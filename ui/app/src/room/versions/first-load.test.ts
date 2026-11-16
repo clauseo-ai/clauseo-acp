@@ -100,3 +100,25 @@ test("the room's first load reaches use-versions.ts and none of Versions' chunk"
   ])
     expect(names.has(kept), kept).toBe(false);
 });
+
+// the same walk for a .docx's tracked changes (room/word/changes-chunk.ts): the wall reaches the chunk only through a
+// bare import(), so neither the panel, its dialog, its words nor its host calls ride in the room's first load
+test("the room's first load reaches none of the tracked changes' chunk", () => {
+  const names = new Set(
+    [...reached(join(room, "entry.ts"))].map((f) => relative(resolve(room, "../../.."), f)),
+  );
+  expect(names.has("app/src/room/paper-wall.tsx")).toBe(true);
+  const chunk = [...reached(join(room, "word/changes-chunk.ts"))].map((f) =>
+    relative(resolve(room, "../../.."), f),
+  );
+  expect(chunk).toContain("components/src/clauseo/word-changes.tsx");
+  for (const kept of [
+    "app/src/room/word/changes-chunk.ts",
+    "app/src/room/word/changes-pane.tsx",
+    "app/src/room/word/revisions.ts",
+    "components/src/clauseo/word-changes.tsx",
+    "components/src/clauseo/draft-review.tsx",
+    "components/src/lib/words-reader.ts",
+  ])
+    expect(names.has(kept), kept).toBe(false);
+});

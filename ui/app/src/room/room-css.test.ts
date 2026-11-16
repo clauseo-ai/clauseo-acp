@@ -32,3 +32,20 @@ test("the room's stylesheet styles the permission prompt's confirming line, neve
   expect(live).toMatch(/\.perm-confirming\s*\{/);
   expect(live).toMatch(/\.perm\[data-confirming\] \.perm-actions\s*\{/);
 });
+
+test("in lite, a hairline stands for the shadowed edges the thread passes under (D-073)", () => {
+  const shell = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../components/src/clauseo/shell.css"),
+    "utf8",
+  );
+  // its border always there, coloured only while the thread runs on below, so showing it moves nothing
+  expect(shell).toMatch(
+    /:root\[data-render="lite"\] \.room-thread \{\s*border-bottom: var\(--hairline\) solid transparent;/,
+  );
+  expect(shell).toMatch(
+    /:root\[data-render="lite"\] \.room-centre\[data-more\] \.room-thread \{\s*border-bottom-color: var\(--divide-mid\);/,
+  );
+  expect(shell).toMatch(
+    /:root\[data-render="lite"\] \.room-pin \{\s*border-bottom: var\(--hairline\) solid var\(--divide-mid\);/,
+  );
+});

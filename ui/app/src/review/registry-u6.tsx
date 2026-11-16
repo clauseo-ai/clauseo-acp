@@ -5,15 +5,20 @@
 import { QuestionLine } from "@clauseo/components/clauseo/answer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
+import { titleOf } from "../room/conversation-title.ts";
 import { RetriedLine } from "../room/retried-line.tsx";
 import { RetryFromHere } from "../room/retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "../room/thread/session.ts";
 import type { Entry } from "./entry.ts";
 import type { PaperSummary } from "../room/host-next.ts";
-import { MATTER, roomHost } from "./hosts.ts";
+import { MATTER, roomHost, threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
+import { PAPERS_LIVE } from "./registry-papers-live.tsx";
+import { WALL_AWAY } from "./registry-wall-away.tsx";
 import { matterWords, threadWords } from "./words.ts";
-import { uuid } from "../testing/stream-script.ts";
+import { agentText, step, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
+import { jumpTo } from "../room/thread/jump-entry.ts";
+import { streamOf } from "../store/view.ts";
 
 /** A retry that does nothing: the review shows the parts, the host isn't asked. */
 const ACTIONS: ThreadActions = {
@@ -60,6 +65,90 @@ const PAPERS: PaperSummary[] = ["Plaint.pdf", "Written statement.pdf", "Lease de
 
 /** The room on a matter with no conversation yet: a new one, before its first question. */
 const fresh = () => <RoomOver host={() => roomHost([MATTER], PAPERS)} />;
+/** A conversation on the ChatGPT plan whose last answer runs to the composer: where the answer ends and the plan's
+ * line starts (D-073; open it with &lite=1 for lite), titled as its first question titles it (D-070), on the rail. */
+const ASKED_LONG =
+  "Without using web search, write a short note on the notice period in clause 9 of the lease deed";
+const LONG = [
+  "Clause nine needs thirty days' written notice to the bank, sent by registered post to its branch.",
+  "The notice must name the loan account, the date of default and the sum outstanding on that date.",
+  "Clause ten lets the bank cure within fifteen days of the notice; the lease runs on if it does.",
+  "Clause eleven keeps the deposit with the lessor until the bank's charge is released in writing.",
+  "Nothing in the lease lets the lessor end it without that notice, whatever the default.",
+].join("\n\n");
+const ended = () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        agent: "codex-acp",
+        title: titleOf(ASKED_LONG) ?? ASKED_LONG,
+        entries: [userMessage(5, 1, ASKED_LONG), agentText(6, 1, LONG), step(7)],
+      })
+    }
+  />
+);
+/** A Find result's jump to a long answer, earlier in the conversation than the pinned question (D-071): where its
+ * first line lands against the pin. */
+const jumped = () => {
+  jumpTo(streamOf(THREAD), 6);
+  return (
+    <RoomOver
+      host={() =>
+        threadHost({
+          agent: "codex-acp",
+          entries: [
+            userMessage(5, 1, ASKED_LONG),
+            agentText(6, 1, `${LONG}\n\n${LONG}`),
+            step(7),
+            userMessage(8, 2, "And what if the bank doesn't cure in time?"),
+            agentText(9, 2, "Then the lessor may end the lease by a second written notice."),
+            step(10),
+          ],
+        })
+      }
+    />
+  );
+};
+/** A long answer whose table, far down it, holds the words a Find result found: clause 21's row of 24. */
+const TABLED = [
+  LONG,
+  ["| Clause | What it says |", "| --- | --- |"]
+    .concat(
+      Array.from({ length: 24 }, (_, i) =>
+        i === 20
+          ? "| 21 | Forfeiture on a second default, after written notice |"
+          : `| ${i + 1} | Terms of clause ${i + 1}, as filed with the deed |`,
+      ),
+    )
+    .join("\n"),
+  "Each clause reads with the schedule of payments annexed to the deed.",
+].join("\n\n");
+/** A Find result's jump to words deep in a long answer, in its table's 21st row (D-071): the row lands mid-way between
+ * the pinned question and the composer, not the answer's first line. */
+const jumpedDeep = () => {
+  jumpTo(streamOf(THREAD), 6, [
+    { text: "| 21 | ", hit: false },
+    { text: "Forfeiture", hit: true },
+    { text: " on a second default, after written notice |", hit: false },
+  ]);
+  return (
+    <RoomOver
+      host={() =>
+        threadHost({
+          agent: "codex-acp",
+          entries: [
+            userMessage(5, 1, ASKED_LONG),
+            agentText(6, 1, TABLED),
+            step(7),
+            userMessage(8, 2, "And what if the bank doesn't cure in time?"),
+            agentText(9, 2, "Then the lessor may end the lease by a second written notice."),
+            step(10),
+          ],
+        })
+      }
+    />
+  );
+};
 /** The same with one paper in the matter. */
 const freshOne = () => <RoomOver host={() => roomHost([MATTER], PAPERS.slice(0, 1))} />;
 
@@ -111,4 +200,27 @@ export const U6: Entry[] = [
     screen: "matters/new-conversation",
     render: freshOne,
   },
+  {
+    id: "U6-08",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/thread-end",
+    render: ended,
+    width: 1400,
+  },
+  {
+    id: "U6-09",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/find-jump",
+    render: jumped,
+  },
+  {
+    id: "U6-10",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/find-jump-deep",
+    render: jumpedDeep,
+  },
+  // The wall following the open matter's folder (0055): PL-01 to PL-03.
+  ...PAPERS_LIVE,
+  // The wall's dimmed tiles, files only online and folders not opened: WA-01 to WA-19.
+  ...WALL_AWAY,
 ];

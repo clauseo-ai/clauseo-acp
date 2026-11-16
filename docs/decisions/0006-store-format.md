@@ -117,6 +117,59 @@ copy too); the rule for which title a thread keeps is in the threads paragraph b
 ALTER TABLE threads ADD COLUMN title_source TEXT /* RenameSource's JSON name; NULL with no title and on rows from before schema 4 */;
 ```
 
+### Schema version 5
+
+`crates/store/src/migrations/0005_matter_skill_packs.sql`, verbatim (the same test checks this
+copy too); decision record 0040 gives the reasons:
+
+```sql
+-- Schema version 5: a matter's skill packs (decision record 0040).
+-- docs/decisions/0040-skill-packs.md gives the reason for the column and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN skill_packs TEXT /* JSON array of pack ids, at most 32, none twice; NULL = the global skills.enabled list */;
+```
+
+### Schema version 6
+
+`crates/store/src/migrations/0006_matter_agent_prefs.sql`, verbatim (the same test checks this
+copy too). A matter remembers the model and effort its conversations start with, per agent kind
+(`UpdateMatter::agent_prefs`, and the host's write after a successful `SetConfigOption`): JSON
+text such as `{"claude":{"model":"opus","effort":"high"}}`, the shape of protocol's
+`AgentPrefs`. NULL, as on every matter before it, leaves each agent at its own defaults. A row,
+not an event: like the other matter details, the reducer's view does not show it.
+
+```sql
+-- Schema version 6: a matter's model and effort picks per agent kind (UpdateMatter's agent_prefs).
+-- docs/decisions/0006-store-format.md gives the reason for the column and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN agent_prefs TEXT /* JSON object: agent kind -> {option id: value id}; NULL = none, each agent's own defaults */;
+```
+
+### Schema version 7
+
+`crates/store/src/migrations/0007_pending_actions.sql`, verbatim (the same test checks this
+copy too). An undo, a restore or a tracked-changes decision writes files one by one, so a crash
+part way leaves some files old and some new, and the next checkpoint would only see outside
+edits. The host keeps one row per matter for the action holding its writer: put, and synced,
+before the matter's thread touches a file, and deleted when the writer passes on. At the next
+start, the rows still there are the actions that did not finish, which the room's notice names
+(`HostQuery::LastExit`); the host then deletes them. A row, not an event: nothing folds it, and
+no stream's history should carry it. `kind` is protocol's `InterruptedKind` JSON name; a kind
+this build does not know is skipped on read.
+
+```sql
+-- Schema version 7: the file action a matter's writer runs, from before it touches a file until
+-- the writer passes on, so the next start can say which one a crash left unfinished.
+-- docs/decisions/0006-store-format.md gives the reason for the table and its columns.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+CREATE TABLE pending_actions (matter TEXT PRIMARY KEY NOT NULL /* MatterId: one writer per matter */,
+  kind TEXT NOT NULL /* InterruptedKind's JSON name */, files INTEGER /* files it set out to change; NULL unknown */,
+  thread TEXT /* ThreadId it was asked from; NULL none */, at INTEGER NOT NULL /* ms since the epoch */) WITHOUT ROWID;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.
@@ -237,7 +290,12 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   agent title; a placeholder fills in only a thread with no title. The host checks it in one
   function (`title_may_change`, `crates/host/src/actor/title_source.rs`) before it writes the row,
   and a rename it refuses makes no event and no row write, so a fast agent title is not undone by
-  the app's later first-words rename.
+  the app's later first-words rename. The name settles after the first turn that produced answer
+  text ends: an agent's title is taken for 60 s after that end (`TITLE_GRACE`, since the adapters
+  title in the background after `end_turn`), and never once the next prompt has gone out or after
+  a session load of a thread whose answered turn is in its history (D-070). A turn with no answer
+  text settles nothing. A cancel marks the session's updates late; a title that comes late still
+  counts while the window is open, and no other late update does.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
   its `CheckpointRecorded` in the matter stream. The event already carries the rest; the commit id

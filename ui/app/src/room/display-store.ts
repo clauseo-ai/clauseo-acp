@@ -10,11 +10,18 @@ import {
   DEFAULT_DISPLAY,
   TEXT_SIZES,
   type Display,
+  type Lang,
   type Platform,
+  type ReleaseMode,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
 import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
-import type { ToolsPatch, ToolsSettingsView } from "../transport/protocol.ts";
+import type {
+  PrivacyPatch,
+  PrivacySettings,
+  ToolsPatch,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
 
 /** The settings without a host; with one, a cache of the host's last answer, read only for the first frame. */
 export const DISPLAY_KEY = "clauseo.display";
@@ -49,12 +56,21 @@ export function uiPatchOf(value: unknown): Partial<UiSettings> {
   return patch;
 }
 
-/** The computer's side of the display: its light and motion preferences, and its OS. */
-export type Surroundings = { dark: boolean; reduced: boolean; platform: Platform };
+/** The computer's side of the display: its light and motion preferences, its OS, whether this is
+ * a test build, and its release mode. */
+export type Surroundings = {
+  dark: boolean;
+  reduced: boolean;
+  platform: Platform;
+  testBuild?: boolean;
+  releaseMode?: ReleaseMode;
+};
 
 /** The display the settings show on this computer now. */
 export function displayOf(ui: UiSettings, around: Surroundings): Display {
   return {
+    testBuild: around.testBuild === true,
+    releaseMode: around.releaseMode ?? "release",
     theme: ui.theme === "dark" || (ui.theme === "system" && around.dark) ? "night" : "day",
     // "automatic" waits on H7's display report, so it is off until then
     render: ui.lite === "lite" ? "lite" : "full",
@@ -72,7 +88,9 @@ const same = (a: Display, b: Display) =>
   a.motion === b.motion &&
   a.lang === b.lang &&
   a.textSize === b.textSize &&
-  a.platform === b.platform;
+  a.platform === b.platform &&
+  a.testBuild === b.testBuild &&
+  a.releaseMode === b.releaseMode;
 
 /** What the store reaches: each null where the page has none (a test, a page outside a browser). */
 export type DisplayEnv = {
@@ -89,6 +107,10 @@ export type DisplayEnv = {
   show: (display: Display) => void;
   /** Settings for this page only, never written: a dev or probe page's query. */
   override?: Partial<UiSettings>;
+  /** The language the desktop read before the window existed (connect.ts's injectedLanguage): the first frame's, over
+   * localStorage's cache and the default, until the host's settings arrive and take over. Anything but a known
+   * language is ignored. */
+  firstLanguage?: Lang | null;
   /** The OS to lay out for until the host says (setPlatform): the webview's own guess (platform.ts's guessPlatform),
    * so a Windows window doesn't start in the Mac's places and move. The Mac where left out. */
   platform?: Platform;
@@ -101,8 +123,14 @@ export interface DisplayStore {
   locked(): readonly string[];
   /** The tools' switches as the host last said, or undefined while it sends none (today's host). */
   tools(): ToolsSettingsView | undefined;
+  /** Each agent's firm plan as the host last said (SettingsView.plans): Plans' firm address (UD2); undefined with none. */
+  plans(): Settings["plans"];
   /** The lawyer's change to a tool's switch, sent to the host as a patch; nothing without a host that takes one. */
   setTools(patch: ToolsPatch): void;
+  /** The privacy switches as the host last said (`privacy.counts`), or undefined while it sends none. */
+  privacy(): PrivacySettings | undefined;
+  /** The lawyer's change to a privacy switch, sent to the host as a patch; nothing without a host that takes one. */
+  setPrivacy(patch: PrivacyPatch): void;
   display(): Display;
   /** The lawyer's change: written to localStorage, or with a NextHost sent to the host as a patch. */
   set(patch: Partial<UiSettings>): void;
@@ -114,6 +142,11 @@ export interface DisplayStore {
   releaseDate(): string | null;
   /** The host's release date, once it says; the listeners hear it, as they hear a settings change. */
   setReleaseDate(date: string | null): void;
+  /** The host's word on whether this is a test build, once it says: the display shows it (`Display.testBuild`). */
+  setTestBuild(testBuild: boolean): void;
+  /** The host's release mode, once it says: the installer button's release page
+   * (`Display.releaseMode`). */
+  setReleaseMode(releaseMode: ReleaseMode): void;
   /** When the view store applies what arrived: every 100 ms in lite, else once a frame. */
   batch(): Batch;
   /** Hears each change to `ui()`, `locked()` or `releaseDate()`: a set, an override, the host's answer, another
@@ -149,9 +182,13 @@ function readStored(storage: DisplayEnv["storage"]): UiSettings {
 /** Starts the display from the settings, at once (display.ts's startDisplay), and keeps it in step with them. */
 export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let stored = readStored(env.storage);
+  const first = one(["en", "hi"] as const, env.firstLanguage);
+  if (first !== undefined) stored = { ...stored, language: first };
   let over: Partial<UiSettings> = uiPatchOf(env.override);
   let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
   let releaseDate: string | null = null;
+  let testBuild = false;
+  let releaseMode: ReleaseMode = "release";
   const dark = env.matchMedia?.(DARK) ?? null;
   const reduced = env.matchMedia?.(REDUCED) ?? null;
   const ui = (): UiSettings => ({ ...stored, ...over });
@@ -160,6 +197,8 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
       dark: dark?.matches ?? false,
       reduced: reduced?.matches ?? false,
       platform,
+      testBuild,
+      releaseMode,
     });
   let current = compute();
   env.start(current);
@@ -181,6 +220,8 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   const host = env.host;
   let locked: readonly string[] = [];
   let tools: ToolsSettingsView | undefined;
+  let privacy: PrivacySettings | undefined;
+  let plans: Settings["plans"];
   let stopHost = () => {};
   /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
   let heard = 0;
@@ -188,6 +229,8 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
     locked = settings.locked;
     tools = settings.tools;
+    privacy = settings.privacy;
+    plans = settings.plans;
     try {
       env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));
     } catch {
@@ -229,11 +272,22 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     ui,
     locked: () => locked,
     tools: () => tools,
+    plans: () => plans,
     setTools(patch) {
       if (host === null || tools === undefined) return;
       tools = { ...tools, ...patch };
       host.setToolSettings(patch).catch((error: unknown) => {
         console.warn(`set_tool_settings failed: ${JSON.stringify(error)}`);
+        void readHost(host);
+      });
+      for (const listener of listeners) listener();
+    },
+    privacy: () => privacy,
+    setPrivacy(patch) {
+      if (host === null || privacy === undefined) return;
+      privacy = { ...privacy, ...patch };
+      host.setPrivacySettings(patch).catch((error: unknown) => {
+        console.warn(`set_privacy_settings failed: ${JSON.stringify(error)}`);
         void readHost(host);
       });
       for (const listener of listeners) listener();
@@ -273,6 +327,14 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     setReleaseDate(next) {
       releaseDate = next;
       for (const listener of listeners) listener();
+    },
+    setTestBuild(next) {
+      testBuild = next;
+      apply();
+    },
+    setReleaseMode(next) {
+      releaseMode = next;
+      apply();
     },
     batch: () => (current.render === "lite" ? liteBatch : frameBatch),
     subscribe(listener) {

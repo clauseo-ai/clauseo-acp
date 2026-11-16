@@ -31,6 +31,9 @@ pub enum AcpEvent {
     PermissionRequested {
         /// The agent's session.
         session: AgentSessionId,
+        /// When it came, relative to the session's turns: `Idle` for a turn the agent started
+        /// by itself, with no prompt in flight.
+        origin: Origin,
         /// The key to answer it with.
         key: PendingKey,
         /// The agent's `toolCallId` the request is about.
@@ -42,16 +45,25 @@ pub enum AcpEvent {
         /// strings, without repeats, as the agent wrote them (absolute, or relative to the
         /// session's `cwd`). Empty when it names none.
         paths: Vec<PathBuf>,
+        /// `toolCall.rawInput` as the agent sent it, when it did: the host reads the paths
+        /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
+        raw_input: Option<serde_json::Value>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
         /// The agent's session.
         session: AgentSessionId,
+        /// When it came, as for `PermissionRequested`.
+        origin: Origin,
         /// The key to answer it with.
         key: PendingKey,
         /// The agent's `elicitationId`, which URL elicitations carry and
         /// [`AcpEvent::ElicitationCompleted`] names again; `None` for a form.
         elicitation_id: Option<CompactString>,
+        /// The scope's `toolCallId`: the agent's tool call the elicitation belongs to, when it
+        /// names one. In-memory only: the host scopes the withheld values to that call
+        /// (0002, `elicitation_resolved`); it is not logged.
+        acp_tool_call_id: Option<CompactString>,
         /// The form or the URL.
         request: ElicitationRequest,
     },
@@ -70,6 +82,27 @@ pub enum AcpEvent {
         /// What it says.
         signal: LimitSignal,
     },
+    /// An AIR `sessionFailure` on a `session_info_update` that says the turn was too long to
+    /// read. The prompt's answer usually carries the same record (`PromptEnd::too_long`); this
+    /// keeps a failure sent only on the update from being lost.
+    TooLong {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came.
+        origin: Origin,
+        /// How it said so.
+        kind: crate::TooLong,
+    },
+    /// An AIR `sessionFailure` of category `connection` on a `session_info_update`: the agent
+    /// could not reach its service (codex-acp's `transport_lost`), and retries or gave up.
+    ConnectionLost {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came.
+        origin: Origin,
+        /// What it says.
+        lost: ConnectionLost,
+    },
     /// Something the agent sent that the driver skipped or did not understand.
     Warning {
         /// The agent's session it is about, when the message named one: `None` for a malformed
@@ -78,6 +111,18 @@ pub enum AcpEvent {
         /// What it was.
         warning: ProtocolWarning,
     },
+    /// A `session/update` over the line cap that the reader dropped, which was or may have been
+    /// a `tool_call_update` and whose start showed no status the driver could pass on in its
+    /// place. The host completes that tool call, if still unfinished, when the turn ends well;
+    /// with no `acp_tool_call_id`, every unfinished tool call of the turn.
+    UpdateSkipped {
+        /// The agent's session, when the start showed it.
+        session: Option<AgentSessionId>,
+        /// When it came: `Idle` when the start showed no session.
+        origin: Origin,
+        /// The agent's `toolCallId`, when the start showed it and its session.
+        acp_tool_call_id: Option<CompactString>,
+    },
 }
 
 /// When an update came, relative to the session's turns.
@@ -85,8 +130,8 @@ pub enum AcpEvent {
 pub enum Origin {
     /// While the prompt of this turn is in flight.
     Turn(TurnId),
-    /// From `cancel()` until the next `prompt()` starts, whether or not the cancelled prompt's
-    /// response has come. The host drops these by turn.
+    /// From `cancel()` until the cancelled prompt's response comes (or the next `prompt()`
+    /// starts). The host drops these by turn.
     Late(TurnId),
     /// Between sending `session/load` and its response: history the agent replays.
     Replay,
@@ -233,6 +278,29 @@ pub enum LimitSignal {
     },
 }
 
+/// An AIR `sessionFailure` of category `connection`: the agent lost its connection to its
+/// service. codex-acp sends one with severity `warning` for each retry Codex makes by itself,
+/// and one with severity `error` when its retries ran out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionLost {
+    /// Its `severity` is `error`: the agent gave up. Anything else, it retries by itself.
+    pub gave_up: bool,
+    /// Its `title`, the agent's own error text, when it is a string. Never shown or logged.
+    pub title: Option<String>,
+}
+
+/// An AIR `sessionFailure` of severity `error` whose `actions` offer `retry` or `new_session`,
+/// in a category no other rule reads (not `limit` nor `connection`, and not too long): the
+/// agent gave up on the turn. codex-acp 2.2.2 sends it for `internal_error` (category `service`,
+/// "Codex encountered an internal error."), `provider_error` and `overloaded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFailed {
+    /// Its `category`, when it is a string: the agent's word, for an allowlisted log.
+    pub category: Option<String>,
+    /// Its `title`, the agent's own error text, when it is a string. Never shown or logged.
+    pub title: Option<String>,
+}
+
 /// The `status` of Claude's rate limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LimitStatus {
@@ -272,7 +340,8 @@ pub enum ProtocolWarning {
         /// The status; `None` when it is missing or not a string.
         status: Option<String>,
     },
-    /// An AIR `sessionFailure` that is not a plan limit (`context_exhausted`, a warning, ...).
+    /// An AIR `sessionFailure` that is neither a plan limit nor a lost connection
+    /// (`context_exhausted`, a limit's warning, ...).
     /// Each field is `None` when it is missing or not a string.
     SessionFailure {
         /// Its `category`.

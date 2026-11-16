@@ -15,7 +15,7 @@ fn ring_with(bytes: &[u8]) -> Mutex<Ring> {
 }
 
 fn no_rules() -> Redactor {
-    Redactor::new(None, &BTreeMap::new())
+    Redactor::new(None, &BTreeMap::new(), &[])
 }
 
 fn env(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
@@ -79,6 +79,7 @@ fn redacts_home_and_tokens_before_cutting() {
             ("DB_PASSWORD", "short"),
             ("PATH", "/usr/local/bin:/usr/bin"),
         ]),
+        &[],
     );
     let mut stderr = format!("the key is {secret} here\n");
     stderr.push_str("open /Users/lawyer/matters/brief.docx failed\n");
@@ -108,7 +109,11 @@ fn redacts_home_and_tokens_before_cutting() {
 
 #[test]
 fn redaction_rules_stand_alone() {
-    let rules = Redactor::new(None, &env(&[("SECRET", "abcdefgh"), ("KEY", "abcdefg")]));
+    let rules = Redactor::new(
+        None,
+        &env(&[("SECRET", "abcdefgh"), ("KEY", "abcdefg")]),
+        &[],
+    );
     assert_eq!(rules.redact("abcdefgh abcdefg"), "[redacted] abcdefg");
     assert_eq!(rules.redact("sk-"), "[redacted]");
     assert_eq!(
@@ -129,13 +134,14 @@ fn redaction_rules_stand_alone() {
     let rules = Redactor::new(
         None,
         &env(&[("A_TOKEN", "12345678"), ("B_TOKEN", "12345678-extra")]),
+        &[],
     );
     assert_eq!(
         rules.redact("12345678-extra 12345678"),
         "[redacted] [redacted]"
     );
     // An empty home is no rule.
-    let rules = Redactor::new(Some(Path::new("")), &BTreeMap::new());
+    let rules = Redactor::new(Some(Path::new("")), &BTreeMap::new(), &[]);
     assert_eq!(rules.redact("a/b"), "a/b");
 }
 
@@ -159,7 +165,7 @@ fn utf8_boundary_kept() {
 #[test]
 fn redaction_window_widens_when_short() {
     let secret = "s".repeat(1000);
-    let rules = Redactor::new(None, &env(&[("API_KEY", &secret)]));
+    let rules = Redactor::new(None, &env(&[("API_KEY", &secret)]), &[]);
     let mut stderr = numbered_lines(1000);
     // The last 16 KiB are secrets alone, which redaction shrinks under 4096 bytes.
     for _ in 0..17 {
@@ -311,7 +317,7 @@ fn a_window_that_opens_on_a_line_start_keeps_its_first_line() {
     // The last 16 KiB start on a line start, and redact to exactly 4096 bytes, so the tail is
     // the whole redacted window, its first line included.
     let secret = "v".repeat(58);
-    let rules = Redactor::new(None, &env(&[("AGENT_API_KEY", &secret)]));
+    let rules = Redactor::new(None, &env(&[("AGENT_API_KEY", &secret)]), &[]);
     let before = "p".repeat(999) + "\n";
     let mut window = String::from("keep me\n");
     for _ in 0..256 {
@@ -342,3 +348,72 @@ fn byte_before_last_reads_across_the_wrap() {
 }
 
 mod tail_opening;
+
+#[test]
+fn a_secret_the_spec_names_is_redacted_whatever_holds_it() {
+    // The case-law relay's token (R24) reaches the agent in a file, never in a variable.
+    let token = "3f".repeat(32);
+    let rules = Redactor::new(None, &BTreeMap::new(), &[token.clone(), "short".to_owned()]);
+    let line = format!("relay hello {{\"token\":\"{token}\"}} failed; short stays\n");
+    let tail = tail(&ring_with(line.as_bytes()), &rules);
+    assert_eq!(
+        tail,
+        "relay hello {\"token\":\"[redacted]\"} failed; short stays\n"
+    );
+    // A window that starts inside the token leaves out what it holds of it.
+    let cut = &token[10..];
+    assert_eq!(
+        rules.without_cut_secret(&format!("{cut} rest"), true),
+        " rest"
+    );
+}
+
+/// A URL's user name and password never reach the tail: an agent may print the proxy URL it was
+/// given (S17 puts the firm's proxy, which may carry them, in its environment).
+#[test]
+fn a_urls_user_name_and_password_are_redacted() {
+    let rules = no_rules();
+    assert_eq!(
+        rules.redact("connect via http://u:p@proxy:3128 failed"),
+        "connect via http://***@proxy:3128 failed"
+    );
+    assert_eq!(
+        rules.redact("https://user:p%40ss@h/x?y https://h/@x"),
+        "https://***@h/x?y https://h/@x"
+    );
+    assert_eq!(rules.redact("ftp://a@b@c:1"), "ftp://***@c:1");
+    assert_eq!(rules.redact("http://host:80 a@b"), "http://host:80 a@b");
+    let stderr = "error: proxy http://u:p@proxy:3128 refused\n";
+    let tail = tail(&ring_with(stderr.as_bytes()), &rules);
+    assert_eq!(tail, "error: proxy http://***@proxy:3128 refused\n");
+    // A window cut inside the URL leaves out what may be its user name and password.
+    for cut in ["/u:pass@proxy:3128 refused", "pass@proxy:3128 refused"] {
+        assert_eq!(rules.without_cut_secret(cut, true), "proxy:3128 refused");
+    }
+}
+
+/// A proxy variable's password is a secret: as written (an unencoded `/` or `#` in it, which
+/// no URL rule finds whole) and percent-decoded, and from a URL with no scheme.
+#[test]
+fn a_proxy_password_is_redacted_raw_decoded_and_without_a_scheme() {
+    let rules = Redactor::new(
+        None,
+        &env(&[
+            ("HTTPS_PROXY", "http://user:pa/ss#w%40rd99@proxy.firm:3128"),
+            ("all_proxy", "admin:s3cretPass123@proxy2.firm:8080"),
+            ("NO_PROXY", "user:notapassword@x"),
+        ]),
+        &[],
+    );
+    let stderr = "raw pa/ss#w%40rd99, decoded pa/ss#w@rd99, bare s3cretPass123, \
+                  url proxy2.firm user admin:s3cretPass123@proxy2.firm:8080";
+    let redacted = rules.redact(stderr);
+    for secret in ["pa/ss#w%40rd99", "pa/ss#w@rd99", "s3cretPass123"] {
+        assert!(!redacted.contains(secret), "{secret}: {redacted}");
+    }
+    assert_eq!(
+        rules.redact("notapassword"),
+        "notapassword",
+        "NO_PROXY holds no proxy"
+    );
+}

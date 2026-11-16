@@ -60,10 +60,15 @@
 //!     `~`). So while a document is open in Word, `cat Contract.docx | grep x > notes.txt`,
 //!     `cp Contract.docx copy.docx` and `pandoc Contract.docx -o summary.md` go on, but `echo
 //!     Contract.docx`, `grep x Contract.docx`, `less Contract.docx`, `cat Contract.docx; rm x`
-//!     or `python -c` naming it is refused, with the held-open reason. The agent's own Read tool
-//!     is not checked.
+//!     or `python -c` naming it is refused, with the held-open reason. Word opening a document
+//!     through a short (8.3) folder path, which it does when the full path is over 259 units,
+//!     creates no `~$` owner file, so this backstop cannot see such a document: it lists only the
+//!     files beside an owner file. The path layer's sharing probe
+//!     ([`clauseo_matters::held_open_at`], a no-share open that fails) still refuses it, and so
+//!     does the OS's own sharing violation on any write. The agent's own Read tool is not checked.
 //!   - stetdoc and textutil (`names::stetdoc`, read with stetdoc v0.9.1's options and their
-//!     arity, so a flag's value is never taken for the document): `view`, `inspect`, `check`,
+//!     arity by `crate::stetdoc_args`, which the turn's shell writes share, so a flag's value
+//!     is never taken for the document): `view`, `inspect`, `check`,
 //!     `lookup`, `capabilities` and `skills` only read; an output (`-o`, `--output`, `-oX`,
 //!     `--output=X`) naming a held file writes it; with `--in-place` any word naming a held file
 //!     is written; else `--dry-run` writes nothing; else `edit`, `replace` and `comment` write
@@ -150,6 +155,7 @@
 mod ask;
 mod codex;
 mod names;
+mod reach;
 mod shell;
 mod timings;
 mod words;
@@ -162,8 +168,12 @@ use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 use codex::{has_codex_part, in_codex_folder, patch_targets};
-use shell::{resolutions, shell_targets};
-use words::Escape;
+// The data folder fence reads a command's `sh -c` scripts as this guard does
+// (`agent/data_fence/command.rs`).
+use reach::Reach;
+pub(crate) use shell::script as shell_script;
+use shell::{shell_targets, walked_resolutions};
+pub(crate) use words::Escape;
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
 /// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).
@@ -339,12 +349,13 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         .or_else(|| cwd.clone())
         .ok_or(Ignored::NoFolder)?;
     let base = cwd.unwrap_or_else(|| folder.clone());
+    let reach = Reach::new(&folder);
     let tool = hook
         .get("tool_name")
         .and_then(Value::as_str)
         .ok_or(Ignored::NoTool)?;
     let input = hook.get("tool_input").ok_or(Ignored::NoTool)?;
-    let Some(targets) = targets(tool, input, &base)? else {
+    let Some(targets) = targets(tool, input, &base, &reach)? else {
         return Ok(None);
     };
     timings::mark("targets");
@@ -352,7 +363,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
             .iter()
-            .any(|path| in_codex_folder(&folder, &base, path)),
+            .any(|path| in_codex_folder(&folder, &base, path, &reach)),
         Targets::Shell {
             patch, names_codex, ..
         } => {
@@ -366,13 +377,16 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
     let held_at = |paths: &[PathBuf]| {
         paths
             .iter()
-            .flat_map(|path| resolutions(&base.join(path)))
-            .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
+            .flat_map(|path| walked_resolutions(&base.join(path), &reach))
+            .find_map(|path| clauseo_matters::held_open_resolved(&folder, &path))
             .map(|(path, _)| path)
     };
+    // A held file found by a tool's path, as the matter lists it (the walk keeps the agent's
+    // spelling, [`names::as_listed`]).
+    let listed = |held: Option<MatterPath>| held.map(|path| names::listed_spelling(&folder, path));
     match &targets {
         Targets::Named(paths) | Targets::Patch(paths) => {
-            let held = held_at(paths);
+            let held = listed(held_at(paths));
             timings::mark("resolve");
             Ok(held.map(Refusal::HeldOpen))
         }
@@ -384,7 +398,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             escape,
             ..
         } => {
-            if let Some(path) = held_at(patch) {
+            if let Some(path) = listed(held_at(patch)) {
                 timings::mark("resolve");
                 return Ok(Some(Refusal::HeldOpen(path)));
             }
@@ -401,7 +415,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             }
             timings::mark("resolve");
             Ok(names::shell_refusal(
-                text, line, *escape, &folder, found, &hits,
+                text, line, *escape, &folder, found, &hits, &reach,
             ))
         }
     }
@@ -430,7 +444,12 @@ enum Targets {
 /// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
 /// check; a shell command's words are files when they exist, taken from `base`. A checked tool
 /// whose input lacks the field its paths come from is ignored.
-fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ignored> {
+fn targets(
+    tool: &str,
+    input: &Value,
+    base: &Path,
+    reach: &Reach,
+) -> Result<Option<Targets>, Ignored> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let targets = match tool {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
@@ -442,8 +461,8 @@ fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ig
                 return Err(Ignored::Shape("file_path, notebook_path or command string"));
             }
         }
-        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash)?,
-        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick)?,
+        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash, reach)?,
+        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick, reach)?,
         _ => return Ok(None),
     };
     Ok(Some(targets))
@@ -453,44 +472,13 @@ fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ig
 /// normalised by its text, so a huge word costs time in proportion to its length.
 const MAX_RESOLVED: usize = 4096;
 
-/// `path` with its deepest existing folder canonicalised and the rest added lexically: the
-/// whole path canonicalised, else its parent with the name added, else the deepest existing
-/// prefix found by halving (a prefix of an existing one exists), canonicalised once, so a long
-/// path costs a few `stat`s, not one per part. A path over [`MAX_RESOLVED`] bytes, or one whose
-/// folder does not canonicalise, is only normalised by its text ([`lexical`]).
-fn existing_resolved(path: &Path) -> PathBuf {
-    if path.as_os_str().len() > MAX_RESOLVED {
-        return lexical(path);
-    }
-    if let Ok(found) = dunce::canonicalize(path) {
-        return found;
-    }
-    if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
-        && let Ok(found) = dunce::canonicalize(parent)
-    {
-        return lexical(&found.join(name));
-    }
-    let parts: Vec<Component<'_>> = path.components().collect();
-    let prefix = |count: usize| parts.iter().take(count).collect::<PathBuf>();
-    // The longest existing prefix has between `low` (exists, or is empty) and `high` parts.
-    let (mut low, mut high) = (0, parts.len().saturating_sub(1));
-    while low < high {
-        let middle = low + (high - low).div_ceil(2);
-        if prefix(middle).metadata().is_ok() {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-    match dunce::canonicalize(prefix(low)) {
-        Ok(found) => lexical(
-            &parts
-                .iter()
-                .skip(low)
-                .fold(found, |acc, part| acc.join(part)),
-        ),
-        Err(_) => lexical(path),
-    }
+/// Where `path` leads: the network-safe walk's resolved path ([`Reach::walked`]: every link
+/// followed, `..` taken as the OS takes it, missing names kept as written), used as it is and
+/// never canonicalised again. A path over [`MAX_RESOLVED`] bytes, or one the walk does not vouch
+/// for (a network location, or one it can't look at), is only normalised by its text
+/// ([`lexical`]), never touched.
+fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
+    reach.walked(path).unwrap_or_else(|| lexical(path))
 }
 
 /// `path` with `.` parts dropped and each `..` taking the part before it off.

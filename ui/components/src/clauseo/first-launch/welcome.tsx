@@ -1,43 +1,66 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
-// (U2's form, in place). The plan gets ready from the first second, on the working line at the foot where the composer
-// will stand, with the fine print under it; and the anonymous counts Clauseo sends by default, said plainly, with the
-// switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
-import { useId, type ReactNode } from "react";
+// (U2's form, in place). Both plans stand at the foot where the composer will stand, Claude then ChatGPT, equal: a lead
+// line, then each plan's own working line (its size and "Sign in with {name}" until the lawyer presses it, since nothing
+// downloads before then, then its progress, failures and "{name} is ready"), with the fine print under them;
+// and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
+// brief), and so does the Safe workspace's line: no screen names it before UC.
+import { useId, type ReactNode, type Ref } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
 import { st } from "../../lib/words-settings.ts";
+import { mt } from "../../lib/words-matters.ts";
 import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
 import { Lockup } from "../lockup.tsx";
 import { Say } from "../say.tsx";
-import { WorkingLine, type WorkingState } from "../working-line.tsx";
+import { WorkingLine, WorkingSaid, type WorkingState } from "../working-line.tsx";
 import { WRAP } from "./classes.ts";
 import { Done, DocumentsLine } from "./parts.tsx";
+import { PickerLine } from "../picker-line.tsx";
 import { cn } from "../../lib/cn.ts";
 
 /** The counts switch: on by default; `locked` when the firm's policy keeps counts off: shown off, with no control. */
 export type CountsSwitch = { on: boolean; locked: boolean; onChange: (on: boolean) => void };
 
+/** One plan's row at the foot. */
+export type FootPlan = {
+  /** Its agent id, for the row's data-agent. */
+  key: string;
+  /** "Claude" or "ChatGPT". */
+  name: string;
+  /** Its working line; null when there is none to show. */
+  install: WorkingState | null;
+  /** Its install finished in this window: "{name} is ready" in the line's place. */
+  ready: boolean;
+  /** A muted line under its row (Claude's browser sign-in note); null or left out with none. */
+  note?: string | null | undefined;
+};
+
 export function Welcome({
-  name,
-  install,
-  ready,
+  plans,
+  papersPlan,
+  tools = null,
   counts,
   onOpenFolder,
   onNewMatter,
   form,
   error,
+  errorAction,
+  opening,
+  making = false,
   onWhatsSent,
   testIds = {},
+  openRef,
 }: {
-  /** The plan's name, "Claude" or "ChatGPT". */
-  name: string;
-  /** The install's working line; null when there is none to show. */
-  install: WorkingState | null;
-  /** The install finished in this window: "{name} is ready" in the line's place. */
-  ready: boolean;
+  /** Both plans, in the order shown: Claude, then ChatGPT. */
+  plans: readonly FootPlan[];
+  /** The one plan in play, which the papers line names (picked, or the only one signed in); null or left out while
+   * both are offered, and the line names both. */
+  papersPlan?: string | null | undefined;
+  /** The document tools' line under the plans (tools.tsx); null with none. */
+  tools?: ReactNode;
   counts: CountsSwitch;
   onOpenFolder: () => void;
   onNewMatter: () => void;
@@ -45,11 +68,20 @@ export function Welcome({
   form?: ReactNode;
   /** A folder refused, said under the question in the language. */
   error?: ReactNode;
+  /** Optional: under the refusal's line, its one way on (Open {name}, for a folder nested with a matter on the list). */
+  errorAction?: ReactNode;
+  /** The folder picker is on its way (its pick has run 300 ms): its line shows under the button. */
+  opening?: boolean | undefined;
+  /** The folder picked is being made a matter: "Opening the folder…" under the button, which waits until it answers. */
+  making?: boolean | undefined;
   /** What's sent, where the app can show the privacy settings. */
   onWhatsSent?: (() => void) | undefined;
   testIds?: { counts?: string; open?: string; newMatter?: string };
+  /** The primary button, Open the folder for a matter, as it mounts: the app's start-up mark. */
+  openRef?: Ref<HTMLButtonElement> | undefined;
 }) {
   const w = useFirstLaunchWords();
+  const { lang } = useDisplay();
   const heading = useId();
   return (
     <>
@@ -79,7 +111,10 @@ export function Welcome({
                   // the words wrap in a narrow column rather than run past it
                   className={cn(WRAP, "min-h-control-large max-w-full py-s2")}
                   onClick={onOpenFolder}
+                  disabled={making}
+                  aria-busy={making ? true : undefined}
                   data-testid={testIds.open}
+                  ref={openRef}
                 >
                   <IconOpen size={16} />
                   {w("Open the folder for a matter")}
@@ -87,6 +122,13 @@ export function Welcome({
                 {error !== null && error !== undefined && (
                   <p className="fl-refusal-head" role="status">
                     {error}
+                  </p>
+                )}
+                {errorAction}
+                {opening && <PickerLine />}
+                {making && (
+                  <p role="status" className="text-small text-muted" data-testid="folder-opening">
+                    <Say>{mt(lang, "Opening the folder…")}</Say>
                   </p>
                 )}
                 <p className="text-small text-muted">
@@ -114,19 +156,61 @@ export function Welcome({
       </div>
       <div className="fl-foot">
         <div className="fl-foot-col">
-          {install !== null ? (
-            <div className="room-entry fl-foot-well" data-working="">
-              <WorkingLine state={install} />
-            </div>
-          ) : (
-            ready && (
-              <Done className="fl-ready">
-                <Say>{w("{name} is ready", { name })}</Say>
-              </Done>
-            )
+          {/* each plan's live region, mounted as the foot is, so each state change is said once,
+              in place; the bytes on the line are seen, not read at every tick (the composer's
+              region, room-entry, does the same) */}
+          {plans.map((plan) => (
+            <span
+              key={plan.key}
+              className="sr-only"
+              role="status"
+              data-testid="install-said"
+              data-agent={plan.key}
+            >
+              {plan.install !== null && <WorkingSaid state={plan.install} />}
+            </span>
+          ))}
+          {/* the lead while a plan still offers its sign-in: either, or both */}
+          {plans.some((plan) => plan.install !== null) && (
+            <p className="fl-plans-lead">
+              <Say>{w("Sign in with the plan you pay for: Claude, ChatGPT or both.")}</Say>
+            </p>
           )}
+          {plans.map((plan) =>
+            plan.install !== null ? (
+              <div
+                key={plan.key}
+                className="room-entry fl-foot-well fl-plan"
+                data-working=""
+                data-testid="plan-row"
+                data-agent={plan.key}
+              >
+                <WorkingLine state={plan.install} />
+                {plan.note != null && (
+                  <p className="fl-plan-note" data-testid="plan-note">
+                    <Say>{plan.note}</Say>
+                  </p>
+                )}
+              </div>
+            ) : (
+              plan.ready && (
+                <div
+                  key={plan.key}
+                  className="fl-plan"
+                  data-testid="plan-row"
+                  data-agent={plan.key}
+                >
+                  <Done className="fl-ready">
+                    <Say>{w("{name} is ready", { name: plan.name })}</Say>
+                  </Done>
+                </div>
+              )
+            ),
+          )}
+          {tools}
           <p className="room-line fl-foot-line">
-            <DocumentsLine name={name} />
+            {/* both plans named while both are offered; one plan in play is named alone */}
+            <DocumentsLine name={papersPlan ?? null} />
           </p>
           <Counts {...counts} onWhatsSent={onWhatsSent} testId={testIds.counts} />
         </div>

@@ -45,8 +45,19 @@ pub const ASSETS: [(&str, &str, &str); 4] = [
     ),
 ];
 
-/// The one-line use the Codex index gives each skill Clauseo renders: the three and stetdoc's.
-const USES: [(&str, &str); 4] = [
+/// The browser's skill: agent-browser v0.41.1's `skill-data/core/SKILL.md`, trimmed for legal
+/// work (Apache-2.0, `LICENSES/Apache-2.0-agent-browser.txt`). Rendered only when the app put
+/// the `agent-browser` command on the agents' `PATH` ([`with_tools`]), so a Clauseo without the
+/// browser never names it. It is not one of [`BUILTIN`]: like stetdoc's, its folder is left alone
+/// by a write that does not carry it.
+pub const AGENT_BROWSER: &str = "agent-browser";
+
+/// The browser skill's source text, `assets/skills/agent-browser/SKILL.md`.
+pub const AGENT_BROWSER_SKILL: &str = include_str!("../../assets/skills/agent-browser/SKILL.md");
+
+/// The one-line use the Codex index gives each skill Clauseo renders: the three, stetdoc's and
+/// the browser's.
+const USES: [(&str, &str); 5] = [
     (
         "legal-drafting",
         "drafting or revising a legal document, or marking up a draft",
@@ -60,6 +71,10 @@ const USES: [(&str, &str); 4] = [
         "reading and updating the matter brief when work starts and before a turn ends",
     ),
     (STETDOC, "reading and editing Word files as tracked changes"),
+    (
+        AGENT_BROWSER,
+        "reading or using a web page that needs a real browser",
+    ),
 ];
 
 /// The index's heading and its one rule.
@@ -89,21 +104,51 @@ pub fn sources() -> Result<Vec<SkillSource>, ProfileError> {
         .collect()
 }
 
+/// The browser's skill as a source, rendered as the three are. Pure; an error is a bug in the
+/// shipped text, which the tests catch.
+pub fn agent_browser_source() -> Result<SkillSource, ProfileError> {
+    SkillSource::builtin(
+        AGENT_BROWSER,
+        vec![SkillFile {
+            path: SKILL_MD.to_owned(),
+            bytes: AGENT_BROWSER_SKILL.as_bytes().to_vec(),
+        }],
+    )
+}
+
 /// stetdoc's skill (when it loaded), then the three: the list `ClauseoProfile::with_skills`
 /// renders. The three's error, if any, comes back beside the list, which then holds stetdoc's
 /// alone.
 pub fn with_stetdoc(stetdoc: Option<SkillSource>) -> (Vec<SkillSource>, Vec<ProfileError>) {
+    with_tools(stetdoc, false)
+}
+
+/// [`with_stetdoc`], then the browser's skill when `agent_browser` says the app put the
+/// `agent-browser` command on the agents' `PATH`. Each error comes back beside the list, which
+/// then holds the rest.
+pub fn with_tools(
+    stetdoc: Option<SkillSource>,
+    agent_browser: bool,
+) -> (Vec<SkillSource>, Vec<ProfileError>) {
     let mut skills: Vec<SkillSource> = stetdoc.into_iter().collect();
+    let mut refused = Vec::new();
     match sources() {
-        Ok(builtin) => {
-            skills.extend(builtin);
-            (skills, Vec::new())
-        }
+        Ok(builtin) => skills.extend(builtin),
         Err(error) => {
             tracing::warn!(error = %error.log_text(), "the built-in legal skills are left out");
-            (skills, vec![error])
+            refused.push(error);
         }
     }
+    if agent_browser {
+        match agent_browser_source() {
+            Ok(skill) => skills.push(skill),
+            Err(error) => {
+                tracing::warn!(error = %error.log_text(), "the browser's skill is left out");
+                refused.push(error);
+            }
+        }
+    }
+    (skills, refused)
 }
 
 /// The one-line use the index gives `name`, if it has one.
@@ -125,8 +170,26 @@ pub fn use_of(name: &str) -> Option<&'static str> {
 /// only neutralises Markdown: the model still reads the path's words, which the lawyer's data
 /// folder chooses (decision record 0031).
 pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
+    index_text(&index_lines(skills_root, rendered))
+}
+
+/// The index's text for `lines`: the heading, the rule and the lines; empty with no line.
+pub(crate) fn index_text(lines: &[String]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
+}
+
+/// [`codex_index`]'s lines, one per skill whose path may be listed. The browser's skill is never
+/// listed: it teaches the shell command, and Codex drives the browser through the `browser` MCP
+/// entry's tools instead (`servers::browser_mcp`).
+pub(crate) fn index_lines(skills_root: &Path, rendered: &Rendered) -> Vec<String> {
     let mut lines = Vec::new();
     for skill in rendered.skills() {
+        if skill.name() == AGENT_BROWSER {
+            continue;
+        }
         let path = skills_root.join(skill.name()).join(SKILL_MD);
         let Some(path) = path.to_str().filter(|path| is_listable(path)) else {
             tracing::warn!(
@@ -141,18 +204,22 @@ pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
         };
         lines.push(line);
     }
-    if lines.is_empty() {
-        return String::new();
-    }
-    format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
+    lines
 }
 
-/// Whether `path` may go in the index (see [`codex_index`]).
-fn is_listable(path: &str) -> bool {
-    !path
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') || is_format(c))
-        && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
+/// Whether `path` may go in the index (see [`codex_index`]); a pack's description too.
+pub(crate) fn is_listable(path: &str) -> bool {
+    !path.chars().any(is_unlisted_char) && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
+}
+
+/// Whether `c` never goes into an agent's instructions or a skill's frontmatter: a control
+/// character, a line or paragraph separator, a format character, or a variation selector
+/// (U+FE00 to U+FE0F and U+E0100 to U+E01EF, which are not format characters but are as
+/// invisible).
+pub(crate) fn is_unlisted_char(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{2028}' | '\u{2029}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
+        || is_format(c)
 }
 
 /// Whether `c` is a Unicode format character (general category Cf): bidi controls, zero-width
@@ -221,7 +288,7 @@ mod tests {
 
     #[test]
     fn every_builtin_has_a_use_line_and_sources() {
-        for name in BUILTIN.iter().chain([&STETDOC]) {
+        for name in BUILTIN.iter().chain([&STETDOC, &AGENT_BROWSER]) {
             assert!(use_of(name).is_some(), "{name}");
         }
         for name in BUILTIN {

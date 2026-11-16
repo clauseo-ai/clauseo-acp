@@ -161,7 +161,7 @@ impl ThreadMemo {
         } else if let Some(turn) = turn_end(event) {
             self.turn_ended(turn, out);
             let never_sent = matches!(event, DomainEvent::TurnEnded(ended)
-                if matches!(ended.stop, StopReason::Cancelled | StopReason::NotAllowed));
+                if matches!(ended.stop, StopReason::Cancelled | StopReason::NotAllowed | StopReason::OutsideMatter));
             if never_sent && !self.started.contains(&turn) {
                 self.withdrawn(turn, out);
             }
@@ -179,7 +179,8 @@ impl ThreadMemo {
             SteerOutcome::Injected { turn }
             | SteerOutcome::Requeued { turn }
             | SteerOutcome::SentNow { turn } => *turn,
-            SteerOutcome::Unknown { .. } => return,
+            // Not sent: the reducer leaves the prompt's turn as it was.
+            SteerOutcome::NotSent { .. } | SteerOutcome::Unknown { .. } => return,
         };
         let (Some(&order), Some(old)) = (
             self.prompts.get(&event.message),

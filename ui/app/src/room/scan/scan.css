@@ -1,0 +1,42 @@
+/* The scan's lines under New matter's folder line (scan-lines.tsx, place-notice.tsx): quiet, small words; the synced
+   notice on the well like U2's folder warning, its "Got it" at its end */
+.scan {
+  display: grid;
+  gap: var(--s1-5);
+  color: var(--muted);
+}
+.scan-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--s2);
+  min-width: 0;
+}
+.scan-counts {
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+.scan-reading {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.scan-stop {
+  margin-inline-start: auto;
+}
+.scan-place {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1-5) var(--s2) var(--s1-5) var(--s3);
+  border-radius: var(--r-card);
+  background: var(--well);
+}
+.scan-place-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+}
+.scan-place-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}

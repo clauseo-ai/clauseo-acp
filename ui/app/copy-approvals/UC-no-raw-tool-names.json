@@ -1,0 +1,101 @@
+{
+  "UC-160": {
+    "en": "Clauseo asks to let a command reach the internet.",
+    "hi": "Clauseo एक कमांड को इंटरनेट तक पहुँचने देने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt, under \"Clauseo asks before going on.\", for a request named only SandboxNetworkAccess (the sandbox's network permission): never the raw name"
+  },
+  "UC-161": {
+    "en": "Clauseo asks to run a task.",
+    "hi": "Clauseo एक काम चलाने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt line for a request named only by a shell tool's name (Bash, exec_command, shell), with no task words of its own"
+  },
+  "UC-162": {
+    "en": "Clauseo asks to read a paper.",
+    "hi": "Clauseo एक दस्तावेज़ पढ़ने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt line for a request named only by a read tool's name (Read, read_file, fs.read)"
+  },
+  "UC-163": {
+    "en": "Clauseo asks to change a paper.",
+    "hi": "Clauseo एक दस्तावेज़ बदलने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt line for a request named only by a write tool's name (Write, write_file, ApplyPatch, MultiEdit)"
+  },
+  "UC-164": {
+    "en": "Clauseo asks to search the papers.",
+    "hi": "Clauseo दस्तावेज़ों में खोजने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt line for a request named only by a search tool's name (Grep, Glob)"
+  },
+  "UC-165": {
+    "en": "Clauseo asks to look online.",
+    "hi": "Clauseo ऑनलाइन देखने की अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Permission prompt line for a request named only by a web or browser tool's name (WebFetch, WebSearch, mcp__browser__…)"
+  },
+  "UC-166": {
+    "en": "Let a task reach the internet.",
+    "hi": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row, done, for a step titled only SandboxNetworkAccess"
+  },
+  "UC-167": {
+    "en": "Tried to let a task reach the internet.",
+    "hi": "एक काम को इंटरनेट तक पहुँचने देने की कोशिश की गई।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row, failed or stopped, for a step titled only SandboxNetworkAccess"
+  },
+  "UC-168": {
+    "en": "Letting a task reach the internet.",
+    "hi": "एक काम को इंटरनेट तक पहुँचने दिया जा रहा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Working line and live step, for a step titled only SandboxNetworkAccess"
+  }
+}

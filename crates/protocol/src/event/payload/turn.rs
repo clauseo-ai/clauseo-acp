@@ -39,12 +39,19 @@ pub struct UserMessage {
 pub struct TurnQueued {
     /// The waiting turn.
     turn: TurnId,
-    /// The thread it waits for: this thread when `behind_turn` is set, or when start-up
-    /// reconciliation holds a first turn.
+    /// The thread it waits for: this thread when `behind_turn` is set, when start-up
+    /// reconciliation holds a first turn, or for a turn the agent started on its own (no
+    /// `UserMessage`), logged as it takes the matter's writer, before its checkpoint.
     behind: ThreadId,
     /// The same thread's turn it waits for.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     behind_turn: Option<TurnId>,
+    /// It went back to the head of its thread's queue: a turn put back for its agent's sign-in
+    /// (decision record 0048, P4b). A restart restores it ahead of the turns queued before it,
+    /// since it was sent first and they may depend on its answer. False is written as a missing
+    /// field, and a missing field reads as false, so an older entry restores in log order.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    at_head: bool,
 }
 
 impl TurnQueued {
@@ -75,7 +82,15 @@ impl TurnQueued {
             turn,
             behind,
             behind_turn,
+            at_head: false,
         })
+    }
+
+    /// The same turn put back at the head of its thread's queue (`at_head`).
+    #[must_use]
+    pub const fn at_head(mut self) -> Self {
+        self.at_head = true;
+        self
     }
 
     /// The waiting turn.
@@ -91,6 +106,11 @@ impl TurnQueued {
     /// The same thread's turn it waits for.
     pub const fn behind_turn(&self) -> Option<TurnId> {
         self.behind_turn
+    }
+
+    /// Whether it went back to the head of its thread's queue.
+    pub const fn is_at_head(&self) -> bool {
+        self.at_head
     }
 }
 
@@ -275,4 +295,10 @@ pub struct StepUndone {
     pub restored: Vec<MatterPath>,
     /// The files the lawyer chose to keep.
     pub kept: Vec<MatterPath>,
+    /// The kept files the lawyer chose to undo that Clauseo had no earlier copy of, with why
+    /// each had not been versioned: in the folder before the turn but skipped (cloud-only or
+    /// over the size cap), then changed by it. Undo never deletes or overwrites them. Missing
+    /// reads as empty, and empty is left out, so an entry from before the field still decodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unversioned: Vec<SkippedFile>,
 }

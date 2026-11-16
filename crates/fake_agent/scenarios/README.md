@@ -45,7 +45,7 @@ The code lives in `crates/fake_agent/src/`.
 |---|---|---|---|
 | `scenario` | yes | The scenario name. | Must equal the file stem (`tool-calls` for `tool-calls.jsonl`). |
 | `description` | yes | One line saying what the scenario does and what the test must do. | Must not be empty or only spaces. |
-| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"` or `"hang"`. See [Running](#running). | Must be one of the two strings. |
+| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"`, `"hang"` or `"hang_briefly"`. See [Running](#running). | Must be one of the three strings. |
 
 No other keys are allowed in the header (`body.rs`, `Header`).
 
@@ -84,6 +84,7 @@ a `respond` step sent, or of the last `session/load` request an `expect` matched
 | `write_file` | `path`: relative path. `content`: string. | Creates the parent folders and writes `content` to `path` under the session cwd, replacing any file there. Fails (exit 3) before any session. | `path` is not empty, not absolute (`/x`, `\x`, `C:...`), and has no `..` part. |
 | `delete_file` | `path`: relative path. | Deletes the file at `path` under the session cwd. Fails (exit 3) when it is not a file, or before any session. | As `write_file`. |
 | `move_file` | `from`, `to`: relative paths. | Moves `from` to `to` under the session cwd, creating `to`'s parent folders. Fails (exit 3) when `from` is not a file, or before any session. | Both paths as `write_file`. |
+| `transcript_user` | A string: the lawyer's words. | Appends Claude Code's transcript line for words it took in, `{"type":"user","timestamp":"2999-01-01T00:00:00.000Z","sessionId":...,"cwd":...,"message":{"role":"user","content":[{"type":"text","text":...}]}}`, to `<CLAUDE_CONFIG_DIR>/projects/<project key of the session cwd>/<current session>.jsonl`, making its folders. The host confirms a steer claude-agent-acp answered `injected` only from such a line (`crates/host/src/actor/turn/queue/transcript.rs`); the project key is Claude Code's, as the host computes it. Stamped far ahead, since the agent reads no clock. Fails (exit 3) before any session, with no current session, when `CLAUDE_CONFIG_DIR` is unset or empty (the host always sets it for a Claude agent), or for a session id that is not a plain file name. | The text is not blank. |
 | `stderr` | `line`: string. `repeat`: optional integer, default `1`. | Writes `line` and `\n` to stderr `repeat` times, in one write. | `repeat` is 0 to 100,000 (`MAX_REPEAT`). |
 | `spawn_child` | `pid_file`: relative path. `own_group`: optional boolean, default `false`. | Starts `fake_agent --hold` with null stdio and never waits for it, writes its PID and `\n` to `pid_file`, then writes `fake_agent: child <pid>` to stderr. `pid_file` is relative to the agent's working directory (the process folder), not the session cwd, so it needs no session. With `own_group: true` the child leads a process group of its own on Unix, as a command Codex starts in a session of its own does, so a signal to the agent's group misses it; on Windows the flag changes nothing (the child stays in the agent's job). | `pid_file` as `write_file`'s `path`. |
 | `exit` | `code`: integer. | Flushes stdout and exits with `code`. Later steps never run. | `code` is 0 to 255 and not 2 or 3, which `fake_agent` keeps for itself (see [Exit codes](#exit-codes)). |
@@ -101,6 +102,7 @@ Examples from the bundled scenarios:
 {"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
 {"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
 {"move_file":{"from":"notes/b.txt","to":"archive/b.txt"}}
+{"transcript_user":"Focus on clause 4"}
 {"stderr":{"line":"fake_agent exit-mid-turn stderr filler.","repeat":200}}
 {"spawn_child":{"pid_file":"grandchild.pid"}}
 {"exit":{"code":1}}
@@ -300,6 +302,7 @@ scenarios themselves stay timer-free, and only the tests of the flag itself pass
 |---|---|
 | `"exit"` (default) | Exit 0 at once, even if steps are left. Exit 0 does not prove the scenario ran to the end. |
 | `"hang"` | Write `fake_agent: stdin closed, holding` to stderr and block forever, until killed. Use it to test that the client escalates to a signal. |
+| `"hang_briefly"` | Write `fake_agent: stdin closed, holding briefly` to stderr, block for 15 s (`HANG_BRIEFLY`) unless killed first, then exit 0. Use it where a test holds the stop ladder: a test killed from outside leaves no agent behind for long. |
 
 Stdin closing is only seen while a step reads. Steps that send run before the agent reads
 again.
@@ -343,6 +346,7 @@ The script itself is never read: a test may make it an empty file with that name
 |---|---|---|
 | `claude-cli` | Claude Code | `<script> --cli auth login [--claudeai\|--console]`, `<script> auth login`, `<script> --cli auth status --json`, `<script> --cli auth logout` (the `--cli` is optional) |
 | `codex.js` | Codex | `<script> login`, `<script> login --device-auth`, `<script> login status`, `<script> logout`, `<script> app-server` |
+| `index.js` under `codex-acp/dist/` | codex-acp's adapter, run by mistake | any arguments: each JSON-RPC request on stdin gets an error (`initialize` -32602, any other method -32601), nothing else is printed, and it exits 0 once stdin closes |
 
 Any other argv[1] is the usual command line above, unchanged. Each mode's home folder holds one
 marker file, `fake-signin-marker`, holding `{"authMethod": ..., "email": "test@example.com"}`. It
@@ -376,15 +380,18 @@ What each command does:
   `To sign in, open https://auth.openai.com/codex/device and enter the code ABCD-EFGH`, then ends as
   `FAKE_SIGNIN` says. Under `FAKE_SIGNIN=device-off` it prints Codex's refusal instead, exit 1:
   `Enable device code sign-in for Codex, Excel, PowerPoint, and Word in ChatGPT Security Settings, then run codex login --device-auth again.`
-- `codex.js login status`: prints `Logged in using ChatGPT`, exit 0, when the marker is there;
-  `Not logged in`, exit 1, when it is not.
-- `codex.js logout`: removes the marker and prints `Successfully logged out`.
+- `codex.js login status`: prints `Logged in using ChatGPT` on stderr, exit 0, when the marker is
+  there; `Not logged in` on stderr, exit 1, when it is not.
+- `codex.js logout`: removes the marker and Codex's login file `auth.json`, and prints
+  `Successfully logged out`.
 - `codex.js app-server`: answers JSON-RPC on stdin and stdout, one object per line, and exits 0 when
   stdin closes. `initialize` answers with `codexHome`, `platformFamily`, `platformOs` and
   `userAgent` (`fake_agent codex-cli`). `account/read` answers
   `{"account":{"type":"chatgpt","email":"test@example.com","planType":"plus"},"requiresOpenaiAuth":false}`
   when the marker is there, and `{"account":null,"requiresOpenaiAuth":true}` when it is not (signed
-  out). A notification (no `id`) gets no reply. Any other method
+  out). A marker whose `authMethod` is `apikey` gives `{"account":{"type":"apiKey"},…}`, and one
+  whose `authMethod` is `chatgpt-no-email` a `ChatGPT` account with `"email":null`; one whose
+  `authMethod` is `no-account` gets the signed-out reply while `login status` still says signed in. A notification (no `id`) gets no reply. Any other method
   gets error `-32601`.
 
 Bad arguments print the mode's usage line on stderr and exit 2.
@@ -400,6 +407,8 @@ Bad arguments print the mode's usage line on stderr and exit 2.
 | `device` | `login --device-auth` works. This is the default. |
 | `device-off` | `login --device-auth` refuses, as above. The browser `login` still works. |
 | `port-busy` | `codex.js login` prints `Port 1455 is already in use: another login is listening on 127.0.0.1:1455.` and exits 1, with no marker. |
+| `app-server-error` | `codex.js app-server` answers every request with an error, as the adapter does. Logins work as `ok-after:0`, but a `codex.js` login writes its marker as Codex's own login file, `auth.json`. |
+| `adapter` | `codex.js` behaves as codex-acp's adapter (above) for every command. |
 | `reuse:<authMethod>` | Writes the marker with that `authMethod` at startup, for any command. The login then works as `ok-after:0`. |
 
 Unset, empty and any other value mean `ok-after:0`.

@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver profile agents counts sandbox"
+APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver connectors profile agents counts sandbox blocklist"
 
 nl=$'\n'
 rust=false app=false ui=false product=false product_also=false unknown=""
@@ -74,7 +74,17 @@ classify() {
     ui/app/src/transport/bindings.ts | ui/components/src/styles/tokens-parts.css) ui=true app=true rust=true ;;
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
     ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
-    ui/app/src/review/registry-h11.tsx) ui=true app=true rust=true ;;
+    ui/app/src/review/registry-h11.tsx | ui/package.json) ui=true app=true rust=true ;;
+    # The page's first mark: native_mark.rs tests that its comma matches index.html's.
+    ui/app/index.html) ui=true app=true rust=true ;;
+    # The native dialogs' review page: dialogs/words and webview2 tests check it matches their tables.
+    ui/app/src/review/registry-nd.tsx) ui=true app=true rust=true ;;
+    # The review registry pages and the room's commands: clauseo-desktop's menu and MCP words check
+    # their tables against them (menu.rs, menu/words.rs, mcp/words.rs, mcp/import_words.rs), and
+    # new registry pages keep coming.
+    ui/app/src/review/registry-*.tsx | ui/app/src/room/room-commands.ts) ui=true app=true rust=true ;;
+    docs/firm-it.md) rust=true ;;
+    ui/app/doc-approvals.json) ui=true app=true rust=true ;;
     # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
     ui/e2e/app-windows | ui/e2e/app-windows/*) ui=true app=true rust=true ;;
     # A crate's assets are built into it (include_str!), Markdown too, so they are not prose.
@@ -86,6 +96,8 @@ classify() {
     .gitignore | .gitattributes | */.gitignore | */.gitattributes) ;;
     # Nightly fuzzing only (fuzz.yml); no pull request job builds fuzz/.
     fuzz/*) ;;
+    # The counts Worker: its own workspace, built and tested by counts-worker.yml alone.
+    services/counts-worker/*) ;;
     # What every Rust build reads.
     Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true ;;
     # The toolchain and cargo config change the binaries, so the scoreboards run too.

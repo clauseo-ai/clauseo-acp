@@ -1,5 +1,6 @@
 // What this matter allows, and Not protected. The room's line under the question box says what the workspace does,
-// "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.", and a press on it
+// "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+// and a press on it
 // opens what the matter allows: what it always may reach, the places the lawyer allowed or refused for it, each with
 // Remove, and whether protection is on. Where protection is off, or couldn't be set up, the same line says "Not
 // protected" for as long as that lasts, with the open lock: a lasting mark in concrete, never in red, because it's a
@@ -53,16 +54,14 @@ export function WorkspaceLine({
             <span>
               <Say>
                 {w.v(
-                  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+                  "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
                 )}
               </Say>
             </span>
           </>
         ) : (
           <NotProtectedMark
-            {...(unprotected.why === "setup"
-              ? { meaning: w.v("Clauseo asks before each change in this matter.") }
-              : {})}
+            meaning={w.v("Clauseo can read any file you can open on this computer.")}
           />
         )}
       </BasePopover.Trigger>
@@ -163,11 +162,15 @@ export function AllowedList({
       <BasePopover.Title render={<Heading level={2} className="allows-title" />}>
         {w.v("What this matter allows")}
       </BasePopover.Title>
-      <p className="allows-sub">
-        <Say>
-          {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
-        </Say>
-      </p>
+      {unprotected === null && (
+        <p className="allows-sub">
+          <Say>
+            {w.v(
+              "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+            )}
+          </Say>
+        </p>
+      )}
       <section className="allows-group">
         <Heading level={3} className="allows-head">
           {w.v("Always")}
@@ -215,20 +218,20 @@ export function AllowedList({
       )}
       <div className="allows-foot" data-unprotected={unprotected !== null ? "" : undefined}>
         <p className="allows-protection">
-          <span className="allows-protection-name">{w.v("Protection")}</span>
+          <span className="allows-protection-name">{w.v("Safe workspace")}</span>
           <span className="allows-protection-state">
             <Say>
               {unprotected === null
                 ? w.v(
-                    "On. Clauseo works inside this matter's folder and asks before going beyond it.",
+                    "On. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
                   )
                 : unprotected.why === "off"
                   ? w.v(
-                      "Off since {time} today. Clauseo can reach any file on this computer without asking.",
+                      "Off since {time} today. Clauseo can read any file you can open on this computer.",
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(
-                      "Couldn't be set up on this computer. Clauseo asks before each change in this matter.",
+                      "Couldn't be set up on this computer. Clauseo can read any file you can open on it.",
                     )}
             </Say>
           </span>
@@ -240,7 +243,9 @@ export function AllowedList({
           onClick={onProtection}
         >
           <span className="deva-nudge">
-            {unprotected === null ? w.v("Switch off protection") : w.v("Switch protection on")}
+            {unprotected === null
+              ? w.v("Switch off the Safe workspace")
+              : w.v("Switch the Safe workspace on")}
           </span>
         </Button>
       </div>

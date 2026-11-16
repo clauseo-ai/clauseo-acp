@@ -1,7 +1,7 @@
 //! Answers to the agent's requests: each pending request has its own key, and a URL
 //! elicitation's accept is exactly `{"action": "accept"}`.
 
-use clauseo_protocol::{AgentChoiceId, ElicitationRequest, ElicitationResponse};
+use clauseo_protocol::{AgentChoiceId, CompactString, ElicitationRequest, ElicitationResponse};
 
 use super::*;
 
@@ -181,6 +181,52 @@ fn url_elicitation_accept_carries_no_content() {
             answer,
             json!({"jsonrpc": "2.0", "id": "el-req-1", "result": {"action": "accept"}})
         );
+        agent.read_end().await;
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+}
+
+/// A form elicitation scoped to a tool call carries the scope's `toolCallId`; one scoped to the
+/// session alone carries none. The host withholds the answer's strings from that call's output.
+#[test]
+fn elicitation_carries_the_scope_tool_call_id() {
+    let (client, events, driver, mut agent) = pipes();
+    let calls = async move {
+        handshake(&client).await;
+        let mut scopes = Vec::new();
+        while scopes.len() < 2 {
+            if let AcpEvent::ElicitationRequested {
+                key,
+                acp_tool_call_id,
+                ..
+            } = events.recv().await.unwrap()
+            {
+                scopes.push(acp_tool_call_id);
+                client
+                    .answer_elicitation(key, ElicitationResponse::Cancel)
+                    .await
+                    .unwrap();
+            }
+        }
+        assert_eq!(scopes, [Some(CompactString::from("tc-1")), None]);
+    };
+    let script = async {
+        agent.start().await;
+        let schema = json!({"type": "object", "properties": {"key": {"type": "string"}}});
+        agent.send(
+            &json!({"jsonrpc": "2.0", "id": "el-req-1", "method": "elicitation/create",
+            "params": {"mode": "form", "sessionId": "s-1", "toolCallId": "tc-1",
+                "message": "Your key?", "requestedSchema": schema}}),
+        );
+        assert_eq!(agent.read().await["id"], "el-req-1");
+        agent.send(
+            &json!({"jsonrpc": "2.0", "id": "el-req-2", "method": "elicitation/create",
+            "params": {"mode": "form", "sessionId": "s-1",
+                "message": "Your key?", "requestedSchema": schema}}),
+        );
+        assert_eq!(agent.read().await["id"], "el-req-2");
         agent.read_end().await;
     };
     let (driver, (), ()) =

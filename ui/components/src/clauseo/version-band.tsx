@@ -33,6 +33,8 @@ export type BandLook = {
   undoable: boolean;
   /** A plain note on this version, such as a file too large to keep versions. */
   note?: string | null;
+  /** Optional: the note's one way on, after its words, as a notice's action. */
+  noteAction?: ReactNode;
   /** Optional: the newest version, which the room already stands at: only Undo this change is offered, since there is
    * nothing to compare, restore or go back to. */
   now?: boolean;
@@ -240,6 +242,7 @@ export function VersionBand({
           <span>
             <Say>{look.note}</Say>
           </span>
+          {look.noteAction}
         </p>
       )}
       {waiting !== null && (

@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use clauseo_protocol::{DomainEvent, Envelope, StreamId};
 
 use crate::helpers::{inside, kinds, values};
-use crate::{Corpus, V1, every_corpus, examples, fixtures, fnv1a, gaps};
+use crate::{Corpus, V1, every_corpus, examples, fixtures, gaps, pins};
 
 /// The files to add for what `corpora` lack, each as `(name, entries)`, from the examples of
 /// `support/examples.rs` (`every_event`, then `later_variants`): `<kind>` with every example of
@@ -52,9 +52,11 @@ fn added_pairs(corpora: &[Corpus]) -> (Vec<(String, Vec<Envelope>)>, Vec<String>
 }
 
 /// Writes the `added/` files for every kind and variant the corpus lacks into
-/// `target/tmp/corpus-added/`, never into `corpus/`, and prints each file's move and its
-/// [`ADDED_AFTER_V1`] row. Run as the corpus README says, with `INSTA_UPDATE=always`: the files
-/// are written as insta binary snapshots, the crate's one way to write a file from a test.
+/// `target/tmp/corpus-added/`, never into `corpus/`: each pair's `.jsonl` and `.msgpack`, and
+/// its `.pin` with their lengths and hashes. Prints each file's move, then the `touch` that makes
+/// the test target rebuild and embed them. Run as the corpus README says, with
+/// `INSTA_UPDATE=always`: the files are written as insta binary snapshots, the crate's one way to
+/// write a file from a test.
 #[test]
 #[ignore = "writes the corpus/added files into target/; run it by name, as corpus/v1/README.md says"]
 fn write_the_added_pairs() {
@@ -71,7 +73,13 @@ fn write_the_added_pairs() {
             json.push('\n');
         }
         let packed = rmp_serde::to_vec_named(entries).unwrap();
-        for (file, bytes) in [("jsonl", json.as_bytes()), ("msgpack", &packed[..])] {
+        let pin = pins::pin_text(json.as_bytes(), &packed);
+        let files = [
+            ("jsonl", json.as_bytes()),
+            ("msgpack", &packed[..]),
+            ("pin", pin.as_bytes()),
+        ];
+        for (file, bytes) in files {
             let mut settings = insta::Settings::clone_current();
             settings.set_snapshot_path(format!("{out}/{file}"));
             settings.set_prepend_module_to_snapshot(false);
@@ -82,17 +90,11 @@ fn write_the_added_pairs() {
                 "mv {out}/{file}/{name}.snap.{file} crates/protocol/tests/corpus/added/{name}.{file}"
             );
         }
-        println!(
-            "row: (\"added/{name}\", include_bytes!(\"added/{name}.jsonl\"), \
-             include_bytes!(\"added/{name}.msgpack\"), ({}, {:#018x}), ({}, {:#018x})),",
-            json.len(),
-            fnv1a(json.as_bytes()),
-            packed.len(),
-            fnv1a(&packed)
-        );
     }
     if pairs.is_empty() {
         println!("nothing to add: the corpus holds every kind and every variant");
+    } else {
+        println!("touch crates/protocol/tests/corpus.rs");
     }
 }
 

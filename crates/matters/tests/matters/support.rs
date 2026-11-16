@@ -110,6 +110,21 @@ pub(crate) fn set_mtime(path: impl AsRef<Path>, mtime: SystemTime) {
         .unwrap();
 }
 
+/// Windows: opens `path` for reading and writing with read sharing only, as Word holds a document
+/// it has open: no other open may write or delete it until the handle drops. Makes no owner file.
+#[cfg(windows)]
+pub(crate) fn hold_as_word(path: impl AsRef<Path>) -> File {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `FILE_SHARE_READ`: other opens may read the file, but not write or delete it.
+    const FILE_SHARE_READ: u32 = 0x1;
+    File::options()
+        .read(true)
+        .write(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .unwrap()
+}
+
 /// A probe that answers cloud-only for the absolute paths a test marks; marks can change
 /// between calls.
 #[derive(Debug, Default)]
@@ -138,11 +153,15 @@ impl PlaceholderProbe for MarkedProbe {
 /// Settings with `root` as the matters root, [`Limits::DEFAULT`], [`Retention::KeepAll`] and
 /// `probe`.
 pub(crate) fn settings(root: impl Into<PathBuf>, probe: Arc<MarkedProbe>) -> Settings {
+    let root = root.into();
+    // Beside the matters root: a test's own trash, never the machine's.
+    let trash = root.with_file_name("trash");
     Settings {
-        matters_root: root.into(),
+        matters_root: root,
         refused_trees: Vec::new(),
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe,
+        trash: Arc::new(clauseo_matters::FolderTrash::new(trash)),
     }
 }

@@ -6,8 +6,9 @@ import { cn } from "../lib/cn.ts";
  * state, never red, which means the other side: the meter and the words say it. */
 export type PlanState = "plenty" | "close" | "reached";
 
-/** The plan meter: the plan's name in primary with a 44 by 4 px meter, primary on the inset tone, and what's left
- * beneath it in the muted tone. From close to the limit, the line turns to primary at the chip's weight, so it's
+/** The plan meter: the plan's name in primary with a 44 by 4 px meter, a rounded fill on the inset tone, and what's left
+ * beneath it in the muted tone. With plenty left the fill is muted, as Settings' Plan and usage and the plan's card
+ * draw it; from close to the limit the fill and the line turn to primary, the line at the chip's weight, so it's
  * noticed by its words and weight without any amber; reached, the meter stands empty as well. The meter tells
  * assistive technology the same in words. dragRegion makes the meter's four elements part of a title bar: a press on
  * them drags the window, as the toolbar's empty space does. */
@@ -72,13 +73,16 @@ export function PlanMeter({
             <BaseMeter.Indicator
               className={cn(
                 "absolute inset-y-0 left-0 rounded-meter",
-                muted ? "bg-flat-num" : "bg-primary",
+                muted ? "bg-flat-num" : state === "plenty" ? "bg-muted" : "bg-primary",
               )}
               data-muted={muted ? "" : undefined}
             />
           </BaseMeter.Track>
         )}
       </BaseMeter.Root>
+      {/* a space between the name and the line, as a reader sees them: the grid draws none, and a button named by its
+          words then has its visible text, words apart, inside its name (axe's label-content-name-mismatch) */}
+      {status !== "" && status !== null && " "}
       {status !== "" && status !== null && (
         <p
           className={cn(state !== "plenty" && "text-primary font-chip")}
@@ -91,8 +95,14 @@ export function PlanMeter({
   );
 }
 
-/** Base UI's meter root with its own children only: the hidden "x" it appends, its last child, left out. */
-function withoutHiddenX(props: ComponentProps<"div">) {
+/** Base UI's meter root with its own children only: the hidden "x" it appends, its last child, left out; and without the
+ * value attributes Base UI sets whatever the role, which role="none" may not carry (axe's aria-allowed-attr). */
+function withoutHiddenX({
+  "aria-valuenow": _now,
+  "aria-valuemin": _min,
+  "aria-valuemax": _max,
+  ...props
+}: ComponentProps<"div">) {
   const all = props.children;
   const kids = isValidElement<{ children?: ReactNode }>(all)
     ? Children.toArray(all.props.children).slice(0, -1)

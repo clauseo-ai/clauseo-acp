@@ -10,6 +10,9 @@
 //! - The launch variables: `STETDOC_AUTHOR`.
 //! - The skills ([`skills`]), rendered into Claude's plugin; Codex gets an index of them in
 //!   its instructions ([`skills::builtin::codex_index`]).
+//! - The skill packs ([`packs`]): a lawyer's or a firm's skill folders, checked and hashed per
+//!   launch, rendered once per hash into a cache, and written into a launch's own second
+//!   plugin (decision record 0040).
 //!
 //! What differs per session goes out as [`placeholders`] the host fills. The host decides
 //! everything the settings decide (web search on or off, the seeded `WebFetch` rules, the
@@ -19,12 +22,15 @@ pub mod claude;
 pub mod codex;
 pub mod error;
 pub mod instructions;
+pub mod packs;
 pub mod paths;
 pub mod placeholders;
 pub mod servers;
 pub mod skills;
+pub mod subagents;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod tools;
 mod write;
 
 use std::collections::BTreeMap;
@@ -38,6 +44,7 @@ pub use claude::ClaudeOptions;
 pub use codex::CodexConfig;
 pub use error::ProfileError;
 pub use instructions::Instructions;
+pub use packs::{PackEntry, PackWrite, PacksWritten, write_packs};
 pub use paths::{BrowserSidecars, ProfilePaths};
 pub use servers::ProfileServer;
 pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
@@ -72,6 +79,13 @@ pub struct ClauseoProfile {
     author: String,
     instructions: Instructions,
     skills: Arc<Rendered>,
+    /// Whether the app copied the `agent-browser` command for the agents
+    /// ([`Self::with_tool_skills`]): the browser's skill. Whether a session has the browser, and
+    /// Claude's rules for it, are the host's, per session.
+    browser: bool,
+    /// Whether the app found a stetdoc whose `--version` works ([`Self::with_stetdoc_cli`]):
+    /// the instructions' stetdoc line.
+    stetdoc_cli: bool,
 }
 
 impl ClauseoProfile {
@@ -85,7 +99,31 @@ impl ClauseoProfile {
             author: instructions::author_name(&author.unwrap_or_default()),
             instructions: Instructions::launch(),
             skills: Arc::default(),
+            browser: false,
+            stetdoc_cli: false,
         }
+    }
+
+    /// The same profile with the stetdoc line in its instructions when `found`: the app found a
+    /// stetdoc whose `--version` works, whether or not its skill loaded
+    /// ([`instructions::stetdoc_part`]).
+    #[must_use]
+    pub fn with_stetdoc_cli(mut self, found: bool) -> Self {
+        self.stetdoc_cli = found;
+        self
+    }
+
+    /// The same profile with stetdoc as `state` says ([`skills::stetdoc::start`]): the stetdoc
+    /// line when it is on, its skill when one loaded, and the other skills as
+    /// [`Self::with_tool_skills`] renders them. Renders in memory: no I/O.
+    #[must_use]
+    pub fn with_stetdoc(
+        self,
+        state: &skills::stetdoc::start::State,
+        agent_browser: bool,
+    ) -> (Self, Vec<ProfileError>) {
+        self.with_stetdoc_cli(state.is_on())
+            .with_tool_skills(state.skill().cloned(), agent_browser)
     }
 
     /// The same profile with `skills` rendered once, here, for every later
@@ -104,7 +142,19 @@ impl ClauseoProfile {
     /// ([`skills::builtin::with_stetdoc`]), rendered as [`Self::with_skills`] does.
     #[must_use]
     pub fn with_builtin_skills(self, stetdoc: Option<SkillSource>) -> (Self, Vec<ProfileError>) {
-        let (sources, mut refused) = skills::builtin::with_stetdoc(stetdoc);
+        self.with_tool_skills(stetdoc, false)
+    }
+
+    /// [`Self::with_builtin_skills`], plus the browser's skill when `agent_browser` says the
+    /// app put the `agent-browser` command on the agents' `PATH` ([`skills::builtin::with_tools`]).
+    #[must_use]
+    pub fn with_tool_skills(
+        mut self,
+        stetdoc: Option<SkillSource>,
+        agent_browser: bool,
+    ) -> (Self, Vec<ProfileError>) {
+        let (sources, mut refused) = skills::builtin::with_tools(stetdoc, agent_browser);
+        self.browser = agent_browser;
         let (profile, more) = self.with_skills(&sources);
         refused.extend(more);
         (profile, refused)
@@ -122,36 +172,106 @@ impl ClauseoProfile {
         &self.paths
     }
 
+    /// Whether the app put the `agent-browser` command on the agents' `PATH`.
+    pub fn browser(&self) -> bool {
+        self.browser
+    }
+
     /// The author name tracked changes carry.
     pub fn author(&self) -> &str {
         &self.author
     }
 
-    /// The composed instructions, `{author}` filled, `{work_folder}` and `{matter_notes}` left.
+    /// The composed instructions, `{author}` and `{stetdoc}` filled, `{work_folder}`,
+    /// `{matter_notes}` and `{connectors}` left, and `{plan}` left for
+    /// [`Self::instructions_for`]. No agent gets this text as it is.
     pub fn instructions(&self) -> String {
-        self.instructions.compose(&self.author)
+        self.instructions
+            .compose_for(&self.author, self.stetdoc_cli)
     }
 
-    /// The servers for an agent of `kind`: `browser`, whatever the kind.
-    pub fn servers(&self, _kind: Option<AgentKind>) -> Vec<ProfileServer> {
-        vec![servers::browser(&self.paths)]
+    /// [`Self::instructions`] for an agent of `kind`: `{plan}` filled with
+    /// [`instructions::plan_name`], so each agent reads its own plan's name: `Claude` for Claude,
+    /// `ChatGPT` for Codex. Claude's options and Codex's keys are built from this.
+    pub fn instructions_for(&self, kind: AgentKind) -> String {
+        let text = self.instructions();
+        let plan = instructions::plan_name(kind);
+        placeholders::fill(&text, &[instructions::PLAN], &[(instructions::PLAN, plan)])
+            .unwrap_or(text)
     }
 
-    /// Claude's options.
+    /// The servers for an agent of `kind`: `browser` for Codex ([`servers::browser_mcp`]; Claude
+    /// keeps the shell command), then `case-law` (R24), which the host sends only in a session
+    /// whose relay it opened.
+    pub fn servers(&self, kind: Option<AgentKind>) -> Vec<ProfileServer> {
+        servers::browser_mcp(kind)
+            .then(|| servers::browser(&self.paths))
+            .into_iter()
+            .chain([servers::case_law(&self.paths)])
+            .collect()
+    }
+
+    /// Claude's options, with [`Self::claude_instructions`].
     pub fn claude_options(&self) -> ClaudeOptions {
-        ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
+        ClaudeOptions::new(
+            self.claude_instructions(),
+            Some(self.paths.claude_plugin.clone()),
+        )
     }
 
-    /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
+    /// Claude's instructions on this OS: [`Self::claude_instructions_for`] macOS or not.
+    pub fn claude_instructions(&self) -> String {
+        self.claude_instructions_for(cfg!(target_os = "macos"))
+    }
+
+    /// Claude's instructions: [`Self::instructions_for`] Claude, then on macOS (`macos`) a blank
+    /// line and [`instructions::claude_shell`]'s line, which Codex never gets, then a blank line
+    /// and [`instructions::claude_scale`], last, as the timing harness appended it. The part
+    /// never holds the research bullets here: the host adds them only in a session that keeps the
+    /// researcher (web search on), and takes the whole part out on a cloud login, with the agents.
+    pub fn claude_instructions_for(&self, macos: bool) -> String {
+        let mut text = self.instructions_for(AgentKind::Claude);
+        if let Some(line) = instructions::claude_shell(macos) {
+            text = format!("{text}\n\n{line}");
+        }
+        match instructions::claude_scale(false) {
+            Some(scale) => format!("{text}\n\n{scale}"),
+            None => text,
+        }
+    }
+
+    /// Codex's keys with no skills index: `developer_instructions` is [`Self::codex_instructions`].
     /// The index goes in only through [`Self::codex_keys`], with a [`SkillsWritten`].
     pub fn codex_config(&self) -> CodexConfig {
-        CodexConfig::with_instructions(self.instructions())
+        CodexConfig::with_instructions(self.codex_instructions())
+    }
+
+    /// Codex's instructions on this OS: [`Self::codex_instructions_for`] macOS or not.
+    pub fn codex_instructions(&self) -> String {
+        self.codex_instructions_for(cfg!(target_os = "macos"))
+    }
+
+    /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line and
+    /// [`instructions::CODEX_SHELL_OFFLINE`], a blank line and [`instructions::CODEX_REFUSAL`],
+    /// then on macOS (`macos`) a blank line and [`instructions::codex_shell`]'s line; Claude
+    /// gets none of them.
+    pub fn codex_instructions_for(&self, macos: bool) -> String {
+        let text = format!(
+            "{}\n\n{}\n\n{}",
+            self.instructions_for(AgentKind::Codex),
+            instructions::CODEX_SHELL_OFFLINE.trim(),
+            instructions::CODEX_REFUSAL.trim()
+        );
+        match instructions::codex_shell(macos) {
+            Some(line) => format!("{text}\n\n{line}"),
+            None => text,
+        }
     }
 
     /// Codex's instructions with the index: [`Self::instructions`], then a blank line and the
     /// skills index ([`Self::skills_index`]) when a skill is rendered.
     fn codex_instructions_with_index(&self) -> String {
-        let text = self.instructions();
+        let text = self.codex_instructions();
         let index = self.skills_index();
         if index.is_empty() {
             text
@@ -169,7 +289,55 @@ impl ClauseoProfile {
 
     /// The `_meta` for an agent of `kind`: Claude's fragment for Claude, none otherwise.
     pub fn session_meta(&self, kind: Option<AgentKind>) -> Option<Map<String, Value>> {
-        (kind == Some(AgentKind::Claude)).then(|| self.claude_options().meta_fragment())
+        self.session_meta_with_packs(kind, None)
+    }
+
+    /// [`Self::session_meta`], with the launch's pack plugin as a second `plugins` entry when
+    /// `packs` is given and wrote a skill: only [`write_packs`] makes the token, so Claude never
+    /// names a plugin the launch did not write.
+    pub fn session_meta_with_packs(
+        &self,
+        kind: Option<AgentKind>,
+        packs: Option<&PacksWritten>,
+    ) -> Option<Map<String, Value>> {
+        (kind == Some(AgentKind::Claude)).then(|| {
+            let options = self.claude_options();
+            match packs.filter(|packs| !packs.skills().is_empty()) {
+                Some(packs) => options.with_pack_plugin(packs.plugin().to_owned()),
+                None => options,
+            }
+            .meta_fragment()
+        })
+    }
+
+    /// The `CODEX_CONFIG` keys for an agent of `kind` with the index of what this launch
+    /// wrote: the built-in lines when `written` is the Claude plugin's [`SkillsWritten`], the
+    /// pack lines when `packs` is given ([`packs::index::codex_index_with_packs`]). With
+    /// neither, [`Self::codex_keys_without_index`].
+    pub fn codex_keys_with_packs(
+        &self,
+        kind: Option<AgentKind>,
+        written: Option<&SkillsWritten>,
+        packs: Option<&PacksWritten>,
+    ) -> Map<String, Value> {
+        if kind != Some(AgentKind::Codex) {
+            return Map::new();
+        }
+        let skills_root = self.paths.claude_skills();
+        let builtin = written.and_then(|written| {
+            if written.root == skills_root {
+                Some((skills_root.as_path(), self.skills.as_ref()))
+            } else {
+                tracing::warn!("a skills write of another folder: Codex gets no built-in index");
+                None
+            }
+        });
+        let index = packs::index::codex_index_with_packs(builtin, packs);
+        let text = self.codex_instructions();
+        if index.is_empty() {
+            return CodexConfig::with_instructions(text).into_keys();
+        }
+        CodexConfig::with_instructions(format!("{text}\n\n{index}")).into_keys()
     }
 
     /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise, with
@@ -249,6 +417,22 @@ impl ClauseoProfile {
         }
     }
 
+    /// The skill packs an agent of `kind` loads and writes into its launch's own plugin, as
+    /// data for the launch-prep thread ([`PackWrite::load`], then [`write_packs`]): `entries`
+    /// (the packs the host admitted, each with the hash recorded when it was turned on) in
+    /// [`ProfilePaths::skill_packs`]. None for an agent with no kind, or with no pack to load.
+    /// Pure and cheap: no file is read here (decision record 0040).
+    pub fn pack_write(
+        &self,
+        kind: Option<AgentKind>,
+        entries: Vec<PackEntry>,
+        allow_scripts: bool,
+    ) -> Option<PackWrite> {
+        kind?;
+        (!entries.is_empty())
+            .then(|| PackWrite::new(self.paths.skill_packs.clone(), entries, allow_scripts))
+    }
+
     /// The write of Claude's plugin.
     fn claude_write(&self) -> SkillWrite {
         SkillWrite {
@@ -294,7 +478,11 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// the launch-prep thread, never the host's.
 ///
 /// Then the retired built-ins ([`skills::builtin::RETIRED_BUILTINS`]) go from the folder
-/// ([`skills::retire`]), and their files are reported as removed.
+/// ([`skills::retire`]), and so does each optional skill `skills` does not carry: the
+/// browser's (this start has no browser) and stetdoc's (none found, its `--version` failed at
+/// the start or in the background check, or its skill was left out). A copy an earlier start
+/// wrote would otherwise stay in Claude's plugin, which Claude reads whole. Their files are
+/// reported as removed.
 ///
 /// The host logs an error from here as a warning and never fails a launch on it: the agent then
 /// runs with the skills the folder already holds, or none, and a Codex agent gets
@@ -309,10 +497,21 @@ pub fn write_skills(skills: &SkillWrite) -> Result<SkillsWritten, ProfileError> 
         write::replace_if_differs(&plugin.join(folder).join(file), PLUGIN_MANIFEST.as_bytes())?;
     }
     let mut report = skills::write_unlocked(&skills.root, &skills.rendered)?;
-    report.removed.extend(skills::retire_unlocked(
-        &skills.root,
-        &skills::builtin::RETIRED_BUILTINS,
-    )?);
+    let mut retired = skills::builtin::RETIRED_BUILTINS.to_vec();
+    // A launch without the browser or stetdoc's skill leaves none behind from one with it.
+    for optional in [skills::builtin::AGENT_BROWSER, skills::stetdoc::STETDOC] {
+        if !skills
+            .rendered
+            .skills()
+            .iter()
+            .any(|skill| skill.name() == optional)
+        {
+            retired.push(optional);
+        }
+    }
+    report
+        .removed
+        .extend(skills::retire_unlocked(&skills.root, &retired)?);
     Ok(SkillsWritten {
         root: skills.root.clone(),
         report,

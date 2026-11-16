@@ -3,14 +3,18 @@
 // controls always show what holds now. The display itself is read with useDisplay().
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
-import type { UiSettings } from "../room/host-next.ts";
-import type { ToolsSettingsView } from "../transport/protocol.ts";
+import type { Settings, UiSettings } from "../room/host-next.ts";
+import type { PrivacySettings, ToolsSettingsView } from "../transport/protocol.ts";
 
 export type LiveSettings = {
   ui: UiSettings;
   locked: readonly string[];
   /** The tools' switches, when the host sends them (SettingsView.tools). */
   tools?: ToolsSettingsView | undefined;
+  /** The privacy switches, when the host sends them (SettingsView.privacy): Privacy's counts switch. */
+  privacy?: PrivacySettings | undefined;
+  /** Each agent's firm plan (SettingsView.plans), when the host sends one: Plans' firm address (UD2). */
+  plans?: Settings["plans"];
 };
 
 const KEYS = ["theme", "font_size", "language", "lite", "motion"] as const;
@@ -20,6 +24,9 @@ const sameSettings = (a: LiveSettings, b: LiveSettings) =>
   a.tools?.web_search === b.tools?.web_search &&
   a.tools?.browser === b.tools?.browser &&
   (a.tools === undefined) === (b.tools === undefined) &&
+  a.privacy?.counts === b.privacy?.counts &&
+  (a.privacy === undefined) === (b.privacy === undefined) &&
+  JSON.stringify(a.plans) === JSON.stringify(b.plans) &&
   a.locked.length === b.locked.length &&
   a.locked.every((key, i) => key === b.locked[i]);
 
@@ -28,7 +35,13 @@ export function useSettings(store: DisplayStore): LiveSettings {
   const last = useRef<LiveSettings | null>(null);
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
   const read = useCallback((): LiveSettings => {
-    const next = { ui: store.ui(), locked: store.locked(), tools: store.tools() };
+    const next = {
+      ui: store.ui(),
+      locked: store.locked(),
+      tools: store.tools(),
+      privacy: store.privacy(),
+      plans: store.plans(),
+    };
     if (last.current !== null && sameSettings(last.current, next)) return last.current;
     last.current = next;
     return next;

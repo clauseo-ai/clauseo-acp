@@ -17,7 +17,14 @@ import {
 } from "../testing/stream-script.ts";
 import type { ErrorCode, ViewEntry } from "../transport/protocol.ts";
 import { stamp } from "./thread/clock.ts";
-import { defaultOutcome, mountRoom, summary, type Harness, type Script } from "./thread/harness.ts";
+import {
+  defaultOutcome,
+  mountRoom,
+  summary,
+  THE_MATTER,
+  type Harness,
+  type Script,
+} from "./thread/harness.ts";
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
 
@@ -220,6 +227,129 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   }
 });
 
+// #1030: the agent's service gave up on the turn on its side. Try again under the answer, never Restart (even with H10
+// faked), no time mark, and the question stays out of the field: Try again asks it
+test("a Codex turn failed with agent.service_error: ChatGPT's line and Try again, no Restart, no time mark", async () => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed("agent.service_error", NOW, agent));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("agent.service_error");
+  expect(row?.textContent).toBe("ChatGPT had a problem on its side. Try again.");
+  expect(h.one("answer-try-again")).not.toBeNull();
+  expect(h.one("restart")).toBeNull();
+  expect(h.one("agent-stopped")).toBeNull();
+  expect(h.one("stopped-here")).toBeNull();
+  expect(field().value).toBe("");
+  expect(h.host.textContent).toContain("Clause nine requires notice");
+});
+
+// D-050's backstop: the agent sent nothing for 5 minutes with no tool running and no question waiting. The same line
+// as agent.service_error: Try again under the answer, never Restart (even with H10 faked), no time mark
+test("a Codex turn failed with agent.quiet: ChatGPT's line and Try again, no Restart, no time mark", async () => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed("agent.quiet", NOW, agent));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("agent.quiet");
+  expect(row?.textContent).toBe("ChatGPT stopped answering. Try again.");
+  expect(h.one("answer-try-again")).not.toBeNull();
+  expect(h.one("restart")).toBeNull();
+  expect(h.one("agent-stopped")).toBeNull();
+  expect(h.one("stopped-here")).toBeNull();
+  expect(field().value).toBe("");
+  expect(h.host.textContent).toContain("Clause nine requires notice");
+});
+
+// a folder Claude can't start in: the host's refusal of a path with a backslash (macOS, Linux; not retryable on the
+// wire) and Claude's "Can't access working directory". Each sentence says Try again: Try again stands under the turn,
+// as for any failed turn, and never Restart (even with H10 faked), which can't mend the folder
+test.each([
+  [
+    "matter.folder_backslash",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ],
+  [
+    "agent.folder_inaccessible",
+    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  ],
+] as const)(
+  "a turn failed with %s: Claude's line and Try again, no Restart",
+  async (code, said) => {
+    h = await asked({ next: H10, platform: "mac" });
+    h.deliver(failed(code));
+    await h.settle();
+    const row = h.one("turn-stopped");
+    expect(row?.dataset["failure"]).toBe(code);
+    expect(row?.textContent).toBe(said);
+    expect(h.one("answer-try-again")).not.toBeNull();
+    expect(h.one("restart")).toBeNull();
+    expect(h.one("agent-stopped")).toBeNull();
+    expect(field().value).toBe("");
+  },
+);
+
+// matter.folder_backslash's line by the matter's folder (folder_display) and the OS: the folder's own name, or the
+// nearest folder above it whose name has the backslash, by name; Finder on the Mac, "your file manager" on Linux
+const SLASHED = "\u2068Old\\Work\u2069";
+test.each([
+  [
+    "mac",
+    "Documents/Acme\\ Traders",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ],
+  [
+    "linux",
+    "Documents/Acme\\ Traders",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+  ],
+  [
+    "mac",
+    "Documents/Old\\Work/Acme Traders",
+    `Claude can't work in this matter's folder because the folder "${SLASHED}" in its path has a backslash (\\). Rename that folder in Finder, then Try again.`,
+  ],
+  [
+    "linux",
+    "Documents/Old\\Work/Acme Traders",
+    `Claude can't work in this matter's folder because the folder "${SLASHED}" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.`,
+  ],
+  [
+    "linux",
+    "",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+  ],
+] as const)(
+  "matter.folder_backslash on %s, the matter folder %j: %s",
+  async (platform, folder, said) => {
+    h = await asked({ platform, matters: [{ ...THE_MATTER, folder_display: folder }] });
+    h.deliver(failed("matter.folder_backslash"));
+    await h.settle();
+    expect(h.one("turn-stopped")?.textContent).toBe(said);
+  },
+);
+
+// offline truth: the agent couldn't get through to its service while the computer seemed online. The same line as
+// agent.quiet: Try again under the answer, never Restart (even with H10 faked), no time mark
+test("a Codex turn failed with agent.unreachable: ChatGPT's line and Try again, no Restart, no time mark", async () => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed("agent.unreachable", NOW, agent));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("agent.unreachable");
+  expect(row?.textContent).toBe(
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+  );
+  expect(h.one("answer-try-again")).not.toBeNull();
+  expect(h.one("restart")).toBeNull();
+  expect(h.one("agent-stopped")).toBeNull();
+  expect(h.one("stopped-here")).toBeNull();
+  expect(field().value).toBe("");
+  expect(h.host.textContent).toContain("Clause nine requires notice");
+});
+
 test("with H10 faked: no Restart for a code a restart can't mend, and a refused Restart says its code", async () => {
   h = await asked({ next: H10 });
   h.deliver(failed("agent.protocol_error"));
@@ -332,11 +462,26 @@ test.each([
 
 // the other agent.* codes that name Claude take the plan by the same path: the step's row in a Codex thread
 test.each([
-  ["agent.auth_required", "Sign in to ChatGPT in Codex first. Your question is kept."],
+  ["agent.auth_required", "Sign in with ChatGPT in Codex first. Your question is kept."],
   ["agent.protocol_error", "ChatGPT sent something Clauseo can't read."],
+  ["agent.service_error", "ChatGPT had a problem on its side. Try again."],
+  ["agent.quiet", "ChatGPT stopped answering. Try again."],
+  [
+    "matter.folder_backslash",
+    "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ],
+  [
+    "agent.folder_inaccessible",
+    "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  ],
+  [
+    "agent.unreachable",
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+  ],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
-  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  // on the Mac, where matter.folder_backslash's line says Finder
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10, platform: "mac" }, agent);
   h.deliver(failed(code, NOW, agent));
   await h.settle();
   expect(h.one("turn-stopped")?.textContent).toContain(said);

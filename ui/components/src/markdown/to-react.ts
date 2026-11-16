@@ -186,12 +186,14 @@ function create(
 
 /**
  * The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``); with `skip`, not inside the
- * elements it names.
+ * elements it names. An image counts as U+FFFC, the object replacement character: its pixels could read as any
+ * site, so a link holding one is a link the host asks about (open/ask.rs's `IMAGE`).
  */
 function textOf(nodes: readonly ElementContent[], skip?: ReadonlySet<string>): string {
   let text = "";
   for (const node of nodes) {
     if (node.type === "text") text += node.value;
+    else if (node.type === "element" && node.tagName === "img") text += "\uFFFC";
     else if (node.type === "element" && !skip?.has(node.tagName))
       text += textOf(node.children, skip);
   }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-page-marks"
+description = "Enables the page_marks command without any pre-configured scope."
+commands.allow = ["page_marks"]
+
+[[permission]]
+identifier = "deny-page-marks"
+description = "Denies the page_marks command without any pre-configured scope."
+commands.deny = ["page_marks"]

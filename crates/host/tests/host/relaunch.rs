@@ -69,6 +69,17 @@ fn failed_code(events: &Events, turn: TurnId) -> Option<ErrorCode> {
     })
 }
 
+/// `turn`'s `TurnFailed` detail, or empty.
+fn failed_detail(events: &Events, turn: TurnId) -> String {
+    events
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::TurnFailed(failed) if failed.turn == turn => failed.detail.clone(),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// Turn 1 on the agent `first` exits mid-turn; turn 2 relaunches it as `then`, which fails
 /// before its session attaches. Turn 2 must end failed with one of `codes`, the thread must
 /// not stay running, and a third prompt (which relaunches `then` again) must be accepted and
@@ -99,6 +110,10 @@ fn relaunch_fails(test: &str, first: Play, then: Play, codes: &[ErrorCode]) {
             "turn {turn} failed with {code:?}: {}",
             events.dump()
         );
+        // No path of the run's folders (the matter's, the program's) is in the detail.
+        let detail = failed_detail(&events, turn);
+        let root = dir.work_path("");
+        assert!(!detail.contains(&*root.to_string_lossy()), "{detail}");
         host.settle();
         let status = host.status(matter, thread);
         assert!(

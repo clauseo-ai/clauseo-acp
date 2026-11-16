@@ -97,3 +97,32 @@ fn file_locked_names_its_files_and_no_path_in_the_message() {
     assert_eq!(Error::Refused(refusal.clone()).to_wire(), refusal);
     assert_eq!(wire(Error::Closed).files(), []);
 }
+
+/// A matter's `FolderMissing` reaches a failure's detail with its reason, never the folder's
+/// path, and the wire with its code; a gone folder is `folder_missing`, one without its marker
+/// `folder_not_a_matter`.
+#[test]
+fn a_missing_folder_names_its_reason_and_no_path() {
+    let folder = PathBuf::from("/Users/someone/Matters/Acme");
+    let cases = [
+        (
+            clauseo_matters::MissingReason::NoFolder,
+            ErrorCode::MatterFolderMissing,
+        ),
+        (
+            clauseo_matters::MissingReason::NoMatterJson,
+            ErrorCode::MatterFolderNotAMatter,
+        ),
+    ];
+    for (reason, code) in cases {
+        let error = Error::from(clauseo_matters::Error::FolderMissing {
+            folder: folder.clone(),
+            reason,
+        });
+        let detail = error.detail();
+        let wired = wire(error);
+        assert_eq!(wired.code(), code);
+        assert!(!detail.contains("someone"), "{detail}");
+        assert!(detail.contains(&reason.to_string()), "{detail}");
+    }
+}

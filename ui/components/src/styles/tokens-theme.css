@@ -378,6 +378,7 @@
 /* the folded search's width, in its own container; the rail folded behind Matters */
 @custom-variant search-folded (@container (max-width: 11rem));
 @custom-variant rail-folded (@media (min-width: 1000px) and (max-width: 1199px));
+@custom-variant room-wide (@media (min-width: 1600px));
 /* the field's well with room for the expected time beside Stop and its own words: 33 rem, so a larger text size
    puts the time back in the working line's row */
 @custom-variant entry-roomy (@container entry (min-width: 33rem));

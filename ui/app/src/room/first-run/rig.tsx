@@ -8,9 +8,11 @@ import { afterEach, vi } from "vitest";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { uuid } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
+import { OnlineSource, fakeOnline } from "../../transport/online.ts";
 import type {
   AgentId,
   CommandOutcome,
+  ConfigOption,
   HostCommand,
   InstallProgress,
   MatterSummary,
@@ -18,6 +20,7 @@ import type {
   SetupCommand,
   SetupEvent,
   SignIn,
+  ThreadSummary,
   UiCount,
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
@@ -35,8 +38,26 @@ export const AT = Date.UTC(2026, 10, 5, 11, 2);
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+/** The mount on its way, if one is. A test that times out mid-mount leaves it open: its act() scope stays open, and
+ * the next test's act() calls overlap it, so their renders never commit (an empty room for the rest of the file). */
+let mounting: Promise<unknown> | null = null;
+/** How long afterEach waits for such a mount before unmounting anyway: under the 10 s hook timeout, so a hung mount
+ * cannot hang the hook. */
+const MOUNT_WAIT_MS = 8_000;
+const noop = () => {};
+/** The window's network the room follows (online.ts), the test's own: never jsdom's navigator.onLine. */
+let network = fakeOnline(false);
 
 afterEach(async () => {
+  if (mounting !== null) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, MOUNT_WAIT_MS);
+    });
+    await Promise.race([mounting.then(noop, noop), bound]);
+    clearTimeout(timer);
+    mounting = null;
+  }
   await act(async () => root?.unmount());
   host?.remove();
   root = null;
@@ -95,26 +116,63 @@ export type RigOptions = {
   settings?: SettingsView;
   platform?: "mac" | "windows" | "linux";
   language?: Lang;
-  /** The agents the host lists (R15's list_agents): both plans unless a test says otherwise. */
+  /** The agents the host lists (R15's list_agents), read on each list_agents: both plans unless a test says otherwise. */
   agents?: AgentId[];
+  /** The NextHost's settings part too, whose settings_changed the room hears (FakeTransport.settingsChanged). */
+  settingsPart?: boolean;
+  /** Answers each setup command; throwing refuses it. */
+  command?: (command: SetupCommand) => void | Promise<void>;
+  /** The host has the settings window (open_settings). */
+  openSettings?: boolean;
+  /** Answers create_matter in place of making MADE_MATTER: refuse by throwing, hold by never settling. */
+  create?: (name: string) => CommandOutcome | Promise<CommandOutcome>;
+  /** The matters the host lists once `create` answers with a matter. */
+  listAfter?: MatterSummary[];
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
+  /** The open matter's threads (list_threads); none by default. */
+  threads?: ThreadSummary[];
+  /** The options each listed agent last reported (AgentSummary.config_options); none by default. */
+  options?: ConfigOption[];
+  /** What the window says of the network (navigator.onLine); offline unless a test says so, so a waiting install says
+   * the offline words. setOnline changes it after. */
+  online?: boolean;
 };
 
 /** The room over a fake host with the setup wire. */
 export async function mountFirstRun(o: RigOptions = {}) {
+  const mount = mountRoom(o);
+  mounting = mount;
+  try {
+    return await mount;
+  } finally {
+    if (mounting === mount) mounting = null;
+  }
+}
+
+async function mountRoom(o: RigOptions) {
   let matters = o.matters ?? [A];
   const fake: FakeHost = {
     platform: o.platform ?? "mac",
+    ...(o.openSettings === true ? { openSettings: () => {} } : {}),
     query: async (query) => {
       if (query === "list_matters") return { matters };
       if (query === "get_settings") return { settings: o.settings ?? settingsView() };
-      if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+      if (typeof query === "object" && "list_threads" in query) return { threads: o.threads ?? [] };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
-    dispatch: (envelope): CommandOutcome => {
+    dispatch: (envelope): CommandOutcome | Promise<CommandOutcome> => {
       const c = envelope.command;
       if (c.create_thread !== undefined) return { thread_created: { thread: MADE_THREAD } };
+      const answer = o.create;
+      if (c.create_matter !== undefined && answer !== undefined) {
+        const name = c.create_matter.name;
+        return (async () => {
+          const outcome = await answer(name);
+          if (o.listAfter !== undefined) matters = o.listAfter;
+          return outcome;
+        })();
+      }
       if (c.create_matter !== undefined) {
         matters = [{ matter: MADE_MATTER, name: c.create_matter.name, kind: "folder" }];
         return { matter_created: { matter: MADE_MATTER } };
@@ -125,18 +183,23 @@ export async function mountFirstRun(o: RigOptions = {}) {
       o.picked === undefined
         ? { folder: "folder-ref-1", display: "Documents/Matters/Rathi Steels" }
         : o.picked,
-    setup: { first: () => o.first ?? [] },
+    setup: {
+      first: () => o.first ?? [],
+      ...(o.command === undefined ? {} : { command: o.command }),
+    },
     next: fakeNext({
       matters: () => [],
-      agents: (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
-        id,
-        ...(id === CLAUDE
-          ? { kind: "claude" as const }
-          : id === CODEX
-            ? { kind: "codex" as const }
-            : {}),
-      })),
-      parts: ["agents"],
+      agents: () =>
+        (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
+          id,
+          ...(o.options === undefined ? {} : { config_options: o.options }),
+          ...(id === CLAUDE
+            ? { kind: "claude" as const }
+            : id === CODEX
+              ? { kind: "codex" as const }
+              : {}),
+        })),
+      parts: o.settingsPart === true ? ["agents", "settings"] : ["agents"],
     }),
   };
   const transport = new FakeTransport(fake);
@@ -144,9 +207,22 @@ export async function mountFirstRun(o: RigOptions = {}) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<Room transport={transport} />));
+  network = fakeOnline(o.online ?? false);
+  await act(async () =>
+    root?.render(
+      <OnlineSource.Provider value={network}>
+        <Room transport={transport} />
+      </OnlineSource.Provider>,
+    ),
+  );
   await settle();
   return transport;
+}
+
+/** The window going online or offline, as its `online` / `offline` event says, then the room renders. */
+export async function setOnline(online: boolean) {
+  await act(async () => network.set(online));
+  await settle();
 }
 
 /** Lets the answers, the lazy chunks and the effects run. */

@@ -8,7 +8,8 @@
 //! `--disable-default-apps` (`cli/src/native/cdp/chrome.rs:466-480`), but not with
 //! `--safebrowsing-disable-auto-update`, and none of its flags turns off the optimization
 //! guide or autofill's server predictions; the hosts below are those features' and the
-//! component updater's, which the flags are known not to stop entirely.
+//! component updater's, which the flags are known not to stop entirely. One is beyond any flag:
+//! RLZ's ping to `clients1.google.com` (decision record 0029, "No background hosts").
 
 /// One host Chrome contacts in the background, and why it is denied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +59,10 @@ pub const DENY_HOSTS: &[DenyHost] = &[
         reason: "the variations (field trial) seed",
     },
     DenyHost {
+        host: "clients1.google.com",
+        reason: "RLZ's ping (/tools/pso/ping) from branded Chrome on Windows and macOS, rlz_ping_delay (90 s) after each start; no switch turns it off",
+    },
+    DenyHost {
         host: "accounts.google.com",
         reason: "Chrome's sign-in checks (fresh profile, no account); provisional for G17 item 5, since denying it breaks Google sign-in on every site",
     },
@@ -67,6 +72,17 @@ pub const DENY_HOSTS: &[DenyHost] = &[
 mod tests {
     use super::DENY_HOSTS;
     use crate::browser::seed_sites::SEED_SITES;
+
+    /// RLZ's ping, which no switch of the guard's (`browser_guard/quiet.rs`) can stop.
+    #[test]
+    fn rlzs_ping_host_is_denied() {
+        let rlz = DENY_HOSTS
+            .iter()
+            .find(|deny| deny.host == "clients1.google.com")
+            .expect("clients1.google.com is denied");
+        assert!(rlz.reason.contains("RLZ"), "{}", rlz.reason);
+        assert!(rlz.reason.contains("rlz_ping_delay"), "{}", rlz.reason);
+    }
 
     #[test]
     fn each_host_once_with_a_reason_and_none_seeded() {

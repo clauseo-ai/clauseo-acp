@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "blocklist/blocklist-v1.txt.gz": "blocklist/blocklist-v1.txt.gz",
+      "blocklist/blocklist-v1.txt.gz.minisig": "blocklist/blocklist-v1.txt.gz.minisig"
+    }
+  }
+}

@@ -3,6 +3,7 @@
 
 export const HI = {
   // FR6: the reason under "Editing files" on a permission card, and behind its info icon
-  "Can't set folder permissions": null, // hi: later
-  "Clauseo can't change this folder's permissions, so it asks before each edit.": null, // hi: later
+  "Can't set folder permissions": "फ़ोल्डर की अनुमतियाँ सेट नहीं हो सकतीं",
+  "Clauseo can't change this folder's permissions, so it asks before each edit.":
+    "Clauseo इस फ़ोल्डर की अनुमतियाँ नहीं बदल सकता, इसलिए हर संपादन से पहले पूछता है।",
 } as const;

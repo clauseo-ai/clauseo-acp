@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CheckpointId, CheckpointKind, Error, FileChange, ImportSummary, MatterKind, RestoreScope,
-    ThreadId, TurnId,
+    CheckpointId, CheckpointKind, Error, FileChange, ImportSummary, MatterKind, MatterPath,
+    RestoreScope, ThreadId, TurnId,
 };
 
 /// A matter was created: the first event of a matter's stream.
@@ -72,8 +72,8 @@ pub struct CheckpointRecorded {
     checkpoint: CheckpointId,
     /// Why it was taken.
     kind: CheckpointKind,
-    /// The thread whose turn or undo took it; `None` for an import or a restore, which no thread
-    /// takes.
+    /// The thread whose turn or undo took it; `None` for an import, a restore or a revisions
+    /// decision, which no thread takes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     thread: Option<ThreadId>,
     /// The turn it was taken around, or the step an undo reverted.
@@ -83,10 +83,10 @@ pub struct CheckpointRecorded {
 
 impl CheckpointRecorded {
     /// A checkpoint taken for `kind`. Fails with [`Error::Format`] on a combination that means
-    /// nothing: an `Import` or `Restore` checkpoint that names a thread or a turn; a
+    /// nothing: an `Import`, `Restore` or `Revisions` checkpoint that names a thread or a turn; a
     /// `BeforeTurn`, `AfterTurn` or `Undo` checkpoint missing either; any checkpoint that names
     /// a turn without its thread. An `OutsideEdits` checkpoint names the thread and step of the
-    /// undo it came before, or nothing before a restore.
+    /// undo it came before, or nothing before a restore or a revisions decision.
     pub fn new(
         checkpoint: CheckpointId,
         kind: CheckpointKind,
@@ -94,9 +94,10 @@ impl CheckpointRecorded {
         turn: Option<TurnId>,
     ) -> Result<Self, Error> {
         let refused = match kind {
-            CheckpointKind::Import | CheckpointKind::Restore => (thread.is_some()
-                || turn.is_some())
-            .then_some("an import or restore checkpoint names no thread or turn"),
+            CheckpointKind::Import | CheckpointKind::Restore | CheckpointKind::Revisions => {
+                (thread.is_some() || turn.is_some())
+                    .then_some("an import, restore or revisions checkpoint names no thread or turn")
+            }
             CheckpointKind::BeforeTurn | CheckpointKind::AfterTurn | CheckpointKind::Undo => {
                 (thread.is_none() || turn.is_none())
                     .then_some("a turn's or an undo's checkpoint names its thread and turn")
@@ -171,4 +172,17 @@ pub struct VersionRestored {
     pub checkpoint: CheckpointId,
     /// What was put back.
     pub scope: RestoreScope,
+    /// The `restore` checkpoint this one took back, if it did. Missing from older logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undoes: Option<CheckpointId>,
+    /// The files it wrote, back as the version had them, for the agent's note; the host keeps
+    /// the first few hundred. Missing from older logs, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub written: Vec<MatterPath>,
+    /// The files it removed, which the version did not have, kept as `written` is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<MatterPath>,
+    /// How many files it wrote or removed past those two lists; missing when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub more: Option<u32>,
 }

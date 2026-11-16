@@ -12,9 +12,17 @@ code departs from the brief.
 ## Decision
 
 - **One proxy per launch, two listeners** on `127.0.0.1` sharing one list and one sink
-  (`start_proxy`, `ProxyHandle::port` and `browser_port`). Both bind through
-  `sandbox::ports::bind_loopback`: port 0 on macOS and Linux; on Windows a free port in 61080 to
-  61179 from a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind (`socket2` makes the
+  (`start_proxy`, `ProxyHandle::port` and `browser_port`). The browser listener takes no
+  token, so it is bound only when `ProxyConfig::browser` is set (false from `ProxyConfig::new`),
+  which the host sets from whether the session has the browser, not from `Loopback` (which
+  also carries non-browser ports such as the case-law relay's); otherwise `browser_port` is
+  `None` (added 2026-11-07: tier B, which has no browser (D10), permits every pool user the
+  whole Windows loopback range, so a token-free listener there would let one matter's agent
+  send traffic under another's list).
+  agent-browser and Chrome reach it as `http://127.0.0.1:<port>`, which carries no
+  credential (`--proxy-server` takes none), so it still asks for no token. Both bind through
+  `sandbox::ports::bind_loopback`: port 0 on macOS and Linux; on Windows a free port in 46100 to
+  46199 from a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind (`socket2` makes the
   socket; `setsockopt` from `windows`' `Win32_Networking_WinSock`). Stage E's connector relay
   binds through the same function.
 - **Runtime.** One thread per proxy, `clauseo-proxy`, runs `async_io::block_on` over an
@@ -82,18 +90,32 @@ code departs from the brief.
   back raw; through an upstream its status is read first, and a 407 gives the client 502 and
   `Denial::UpstreamAuth`, as for CONNECT.
 - **Upstream.** `Route::Http` gets `CONNECT host:443` with `Host` and no credentials: 200 opens the
-  tunnel, 407 gives the client 502 and `Denial::UpstreamAuth`, anything else 502. Clauseo stores
-  no proxy password. Discovery is `proxy/upstream.rs`: per scheme, `HTTPS_PROXY` for CONNECT and
+  tunnel, 407 gives the client 502 and `Denial::UpstreamAuth`, anything else 502. Clauseo stores no
+  proxy password. Discovery is `proxy/upstream.rs`: per scheme, `HTTPS_PROXY` for CONNECT and
   `HTTP_PROXY` for plain `http://` (each with its lower-case form and `NO_PROXY`), then the OS
-  asked about an `https://` or `http://` URL to match (macOS's separate HTTP proxy setting and
-  PAC scripts that branch on the scheme apply). OS answers are cached 5 minutes, at most 1024 of
-  them, the oldest dropped first. A miss runs one OS lookup per scheme, host and port (other
-  callers for the same key wait for its answer), and at most 4 at once per proxy; a miss past
-  that goes direct for that request and is not cached. On Windows the whole WinHTTP lookup, WPAD
-  included, is bounded to 10 s on its own thread, and at most 4 such threads live at once in the
-  process (a lookup left running past its bound keeps its slot), so hung lookups cannot pile up
-  threads; past that the lookup fails and goes direct. `upstream_for` (stage E's connector relay) returns `Result<Route, Error>` and refuses
-  a firm URL that `start_proxy` refuses, so the relay fails visibly rather than going around the
+  asked about an `https://` or `http://` URL to match (macOS's separate HTTP proxy setting and PAC
+  scripts that branch on the scheme apply). OS answers are cached 60 s (proxy, `DIRECT` and failed
+  lookups alike, so a WPAD timeout stalls a connection at most once a minute per host, and a laptop
+  on a new network gets the new answer within a minute), at most 1024 of them, the oldest dropped
+  first. A miss runs one OS lookup per scheme, host and port (other callers for the same key wait
+  for its answer), and at most 8 at once per proxy (desktop's S17 resolver asks about 5 hosts at
+  once); a miss past that waits up to 2 s for a slot, then fails for that request, uncached, with
+  one warning per process that names no host. On Windows the whole WinHTTP lookup, WPAD included, is
+  bounded to 10 s on its own thread, and at most 8 such threads live at once in the process (a
+  lookup left running past its bound keeps its slot), so hung lookups cannot pile up threads; past
+  that the lookup fails. A failed lookup is kept apart from `DIRECT` (`UpstreamAnswer::Failed`, with
+  its `FailKind`, cached the same 60 s): on Windows, a PAC URL the settings name is asked before
+  auto-detect (a firm's GPO often sets both, and a slow WPAD would use up the lookup's 10 s bound),
+  auto-detect's route answering only when the PAC URL fails; a PAC URL that fails, with no WPAD
+  route either, is failed, and so is a WPAD lookup that fails with nothing else set, but for the
+  answers that mean no proxy on this network (12180 no WPAD file found, 12167 a `wpad` name serving
+  no script, 12178 the auto-proxy service off; each PAC fetch the service cannot make is retried in
+  process first), which read as direct; WinHTTP reports "no WPAD on this network" and a transient
+  discovery failure with that same code (12180), so a transient one still reads as direct; a
+  connection decides over it as "A failed lookup" (below) says, and `upstream_answer` hands it to a
+  caller that keeps an earlier answer over a failure (desktop's S17 route refresh). `upstream_for`
+  (stage E's connector relay) maps a failure to direct, returns `Result<Route, Error>` and refuses a
+  firm URL that `start_proxy` refuses, so the relay fails visibly rather than going around the
   firm's proxy. `Upstream`'s `Debug` shows only a fixed URL's scheme, host and port.
 - **allow and revoke** change a live exact-host list, read on every request. `revoke` removes the
   exact host whether it came from the start list or `allow`, and closes each open tunnel whose
@@ -152,7 +174,7 @@ Departures from the brief:
   launch cannot take the host's file descriptors.
 - Through an upstream, names are also resolved locally for the address check (see Address
   check); the brief checks only IP literals there.
-- The Windows port allocator's error, when every port in 61080 to 61179 fails, names the range and
+- The Windows port allocator's error, when every port in 46100 to 46199 fails, names the range and
   says another program or a Windows port reservation (Hyper-V, WSL or Docker; `netsh int ipv4
   show excludedportrange protocol=tcp`) may hold it.
 
@@ -180,12 +202,12 @@ Departures from the brief:
 Amended 2026-11-03: port claims. The browser needs loopback ports that agent-browser's daemon and
 Chrome bind later, in the jail, so they cannot be listeners the host holds. `ports::claim_port`
 returns a `PortClaim`: on macOS and Linux the port a bind of `127.0.0.1:0` got (closed before it
-returns), on Windows a free port in 61080 to 61179 tested with the same `SO_EXCLUSIVEADDRUSE` bind.
+returns), on Windows a free port in 46100 to 46199 tested with the same `SO_EXCLUSIVEADDRUSE` bind.
 Each claim sits in a process-wide registry until it drops, and `bind_loopback`, `claim_port` and
 `claim_port_at` never hand out a registered port (on macOS and Linux a bind that lands on one is
 asked again, the rejected listeners held open meanwhile; on Windows registered ports are skipped).
 `ports::claim_port_at(port)` is for agent-browser's Windows daemon port, whose number is a hash of
-its session name: it refuses a port outside 61080 to 61179 on Windows (`InvalidInput`), and gives
+its session name: it refuses a port outside 46100 to 46199 on Windows (`InvalidInput`), and gives
 `AddrInUse` when the port is registered or a test bind fails, so the caller draws a new session
 name; it checks the registry before its test bind, so it never binds a claimed port. Interim,
 until agent-browser takes a port option upstream. The registry keeps this process's claims apart
@@ -202,6 +224,14 @@ it is held for an instant under the registry lock and the bind asked again, and 
 that exact port in that instant fails, but cannot take it over. On Windows the candidate loop skips
 claimed ports before any bind.
 
+Amended 2026-11-07 (S15 PR7): the Windows range is `ports::TIER_B_PORTS`, 46100 to 46199, moved
+below Windows' dynamic range (49152 and up by default) so the OS never hands its ports to other
+programs, and kept for tier B's listeners alone: set-up's static permits open it to every pool
+user. `claim_port` and `claim_port_at` are for tier B only. The browser claims outside the
+range: `claim_browser_port` (a bind of `127.0.0.1:0`, asked again when it lands in the range or
+on a held port) and `claim_browser_port_at` (refuses 0 and the range). 0049 says how tier B
+checks the machine's dynamic and excluded port ranges and the listeners in its range.
+
 Amended 2026-11-03: private-address refusals come before the allowlist. On both listeners and in
 both forms (CONNECT and absolute-form `http://`), a host that is an IP literal in any form the
 parser reads (dotted, hex, bracketed IPv6) whose address the address check calls non-public, or
@@ -211,6 +241,77 @@ never resolved. Before, an unlisted private literal was `NotAllowed`, whose card
 it, and a listed `localhost` was resolved and checked only by its answers. No allowlist entry can
 let a private literal or `localhost` through now. A public literal off the list stays
 `NotAllowed`, and a listed one still goes through the address check.
+
+Amended 2026-11-07: a failed lookup. Before, a connection whose OS lookup failed went direct.
+For a firm whose PAC or static proxy routes every connection through its inspection proxy, a PAC
+server that goes down, or a PAC script that breaks, then sent the agent around the inspection. A
+failed lookup now says why, as a `FailKind`, and each connection whose route lookup fails (the
+OS lookup failed or timed out, no lookup slot was free, or the lookup took longer than the
+connect timeout) decides by its kind.
+
+The kinds, in order (a later one is added at the end):
+
+- **`PacUnreachable`:** the PAC file the settings name could not be fetched. On Windows, WinHTTP
+  12167 (`ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`) for a PAC URL, or its host silent (12002
+  timeout, 12007 no such name, 12029 no connection); on macOS, a PAC URL's fetch failure
+  (`NSURLErrorDomain`, or a negative URL-loading code in `kCFErrorDomainCFNetwork`), or its run
+  with no answer within 5 s. WPAD's fetch failures are not this kind: they read as no proxy here,
+  as above. A static proxy setting never gives it.
+- **`BadScript`:** the PAC script was got and would not run: WinHTTP 12166
+  (`ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`), from a PAC URL or WPAD, or macOS's
+  `kCFErrorPACFileError` (308), from a PAC URL or an inline script.
+- **`Other`:** everything else: no free lookup slot, settings unreadable or too slow, WinHTTP's
+  auto-proxy service error (12178), the Windows lookup past its 10 s bound, and any other code.
+
+The Windows codes are mapped in `parse::pac_kind`, beside `pac_error`; the macOS ones in
+`parse::cf_pac_kind`, from the PAC run. Both are pure functions, tested on every target.
+
+**`PacUnreachable`** usually means the laptop is off the firm's network (at home, a VPN dropped),
+where the PAC server is out of reach and so, most likely, is the proxy it names. Browsers go
+direct when they cannot fetch a PAC file, and so does the egress proxy, with one check first:
+
+1. **The host's earlier proxy, while it answers.** When a real lookup gave the same scheme, host
+   and port a proxy under 10 minutes ago (the reuse window below), the proxy probes it with
+   `upstream::reachable` (resolve and TCP-connect, nothing sent), capped at 1 s and run off the
+   proxy thread. A proxy that takes the connection is kept: the laptop is still on the firm's
+   network and only the PAC server is down. One that does not is forgotten, so no later failure
+   in the window reuses it, and the connection goes direct.
+2. **Direct, otherwise:** no earlier proxy, or an earlier `DIRECT`. This holds even when the firm
+   meant a proxy: refusing would leave an off-network laptop with no network at all, for a proxy
+   it cannot reach.
+
+**`BadScript` and `Other`** take the first of:
+
+1. **The host's last good route.** The route a real lookup gave for the same scheme, host and port
+   under 10 minutes ago, `DIRECT` included, is reused: the same window as desktop's backstop for a
+   kept proxy (S17), so the two agree, and short enough that a laptop moved to another network
+   stops using the old one. Each proxy keeps at most 256 hosts (`server/route.rs`); at the cap a
+   new host first drops those past 10 minutes, then the oldest. The time is when the OS lookup
+   answered, which a cached answer keeps, so a route served from the 60 s cache is not younger than
+   it is. Another host's route is never used: a PAC script routes host by host.
+2. **A refusal, when the firm meant a proxy:** the settings name a PAC URL, an inline PAC script
+   (macOS `ProxyAutoConfigJavaScript`, as an MDM profile pushes) or a static proxy, WinHTTP found
+   a PAC script it could not run (12166, WPAD's included), or the settings could not be read, or
+   not within the connect timeout (refusing is the safe side when the firm may require a proxy).
+   The connection gets 502, the status an upstream that fails already gets, for CONNECT and plain
+   `http://` alike (the proxy's refusals carry no header naming the cause), the record's verdict
+   is `Failed`, and `Denial::UpstreamUnavailable { host, port }` goes through the rate cap like
+   any denial. A broken script is no sign the laptop left the firm's network, so it does not go
+   direct.
+3. **Direct, otherwise:** settings read and naming nothing (a plain network), or auto-detect
+   (WPAD) alone that found nothing usable, where there is no firm proxy to go around.
+
+The OS lookup reads the reason when it fails and the cache keeps it with the failure, in a
+crate-internal `Answer::Failed(Failure, FailKind)`. The public `UpstreamAnswer::Failed` carries
+the `FailKind`; desktop's refresh ignores it (`Failed(_)`) and is unchanged. On macOS whether a
+proxy was meant comes from the system proxy settings (`ProxyAutoConfigEnable` with a URL, a
+`ProxyAutoConfigJavaScript` present, `HTTPEnable` or `HTTPSEnable`); on Windows from the current
+user's settings (an auto-config URL or a proxy string) and the PAC error code. A failure that
+asked the OS nothing (no slot, a lookup past the connect timeout, past the Windows thread bound)
+reads the settings then. Known gap: on macOS a script that would not run is `BadScript` but not,
+by itself, a proxy meant, so a broken script that WPAD alone found on macOS still goes direct.
+WPAD is off by default on macOS, and firms push a PAC URL, an inline script or a static proxy,
+each of which refuses.
 
 ## Status
 

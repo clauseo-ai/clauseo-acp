@@ -149,6 +149,14 @@ fn each_setup_state_gives_its_tier_or_reason() {
             SetupState::SetUpByOtherUser,
             Detection::none(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned())),
         ),
+        (
+            SetupState::Blocked(crate::Blocked::LogonRight),
+            Detection::none(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
+        ),
+        (
+            SetupState::Blocked(crate::Blocked::Policy),
+            Detection::none(NoSandbox::SetUpBlocked(crate::Blocked::Policy)),
+        ),
     ];
     for (state, expected) in cases {
         let setup = FakeSetup::new(state.clone());
@@ -190,6 +198,14 @@ fn the_new_reasons_keep_their_wire_names() {
         (
             NoSandbox::SetUpFailed("x".to_owned()),
             "{\"set_up_failed\":\"x\"}",
+        ),
+        (
+            NoSandbox::SetUpBlocked(crate::Blocked::Policy),
+            "{\"set_up_blocked\":\"policy\"}",
+        ),
+        (
+            NoSandbox::SetUpBlocked(crate::Blocked::LogonRight),
+            "{\"set_up_blocked\":\"logon_right\"}",
         ),
     ];
     for (reason, json) in names {

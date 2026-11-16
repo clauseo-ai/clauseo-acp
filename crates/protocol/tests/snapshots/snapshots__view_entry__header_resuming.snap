@@ -1,0 +1,27 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: entry
+---
+{
+  "header": {
+    "order": 1,
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "title": "Draft SPA",
+    "agent": "claude-acp",
+    "status": "starting",
+    "resuming_since": 1760000000000,
+    "queue_held": true,
+    "queue_held_reason": "paused",
+    "steer_joins_turn": true,
+    "done": false,
+    "mode_id": "plan",
+    "config_options": [],
+    "commands": [],
+    "plan": [],
+    "usage": {
+      "context_used": 1200,
+      "context_size": 200000
+    }
+  }
+}

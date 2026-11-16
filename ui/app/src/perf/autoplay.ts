@@ -5,8 +5,8 @@
 //  2. idle memory: `IDLE_SETTLE_MS` after `interactive` (start-up work, the first fetches and the webview's own
 //     processes calm down), one `marks_memory` reading (WebKit: no forced GC);
 //  3. open the matter through the room's rail, as ui/e2e/app-windows/flow.ts's `openMatter` does: New matter (after
-//     Matters, if the rail is folded), the name, Change (the build's `E2E_MATTER_DIR` answers its picker, and becomes the
-//     matter) until the form names the folder, Create the matter, until the toolbar names the matter and the composer
+//     Matters, if the rail is folded), the name, Choose folder… (the build's `E2E_MATTER_DIR` answers its picker, and
+//     becomes the matter) until the form names the folder, Create matter, until the toolbar names the matter and the composer
 //     is enabled;
 //  4. type `PROMPT` into the composer (one value change: keystrokes are not measured on WebKit);
 //  5. `channelBytes`, `startStream`, click Send;
@@ -264,8 +264,8 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
   need(doc, "new-matter").click();
   await until("the new matter form", () => byId(doc, "matter-name") !== null);
   setValue(need(doc, "matter-name"), MATTER);
-  // Change picks E2E_MATTER_DIR: the matter is that folder itself, as on Windows. Create waits until the form names
-  // it, or it would make a new folder instead.
+  // Choose folder… picks E2E_MATTER_DIR: the matter is that folder itself, as on Windows. Create matter waits until the
+  // form names it: it stays held back until there is a folder.
   const before = formFolder(doc);
   need(doc, "matter-existing").click();
   await until(

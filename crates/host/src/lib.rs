@@ -24,6 +24,28 @@
 //!   channel with `try_send` and never waits for; a full channel makes it catch up from its
 //!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
 //! - The Scratch matter: a first start creates it.
+//! - Tracked changes in a matter's Word file (`revisions.rs`, `actor/revisions.rs`):
+//!   `ListRevisions` and `DecideRevisions` run stetdoc (`HostConfig::with_stetdoc`) on
+//!   the matter's thread against private copies in `<data folder>/revisions/<matter id>/`, never
+//!   in the folder; a decision holds the writer and writes the file as a restore does, between
+//!   an `outside-edits` and a `revisions` checkpoint.
+//! - The block list's updates (`blocklist.rs`, decision record 0053), with
+//!   [`BlockListSeams::apply`] and something enforcing the list only (the guarded browser or
+//!   the Safe workspace; neither in the plain build): a `clauseo-blocklist` thread, started
+//!   once the host serves and stopped when it ends, loads the newer verified one of the stored pair
+//!   (`<data folder>/blocklist/`) and the bundled snapshot into the shared
+//!   `clauseo_blocklist::Current`, then fetches the published pair every interval, verifies it,
+//!   applies the rollback rule, stores it and swaps it in; any failure keeps the list in use.
+//!   Each round reads the settings as the actor last saw them (`network.unsafe_site_list_updates`
+//!   off skips the fetch; `network.upstream_proxy` routes it); [`block_list_is_stale`] says
+//!   whether the list in use is over 3 days old.
+//! - The lawyer's "Allow this site" (0053, PR 2; `actor/allowed.rs`): `AllowBlockedSite`
+//!   allows the exact host of a `SiteBlocked` notice the host keeps (each thread's latest 64),
+//!   for its matter or always; `RevokeAllowedSite` and `AllowedSites` take back and list. Stored in
+//!   `<data folder>/blocklist/allowed.json`, never in the settings, its sha256 in the OS secret
+//!   store (`BlockListSeams::with_secrets`); [`AllowedSites`] gives each
+//!   launch's proxy a live per-matter view, empty while `network.allow_unsafe_site_override`
+//!   is off.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
 //!   activity, `ForgetMatter` (which deletes nothing; an import of the folder brings the matter
@@ -46,9 +68,10 @@
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
 //!   no strict config go: the firm controls MCP there. Every session's `_meta` also turns
 //!   bypass off (`allowDangerouslySkipPermissions: false`), and a Claude session that starts in
-//!   another mode than `default` (the user's `permissions.defaultMode`, a resumed transcript's
-//!   mode) gets `session/set_mode default` before its first prompt; a failed switch fails the
-//!   launch.
+//!   another mode than Clauseo's (`auto`, or `default` in forced ask; the user's
+//!   `permissions.defaultMode` or a resumed transcript's mode may differ) gets
+//!   `session/set_mode` to it before its first prompt; when auto is not available it runs in
+//!   `acceptEdits` with one notice, and any other failed switch fails the launch.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
 //!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
 //!   `config.toml` of the same switches for app-server's start-up, a
@@ -82,8 +105,9 @@
 //!   [`HostConfig::with_clock`], [`HostConfig::with_ids`] and
 //!   [`HostConfig::with_limits_reader`] set the rest). It returns once
 //!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
-//!   and start-up reconciliation has committed. A second start on the same data folder fails
-//!   with `store.locked`.
+//!   and start-up reconciliation has committed. With [`HostConfig::with_documents_later`] it
+//!   does not wait for the default matters folder: the Scratch matter comes once it answers. A
+//!   second start on the same data folder fails with `store.locked`.
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
 //!   [`HostHandle::subscribe_app`], [`HostHandle::subscribe_limits`], [`HostHandle::ack`],
@@ -117,6 +141,18 @@
 //!   `actor/counting.rs` bumps closed events into it at each call site, once per operation that
 //!   succeeded; with none, or counts off, it counts nothing. Counting never blocks or fails a
 //!   command.
+//! - The updater's seam (decision record 0037): [`Updater`] (`install_kind`, `check` and
+//!   `download`; never `install`, which desktop runs after the host has stopped), the values
+//!   that cross it ([`Offer`], [`Downloaded`], [`Opaque`], [`ProgressSink`], [`UpdaterError`]),
+//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], updates unavailable so nothing is
+//!   ever checked. [`read_update_marker`] reads `update.json` as the last run left it.
+//! - The updater in the actor (`actor/update.rs`): `HostConfig::with_updater`, its jitter seed
+//!   and the app's version start the pure machine (`update/machine.rs`) once the host serves.
+//!   Its check and download run on the pool, one timer on the host clock, `update.json` on the
+//!   `clauseo-update` thread, never the actor's. `InstallUpdate { now }` holds new sends
+//!   queued and stops every running turn as Stop does; `after_turn` waits until no turn runs.
+//!   Then the host answers, shuts down as a quit does, and ends with
+//!   [`HostExit::Install`] ([`HostHandle::exit`]) for desktop to install.
 //! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
 //!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
@@ -178,9 +214,10 @@
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
 //! 0030), `counts` (the usage counts, 0036), `sandbox` (the browser's socket folder and port
 //! claims, 0029), `getrandom` (Windows browser session names), `async-channel`, `async-io`,
-//! `futures`, `uuid`, `serde_json`, `tracing`, `tracing-subscriber` (the log file, 0047),
-//! `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio`
-//! or `agents`.
+//! `futures`, `uuid`, `serde` (the updater's marker), `serde_json`, `tracing`,
+//! `tracing-subscriber` (the log file, 0047), `thiserror`, `dunce` and `sha2` (the Codex hook's
+//! trust hash, 0024), `blocklist` and `url` (the block list and its fetch's redirects, 0053).
+//! Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!
@@ -202,47 +239,98 @@
 mod actor;
 mod agent;
 mod blob_read;
+mod blocklist;
 pub mod browser;
 mod build;
 mod clock;
 mod coalesce;
+pub mod codex_input;
 mod config;
+pub mod connectors;
 mod encode;
 mod error;
 mod file_link;
 mod handle;
 mod ids;
 pub mod log_file;
+mod matter_marker;
 mod matter_worker;
+mod network_paths;
 mod pipeline;
 pub mod pre_write_guard;
 mod principal;
 mod rate;
+mod revisions;
 mod search;
 mod sent;
+mod shell_writes;
+pub mod shown;
 mod snapshot;
 mod sources;
+mod stetdoc_args;
+#[cfg(test)]
+mod testing;
 mod undo_note;
+mod update;
 mod view;
 mod window;
 mod write;
 
 pub use agent::loads::codex_hook_config;
+pub use agent::login_link::{
+    AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,
+};
+pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
+#[cfg(feature = "test-support")]
+pub use agent::shell_path::path_helper_folders;
+pub use blocklist::{AllowedSites, BlockListSeams, BlockListUpdate, block_list_is_stale};
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
+pub use config::mcp::{
+    McpFileStamp, McpFinder, McpFound, McpHereFinder, McpImportFinder, McpLaunchAsk,
+    McpLaunchConfirm, McpResolver, find_mcp_imports_in, shown as mcp_shown,
+};
+pub use config::{
+    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
+    NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
+};
 #[cfg(feature = "test-support")]
-pub use config::TestProxy;
-pub use config::{EgressProxy, HostConfig, NoProfile, ProfileHook, SessionKey};
+pub use config::{TestProxy, WithMatterTrash, WithPlaceholderProbe};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{
-    AppSubscription, EventSubscription, Host, HostHandle, HostJoin, LocatedFile, Subscription,
+    AppSubscription, BlockedSite, EventSubscription, Host, HostExit, HostHandle, HostJoin,
+    LocatedFile, Subscription,
 };
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
+pub use matter_marker::check_matter_folder;
 #[cfg(feature = "test-support")]
 pub use search::SearchHold;
+pub use update::{
+    CachedDownload, Downloaded, InstallKind, MarkerState, NoUpdater, Offer, Opaque, Progress,
+    ProgressSink, UpdateMarker, Updater, UpdaterError, read_update_marker,
+};
+
+/// Where Claude Code, with `home` as its config folder, writes the transcript of `session`
+/// started in the matter folder `stored`: the file whose lines confirm a steer
+/// (`actor/turn/queue/transcript.rs`). For tests that play Claude's part.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn claude_transcript(
+    home: &std::path::Path,
+    stored: &std::path::Path,
+    session: &str,
+) -> std::path::PathBuf {
+    let cwd = session_folder(stored);
+    // A folder whose path is not UTF-8 has no project key; its transcript is never read.
+    let project = agent::data_fence::claude_projects(home, &[&cwd])
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| home.join("projects"));
+    project.join(format!("{session}.jsonl"))
+}

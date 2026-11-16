@@ -125,8 +125,8 @@ error_codes! {
         newer Clauseo.";
     MatterCheckpointFailed = "matter.checkpoint_failed", retryable: true, meaning: "Taking a \
         checkpoint of the matter's files failed.";
-    MatterFolderMissing = "matter.folder_missing", retryable: false, meaning: "The matter's \
-        folder is gone: moved, deleted, or its drive is not mounted.";
+    MatterFolderMissing = "matter.folder_missing", retryable: true, meaning: "The matter's \
+        folder is gone: moved, deleted, or its drive is not mounted or did not answer in time.";
     MatterFolderRefused = "matter.folder_refused", retryable: false, meaning: "The folder may not \
         be a matter: a drive root, the home folder or a system folder.";
     MatterCodexFolder = "matter.codex_folder", retryable: false, meaning: "The matter folder \
@@ -142,8 +142,8 @@ error_codes! {
     MatterFolderIsSystem = "matter.folder_is_system", retryable: false, meaning: "The folder may \
         not be a matter: it is a system folder or a folder of app data or keys, or holds one.";
     MatterFolderUnreadable = "matter.folder_unreadable", retryable: false, meaning: "Clauseo may \
-        not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a \
-        matter.";
+        not read the folder (a `.clauseo/matter.json` that does not read is set aside, not \
+        refused, since 2026-11-11).";
     MatterFolderIsMatter = "matter.folder_is_matter", retryable: false, meaning: "The folder is \
         a matter's folder, or sits inside one or holds one; the error's `matter` names that \
         matter when it is on Clauseo's list.";
@@ -163,8 +163,10 @@ error_codes! {
     SettingsLocked = "settings.locked", retryable: false, meaning: "The change names a setting \
         that the firm's policy sets, so the lawyer cannot change it; nothing was changed.";
     AgentInstallOffline = "agent.install_offline", retryable: true, meaning: "The agent's install \
-        cannot reach its hosts: name resolution or connect failed with no route. The install \
-        waits and tries again by itself.";
+        cannot reach its hosts: name resolution failed, connect failed with no route, or the \
+        connection was reset, aborted or timed out. The install waits and tries again by itself; \
+        the app says it is offline only while the window says so, else that the download cannot \
+        be reached.";
     AgentInstallBlocked = "agent.install_blocked", retryable: false, meaning: "A proxy or \
         firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web \
         page where a file should be.";
@@ -193,6 +195,198 @@ error_codes! {
     UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
         signature check or install failed; the version running keeps running, and a later check \
         tries again.";
+    SettingsRefused = "settings.refused", retryable: false, meaning: "The change breaks a \
+        settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped \
+        variable or an address that is not https; the message names the key, never the value, \
+        and nothing was changed.";
+    SettingsKeyStored = "settings.key_stored", retryable: false, meaning: "A key is already \
+        stored for this agent, so this window may not replace it; it is changed or removed in \
+        Settings. No key text is in the message.";
+    SigninLoginShared = "signin.login_shared", retryable: false, meaning: "A Codex login, logout \
+        or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login \
+        file; the remedy is in the app, \"Stop using it here\".";
+    SigninFirmManaged = "signin.firm_managed", retryable: false, meaning: "Sign-in is \
+        refused: a firm endpoint is set by policy.";
+    SigninKeyInUse = "signin.key_in_use", retryable: false, meaning: "Sign-in is refused: an \
+        API key is stored.";
+    SigninEndpointInUse = "signin.endpoint_in_use", retryable: false, meaning: "Sign-in is \
+        refused: an endpoint is set in Settings.";
+    MatterFolderTooDeep = "matter.folder_too_deep", retryable: false, meaning: "The matter \
+        folder's path is too long for Windows to start programs in it: move the folder closer \
+        to the top of its drive.";
+    SigninAgentsStillRunning = "signin.agents_still_running", retryable: true, meaning: "An \
+        agent was still running after Clauseo waited for it to stop, so the login was not \
+        changed and nothing was removed; trying again once it has stopped can succeed.";
+    AgentKeysLoading = "agent.keys_loading", retryable: true, meaning: "Clauseo has not \
+        finished loading the stored API keys; no agent was started; trying again in a moment can \
+        succeed.";
+    AgentKeyUnreadable = "agent.key_unreadable", retryable: true, meaning: "A stored API key \
+        could not be read from the system's key store (no answer in time, or the read was \
+        refused, often at a permission prompt); no agent was started. Trying again once it can \
+        be read can succeed.";
+    MatterDocumentPathTooLong = "matter.document_path_too_long", retryable: false, meaning: "A \
+        Word document's path is too long for Word to open, even with its folders' short names \
+        (Windows): move the matter's folder nearer the top of its drive, or shorten its folder \
+        names.";
+    MatterProtectedLink = "matter.protected_link", retryable: false, meaning: "A protected \
+        name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a \
+        shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the \
+        agent is not started; the lawyer moves or deletes it.";
+    SandboxSetupRefused = "sandbox.setup_refused", retryable: true, meaning: "The sandbox's set-up \
+        was not done: the lawyer declined the administrator prompt, or Windows refused to raise \
+        it; asking again can succeed.";
+    SandboxSetupFailed = "sandbox.setup_failed", retryable: true, meaning: "The sandbox's set-up, \
+        or the check that the sandbox works, failed; trying again can succeed.";
+    SandboxSetupRequired = "sandbox.setup_required", retryable: false, meaning: "The firm \
+        requires the sandbox (sandbox.required) and this computer needs its one-time set-up \
+        first (not done, or its administrator prompt declined), so no agent was started; \
+        running the set-up fixes it.";
+    SandboxRequired = "sandbox.required", retryable: false, meaning: "The firm requires the \
+        sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does \
+        not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a \
+        newer cause), so no agent was started.";
+    MatterFolderNotAMatter = "matter.folder_not_a_matter", retryable: false, meaning: "The \
+        matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, \
+        unreadable or belongs to another matter: locate the matter's folder.";
+    SandboxBlocked = "sandbox.blocked", retryable: false, meaning: "A Windows setting or \
+        security tool blocks the sandbox (its set-up program is missing or was blocked, say), so \
+        no agent was started; whoever looks after this computer can fix it.";
+    BlocklistOverrideOff = "blocklist.override_off", retryable: false, meaning: "Allowing a \
+        site on Clauseo's unsafe-site list is turned off (network.allow_unsafe_site_override is \
+        false, usually by the firm's policy), so nothing was allowed.";
+    BlocklistNoticeExpired = "blocklist.notice_expired", retryable: false, meaning: "The \
+        blocked-site notice an allow names is one the host no longer keeps (too old, or from \
+        before a restart), so nothing was allowed: allow the site from a new notice.";
+    BlocklistAllowNotSaved = "blocklist.allow_not_saved", retryable: false, meaning: "The \
+        allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store \
+        or the data folder failed), so the site is blocked again after a restart.";
+    BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
+        site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
+        saved allows, so the site may be allowed again after a restart.";
+    SandboxCleaningUp = "sandbox.cleaning_up", retryable: true, meaning: "An earlier Safe \
+        workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished \
+        after Clauseo waited for it, so no agent was started; trying again in a moment can \
+        succeed.";
+    AgentInstallSetupFailed = "agent.install_setup_failed", retryable: true, meaning: "The \
+        agent's files all downloaded and checked, but setting them up on this computer failed \
+        after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
+        because security software held the fresh files. Trying again may work.";
+    BlacklineNoWordTool = "blackline.no_word_tool", retryable: false, meaning: "The Word \
+        blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was \
+        compared.";
+    BlacklineNotWord = "blackline.not_word", retryable: false, meaning: "The file is not a \
+        Word document (.docx), so it has no Word blackline.";
+    BlacklineFailed = "blackline.failed", retryable: true, meaning: "The Word blackline \
+        failed: the compare or its view failed, took too long, or printed what Clauseo could not \
+        read; nothing is shown and nothing was written in the matter. Trying again can \
+        succeed.";
+    WordStetdocMissing = "word.stetdoc_missing", retryable: false, meaning: "Clauseo has no \
+        stetdoc program to read or edit Word files with, or could not start it.";
+    WordRevisionsStale = "word.revisions_stale", retryable: false, meaning: "The Word file \
+        changed since its tracked changes were listed, or a change named is no longer in it, so \
+        nothing was written: list them again.";
+    WordNotDocx = "word.not_docx", retryable: false, meaning: "The file is not a Word document \
+        (.docx) that stetdoc can read.";
+    WordEditFailed = "word.edit_failed", retryable: true, meaning: "stetdoc failed or did not \
+        finish in time while reading or editing the Word file, or the file is not on this computer \
+        or is too large to version, so nothing was written.";
+    MatterFolderPermission = "matter.folder_permission", retryable: false, meaning: "The \
+        computer's privacy settings keep Clauseo, or the agent it starts, from opening the \
+        matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works \
+        in it: allow Clauseo there, then ask again.";
+    AgentOffline = "agent.offline", retryable: true, meaning: "The agent lost its connection \
+        while answering and the computer is offline: the window said offline and the host's own \
+        probe of the agent's service did not get through either. The answer so far is kept; \
+        asking again can work once the computer is back online.";
+    MatterFolderInClauseoData = "matter.folder_in_clauseo_data", retryable: false,
+        meaning: "The folder is, holds or sits inside Clauseo's data folder; one that is or sits \
+        inside the matters' history folder in it is `matter.folder_in_matters_root`.";
+    MatterFolderInsideMatter = "matter.folder_inside_matter", retryable: false, meaning: "The \
+        folder sits inside a matter's folder; the error's `matter` names that matter when it is \
+        on Clauseo's list.";
+    MatterFolderHoldsMatter = "matter.folder_holds_matter", retryable: false, meaning: "The \
+        folder holds a matter's folder; the error's `matter` names that matter when it is on \
+        Clauseo's list.";
+    PromptTooLong = "prompt.too_long", retryable: false, meaning: "The prompt's text is over \
+        `MAX_PROMPT_TEXT_BYTES` (6 MiB, counted as JSON-escaped bytes), in a `SendPrompt` or an \
+        `EditQueuedPrompt`, so nothing was sent; the draft is kept. A `ChatGPT` prompt over Codex's \
+        own input limit (1,048,576 characters, as the host counts them) gets it too: refused the \
+        same way when sent or edited, or, when the undo note added as it goes out takes it over, \
+        its turn fails with this code before anything is sent, the queue held. Only the prompt's \
+        text gets this code: every other size limit stays `command.invalid`.";
+    McpNameEmpty = "mcp.name_empty", retryable: false, meaning: "The MCP server has no name.";
+    McpNameTaken = "mcp.name_taken", retryable: false, meaning: "Another of the lawyer's MCP \
+        servers already has this name.";
+    McpNameReserved = "mcp.name_reserved", retryable: false, meaning: "The MCP server name is \
+        kept for one of Clauseo's own tools (`browser`, `case-law`) or Claude Code's built-ins \
+        (`ide`, `claude-in-chrome`, `computer-use`), in any case.";
+    McpNameInvalid = "mcp.name_invalid", retryable: false, meaning: "The MCP server name is not \
+        1 to 64 letters, digits, `_` or `-`, or holds `__`, or ends in `_`.";
+    McpCommandInvalid = "mcp.command_invalid", retryable: false, meaning: "The local MCP \
+        server's program is neither a bare name (`npx`) nor an absolute path on this computer: a \
+        relative path, a network path, or empty.";
+    McpCommandNotFound = "mcp.command_not_found", retryable: false, meaning: "The local MCP \
+        server's program is not on this computer: a bare name found on no search path, or an \
+        absolute path with no file. The program is the one the command named.";
+    McpUrlInvalid = "mcp.url_invalid", retryable: false, meaning: "The remote MCP server's URL \
+        is not an `https` URL with a host (`http` only for `localhost` or `127.0.0.1`), or \
+        holds a user name or password.";
+    McpHeaderNameInvalid = "mcp.header_name_invalid", retryable: false, meaning: "A header name \
+        is not an HTTP token, or appears twice in any case.";
+    McpEnvNameInvalid = "mcp.env_name_invalid", retryable: false, meaning: "A variable name is \
+        not a letter or `_` followed by letters, digits or `_`, or appears twice.";
+    McpSecretStoreFailed = "mcp.secret_store_failed", retryable: true, meaning: "The OS \
+        keychain refused or failed to save a value, so the MCP server was not changed.";
+    McpServerUnknown = "mcp.server_unknown", retryable: false, meaning: "The lawyer has no MCP \
+        server of that name.";
+    McpSaveDeclined = "mcp.save_declined", retryable: false, meaning: "The lawyer declined the \
+        native confirm before an MCP server was added or its program, arguments, variable names \
+        or URL changed, so nothing was saved.";
+    AgentServiceError = "agent.service_error", retryable: true, meaning: "The agent's service \
+        had a problem on its side and the agent gave up on the turn: an AIR `sessionFailure` of \
+        severity `error` offering `retry` or `new_session`, in a category no other code reads \
+        (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is \
+        kept; asking again can work.";
+    AgentQuiet = "agent.quiet", retryable: true, meaning: "The agent sent nothing for 5 minutes \
+        while answering, with no tool running and no question waiting for the lawyer, so the \
+        host ended the turn (D-050's backstop: a blocked network the host's probe could not see, \
+        such as a proxy that asks for credentials or one that inspects TLS); or the agent's own \
+        request to its service timed out while the host's probe reached that service (a slow \
+        service). The answer so far is kept; asking again can work.";
+    McpImportTooLarge = "mcp.import_too_large", retryable: false, meaning: "The servers an \
+        import would add, with their programs, arguments, URLs and variable or header names, \
+        are too long to show whole in one confirm (over 2,000 characters), so nothing was \
+        imported.";
+    MatterFolderBackslash = "matter.folder_backslash", retryable: false, meaning: "The \
+        matter folder's path has a backslash (`\\`) in a folder's name, on macOS or Linux, where \
+        the agent cannot start in such a folder (Claude Code exits with \"Can't access working \
+        directory\"), so the host did not start it. Renaming the folder fixes it.";
+    AgentFolderInaccessible = "agent.folder_inaccessible", retryable: true, meaning: "The \
+        agent could not open the matter folder as its working folder when it started (Claude \
+        Code's \"Can't access working directory\" in its answer to a startup request), though \
+        the host found the folder there just before. Asking again can work once the folder is \
+        back where the matter expects it.";
+    BlacklineNestedTable = "blackline.nested_table", retryable: false, meaning: "stetdoc could \
+        not compare the two versions because of a table inside a table cell (its compare \
+        refused the redline it made, `validation_failed`, over a cell), so nothing is shown; \
+        trying again gives the same answer.";
+    BlacklineCannotCompare = "blackline.cannot_compare", retryable: false, meaning: "stetdoc \
+        refused to compare the two versions (`validation_failed` or `unsupported`) for a reason \
+        other than a table inside a table, so nothing is shown; trying again gives the same \
+        answer.";
+    BlacklineNotReadable = "blackline.not_readable", retryable: false, meaning: "stetdoc could \
+        not read one of the two versions as a Word document (`malformed_input`, \
+        `corrupt_complement` or `unsupported_version`), so nothing is shown.";
+    BlacklineTooLarge = "blackline.too_large", retryable: false, meaning: "One of the two \
+        versions is past a size limit of stetdoc's (`limit_exceeded`), so nothing is shown.";
+    BlacklineFormatUnknown = "blackline.format_unknown", retryable: false, meaning: "stetdoc's \
+        view of the blackline is in a format this Clauseo does not know (a header other than \
+        `stet 1`, or none), so nothing is shown rather than a guess.";
+    AgentUnreachable = "agent.unreachable", retryable: true, meaning: "The agent could not get \
+        through to its service while answering, and the computer did not seem offline: the \
+        service, or a proxy or firewall in front of it, refused, timed out or blocked the \
+        connection, or its name did not resolve. The answer so far is kept; asking again can \
+        work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
@@ -250,7 +444,8 @@ pub struct HostError {
     /// Whether the same call may succeed later.
     retryable: bool,
     /// The matter the failure is about, where the code says so: for
-    /// `matter.folder_is_matter`, the matter on Clauseo's list that has the folder. Missing
+    /// `matter.folder_is_matter`, `matter.folder_inside_matter` and
+    /// `matter.folder_holds_matter`, the matter on Clauseo's list that has the folder. Missing
     /// otherwise, and when that matter is not on the list (forgotten, or from another install).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
@@ -281,7 +476,7 @@ impl HostError {
     }
 
     /// The matter the failure is about, for the codes that name one
-    /// (`matter.folder_is_matter`).
+    /// (`matter.folder_is_matter`, `matter.folder_inside_matter`, `matter.folder_holds_matter`).
     pub const fn matter(&self) -> Option<MatterId> {
         self.matter
     }
@@ -315,15 +510,35 @@ impl HostError {
     }
 
     /// A `command.invalid` failure for a command whose own input broke a rule: a value that did
-    /// not parse or a limit `validate` checks. Only for a command's input; a value read back from
-    /// the store that does not parse is `store.corrupt`, which the store builds with
+    /// not parse or a limit `validate` checks. A prompt's text over its limit
+    /// ([`Measure::PromptText`](crate::Measure::PromptText)) is `prompt.too_long` instead, read
+    /// from the typed measure, never from the message. Only for a command's input; a value read
+    /// back from the store that does not parse is `store.corrupt`, which the store builds with
     /// [`HostError::new`].
     #[expect(
         clippy::needless_pass_by_value,
         reason = "taken by value so a caller writes `.map_err(HostError::invalid_command)`"
     )]
     pub fn invalid_command(error: Error) -> Self {
-        Self::new(ErrorCode::CommandInvalid, error.to_string())
+        Self::new(Self::invalid_command_code(&error), error.to_string())
+    }
+
+    /// The code [`HostError::invalid_command`] gives `error`: `prompt.too_long` for a prompt's
+    /// text over its limit (`Error::TooLarge` of
+    /// [`Measure::PromptText`](crate::Measure::PromptText)), `command.invalid` for anything else.
+    /// The one place that choice is made, so a caller that logs the code logs what the wire says.
+    pub const fn invalid_command_code(error: &Error) -> ErrorCode {
+        if matches!(
+            error,
+            Error::TooLarge {
+                what: crate::Measure::PromptText,
+                ..
+            }
+        ) {
+            ErrorCode::PromptTooLong
+        } else {
+            ErrorCode::CommandInvalid
+        }
     }
 }
 

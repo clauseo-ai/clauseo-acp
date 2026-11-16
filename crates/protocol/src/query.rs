@@ -8,10 +8,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
+    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit, LastStop,
+    MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
+    ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest,
+    Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId,
+    UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -127,6 +129,9 @@ pub enum HostQuery {
         checkpoint: CheckpointId,
         /// The whole matter or chosen files, as `RestoreVersion` takes it.
         scope: RestoreRequest,
+        /// The `restore` checkpoint it would take back, as `RestoreVersion` takes it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
     },
     /// What undoing a turn's step would meet now: the step's files whose content in the folder
     /// differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
@@ -157,7 +162,10 @@ pub enum HostQuery {
     /// The agents in the settings, for a new thread's choice of agent.
     ListAgents,
     /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
-    /// line before a pick. JSON: `"get_default_location"`.
+    /// line before a pick. JSON: `"get_default_location"`. A host with no default location (no
+    /// `matters.default_location` and no Documents folder, issue #365) refuses it with
+    /// `command.invalid`, as it refuses a `DefaultLocation` create; the form then asks for a
+    /// folder.
     GetDefaultLocation,
     /// Search inside matters and conversations (decision 0043). Answered
     /// `QueryResult::Search`.
@@ -179,6 +187,51 @@ pub enum HostQuery {
     /// Where the updater stands (decision record 0037), read after subscribing to the app
     /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
     GetUpdate,
+    /// How the run before this one ended, and the file actions it left unfinished, for the
+    /// notice after Clauseo closed unexpectedly. Answered `QueryResult::LastExit`, the same all
+    /// through a run. JSON: `"last_exit"`.
+    LastExit,
+    /// Every skill pack folder in `<data>/skill-packs/`, and every pack `skills.enabled`
+    /// names, each with its state (decision record 0040), sorted by id; read off the host
+    /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
+    ListSkillPacks,
+    /// This computer's sandbox and the firm's protection settings (decision record 0051).
+    /// Answered `QueryResult::Protection`, from the host's cache, at once.
+    /// JSON: `"protection"`.
+    Protection,
+    /// The sites the lawyer allowed despite the unsafe-site block list (decision record 0053,
+    /// PR 2), `Always` first, each sorted by host, then by matter. Listed whatever the policy
+    /// says: while `network.allow_unsafe_site_override` is off none is honoured, and
+    /// `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
+    /// JSON: `"allowed_sites"`.
+    AllowedSites,
+    /// The Word blackline of one `.docx` between a version and another version, or the
+    /// matter's folder as it is now when `to` is `None`, as `CompareVersions` takes them. The
+    /// host runs stetdoc on copies outside the matter and writes nothing in it. Answered
+    /// `QueryResult::WordBlackline`; refused with `blackline.not_word` for a path that does
+    /// not end in `.docx`, `blackline.no_word_tool` when this Clauseo has no stetdoc, and
+    /// `blackline.failed` when stetdoc fails, takes too long or prints what the host can't
+    /// read. JSON: `{"word_blackline": {"matter": "...", "path": "...", "from": "..."}}`.
+    WordBlackline {
+        /// The matter.
+        matter: MatterId,
+        /// The document, relative to the matter folder.
+        path: MatterPath,
+        /// The older version.
+        from: CheckpointId,
+        /// The newer version; `None` (missing or `null` in JSON) is the folder now.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        to: Option<CheckpointId>,
+    },
+    /// The tracked changes of one Word file of a matter, read with stetdoc from a private copy
+    /// (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
+    /// a `.docx` or does not read as one is `word.not_docx`; no stetdoc, `word.stetdoc_missing`.
+    ListRevisions {
+        /// The matter.
+        matter: MatterId,
+        /// The Word file.
+        path: MatterPath,
+    },
 }
 
 /// A query's answer.
@@ -204,6 +257,8 @@ pub enum QueryResult {
     Settings(SettingsView),
     /// For `GetUpdate`.
     Update(UpdateView),
+    /// For `LastExit`.
+    LastExit(LastExit),
     /// For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
     /// it by (the same excluded names, size cap and cloud-only files).
     Papers {
@@ -220,6 +275,10 @@ pub enum QueryResult {
         /// `unread` together are then its first [`MAX_PAPERS`] by path (a folder counted
         /// where `<folder>/` sorts).
         truncated: bool,
+        /// Where the matter's folder lives, as `FolderScanned`'s `place` says it: for the
+        /// words of a cloud-only file in `skipped`. Asked of the OS on each listing; reads no
+        /// file.
+        place: FolderPlace,
     },
     /// For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id.
     Agents(Vec<AgentSummary>),
@@ -231,6 +290,16 @@ pub enum QueryResult {
     /// For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
     /// `{"folder_support": {}}` for a fine folder.
     FolderSupport(PickedFolderSupport),
+    /// For `ListSkillPacks`.
+    SkillPacks(Vec<PackStatus>),
+    /// For `Protection`.
+    Protection(ProtectionView),
+    /// For `AllowedSites`.
+    AllowedSites(Vec<AllowedSite>),
+    /// For `WordBlackline`.
+    WordBlackline(WordBlackline),
+    /// For `ListRevisions`.
+    Revisions(RevisionList),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
@@ -257,6 +326,10 @@ pub struct PaperSummary {
     pub size: Count,
     /// When it was last modified.
     pub modified: Timestamp,
+    /// A `.docx` that holds tracked changes or comments, as the host found them in its XML:
+    /// what its tile's Tracked changes press waits for. False is left out of the JSON.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub tracked: bool,
 }
 
 /// One agent in the settings, for `ListAgents`.
@@ -269,6 +342,11 @@ pub struct AgentSummary {
     /// `fake-agent`. Left out of the JSON when `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<AgentKind>,
+    /// Its config options as its latest session reported them (the host keeps them across
+    /// restarts), so a new conversation can offer the model and effort before any session;
+    /// empty, and left out of the JSON, until its first conversation started.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub config_options: Vec<ConfigOption>,
 }
 
 /// Where new matters go, for `GetDefaultLocation`.
@@ -292,6 +370,10 @@ pub struct RestorePreview {
     /// (`modified`, or `added` for a file brought back). Empty when the folder already
     /// stands as the version.
     pub changes: Vec<FileChange>,
+    /// Files the undone restore added that still hold what it wrote: the restore deletes them.
+    /// Empty unless it undoes a restore; missing from an older host's answer.
+    #[serde(default)]
+    pub removes: Vec<MatterPath>,
     /// Files in the folder now that the version does not have: the restore leaves them.
     pub added_since: Vec<MatterPath>,
     /// Files that differ from the version but the restore cannot write (cloud-only, over the
@@ -335,6 +417,14 @@ pub struct MatterSummary {
     /// Its next date, once set.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub next_date: Option<Date>,
+    /// The skill packs it may load, once set (decision record 0040); missing means the global
+    /// `skills.enabled` list, and `[]` means no pack for this matter.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub skill_packs: Option<PackList>,
+    /// The model and effort a new conversation in it starts with, per agent kind, once set
+    /// (`UpdateMatter::agent_prefs`, or a successful `SetConfigOption` in one of its threads).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent_prefs: Option<AgentPrefs>,
     /// Whether it is pinned to the top of the rail; missing reads as `false`.
     #[serde(default)]
     pub pinned: bool,
@@ -363,6 +453,11 @@ pub struct MatterSummary {
     /// folder is fine, before any check since the host started, and off Windows.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub folder_support: Option<FolderSupportKind>,
+    /// Whether its agents run in the sandbox, and why not (decision record 0051): an in-memory
+    /// reading, not state in the log. Missing when not known yet: before the host has decided,
+    /// and from a host that does not tell.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub protection: Option<Protection>,
 }
 
 open_unit_enum! {
@@ -426,6 +521,11 @@ pub struct ThreadSummary {
     /// missing reads as `false`.
     #[serde(default)]
     pub queue_held: bool,
+    /// Why its queue waits, as
+    /// [`HeaderEntry::queue_held_reason`](crate::HeaderEntry::queue_held_reason); set only while
+    /// `queue_held` is true. Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_held_reason: Option<QueueHoldReason>,
     /// Whether the lawyer has seen how its last turn ended: true when no turn ended after its
     /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
     #[serde(default = "seen_default")]

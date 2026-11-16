@@ -3,7 +3,6 @@
 
 export const HI = {
   Matters: "मामले",
-  "Next date": "अगली तारीख",
   "Search this matter": "इस मामले में खोजें",
   Undo: "पूर्ववत करें",
   "Versions and Undo": "संस्करण और पूर्ववत करें",

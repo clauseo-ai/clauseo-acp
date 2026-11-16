@@ -321,6 +321,7 @@ fn user_message_and_agent_content_match_view_counts() {
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
+        at_head: false,
         ts: Timestamp::ZERO,
     });
     assert_eq!(entry.inline_len(), 3_000);

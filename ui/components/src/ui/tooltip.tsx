@@ -20,11 +20,12 @@ export function Tooltip({
   side = "top",
   fixed = false,
   within,
+  anchor,
 }: {
   content: ReactNode;
   /** The trigger: one element that can take focus. */
   children: ReactElement;
-  side?: "top" | "bottom";
+  side?: "top" | "bottom" | "right";
   /** Placed against the window, not the page: for a trigger inside a box that scrolls and clips (the wall), where a
    * tooltip placed in the box would be cut off at its edge. It still mounts in the page's layer. */
   fixed?: boolean;
@@ -32,6 +33,9 @@ export function Tooltip({
    * the other. For a trigger in a box that something else covers past its edge, such as the wall under the room's
    * header. The window, when left out. */
   within?: string;
+  /** What the tooltip is placed against instead of the trigger: a whole row, so it covers none of the row's
+   * neighbours. */
+  anchor?: Element | undefined;
 }) {
   const [boundary, setBoundary] = useState<Element | null>(null);
   const trigger = useCallback(
@@ -53,6 +57,7 @@ export function Tooltip({
           positionMethod={fixed ? "fixed" : "absolute"}
           className="z-30"
           {...(boundary === null ? {} : { collisionBoundary: boundary })}
+          anchor={anchor}
         >
           <BaseTooltip.Popup className={tip}>{content}</BaseTooltip.Popup>
         </BaseTooltip.Positioner>

@@ -1,11 +1,13 @@
 // The frame contract (responsive.css): where the window draws its own frame, the toolbar keeps the window's top and the
 // parts that line up with the host's native ones (the caption buttons' hit-test, macOS's traffic lights) never move.
-// Each rule is read from the stylesheet, so dropping one fails here.
+// Each rule is read from the stylesheet, so dropping one fails here. The caption's rule over a dialog is shell.css's.
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { scrim } from "../ui/recipes-overlays.ts";
 
 const css = readFileSync(new URL("responsive.css", import.meta.url), "utf8");
+/** shell.css: the caption's rule over a dialog's scrim, which the settings window takes as well as the room. */
+const shell = readFileSync(new URL("shell.css", import.meta.url), "utf8");
 const OWN = ':root[data-frame="own"]';
 
 /** The declarations of `selector`'s rule in `text`, or null where there is none. */
@@ -69,6 +71,6 @@ test("while a dialog stands, the caption buttons rise over its scrim: the toolba
   expect(top).toMatch(/z-index: auto;/);
   const scrimZ = Number(/\bz-(\d+)\b/.exec(scrim)?.[1]);
   expect(scrimZ).toBeGreaterThan(0);
-  const caption = rule(css, `${dialog} .room-caption`);
+  const caption = rule(shell, `${dialog} .room-caption`);
   expect(Number(/z-index: (\d+);/.exec(caption ?? "")?.[1])).toBeGreaterThan(scrimZ);
 });

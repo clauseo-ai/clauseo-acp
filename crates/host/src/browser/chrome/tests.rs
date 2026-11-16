@@ -2,7 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{ChromeRoots, EDGE_ALLOWED, Platform, find, find_with, version};
+use clauseo_settings::chromium_policy::Browser;
+
+use super::{
+    ChromeRoots, EDGE_ALLOWED, Platform, WindowsBrowsers, find, find_with, version,
+    windows_installed, windows_installed_with,
+};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
@@ -14,7 +19,7 @@ fn roots(dir: &Path, platform: Platform) -> ChromeRoots {
         home: Some(dir.join("home")),
         program_files: Some(dir.join("pf")),
         program_files_x86: Some(dir.join("pf86")),
-        local_app_data: Some(dir.join("local")),
+        local_app_data: Some(dir.join(LOCAL)),
         app_data: dir.join("app"),
     }
 }
@@ -35,6 +40,8 @@ const WIN_EDGE: &str = "Microsoft/Edge/Application/msedge.exe";
 const CFT_MAC_ARM: &str =
     "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const CFT_WIN: &str = "chrome-win64/chrome.exe";
+/// Where a per-user Chrome installs itself under `%LOCALAPPDATA%`, as a fixture's `local`.
+const LOCAL: &str = "local";
 
 #[test]
 fn installed_chrome_wins_on_mac_over_home_and_chrome_for_testing() {
@@ -62,37 +69,96 @@ fn mac_home_applications_comes_second() {
 #[test]
 fn windows_chrome_in_program_files_order() {
     let dir = TempDir::new("chrome-win-order");
-    touch(&dir.path().join("local"), WIN_CHROME);
+    touch(&dir.path().join(LOCAL), WIN_CHROME);
     let x86 = touch(&dir.path().join("pf86"), WIN_CHROME);
     assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(x86));
     let pf = touch(&dir.path().join("pf"), WIN_CHROME);
     assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(pf));
 }
 
+/// A per-user Chrome cannot start sandboxed over the guard's pipe, so Windows never takes one,
+/// even with nothing else installed; it is found as present but not usable, so the lawyer is
+/// told why (`BrowserPerUserChromeOnly`), not to install Chrome.
 #[test]
-fn windows_local_app_data_chrome() {
+fn windows_finds_a_per_user_chrome_but_never_takes_it() {
     let dir = TempDir::new("chrome-win-local");
-    let local = touch(&dir.path().join("local"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(local));
+    let local = touch(&dir.path().join(LOCAL), WIN_CHROME);
+    for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
+        let roots = roots(dir.path(), platform);
+        assert_eq!(find(&roots), None, "{platform:?}");
+        assert_eq!(
+            windows_installed(&roots),
+            WindowsBrowsers {
+                usable: Vec::new(),
+                per_user_chrome: Some(local.clone()),
+            },
+            "{platform:?}"
+        );
+    }
+    // Beside a Program Files Chrome it is still never taken.
+    let pf = touch(&dir.path().join("pf"), WIN_CHROME);
+    let installed = windows_installed(&roots(dir.path(), Platform::WindowsX64));
+    assert_eq!(installed.usable, [(Browser::Chrome, pf)]);
+    assert_eq!(installed.per_user_chrome, Some(local));
+    // Without the folder there is none to find.
+    let unset = ChromeRoots {
+        local_app_data: None,
+        ..roots(dir.path(), Platform::WindowsX64)
+    };
+    assert_eq!(windows_installed(&unset).per_user_chrome, None);
 }
 
 #[test]
-fn edge_is_used_only_when_allowed() {
-    const { assert!(!EDGE_ALLOWED, "Edge waits for G17 item 4") };
+fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
+    const { assert!(EDGE_ALLOWED, "Edge is Windows' first browser") };
     let dir = TempDir::new("chrome-win-edge");
     let edge = touch(&dir.path().join("pf86"), WIN_EDGE);
     touch(&dir.path().join("pf"), WIN_EDGE);
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         let roots = roots(dir.path(), platform);
-        assert_eq!(find(&roots), None, "{platform:?}: Edge while not allowed");
-        assert_eq!(find_with(&roots, true), Some(edge.clone()), "{platform:?}");
+        assert_eq!(
+            find_with(&roots, false),
+            None,
+            "{platform:?}: Edge while not allowed"
+        );
+        assert_eq!(find(&roots), Some(edge.clone()), "{platform:?}");
+        assert_eq!(
+            roots.edge(),
+            [
+                dir.path().join("pf86").join(WIN_EDGE),
+                dir.path().join("pf").join(WIN_EDGE)
+            ],
+            "{platform:?}: Program Files (x86), then Program Files"
+        );
     }
-    // Chrome still comes before an allowed Edge.
-    let chrome = touch(&dir.path().join("local"), WIN_CHROME);
+    // An allowed Edge comes before a Program Files Chrome; a disallowed one leaves Chrome.
+    let chrome = touch(&dir.path().join("pf"), WIN_CHROME);
+    let win = roots(dir.path(), Platform::WindowsX64);
+    assert_eq!(find_with(&win, true), Some(edge.clone()));
+    assert_eq!(find_with(&win, false), Some(chrome.clone()));
     assert_eq!(
-        find_with(&roots(dir.path(), Platform::WindowsX64), true),
-        Some(chrome)
+        windows_installed(&win).usable,
+        [(Browser::Edge, edge), (Browser::Chrome, chrome.clone())]
     );
+    assert_eq!(
+        windows_installed_with(&win, false).usable,
+        [(Browser::Chrome, chrome)]
+    );
+}
+
+#[test]
+fn windows_installed_is_empty_off_windows() {
+    let dir = TempDir::new("chrome-installed-off-windows");
+    touch(&dir.path().join("pf"), WIN_CHROME);
+    touch(&dir.path().join("pf86"), WIN_EDGE);
+    touch(&dir.path().join("root"), MAC_CHROME);
+    touch(&dir.path().join(LOCAL), WIN_CHROME);
+    for platform in [Platform::MacArm64, Platform::MacX64, Platform::Linux] {
+        assert_eq!(
+            windows_installed(&roots(dir.path(), platform)),
+            WindowsBrowsers::default()
+        );
+    }
 }
 
 #[test]
@@ -104,6 +170,7 @@ fn edge_is_never_looked_for_on_mac() {
 
 #[test]
 fn chrome_for_testing_highest_version_wins() {
+    const CFT_WIN: &str = CFT_MAC_ARM;
     let dir = TempDir::new("chrome-cft-version");
     touch(
         dir.path(),
@@ -121,7 +188,7 @@ fn chrome_for_testing_highest_version_wins() {
     write::create_dir_all(&dir.path().join("app/browsers/chrome-200.0.0.0")).unwrap();
     touch(dir.path(), &format!("app/browsers/chrome-latest/{CFT_WIN}"));
     touch(dir.path(), &format!("app/browsers/other-300.0/{CFT_WIN}"));
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(newest));
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(newest));
 }
 
 #[test]
@@ -141,21 +208,25 @@ fn chrome_for_testing_layout_per_platform() {
     assert_eq!(find(&roots(dir.path(), Platform::MacX64)), Some(x64));
 }
 
+/// Chrome for Testing in its per-user folder cannot start sandboxed over the guard's pipe, so
+/// Windows never takes one, x64 or ARM64, even with nothing else installed.
 #[test]
-fn windows_arm64_skips_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-arm64");
+fn windows_ignores_chrome_for_testing() {
+    let dir = TempDir::new("chrome-win-cft");
     touch(
         dir.path(),
         &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
     );
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsArm64)), None);
-    assert!(find(&roots(dir.path(), Platform::WindowsX64)).is_some());
-    // Installed Chrome still serves ARM64.
+    for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
+        assert_eq!(find(&roots(dir.path(), platform)), None, "{platform:?}");
+        assert_eq!(platform.cft_name(), None, "{platform:?}: no download");
+        assert_eq!(platform.cft_binary(), None, "{platform:?}");
+    }
+    // Program Files Chrome serves both.
     let chrome = touch(&dir.path().join("pf"), WIN_CHROME);
-    assert_eq!(
-        find(&roots(dir.path(), Platform::WindowsArm64)),
-        Some(chrome)
-    );
+    for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
+        assert_eq!(find(&roots(dir.path(), platform)), Some(chrome.clone()));
+    }
 }
 
 #[test]
@@ -204,27 +275,21 @@ fn versions_compare_by_number() {
 }
 
 #[test]
-fn windows_installed_chrome_beats_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-installed-cft");
+fn windows_edge_beats_program_files_chrome_and_ignores_the_rest() {
+    let dir = TempDir::new("chrome-win-edge-first");
     touch(
         dir.path(),
         &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
     );
-    let chrome = touch(&dir.path().join("local"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(chrome));
-}
-
-#[test]
-fn an_allowed_edge_beats_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-edge-cft");
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+    touch(&dir.path().join(LOCAL), WIN_CHROME);
+    let chrome = touch(&dir.path().join("pf86"), WIN_CHROME);
+    assert_eq!(
+        find(&roots(dir.path(), Platform::WindowsX64)),
+        Some(chrome),
+        "Program Files Chrome over a per-user one and Chrome for Testing"
     );
     let edge = touch(&dir.path().join("pf"), WIN_EDGE);
-    let roots = roots(dir.path(), Platform::WindowsX64);
-    assert_eq!(find_with(&roots, true), Some(edge));
-    assert_ne!(find(&roots), find_with(&roots, true));
+    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(edge));
 }
 
 /// A link in the browsers folder picks nothing: a linked version folder, or a binary linked to a
@@ -232,6 +297,7 @@ fn an_allowed_edge_beats_chrome_for_testing() {
 #[cfg(unix)]
 #[test]
 fn a_link_in_the_browsers_folder_is_passed_over() {
+    const CFT_WIN: &str = CFT_MAC_ARM;
     let dir = TempDir::new("chrome-cft-links");
     let real = touch(
         dir.path(),
@@ -243,12 +309,10 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
         &dir.path().join("app/browsers/chrome-999.0"),
     )
     .unwrap();
-    write::create_dir_all(&dir.path().join("app/browsers/chrome-500.0/chrome-win64")).unwrap();
-    write::symlink(
-        &elsewhere,
-        &dir.path()
-            .join(format!("app/browsers/chrome-500.0/{CFT_WIN}")),
-    )
-    .unwrap();
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(real));
+    let linked = dir
+        .path()
+        .join(format!("app/browsers/chrome-500.0/{CFT_WIN}"));
+    write::create_dir_all(linked.parent().unwrap()).unwrap();
+    write::symlink(&elsewhere, &linked).unwrap();
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(real));
 }

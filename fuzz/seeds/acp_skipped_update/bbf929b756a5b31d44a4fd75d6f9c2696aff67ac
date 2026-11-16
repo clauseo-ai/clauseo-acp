@@ -1,0 +1,1 @@
+ { "method" : "session/update" , "params" : { "update" : { "_meta" : [ { "a" : "}]" } ] , "status" : "pending" } , "sessionId" : "s" } }

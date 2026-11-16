@@ -153,11 +153,13 @@
   },
   "U4-20": {
     "en": "Claude wants to save its plan as a note in its own folder, not in this matter.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "stage C #418: Claude's plan note in its own folder"
+    "by": "Rohan",
+    "note": "stage C #418: Claude's plan note in its own folder; Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }

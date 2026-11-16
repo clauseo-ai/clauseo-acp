@@ -1,0 +1,146 @@
+{
+  "TN-01": {
+    "en": "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+    "hi": "Clauseo को इस बातचीत के पहले के प्रश्न और उत्तर याद नहीं हैं। उनसे जो ज़रूरी हो, उसे अपने अगले प्रश्न में शामिल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-02": {
+    "en": "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.",
+    "hi": "पूर्ववत करने के बाद 1 दस्तावेज़ वापस आ गया: {papers}। Clauseo ने उसे फिर से नहीं हटाया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-03": {
+    "en": "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.",
+    "hi": "पूर्ववत करने के बाद {n} दस्तावेज़ वापस आ गए: {papers}। Clauseo ने उन्हें फिर से नहीं हटाया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-04": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। यह मामला इसे इस्तेमाल करने के लिए सेट है, पर यह चालू नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-05": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इस कंप्यूटर की स्किल पैक सेटिंग्स इसकी अनुमति नहीं देतीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-06": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। चालू किए जाने के बाद इसकी फ़ाइलें बदल गईं। इसे इस्तेमाल करने के लिए फिर से चालू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-07": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo को यह इस कंप्यूटर पर नहीं मिला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-08": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-09": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.",
+    "hi": "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-10": {
+    "en": "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+    "hi": "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "claudeauto (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)"
+  },
+  "TN-11": {
+    "en": "Clauseo stopped a step: {name} tried to reach outside this matter.",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "Host notice NoticeKind::OutsideMatterBlocked: Clauseo's data fence refused, unasked, a request of the agent's that reached outside the matter (actor/turn/outside.rs), once a turn; the agent is told separately by a steer. {name} is the agent as U3-52 names it (stops.ts: Claude, ChatGPT for Codex, or its own name). Reworded 2026-11-11 to U3-52's shape"
+  },
+  "TN-12": {
+    "en": "Clauseo stopped a step: the AI tried to reach outside this matter.",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "TN-11 where the room knows no agent name (notice-words.ts), as U3-53's the AI; rendered alone. The host's own notice text is this English, for a view that does not know the kind"
+  },
+  "TN-13": {
+    "en": "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय {name} वेब खोज का उपयोग कर सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "netnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-15",
+    "by": "orchestrator (settled en, option c)",
+    "note": "Host notice NoticeKind::ShellNetworkBlocked: Clauseo declined, unasked, a Codex shell command that needed the internet (curl, wget, a network approval; actor/turn/shell_network.rs), once a turn; the agent is told separately, by a steer or at the start of the next prompt. {name} as TN-11 (ChatGPT for Codex)"
+  },
+  "TN-14": {
+    "en": "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय यह वेब खोज का उपयोग कर सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "netnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-15",
+    "by": "orchestrator (settled en, option c)",
+    "note": "TN-13 where the room knows no agent name (notice-words.ts), as TN-12; rendered alone"
+  }
+}

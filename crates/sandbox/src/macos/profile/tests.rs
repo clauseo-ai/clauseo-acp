@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+use super::names::{GIT_NAME_REGEX, HEAD_REGEX};
 use super::*;
 use crate::test_support::TempDir;
 use crate::{LinkFinding, LinkKind, PolicyBuilder};
@@ -91,6 +93,74 @@ fn with_a_credential_link() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
+/// M4: the credential link gets read and `file-write-data`; every other write to it (chmod,
+/// chflags, xattr, chown, setugid, times, ACL) is denied after every allow that covers it, with
+/// data, unlink and create allowed back. Seatbelt applies the last match.
+#[test]
+fn the_credential_link_takes_data_writes_but_not_metadata() {
+    let w = World::new("profile-credential-link-metadata");
+    let policy = w
+        .builder()
+        .credential_link(w.at("data/agent-state/m1/codex/auth.json"))
+        .read_only_in_state(w.at("data/agent-state/m1/codex/config.toml"))
+        .build()
+        .unwrap();
+    let text = SeatbeltProfile::new(&policy, TAG)
+        .unwrap()
+        .text()
+        .to_owned();
+    let link = "(literal (param \"CREDENTIAL_LINK\"))";
+    let allow = format!("(allow file-read* file-write-data\n  {link})");
+    assert_eq!(text.matches(&allow).count(), 2, "{text}");
+    for rule in text
+        .split("\n(")
+        .filter(|r| r.starts_with("allow file-read* file-write*"))
+    {
+        assert!(!rule.contains("CREDENTIAL_LINK"), "{rule}");
+    }
+    let deny = format!("(deny file-write*\n  {link}\n  (with message \"{TAG}\"))");
+    let back = format!("(allow file-write-data file-write-unlink file-write-create\n  {link})");
+    let deny_at = text.find(&deny).expect(&text);
+    let back_at = text.find(&back).expect(&text);
+    assert!(deny_at < back_at, "{text}");
+    // After the last allow of the state folder, so the deny wins; before its read-only denies.
+    let last_state = text.rfind("(subpath (param \"STATE\"))").unwrap();
+    assert!(deny_at > last_state, "{text}");
+    let read_only_at = text.find("; Read-only in the state folder").expect(&text);
+    assert!(back_at < read_only_at, "{text}");
+    assert_eq!(text.matches(link).count(), 4, "{text}");
+}
+
+/// The session's temp folder, `data/run/s1/tmp`: read and write as a subpath, in the allows
+/// and again after the hidden data dir; the run folder above it gets only metadata (its path
+/// resolves), never a read or write rule.
+#[test]
+fn with_a_session_tmpdir() {
+    let w = World::new("profile-session-tmpdir");
+    w.dir.dir("data/run/s1");
+    let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
+    let text = w.render(&policy);
+    let rw = "(allow file-read* file-write*\n  (subpath (param \"TMPDIR\")))";
+    assert_eq!(text.matches(rw).count(), 2, "{text}");
+    let hidden_at = text.find("; Hidden paths").expect(&text);
+    assert!(text.rfind(rw).unwrap() > hidden_at, "{text}");
+    assert!(text.contains("TMPDIR = <root>/data/run/s1/tmp\n"), "{text}");
+    let run = dunce::canonicalize(w.at("data/run/s1")).unwrap();
+    let parent = run.parent().unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    for (name, path) in profile.params() {
+        assert!(
+            path != &run && path != parent,
+            "{name} names the run folder or its parent"
+        );
+        assert!(
+            name == "TMPDIR" || !path.starts_with(&run),
+            "{name} is in the run folder"
+        );
+    }
+    insta::assert_snapshot!(text);
+}
+
 #[test]
 fn with_a_browser_socket_folder() {
     let w = World::new("profile-browser-sockets");
@@ -154,6 +224,34 @@ fn with_read_only_paths_in_the_matter() {
         .build()
         .unwrap();
     insta::assert_snapshot!(w.render(&policy));
+}
+
+/// S15 `PR4a2`: a nested `.mcp.json` is in `read_only_in_matter` and comes out as a subpath in
+/// the profile's write deny of the matter's read-only paths.
+#[test]
+fn a_nested_mcp_json_is_write_denied() {
+    let w = World::new("profile-nested-mcp");
+    w.dir.file("matter/sub/.mcp.json", "{}");
+    let policy = w.builder().build().unwrap();
+    let mcp = dunce::canonicalize(w.at("matter"))
+        .unwrap()
+        .join("sub/.mcp.json");
+    let rule = PathRule::Subpath(mcp.clone());
+    assert!(policy.read_only_in_matter().contains(&rule));
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    let (name, _) = profile
+        .params()
+        .iter()
+        .find(|(name, path)| name.starts_with("READ_ONLY_") && *path == mcp)
+        .unwrap();
+    let text = profile.text();
+    let (_, block) = text.split_once("; Read-only in the matter").unwrap();
+    let (block, _) = block.split_once("(with message").unwrap();
+    assert!(block.contains("(deny file-write*"), "{block}");
+    assert!(
+        block.contains(&format!("(subpath (param \"{name}\"))")),
+        "{block}"
+    );
 }
 
 #[test]
@@ -328,4 +426,109 @@ fn many_findings_stay_within_the_link_rule_budget() {
     // The whole argument list stays far from the 1 MB argument limit.
     let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
     assert!(bytes < 64 * 1024, "{bytes} bytes");
+}
+
+/// A name rule's pattern as Seatbelt reads it: `sandbox-exec` with only that deny, so each
+/// probe shows what the pattern matches. Whether `sh -c "$cmd $1"` is refused in the matter.
+#[cfg(target_os = "macos")]
+fn regex_refuses(regex: &str, matter: &Path, cmd: &str, rel: &str) -> bool {
+    let profile = format!(
+        "(version 1)(allow default)(deny file-write* (require-all (subpath (param \"M\")) \
+         (regex #\"{regex}\")))"
+    );
+    let script = format!("{cmd} \"$1\"");
+    let out = async_io::block_on(
+        async_process::Command::new("/usr/bin/sandbox-exec")
+            .arg("-D")
+            .arg(format!("M={}", matter.display()))
+            .args(["-p", &profile, "/bin/sh", "-c", &script, "sh"])
+            .arg(matter.join(rel))
+            .output(),
+    )
+    .unwrap();
+    let refused = !out.status.success();
+    if refused {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("Operation not permitted"), "{stderr}");
+    }
+    refused
+}
+
+/// Checks `regex` refuses each of `refused` and none of `allowed`, each a command and a path.
+#[cfg(target_os = "macos")]
+fn check_regex(regex: &str, matter: &Path, refused: &[(&str, &str)], allowed: &[(&str, &str)]) {
+    for (cmd, rel) in refused {
+        assert!(
+            regex_refuses(regex, matter, cmd, rel),
+            "{cmd} {rel:?} was allowed"
+        );
+    }
+    for (cmd, rel) in allowed {
+        assert!(
+            !regex_refuses(regex, matter, cmd, rel),
+            "{cmd} {rel:?} was refused"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_git_name_regex_matches_only_a_name_git() {
+    let w = World::new("profile-git-name");
+    w.dir.dir("matter/sub");
+    w.dir.dir("matter/deep/.git");
+    w.dir.dir("matter/.github");
+    let matter = dunce::canonicalize(w.at("matter")).unwrap();
+    let refused = [
+        ("mkdir", ".git"),
+        ("mkdir", ".GIT"),
+        ("touch", ".Git"),
+        ("mkdir", "sub/.git"),
+        ("touch", "deep/.git/x"),
+        ("touch", ".git"),
+        // Names HFS+ opens as `.git`: its ignorables before, between and after the letters.
+        ("mkdir", ".g\u{200C}it"),
+        ("touch", "\u{FEFF}.G\u{202A}I\u{206F}T\u{200F}"),
+        ("touch", ".gi\u{200D}\u{202E}\u{206A}t"),
+    ];
+    let allowed = [
+        ("touch", ".gitignore"),
+        ("touch", ".github/x"),
+        ("touch", "a.git"),
+        ("mkdir", "sub/.gitattributes-dir"),
+        ("touch", "sub/x.git"),
+        ("touch", ".g\u{200C}itignore"),
+        // U+200B and U+2010 are not ignorable.
+        ("touch", ".g\u{200B}it"),
+        ("touch", ".g\u{2010}it"),
+    ];
+    check_regex(GIT_NAME_REGEX, &matter, &refused, &allowed);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_head_regex_matches_only_a_last_name_head() {
+    let w = World::new("profile-head");
+    w.dir.dir("matter/docs");
+    let matter = dunce::canonicalize(w.at("matter")).unwrap();
+    let refused = [
+        ("touch", "HEAD"),
+        ("touch", "docs/head"),
+        ("mkdir", "docs/Head"),
+        ("touch", "HE\u{200D}AD"),
+        ("touch", "\u{202A}HEAD\u{FEFF}"),
+    ];
+    let allowed = [
+        ("touch", "HEADER.md"),
+        ("touch", "ahead"),
+        ("touch", "docs/a\u{200D}head"),
+        ("touch", "docs/HEAD.txt"),
+        // ZWJ and ZWNJ in Hindi and Persian names.
+        ("touch", "\u{915}\u{94D}\u{200D}\u{937}.txt"),
+        (
+            "touch",
+            "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}.txt",
+        ),
+    ];
+    check_regex(HEAD_REGEX, &matter, &refused, &allowed);
 }

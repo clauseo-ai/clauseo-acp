@@ -27,6 +27,12 @@
 //! - Every call is a blocking keychain call (macOS may show a prompt), so the caller keeps them
 //!   off the host's actor: desktop loads the keys once at start on the agents thread and keeps
 //!   them in memory.
+//! - Every write in this process ([`Keychain::store`], [`Keychain::clear`] and
+//!   [`Keychain::store_if_absent`]) takes one lock for the whole process, so
+//!   `store_if_absent`'s check and store are one step against every other write here. The OS
+//!   stores have no create-only write (Credential Manager has none), so another process can
+//!   still write between the two: desktop's single-instance plugin keeps a second Clauseo from
+//!   running.
 //! - Test seam: [`Keychain`], whose [`Keychain::os`] is the free functions' keychain. Tests use
 //!   [`Keychain::memory`] (an in-memory store) and [`Keychain::none`] (the Linux rule), never the
 //!   real keychain.
@@ -40,6 +46,7 @@ mod os;
 mod tests;
 
 use std::fmt;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use clauseo_protocol::AgentId;
 use zeroize::Zeroizing;
@@ -47,7 +54,9 @@ use zeroize::Zeroizing;
 #[cfg(any(test, feature = "test-support"))]
 use std::collections::BTreeMap;
 #[cfg(any(test, feature = "test-support"))]
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
+#[cfg(any(test, feature = "test-support"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The keychain service every agent's key is stored under.
 pub const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop";
@@ -74,6 +83,24 @@ pub fn store(agent: &AgentId, key: &str) -> Result<(), KeyError> {
 /// `agent`'s API key from the OS keychain, or `None` when there is none.
 pub fn load(agent: &AgentId) -> Result<Option<Zeroizing<String>>, KeyError> {
     Keychain::os().load(agent)
+}
+
+/// Stores `key` as `agent`'s API key in the OS keychain only when it has none: see
+/// [`Keychain::store_if_absent`].
+pub fn store_if_absent(agent: &AgentId, key: &str) -> Result<bool, KeyError> {
+    Keychain::os().store_if_absent(agent, key)
+}
+
+/// Whether [`store`] would take `key` as `agent`'s: [`KeyError::Invalid`] with [`refusal`]'s
+/// reason, else `Ok`. No keychain call, so a caller checks a key before anything else it does.
+pub fn check(agent: &AgentId, key: &str) -> Result<(), KeyError> {
+    match refusal(key) {
+        Some(reason) => Err(KeyError::Invalid {
+            agent: agent.clone(),
+            reason,
+        }),
+        None => Ok(()),
+    }
 }
 
 /// Removes `agent`'s API key from the OS keychain; `Ok` when there is none.
@@ -134,8 +161,10 @@ enum Backend {
     None,
     #[cfg(any(target_os = "macos", windows))]
     Os,
+    /// The items, whether every read fails (a locked keychain, a denied prompt), and whether
+    /// every read waits (a prompt nobody answers).
     #[cfg(any(test, feature = "test-support"))]
-    Memory(Arc<Mutex<Items>>),
+    Memory(Arc<Mutex<Items>>, Arc<AtomicBool>, Arc<Hang>),
 }
 
 impl fmt::Debug for Keychain {
@@ -145,7 +174,7 @@ impl fmt::Debug for Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => f.write_str("Keychain(os)"),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => f
+            Backend::Memory(items, ..) => f
                 .debug_tuple("Keychain::memory")
                 .field(&lock(items).keys().collect::<Vec<_>>())
                 .finish(),
@@ -174,7 +203,28 @@ impl Keychain {
     #[cfg(any(test, feature = "test-support"))]
     pub fn memory() -> Keychain {
         Keychain {
-            backend: Backend::Memory(Arc::default()),
+            backend: Backend::Memory(Arc::default(), Arc::default(), Arc::default()),
+        }
+    }
+
+    /// Tests only: with `fail`, every read of a memory keychain (and its clones) fails as
+    /// [`KeyError::NoAccess`], as a locked keychain or a denied prompt does, until called again
+    /// with `false`; writes still work. No effect on another keychain.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_reads(&self, fail: bool) {
+        if let Backend::Memory(_, failing, _) = &self.backend {
+            failing.store(fail, Ordering::SeqCst);
+        }
+    }
+
+    /// Tests only: with `hang`, every read of a memory keychain (and its clones) waits, as a
+    /// keychain prompt nobody answers does, until called again with `false`, when the waiting
+    /// reads go on. No effect on another keychain.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hang_reads(&self, hang: bool) {
+        if let Backend::Memory(_, _, hanging) = &self.backend {
+            *hanging.on.lock().unwrap_or_else(PoisonError::into_inner) = hang;
+            hanging.changed.notify_all();
         }
     }
 
@@ -185,19 +235,37 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::available(),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(_) => true,
+            Backend::Memory(..) => true,
         }
     }
 
     /// Stores `key` as `agent`'s key, replacing any; refuses it (writing nothing) unless it is
     /// printable ASCII of at most [`MAX_KEY_BYTES`] bytes (see [`refusal`]).
     pub fn store(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
-        if let Some(reason) = refusal(key) {
-            return Err(KeyError::Invalid {
-                agent: agent.clone(),
-                reason,
-            });
+        let _writes = writes();
+        self.store_unlocked(agent, key)
+    }
+
+    /// Stores `key` as `agent`'s key only when none is stored: `Ok(true)` when it was stored,
+    /// `Ok(false)` (nothing written) when a key was there. A stored item that is not a valid key
+    /// is [`KeyError::StoredInvalid`], and nothing is written; a refused key is refused as
+    /// [`Keychain::store`] refuses it.
+    ///
+    /// Atomic within this process only: it holds the process's write lock from the load to the
+    /// store, so no other write here falls between them; the OS stores have no create-only
+    /// write, so another process could, and desktop's single-instance plugin keeps a second
+    /// Clauseo from running.
+    pub fn store_if_absent(&self, agent: &AgentId, key: &str) -> Result<bool, KeyError> {
+        let _writes = writes();
+        if self.load(agent)?.is_some() {
+            return Ok(false);
         }
+        self.store_unlocked(agent, key).map(|()| true)
+    }
+
+    /// [`Keychain::store`] with the write lock already held.
+    fn store_unlocked(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
+        check(agent, key)?;
         match &self.backend {
             Backend::None => Err(KeyError::NoKeychain {
                 agent: agent.clone(),
@@ -205,7 +273,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::set(agent, key.as_bytes()),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => {
+            Backend::Memory(items, ..) => {
                 let bytes = Zeroizing::new(key.as_bytes().to_vec());
                 lock(items).insert(account(agent), bytes);
                 Ok(())
@@ -221,7 +289,15 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::get(agent)?,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => lock(items).get(&account(agent)).map(|b| b.to_vec()),
+            Backend::Memory(items, failing, hanging) => {
+                hanging.wait();
+                if failing.load(Ordering::SeqCst) {
+                    return Err(KeyError::NoAccess {
+                        agent: agent.clone(),
+                    });
+                }
+                lock(items).get(&account(agent)).map(|b| b.to_vec())
+            }
         };
         bytes.map(|bytes| into_key(agent, bytes)).transpose()
     }
@@ -235,6 +311,7 @@ impl Keychain {
         )
     )]
     pub fn clear(&self, agent: &AgentId) -> Result<(), KeyError> {
+        let _writes = writes();
         match &self.backend {
             Backend::None => {
                 // No keychain, so no key of this agent's can exist.
@@ -244,10 +321,38 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::delete(agent),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => {
+            Backend::Memory(items, ..) => {
                 lock(items).remove(&account(agent));
                 Ok(())
             }
+        }
+    }
+}
+
+/// The lock every keychain write in this process takes, past a poisoning.
+fn writes() -> MutexGuard<'static, ()> {
+    static WRITES: Mutex<()> = Mutex::new(());
+    WRITES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether a memory keychain's reads wait, and the wake for those waiting.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Default)]
+struct Hang {
+    on: Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Hang {
+    /// Waits while reads hang.
+    fn wait(&self) {
+        let mut on = self.on.lock().unwrap_or_else(PoisonError::into_inner);
+        while *on {
+            on = self
+                .changed
+                .wait(on)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 }

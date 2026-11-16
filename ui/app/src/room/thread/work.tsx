@@ -3,8 +3,13 @@
 // conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type {
+  ComposerHandle,
+  ConfigMenu,
+  PlanChoice,
+} from "@clauseo/components/clauseo/composer.tsx";
+import { late } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
@@ -37,12 +42,29 @@ import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
-import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+import { FolderSupportContext, MatterFolderContext, notedFolder } from "../folder-support.ts";
+import { locatable, useLocateFolder } from "../act-refusals.ts";
+import { LocateButton } from "../locate-button.tsx";
+import { hasSetup } from "../first-run/hold.ts";
+import { useThreadMenus } from "../config-menus.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
 const FolderNotice = lazy(() =>
   import("../folder-notice.tsx").then((m) => ({ default: m.FolderNotice })),
 );
+
+/** UD2's notes in the composer's notice line (the expired card, the first read's line), from the thread's chunk. */
+const AfterSignInNote = lazy(() =>
+  late(import("./list.tsx")).then((m) => ({ default: m.AfterSignInNote })),
+);
+
+/** A held queue: why, as the host says it (`queue_held_reason`; "" from an older host that doesn't), else null. */
+const heldPick = (v: StreamView | undefined): string | null => {
+  const h = v?.header?.header;
+  if (h?.queue_held !== true) return null;
+  return h.queue_held_reason ?? "";
+};
+const agentPick = (v: StreamView | undefined) => v?.header?.header?.agent ?? null;
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -71,12 +93,14 @@ export function Work({
   draftKey,
   conversation,
   choice,
+  menus: draftMenus,
   plan = "",
   focus = null,
   onThread,
   conversations,
   archived = false,
   folderShut,
+  openRefused = null,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -88,6 +112,8 @@ export function Work({
   conversation: ConversationLink;
   /** A new conversation's plan choice, before its first question. */
   choice?: PlanChoice | undefined;
+  /** A new conversation's model and effort menus, before its first question (config-menus.ts). */
+  menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words ("Uses your Claude plan"), "" for none. */
   plan?: string;
   /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
@@ -100,6 +126,9 @@ export function Work({
   archived?: boolean;
   /** The matters whose folder notice the lawyer closed (room.tsx keeps them above Work's key, as the drafts). */
   folderShut?: Set<MatterId>;
+  /** A paper's open from an answer or from Find, refused, by its code, until the next try
+   * (act-refusals.ts). */
+  openRefused?: string | null;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -128,6 +157,9 @@ export function Work({
   // the tool line on the status line, from the open thread's header: none for a draft, or a header without tools
   // (tool-line-load.ts: its chunk loads once a header has tools, and until then the line has no tool segment)
   const tools = useToolsSegment(store, stream, lang);
+  // the model and effort: the draft's until there is a thread, then the thread's own, from its header
+  const threadMenus = useThreadMenus(transport, store, stream, session.thread, lang);
+  const menus = session.thread === null ? draftMenus : threadMenus;
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -148,6 +180,32 @@ export function Work({
     lines,
     plan: agentPlan,
   });
+  // UD2: the question held for the plan's sign-in (queue_held_reason "sign_in"; from an older host that says no why, a held queue
+  // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line
+  const held = useStreamPart(store, stream, heldPick);
+  const heldAgent = useStreamPart(store, stream, agentPick);
+  const expired =
+    hasSetup(transport) &&
+    held != null &&
+    heldAgent != null &&
+    (held === "sign_in" || (held === "" && brk?.code === "agent.auth_required"))
+      ? { agent: heldAgent, failedAt: brk?.step.ts ?? 0 }
+      : null;
+  // with no matter open there is no thread to note: the fallback alone, and the thread's chunk stays unloaded
+  const noteFor = (fallback: ReactNode) =>
+    matter === null ? (
+      fallback
+    ) : (
+      <Suspense fallback={fallback}>
+        <AfterSignInNote
+          transport={transport}
+          stream={stream}
+          thread={session.thread}
+          expired={expired}
+          fallback={fallback}
+        />
+      </Suspense>
+    );
   const retry = () => {
     if (stream !== null) store.retry(stream);
   };
@@ -156,6 +214,9 @@ export function Work({
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
   // U7: a refused Stop the other, by its code, on the composer's line until the next press or Ask
   const [otherRefused, refuseOther] = useRefused();
+  const shownRefused = session.refused ?? otherRefused ?? openRefused;
+  // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
+  const locate = useLocateFolder();
   const ask = (text: string, how?: AskHow) => {
     refuseOther(null);
     return session.ask(text, how);
@@ -163,8 +224,12 @@ export function Work({
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
-  // the thread's chunk, in memory before the first view or the first answer, with a matter or without
-  useEffect(() => void loadThread(), []);
+  // the thread's chunk, in memory before the first view or the first answer, once a matter opens: never at boot or
+  // under the welcome, where it would only compete with the first screen
+  const opened = matter !== null;
+  useEffect(() => {
+    if (opened) void loadThread();
+  }, [opened]);
   // folder rights: the notice, once per matter until Close
   const noted = notedFolder(matter?.folder_support);
   const [closed, setClose] = useState<MatterId | null>(null);
@@ -180,7 +245,6 @@ export function Work({
           <FolderNotice
             key={matter.matter}
             kind={noted}
-            folder={matter.folder_display ?? ""}
             onClose={() => {
               folderShut?.add(matter.matter);
               setClose(matter.matter);
@@ -192,14 +256,23 @@ export function Work({
         {/* the list's box, holding Thread, whose .room-thread is the scroller inside it; below 1000 px it takes the
             thread's place in the one column (responsive.css orders the thread first) */}
         <div data-testid="transcript" className="flex min-h-0 flex-1 flex-col max-mid:order-1">
-          {/* empty until the thread's chunk is in: its arrival is one commit */}
-          <Suspense fallback={null}>
-            <KeyedRequestContext value={keyed}>
-              <FolderSupportContext value={matter?.folder_support}>
-                <LazyThreadList transport={transport} stream={stream} busy={busy} />
-              </FolderSupportContext>
-            </KeyedRequestContext>
-          </Suspense>
+          {/* empty with no matter open, and until the thread's chunk is in: its arrival is one commit */}
+          {opened && (
+            <Suspense fallback={null}>
+              <KeyedRequestContext value={keyed}>
+                <FolderSupportContext value={matter?.folder_support}>
+                  <MatterFolderContext value={matter?.folder_display || null}>
+                    <LazyThreadList
+                      transport={transport}
+                      stream={stream}
+                      busy={busy}
+                      sent={session.sentTurn}
+                    />
+                  </MatterFolderContext>
+                </FolderSupportContext>
+              </KeyedRequestContext>
+            </Suspense>
+          )}
         </div>
       </ThreadActionsContext>
       {archived ? (
@@ -210,6 +283,7 @@ export function Work({
           drafts={drafts}
           draftKey={draftKey}
           choice={choice}
+          menus={menus}
           plan={plan}
           tools={tools}
           commands={commands}
@@ -218,7 +292,10 @@ export function Work({
           busy={busy}
           doing={doing}
           asks={asks}
-          refused={session.refused ?? otherRefused}
+          refused={shownRefused}
+          {...(locatable(shownRefused) && locate !== null
+            ? { refusedActions: <LocateButton onLocate={locate} /> }
+            : {})}
           failed={
             failed === null
               ? null
@@ -235,7 +312,9 @@ export function Work({
                     testId: "stream-failed",
                   }
           }
-          stopped={stopped}
+          stopped={expired === null ? stopped : null}
+          noteFor={noteFor}
+          gateYields={expired !== null}
           refill={refillOf(brk, live, restart)}
           onAsk={ask}
           onStop={session.stop}

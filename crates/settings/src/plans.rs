@@ -114,7 +114,7 @@ fn name_shaped(name: &str) -> bool {
 /// Whether an unknown field `text` may be quoted: `[a-z][a-z0-9_]{0,31}`, which still shows a
 /// typo (`envv`, `endpoit`). Anything else may be pasted text (`NAME=value`, a `ghp_…` or other
 /// token, which mixes case or runs long), so a message gives its place instead.
-fn field_shaped(text: &str) -> bool {
+pub(crate) fn field_shaped(text: &str) -> bool {
     text.len() <= 32
         && text
             .bytes()
@@ -192,11 +192,17 @@ fn first_refused(
 /// punycode, so no right-to-left override or zero-width character), `https://` in any case,
 /// then a host and a port of at most 65535 if any, with no user name or password (`@`), query
 /// (`?`), fragment (`#`), backslash, space or control character anywhere.
-pub(crate) fn web_address_ok(url: &str) -> bool {
+pub fn web_address_ok(url: &str) -> bool {
+    address_ok(url, "https://")
+}
+
+/// [`web_address_ok`]'s rules after `scheme` (`https://`, or `http://` for a proxy), which
+/// matches in any case.
+pub(crate) fn address_ok(url: &str, scheme: &str) -> bool {
     let Some(rest) = url
-        .get(..8)
-        .filter(|scheme| url.is_ascii() && scheme.eq_ignore_ascii_case("https://"))
-        .and_then(|_| url.get(8..))
+        .get(..scheme.len())
+        .filter(|start| url.is_ascii() && start.eq_ignore_ascii_case(scheme))
+        .and_then(|_| url.get(scheme.len()..))
     else {
         return false;
     };
@@ -208,7 +214,7 @@ pub(crate) fn web_address_ok(url: &str) -> bool {
 
 /// Whether `authority` is a host, or `[` an IPv6 literal `]`, then `:` and a port of 1 to 5
 /// digits up to 65535 if any.
-fn authority_ok(authority: &str) -> bool {
+pub(crate) fn authority_ok(authority: &str) -> bool {
     let (host, port) = match authority.strip_prefix('[') {
         Some(literal) => match literal.split_once(']') {
             Some((inside, "")) => (inside, None),
@@ -364,8 +370,9 @@ pub(crate) fn entry_is_clauseos(entry: &Value, data_dir: &Path) -> bool {
     owns(command, script, data_dir)
 }
 
-/// [`entry_is_clauseos`] for a launch about to be written.
-pub(crate) fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
+/// [`entry_is_clauseos`] for a launch about to be written, or one held: desktop reads an
+/// `agents.<id>` entry that is Clauseo's as an install it made here before (#859).
+pub fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
     owns(
         &launch.command,
         launch.args.first().map(String::as_str),

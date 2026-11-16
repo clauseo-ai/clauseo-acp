@@ -291,7 +291,7 @@ pub struct Crash {
     pub process: CrashProcess,
     /// What kind.
     pub kind: CrashKind,
-    /// Whether it came within a short time of the start.
+    /// Whether the window had shown the app before the crash.
     pub after_launch: bool,
 }
 

@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod entry;
+mod hold;
 mod tools;
 
 pub use entry::{
@@ -25,6 +26,7 @@ pub use entry::{
     PermissionEntry, PermissionState, StepEntry, ToolCallEntry, ToolCallPage, ToolCallSearch,
     ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
 };
+pub use hold::QueueHoldReason;
 pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
 enum_with_names! {

@@ -9,7 +9,7 @@
 )]
 
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -18,8 +18,10 @@ use std::time::Duration;
 /// already in place (`private_dir::create`: the desktop user, `SYSTEM` and `Administrators`
 /// with full access, nothing inherited); a folder already there is opened without following a
 /// link and secured through that handle (`private_dir::protect`: refused if a link,
-/// owner taken back or refused, the DACL set again). Files inside are checked one by one by the
-/// code that uses them ([`check_owned_file`]); nothing walks the folder.
+/// owner taken back or refused, the DACL set again). Elsewhere, where only tests use it, a link
+/// or anything but a folder at `path` is refused, as on Windows. Files inside are checked one by
+/// one by the code that uses them ([`check_owned_file`]); only `secrets.bin`'s store lists the
+/// folder, for its temp names, after this.
 pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -31,9 +33,46 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     #[cfg(not(windows))]
     match std::fs::create_dir(path) {
         Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
+        Err(_) if !std::fs::symlink_metadata(path)?.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is a link or not a folder", path.display()),
+            ));
+        }
         _ => {}
     }
     Ok(())
+}
+
+/// Makes the agent's profile folder `path`, below the folder `base` (which must exist), as this
+/// process's user: the inner runner, as the pool user, makes `<state>\AppData\Roaming` and the
+/// rest its environment names (S15 `PR5`). Each part below `base` is opened or made relative to
+/// its parent's handle, never through a link (`set_aside::folder_chain`, `OBJ_DONT_REPARSE`), and
+/// refused if it is a reparse point: a junction another session's agent swaps in at any moment
+/// is never followed.
+#[cfg(windows)]
+pub(crate) fn make_agent_folder(base: &Path, path: &Path) -> io::Result<()> {
+    let below = path
+        .strip_prefix(base)
+        .map_err(|_outside| io::Error::new(io::ErrorKind::InvalidInput, "not below its base"))?;
+    let parts: Vec<std::ffi::OsString> = below
+        .components()
+        .map(|part| part.as_os_str().to_owned())
+        .collect();
+    super::set_aside::make_folders(base, &parts)
+}
+
+/// Renames `from` (not followed if a link) to `to`, refusing (`AlreadyExists`) when something
+/// is at `to`, since a rename over a file (or, on Unix, an empty folder) would succeed. For the
+/// set-aside's tests: the agent's renames, and the moves of their stand-in for NTFS.
+#[cfg(test)]
+pub(crate) fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(to) {
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::rename(from, to)
 }
 
 /// What the repair found on an opened record file or the sandbox folder, through its handle.
@@ -102,6 +141,83 @@ pub(crate) fn check_owned_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Reads a file this crate keeps in the sandbox folder through the one handle its checks go
+/// through ([`check_owned_file`]'s, opened for reading too), so the bytes are the file checked,
+/// never a second open by path: `None` when it is missing; refused when it holds more than `cap`
+/// bytes. Elsewhere, where only tests use it, it opens without following a link and refuses a
+/// link, a non-file or a second hard link through that one descriptor.
+#[cfg(any(windows, test))]
+pub(crate) fn read_owned_file(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    #[cfg(windows)]
+    {
+        super::private_dir::read_checked_file(path, cap)
+    }
+    #[cfg(not(windows))]
+    {
+        read_posix(path, cap, false)
+    }
+}
+
+/// [`read_owned_file`] for a caller that must never write (`UserSetup::state`): one handle
+/// opened for reading only, nothing repaired. A link, a non-file or a second hard link is
+/// refused; a file that isn't this user's alone is `None`, as if missing: on Windows one whose
+/// owner isn't this user or whose DACL isn't the protected one naming only this user, `SYSTEM`
+/// and `Administrators`; elsewhere (the tests' stand-in) one whose mode gives the group or
+/// others any access.
+#[cfg(any(windows, test))]
+pub(crate) fn read_owned_file_unchanged(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    #[cfg(windows)]
+    {
+        super::private_dir::read_unchanged(path, cap)
+    }
+    #[cfg(not(windows))]
+    {
+        read_posix(path, cap, true)
+    }
+}
+
+/// The tests' stand-in for the two reads: opened without following a link, checked through
+/// that descriptor, then read up to `cap` bytes. With `owner_only`, a mode giving the group
+/// or others any access makes it `None`.
+#[cfg(all(test, not(windows)))]
+fn read_posix(path: &Path, cap: u64, owner_only: bool) -> io::Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+
+    use rustix::fs::{Mode, OFlags};
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file = match rustix::fs::open(path, flags, Mode::empty()) {
+        Ok(fd) => File::from(fd),
+        Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+        Err(error) => return Err(io::Error::from(error)),
+    };
+    let metadata = file.metadata()?;
+    let found = Found {
+        reparse: false,
+        right_kind: metadata.is_file(),
+        links: u32::try_from(metadata.nlink()).unwrap_or(u32::MAX),
+        owner_allowed: true,
+    };
+    repair_plan(found).map_err(|why| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: {why}", path.display()),
+        )
+    })?;
+    if owner_only && metadata.mode() & 0o077 != 0 {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    file.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
 /// How long [`lock_exclusive`] waits for another holder.
 pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(10);
 /// How often a waiting lock tries again.
@@ -123,6 +239,12 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
         .create(true)
         .truncate(false)
         .open(path)?;
+    lock_open_for(file, path, wait)
+}
+
+/// [`lock_exclusive_for`] for a lock file the caller already opened (`file`, without following a
+/// link), named by `path` in its error. Dropping the file releases the lock.
+pub(crate) fn lock_open_for(file: File, path: &Path, wait: Duration) -> io::Result<File> {
     let tries = wait.as_millis() / LOCK_RETRY.as_millis() + 1;
     for attempt in 0..tries {
         match file.try_lock() {
@@ -141,12 +263,63 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
     ))
 }
 
+/// Removes the file this crate keeps at `path` in the sandbox folder, checked first as
+/// [`check_owned_file`] checks it, so a link there is refused, never followed. A missing file is
+/// fine. The clean-close record goes this way at every launch (S15 `PR3d`), and off Windows the
+/// set-aside's bookkeeping (`set_aside/bookkeeping.rs`).
+#[cfg(any(windows, test, feature = "test-support"))]
+pub(crate) fn remove_owned_file(path: &Path) -> io::Result<()> {
+    check_owned_file(path)?;
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Removes the folder `path` when it is empty (`rmdir`, which never follows a link nor
+/// recurses). The stand-in off Windows, where only tests run it, for the set-aside's forget on
+/// NTFS (`set_aside/bookkeeping.rs`).
+#[cfg(all(not(windows), any(test, feature = "test-support")))]
+pub(crate) fn remove_empty_folder(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir(path)
+}
+
 /// Replaces the file `path` with `bytes` in one step: the bytes go to a new file beside it
 /// (`.<name>.<16 hex>.tmp`, made with `create_new`, so nothing there already is opened), are
 /// flushed to disk, and the new file is renamed over `path` (`MoveFileExW` with
 /// `MOVEFILE_REPLACE_EXISTING` on Windows). A reader sees the old file or the new one, never a
 /// part. On failure the new file is removed and `path` is as it was.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with(path, bytes, Write::write_all)
+}
+
+/// Whether `name` is exactly the temp name [`write_atomic`] gives a new file beside the file
+/// named `target`: `.<target>.<16 lowercase hex>.tmp`. For clearing ones a crash left.
+#[cfg(any(windows, test))]
+pub(crate) fn is_atomic_temp(target: &std::ffi::OsStr, name: &std::ffi::OsStr) -> bool {
+    let (Some(target), Some(name)) = (target.to_str(), name.to_str()) else {
+        return false;
+    };
+    let Some(hex) = name
+        .strip_prefix('.')
+        .and_then(|rest| rest.strip_prefix(target))
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    hex.len() == 16
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// [`write_atomic`] with the write itself as a parameter, so a test can fail it partway.
+pub(crate) fn write_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    write: impl FnOnce(&mut File, &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
@@ -163,7 +336,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
             .write(true)
             .create_new(true)
             .open(&temp)?;
-        file.write_all(bytes)?;
+        write(&mut file, bytes)?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&temp, path)
@@ -207,6 +380,48 @@ mod tests {
         ] {
             assert!(repair_plan(refused).is_err(), "{refused:?}");
         }
+    }
+
+    #[test]
+    fn the_temp_name_matches_what_write_atomic_makes_and_nothing_else() {
+        use std::ffi::OsStr;
+
+        use crate::test_support::TempDir;
+
+        let temp = TempDir::new("atomic-temp-name");
+        let target = temp.path().join("secrets.bin");
+        let folder = temp.path().to_owned();
+        let mut seen = Vec::new();
+        write_atomic_with(&target, b"x", |file, bytes| {
+            for entry in std::fs::read_dir(&folder)? {
+                seen.push(entry?.file_name());
+            }
+            file.write_all(bytes)
+        })
+        .unwrap();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert!(
+            is_atomic_temp(OsStr::new("secrets.bin"), &seen[0]),
+            "{seen:?}"
+        );
+        let name = OsStr::new("secrets.bin");
+        for other in [
+            "secrets.bin",
+            ".secrets.bin.0123456789ABCDEF.tmp",
+            ".secrets.bin.0123456789abcde.tmp",
+            ".secrets.bin.0123456789abcdef0.tmp",
+            ".secrets.bin.0123456789abcdeg.tmp",
+            ".secrets.bin.0123456789abcdef.tmp.old",
+            "x.secrets.bin.0123456789abcdef.tmp",
+            ".matters.json.0123456789abcdef.tmp",
+            ".secrets.bin..0123456789abcdef.tmp",
+        ] {
+            assert!(!is_atomic_temp(name, OsStr::new(other)), "{other}");
+        }
+        assert!(is_atomic_temp(
+            name,
+            OsStr::new(".secrets.bin.0123456789abcdef.tmp")
+        ));
     }
 
     #[cfg(unix)]

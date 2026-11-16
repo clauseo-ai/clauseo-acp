@@ -11,7 +11,7 @@
 //!   the page's CSP on its scripts (`csp.rs`), and in the e2e build the same webview arguments
 //!   and init script as `main`, since `WebView2` webviews sharing a profile must match.
 //! - Callers: the `open_settings` command (granted to `main` only) and, on the Mac, the app
-//!   menu's "Settings…" item on Cmd+, ([`app_menu`]). No menu on Windows or Linux.
+//!   menu's "Settings…" item on Cmd+, (`menu.rs`). No menu on Windows or Linux.
 //! - Each window's destruction drops its bridge stream ([`on_destroyed`]), one its page's
 //!   `open_stream` still waiting for the host included; destroying `main` destroys `settings`
 //!   too, so closing `main` still ends the app. Only a build that worked is recorded.
@@ -40,18 +40,73 @@ const PAGE: &str = "settings.html";
 /// The window's title (the Mac hides it; Windows shows it in the taskbar).
 const TITLE: &str = "Settings";
 
-/// The id of the Mac app menu's "Settings…" item.
-#[cfg(target_os = "macos")]
-const MENU_ID: &str = "settings";
+/// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
+/// and banner open Connectors; R17: UC's first-run button opens Protection; U12: the toolbar's
+/// plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy). Closed,
+/// as the app
+/// asked: a value the build does not know is refused when the command's arguments decode, never
+/// ignored, and a new section is added here together with the page that shows it (ADR 0002's
+/// rule for commands, which a webview sends).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SettingsSection {
+    /// The Connectors section.
+    Connectors,
+    /// The Protection section: the sandbox's state, its set-up and removal (decision record
+    /// 0051). The page is the app's.
+    Protection,
+    /// Plan and usage: each agent's plan and its limits.
+    Usage,
+    /// The Privacy section: the anonymous counts and what they include.
+    Privacy,
+}
 
-/// Brings the settings window forward, building it when there is none.
-pub(crate) fn open_or_focus<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
-    if let Some(window) = manager.get_webview_window(SETTINGS_WINDOW) {
-        return raise(&window);
+impl SettingsSection {
+    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`,
+    /// `settings.html#usage`, `settings.html#privacy`.
+    fn fragment(self) -> &'static str {
+        match self {
+            Self::Connectors => "connectors",
+            Self::Protection => "protection",
+            Self::Usage => "usage",
+            Self::Privacy => "privacy",
+        }
     }
-    build(manager).or_else(|error| match manager.get_webview_window(SETTINGS_WINDOW) {
+}
+
+/// In tests, the fragments [`open_or_focus`] set on an open window, when the app manages one:
+/// the mock runtime runs no script, so this is how a test sees the hash change.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct HashesSet(pub(crate) std::sync::Mutex<Vec<&'static str>>);
+
+/// Brings the settings window forward, building it when there is none; at `section` when one
+/// is named. A new window opens at `settings.html#<section>`; an open one has its
+/// `location.hash` set to it (a fixed string from [`SettingsSection`], never the caller's
+/// text), which the page will follow on `hashchange` (U15's page; no listener exists yet).
+pub(crate) fn open_or_focus<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: Option<SettingsSection>,
+) -> tauri::Result<()> {
+    let open_at = |window: &WebviewWindow<R>| {
+        if let Some(section) = section {
+            #[cfg(test)]
+            if let Some(set) = manager.try_state::<HashesSet>()
+                && let Ok(mut set) = set.0.lock()
+            {
+                set.push(section.fragment());
+            }
+            window.eval(format!("location.hash = {:?};", section.fragment()))?;
+        }
+        raise(window)
+    };
+    if let Some(window) = manager.get_webview_window(SETTINGS_WINDOW) {
+        return open_at(&window);
+    }
+    build(manager, section).or_else(|error| match manager.get_webview_window(SETTINGS_WINDOW) {
         // Two opens at once: the other built it.
-        Some(window) => raise(&window),
+        Some(window) => open_at(&window),
         None => Err(error),
     })
 }
@@ -65,7 +120,10 @@ fn raise<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
 }
 
 /// Builds the settings window (see the contract).
-fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
+fn build<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: Option<SettingsSection>,
+) -> tauri::Result<()> {
     // The e2e and marks builds open at the size whatever the work area, like `main`; so do the
     // unit tests, whose mock runtime has no monitor to ask.
     let (width, height) = if cfg!(any(feature = "e2e", test)) {
@@ -76,15 +134,18 @@ fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
             window_size::primary_work_area(manager.app_handle()),
         )
     };
-    let builder = WebviewWindowBuilder::new(manager, SETTINGS_WINDOW, WebviewUrl::App(PAGE.into()))
+    let page = match section {
+        Some(section) => format!("{PAGE}#{}", section.fragment()),
+        None => PAGE.to_owned(),
+    };
+    let builder = WebviewWindowBuilder::new(manager, SETTINGS_WINDOW, WebviewUrl::App(page.into()))
         .title(TITLE)
         .use_https_scheme(true)
         .inner_size(width, height)
         .center();
-    let builder = window_frame::with_frame(builder);
+    let builder = window_size::with_ground(window_frame::with_frame(builder));
     let builder = csp::on_scripts(builder, manager);
-    #[cfg(all(windows, feature = "e2e"))]
-    let builder = crate::e2e::with_debugging_port(builder);
+    let builder = crate::navigation::guard(builder, manager);
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(crate::e2e::init_script());
     let built = number_build(manager);
@@ -93,7 +154,11 @@ fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
     // The Windows maximise cover makes a Win32 child window and subclasses this one, which must
     // happen on the window's own thread; `open_settings` builds from an async command's thread.
     let framed = window.clone();
-    window.run_on_main_thread(move || window_frame::after_build(&framed))?;
+    // Off Windows it was built hidden: shown after, in the ground (window_size.rs).
+    window.run_on_main_thread(move || {
+        window_frame::after_build(&framed);
+        window_size::show_first_frame(&framed);
+    })?;
     on_destroyed(&window, built);
     Ok(())
 }
@@ -134,31 +199,6 @@ pub(crate) fn closed<R: Runtime, M: Manager<R>>(manager: &M, label: &str, built:
     {
         // Best effort: a window that cannot be destroyed stays, and closing it ends the app.
         let _destroyed = settings.destroy();
-    }
-}
-
-/// The Mac app menu: Tauri's default, with "Settings…" on Cmd+, after About and its
-/// separator, then a separator before Services.
-#[cfg(target_os = "macos")]
-pub(crate) fn app_menu<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
-    let menu = Menu::default(app)?;
-    if let Some(MenuItemKind::Submenu(first)) = menu.items()?.into_iter().next() {
-        let settings = MenuItem::with_id(app, MENU_ID, "Settings…", true, Some("CmdOrCtrl+,"))?;
-        let separator = PredefinedMenuItem::separator(app)?;
-        first.insert_items(&[&settings, &separator], 2)?;
-    }
-    Ok(menu)
-}
-
-/// Opens or focuses the settings window when the menu item `id` is "Settings…".
-#[cfg(target_os = "macos")]
-pub(crate) fn on_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
-    if id == MENU_ID {
-        // Best effort: a window that cannot open leaves the app as it was.
-        let _opened = open_or_focus(app);
     }
 }
 

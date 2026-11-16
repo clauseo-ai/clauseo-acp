@@ -9,6 +9,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Opens `clauseo_acp::fuzzing`, the internals the fuzz targets in `fuzz/` call. Only the fuzz
+# crate turns it on; no app crate may.
+fuzzing = []
+
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 # Exactly what Claude Code and Codex use; never `unstable_subagents`, `unstable`, `schemars`,
@@ -25,8 +30,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 memchr = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 clauseo-fake_agent = { path = "../fake_agent" }
 async-process = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 uuid = { workspace = true }

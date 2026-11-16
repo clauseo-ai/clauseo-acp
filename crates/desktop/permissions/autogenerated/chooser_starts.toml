@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chooser-starts"
+description = "Enables the chooser_starts command without any pre-configured scope."
+commands.allow = ["chooser_starts"]
+
+[[permission]]
+identifier = "deny-chooser-starts"
+description = "Denies the chooser_starts command without any pre-configured scope."
+commands.deny = ["chooser_starts"]

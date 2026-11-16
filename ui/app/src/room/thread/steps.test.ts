@@ -4,10 +4,16 @@ import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { describe, expect, test } from "vitest";
-import { agentText, header, toolCall } from "../../testing/stream-script.ts";
-import type { EntryId, ToolCallEntry, ToolCallStatus, ToolKind } from "../../transport/protocol.ts";
-import type { StreamView } from "../../store/view.ts";
-import { doingOf, doingPick, placeOf, splitPath, titleOf } from "./step-names.ts";
+import { agentText, chosen, header, permission, toolCall } from "../../testing/stream-script.ts";
+import type {
+  EntryId,
+  PermissionEntry,
+  ToolCallEntry,
+  ToolCallStatus,
+  ToolKind,
+} from "../../transport/protocol.ts";
+import { entryIdOf, type StreamView } from "../../store/view.ts";
+import { doingOf, doingPick, internalOf, placeOf, splitPath, titleOf } from "./step-names.ts";
 import {
   doneOf,
   doneSoFar,
@@ -16,11 +22,14 @@ import {
   kindsOf,
   lineOf,
   markOf,
+  promptsAtTheirCalls,
   restOf,
   segmentsOf,
+  segmentsPick,
   summaryOf,
   troubleOf,
   type Part,
+  type Segment,
 } from "./steps.ts";
 
 let n = 0;
@@ -60,6 +69,65 @@ describe("segmentsOf", () => {
 
   test("a permission prompt or a question parts the runs either side, and never folds", () => {
     expect(of("ttpttqt")).toEqual(["[t0 t1]", "p2", "[t3 t4]", "q5", "[t6]"]);
+  });
+});
+
+describe("promptsAtTheirCalls", () => {
+  const group = (...ids: string[]): Segment => ({ group: ids as EntryId[] });
+  const row = (id: string): Segment => ({ row: id as EntryId });
+  const calls: Record<string, string> = { p1: "t1", p2: "t2", p3: "t3" };
+  const callOf = (id: EntryId) => (calls[id] ?? null) as EntryId | null;
+  const shown = (segments: readonly Segment[]) =>
+    promptsAtTheirCalls(segments, callOf).map((s) =>
+      s.row !== undefined ? s.row : `[${s.group.join(" ")}]`,
+    );
+
+  test("a prompt answered after the next step began stands after its own step, not the next one's", () => {
+    // the dry run: two commands, the first one's prompt, a third command (refused unasked), the second one's prompt
+    expect(shown([group("t1", "t2"), row("p1"), group("t3"), row("p2")])).toEqual([
+      "[t1 t2]",
+      "p1",
+      "p2",
+      "[t3]",
+    ]);
+  });
+
+  test("a prompt right after its own step, or with no tool call, stays where it is", () => {
+    const segments = [group("t1"), row("p1"), row("a5"), group("t3"), row("p3"), row("q9")];
+    expect(shown(segments)).toEqual(["[t1]", "p1", "a5", "[t3]", "p3", "q9"]);
+  });
+
+  test("a prompt never moves ahead of the agent's words or a notice that came between", () => {
+    const segments = [group("t1", "t2"), row("a5"), group("t3"), row("n6"), group("t4"), row("p2")];
+    expect(shown(segments)).toEqual(["[t1 t2]", "a5", "[t3]", "n6", "p2", "[t4]"]);
+    expect(shown([group("t1", "t2"), row("a5"), group("t3"), row("p2")])).toEqual([
+      "[t1 t2]",
+      "a5",
+      "p2",
+      "[t3]",
+    ]);
+  });
+});
+
+describe("segmentsPick", () => {
+  test("only an answered prompt moves back to its step; a pending one stays put", () => {
+    const of = (state: PermissionEntry["state"]) => {
+      // two steps, a third begun, then the second one's prompt
+      const entries = [toolCall(1, 61, "completed"), toolCall(2, 62, "completed")]
+        .concat(agentText(3, 63, "Then the third."), toolCall(4, 64, "pending"))
+        .concat(permission(5, 65, state, 62));
+      const paged = new Map(entries.map((e) => [entryIdOf(e), e] as const));
+      const ids = entries.map(entryIdOf);
+      const name = (id: EntryId) => `${ids.indexOf(id)}`;
+      return segmentsPick(
+        ids,
+        paged,
+      )(undefined).map((s) =>
+        s.row !== undefined ? name(s.row) : `[${s.group.map(name).join(" ")}]`,
+      );
+    };
+    expect(of("pending")).toEqual(["[0 1]", "2", "[3]", "4"]);
+    expect(of(chosen("allow_once"))).toEqual(["[0 1]", "2", "4", "[3]"]);
   });
 });
 
@@ -160,13 +228,19 @@ describe("the folded line", () => {
         call("read", "failed", lease),
         ...Array.from({ length: 4 }, () => call("edit", "cancelled")),
       ]).trouble,
-    ).toBe(
-      "Tried to read Lease deed.pdf. Tried to change a paper. Tried to change a paper. And 2 more.",
-    );
+    ).toBe("Tried to read Lease deed.pdf. Tried to change a paper. And 3 more.");
     for (const lang of ["en", "hi"] as const) {
       const one = restOf(lang, [call("fetch", "failed")]);
       expect(one.trouble).not.toContain(troubleOf(lang, [call("fetch", "failed")]));
     }
+  });
+
+  test("the same tried words are said once, the repeat counted in the more (D-077)", () => {
+    const task = () => call("execute", "failed");
+    expect(restOf("en", [task(), task()]).trouble).toBe("Tried to run a task. And 1 more.");
+    expect(
+      restOf("hi", [task(), task()]).trouble.split("एक काम चलाने की कोशिश की गई।"),
+    ).toHaveLength(2);
   });
 
   test("a failure stays on the line, one of many; a stop too", () => {
@@ -300,18 +374,18 @@ describe("friendly names", () => {
     expect(doneOf("en", call("read", "failed", lease))).toBe("Tried to read Lease.pdf.");
     expect(doneOf("hi", call("read", "failed", lease))).toBe("Lease.pdf पढ़ने की कोशिश की गई।");
     expect(restOf("en", [call("read", "failed", lease)]).trouble).toBe("Tried to read Lease.pdf.");
-    expect(doneOf("en", call("other", "cancelled", { title: "Check the cause list" }))).toBe(
-      "Tried: Check the cause list.",
+    expect(doneOf("en", call("other", "cancelled", { title: "Check the share register" }))).toBe(
+      "Tried: Check the share register.",
     );
-    expect(doneOf("hi", call("other", "cancelled", { title: "Check the cause list." }))).toBe(
-      "कोशिश की गई: Check the cause list।",
+    expect(doneOf("hi", call("other", "cancelled", { title: "Check the share register." }))).toBe(
+      "कोशिश की गई: Check the share register।",
     );
     const count = raw({ command: "x", description: "Count the pages" });
     expect(doneOf("en", call("execute", "failed", count))).toBe("Tried: Count the pages.");
     // done, the agent's own words as they are
     expect(doneOf("en", call("execute", "completed", count))).toBe("Count the pages.");
-    expect(doneOf("en", call("other", "completed", { title: "Check the cause list" }))).toBe(
-      "Check the cause list.",
+    expect(doneOf("en", call("other", "completed", { title: "Check the share register" }))).toBe(
+      "Check the share register.",
     );
   });
 
@@ -322,14 +396,14 @@ describe("friendly names", () => {
     const unknown = call("read", "unknown", lease);
     const words = [
       doneOf("en", unknown),
-      doneOf("en", call("other", "unknown", { title: "Check the cause list" })),
+      doneOf("en", call("other", "unknown", { title: "Check the share register" })),
       doneOf("en", call("search", "unknown", raw({ pattern: "notice period" }))),
       doneOf("en", call("execute", "unknown")),
       restOf("en", [unknown]).line,
     ];
     expect(words).toEqual([
       "Lease.pdf.",
-      "Check the cause list.",
+      "Check the share register.",
       "'notice period'.",
       "State not known.",
       "State not known.",
@@ -426,5 +500,53 @@ describe("doingPick: the working line's words", () => {
       pick(view("running", [{ id: "tool_call:a", e: { tool_call: call("read") } }])),
     ).toBeNull();
     expect(pick(view("idle", [{ id: "tool_call:a", e: { tool_call: reading } }]))).toBeNull();
+  });
+});
+
+describe("the agent's own notes (D-044)", () => {
+  const brief = "/Users/x/Library/Application Support/Clauseo/agent-state/m1/notes/matter-brief.md";
+  const notes = "C:\\Users\\x\\AppData\\Roaming\\Clauseo\\agent-state\\m1\\notes\\matter-brief.md";
+  const outside = (display: string) =>
+    ({ locations: [{ outside: { display } }] }) as Partial<ToolCallEntry>;
+
+  test("a step that touches only the notes, by location, input or title, is internal; a paper's step is not", () => {
+    expect(internalOf(call("edit", "completed", outside(brief)))).toBe(true);
+    expect(internalOf(call("read", "failed", raw({ file_path: brief })))).toBe(true);
+    expect(internalOf(call("execute", "completed", { title: `Get-Content ${notes}` }))).toBe(true);
+    expect(
+      internalOf(call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" }))),
+    ).toBe(false);
+    expect(
+      internalOf(call("read", "completed", { title: `diff ${brief} /Users/x/Matters/Lease.pdf` })),
+    ).toBe(false);
+    expect(internalOf(call("search"))).toBe(false);
+  });
+
+  test("the folded line neither counts the brief as a paper changed nor its failed read as failed", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+      call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" })),
+    ].map((c) => ({ tool_call: c }));
+    const line = lineOf("en", rows, false);
+    expect(line.line).toBe("1 paper read.");
+    expect(line.trouble).toBe("");
+    const running = { tool_call: call("search", "in_progress") };
+    const live = lineOf("en", [...rows, running], true);
+    expect(live.more).toBe(steps("en", "1 done so far."));
+    expect(live.trouble).toBe("");
+  });
+
+  test("a group of nothing but the notes says the work was planned, with no count and no break", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+    ].map((c) => ({ tool_call: c }));
+    expect(lineOf("en", rows, false)).toEqual({
+      kinds: ["think"],
+      line: steps("en", "Planned the work."),
+      trouble: "",
+      more: "",
+    });
   });
 });

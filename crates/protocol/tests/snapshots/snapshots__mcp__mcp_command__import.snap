@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpCommand::Import { source: McpImportSource::ClaudeCode }"
+---
+{
+  "import": {
+    "source": "claude_code"
+  }
+}

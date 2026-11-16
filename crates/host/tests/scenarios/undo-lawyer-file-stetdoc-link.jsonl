@@ -1,0 +1,12 @@
+{"scenario":"undo-lawyer-file-stetdoc-link","description":"stetdoc run through Bash with the matter folder spelled through a symlink (m-link, beside the matter, made by the test), as macOS's /var for /private/var or a matter under a linked OneDrive folder: `cd \"<link>\" && stetdoc edit \"Main Agreement.docx\" --ops ops.json` (its default Main Agreement.edited.docx) and an absolute `-o \"<link>/Reply.docx\"`. While the client holds the ask, the test writes both files; the host resolves the spelling into the matter, so neither is flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-bash","name":"Bash","title":"stetdoc edit","kind":"execute","status":"pending","rawInput":{"command":"cd \"{{cwd}}/../m-link\" && stetdoc edit \"Main Agreement.docx\" --ops ops.json; stetdoc edit \"{{cwd}}/../m-link/Main Agreement.docx\" --ops reply.json -o \"{{cwd}}/../m-link/Reply.docx\""}}}}
+{"note":"The test makes the link and writes both files while this ask waits.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t1-bash","title":"stetdoc edit","kind":"execute","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1-bash","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

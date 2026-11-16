@@ -1,7 +1,10 @@
-# Windows ARM64's check on a pull request. Tier 2 runs nightly and on demand (ci.yml's notes): on
-# a pull request ci.yml's build matrix leaves Windows ARM64 out, and this job reports its check
-# instead. Skipped by `if`, it takes no runner and reports as skipped. It builds and tests
-# nothing, so Rohan's CI decision (2026-11-04) leaves it as it is.
+# Windows ARM64's check on a pull request. Windows ARM64 runs Windows x64's tests, elevated tests
+# included, in the merge group (without clippy and the keychain smoke test, which run nightly and
+# on demand; ci.yml's notes, since 2026-11-08), not on a pull request: there ci.yml's
+# build matrix leaves it out, and this job reports its check instead. Skipped by `if`, it takes no
+# runner and reports as skipped, which also passes the check once it is required. It builds and
+# tests nothing. It runs on pull requests only, so in a merge group ci.yml's real job alone
+# reports `build (aarch64-pc-windows-msvc)`.
 name: tier 2 on pull requests
 on:
   pull_request:
@@ -13,4 +16,4 @@ jobs:
     if: github.event_name == 'never'
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "Windows ARM64 is tier 2; it builds and tests nightly and on demand."
+      - run: echo "Windows ARM64 builds and tests in the merge group, nightly and on demand, not on a pull request."

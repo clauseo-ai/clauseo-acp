@@ -1,7 +1,7 @@
 //! The commit that closes a turn. Every path that ends a turn (step 7, a turn that never
 //! started, a dequeued turn, the retry of a failed end, start-up repair) builds one
 //! [`TurnClose`] and pushes it with [`TurnClose::push_into`], which keeps the order rules:
-//! expiries, cancelled tool calls, the matter's checkpoint events, `FilesChanged`,
+//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`,
 //! `TurnFailed`, `TurnEnded`, `TurnStoppedAtLimit`, and the detach last, so R6 leaves the
 //! thread in the state the detach gives.
 //!
@@ -13,13 +13,15 @@
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
     ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
-    StreamId, ThreadId, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
 };
 
 use super::super::Actor;
 use super::out::Out;
+use super::skipped::{self, Skipped};
 use super::{LimitMark, cancel};
 use crate::error::Error;
+use crate::log_file::LIFECYCLE;
 use crate::pipeline::MatterEvent;
 
 /// The requests a close expires.
@@ -94,6 +96,11 @@ pub(super) struct TurnClose {
     pub(super) expiries: Expiries,
     /// `Cancelled` for each tool call of the turn not finished, as sent.
     pub(super) cancel_tools: bool,
+    /// When not cancelling: `Completed` for each of these tool calls not finished, as sent.
+    /// Set on a turn the agent ended well to the calls whose update the ACP reader dropped over
+    /// its line cap with no status read (`skipped.rs`), so a call whose last update never came
+    /// does not stay running.
+    pub(super) complete_tools: Skipped,
     /// Events of the matter's stream: checkpoint records (with their rows) and outside edits.
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
@@ -114,6 +121,7 @@ impl TurnClose {
             failure: None,
             expiries: Expiries::None,
             cancel_tools: false,
+            complete_tools: Skipped::None,
             matter: None,
             files: None,
             checkpoint_after: None,
@@ -135,7 +143,10 @@ impl TurnClose {
         let turn = self.turn;
         self.expiries.push_into(actor, out)?;
         if self.cancel_tools {
-            cancel::push_tool_cancels(actor, out.thread(), turn, out)?;
+            cancel::push_tool_settles(actor, out.thread(), turn, ToolCallStatus::Cancelled, out)?;
+        } else {
+            let tools = skipped::unfinished(actor, out.thread(), turn, &self.complete_tools);
+            cancel::push_statuses(actor, tools, ToolCallStatus::Completed, out)?;
         }
         if let Some((matter, events)) = &self.matter {
             for event in events {
@@ -146,7 +157,7 @@ impl TurnClose {
             out.push(actor, files.clone())?;
         }
         if let Some((code, detail)) = &self.failure {
-            let detail = detail.clone();
+            let detail = detail.clone().map(|detail| detail_of(actor, detail));
             out.push(
                 actor,
                 TurnFailed {
@@ -178,6 +189,28 @@ impl TurnClose {
         Ok(())
     }
 
+    /// The lifecycle line of the durable end: the stop, how many papers the turn changed and
+    /// how many of those may hold the lawyer's own edits. Counts only, never a path.
+    pub(super) fn log_end(&self, thread: ThreadId) {
+        let files = self
+            .files
+            .as_ref()
+            .map_or(&[][..], |changed| &changed.files[..]);
+        let flagged = files
+            .iter()
+            .filter(|file| file.may_include_lawyer_edits())
+            .count();
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            turn = %self.turn,
+            stop = ?self.stop,
+            changed = files.len(),
+            flagged,
+            "a turn ended"
+        );
+    }
+
     /// One commit holding the close, tagged `then`.
     pub(super) fn send(
         &self,
@@ -207,6 +240,23 @@ impl TurnClose {
     }
 }
 
+/// Whether a turn that stops with `stop`, and no failure, completes the tool calls it leaves
+/// unfinished whose update the reader dropped ([`TurnClose::complete_tools`]): the stops where
+/// the agent answered the prompt. A cancel closes every unfinished one `Cancelled` itself, and a
+/// failure leaves them as they are. An agent that ends its turn has run its tool calls, so one
+/// still open after a dropped update lost its last one.
+pub(super) fn completes_tools(stop: StopReason) -> bool {
+    matches!(
+        stop,
+        StopReason::EndTurn
+            | StopReason::MaxTokens
+            | StopReason::MaxTurnRequests
+            | StopReason::Refusal
+            | StopReason::AtLimit
+            | StopReason::TooLong
+    )
+}
+
 /// Sends `stopped` in `thread` as its own commit, tagged so that its result reaches the
 /// pending stop (`limits/stops.rs`): a turn's stop at the limit, after the read that gave its
 /// reset time, or the one start-up repair adds. The thread's stream must be loaded.
@@ -232,3 +282,70 @@ pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
         closing.is_some_and(|closing| closing.close.turn == turn)
     })
 }
+
+/// The most of a `TurnFailed.detail` written, in bytes, as the protocol documents it.
+pub(super) const MAX_DETAIL_BYTES: usize = 4096;
+
+/// `detail` as a `TurnFailed` writes it: the home folder written `~` ([`scrub_home`]), tokens
+/// and URL credentials hidden as the stderr tail hides them (`clauseo_process::redact_tokens`),
+/// control characters as spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's
+/// error message is uncapped and may carry a stack trace with the lawyer's paths.
+pub(super) fn detail_of(actor: &Actor, detail: String) -> String {
+    let mut detail = clauseo_process::redact_tokens(&scrub_home(detail, &actor.home_spellings));
+    if detail.contains(char::is_control) {
+        detail = detail.replace(char::is_control, " ");
+    }
+    if detail.len() > MAX_DETAIL_BYTES {
+        let mut end = MAX_DETAIL_BYTES;
+        while !detail.is_char_boundary(end) {
+            end -= 1;
+        }
+        detail.truncate(end);
+    }
+    detail
+}
+
+/// `text` with every spelling of the home folder in `homes` (`rail::home_spellings`: as
+/// configured and canonical) written `~`, each as it is, with forward slashes, as a
+/// `file://` URL and JSON-escaped (`C:\\Users\\…`), ignoring ASCII case (Windows and macOS
+/// paths). The longest form goes first, so a URL loses its scheme too. A spelling of one
+/// character (`/`) is left alone.
+pub(super) fn scrub_home(text: String, homes: &[std::path::PathBuf]) -> String {
+    let mut forms: Vec<String> = Vec::new();
+    for home in homes.iter().filter_map(|home| home.to_str()) {
+        let home = home.trim_end_matches(['/', '\\']);
+        if home.chars().count() <= 1 {
+            continue;
+        }
+        let forward = home.replace('\\', "/");
+        let url = if forward.starts_with('/') {
+            format!("file://{forward}")
+        } else {
+            format!("file:///{forward}")
+        };
+        forms.extend([url, home.replace('\\', "\\\\"), forward, home.to_owned()]);
+    }
+    forms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    forms.dedup();
+    forms
+        .iter()
+        .fold(text, |text, form| replace_ignoring_case(&text, form, "~"))
+}
+
+/// `text` with each match of `from`, ignoring ASCII case, replaced by `to`.
+fn replace_ignoring_case(text: &str, from: &str, to: &str) -> String {
+    // ASCII lowercasing keeps every byte where it was, so a match in `lower` is one in `text`.
+    let (lower, needle) = (text.to_ascii_lowercase(), from.to_ascii_lowercase());
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (found, _) in lower.match_indices(&needle) {
+        out.push_str(text.get(at..found).unwrap_or_default());
+        out.push_str(to);
+        at = found + needle.len();
+    }
+    out.push_str(text.get(at..).unwrap_or_default());
+    out
+}
+
+#[cfg(test)]
+mod tests;

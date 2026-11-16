@@ -1,0 +1,5 @@
+{"scenario":"prompt-child-in-group","description":"The handshake; at the first prompt starts a child that stays in the agent's process group and ignores stdin (child.pid), streams one chunk and never ends the turn; exits when stdin closes","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"spawn_child":{"pid_file":"child.pid"}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"Working."}}}}

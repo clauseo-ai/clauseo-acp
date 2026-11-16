@@ -62,6 +62,10 @@ fn refusals_say_why() {
             Refusal::MattersRoot,
             "it is, holds or sits inside Clauseo's matters folder".to_owned(),
         ),
+        (
+            Refusal::TooDeep,
+            "its path is too long for Windows to start programs in it".to_owned(),
+        ),
     ];
     for (reason, words) in cases {
         assert_eq!(reason.to_string(), words);

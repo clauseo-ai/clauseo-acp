@@ -3,7 +3,7 @@
 //! calls refused, and no status run after the end.
 
 use clauseo_agents::testing::write_file;
-use clauseo_agents::{Method, PasteCode, SigninCode, SigninError, SigninState, Source};
+use clauseo_agents::{Found, Method, PasteCode, SigninCode, SigninError, SigninState, Source};
 
 use crate::support::{
     Events, Fixture, LOGIN_LIMIT, NUDGE, POLL, STATUS_LIMIT, Seen, claude, codex, now,
@@ -44,7 +44,8 @@ fn start_waiting(fx: &Fixture, method: Method) -> (clauseo_agents::Agents, Event
     let (agents, events) = fx.start();
     agents.sign_in(&claude(), method).unwrap();
     let seen = events.until(|state| matches!(state, SigninState::Waiting { .. }));
-    assert_eq!(states(&seen), [waiting(false)]);
+    // the quick status check a sign-in makes first shows `Checking`
+    assert_eq!(states(&seen), [SigninState::Checking, waiting(false)]);
     (agents, events)
 }
 
@@ -55,7 +56,10 @@ fn a_sign_in_completes_with_the_account_plan_and_time() {
     agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(false), signed_in()]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(false), signed_in()]
+    );
     assert_eq!(agents.signin_state(&claude()), Some(signed_in()));
     let logins = fx.runs_of("login");
     assert_eq!(logins.len(), 1);
@@ -140,9 +144,10 @@ fn cancel_kills_the_run_and_its_tree() {
         login.pid
     );
     let _ = login;
-    // Nothing is left to run: no poll armed, and Cancel has nothing to stop.
+    // Nothing is left to run: no poll armed, and Cancel has nothing to stop. The one status
+    // run is the quick check before the login.
     assert_eq!(fx.timer.live(), Vec::<std::time::Duration>::new());
-    assert_eq!(fx.runs_of("status"), []);
+    assert_eq!(fx.runs_of("status").len(), 1);
     assert_eq!(
         agents.cancel_sign_in(&claude()),
         Err(SigninError::NotRunning(claude()))
@@ -234,9 +239,12 @@ fn sign_out_runs_the_logout_then_status() {
         "auth".to_owned(),
         "logout".to_owned()
     ]));
-    // A status check now agrees.
+    // A status check now agrees, and finds no login of the lawyer's.
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none);
 }
 
 #[test]
@@ -258,21 +266,23 @@ fn check_status_reports_a_login_already_there() {
 #[test]
 fn no_status_runs_once_a_poll_confirms_the_sign_in() {
     let fx = Fixture::new("signin-confirmed", "never");
-    // The login never ends by itself; the first poll finds the account signed in.
+    // The login never ends by itself; the first poll finds the account signed in (the login
+    // made after the quick check before the login said signed out).
+    let (agents, events) = start_waiting(&fx, Method::ClaudeAi);
     let home = fx.config.signin.homes[&claude()].clone();
     write_file(
         &home.join("fake-signin-marker"),
         br#"{"authMethod":"claude.ai","email":"test@example.com"}"#,
     )
     .unwrap();
-    let (agents, events) = start_waiting(&fx, Method::ClaudeAi);
     fx.timer.fire(POLL);
     let (_, last) = events.until_end();
     assert_eq!(last, signed_in());
     // By the time `SignedIn` is sent, the login, the polls and their limits are all gone.
     assert_eq!(fx.timer.live(), Vec::<std::time::Duration>::new());
     let runs = fx.launches().len();
-    assert_eq!(fx.runs_of("status").len(), 1);
+    // The quick check's, then the poll's.
+    assert_eq!(fx.runs_of("status").len(), 2);
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(fx.runs_of("login")[0].pid));
     assert!(fx.timer.armed().contains(&STATUS_LIMIT));
@@ -327,4 +337,84 @@ fn calls_that_cannot_run_are_refused() {
         Err(SigninError::NoHome(claude()))
     );
     assert_eq!(fx.launches(), []);
+}
+
+#[test]
+fn sign_in_runs_through_the_sign_in_launcher_and_never_the_install_one() {
+    let fx = Fixture::new("signin-split", "ok-after:0");
+    let (agents, events, installs) = fx.start_split(claude());
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
+    assert_eq!(
+        fx.runs_of("login").len(),
+        1,
+        "the login went through the sign-in launcher"
+    );
+    assert_ne!(fx.runs_of("status"), []);
+    let auth_runs: Vec<String> = installs
+        .args()
+        .into_iter()
+        .filter(|args| args.contains("\"auth\""))
+        .collect();
+    assert_eq!(
+        auth_runs,
+        Vec::<String>::new(),
+        "no sign-in run on the install launcher"
+    );
+}
+
+/// The status check that runs detection (a CLI run in the lawyer's home) holds no caller: with
+/// every `auth status` run hung, `check_status` returns at once, and the state and a second
+/// command answer while the run goes on. Desktop's `setup` and the windows' calls never wait on it.
+#[cfg(unix)]
+#[test]
+fn a_status_run_that_never_answers_holds_no_caller() {
+    let fx = Fixture::new("signin-status-hangs", "never");
+    let (agents, _events) = fx.start();
+    fx.stall(Some("status"));
+    let began = clauseo_agents::testing::instant();
+    agents.check_status(&claude()).unwrap();
+    assert!(matches!(
+        agents.signin_state(&claude()),
+        None | Some(SigninState::Checking)
+    ));
+    drop(agents.cancel_sign_in(&claude()));
+    agents.check_status(&claude()).unwrap();
+    let took = clauseo_agents::testing::millis_since(began);
+    assert!(took < 1000, "the calls took {took} ms");
+    let mut runs = 0;
+    for _ in 0..3000 {
+        runs = fx.runs_of("status").len();
+        if runs > 0 {
+            break;
+        }
+        crate::support::pause();
+    }
+    assert_eq!(runs, 1, "one status run, still going");
+}
+
+/// A sign-in job whose thread panics frees its job with `Failed` (a dev or test build; a release
+/// build aborts), so the agent is not left signing in and the next sign-in runs.
+#[test]
+fn a_panicking_sign_in_job_frees_its_slot() {
+    let fx = Fixture::new("signin-panic", "ok-after:0");
+    let (agents, events) = fx.start();
+    fx.panic_on("login");
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert!(
+        matches!(
+            last,
+            SigninState::Failed {
+                code: SigninCode::Failed,
+                ..
+            }
+        ),
+        "{last:?}"
+    );
+    assert!(!agents.sign_in_going(&claude()));
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
 }

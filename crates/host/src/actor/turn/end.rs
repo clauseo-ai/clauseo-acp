@@ -7,6 +7,10 @@
 //! logged after the read (`limits::stop_later`); an agent id with no kind gets no read, so its
 //! stop rides in the end commit as before.
 //!
+//! A turn the model refused as too long to read (`PromptEnd::too_long`, or a prompt error for
+//! which `clauseo_acp::Error::prompt_too_long` holds) ends `TooLong`: no `TurnFailed`, the
+//! answer so far kept, the queue held, and no limits read for either agent.
+//!
 //! The Codex fallback: a Codex prompt that fails with a JSON-RPC error may be codex-acp's form
 //! of the limit, which Clauseo never parses from prose. Step 6 runs as for any failure, then
 //! asks for one Codex read; step 7's commit waits until that read is done, or 10 s on the host
@@ -30,7 +34,8 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, state, steps, updates,
+    current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
+    updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -72,7 +77,23 @@ pub(super) fn on_prompt_done(
     updates::flush_rate(actor, thread);
     // A turn whose commit already failed ends `Failed` whatever the read says.
     let store_failed = current(actor, thread).is_some_and(|current| current.store_failed.is_some());
+    // A prompt refused as too long ends `TooLong`, never `Failed`, and is never read as a limit.
+    let too_long = matches!(&result, Err(error) if error.prompt_too_long());
+    // A too-long `sessionFailure`, on the answer or an update before it, ends the turn `TooLong`
+    // when it fits the agent (`too_long_stops`).
+    let said = match &result {
+        Ok(answer) => answer.too_long,
+        Err(_) => None,
+    }
+    .or_else(|| current(actor, thread).and_then(|current| current.too_long));
+    let said_too_long = said.is_some_and(|kind| too_long_stops(actor, thread, kind));
+    // Offline skips the limits read: it needs the network too. `TooLong` wins over offline.
+    let ends_too_long = too_long || (result.is_ok() && said_too_long);
+    let (went_offline, lost) = offline::prompt_ended(actor, thread, &result, ends_too_long);
+    let gave_up = lost.or_else(|| updates::gave_up::failed(thread, &result, ends_too_long));
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
+        && !too_long
+        && went_offline.is_none()
         && !host_stopping(actor)
         && !store_failed
         && limits::reads_for(actor, thread) == Some(AgentKind::Codex);
@@ -82,15 +103,19 @@ pub(super) fn on_prompt_done(
     current.prompt_call = None;
     let end = match result {
         Ok(_) | Err(_) if current.cancelled => End::cancelled(None),
+        Ok(_) if let Some((code, detail)) = gave_up => End::failed(code, detail, None),
         Ok(answer) => {
             if current.limit.is_none() {
                 current.limit = answer.limit.as_ref().and_then(asks::limit_mark);
             }
-            // The agent cancelled the turn on the lawyer's refusal, not on a Stop.
-            let stop = if answer.stop == StopReason::Cancelled && current.refused {
-                StopReason::NotAllowed
-            } else {
-                answer.stop
+            // The agent cancelled the turn on a refusal (the lawyer's, or the host's data-folder
+            // one), not on a Stop.
+            let stop = match current.refused {
+                Some(refused) if answer.stop == StopReason::Cancelled => refused,
+                // The model refused the turn as too long to read (an AIR `sessionFailure` on
+                // its `end_turn`): a stop of its own, the answer so far kept.
+                _ if said_too_long => StopReason::TooLong,
+                _ => answer.stop,
             };
             End {
                 stop,
@@ -99,14 +124,40 @@ pub(super) fn on_prompt_done(
                 detach: None,
             }
         }
+        Err(_) if too_long => End {
+            stop: StopReason::TooLong,
+            failure: None,
+            expiry: ExpiryReason::TurnEnded,
+            detach: None,
+        },
         Err(error) => {
             if fallback {
                 current.limit_read = Some(LimitRead::default());
             }
-            End::failed(error.code(), Some(error.to_string()), None)
+            let (code, text) = offline::failed_with(actor, went_offline, &error);
+            End::failed(code, Some(text), None)
         }
     };
     end_turn(actor, thread, end);
+}
+
+/// Whether a too-long `sessionFailure` of `kind` ends `thread`'s turn `TooLong`: Claude Code's
+/// "Prompt is too long" from any agent; `context_exhausted` only from codex-acp, since Claude's
+/// adapter sends that shape for its configured turn or output limit, which shortening a question
+/// does not fix. Any other is logged by its kind alone, no text.
+fn too_long_stops(actor: &Actor, thread: ThreadId, kind: clauseo_acp::TooLong) -> bool {
+    let codex = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
+    let stops = match kind {
+        clauseo_acp::TooLong::PromptTooLong => true,
+        clauseo_acp::TooLong::ContextExhausted => codex,
+    };
+    if !stops {
+        tracing::warn!(%thread, ?kind, "a session failure that is not too long for this agent");
+    }
+    stops
 }
 
 /// A Codex prompt's `.codex` re-check refused it, so nothing reached the agent: the agent is
@@ -139,6 +190,10 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
 /// Steps 6 and 7: the held text and the expiries in one commit, then the after-turn
 /// checkpoint, whose answer logs the end.
 pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
+    super::own_turn::turn_ending(actor, thread, end.stop);
+    // Claude's suspected connection line goes back into the answer unless the turn ends
+    // offline: a cancel (one the agent never answered too) or any other end.
+    offline::turn_ending(actor, thread, end.failure.as_ref().map(|(code, _)| *code));
     cancel::sweep_leftovers(actor, thread, end.stop);
     let Some(current) = current(actor, thread) else {
         return;
@@ -147,9 +202,19 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         return;
     }
     current.phase = TurnPhase::Ending;
+    let answered = current.first_words.is_some();
     if let Some(call) = current.prompt_call.take() {
         call.abort();
     }
+    if answered {
+        let now = actor.now().mono;
+        super::state::answered_end(actor, thread, now);
+    }
+    // Case-law calls from now on count against the between-turns bucket (R24).
+    super::launch_checks::relay::turn_ended(actor, thread);
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     if let Some(timer) = current.cancel_timer.take() {
         timer.abort();
     }
@@ -164,6 +229,8 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         end.detach = current.detach.take();
     }
     let (turn, before) = (current.turn, current.checkpoint_before);
+    let hint =
+        std::mem::take(&mut current.case_law_hint) == crate::connectors::hint::TurnLooks::CaseLaw;
     let expiry = end.expiry;
     let paths = std::mem::take(&mut current.tool_paths);
     current.end = Some(end);
@@ -175,10 +242,17 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     if let Err(error) = expired {
         tracing::warn!(%thread, error = %Cause(&error), "a turn's expiries were not logged");
     }
+    if let Some(state) = state(actor, thread) {
+        // The relay's case-law results no call of this turn took (`sources/case_law.rs`).
+        state.sources.case_law.turn_ended();
+    }
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.permissions.clear();
         agent.elicitations.clear();
         agent.url_elicitations.clear();
+    }
+    if hint && let Some(matter) = actor.threads.get(&thread).map(|entry| entry.row.matter) {
+        super::super::connectors::hint::turn_ended(actor, matter, thread, turn);
     }
     limits::asking_changed(actor);
     let reads = state(actor, thread)
@@ -278,6 +352,7 @@ pub(super) fn on_after_turn(
     close.failure = end.failure;
     close.limit = limit;
     close.detach = end.detach;
+    close.complete_tools = super::skipped::to_complete(actor, thread, &close);
     if !fallback {
         // The fallback asked for its read before this commit, and asks nothing after it.
         tell_limits(actor, thread, &mut close);
@@ -417,11 +492,17 @@ pub(super) fn after_events(
 /// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
+    let mut requeue = None;
     let ended = state(actor, thread).and_then(|state| {
-        let current = state.current.take()?;
+        let mut current = state.current.take()?;
+        let stopped = state.stopped_for_sign_in.take();
         let close = &state.closing.as_ref()?.close;
         // A turn ended with no close of its own (a host bug lost its matter) is not counted.
-        (close.turn == current.turn).then(|| counting::Ended {
+        if close.turn != current.turn {
+            return None;
+        }
+        requeue = sign_in::requeue_of(&mut current, stopped, close);
+        Some(counting::Ended {
             started: current.started,
             first_words: current.first_words,
             now,
@@ -432,8 +513,12 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     if let Some(ended) = ended {
         counting::answer_ended(actor, thread, &ended);
     }
+    if let Some(requeue) = requeue {
+        queue::keep_for_sign_in(actor, thread, requeue);
+    }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);
+        super::super::papers::follow::on_turn_ended(actor, matter);
     }
     if host_stopping(actor) {
         agents::stop(actor, thread);
@@ -456,8 +541,9 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
 }
 
 /// The holder of `matter`'s writer has let go: the next queued turn takes it, or nothing
-/// does during shutdown.
+/// does during shutdown. A file action it held is over (`last_exit.rs`).
 pub(super) fn pass_writer(actor: &mut Actor, matter: MatterId) {
+    super::super::last_exit::finished(actor, matter);
     let shutting = host_stopping(actor);
     let Some(entry) = actor.matters.get_mut(&matter) else {
         return;
@@ -507,6 +593,6 @@ pub(super) fn check_abort(actor: &mut Actor, thread: ThreadId) {
     };
     current.abort = false;
     if current.live() {
-        cancel::cancel_running(actor, thread, None);
+        cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
     }
 }

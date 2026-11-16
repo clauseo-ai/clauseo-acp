@@ -6,10 +6,22 @@ expression: SECURITY_KEYS
   "mcp.servers",
   "tools.web_search",
   "tools.browser",
+  "tools.connectors",
   "privacy.counts",
   "privacy.crash_reports",
   "update.mode",
   "install.bundle",
   "install.registry",
-  "plans."
+  "plans.",
+  "skills.extra",
+  "skills.allow_scripts",
+  "skills.curated",
+  "sandbox.required",
+  "sandbox.allow_unprotected_auto",
+  "network.upstream_proxy",
+  "network.ca_certs",
+  "network.allowed_domains",
+  "network.allow_unsafe_site_override",
+  "network.unsafe_site_list_updates",
+  "browser.allow_when_remote_debugging_disabled"
 ]

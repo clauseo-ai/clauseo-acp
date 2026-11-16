@@ -15,6 +15,8 @@ use crate::setup::tests::{
 };
 use std::path::PathBuf;
 
+/// The authenticated download through gh, and when it is chosen.
+mod gh;
 /// The winget path when winget exits 0.
 mod winget;
 
@@ -51,6 +53,7 @@ fn install_with(
         ran.push((cmd.to_string(), at.to_path_buf()));
         match cmd.program {
             Program::Named("curl") => Scratch::write(at.join(curl_output(cmd)), asset_bytes)?,
+            Program::Named("gh") => Scratch::write(at.join(gh::gh_output(cmd)), asset_bytes)?,
             Program::Named("tar") => {
                 Scratch::write(at.join(cmd.args.last().unwrap()), ASSET_BYTES)?;
             }

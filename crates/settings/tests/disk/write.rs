@@ -30,6 +30,11 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
+/// `fs::hard_link`.
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    fs::hard_link(original, link)
+}
+
 /// `fs::set_permissions`.
 pub(crate) fn set_permissions(path: &Path, permissions: Permissions) -> io::Result<()> {
     fs::set_permissions(path, permissions)

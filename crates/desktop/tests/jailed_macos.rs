@@ -1,14 +1,14 @@
 //! The built app inside a real Seatbelt sandbox (macOS CI): started under `sandbox-exec`, it
-//! refuses with exit 77 and exactly its one stderr line; the pre-write guard still runs, inside
-//! the sandbox and outside it. The profiles are the ones run by hand on a Mac mini against a
-//! debug build. A start that wrongly reached the app would open a window and hang until nextest's
-//! timeout ends the test, which fails it.
+//! refuses with exit 77 and exactly its one stderr line, which names Seatbelt; the pre-write guard
+//! still runs, inside the sandbox and outside it. The profiles are the ones run by hand on a Mac
+//! mini against a debug build. A start that wrongly reached the app would open a window and hang
+//! until nextest's timeout ends the test, which fails it.
 #![cfg(target_os = "macos")]
 
 use std::io::Write as _;
 use std::process::{Command, Output, Stdio};
 
-use clauseo_desktop::{REFUSAL, SANDBOXED_EXIT};
+use clauseo_desktop::{REFUSAL, SANDBOXED_EXIT, Signal, refusal};
 
 /// The binary under test.
 const APP: &str = env!("CARGO_BIN_EXE_clauseo-desktop");
@@ -82,7 +82,11 @@ fn assert_refused(output: &Output) {
     assert_eq!(output.status.code(), Some(SANDBOXED_EXIT), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        format!("{REFUSAL}\n")
+        "Clauseo will not start inside the agent sandbox (Seatbelt sandbox).\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        format!("{}\n", refusal(Signal::Seatbelt))
     );
     assert!(output.stdout.is_empty(), "{output:?}");
 }
@@ -92,7 +96,8 @@ fn assert_refused(output: &Output) {
 fn assert_guard_refused(output: &Output) {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.is_empty() && !stderr.contains(REFUSAL), "{stderr}");
+    let stem = REFUSAL.strip_suffix('.').unwrap();
+    assert!(!stderr.is_empty() && !stderr.contains(stem), "{stderr}");
 }
 
 #[test]

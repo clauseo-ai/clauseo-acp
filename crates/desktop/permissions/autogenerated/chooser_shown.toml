@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chooser-shown"
+description = "Enables the chooser_shown command without any pre-configured scope."
+commands.allow = ["chooser_shown"]
+
+[[permission]]
+identifier = "deny-chooser-shown"
+description = "Denies the chooser_shown command without any pre-configured scope."
+commands.deny = ["chooser_shown"]

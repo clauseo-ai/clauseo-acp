@@ -5,13 +5,11 @@ import type { Hindi } from "./words-core.ts";
 export const HI = {
   /* ---------- the rail: finding a matter, a folder that moved ---------- */
   "Find a matter": "मामला खोजें",
-  // RO-20: Find's placeholder and name once it searches inside (U16a); hi: later
-  Find: null,
-  "Find a matter by its name, client or case number": "नाम, मुवक्किल या केस नंबर से मामला खोजें",
+  // RO-20: Find's placeholder and name once it searches inside (U16a)
+  Find: "खोजें",
   Recent: "हाल के",
   "Matching matters": "मेल खाते मामले",
   "No matter matches '{q}'.": "कोई मामला '{q}' से मेल नहीं खाता।",
-  "Search covers names, clients and case numbers.": "खोज में नाम, मुवक्किल और केस नंबर शामिल हैं।",
   // where the host gives no client (today's), find searches names only; with clients, names and clients
   "Find a matter by its name": "नाम से मामला खोजें",
   "Find a matter by its name or client": "नाम या मुवक्किल से मामला खोजें",
@@ -22,35 +20,64 @@ export const HI = {
   "Client, {client}": "मुवक्किल, {client}",
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
-  /* ---------- a new matter: a folder the host refused, a create that failed, a next date that doesn't read ---------- */
-  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
-  // matters' own folder, a drive, the home folder and a system folder alike
+  /* ---------- a new matter: a folder the host refused, a create that failed ---------- */
+  // matter.folder_refused, which doesn't say why; also the line for a folder inside or holding a matter the list
+  // doesn't have (one being made or forgotten), and for matter.folder_is_matter, with no Open
   "Clauseo can't make a matter of this folder. Choose another folder.":
     "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
-  "{path} is a whole drive.": "{path} पूरी ड्राइव है।",
-  "A matter is one folder of papers. Choose the folder for one matter.":
-    "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
-  "{path} is your home folder.": "{path} आपका होम फ़ोल्डर है।",
-  "It holds far more than one matter. Choose the folder for one matter.":
-    "इसमें एक मामले से कहीं अधिक है। किसी एक मामले का फ़ोल्डर चुनें।",
-  "{path} is a folder the computer keeps for itself.":
-    "{path} वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है।",
-  "Choose the folder that holds the matter's papers.": "वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
+  // folder PR 2: each refusal says its reason (matter-form-check.ts)
+  "This is the top of a drive. Choose a folder on it.":
+    "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+  "This is your home folder. Choose a folder inside it.":
+    "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+  "This is a system folder. Choose another folder.": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+  "This folder is part of Clauseo's own data. Choose another folder.":
+    "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
+  "This folder is too deeply nested for Windows. Choose a shorter path.":
+    "यह फ़ोल्डर Windows के लिए दूसरे फ़ोल्डरों के बहुत भीतर है। छोटा पथ चुनें।",
   "Clauseo can't read {path}.": "Clauseo {path} नहीं पढ़ पा रहा।",
   "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
   "It may be locked, or on a drive that's no longer connected.":
     "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
-  "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
-  // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
-  // the list has it, and Open it beside the line
-  "This folder is already a matter: {name}.": null,
-  "This folder is already a matter.": null,
+  // matter.folder_inside_matter, matter.folder_holds_matter: the matter on the list whose folder it is nested with,
+  // and Open {name} beside the line
+  "This folder is inside the folder of {name}.": "यह फ़ोल्डर {name} के फ़ोल्डर के भीतर है।",
+  "This folder holds the folder of {name}.": "इस फ़ोल्डर में {name} का फ़ोल्डर है।",
+  "Open {name}": "{name} खोलें",
   // matter.folder_in_matters_root: the folder Clauseo keeps matters in, a choose-another refusal
-  "{path} is the folder Clauseo keeps matters in.": null,
-  "That folder is where Clauseo keeps matters.": null,
-  "Choose the folder for one matter.": null,
+  "{path} is the folder Clauseo keeps matters in.": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
+  "That folder is where Clauseo keeps matters.": "उस फ़ोल्डर में Clauseo मामले रखता है।",
+  "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
+  /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
+  "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
+  // the first screen, while the folder picked is made a matter (matters.create)
+  "Opening the folder…": "फ़ोल्डर खुल रहा है…",
+  /* ---------- Clauseo's own folder chooser, where Windows' folder window would stall (folder-chooser.tsx) ---------- */
+  "Choose the matter's folder": "मामले का फ़ोल्डर चुनें",
+  "Windows' folder window is slow to open on this computer, so Clauseo shows its own.":
+    "इस कंप्यूटर पर Windows की फ़ोल्डर विंडो देर से खुलती है, इसलिए Clauseo अपनी विंडो दिखाता है।",
+  // the start points beside the drives (C:, D:): the home folder, the Desktop, the folder of the last pick
+  Home: "होम",
+  Desktop: "डेस्कटॉप",
+  "Last place": "पिछली जगह",
+  Up: "ऊपर",
+  "Or type a folder's location": "या फ़ोल्डर का स्थान टाइप करें",
+  Go: "जाएँ",
+  "Choose this folder": "यह फ़ोल्डर चुनें",
+  Cancel: "रद्द करें",
+  "This folder didn't answer in time.": "इस फ़ोल्डर ने समय पर जवाब नहीं दिया।",
+  "Try again": "फिर से प्रयास करें",
+  "This folder can't be found.": "यह फ़ोल्डर नहीं मिला।",
+  "Clauseo can't use this folder.": "Clauseo इस फ़ोल्डर का इस्तेमाल नहीं कर सकता।",
+  // beside a folder Clauseo refuses (a system folder, the home folder's own): listed, but it doesn't open
+  "Can't be a matter": "मामला नहीं बन सकता",
+  "Some folders aren't shown.": "कुछ फ़ोल्डर नहीं दिखाए गए हैं।",
+  // where the places to start or the folders stand while the desktop still reads them (provisional Hindi)
+  "Looking…": "देखा जा रहा है…",
+  // while the desktop's own window asks to use the folder chosen
+  "Waiting for you to confirm…": "आपकी पुष्टि की प्रतीक्षा है…",
   /* ---------- a matter whose folder has moved ---------- */
   "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
   "It was at {path}. Find it where it is now, and the matter opens as you left it.":
@@ -77,6 +104,27 @@ export const HI = {
   // the same with one paper, which the design's line has no form for (U6's draft, QU.8)
   "A new conversation. It reads this matter's one paper.":
     "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
+  // after it, the papers it can't read because they are only online (the wall's dimmed tiles), by the service that
+  // syncs the folder where it has a name; never with no paper to read. Hindi provisional (stage D, 2026-11-11)
+  "{n} more are only in {service}.": "{n} और दस्तावेज़ केवल {service} में हैं।",
+  "1 more is only in {service}.": "1 और दस्तावेज़ केवल {service} में है।",
+  "{n} more are only online.": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
+  "1 more is only online.": "1 और दस्तावेज़ केवल ऑनलाइन है।",
+  // in its place with no paper to read, when the matter's papers are all only online (folders not opened aren't
+  // counted). Hindi provisional (stage D, 2026-11-11)
+  "A new conversation. This matter's {n} papers are only in {service}.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल {service} में हैं।",
+  "A new conversation. This matter's one paper is only in {service}.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल {service} में है।",
+  "A new conversation. This matter's {n} papers are only online.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल ऑनलाइन हैं।",
+  "A new conversation. This matter's one paper is only online.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल ऑनलाइन है।",
+  // with no paper and no file only online, only folders Clauseo couldn't open: one key each, the same Hindi
+  "A new conversation. Clauseo couldn't open this matter's folders.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+  "A new conversation. Clauseo couldn't open this matter's folder.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",
@@ -101,7 +149,7 @@ export const HI = {
   "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। आपने {time} बजे उत्तर रोका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.":
-    null, // hi: later
+    "कतार रुकी है। आपने {time} बजे एक अनुरोध की अनुमति नहीं दी, इसलिए आपके भेजने तक और कुछ नहीं भेजा जाएगा।",
   "The queue is held. The answer failed at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। {time} बजे उत्तर पूरा नहीं हो सका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "Send next": "अगला भेजें",
@@ -111,15 +159,29 @@ export const HI = {
   // the lawyer sends
   "{n} queued.": "{n} कतार में।",
   "1 queued.": "1 कतार में।",
+  // UD2-57: under the count while the host holds the queue for an update install (#537's queue_held_reason)
+  "Clauseo is installing an update. Your queued questions go once it's done.":
+    "Clauseo एक अपडेट इंस्टॉल कर रहा है। इसके पूरा होते ही कतार में रखे आपके प्रश्न भेजे जाएँगे।",
+  // UD2-58: the resume cue, after an idle stop, while the agent restarts slowly (R20b; the plan's name fills {plan})
+  "Getting {plan} ready.": "{plan} तैयार हो रहा है।",
+  // under each queued message while the queue isn't held, and in a steer still waiting on the agent's word (the plan's
+  // name fills {name}: Claude, ChatGPT). Hindi provisional
+  "Sends when {name} finishes": "{name} के पूरा करने पर जाएगा",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
-  "Send now gives your words to Clauseo while it writes.":
-    "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
-  "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.":
-    "ChatGPT उत्तर के बीच में शब्द नहीं ले सकता। अभी भेजें इस उत्तर को रोकता है, जितना लिखा गया वह रखता है, और आपके शब्द पहले भेजता है।",
+  // the composer's hint: an agent that takes words mid-answer, and any other (the plan's name fills {name}). Hindi
+  // provisional
+  "Enter adds your words to this answer. Send now stops the answer and sends them.":
+    "Enter से आपके शब्द इसी उत्तर में जुड़ जाते हैं। अभी भेजें उत्तर रोककर उन्हें भेजता है।",
+  "Enter sends your words when {name} finishes. Send now stops the answer and sends them.":
+    "Enter से आपके शब्द {name} के पूरा करने पर जाते हैं। अभी भेजें उत्तर रोककर उन्हें भेजता है।",
   "You, {time}, while Clauseo answered": "आप, {time}, जब Clauseo उत्तर दे रहा था",
-  // where a steered message went: the answer had just ended (requeued), or it was stopped for the words (sent now)
-  "Your words came as the answer ended, so they go next.":
-    "आपके शब्द उत्तर पूरा होते समय पहुँचे, इसलिए वे अगले भेजे जाएँगे।",
+  // where a steered message went: it waited for the answer to end (requeued; Hindi provisional), or the answer was
+  // stopped for the words (sent now)
+  "Your words waited for the answer to end, so they went next.":
+    "आपके शब्द उत्तर पूरा होने तक रुके रहे, इसलिए वे अगले भेजे गए।",
+  // a steer never sent (the answer stopped or ended first): under its words; its words go back into the composer.
+  // Hindi provisional
+  "Not sent, because you stopped the answer.": "नहीं भेजा गया, क्योंकि आपने उत्तर रोक दिया।",
   "Stopped at {time} to send your words first. The answer so far is kept.":
     "आपके शब्द पहले भेजने के लिए {time} बजे रोका गया। अब तक का उत्तर रखा गया है।",
   "Your words at {time} came in while Clauseo searched Indian Kanoon for {what}. That search carried on in the background, finished at {done}, and this answer uses it.":

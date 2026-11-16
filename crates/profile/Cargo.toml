@@ -22,6 +22,20 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+# The skill packs' read (src/packs/read.rs): open with O_NOFOLLOW, through rustix's safe call.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
+# The skill packs' read on Windows (src/packs/windows.rs): CreateFileW with
+# FILE_FLAG_OPEN_REPARSE_POINT, GetFileInformationByHandle for the attributes and link count, and
+# GetFinalPathNameByHandleW.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+] }
+
 [dev-dependencies]
 # Itself with test-support, so the tests reach `tree_text` with no flag.
 clauseo-profile = { path = ".", features = ["test-support"] }

@@ -50,6 +50,11 @@ pub(crate) struct ThreadEntry {
     /// step when the stream is unloaded, and from each durable `TurnEnded`.
     pub(crate) last_stop: Option<super::rail::Stop>,
     pub(crate) turn: turn::TurnState,
+    /// The papers its undos removed that the host still looks for (`turn/came_back.rs`).
+    pub(crate) came_back: turn::CameBackWatches,
+    /// `CreateThread`'s config, in memory only: set at the session's start while the thread has
+    /// logged no options of its own (`turn/picks.rs`).
+    pub(crate) picks: Option<clauseo_protocol::ConfigPicks>,
 }
 
 /// Work in flight that start-up and shutdown wait for.
@@ -60,6 +65,9 @@ pub(crate) struct Work {
     pub(crate) receipts: usize,
     pub(crate) matter_jobs: usize,
     pub(crate) snapshots: usize,
+    /// Run folders being removed off the actor (`launch_checks::discard`), with their browser
+    /// claims: shutdown answers only once they are gone.
+    pub(crate) run_removals: usize,
 }
 
 impl Work {
@@ -69,6 +77,7 @@ impl Work {
             && self.receipts == 0
             && self.matter_jobs == 0
             && self.snapshots == 0
+            && self.run_removals == 0
     }
 }
 

@@ -86,7 +86,7 @@ fn scenario(stem: &str, canary: &str) -> String {
             "agentInfo": {"name": "fake_agent", "version": "0.0.0"}}}}),
         json!({"expect": {"method": "session/new", "as": "new", "params": {"cwd": "{{any}}"}}}),
         json!({"respond": {"to": "new", "result": {"sessionId": "sess-1", "modes": {
-            "currentModeId": "default", "availableModes": [
+            "currentModeId": "auto", "availableModes": [
                 {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
                 {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]}}}}),
         json!({"expect": {"method": "session/prompt", "as": "p1", "params": {"sessionId": "sess-1"}}}),
@@ -440,6 +440,7 @@ fn session_in_a_planted_environment() {
         HostCommand::CreateThread {
             matter,
             agent: AgentId::new(CLAUDE).unwrap(),
+            config: None,
         },
     );
     let CommandOutcome::ThreadCreated { thread } = created else {

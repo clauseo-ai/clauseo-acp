@@ -1,0 +1,274 @@
+//! S15 `PR4a2` on NTFS: a nested `CLAUDE.md` and a nested `.git\config` that the lawyer had at
+//! launch can't be edited, renamed, replaced or deleted by the pool user, and forgetting the
+//! matter hands their denies back. This test process stands in for the pool user: the plan
+//! names this user's own SID as the pool user, and the matter's DACL gives that SID `Modify`
+//! alone (no `FILE_DELETE_CHILD`), as tier B gives the pool user. The lawyer's copies are read
+//! back byte for byte.
+
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
+
+use super::Around;
+use crate::Error;
+use crate::windows::acl_plan::{AdmittedPlan, Sid, Subjects, plan};
+use crate::windows::admit::{PathKind, admit_with};
+use crate::windows::apply::{apply, forget_matter};
+use crate::windows::fence::Neighbours;
+use crate::windows::ledger::{Ledger, ledger_path};
+use crate::windows::private_dir::set_owner;
+use crate::windows::record::current_user_sid;
+use crate::windows::test_acl::{entries, has};
+use crate::windows::test_dacl::{auto_inherit_with, drop_privileges, protect_with};
+use crate::windows::test_junction::junction;
+use crate::windows::test_world::{
+    FakeFolders, GROUP_SID, OTHER_POOL_SIDS, USER_SID, World, matter_one, reserved, sids, trusted,
+};
+use crate::windows::{FolderSupport, NtfsAcl};
+
+const CLAUDE: &str = "# The lawyer's instructions\r\n\r\nCite the bundle.\r\n";
+const CONFIG: &str = "[core]\r\n\trepositoryformatversion = 0\r\n\tbare = false\r\n";
+
+/// `ACCESS_DENIED_ACE_TYPE`.
+const DENIED: u8 = 1;
+
+/// The read-only denies of matter one's plan for `w`, with `me` as its pool user: what
+/// `acl_plan` makes of the policy's `read_only_in_matter`, nothing else.
+fn read_only_denies(w: &World, me: &Sid) -> AdmittedPlan {
+    let policy = w.builder().build().unwrap();
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let none = FakeFolders::default();
+    let admitted = admit_with(&policy, &w.at("data"), &Neighbours::default(), ok, &none).unwrap();
+    let subjects = Subjects {
+        pool_user: me.clone(),
+        matter: None,
+        other_pool_users: OTHER_POOL_SIDS
+            .iter()
+            .map(|s| Sid::parse(s).unwrap())
+            .collect(),
+        pool_group: Sid::parse(GROUP_SID).unwrap(),
+    };
+    let full = plan(&admitted, &subjects, matter_one()).unwrap();
+    let denies = full
+        .grants()
+        .iter()
+        .filter(|g| g.kind() == PathKind::ReadOnlyInMatter)
+        .cloned()
+        .collect();
+    AdmittedPlan::from_grants(matter_one(), denies)
+}
+
+/// One thing the agent tries, through std's own calls, as an agent's tools make them.
+#[derive(Debug, Clone, Copy)]
+enum Try {
+    /// Open the file to write.
+    Write,
+    /// Open the file to append, and append a line.
+    Append,
+    /// Rename it to the other name, replacing what is there.
+    Rename,
+    /// Delete the file.
+    Delete,
+    /// Delete the folder and everything in it.
+    DeleteTree,
+    /// Make a file of the agent's.
+    Make,
+}
+
+/// `what` on `path`; `to` is the name a rename gives it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test plays the agent: it tries std's own writes, renames and deletes"
+)]
+fn agent(what: Try, path: &Path, to: &Path) -> io::Result<()> {
+    match what {
+        Try::Write => OpenOptions::new().write(true).open(path).map(drop),
+        Try::Append => OpenOptions::new()
+            .append(true)
+            .open(path)?
+            .write_all(b"a line\r\n"),
+        Try::Rename => fs::rename(path, to),
+        Try::Delete => fs::remove_file(path),
+        Try::DeleteTree => fs::remove_dir_all(path),
+        Try::Make => fs::write(path, "# the agent's\r\n"),
+    }
+}
+
+/// `what` on `path` (to `to`), which must be refused for access.
+fn denied(what: Try, path: &Path, to: &Path) {
+    match agent(what, path, to) {
+        Ok(()) => panic!("{what:?} {} went through", path.display()),
+        Err(error) => assert_eq!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied,
+            "{what:?} {}: {error}",
+            path.display()
+        ),
+    }
+}
+
+/// Each way the agent could change the file at `path`, every one refused: open it to write or
+/// to append, rename it away, delete it, and rename `spare` (a file of the agent's at the
+/// matter's root) over it.
+fn refused(path: &Path, spare: &Path) {
+    let away = path.with_extension("moved");
+    for what in [Try::Write, Try::Append, Try::Rename, Try::Delete] {
+        denied(what, path, &away);
+    }
+    agent(Try::Make, spare, spare).unwrap();
+    denied(Try::Rename, spare, path);
+    agent(Try::Delete, spare, spare).unwrap();
+}
+
+/// Whether `path` holds a deny entry for `sid`, inherited or explicit.
+fn denied_to(path: &Path, sid: &Sid) -> bool {
+    entries(path)
+        .iter()
+        .any(|(kind, _, _, s)| *kind == DENIED && s == sid)
+}
+
+#[test]
+fn the_pool_user_cant_edit_rename_or_delete_a_nested_claude_md_or_git_config() {
+    let w = World::new("apply-ntfs-nested");
+    w.dir.file("matter/sub/CLAUDE.md", CLAUDE);
+    w.dir.file("matter/repo/.git/config", CONFIG);
+    w.dir
+        .file("matter/sub/brief.md", "# the lawyer's brief\r\n");
+    // The stand-in pool user is this user's own SID, so the write deny the apply writes binds
+    // the apply too. Whoever owns the lawyer's files must not be the stand-in: then they would
+    // count as pool-owned, and the owner pass would need the `WRITE_DAC` and `WRITE_OWNER`
+    // the deny just refused (`ChildShut`, VM run 7 at Medium, and CI's runneradmin, whose
+    // default owner is the user, not Administrators). In real use the pool SID never owns the
+    // lawyer's files, so each is given to `Administrators` here, whatever the token's default
+    // owner. A token that may not set that owner (Medium, no restore privilege) skips.
+    let admins = Sid::parse("S-1-5-32-544").unwrap();
+    // Top-down: a folder before what is in it.
+    let items = [
+        "sub",
+        "sub/CLAUDE.md",
+        "sub/brief.md",
+        "repo",
+        "repo/.git",
+        "repo/.git/config",
+    ];
+    for rel in items {
+        if let Err(error) = set_owner(&w.at(&format!("matter/{rel}")), &admins) {
+            eprintln!("skipped: this token can't make Administrators an owner: {error}");
+            return;
+        }
+    }
+    drop_privileges();
+    let me = current_user_sid().unwrap();
+    let matter = w.canonical("matter");
+    // The stand-in's rights must come from its own entries alone, as a real pool user's do:
+    // the product gives the pool SID `Modify` (`0x1301bf`, no `FILE_DELETE_CHILD`), and the
+    // protected item's deny takes `DELETE`. Here the stand-in is also in `Administrators`, and
+    // under a temp folder whose DACL isn't auto-inherited (CI's `D:\a\_temp`) NTFS gives each
+    // new item explicit copies of its parent's entries, `Administrators` full control among
+    // them. A protected DACL on `matter` alone keeps those copies on `sub`, whose
+    // `FILE_DELETE_CHILD` then lets the stand-in rename `CLAUDE.md` past its deny (CI run
+    // 42217823675). So `matter` gets the pool user's share alone (`Modify` for the stand-in,
+    // full control for `SYSTEM`; each owner keeps `READ_CONTROL` and `WRITE_DAC`), and each
+    // item below drops its explicit entries and takes only what `matter` passes down. The
+    // product's own grants and denies then sit on top, as in use.
+    let dacl = format!("D:P(A;OICI;0x1301bf;;;{me})(A;OICI;FA;;;SY)");
+    protect_with(&matter, &dacl).unwrap();
+    for rel in items {
+        let path = rel.split('/').fold(matter.clone(), |p, part| p.join(part));
+        auto_inherit_with(&path, "D:").unwrap();
+        assert!(!has(&path, "S-1-5-32-544", false), "{}", path.display());
+        assert!(!has(&path, "S-1-5-32-544", true), "{}", path.display());
+    }
+    let claude = matter.join("sub").join("CLAUDE.md");
+    let git = matter.join("repo").join(".git");
+    let config = git.join("config");
+
+    let mut plan = read_only_denies(&w, &me);
+    let planned: Vec<PathBuf> = plan.grants().iter().map(|g| g.path().to_owned()).collect();
+    assert!(planned.contains(&claude), "{planned:?}");
+    assert!(planned.contains(&git), "{planned:?}");
+    let data = w.canonical("data");
+    let mut ledger =
+        Ledger::open(ledger_path(&data), std::slice::from_ref(&me), &reserved()).unwrap();
+    let mut acl = NtfsAcl::new().unwrap();
+    apply(&mut ledger, &mut plan, &mut acl, &mut Around).unwrap();
+    let recorded: Vec<PathBuf> = ledger.entries().map(|e| e.path.clone()).collect();
+    assert!(recorded.contains(&claude), "{recorded:?}");
+    assert!(recorded.contains(&git), "{recorded:?}");
+    assert!(has(&claude, me.as_str(), false) && has(&git, me.as_str(), false));
+    assert!(
+        denied_to(&config, &me),
+        "the deny on .git reaches its config"
+    );
+
+    let spare = matter.join("agent.tmp");
+    for (path, was) in [(&claude, CLAUDE), (&config, CONFIG)] {
+        refused(path, &spare);
+        let now = fs::read(path).unwrap();
+        assert_eq!(now, was.as_bytes(), "{}", path.display());
+    }
+    // The nested `.git` folder itself can't be renamed or deleted either.
+    let moved = matter.join("repo").join("git-moved");
+    denied(Try::Rename, &git, &moved);
+    denied(Try::DeleteTree, &git, &moved);
+    assert_eq!(fs::read(&config).unwrap(), CONFIG.as_bytes());
+    // The rest of the matter stays the pool user's to write.
+    let brief = matter.join("sub").join("brief.md");
+    agent(Try::Append, &brief, &brief).unwrap();
+
+    // Forget hands every deny back: the entries go, and the files can be written again.
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut Around).unwrap();
+    assert_eq!(ledger.entries().count(), 0);
+    for path in [&claude, &git, &config] {
+        assert!(!denied_to(path, &me), "{}", path.display());
+    }
+    agent(Try::Append, &claude, &claude).unwrap();
+}
+
+/// S15 `PR4a2`: a junction named `.claude` in the matter, leading elsewhere in it, refuses the
+/// launch as a protected link, named relative to the matter, and leaves no entry written.
+#[test]
+fn a_junction_named_claude_refuses_the_launch_naming_it() {
+    let w = World::new("apply-ntfs-protected-junction");
+    w.dir.file("matter/settings/settings.json", "{}");
+    w.dir.dir("matter/sub");
+    let matter = w.canonical("matter");
+    junction(
+        &matter.join("sub").join(".claude"),
+        &matter.join("settings"),
+    )
+    .unwrap();
+    let policy = w.builder().build().unwrap();
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let none = FakeFolders::default();
+    let admitted = admit_with(&policy, &w.at("data"), &Neighbours::default(), ok, &none).unwrap();
+    // The pool user's `Modify` on the matter and the read-only denies.
+    let grants = plan(&admitted, &sids(), matter_one())
+        .unwrap()
+        .grants()
+        .iter()
+        .filter(|g| matches!(g.kind(), PathKind::Matter | PathKind::ReadOnlyInMatter))
+        .filter(|g| g.sid().as_str() == USER_SID)
+        .cloned()
+        .collect();
+    let mut plan = AdmittedPlan::from_grants(matter_one(), grants);
+    let data = w.canonical("data");
+    let mut ledger = Ledger::open(ledger_path(&data), &trusted(), &reserved()).unwrap();
+    let error = apply(
+        &mut ledger,
+        &mut plan,
+        &mut NtfsAcl::new().unwrap(),
+        &mut Around,
+    )
+    .unwrap_err();
+    let Error::ProtectedLink { at } = &error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(at, &Path::new("sub").join(".claude"));
+    assert!(
+        error.to_string().starts_with("sub\\.claude is a shortcut"),
+        "{error}"
+    );
+    assert_eq!(ledger.entries().count(), 0);
+    assert!(!has(&matter, USER_SID, false));
+}

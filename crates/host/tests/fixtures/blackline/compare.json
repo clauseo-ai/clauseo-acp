@@ -1,0 +1,349 @@
+{
+  "next": "stetdoc view redline.docx --revisions (the written file numbers its blocks again, so take the next base from a view)",
+  "output": "redline.docx",
+  "receipt": {
+    "added": [],
+    "added_count": 0,
+    "base": null,
+    "blocks": [],
+    "blocks_omitted": 0,
+    "comments": [],
+    "dry_run": false,
+    "moves": [],
+    "operations": [],
+    "retired": [],
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "changes": [
+          {
+            "block": "p2",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              7
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p2",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              6
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p16",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              3,
+              2
+            ],
+            "kind": "paragraph_deleted"
+          },
+          {
+            "block": "p3",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              9
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p3",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              8
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p5",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              10
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p7",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              15
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p7",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              14
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p11",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              12
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p11",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              11
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p12",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              13
+            ],
+            "kind": "run_format"
+          },
+          {
+            "block": "p13",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              5,
+              4
+            ],
+            "kind": "paragraph_inserted"
+          },
+          {
+            "block": "p15",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              17
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p15",
+            "date": "2026-11-09T10:00:00Z",
+            "ids": [
+              16
+            ],
+            "kind": "insertion"
+          }
+        ],
+        "counts": [
+          [
+            "insertion",
+            6
+          ],
+          [
+            "deletion",
+            5
+          ],
+          [
+            "paragraph_inserted",
+            1
+          ],
+          [
+            "paragraph_deleted",
+            1
+          ],
+          [
+            "run_format",
+            1
+          ]
+        ]
+      }
+    ],
+    "stamp": {
+      "author": "Clauseo",
+      "date": "2026-11-09T10:00:00Z"
+    },
+    "text": "compared: 14 revisions, tracked as Clauseo 2026-11-09T10:00:00Z.\nClauseo: insertion 6, deletion 5, paragraph insertion 1, paragraph deletion 1, run formatting 1\nvalidated 10 units: no problems, and this file needs no separate check.\n",
+    "tracked": true,
+    "validation": {
+      "carried": [],
+      "carried_total": 0,
+      "notes": [],
+      "parts": 2,
+      "units": 10
+    },
+    "warnings": []
+  },
+  "saved": {
+    "base": "cb2de3e1ccf89dde:1:d94d303d20d5b494",
+    "edited": true,
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "000 monthly",
+        "ids": [
+          7
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          6
+        ],
+        "inserted": "200 each month in advance",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p16",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "The deposit is returned within 30 days.\n",
+        "ids": [
+          3,
+          2
+        ],
+        "kind": "paragraph_deleted",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "New York",
+        "ids": [
+          9
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          8
+        ],
+        "inserted": "Delaware",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p5",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          10
+        ],
+        "inserted": " and tidy",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p7",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "000",
+        "ids": [
+          15
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p7",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          14
+        ],
+        "inserted": "200",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p11",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "braces",
+        "ids": [
+          12
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p11",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          11
+        ],
+        "inserted": "curly",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p12",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          13
+        ],
+        "kind": "run_format",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p13",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          5,
+          4
+        ],
+        "inserted": "Notices go by email.\n",
+        "kind": "paragraph_inserted",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p15",
+        "date": "2026-11-09T10:00:00Z",
+        "deleted": "Thirty",
+        "ids": [
+          17
+        ],
+        "kind": "deletion",
+        "story": "notes",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p15",
+        "date": "2026-11-09T10:00:00Z",
+        "ids": [
+          16
+        ],
+        "inserted": "Sixty",
+        "kind": "insertion",
+        "story": "notes",
+        "text_truncated": false
+      }
+    ],
+    "sha256": "07ced377553a7d4b835dc855445f5fcba8a6477c686b9012ecc4b01414e567f3"
+  }
+}

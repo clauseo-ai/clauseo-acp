@@ -2,13 +2,19 @@
 
 use std::ffi::OsString;
 
-use clauseo_mcp::{Failure, browser_guard};
+use clauseo_mcp::{Failure, browser_guard, connector};
 
 /// A mode's entry point: the arguments after the mode's name, and the exit code or a failure.
 type Run = fn(&[OsString]) -> Result<i32, Failure>;
 
 /// Every mode, by the exact name argv[1] must hold. The usage line is built from this table.
-const MODES: &[(&str, Run)] = &[("browser-guard", browser_guard::run)];
+const MODES: &[(&str, Run)] = &[
+    ("browser-guard", browser_guard::run),
+    // Unix: started by the guard itself, never by the agent (`browser_guard/reaper.rs`).
+    #[cfg(unix)]
+    ("browser-reaper", browser_guard::reaper::run),
+    ("connector", connector::run),
+];
 
 /// The exit code for a command line no mode takes.
 const EXIT_USAGE: i32 = 2;

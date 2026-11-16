@@ -4,12 +4,17 @@
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
-use crate::support::{CDP_PORT, GUARD, Scratch, example, guard_command, port_args, run};
+use crate::support::{CDP_PORT, GUARD, Guard, Scratch, example, guard_command, port_args, run};
 use crate::write;
 
-const MODE_USAGE: &str = "usage: clauseo-mcp <mode> ... (modes: browser-guard)\n";
+const MODE_USAGE: &str = if cfg!(unix) {
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, browser-reaper, connector)\n"
+} else {
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n"
+};
 const GUARD_USAGE: &str = if cfg!(windows) {
     "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> \
      --daemon-port <port> -- <agent-browser args...>\n"
@@ -162,12 +167,12 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
     let stub = example("echo_stub");
     let log = scratch.log();
     let args = [log.as_os_str()];
+    // `AGENT_BROWSER_PROXY` is optional (the plain client's Codex entry sends none:
+    // `env.rs`'s no-proxy test), but one that is set must be valid (below).
     let mut required = vec![
         "AGENT_BROWSER_CONFIG",
-        "AGENT_BROWSER_PROXY",
         "AGENT_BROWSER_EXECUTABLE_PATH",
         "AGENT_BROWSER_SESSION",
-        "AGENT_BROWSER_STREAM_PORT",
     ];
     if cfg!(unix) {
         required.push("AGENT_BROWSER_SOCKET_DIR");
@@ -188,9 +193,6 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
         ("AGENT_BROWSER_CONFIG", "agent-browser.json"),
         ("AGENT_BROWSER_EXECUTABLE_PATH", "/no/such/chrome"),
         ("AGENT_BROWSER_SESSION", "a b"),
-        ("AGENT_BROWSER_STREAM_PORT", "80"),
-        ("AGENT_BROWSER_STREAM_PORT", "65536"),
-        ("AGENT_BROWSER_STREAM_PORT", "0"),
     ] {
         let mut command = guard_command(&scratch, &stub, &args);
         command.env(name, value);
@@ -235,9 +237,38 @@ fn an_unstartable_child_exits_1() {
     let not_a_program = scratch.path().join("not-a-program");
     write::write(&not_a_program, "plain text").unwrap();
     let args: [&OsStr; 0] = [];
-    let output = run(guard_command(&scratch, &not_a_program, &args));
-    assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).starts_with("clauseo-mcp browser-guard: cannot run "));
+    // The first call starts Chrome, then fails to start agent-browser: the call gets an error.
+    let mut guard = Guard::start(guard_command(&scratch, &not_a_program, &args));
+    assert_eq!(guard.call("open")["error"]["code"], -32603);
+    let (status, (_, text)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1));
+    let lines: Vec<&str> = text.lines().collect();
+    let chrome = scratch.path().join(crate::support::CHROME);
+    let chrome = chrome.display();
+    let notes = [
+        format!("clauseo-mcp browser-guard: starting {chrome} over a DevTools pipe"),
+        format!(
+            "clauseo-mcp browser-guard: {chrome} started; waiting for its answer on its DevTools \
+             pipe"
+        ),
+        format!(
+            "clauseo-mcp browser-guard: {chrome} answers on its DevTools pipe; the relay listens \
+             on 127.0.0.1"
+        ),
+    ];
+    let notes: Vec<&str> = notes.iter().map(String::as_str).collect();
+    assert_eq!(lines.get(..3), Some(notes.as_slice()), "{text}");
+    assert!(
+        lines
+            .get(3)
+            .is_some_and(|line| line.starts_with("clauseo-mcp browser-guard: cannot run ")),
+        "{text}"
+    );
+    // Chrome started first, so the guard ended it and deleted its profile.
+    assert_eq!(
+        crate::support::run_files(&scratch.cwd()),
+        Vec::<PathBuf>::new()
+    );
 }
 
 /// Unix: the host's socket folder must be there, absolute, a real folder (not a link), mode
@@ -280,9 +311,10 @@ fn an_unsafe_socket_folder_stops_the_guard() {
     write::symlink(scratch.cwd(), &dir).unwrap();
     check(&dir, "it is a link");
     write::remove_dir_all(&dir).unwrap();
-    // `<dir>/<session>.sock`, the session 18 bytes: 104 bytes with an 80-byte folder.
-    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(48)));
-    assert_eq!(long.as_os_str().len(), 80);
+    // `<dir>/<session>.sock`, the session the run's own, at most 23 bytes
+    // (`run-4294967295-ffffffff`): 104 bytes with a 75-byte folder.
+    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(43)));
+    assert_eq!(long.as_os_str().len(), 75);
     write::create_dir_all(&long).unwrap();
     write::set_mode(&long, 0o700).unwrap();
     check(&long, "is 104 bytes, over the 103 a Unix socket allows");

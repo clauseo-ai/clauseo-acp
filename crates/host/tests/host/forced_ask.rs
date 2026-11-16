@@ -2,8 +2,10 @@
 //! `HostConfig::with_folder_support` (test-support only), so it runs on every OS. A Claude agent
 //! in a matter on a network drive: `SetMode` takes only `default` and `plan`; a plan exit loses
 //! its auto-accept option and an answer naming it is refused; a mode the agent moves to itself is
-//! switched back; `SetConfigOption` for the mode takes only the same two; the row says why. With
-//! no guard program the launch is refused. A matter with no such answer runs as before. Codex in
+//! switched back to `default`, and a session that starts in `acceptEdits` is switched to it
+//! before its first prompt; `SetConfigOption` for the mode is refused; the row says why. With
+//! no guard program the launch is refused. A matter with no such answer runs in `auto` (or
+//! `acceptEdits` when auto is not offered) and keeps a plan exit's mode. Codex in
 //! such a matter is refused. The `_meta` layers (no `allowedTools`, the `permissions.ask` rules,
 //! the hook before every tool with `--ask-all`) are pinned in `agent/loads/layering_tests.rs`
 //! and `claude-ask-unknown.jsonl`, the hook's answers in `pre_write_guard/tests/ask.rs`.
@@ -136,15 +138,12 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
     }
     assert_eq!(host.ok(set_mode(thread, "plan")), CommandOutcome::Done);
     events.until("ModeChanged plan", |e| modes(e).len() == 4);
-    // The mode's config option is gated the same way (the review's
-    // `rev_config_option_mode_is_refused_in_forced_ask`): only plan reaches the agent.
-    for mode in ["acceptEdits", "bypassPermissions", "auto"] {
+    // The mode's config option never reaches the agent (the review's
+    // `rev_config_option_mode_is_refused_in_forced_ask`): only model and effort options are
+    // settable (`turn/picks.rs`), so even `plan` is refused there.
+    for mode in ["acceptEdits", "bypassPermissions", "auto", "plan"] {
         host.refused(set_config_mode(thread, mode), ErrorCode::CommandInvalid);
     }
-    assert_eq!(
-        host.ok(set_config_mode(thread, "plan")),
-        CommandOutcome::Done
-    );
     events.assert_no_mismatch();
     assert_eq!(
         summary(&host, matter).folder_support,
@@ -153,9 +152,74 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
     host.shutdown();
 }
 
+/// A forced-ask session that starts in `acceptEdits` (Clauseo's mode elsewhere, or the user's
+/// `permissions.defaultMode`) is switched to `default` before its first prompt: forced ask never
+/// runs in Clauseo's usual `acceptEdits` (decision 3 of 2026-11-04 stands).
+#[test]
+fn a_forced_ask_session_starts_in_default_not_accept_edits() {
+    for (test, kind) in [
+        ("forced_ask_start_network", Some(FolderSupportKind::Network)),
+        (
+            "forced_ask_start_no_permissions",
+            Some(FolderSupportKind::NoPermissions),
+        ),
+    ] {
+        let (_dir, host, _, thread) = claude_in(test, "claude-forced-ask-start", kind);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Summarise clause 4.");
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+        assert_eq!(modes(&events), ["default"], "{test}: {}", events.dump());
+        host.shutdown();
+    }
+}
+
+/// A forced-ask session reopened by `session/load` (answered in `auto`) or by `session/resume`
+/// (answered in `acceptEdits`) is switched to `default` before its prompt, as a new one is.
+#[test]
+fn a_forced_ask_session_reopened_by_load_or_resume_stays_in_default() {
+    for (test, reopen) in [
+        ("forced_ask_load", "claude-forced-ask-load"),
+        ("forced_ask_resume", "claude-forced-ask-resume"),
+    ] {
+        let dir = Dir::new(
+            test,
+            &[(CLAUDE, Scenario::Local("claude-forced-ask-start"))],
+        );
+        let forced = |config: clauseo_host::HostConfig| {
+            config
+                .with_folder_support(Some(FolderSupportKind::Network))
+                .with_pre_write_guard(std::path::PathBuf::from(GUARD))
+        };
+        let host = dir.start_with(0, forced);
+        let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Summarise clause 4.");
+        assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+        host.shutdown();
+
+        dir.set_agents(&[(CLAUDE, Scenario::Local(reopen))]);
+        let host = dir.start_with(1, forced);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "And clause 5?");
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{test}: {}", events.dump());
+        assert_eq!(
+            modes(&events),
+            ["default", "default"],
+            "{test}: {}",
+            events.dump()
+        );
+        host.shutdown();
+    }
+}
+
 /// With no folder answer (and with `cant_change_permissions`, which forces nothing) the same plan
-/// exit offers all three options, the auto-accept one is taken, the agent stays in acceptEdits,
-/// and `SetMode acceptEdits` reaches it: as before forced ask.
+/// exit, from an agent that offers no `auto` (so the session runs in the `acceptEdits`
+/// fallback), offers all three options, the auto-accept one is taken, the agent stays in
+/// acceptEdits, and `SetMode acceptEdits` reaches it: as before forced ask.
 #[test]
 fn claude_elsewhere_runs_as_before() {
     for (test, kind) in [
@@ -190,11 +254,122 @@ fn claude_elsewhere_runs_as_before() {
         events.assert_no_mismatch();
         assert_eq!(
             modes(&events),
-            ["default", "acceptEdits", "acceptEdits"],
+            ["acceptEdits", "acceptEdits", "acceptEdits"],
             "{test}"
         );
         host.shutdown();
     }
+}
+
+/// Outside forced ask, a plan exit as claude-agent-acp 0.89.1 sends it (`auto` always listed)
+/// keeps all four options; "use auto mode" moves the agent to `auto`, and the host keeps it
+/// there. Forced ask drops both auto options (`agent/forced_ask/tests.rs`, and
+/// [`claude_on_a_network_drive_runs_in_forced_ask`] for the accept-edits one).
+#[test]
+fn a_normal_plan_exits_auto_option_lands_in_auto() {
+    let (_dir, host, _, thread) = claude_in("plan_exit_auto", "claude-plan-exit-auto", None);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
+    events.until("permission request 1", |e| {
+        !e.permission_requests().is_empty()
+    });
+    assert_eq!(
+        offered(&events),
+        [
+            "exit-plan-clear-auto",
+            "exit-plan-auto",
+            "exit-plan-default",
+            "reject"
+        ],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        host.ok(answer(thread, &events, "exit-plan-auto")),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    events.until("ModeChanged auto", |e| modes(e).len() == 3);
+    events.assert_no_mismatch();
+    assert_eq!(
+        modes(&events),
+        ["auto", "plan", "auto"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// Runs one plan-exit turn of `thread`: waits for request `n` (1-based), answers `option`, and
+/// waits for the turn's end and for `modes` mode changes in all.
+fn plan_exit(
+    host: &Running,
+    events: &mut Events,
+    thread: ThreadId,
+    n: usize,
+    option: &str,
+    modes_len: usize,
+) {
+    let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
+    events.until("permission request", |e| e.permission_requests().len() == n);
+    let request = events.permission_requests()[n - 1];
+    assert_eq!(
+        host.ok(HostCommand::AnswerPermission {
+            thread,
+            request,
+            option_id: AgentChoiceId::new(option).unwrap(),
+        }),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    events.until("mode changes", |e| modes(e).len() == modes_len);
+    events.assert_no_mismatch();
+}
+
+/// Outside forced ask, a plan exit answered "keep planning" stays in `plan`, and one approved
+/// with the manual option (the app's "Allow once") moves the agent to `default`, which the
+/// host switches to `auto`: approving a plan means going ahead in the matter's mode.
+#[test]
+fn a_normal_plan_exit_stays_in_plan_or_goes_ahead_in_auto() {
+    let (_dir, host, _, thread) = claude_in("plan_exit_normal", "claude-plan-exit-normal", None);
+    let mut events = host.events(StreamId::Thread(thread));
+    plan_exit(&host, &mut events, thread, 1, "reject", 2);
+    assert_eq!(modes(&events), ["auto", "plan"], "{}", events.dump());
+    plan_exit(&host, &mut events, thread, 2, "exit-plan-default", 4);
+    assert_eq!(
+        modes(&events),
+        ["auto", "plan", "default", "auto"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// In forced ask the same approval ends in `default`, with no switch.
+#[test]
+fn a_forced_ask_plan_exit_approved_ends_in_default() {
+    let (_dir, host, _, thread) = claude_in(
+        "plan_exit_forced",
+        "claude-forced-ask-plan-default",
+        Some(FolderSupportKind::Network),
+    );
+    let mut events = host.events(StreamId::Thread(thread));
+    plan_exit(&host, &mut events, thread, 1, "exit-plan-default", 3);
+    assert_eq!(
+        offered(&events),
+        ["exit-plan-default", "reject"],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        modes(&events),
+        ["default", "plan", "default"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
 }
 
 /// Forced ask with no guard hook to give (no guard program, as when `current_exe` failed): the

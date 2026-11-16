@@ -6,7 +6,6 @@
 use keyring::{Entry, Error};
 
 use crate::error::StoreError;
-use crate::known::KEYCHAIN_SERVICE;
 
 /// keyring's one-time store setup, or its error.
 pub(super) fn init() -> Result<(), StoreError> {
@@ -16,24 +15,26 @@ pub(super) fn init() -> Result<(), StoreError> {
     }
 }
 
-fn entry(account: &str) -> Result<Entry, StoreError> {
-    Entry::new(KEYCHAIN_SERVICE, account).map_err(|err| map(&err))
+fn entry(service: &str, account: &str) -> Result<Entry, StoreError> {
+    Entry::new(service, account).map_err(|err| map(&err))
 }
 
-pub(super) fn get(account: &str) -> Result<Option<Vec<u8>>, StoreError> {
-    match entry(account)?.get_secret() {
+pub(super) fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, StoreError> {
+    match entry(service, account)?.get_secret() {
         Ok(secret) => Ok(Some(secret)),
         Err(Error::NoEntry) => Ok(None),
         Err(err) => Err(map(&err)),
     }
 }
 
-pub(super) fn set(account: &str, secret: &[u8]) -> Result<(), StoreError> {
-    entry(account)?.set_secret(secret).map_err(|err| map(&err))
+pub(super) fn set(service: &str, account: &str, secret: &[u8]) -> Result<(), StoreError> {
+    entry(service, account)?
+        .set_secret(secret)
+        .map_err(|err| map(&err))
 }
 
-pub(super) fn delete(account: &str) -> Result<(), StoreError> {
-    match entry(account)?.delete_credential() {
+pub(super) fn delete(service: &str, account: &str) -> Result<(), StoreError> {
+    match entry(service, account)?.delete_credential() {
         Ok(()) | Err(Error::NoEntry) => Ok(()),
         Err(err) => Err(map(&err)),
     }

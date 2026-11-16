@@ -7,16 +7,37 @@
 //! the privacy switches. Of the updater's four (0037), `main` sends `InstallUpdate`,
 //! `CancelScheduledUpdate` and `CheckForUpdate` (its "Restart to update" row), and the settings
 //! window `SetUpdateMode` and `CheckForUpdate`: settings never installs, main never changes the
-//! mode.
+//! mode. Of the connector commands (R24, `connector_main` and `connector_settings`), `main`
+//! sends only `DismissCaseLawHint` and `RefreshBalance`: it shows agent output, so it never adds
+//! a connector or a key, spends credits, opens a pay link, signs out or removes; its hint and
+//! banner open Settings at the connector (`open_settings` with `section: "connectors"`), whose
+//! window sends the rest. The sandbox's two commands (0051, R17 PR-B1), `RetryProtection` and
+//! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
+//! main window's protection notice. Neither carries a field, and the host holds each answer
+//! until the set-up (with its administrator prompt) ends.
+//! The browser's `InstallBrowser`, `CancelBrowserInstall` and `RecheckBrowserPolicy` (0029)
+//! are `main`'s alone: its tool line offers them.
+//! Of the unsafe-site override's two (0053, PR 2), `main` sends
+//! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
+//! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
+//! agent shows or runs, may lift a block.
+//! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
+//! `offline`. The lawyer's MCP server commands (Settings › Tools) are the settings window's
+//! alone: each server is a program that runs with the lawyer's access.
 
-use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{
+    ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
+};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its
-/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), and for its
-/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), any other window nothing.
+/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its Skills
+/// pane `SetSkillPack` (0040), for its
+/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
+/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
+/// the connector commands but the hint's (R24), for its protection section `RetryProtection`
+/// and `RemoveSandboxSetup` (0051), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -26,13 +47,26 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             HostCommand::SetUiSettings { .. }
             | HostCommand::SetToolSettings { .. }
             | HostCommand::SetPrivacySettings { .. }
+            // Skills (0040, PR-E): turning a pack on or off is a setting; the id is checked
+            // by its type, the pack by the host.
+            | HostCommand::SetSkillPack { .. }
             | HostCommand::RefreshLimits { .. }
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
-            | HostCommand::CheckForUpdate {} => Ok(()),
+            | HostCommand::CheckForUpdate {}
+            // Protection (0051): retrying the set-up, or removing it.
+            | HostCommand::RetryProtection {}
+            | HostCommand::RemoveSandboxSetup {}
+            // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
+            | HostCommand::RevokeAllowedSite { .. }
+            // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
+            | HostCommand::Mcp(_) => Ok(()),
+            HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, refresh_limits, set_update_mode and check_for_update",
+                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
+                 the MCP server commands and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -42,10 +76,10 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// Whether `main` may send `command`: an allow-list, one arm per host command and no
 /// catch-all, so a command the host adds does not compile here until the bridge rules on it
 /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
-/// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-/// `SetConfigOption`), and a `CreateMatter`, `RelocateMatter` or `ScanFolder` whose folder
-/// ref this run's `pick_folder` did not issue. `CancelScan` always passes: it starts nothing,
-/// and cancelling a scan that is not running does nothing.
+/// (`AnswerPermission`), what may not come from the window at all (`SetMode`, a
+/// `SetConfigOption` that is not a choice), and a `CreateMatter`, `RelocateMatter` or
+/// `ScanFolder` whose folder ref this run's `pick_folder` did not issue. `CancelScan` always
+/// passes: it starts nothing, and cancelling a scan that is not running does nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
         HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
@@ -87,19 +121,46 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // it after the lawyer agrees, and its Cancel button the cancel. No field to check.
         | HostCommand::InstallBrowser {}
         | HostCommand::CancelBrowserInstall {}
+        // The browser row's "Try again" when the firm's browser policy was not read (0029):
+        // a read on the host, which runs one at a time. No field to check.
+        | HostCommand::RecheckBrowserPolicy {}
         // R23: the rail card's update actions, "Restart to update" (now or after the answer),
         // taking a scheduled install back, and "Check again"; settings may not install (0037).
         | HostCommand::InstallUpdate { .. }
         | HostCommand::CancelScheduledUpdate {}
-        | HostCommand::CheckForUpdate {} => Ok(()),
+        | HostCommand::CheckForUpdate {}
+        // 0051: the protection notice's "Set up" and the removal; no field to check.
+        | HostCommand::RetryProtection {}
+        | HostCommand::RemoveSandboxSetup {}
+        // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
+        // The host allows only the host of a notice it sent, and refuses while policy forbids.
+        | HostCommand::AllowBlockedSite { .. }
+        | HostCommand::RevokeAllowedSite { .. }
+        // The room's tracked changes in a Word file: a matter, a path inside it that the host
+        // resolves and refuses unless it is a `.docx`, and change ids. Writes as a restore does.
+        | HostCommand::DecideRevisions(_)
+        // The pickers: a choice of a config option, which the host takes only for a model or
+        // effort option of the thread's (`turn/picks.rs`), refusing every other.
+        | HostCommand::SetConfigOption {
+            value: ConfigValue::Select(_),
+            ..
+        }
+        // D-050: the window's `online`/`offline` events, a flag; it only arms or takes back
+        // the host's offline watch on running turns.
+        | HostCommand::SetNetwork { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
-        // A mode or option can widen what the agent may do without asking (Claude's
-        // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
-        // That path does not exist yet, and the window never sends either.
-        HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
-            "modes and config options are not settable from the window yet",
+        // A mode, or an option like it, can widen what the agent may do without asking
+        // (Claude's bypassPermissions), an escalation 0001 puts behind a native dialog drawn by
+        // Rust. That path does not exist yet, and the window never sends either. A model or
+        // effort option is always a choice, never on or off.
+        HostCommand::SetMode { .. } => Err(invalid("modes are not settable from the window yet")),
+        HostCommand::SetConfigOption {
+            value: ConfigValue::Boolean(_),
+            ..
+        } => Err(invalid(
+            "only the model and effort options are settable from the window, and they are choices",
         )),
         // The tool switches live in the settings window only; the main window shows the
         // tools and offers to open Settings, so it has no caller (least privilege).
@@ -114,6 +175,59 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // The mode lives in the settings window only, as the other switches do.
         HostCommand::SetUpdateMode { .. } => Err(invalid(
             "the update mode is set from the settings window only",
+        )),
+        // Skill packs are turned on and off in the settings window's Skills pane only, as the
+        // other switches are (least privilege, 0040); the matter picker only reads them.
+        HostCommand::SetSkillPack { .. } => Err(invalid(
+            "skill packs are turned on and off from the settings window only",
+        )),
+        // R24: the room's hint and the balance only; the rest is the settings window's.
+        HostCommand::Connector(connector) => connector_main(connector),
+        // A lawyer's MCP server is a program that runs with the lawyer's access: added, changed
+        // and turned on in the settings window only, never from the window that shows agent
+        // output.
+        HostCommand::Mcp(_) => Err(invalid(
+            "the MCP servers are changed from the settings window only",
+        )),
+    }
+}
+
+/// The connector commands `main` may send (R24, the app review of #470): dismissing the case-law
+/// hint and refreshing the balance. One arm per command and no catch-all, as in `admit_main`.
+fn connector_main(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::DismissCaseLawHint { .. } | ConnectorCommand::RefreshBalance { .. } => {
+            Ok(())
+        }
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::OpenPayLink { .. } => Err(invalid(
+            "the main window sends only dismiss_case_law_hint and refresh_balance of the \
+             connector commands; the rest are sent from Settings",
+        )),
+    }
+}
+
+/// The connector commands the settings window's Connectors section may send: all but the
+/// room's hint, which it never shows. One arm per command and no catch-all.
+fn connector_settings(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::RefreshBalance { .. }
+        // The pay link the host holds, behind the native confirm; the room's banner opens
+        // Settings at the connector, which sends it.
+        | ConnectorCommand::OpenPayLink { .. } => Ok(()),
+        ConnectorCommand::DismissCaseLawHint { .. } => Err(invalid(
+            "the case-law hint is dismissed from the main window",
         )),
     }
 }

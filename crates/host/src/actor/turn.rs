@@ -12,15 +12,27 @@
 mod agents;
 mod answers;
 mod asks;
+mod came_back;
 mod cancel;
+pub(super) mod case_law;
 mod close;
+mod codex_cap;
 mod end;
 mod failure;
 mod forced_mode;
+mod idle;
 mod inputs;
+mod key_retry;
 mod known;
 mod launch_checks;
+mod logout;
+mod note;
+mod offline;
+pub(crate) use offline::{probe::settings::claude_shell_carries, set_network};
 mod out;
+mod outside;
+mod own_turn;
+mod picks;
 mod profile_loads;
 mod prompt;
 mod queue;
@@ -28,19 +40,24 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
+mod shell_network;
+pub(super) mod sign_in;
+mod skipped;
 mod state;
 mod steps;
 mod text;
 mod undo;
-mod undo_preview;
+pub(crate) mod undo_preview;
 mod updates;
+pub(crate) mod wide;
+mod withheld;
 mod writer;
 
 use std::collections::VecDeque;
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    MatterId, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -50,20 +67,29 @@ use crate::coalesce::ThreadText;
 use crate::error::Error;
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
+use state::BeforePrompt;
 
 pub(crate) use asks::asks_pending;
+pub(crate) use came_back::{
+    Check as CameBackCheck, Watches as CameBackWatches, on_reply as came_back_reply,
+};
 pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
+pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as idle_tick};
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
-pub(crate) use launch_checks::RunSweep;
+pub(crate) use launch_checks::HeldRuns;
+pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
-pub(crate) use queue::queue_held;
+pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
-    RestoreAsk, committed as restore_committed, on_restored, restore_version,
+    RestoreAsk, RevisionsAsk, committed as restore_committed, decide_revisions, on_decided,
+    on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
-pub(crate) use undo_preview::preview_undo;
+pub(crate) use sign_in::on_request as sign_in_request;
+pub(crate) use state::history_settles;
+pub(crate) use state::{busy, keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -81,20 +107,23 @@ pub(crate) struct TurnState {
     preparing: Option<Box<launch_checks::Preparing>>,
     /// The folders of the launched agent's session, from its launch until it ends.
     run: Option<launch_checks::RunFolders>,
+    /// The skill packs its launches skipped, each pack and reason told once for the host's run.
+    packs: launch_checks::PackNotices,
+    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
+    /// for the host's run.
+    auto_told: bool,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
-    /// The browser opens of the thread's turns that have not finished, for `PageVisited`. Kept
-    /// past a turn's end, so a completion that comes late or in a replay finds its open and is
-    /// still not recorded (`updates.rs` drops it by its origin).
-    browser_opens: crate::sources::browser::Opens,
+    /// The thread's sources in progress: the browser's opens and the agents' web calls that have
+    /// not finished. Kept past a turn's end, so a completion that comes late or in a replay finds
+    /// its call and is still not recorded (`updates.rs` drops it by its origin).
+    sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
-    /// The files put back since the last `TurnStarted`; `None` until first needed, then
-    /// read from the loaded state.
-    note: Option<Vec<MatterPath>>,
-    /// The files restores of the thread's matter wrote since the last `TurnStarted`, held in
-    /// memory only (`restore.rs`); the next prompt's note adds them.
-    restored: Vec<MatterPath>,
+    /// The undo note the next prompt starts with (`note.rs`).
+    note: note::NoteState,
+    /// The offline-shell note did not reach the agent; it goes first in the next prompt.
+    offline_owed: bool,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
@@ -105,6 +134,13 @@ pub(crate) struct TurnState {
     undo: Option<Box<undo::UndoLog>>,
     /// The prompts waiting behind the current turn, whether they are held, steers in flight.
     queue: queue::ThreadQueue,
+    /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
+    /// to the queue held for the sign-in (`sign_in.rs`).
+    stopped_for_sign_in: Option<TurnId>,
+    /// Where the thread's name stands for the agent's titles (D-070), in this run.
+    title: state::TitleWindow,
+    /// Agent output that came outside any turn, waiting for one (`own_turn.rs`).
+    own_held: own_turn::Held,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -149,19 +185,31 @@ struct Current {
     turn: TurnId,
     /// The lawyer's message that opened it.
     message: clauseo_protocol::MessageId,
-    /// The prompt's content, until step 5 sends it.
+    /// The prompt's content, as step 5 sends it (kept, so a turn held for the sign-in goes
+    /// back to the queue with it, `sign_in.rs`).
     prompt: Vec<ContentBlock>,
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
-    /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
-    /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
-    /// reject option ends the turn). Another answer or a Stop clears it.
-    refused: bool,
+    /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
+    stopped: key_retry::Stopped,
+    /// The stop the agent's own `Cancelled` becomes after the turn's last permission answer
+    /// was a refusal with no Stop since (Codex's only reject ends the turn): `NotAllowed` for
+    /// the lawyer's, `OutsideMatter` for the host's data folder. An answer or a Stop clears it.
+    refused: Option<StopReason>,
+    /// The once-a-turn notes the turn has given.
+    told: state::Told,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
+    /// The first too-long `sessionFailure` of the turn sent on an update (`AcpEvent::TooLong`).
+    too_long: Option<clauseo_acp::TooLong>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
+    /// Tool calls whose update the ACP reader dropped with no status read (`skipped.rs`).
+    skipped: skipped::Skipped,
+    /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
+    /// whether to offer the connector.
+    case_law_hint: crate::connectors::hint::TurnLooks,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
@@ -175,6 +223,12 @@ struct Current {
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
     failure: Option<(ErrorCode, Option<String>)>,
+    /// The agent said its connection failed, or the window said offline, and the agent has sent
+    /// nothing since (`offline.rs`). A prompt's end held for the probe is `probe_hold`.
+    offline: Option<offline::Watch>,
+    probe_hold: Option<offline::Hold>,
+    /// The quiet arm's clock of the turn (`offline/quiet.rs`).
+    quiet: offline::quiet::QuietClock,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
@@ -188,11 +242,14 @@ struct Current {
     started: std::time::Duration,
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
+    /// When its first live agent update came, on the same clock (`state::first_update`).
+    first_update: Option<std::time::Duration>,
+    /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
+    /// the turn ends.
+    withheld: withheld::Withheld,
+    /// The agent started it, with no prompt (`own_turn.rs`).
+    own: Option<own_turn::Own>,
 }
-
-/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
-/// taken, and when it failed.
-type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,8 +346,20 @@ enum TimerKind {
     Rate,
     Cancel(TurnId),
     LimitRead(TurnId),
+    /// The wait after a connection failure ran out (`offline.rs`).
+    Offline(TurnId),
+    /// The quiet arm's check of a live turn (`offline/quiet.rs`).
+    Quiet(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
+    /// The next read of Claude's transcript for unconfirmed steers (`queue/confirm.rs`).
+    SteerCheck,
+    /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
+    StopWait(u64),
+    /// An agent-started turn went quiet (`own_turn.rs`).
+    OwnQuiet(TurnId),
+    /// A cancelled agent-started turn's late window may close (`own_turn/late.rs`).
+    OwnLate,
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -307,19 +376,6 @@ enum JobKind {
     Reconcile(Box<reconcile::Repair>),
     Undo(Box<undo::UndoAsk>),
     Permission(Box<asks::HeldOpenCheck>),
-}
-
-impl JobKind {
-    /// The variant's name, for the log: its fields can hold paths.
-    const fn name(&self) -> &'static str {
-        match self {
-            Self::Before(_) => "Before",
-            Self::After(_) => "After",
-            Self::Reconcile(_) => "Reconcile",
-            Self::Undo(_) => "Undo",
-            Self::Permission(_) => "Permission",
-        }
-    }
 }
 
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
@@ -341,6 +397,15 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
+        TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::SteerChecked(checked) => queue::on_steer_checked(actor, *checked),
+        TurnInput::OfflineProbe {
+            thread,
+            turn,
+            reach,
+        } => offline::on_probed(actor, thread, turn, reach),
+        TurnInput::OfflineNoteOwed(thread) => shell_network::owe_note(actor, thread),
         TurnInput::Log {
             thread,
             why,
@@ -352,6 +417,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             LogFor::PreviewUndo { turn, reply } => {
                 undo_preview::on_log(actor, thread, turn, reply, result);
             }
+            LogFor::Restores(since) => note::on_restores(actor, thread, since, result),
         },
     }
 }
@@ -365,7 +431,13 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
+        TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
+        TimerKind::Quiet(turn) => offline::quiet::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
+        TimerKind::SteerCheck => queue::on_steer_check_timer(actor, thread),
+        TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
+        TimerKind::OwnQuiet(turn) => own_turn::on_quiet(actor, thread, turn),
+        TimerKind::OwnLate => own_turn::on_late_timer(actor, thread),
     }
 }
 
@@ -374,8 +446,10 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
     let TurnJob { thread, kind } = job;
     match (kind, reply) {
         (JobKind::Before(turn), MatterReply::BeforeTurn(result)) => {
-            known::when_loaded(actor, thread, result, move |actor, result| {
-                steps::on_before_turn(actor, thread, turn, result);
+            note::read_first(actor, thread, move |actor| {
+                known::when_loaded(actor, thread, result, move |actor, result| {
+                    steps::on_before_turn(actor, thread, turn, result);
+                });
             });
         }
         (JobKind::After(turn), MatterReply::AfterTurn(result)) => {
@@ -483,68 +557,9 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
 /// limit is logged. The actor closes the store once [`busy`] is false and commits returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
+    came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether start-up (reconciliation) or shutdown (cancels, agent stops, unlogged stops at the
-/// limit) must wait for the turn path. Scanned only while starting or stopping.
-pub(crate) fn busy(actor: &Actor) -> bool {
-    if matches!(actor.phase, HostPhase::Serving) {
-        return false;
-    }
-    let stops = host_stopping(actor) && super::limits::stops_busy(actor);
-    stops
-        || actor.threads.values().any(|entry| {
-            let state = &entry.turn;
-            state.reconciling
-                || state.agent.is_some()
-                || state.preparing.is_some()
-                || state.current.as_ref().is_some_and(|current| {
-                    matches!(
-                        current.phase,
-                        TurnPhase::Checkpointing
-                            | TurnPhase::Starting
-                            | TurnPhase::Prompting
-                            | TurnPhase::FallbackStop
-                            | TurnPhase::Ending
-                    )
-                })
-        })
-}
-
-/// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
-/// turns (`thread.turn_running` for `ArchiveThread`).
-pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
-    })
-}
-
-/// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
-pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.agent.is_some()
-            || state.preparing.is_some()
-            || state.current.is_some()
-            || state.reconciling
-            || state
-                .closing
-                .as_ref()
-                .is_some_and(|closing| !closing.retried)
-    }) || super::limits::holds_stop(actor, thread)
-}
-
-/// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
-/// a reload.
-pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
-    actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
 /// Whether the host is shutting down.

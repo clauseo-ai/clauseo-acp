@@ -17,6 +17,7 @@ import {
   CHANGED,
   EARLIER,
   HISTORY,
+  LONG_PAPER,
   MISSING_QUERY,
   PAPER_COUNT,
   PERMISSION_PAPER,
@@ -59,6 +60,13 @@ export function StateSamples() {
       </Sample>
       <Sample name="ChangeNote, papers changed">
         <ChangeNote papers={CHANGED} onUndo={nothing} onCompare={nothing} />
+      </Sample>
+      <Sample name="ChangeNote, a long path beside Open in Word and Undo">
+        <ChangeNote
+          papers={[LONG_PAPER]}
+          onUndo={nothing}
+          open={{ label: "Open in Word", onOpen: nothing }}
+        />
       </Sample>
       <Sample name="ChangeNote, a paper edited since, Undo asks first">
         <ChangeNote

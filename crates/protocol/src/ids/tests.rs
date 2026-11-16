@@ -6,10 +6,10 @@ use uuid::Uuid;
 
 use crate::test_support::err_contains;
 use crate::{
-    AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId, Cursor, DomainEvent,
-    ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MAX_SAFE, MatterId, MatterPath,
-    MessageId, PermissionRequestId, Seq, SteerOutcome, ThreadId, ThreadStatus, Timestamp,
-    ToolCallId, TurnId, TurnStarted, ViewEpoch,
+    AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId, ContentId, Cursor,
+    DomainEvent, ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MAX_SAFE, MatterId,
+    MatterPath, MessageId, PermissionRequestId, Seq, SteerOutcome, ThreadId, ThreadStatus,
+    Timestamp, ToolCallId, TurnId, TurnStarted, ViewEpoch,
 };
 
 const V7: &str = "01900000-0000-7000-8000-000000000001";
@@ -374,6 +374,7 @@ fn every_id_round_trips_in_both_formats() {
     round_trips(&FileRefId::new(v7).unwrap());
     round_trips(&FolderRefId::new(v7).unwrap());
     round_trips(&ViewEpoch::new(v7).unwrap());
+    round_trips(&BlockedSiteId::new(v7).unwrap());
 
     let started = DomainEvent::from(TurnStarted {
         turn: TurnId::new(v7).unwrap(),

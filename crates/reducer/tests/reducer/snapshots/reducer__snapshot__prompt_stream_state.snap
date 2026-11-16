@@ -64,6 +64,7 @@ expression: fold(&prompt_stream().unwrap())
           "stop": "end_turn",
           "files": [],
           "skipped": [],
+          "checkpoint_before": "01900000-0000-7000-8000-000200000005",
           "checkpoint_after": "01900000-0000-7000-8000-000200000011",
           "undone": false,
           "usage": {
@@ -83,6 +84,7 @@ expression: fold(&prompt_stream().unwrap())
     "running": null,
     "after_turn": null,
     "files": {},
-    "failures": {}
+    "failures": {},
+    "before_checkpoints": {}
   }
 }

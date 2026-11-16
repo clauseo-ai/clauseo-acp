@@ -1,10 +1,13 @@
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use super::{Os, Source, build, is_local_file, is_loopback_proxy, is_session, port_of};
+use super::{
+    Os, Source, WindowsDirs, build, chrome_env, is_local_file, is_loopback_proxy, is_session,
+    port_of, set_cdp,
+};
 
-/// The `--cdp-port` the tests pass.
-const CDP: u16 = 61_101;
+mod proxy;
+
 /// The socket folder the tests' host made.
 const SOCKET: &str = "/tmp/clauseo-ab-0123456789abcdef";
 
@@ -37,7 +40,6 @@ fn required(os: Os) -> Vec<(&'static str, String)> {
     if os == Os::Unix {
         vars.push(("AGENT_BROWSER_SOCKET_DIR", SOCKET.to_owned()));
     }
-    vars.push(("AGENT_BROWSER_STREAM_PORT", "61100".to_owned()));
     vars
 }
 
@@ -131,10 +133,19 @@ fn ports_are_1024_to_65535_in_plain_decimal() {
 #[test]
 fn each_required_variable_missing_is_named() {
     for os in [Os::Unix, Os::Windows] {
-        for (name, _) in required(os) {
-            let error = build(&source_for(os, &[], name), os, Path::new(&abs("cwd")), CDP)
-                .unwrap_err()
-                .to_string();
+        // The proxy is optional (`a_missing_proxy_sets_no_proxy_variable`).
+        for (name, _) in required(os)
+            .into_iter()
+            .filter(|(name, _)| *name != "AGENT_BROWSER_PROXY")
+        {
+            let error = build(
+                &source_for(os, &[], name),
+                os,
+                Path::new(&abs("cwd")),
+                &WindowsDirs::default(),
+            )
+            .unwrap_err()
+            .to_string();
             assert_eq!(
                 error,
                 format!("{name} is not set; the host sets it"),
@@ -154,7 +165,7 @@ fn each_required_variable_missing_is_named() {
 #[test]
 fn each_required_variable_invalid_is_named() {
     let cwd = abs("cwd");
-    let cases: [(&str, &str, &str); 12] = [
+    let cases: [(&str, &str, &str); 9] = [
         (
             "AGENT_BROWSER_CONFIG",
             "relative/agent-browser.json",
@@ -192,25 +203,10 @@ fn each_required_variable_invalid_is_named() {
             "must be an absolute path",
         ),
         ("AGENT_BROWSER_SOCKET_DIR", "", "must be an absolute path"),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "80",
-            "must be a port from 1024 to 65535 with no leading zero",
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "065000",
-            "must be a port from 1024 to 65535",
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "65536",
-            "must be a port from 1024 to 65535",
-        ),
     ];
     for (name, bad, words) in cases {
         let source = source_with(&[(name, bad)], name);
-        let error = build(&source, Os::Unix, Path::new(&cwd), CDP)
+        let error = build(&source, Os::Unix, Path::new(&cwd), &WindowsDirs::default())
             .unwrap_err()
             .to_string();
         assert!(error.starts_with(&format!("{name} {words}")), "{error}");
@@ -235,7 +231,7 @@ fn unix_map_is_exactly_the_allow_list() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Unix, cwd, CDP).unwrap();
+    let env = build(&source, Os::Unix, cwd, &WindowsDirs::default()).unwrap();
     let mut names: Vec<&str> = env.keys().map(String::as_str).collect();
     names.sort_unstable();
     assert_eq!(
@@ -253,7 +249,7 @@ fn unix_map_is_exactly_the_allow_list() {
             "AGENT_BROWSER_SCREENSHOT_DIR",
             "AGENT_BROWSER_SESSION",
             "AGENT_BROWSER_SOCKET_DIR",
-            "AGENT_BROWSER_STREAM_PORT",
+            "AGENT_BROWSER_STREAM_DISABLED",
             "ALL_PROXY",
             "HOME",
             "HTTPS_PROXY",
@@ -267,13 +263,16 @@ fn unix_map_is_exactly_the_allow_list() {
         ]
     );
     assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
-    assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100");
     assert_eq!(get(&env, "HTTP_PROXY"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "http_proxy"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "AGENT_BROWSER_IDLE_TIMEOUT_MS"), "600000");
     assert_eq!(
         get(&env, "AGENT_BROWSER_ARGS"),
-        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port=61101"
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+    );
+    assert!(
+        !env.contains_key("AGENT_BROWSER_CDP"),
+        "set once Chrome is up"
     );
     assert_eq!(get(&env, "LANG"), "en_IN.UTF-8");
     assert_eq!(get(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
@@ -300,7 +299,7 @@ fn windows_names_match_without_case_and_appear_once() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Windows, cwd, CDP).unwrap();
+    let env = build(&source, Os::Windows, cwd, &WindowsDirs::default()).unwrap();
     // The first match in the OS's order wins, under the allow-list's spelling.
     assert_eq!(get(&env, "SystemRoot"), r"D:\Win");
     assert_eq!(get(&env, "ComSpec"), r"D:\Win\system32\cmd.exe");
@@ -339,17 +338,148 @@ fn windows_path_falls_back_to_c_windows() {
         &source_for(Os::Windows, &[], ""),
         Os::Windows,
         Path::new("/s"),
-        CDP,
+        &WindowsDirs::default(),
     )
     .unwrap();
     assert_eq!(get(&env, "PATH"), r"C:\Windows\System32;C:\Windows");
     assert_eq!(get(&env, "SystemRoot"), r"C:\Windows");
 }
 
+/// The Windows folders as a Windows machine reports them, for the tests that inject them.
+fn injected() -> WindowsDirs {
+    WindowsDirs {
+        windows: Some(PathBuf::from(r"D:\Win")),
+        system: Some(PathBuf::from(r"D:\Win\System32")),
+    }
+}
+
+#[test]
+fn windows_gives_the_child_all_four_defaults_from_the_injected_folders() {
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &injected(),
+    )
+    .unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"D:\Win");
+    assert_eq!(get(&env, "windir"), r"D:\Win");
+    assert_eq!(get(&env, "ComSpec"), r"D:\Win\System32\cmd.exe");
+    assert_eq!(get(&env, "PATHEXT"), ".COM;.EXE;.BAT;.CMD");
+    assert_eq!(get(&env, "PATH"), r"D:\Win\System32;D:\Win");
+}
+
+#[test]
+fn windows_defaults_fall_back_to_c_windows_without_injected_folders() {
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &WindowsDirs::default(),
+    )
+    .unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"C:\Windows");
+    assert_eq!(get(&env, "windir"), r"C:\Windows");
+    assert_eq!(get(&env, "ComSpec"), r"C:\Windows\System32\cmd.exe");
+    assert_eq!(get(&env, "PATHEXT"), ".COM;.EXE;.BAT;.CMD");
+    assert_eq!(get(&env, "PATH"), r"C:\Windows\System32;C:\Windows");
+}
+
+#[test]
+fn path_and_comspec_use_the_reported_system_directory_even_when_it_is_elsewhere() {
+    let dirs = WindowsDirs {
+        windows: Some(PathBuf::from(r"D:\Win")),
+        system: Some(PathBuf::from(r"E:\Sys")),
+    };
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &dirs,
+    )
+    .unwrap();
+    assert_eq!(get(&env, "ComSpec"), r"E:\Sys\cmd.exe");
+    assert_eq!(get(&env, "PATH"), r"E:\Sys;D:\Win");
+}
+
+#[test]
+fn windows_defaults_use_each_injected_folder_and_else_the_system_root() {
+    let windows_only = WindowsDirs {
+        windows: Some(PathBuf::from(r"D:\Win")),
+        system: None,
+    };
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &windows_only,
+    )
+    .unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"D:\Win");
+    assert_eq!(get(&env, "ComSpec"), r"D:\Win\System32\cmd.exe");
+
+    let system_only = WindowsDirs {
+        windows: None,
+        system: Some(PathBuf::from(r"D:\Sys")),
+    };
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &system_only,
+    )
+    .unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"C:\Windows");
+    assert_eq!(get(&env, "windir"), r"C:\Windows");
+    assert_eq!(get(&env, "ComSpec"), r"D:\Sys\cmd.exe");
+}
+
+#[test]
+fn windows_defaults_keep_the_guards_own_values() {
+    let source = source_for(
+        Os::Windows,
+        &[
+            ("SystemRoot", r"E:\Root"),
+            ("windir", r"E:\Dir"),
+            ("ComSpec", r"E:\Shell\cmd.exe"),
+            ("PATHEXT", ".EXE"),
+        ],
+        "",
+    );
+    let env = build(&source, Os::Windows, Path::new("/s"), &injected()).unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"E:\Root");
+    assert_eq!(get(&env, "windir"), r"E:\Dir");
+    assert_eq!(get(&env, "ComSpec"), r"E:\Shell\cmd.exe");
+    assert_eq!(get(&env, "PATHEXT"), ".EXE");
+    // PATH starts with the system directory Windows reported, as ComSpec's default would.
+    assert_eq!(get(&env, "PATH"), r"D:\Win\System32;E:\Root");
+}
+
+#[test]
+fn windir_and_comspec_follow_the_guards_own_system_root() {
+    let source = source_for(Os::Windows, &[("SystemRoot", r"E:\Root")], "");
+    let env = build(
+        &source,
+        Os::Windows,
+        Path::new("/s"),
+        &WindowsDirs::default(),
+    )
+    .unwrap();
+    assert_eq!(get(&env, "SystemRoot"), r"E:\Root");
+    assert_eq!(get(&env, "windir"), r"E:\Root");
+    assert_eq!(get(&env, "ComSpec"), r"E:\Root\System32\cmd.exe");
+}
+
 #[test]
 fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
     let cwd = Path::new("/state/browser");
-    let env = build(&source_with(&[], ""), Os::Unix, cwd, CDP).unwrap();
+    let env = build(
+        &source_with(&[], ""),
+        Os::Unix,
+        cwd,
+        &WindowsDirs::default(),
+    )
+    .unwrap();
     assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
     // On Windows a socket folder in the guard's environment is ignored.
     let windows = source_for(
@@ -357,7 +487,7 @@ fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
         &[("AGENT_BROWSER_SOCKET_DIR", r"C:\elsewhere")],
         "",
     );
-    let env = build(&windows, Os::Windows, cwd, CDP).unwrap();
+    let env = build(&windows, Os::Windows, cwd, &WindowsDirs::default()).unwrap();
     assert_eq!(
         &env["AGENT_BROWSER_SOCKET_DIR"],
         cwd.join("run").as_os_str()
@@ -366,21 +496,63 @@ fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
 }
 
 #[test]
-fn the_stream_port_and_the_cdp_argument_pass_through_on_both() {
+fn no_stream_port_is_needed_or_passed_and_the_cdp_port_is_no_longer_pinned() {
     let cwd = Path::new("/state/browser");
     for os in [Os::Unix, Os::Windows] {
-        let env = build(&source_for(os, &[], ""), os, cwd, 1024).unwrap();
-        assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100", "{os:?}");
-        let args: Vec<&str> = get(&env, "AGENT_BROWSER_ARGS").split('\n').collect();
+        // Route 2: a host that still passes a stream port, even a bad one, changes nothing.
+        for given in [
+            &[][..],
+            &[("AGENT_BROWSER_STREAM_PORT", "61100")],
+            &[("AGENT_BROWSER_STREAM_PORT", "80")],
+        ] {
+            let env = build(&source_for(os, given, ""), os, cwd, &WindowsDirs::default()).unwrap();
+            assert!(
+                !env.contains_key("AGENT_BROWSER_STREAM_PORT"),
+                "{os:?} {given:?}"
+            );
+            assert_eq!(get(&env, "AGENT_BROWSER_STREAM_DISABLED"), "1", "{os:?}");
+        }
+        let mut env = build(&source_for(os, &[], ""), os, cwd, &WindowsDirs::default()).unwrap();
         assert_eq!(
-            args,
-            [
-                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-                "--remote-debugging-port=1024"
-            ],
+            get(&env, "AGENT_BROWSER_ARGS"),
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             "{os:?}"
         );
+        let endpoint = "ws://127.0.0.1:1024/devtools/browser/0-a";
+        set_cdp(&mut env, endpoint);
+        assert_eq!(get(&env, "AGENT_BROWSER_CDP"), endpoint, "{os:?}");
     }
+}
+
+#[test]
+fn chrome_gets_the_child_map_without_agent_browser_variables() {
+    let cwd = Path::new("/state/browser");
+    let env = build(
+        &source_with(&[("LANG", "en")], ""),
+        Os::Unix,
+        cwd,
+        &WindowsDirs::default(),
+    )
+    .unwrap();
+    let chrome = chrome_env(&env);
+    let mut names: Vec<&str> = chrome.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "ALL_PROXY",
+            "HOME",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "LANG",
+            "PATH",
+            "TMPDIR",
+            "all_proxy",
+            "http_proxy",
+            "https_proxy",
+        ]
+    );
+    assert_eq!(&chrome["HOME"], cwd.join("home").as_os_str());
 }
 
 #[test]

@@ -21,7 +21,7 @@ const CALLS = [
   ["tc-delete-1", "Deleted old.txt.", "completed"],
   ["tc-move-1", "Moved b.txt.", "completed"],
   ["tc-search-1", 'Search for "indemnity".', "completed"],
-  ["tc-execute-1", "Ran a task.", "completed"],
+  ["tc-execute-1", "Ran the checks.", "completed"],
   ["tc-think-1", "Thought it through.", "completed"],
   ["tc-switch-1", "Switch to plan mode.", "completed"],
   ["tc-fetch-1", "Tried to read terms.html online.", "failed"],

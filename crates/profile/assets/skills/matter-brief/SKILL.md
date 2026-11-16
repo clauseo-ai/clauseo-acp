@@ -3,7 +3,7 @@ name: matter-brief
 description: Use when starting work in a matter, and before ending any turn that reached a conclusion, produced a document or learned a material fact. Keeps the matter brief in your matter notes folder current, with parties and posture, facts, forum and governing law, dated positions taken, open questions and key documents. Read it first, never ask what it already answers, and never drop or silently contradict a recorded position.
 metadata:
   clauseo:
-    version: 1
+    version: 2
     author: Clauseo
     tools: []
     tier: builtin
@@ -33,7 +33,7 @@ Title style: "{codename or client}, {engagement}" ("Project Kestrel, acquisition
 ## The maintenance contract
 
 - The file is `matter-brief.md` in your matter notes folder. Every agent working on this matter shares it, in this conversation and in others. Use your own file tools to read and edit it.
-- Read it at the start of work. If it does not exist, create it from the skeleton once you know enough to fill the title and summary.
+- At the start of work, list your matter notes folder, and read the brief only if it is there: never try to read a brief that does not exist yet. If it does not exist, create it from the skeleton once you know enough to fill the title and summary.
 - At the end of any turn that produced a document, reached a conclusion or learned a material fact, bring it current, before the turn's last message.
 - Keep it under 12,000 characters. Record conclusions and state, never the conversation's story.
 - Date each entry under Positions taken and cite the document it came from ("More likely than not X, advice note on the non-compete, 8 June").

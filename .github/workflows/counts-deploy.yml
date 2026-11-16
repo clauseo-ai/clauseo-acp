@@ -1,0 +1,292 @@
+# Deploys the counts Worker to t.clauseo.chat (docs/counts-worker.md, "Deploying"), or runs the
+# live check's canary.
+#
+# - Runs on a push to main that touches the Worker, the crate whose schema it takes
+#   (crates/counts, crates/protocol) or this file, so a new value in the crate reaches the
+#   Worker with no Worker change; and by hand (workflow_dispatch, from main): `deploy`, or
+#   `check`, which takes no input. Never on a pull request: this is the only workflow with the
+#   token.
+# - Skipped until Rohan's Cloudflare set-up sets the repository variable COUNTS_DEPLOY_ENABLED to
+#   true, and on any ref but main. The deploy job runs in the environment counts-deploy, whose
+#   branch rule allows main only and whose reviewer is Rohan.
+# - Two jobs. `bundle` has no environment and no secret: the schema snapshot, the Worker's own
+#   tests (cargo test, pnpm test), the privacy guard and the wasm build. It hashes what the deploy
+#   ships (scripts/bundle-hash.mjs: build/, wrangler.toml, migrations/, the deploy scripts, the
+#   lockfile that pins wrangler and this file) and uploads exactly those files. `deploy`
+#   downloads them, checks the hash, and builds nothing: the bytes approved are the bytes hashed.
+#   Then the D1 database (found by name, else created in the EU; a refused jurisdiction fails the
+#   job), the deploy copy (wrangler.deploy.toml, with no [build], so wrangler never builds with
+#   the token present) and its guard, the migrations and the deploy.
+# - A push that would ship the same Worker skips the deploy, and so its approval: `bundle` finds
+#   the hash the last deploy uploaded (the artifact counts-worker-deployed) and `deploy` runs
+#   only when the hashes differ, or by hand (`deploy` forces one). Why the built bundle and not a
+#   narrower path filter: the Worker compiles from its folder, crates/counts and whatever of
+#   crates/protocol counts uses. A file filter fails the wrong way: once counts uses another
+#   protocol file, a change there would not deploy, the live Worker's closed lists would fall
+#   behind the app and it would answer 400 to new values, refusing real counts. The hash fails
+#   the safe way: a build that is not reproducible, or a missing or expired hash, just deploys.
+#   What it cannot see: the R2 bucket appearing (the deploy copy then gains its binding), a new
+#   database, or a change to ACCESS_TEAM or ACCESS_DASH_EMAIL; force a deploy by hand after any.
+# - Secrets: CLOUDFLARE_API_TOKEN, and optionally CLOUDFLARE_ACCOUNT_ID (unset: wrangler uses the
+#   one account the token can see). Both are set only on the steps that call Cloudflare, and
+#   GitHub masks them. The deploy step also gets the variable ACCESS_TEAM and the secret
+#   ACCESS_DASH_EMAIL for the Access step (scripts/access.mjs), which finds or creates the two
+#   Access applications and passes the team and their AUD tags as `wrangler deploy --var`,
+#   masked. Without ACCESS_TEAM, or a token without the Access scopes, it deploys anyway and
+#   /dash and /v1/query stay 404. No env value carries any other id, and no artifact holds the
+#   database id.
+# - Run logs on this public repo are public. Every wrangler call goes through
+#   scripts/deploy.mjs, which prints wrangler's output only through a redactor (UUIDs, 32-hex ids,
+#   emails, account names) and masks the database id once found. `check` prints only the canary's
+#   two row counts, then deletes the canary rows. No step runs `wrangler whoami` or `wrangler tail`.
+#   The two hashes are printed: they are not secret.
+name: counts-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/counts-worker/**
+      - crates/counts/**
+      - crates/protocol/**
+      - .github/workflows/counts-deploy.yml
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy, or check: count and delete the live check's canary rows"
+        type: choice
+        options: [deploy, check]
+        default: deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: counts-deploy
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  WRANGLER_SEND_METRICS: "false"
+  # The worker-build release the Worker is built with; it matches the `worker` crate in
+  # services/counts-worker/Cargo.lock.
+  WORKER_BUILD_VERSION: 0.8.7
+
+jobs:
+  bundle:
+    name: build and hash
+    if: vars.COUNTS_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        working-directory: services/counts-worker
+    outputs:
+      hash: ${{ steps.compare.outputs.hash }}
+      changed: ${{ steps.compare.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the wasm target
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      # Exactly one test must run: a renamed test would otherwise pass by matching nothing.
+      - name: The committed JSON Schema matches the crate's types
+        working-directory: .
+        env:
+          INSTA_UPDATE: "no"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches -- --exact 2>&1 | tee "$RUNNER_TEMP/snapshot.log"
+          grep -q "test result: ok. 1 passed;" "$RUNNER_TEMP/snapshot.log" ||
+            { echo "::error::the schema snapshot test did not run exactly once"; exit 1; }
+
+      - name: The Worker's native tests
+        run: cargo test --locked
+
+      - name: Install worker-build
+        run: cargo install --locked worker-build --version "$WORKER_BUILD_VERSION"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: Install wrangler
+        run: pnpm install --frozen-lockfile
+
+      - name: The Worker's tests against wrangler dev --local
+        run: pnpm test
+
+      - name: Check wrangler.toml's privacy settings
+        run: node scripts/check-deploy.mjs
+
+      # No secret here: wrangler deploy uploads this output and builds nothing.
+      - name: Build the Worker
+        run: worker-build --release
+
+      # The deploy job gets these files and nothing else from this checkout.
+      - name: Copy what the deploy ships
+        working-directory: .
+        run: |
+          set -euo pipefail
+          node services/counts-worker/scripts/bundle-hash.mjs files > "$RUNNER_TEMP/bundle-files.txt"
+          mkdir "$RUNNER_TEMP/bundle"
+          xargs -d '\n' cp --parents -t "$RUNNER_TEMP/bundle" < "$RUNNER_TEMP/bundle-files.txt"
+
+      - name: Find the last deploy's hash
+        id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "last=$(node scripts/bundle-hash.mjs last)" >> "$GITHUB_OUTPUT"
+
+      # Over the copy, so the hash is of the uploaded bytes.
+      - name: Compare with the last deploy
+        id: compare
+        env:
+          LAST: ${{ steps.last.outputs.last }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          hash=$(node "$RUNNER_TEMP/bundle/services/counts-worker/scripts/bundle-hash.mjs" hash)
+          echo "this bundle: $hash"
+          echo "last deploy: ${LAST:-none found}"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          if [ -n "$LAST" ] && [ "$LAST" = "$hash" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" = push ]; then
+              echo "same Worker as deployed ($hash), no deploy" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: counts-worker-bundle
+          path: ${{ runner.temp }}/bundle
+          if-no-files-found: error
+          # For .github/workflows/counts-deploy.yml; the copy holds no other hidden file.
+          include-hidden-files: true
+          # As long as the environment's approval may wait.
+          retention-days: 30
+
+  deploy:
+    name: ${{ inputs.action == 'check' && 'check the canary' || 'deploy' }}
+    needs: bundle
+    # A push deploys only a changed bundle; by hand, `deploy` always deploys.
+    if: >-
+      vars.COUNTS_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || needs.bundle.outputs.changed == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: counts-deploy
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/counts-worker
+    env:
+      ACTION: ${{ inputs.action || 'deploy' }}
+      BUNDLE_HASH: ${{ needs.bundle.outputs.hash }}
+    steps:
+      # Only the node and pnpm versions; the Worker's folder comes from the bundle job's artifact.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: ui/package.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: counts-worker-bundle
+          path: .
+
+      - name: The bundle is the one hashed
+        run: |
+          set -euo pipefail
+          got=$(node scripts/bundle-hash.mjs hash)
+          echo "bundle: $got"
+          [ "$got" = "$BUNDLE_HASH" ] ||
+            { echo "::error::the downloaded bundle's hash is not the bundle job's"; exit 1; }
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: Install wrangler
+        run: pnpm install --frozen-lockfile
+
+      - name: Find or create the D1 database, and write the checked deploy config
+        if: env.ACTION == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs config
+
+      - name: Find the D1 database, and write the checked deploy config
+        if: env.ACTION == 'check'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs config --no-create
+
+      - name: Check the deploy config's privacy settings
+        run: node scripts/check-deploy.mjs wrangler.deploy.toml --deployed
+
+      - name: Count and delete the canary rows
+        if: env.ACTION == 'check'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs canary
+
+      - name: Apply the migrations
+        if: env.ACTION == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs migrate
+
+      - name: Deploy
+        if: env.ACTION == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_TEAM: ${{ vars.ACCESS_TEAM }}
+          ACCESS_DASH_EMAIL: ${{ secrets.ACCESS_DASH_EMAIL }}
+        run: node scripts/deploy.mjs deploy
+
+      - name: Keep this deploy's hash, for the next run's comparison
+        if: env.ACTION == 'deploy'
+        run: |
+          mkdir -p "$RUNNER_TEMP/deployed"
+          echo "$BUNDLE_HASH" > "$RUNNER_TEMP/deployed/hash"
+
+      # When it expires, the next run deploys.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.ACTION == 'deploy'
+        with:
+          name: counts-worker-deployed
+          path: ${{ runner.temp }}/deployed/hash
+          if-no-files-found: error
+          retention-days: 90

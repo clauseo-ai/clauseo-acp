@@ -10,7 +10,7 @@ use clauseo_protocol::{
     MatterSource, QueryResult, RestoreRequest, StopReason, StreamId, Title,
 };
 
-use crate::matters::{client, created, date, import, summary};
+use crate::matters::{client, created, date, import, packs, summary};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, send_prompt, wait};
 
 /// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
@@ -54,7 +54,9 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
         matter,
         client: FieldChange::Set(client("Smith")),
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(true),
+        agent_prefs: FieldChange::Keep,
     });
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Tighten clause 4");
@@ -91,6 +93,7 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
         HostCommand::CreateThread {
             matter,
             agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+            config: None,
         },
         ErrorCode::CommandUnknownMatter,
     );
@@ -192,6 +195,7 @@ fn preview(
     });
     let checkpoint = events.checkpoint(CheckpointKind::Import).unwrap();
     host.query(HostQuery::PreviewRestore {
+        undoes: None,
         matter,
         checkpoint,
         scope: RestoreRequest::Matter,
@@ -231,6 +235,54 @@ fn a_folder_moved_while_forgotten_comes_back_where_it_is_now_in_the_same_run() {
     host.shutdown();
 }
 
+/// A restored list is returned as it was. Whether a pack in it loads is decided at launch: a pack
+/// that is not turned on, or whose hash no longer matches, is skipped there (decision record
+/// 0040, PR-D). This test checks only that the list comes back.
+#[test]
+fn forget_keeps_skill_packs_and_unforget_restores_them() {
+    let dir = Dir::new("forget_skill_packs", &[]);
+    let folder = dir.folder("Kaveri Agro", &[("brief.txt", "Clause 4\n")]);
+    let host = dir.start(0);
+    let matter = created(import(&host, "Kaveri Agro", &folder, (None, None)));
+    let list = packs(&["india-litigation", "contracts"]);
+    host.ok(HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Set(list.clone()),
+        pinned: None,
+        agent_prefs: FieldChange::Keep,
+    });
+    let before = summary(&host, matter).skill_packs;
+    assert_eq!(before, Some(list));
+    assert_eq!(
+        host.ok(HostCommand::ForgetMatter { matter }),
+        CommandOutcome::Done
+    );
+    host.shutdown();
+
+    // The forgotten matter's row still holds the list.
+    let store = crate::titles::open_store(dir.data());
+    let row = wait("matters", store.matters())
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == matter)
+        .unwrap();
+    assert!(row.forgotten.is_some(), "{row:?}");
+    assert_eq!(row.skill_packs, before);
+    wait("close", store.close()).unwrap();
+
+    // Importing the folder again brings the list back exactly as it was, so a bring-back never
+    // adds a pack the matter did not already have.
+    let host = dir.start(1);
+    assert_eq!(
+        created(import(&host, "Kaveri Agro", &folder, (None, None))),
+        matter
+    );
+    assert_eq!(summary(&host, matter).skill_packs, before);
+    host.shutdown();
+}
+
 #[test]
 fn a_forgotten_folder_still_counts_for_other_folders() {
     let dir = Dir::new("forget_nesting", &[]);
@@ -241,14 +293,15 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
     host.ok(HostCommand::ForgetMatter { matter });
     // A folder inside it or holding it is refused, naming no matter: the forgotten one is not
     // on the list, so there is nothing to open.
-    for path in [inside, folder.parent().unwrap().to_owned()] {
+    for (path, code) in [
+        (inside, ErrorCode::MatterFolderInsideMatter),
+        (
+            folder.parent().unwrap().to_owned(),
+            ErrorCode::MatterFolderHoldsMatter,
+        ),
+    ] {
         let error = import(&host, "Other", &path, (None, None)).expect_err("refused");
-        assert_eq!(
-            error.code(),
-            ErrorCode::MatterFolderIsMatter,
-            "{}: {error}",
-            path.display()
-        );
+        assert_eq!(error.code(), code, "{}: {error}", path.display());
         assert_eq!(error.matter(), None, "{}", path.display());
     }
     let parent = wait(
@@ -263,7 +316,7 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderIsMatter,
+        ErrorCode::MatterFolderInsideMatter,
     );
     assert_eq!(error.matter(), None);
     assert!(!folder.join("Appeal").exists());

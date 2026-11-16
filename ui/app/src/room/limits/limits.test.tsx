@@ -9,16 +9,22 @@ import { join } from "node:path";
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reset } from "../../testing/stream-script.ts";
+import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
   AgentLimitsView,
   LimitMeter,
   LimitWindowView,
   LimitsView,
   MeterTone,
+  SetupEvent,
+  SignIn,
 } from "../../transport/protocol.ts";
+import { CLAUDE, setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import { fakeNext } from "../fake-next.ts";
+import { loadThread } from "../thread/chunk.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
 import { LIMIT_WARNING_FEED } from "./limit-warning-feed.ts";
+import { bounded, startWaits } from "./limits-test-wait.ts";
 import { preloadPlanCard } from "./plan-card-load.ts";
 
 // the card's preload, watched: the same function, counted
@@ -34,7 +40,9 @@ let h: Harness | null = null;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  startWaits();
 });
+
 afterEach(async () => {
   await h?.unmount();
   h = null;
@@ -80,14 +88,34 @@ const figureless = (over: Partial<AgentLimitsView>): AgentLimitsView => {
   return e;
 };
 
-/** The room on a new conversation, whose agent is the one the host lists (R15): `agent`, of its kind where it has
- * one; with words in the field, so Ask stands enabled as long as nothing holds it. */
-async function room(agent = "claude-acp", language: "en" | "hi" = "en") {
+// the sign-ins the setup store hears for the agent: the header's plan shows once one names the plan
+const AT = NOW;
+const planSignIn = (plan: string): SignIn => ({
+  signed_in: { plan, method: "plan", source: "own", at: AT },
+});
+const KEY_SIGN_IN: SignIn = { signed_in: { method: "api_key", source: "own", at: AT } };
+const FIRM_SIGN_IN: SignIn = { signed_in: { method: "firm", source: "own", at: AT } };
+const NO_PLAN_SIGN_IN: SignIn = { signed_in: { method: "plan", source: "own", at: AT } };
+const SIGNED_OUT: SignIn = { signed_out: {} };
+const WAITING: SignIn = { waiting: { since: AT, nudge: false } };
+
+/** The room on a new conversation, whose agent is the one the host lists (R15): `agent`, of its
+ * kind where it has one; with words in the field, so Ask stands enabled as long as nothing holds
+ * it. Its sign-in is `sign`: signed in with the kind's plan by default; null for a host that has
+ * said nothing of the sign-in yet. */
+async function room(
+  agent = "claude-acp",
+  language: "en" | "hi" = "en",
+  sign: SignIn | null = planSignIn(agent.startsWith("codex") ? "ChatGPT Plus" : "Claude Max"),
+) {
   const kind = agent.startsWith("claude")
     ? "claude"
     : agent.startsWith("codex")
       ? "codex"
       : undefined;
+  const setupFirst: SetupEvent[] = [{ setup_info: { keys_available: true } }];
+  if (sign !== null && kind !== undefined)
+    setupFirst.push({ sign_in_changed: { agent, state: sign } });
   h = await mountRoom({
     threads: [],
     next: fakeNext({
@@ -96,7 +124,11 @@ async function room(agent = "claude-acp", language: "en" | "hi" = "en") {
       parts: ["agents"],
     }),
     display: { language },
+    setup: { first: () => setupFirst },
+    waitForRenderer: false,
   });
+  // the thread's chunk, which the harness would await in an act of its own with no bound
+  await bounded("the thread's chunk", loadThread);
   h.deliver([reset([])]);
   await h.type("Summarise the notice to the bank.");
   return h;
@@ -105,11 +137,13 @@ async function room(agent = "claude-acp", language: "en" | "hi" = "en") {
 /** Plays a view, and lets a chunk it asks for (the warning's note) load. */
 const view = async (v: LimitsView) => {
   await act(async () => h!.transport.limitsChanged(v));
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
+  await bounded("the view's chunks", () => vi.dynamicImportSettled());
 };
+/** Lets the setup wire's events and a chunk they ask for land. */
+const settle = () => bounded("the setup wire's chunks", () => vi.dynamicImportSettled());
 const plan = () => h!.one("plan");
+// the plan's words as they show; the meter's hidden "x" (Base UI's, for VoiceOver) is none of them
+const shown = () => plan()?.textContent?.replace(/x$/, "");
 const send = () => h!.one("send") as HTMLButtonElement | null;
 const sendEnabled = () =>
   send() !== null && !send()!.disabled && send()!.getAttribute("aria-disabled") !== "true";
@@ -119,7 +153,7 @@ async function openCard() {
   await h!.click(plan());
   const card = () => document.querySelector<HTMLElement>('[data-testid="plan-card"]');
   for (let i = 0; i < 5 && card() === null; i += 1) {
-    await act(async () => {
+    await bounded("the card's chunk", async () => {
       await vi.dynamicImportSettled();
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -127,8 +161,39 @@ async function openCard() {
   return card();
 }
 
+/** The sign-in the setup store holds for claude-acp, as it has heard it so far. */
+const signInHeard = () =>
+  setupStoreOf(h!.transport as HostTransport & SetupSource).state().agents[CLAUDE]?.signIn;
+
+test("no line before a view, signed out: the sign-in is driven to signed out first", async () => {
+  await room("claude-acp", "en", SIGNED_OUT);
+  await settle();
+  expect(signInHeard()).toEqual(SIGNED_OUT);
+  expect(plan()).toBeNull();
+  await act(async () => {
+    h!.transport.setupEvent({
+      sign_in_changed: { agent: "claude-acp", state: planSignIn("Claude Max") },
+    });
+  });
+  await settle();
+  expect(signInHeard()).toEqual(planSignIn("Claude Max"));
+  expect(plan()).toBeNull();
+});
+
+test("a view arriving while signed out gives the name only, never the plan's line", async () => {
+  await room("claude-acp", "en", SIGNED_OUT);
+  await settle();
+  expect(signInHeard()).toEqual(SIGNED_OUT);
+  await view({ claude: entry(30) });
+  expect(shown()).toBe("Claude");
+  expect(plan()?.dataset["look"]).toBe("bare");
+  expect(plan()?.dataset["freshness"]).toBe("fresh");
+  expect(plan()?.querySelector(".rounded-meter")).toBeNull();
+});
+
 test("claude-acp gets the Claude plan's line, with its tone and freshness; no line before a view", async () => {
   await room();
+  await settle();
   expect(plan()).toBeNull();
   await view({ claude: entry(30) });
   expect(plan()?.dataset["tone"]).toBe("neutral");
@@ -311,7 +376,7 @@ test("none: its line, and the card's Try again sends try_again", async () => {
 });
 
 test("pay as you go: the title and who bills, no bar and no figure, in the toolbar and the card", async () => {
-  await room();
+  await room("claude-acp", "en", KEY_SIGN_IN);
   await view({
     claude: figureless({
       freshness: "not_applicable",
@@ -327,6 +392,92 @@ test("pay as you go: the title and who bills, no bar and no figure, in the toolb
   expect(card?.textContent).toContain("Claude, pay as you go");
   expect(card?.querySelector(".plan-track")).toBeNull();
   expect(card?.textContent).not.toMatch(/%/);
+});
+
+test("signed out: the name alone, with no plan line and no billing line, though the view says pay as you go", async () => {
+  await room("claude-acp", "en", SIGNED_OUT);
+  await view({
+    claude: figureless({
+      freshness: "not_applicable",
+      billing: "pay_as_you_go",
+      provider: "anthropic",
+    }),
+  });
+  expect(shown()).toBe("Claude");
+  expect(plan()?.dataset["look"]).toBe("bare");
+  expect(plan()?.textContent).not.toMatch(/pay as you go|Billed|plan/);
+  expect(plan()?.classList.contains("room-plan-press")).toBe(false);
+});
+
+test("signed out with figures: the name alone, no meter, no line and no card", async () => {
+  await room("claude-acp", "en", SIGNED_OUT);
+  await view({ claude: entry(30) });
+  expect(shown()).toBe("Claude");
+  expect(plan()?.querySelector(".rounded-meter")).toBeNull();
+  expect(plan()?.textContent).not.toMatch(/%|Plenty|plan/);
+  expect(plan()?.classList.contains("room-plan-press")).toBe(false);
+});
+
+test("codex-acp signed out: the name alone", async () => {
+  await room("codex-acp", "en", SIGNED_OUT);
+  await view({ codex: entry(30, { plan: "ChatGPT Plus" }) });
+  expect(shown()).toBe("ChatGPT");
+  expect(plan()?.textContent).not.toMatch(/%|Plenty|plan/);
+});
+
+test("signing in (waiting): the name alone until the sign-in is done", async () => {
+  await room("claude-acp", "en", WAITING);
+  await view({ claude: entry(30) });
+  expect(shown()).toBe("Claude");
+  expect(plan()?.textContent).not.toMatch(/%|Plenty/);
+});
+
+test("a sign-in heard after the view: the line stands once the plan is named", async () => {
+  await room("claude-acp", "en", SIGNED_OUT);
+  await view({ claude: entry(30) });
+  expect(shown()).toBe("Claude");
+  await act(async () => {
+    h!.transport.setupEvent({
+      sign_in_changed: { agent: "claude-acp", state: planSignIn("Claude Max") },
+    });
+  });
+  await settle();
+  expect(plan()?.textContent).toContain("Claude plan");
+  expect(plan()?.textContent).toContain("Plenty left until the 6:10 pm reset");
+});
+
+test("signed in by a key or the firm's endpoint: the line as the view gives it", async () => {
+  await room("claude-acp", "en", KEY_SIGN_IN);
+  await view({
+    claude: figureless({
+      freshness: "not_applicable",
+      billing: "pay_as_you_go",
+      provider: "anthropic",
+    }),
+  });
+  expect(plan()?.textContent).toContain("Claude, pay as you go");
+  expect(plan()?.textContent).toContain("Billed to your Anthropic account");
+  await act(async () => {
+    h!.transport.setupEvent({ sign_in_changed: { agent: "claude-acp", state: FIRM_SIGN_IN } });
+  });
+  await settle();
+  expect(plan()?.textContent).toContain("Claude, pay as you go");
+  expect(plan()?.textContent).toContain("Billed to your Anthropic account");
+});
+
+test("signed in by a plan login whose plan is not named: the limits' line and meter, as before", async () => {
+  await room("claude-acp", "en", NO_PLAN_SIGN_IN);
+  await view({ claude: entry(30) });
+  expect(plan()?.textContent).toContain("Claude plan");
+  expect(plan()?.textContent).toContain("Plenty left until the 6:10 pm reset");
+  expect(plan()?.querySelector(".rounded-meter")).not.toBeNull();
+});
+
+test("no sign-in heard yet: the name alone, whatever the view holds", async () => {
+  await room("claude-acp", "en", null);
+  await view({ claude: entry(30) });
+  expect(shown()).toBe("Claude");
+  expect(plan()?.textContent).not.toMatch(/%|Plenty/);
 });
 
 test("the hidden plan-state marker: none before a view and for fake-agent, loading, live_only with no line", async () => {
@@ -361,9 +512,7 @@ test("limit-warning's feed as claude-acp: the marker goes none, loading, unavail
   note();
   for (const line of LIMIT_WARNING_FEED) {
     await act(async () => h!.transport.deliver(line));
-    await act(async () => {
-      await vi.dynamicImportSettled();
-    });
+    await bounded("the line's chunks", () => vi.dynamicImportSettled());
     note();
   }
   expect(h!.transport.problems).toEqual([]);
@@ -396,9 +545,7 @@ test("focus on the plan starts loading its card before any press; the card stays
   await act(async () => plan()?.focus());
   expect(preload).toHaveBeenCalledTimes(1);
   expect(document.querySelector('[data-testid="plan-card"]')).toBeNull();
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
+  await bounded("the card's preload", () => vi.dynamicImportSettled());
   const card = await openCard();
   expect(card?.textContent).toContain("Claude Max");
 });

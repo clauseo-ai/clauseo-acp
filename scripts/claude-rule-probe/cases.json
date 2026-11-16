@@ -1,0 +1,279 @@
+{
+ "settings": {
+  "permissions": {
+   "deny": [
+    "Bash(*C:\\Users*)",
+    "Bash(*abc\\\\*)",
+    "Bash(*mno\\**)",
+    "Bash(*pqr\\\\\\*)",
+    "Bash(*def\\\\\\**)",
+    "Bash(*desktop\\\\\\\\\\**)",
+    "PowerShell(*C:\\Users*)",
+    "Bash(*xyz\\)",
+    "Bash(*uvw\\\\)",
+    "Bash(*yyy:*)",
+    "Bash(*zzz:**)",
+    "Bash(*$HOME/AppData/R*)",
+    "Bash(*/home/AppData/Q*)",
+    "Bash(*ai.clauseo.desktop\\agent-state\\02other*)"
+   ],
+   "allow": [
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes)",
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"*)",
+    "Bash(cat *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(head *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(dir *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes)"
+   ]
+  }
+ },
+ "expect_skipped": [
+  "Bash(*xyz\\)"
+ ],
+ "cases": [
+  {
+   "name": "a backslash before a letter is itself",
+   "tool": "Bash",
+   "command": "cat C:\\Users\\x",
+   "denied": true
+  },
+  {
+   "name": "... so it does not match without it",
+   "tool": "Bash",
+   "command": "cat C:Users",
+   "denied": false
+  },
+  {
+   "name": "\\\\ is one backslash to the parser: \\\\* is a literal star",
+   "tool": "Bash",
+   "command": "cat abc\\x",
+   "denied": false
+  },
+  {
+   "name": "\\* is a literal star",
+   "tool": "Bash",
+   "command": "cat mno*x",
+   "denied": true
+  },
+  {
+   "name": "... not any text",
+   "tool": "Bash",
+   "command": "cat mno\\x",
+   "denied": false
+  },
+  {
+   "name": "\\\\\\* is a backslash, then any text",
+   "tool": "Bash",
+   "command": "cat pqr\\x",
+   "denied": true
+  },
+  {
+   "name": "... and needs the backslash",
+   "tool": "Bash",
+   "command": "cat pqrx",
+   "denied": false
+  },
+  {
+   "name": "the first #1035 build's \\\\\\** is a backslash, then any text",
+   "tool": "Bash",
+   "command": "cat def\\anything",
+   "denied": true
+  },
+  {
+   "name": "five before * are a backslash and a literal star",
+   "tool": "Bash",
+   "command": "cat desktop\\*x",
+   "denied": true
+  },
+  {
+   "name": "... not a backslash and any text",
+   "tool": "Bash",
+   "command": "cat desktop\\x",
+   "denied": false
+  },
+  {
+   "name": "PowerShell in any case (no PowerShell tool off Windows)",
+   "tool": "PowerShell",
+   "command": "Get-Content C:\\USERS\\x",
+   "denied": true
+  },
+  {
+   "name": "a content ending in one backslash escapes its closing ): the rule is skipped",
+   "tool": "Bash",
+   "command": "cat xyz\\",
+   "denied": false
+  },
+  {
+   "name": "two: the ) closes it and the rule is kept; but Bash matches its parse, which drops an unquoted trailing backslash, so this end rule is PowerShell's",
+   "tool": "Bash",
+   "command": "cat uvw\\",
+   "denied": false
+  },
+  {
+   "name": "... at the end only",
+   "tool": "Bash",
+   "command": "cat uvw\\a",
+   "denied": false
+  },
+  {
+   "name": "a content ending in :* is a legacy prefix rule: it never matches",
+   "tool": "Bash",
+   "command": "cat yyy:1",
+   "denied": false
+  },
+  {
+   "name": ":** matches a colon and anything",
+   "tool": "Bash",
+   "command": "cat zzz:1",
+   "denied": true
+  },
+  {
+   "name": "... a colon at the end",
+   "tool": "Bash",
+   "command": "cat zzz:",
+   "denied": true
+  },
+  {
+   "name": "... and needs the colon",
+   "tool": "Bash",
+   "command": "cat zzzx",
+   "denied": false
+  },
+  {
+   "name": "Claude Code puts its HOME in place of a $HOME the shell expands: the literal rule misses",
+   "tool": "Bash",
+   "command": "cat \"$HOME/AppData/Rx\"",
+   "denied": false
+  },
+  {
+   "name": "... and matches where the shell leaves it alone",
+   "tool": "Bash",
+   "command": "cat '$HOME/AppData/Rx'",
+   "denied": true
+  },
+  {
+   "name": "... the expanded home matches (probe.py's HOME is <work>/home)",
+   "tool": "Bash",
+   "command": "cat \"$HOME/AppData/Qx\"",
+   "denied": true
+  },
+  {
+   "name": "own folder allow (auto): a listing an allow rule matches runs, no classifier",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... with flags, unquoted",
+   "tool": "Bash",
+   "command": "ls -la C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... reading a file in it",
+   "tool": "Bash",
+   "command": "cat \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\n.md\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... a listing no rule allows is refused by the (flagging) server-side classifier",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notesX",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a name the own one starts is no own folder",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\01ownX\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a sibling a deny rule names is denied",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\02other\\notes",
+   "mode": "auto",
+   "denied": true,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... and denied beside the own folder: deny beats allow",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\" C:\\D\\ai.clauseo.desktop\\agent-state\\02other\\notes",
+   "mode": "auto",
+   "denied": true,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a chained part no rule allows sends the whole command to a classifier",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"; python3 -c \"print(3)\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... any other command naming the own folder too",
+   "tool": "Bash",
+   "command": "python3 -c \"print(1)\" C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a path outside the working folders beside the own one: ls checks it and asks",
+   "tool": "Bash",
+   "command": "ls -la /etc \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... cat checks it too",
+   "tool": "Bash",
+   "command": "cat /etc/hostname C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... head too",
+   "tool": "Bash",
+   "command": "head -n 3 /etc/passwd C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... but dir is not a path-checked command (no D9 entry): a dir rule lists any folder (why the launch writes none)",
+   "tool": "Bash",
+   "command": "dir /etc C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  }
+ ],
+ "server_verdict": "flagged"
+}

@@ -5,17 +5,77 @@ import { expect, test } from "vitest";
 import { isTitle, MAX_TITLE_CHARS, titleOf } from "./conversation-title.ts";
 
 const points = (text: string) => Array.from(text).length;
+const graphemes = (text: string) =>
+  Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)).length;
 
-test("a message of 48 code points or fewer is its own title, whole", () => {
-  const at48 = "word ".repeat(9) + "abc";
-  expect(points(at48)).toBe(48);
-  expect(titleOf(at48)).toBe(at48);
+// D-070: [the first message, its title]. Whole up to 48 graphemes; longer, cut with "…" at the first clause's end
+// (16 graphemes or more), else the last space, never mid-word; "…" only when cut.
+const TITLES: [message: string, title: string][] = [
+  // whole
+  ["Draft the reply", "Draft the reply"],
+  ["word ".repeat(9) + "abc", "word ".repeat(9) + "abc"],
+  ["मुझे किसी वकील से बात करनी है", "मुझे किसी वकील से बात करनी है"],
+  ["x".repeat(47) + "📄", "x".repeat(47) + "📄"],
+  // one grapheme over: the last space, with its "…"
+  ["word ".repeat(9) + "abcd", "word word word word word word word word word…"],
+  // the stage C case: the boilerplate dropped, then the first clause would be too long, so the last space
+  [
+    "Without using web search, write a short note on the notice period in clause 9 of the lease deed",
+    "Write a short note on the notice period in…",
+  ],
+  ["Without web search: what is a caveat?", "What is a caveat?"],
+  // the first clause's end, when it comes late enough
+  [
+    "Please read the lease deed, and tell me whether clause nine lets the bank end it early",
+    "Please read the lease deed…",
+  ],
+  [
+    "What does clause nine say? Then draft a reply to the bank's notice of the twelfth",
+    "What does clause nine say…",
+  ],
+  // a clause too short to stand alone: on to the last space
+  [
+    "Hi, can you prepare the bail application for the accused in Delhi court tomorrow morning",
+    "Hi, can you prepare the bail application for…",
+  ],
+  [
+    "Please prepare the bail application for the accused in Delhi court tomorrow morning",
+    "Please prepare the bail application for the…",
+  ],
+  // Hindi: cut at a danda's end, else at a space, a vowel sign never parted from its letter
+  [
+    "किरायानामे की धारा नौ पढ़िए। फिर बैंक के नोटिस का जवाब तैयार कीजिए और तारीख भी बताइए",
+    "किरायानामे की धारा नौ पढ़िए…",
+  ],
+  [
+    "मुझे किसी वकील से बात करनी है और मेरे केस की तारीख भी बताइए कृपया जल्दी",
+    "मुझे किसी वकील से बात करनी है और मेरे केस की तारीख भी बताइए कृपया…",
+  ],
+  // only a word longer than the whole title is cut inside it
+  ["z".repeat(60), "z".repeat(47) + "…"],
+  ["x".repeat(30) + "   " + "y".repeat(30), "x".repeat(30) + "…"],
+];
+
+test.each(TITLES)("%j gives %j", (message, title) => {
+  expect(titleOf(message)).toBe(title);
+  expect(graphemes(title)).toBeLessThanOrEqual(48);
+  expect(title.endsWith("…")).toBe(graphemes(message.trim().replace(/\s+/g, " ")) > 48);
 });
 
-test("a message of 49 code points gives its first 6 words", () => {
-  const at49 = "word ".repeat(9) + "abcd";
-  expect(points(at49)).toBe(49);
-  expect(titleOf(at49)).toBe("word word word word word word");
+test("a cut never parts a Hindi letter from its vowel sign or virama", () => {
+  // one word of 80 graphemes, अनुच्छेद (अ नु च्छे द) twenty times: cut inside it, at a grapheme's edge
+  const long = "अनुच्छेद".repeat(20);
+  const title = titleOf(long) ?? "";
+  const segments = (text: string) =>
+    Array.from(
+      new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+      (g) => g.segment,
+    );
+  const kept = segments(title.slice(0, -1));
+  expect(title.endsWith("…")).toBe(true);
+  expect(kept).toEqual(segments(long).slice(0, 47));
+  // never ending on a bare virama, the conjunct च्छे whole
+  expect(title.slice(0, -1).endsWith("\u094d")).toBe(false);
 });
 
 test("whitespace is collapsed and trimmed, tabs and newlines too", () => {
@@ -23,35 +83,11 @@ test("whitespace is collapsed and trimmed, tabs and newlines too", () => {
   expect(titleOf("Draft\tthe\r\nreply")).toBe("Draft the reply");
 });
 
-test("a longer message gives its first 6 words, joined by one space", () => {
-  const long =
-    "Please prepare the bail application for the accused in Delhi court tomorrow morning";
-  expect(points(long)).toBeGreaterThan(48);
-  expect(titleOf(long)).toBe("Please prepare the bail application for");
+test("the boilerplate alone is the title as it is, never nothing", () => {
+  expect(titleOf("Without using web search,")).toBe("Without using web search,");
 });
 
-test("a long message of fewer than 6 words gives those words, even over 48 code points", () => {
-  const a = "x".repeat(30);
-  const b = "y".repeat(30);
-  expect(titleOf(`${a}   ${b}`)).toBe(`${a} ${b}`);
-  // one word of 60 code points is the title, as it is still within the host's limit
-  expect(titleOf("z".repeat(60))).toBe("z".repeat(60));
-});
-
-test("a Devanagari question of 48 code points or fewer stays whole, combining vowel signs and all", () => {
-  const question = "मुझे किसी वकील से बात करनी है";
-  // 29 code points, the vowel signs ि and ी among them: each is its own code point
-  expect(points(question)).toBe(29);
-  expect(titleOf(question)).toBe(question);
-});
-
-test("a long Devanagari message gives its first 6 words", () => {
-  const long = "मुझे किसी वकील से बात करनी है और मेरे केस की तारीख भी बताइए";
-  expect(points(long)).toBeGreaterThan(48);
-  expect(titleOf(long)).toBe("मुझे किसी वकील से बात करनी");
-});
-
-test("the length is in code points, not UTF-16 units: 47 letters and an emoji are 48, whole", () => {
+test("the length is in graphemes: 47 letters and an emoji are 48, whole, though 49 UTF-16 units", () => {
   const title = "x".repeat(47) + "📄";
   expect(points(title)).toBe(48);
   expect(title.length).toBe(49);
@@ -65,8 +101,6 @@ test("a message the host would refuse gives null", () => {
   expect(titleOf("Draft\u0007 reply")).toBeNull();
   // a bidi override
   expect(titleOf("\u202eabc")).toBeNull();
-  // six 40-letter words: 245 code points, over the 200 limit
-  expect(titleOf(Array(6).fill("a".repeat(40)).join(" "))).toBeNull();
   // nothing at all, or whitespace only
   expect(titleOf("")).toBeNull();
   expect(titleOf(" \n\t ")).toBeNull();

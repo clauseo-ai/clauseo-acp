@@ -326,6 +326,8 @@ fn feature_used_counts_an_undo_and_a_restore_once_each() {
         .checkpoint(CheckpointKind::Import)
         .unwrap();
     let restore = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter,
         checkpoint: import,
         scope: RestoreRequest::Files {

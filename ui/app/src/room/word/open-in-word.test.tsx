@@ -1,9 +1,14 @@
-// @vitest-environment happy-dom
-// "Open in Word" over FakeTransport: a .doc or .docx the wall lists opens through open_file with its file ref, from its
-// tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
-// a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
-// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
-// only in the console for a tile.
+// @vitest-environment happy-dom "Open in Word" over FakeTransport: a .doc or .docx the wall lists
+// opens through open_file with its file ref, from its tile (a press, Enter or Space, its words on
+// the face, its whole name in the tooltip on hover and keyboard focus) and from a change note naming
+// it while the changes stand; never for a paper the wall doesn't list. A .pdf's and a .txt's tile
+// opens them the same way, with the computer's default app, under Open it; a type the desktop
+// doesn't open (.zip) has no press. A second
+// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why
+// under the note and under the tiles, by its code; a path too long for Word with Show in folder
+// beside it, revealing the matter's folder. An open Word started in Protected View says so in a
+// quiet line under the note, until the next open or Undo, and under the tiles, until the next press
+// of a tile.
 import { IconFileGeneric, IconFilePdf, IconFileWord } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
@@ -14,8 +19,9 @@ import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
-import { reset, step, uuid } from "../../testing/stream-script.ts";
+import { MATTER, reset, step, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, PaperSummary, ViewEntry } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { defaultOutcome, mountRoom, type Harness, type Script } from "../thread/harness.ts";
@@ -47,6 +53,7 @@ const PAPERS = [
   paper(2, "Old notice.DOC"),
   paper(3, "Exhibit.pdf"),
   paper(4, "brief.txt"),
+  paper(5, "bundle.zip"),
 ];
 
 const file = (path: string): FileChange => ({
@@ -75,19 +82,29 @@ const faceOf = (name: string) =>
     .find((t) => t.querySelector(".tile-title")?.textContent === name)
     ?.querySelector<HTMLButtonElement>("button.tile-face") ?? null;
 const opened = () => h!.transport.only("open_file").map((c) => c.file);
+const titles = (faces: readonly Element[]) =>
+  faces.map((b) => b.querySelector(".tile-title")?.textContent);
 
-test("a .doc and a .docx tile open in Word, by their file refs; a .pdf and a .txt tile don't", async () => {
+test("a .doc and a .docx tile open in Word, a .pdf and a .txt tile with the default app, by their file refs; a .zip doesn't", async () => {
   h = await withPapers();
-  const word = h.all("open-in-word");
-  expect(word.map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
-  expect(faceOf("Exhibit.pdf")?.dataset["testid"]).toBeUndefined();
-  expect(faceOf("brief.txt")?.dataset["testid"]).toBeUndefined();
-  await h.click(faceOf("Reply.docx"));
-  await h.click(faceOf("Old notice.DOC"));
-  await h.click(faceOf("Exhibit.pdf"));
-  await h.click(faceOf("brief.txt"));
-  await h.settle();
-  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8)]);
+  expect(titles(h.all("open-in-word"))).toEqual(["Reply.docx", "Old notice.DOC"]);
+  expect(titles(h.all("open-file"))).toEqual(["Exhibit.pdf", "brief.txt"]);
+  expect(faceOf("bundle.zip")?.dataset["testid"]).toBeUndefined();
+  for (const name of ["Reply.docx", "Old notice.DOC", "Exhibit.pdf", "brief.txt", "bundle.zip"]) {
+    await h.click(faceOf(name));
+    await h.settle();
+  }
+  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8), uuid(3, 8), uuid(4, 8)]);
+});
+
+test("a file's name stands whole in its two clamped lines where nothing needs cutting, read once", async () => {
+  h = await withPapers();
+  const title = faceOf("Exhibit.pdf")?.querySelector(".tile-title");
+  expect(title?.classList.contains("tile-name")).toBe(true);
+  expect(title?.querySelector(".tile-name-text")?.textContent).toBe("Exhibit.pdf");
+  expect(title?.querySelector(".tile-name-text")?.getAttribute("aria-hidden")).toBeNull();
+  // the whole name for assistive technology only while the eye's words are cut
+  expect(title?.querySelector(".sr-only")?.textContent).toBe("");
 });
 
 test("every tile carries its file type's glyph by extension, at 24 px, and the Word tiles still open in Word", async () => {
@@ -99,21 +116,27 @@ test("every tile carries its file type's glyph by extension, at 24 px, and the W
   expect(iconIn(faceOf("brief.txt"), IconFileGeneric, 24, "tile-glyph")).not.toBeNull();
   for (const name of ["Reply.docx", "Exhibit.pdf"])
     expect(glyph(name)?.getAttribute("aria-hidden")).toBe("true");
-  expect(h.all("open-in-word").map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
+  // and its type's colour, for the wall to paint the glyph's tab: none for a plain file
+  const tone = (name: string) => faceOf(name)?.closest("li.tile")?.getAttribute("data-file");
+  expect(tone("Reply.docx")).toBe("word");
+  expect(tone("Old notice.DOC")).toBe("word");
+  expect(tone("Exhibit.pdf")).toBe("pdf");
+  expect(tone("brief.txt")).toBeNull();
+  expect(titles(h.all("open-in-word"))).toEqual(["Reply.docx", "Old notice.DOC"]);
 });
 
-test("a Word tile says it opens in Word to screen readers, and keeps its hint out of the title", async () => {
+test("a tile says what its press does on its face, in the language, and keeps its name's tooltip out of the title", async () => {
   h = await withPapers({ display: { language: "hi" } });
   const face = faceOf("Reply.docx");
-  const more = face?.getAttribute("aria-describedby");
-  expect(more).toBeTruthy();
-  expect(document.getElementById(more ?? "")?.textContent).toBe(rdt("hi", "Open in Word"));
+  expect(face?.querySelector(".tile-cue")?.textContent).toBe(rdt("hi", "Open in Word"));
+  expect(faceOf("Exhibit.pdf")?.querySelector(".tile-cue")?.textContent).toBe(mt("hi", "Open it"));
+  expect(faceOf("bundle.zip")?.querySelector(".tile-cue")).toBeNull();
   expect(face?.getAttribute("title")).toBeNull();
-  // a tile that isn't Word's keeps no description
-  expect(faceOf("Exhibit.pdf")?.getAttribute("aria-describedby")).toBeNull();
+  // the face's words say it: no description repeats them
+  expect(face?.getAttribute("aria-describedby")).toBeNull();
 });
 
-test("the hint shows on keyboard focus, in the tooltip, as on hover", async () => {
+test("the whole name shows on keyboard focus, in the tooltip, as on hover", async () => {
   h = await withPapers();
   const face = faceOf("Reply.docx");
   expect(tipText()).toBeNull();
@@ -121,7 +144,7 @@ test("the hint shows on keyboard focus, in the tooltip, as on hover", async () =
     face?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     face?.focus();
   });
-  await act(async () => vi.waitFor(() => expect(tipText()).toBe("Open in Word")));
+  await act(async () => vi.waitFor(() => expect(tipText()).toBe("Reply.docx")));
 });
 
 for (const language of ["en", "hi"] as const) {
@@ -132,7 +155,7 @@ for (const language of ["en", "hi"] as const) {
       face?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
       face?.focus();
     });
-    const label = rdt(language, "Open in Word");
+    const label = "Reply.docx";
     const popup = () =>
       [...document.body.querySelectorAll<HTMLElement>("[data-side]")].find(
         (n) => n.textContent === label,
@@ -156,7 +179,7 @@ for (const language of ["en", "hi"] as const) {
 const tipText = () =>
   [...document.body.querySelectorAll('[role="tooltip"], [data-side]')]
     .map((n) => n.textContent)
-    .find((t) => t === "Open in Word") ?? null;
+    .find((t) => t === "Reply.docx") ?? null;
 
 test("Enter and Space on a focused Word tile open it: the face is a native button with nothing in the way", async () => {
   h = await withPapers();
@@ -173,7 +196,7 @@ test("Enter and Space on a focused Word tile open it: the face is a native butto
   expect(opened()).toEqual([uuid(1, 8)]);
 });
 
-test("a declined open says nothing; a failed one goes only to the console", async () => {
+test("a declined open says nothing; a failed one says why under the tiles", async () => {
   h = await withPapers();
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   h.transport.host.openFile = () => {
@@ -188,7 +211,8 @@ test("a declined open says nothing; a failed one goes only to the console", asyn
   await h.click(faceOf("Reply.docx"));
   await h.settle();
   expect(warn).toHaveBeenCalledTimes(1);
-  expect(h.host.querySelector('[role="alert"]')).toBeNull();
+  expect(wallLine("wall-error")?.dataset["code"]).toBe("internal");
+  expect(wallLine("wall-error")?.getAttribute("role")).toBe("alert");
   expect(opened()).toHaveLength(2);
 });
 
@@ -255,7 +279,13 @@ test("two quick presses on the note's Open in Word send one open_file", async ()
 const noteError = () =>
   h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="error"]') ?? null;
 
-for (const code of ["internal", "command.conflict", "matter.folder_missing", "command.invalid"]) {
+for (const code of [
+  "internal",
+  "command.conflict",
+  "matter.folder_missing",
+  "command.invalid",
+  "matter.document_path_too_long",
+]) {
   test(`a failed open from the note says why in its error line, by its code: ${code}`, async () => {
     h = await withPapers();
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -274,6 +304,156 @@ for (const code of ["internal", "command.conflict", "matter.folder_missing", "co
     expect(noteError()).toBeNull();
   });
 }
+
+const PROTECTED =
+  "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.";
+const protectedLine = () =>
+  h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="open-protected-view"]') ??
+  null;
+const openFromNote = async () => {
+  await h!.click(h!.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+  await h!.settle();
+};
+
+test("an open in Protected View says so in a quiet line under the note; the next open clears it", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  expect(protectedLine()).toBeNull();
+  await openFromNote();
+  expect(protectedLine()?.textContent).toBe(PROTECTED);
+  expect(protectedLine()?.getAttribute("role")).toBe("status");
+  expect(protectedLine()?.closest('[role="alert"]')).toBeNull();
+  expect(noteError()).toBeNull();
+  // the next open clears it as it goes, and an open outside Protected View leaves it gone
+  h.transport.host.openFile = () => ({ protected_view: false });
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+});
+
+test("an open outside Protected View, or a failed one, shows no Protected View line", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(opened()).toHaveLength(1);
+  expect(protectedLine()).toBeNull();
+  h.transport.host.openFile = () => {
+    throw { code: "matter.document_path_too_long", message: "for logs", retryable: false };
+  };
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+  expect(noteError()?.dataset["code"]).toBe("matter.document_path_too_long");
+});
+
+test("Undo clears the Protected View line", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(protectedLine()).not.toBeNull();
+  await h.click(h.one("undo"));
+  await h.settle();
+  expect(protectedLine()).toBeNull();
+});
+
+const wallLine = (testId: string) =>
+  h!.host.querySelector<HTMLElement>(`aside.room-pane [data-testid="${testId}"]`);
+const openFromTile = async () => {
+  await h!.click(faceOf("Reply.docx"));
+  await h!.settle();
+};
+const TOO_LONG = { code: "matter.document_path_too_long", message: "for logs", retryable: false };
+
+test("a tile's open in Protected View says so in a quiet line under the tiles; the next press clears it", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  expect(wallLine("open-protected-view")).toBeNull();
+  await openFromTile();
+  expect(opened()).toEqual([uuid(1, 8)]);
+  expect(wallLine("open-protected-view")?.textContent).toBe(PROTECTED);
+  expect(wallLine("open-protected-view")?.getAttribute("role")).toBe("status");
+  expect(wallLine("wall-error")).toBeNull();
+  // the line is the wall's: the thread says nothing
+  expect(h.host.querySelectorAll('[data-testid="open-protected-view"]')).toHaveLength(1);
+  h.transport.host.openFile = () => ({ protected_view: false });
+  await openFromTile();
+  expect(opened()).toHaveLength(2);
+  expect(wallLine("open-protected-view")).toBeNull();
+});
+
+test("a tile's open outside Protected View, with protected_view absent, shows no line", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => {};
+  await openFromTile();
+  expect(opened()).toEqual([uuid(1, 8)]);
+  expect(wallLine("open-protected-view")).toBeNull();
+  expect(wallLine("wall-error")).toBeNull();
+});
+
+test("a tile's open of a path too long for Word says why under the tiles, and Show in folder reveals the matter's folder", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.transport.host.openFile = () => {
+    throw TOO_LONG;
+  };
+  await openFromTile();
+  expect(wallLine("wall-error")?.textContent).toBe(errorWords("en", TOO_LONG.code));
+  expect(wallLine("wall-error")?.getAttribute("role")).toBe("alert");
+  expect(wallLine("open-protected-view")).toBeNull();
+  const reveal = wallLine("reveal");
+  expect(reveal?.textContent).toBe("Show in folder");
+  expect(h.transport.only("reveal")).toEqual([]);
+  await h.click(reveal);
+  await h.settle();
+  expect(h.transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: MATTER } }]);
+  // the next press clears it
+  h.transport.host.openFile = () => {};
+  await openFromTile();
+  expect(wallLine("wall-error")).toBeNull();
+  expect(wallLine("reveal")).toBeNull();
+});
+
+for (const code of ["internal", "command.conflict", "matter.folder_missing", "some.newer_code"])
+  test(`a tile's other failures say why under the tiles, by their code, without Show in folder: ${code}`, async () => {
+    h = await withPapers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.transport.host.openFile = () => {
+      throw { code, message: "for logs", retryable: false };
+    };
+    await openFromTile();
+    expect(wallLine("wall-error")?.dataset["code"]).toBe(code);
+    // an unknown code says the generic words
+    expect(wallLine("wall-error")?.textContent).toBe(errorWords("en", code));
+    expect(wallLine("reveal")).toBeNull();
+    // the next press that opens clears it
+    h.transport.host.openFile = () => {};
+    await openFromTile();
+    expect(wallLine("wall-error")).toBeNull();
+  });
+
+test("the note's error line for a path too long for Word has Show in folder, which reveals the matter's folder", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.transport.host.openFile = () => {
+    throw TOO_LONG;
+  };
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(noteError()?.dataset["code"]).toBe(TOO_LONG.code);
+  const reveal = h.one("files-changed")?.querySelector<HTMLElement>('[data-testid="reveal"]');
+  expect(reveal?.textContent).toBe("Show in folder");
+  await h.click(reveal);
+  await h.settle();
+  expect(h.transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: MATTER } }]);
+  // another code offers no Show in folder
+  h.transport.host.openFile = () => {
+    throw { code: "internal", message: "for logs", retryable: false };
+  };
+  await openFromNote();
+  expect(noteError()?.dataset["code"]).toBe("internal");
+  expect(h.one("files-changed")?.querySelector('[data-testid="reveal"]')).toBeNull();
+});
 
 test("a declined open from the note says nothing", async () => {
   h = await withPapers();

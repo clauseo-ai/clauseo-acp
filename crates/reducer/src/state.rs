@@ -117,6 +117,8 @@ pub struct ThreadState {
     pub(crate) files: BTreeMap<TurnId, TurnFiles>,
     /// `TurnFailed` codes of turns that have not ended.
     pub(crate) failures: BTreeMap<TurnId, ErrorCode>,
+    /// The before-turn checkpoints of started turns that have not ended, for their steps.
+    pub(crate) before_checkpoints: BTreeMap<TurnId, CheckpointId>,
     pub(crate) index: Index,
 }
 
@@ -133,6 +135,7 @@ impl ThreadState {
             after_turn: None,
             files: BTreeMap::new(),
             failures: BTreeMap::new(),
+            before_checkpoints: BTreeMap::new(),
             index: Index::default(),
         }
     }
@@ -167,6 +170,11 @@ impl ThreadState {
     /// The turn that started and has not ended.
     pub const fn running(&self) -> Option<TurnId> {
         self.running
+    }
+
+    /// The messages of its queued prompts, in the order they go (`queued_order.rs`).
+    pub fn queued_order(&self) -> Vec<MessageId> {
+        crate::queued_order(self.entries.values())
     }
 }
 

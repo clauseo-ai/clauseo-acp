@@ -6,12 +6,12 @@ use std::io;
 use std::time::Duration;
 
 use async_io::block_on;
-use clauseo_process::{Error, Launched, ManualTimer, ShutdownOutcome};
+use clauseo_process::{Error, Launched, ManualTimer, ShutdownOutcome, SpawnOptions};
 use clauseo_protocol::{DetachReason, ErrorCode};
 use futures::{AsyncWriteExt, join};
 use serde_json::json;
 
-use crate::harness::{RunDir, launch, launch_program, lines};
+use crate::harness::{RunDir, launch, launch_program, launch_with, lines};
 
 /// Each of the 200 stderr lines `exit-mid-turn` writes before it exits 1.
 const FILLER: &str = "fake_agent exit-mid-turn stderr filler.\n";
@@ -45,6 +45,33 @@ fn idle_exits_on_stdin_close() {
     let error = block_on(stdin.write_all(b"{}\n")).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     block_on(stdin.close()).unwrap();
+}
+
+/// `SpawnOptions::stdin_grace` is the first wait the ladder arms, and an agent that exits on
+/// stdin close is still `StdinClosed` within it.
+#[test]
+fn a_custom_stdin_grace_is_the_first_wait() {
+    let dir = RunDir::new();
+    let grace = Duration::from_secs(5);
+    let opts = SpawnOptions::new().stdin_grace(grace);
+    let Launched {
+        stdout: _stdout,
+        stderr,
+        handle,
+        ..
+    } = launch_with("idle", &dir, &opts).unwrap();
+    let timer = ManualTimer::new();
+    let (outcome, pumped, armed) = block_on(async {
+        let (outcome, pumped) = join!(handle.shutdown(&timer, None), stderr.drain());
+        (outcome, pumped, timer.next_armed().await)
+    });
+    assert!(
+        matches!(outcome, ShutdownOutcome::StdinClosed(_)),
+        "expected StdinClosed, got {outcome:?}"
+    );
+    pumped.unwrap();
+    assert_eq!(armed, grace);
+    assert_eq!(timer.fired(), 0);
 }
 
 #[cfg(unix)]

@@ -8,12 +8,44 @@
 mod support;
 
 #[cfg(test)]
+#[path = "signin/events.rs"]
+mod events;
+
+#[cfg(test)]
 #[path = "signin/claude.rs"]
 mod claude;
 
 #[cfg(test)]
 #[path = "signin/codex.rs"]
 mod codex;
+
+#[cfg(test)]
+#[path = "signin/codex_cli.rs"]
+mod codex_cli;
+
+#[cfg(test)]
+#[path = "signin/codex_status.rs"]
+mod codex_status;
+
+#[cfg(test)]
+#[path = "signin/status_retry.rs"]
+mod status_retry;
+
+#[cfg(test)]
+#[path = "signin/graceful.rs"]
+mod graceful;
+
+#[cfg(test)]
+#[path = "signin/cancel_before_spawn.rs"]
+mod cancel_before_spawn;
+
+#[cfg(test)]
+#[path = "signin/kept_login.rs"]
+mod kept_login;
+
+#[cfg(test)]
+#[path = "signin/switch_guard.rs"]
+mod switch_guard;
 
 #[cfg(test)]
 #[path = "signin/queued.rs"]
@@ -28,8 +60,24 @@ mod reuse_claude;
 mod reuse_codex;
 
 #[cfg(test)]
+#[path = "signin/found_at_press.rs"]
+mod found_at_press;
+
+#[cfg(test)]
+#[path = "signin/detect_nowrite.rs"]
+mod detect_nowrite;
+
+#[cfg(test)]
+#[path = "signin/detect_keychain.rs"]
+mod detect_keychain;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
+
+#[cfg(test)]
+#[path = "signin/lifecycle_log.rs"]
+mod lifecycle_log;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

@@ -43,6 +43,7 @@ fn a_running_session_keeps_its_tools_until_the_next_session_starts() {
         patch: ToolsPatch {
             web_search: Some(false),
             browser: None,
+            connectors: None,
         },
     });
     // The running session's header still shows what it started with, to a new subscriber too.

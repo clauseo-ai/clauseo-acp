@@ -7,12 +7,13 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::support::{CDP_PORT, Guard, PROXY, Scratch, example, guard_command, host_env};
+use crate::support::{Guard, PROXY, Scratch, example, guard_command, host_env};
 use crate::write;
 
 /// What the agent's environment may hold that must never reach agent-browser. The host's own
-/// inputs (`AGENT_BROWSER_SOCKET_DIR` on Unix, `AGENT_BROWSER_STREAM_PORT`) are not here: the
-/// host sets them on top, and `usage.rs` tests their refusals.
+/// input `AGENT_BROWSER_SOCKET_DIR` (Unix) is not here: the host sets it on top, and `usage.rs`
+/// tests its refusals. `AGENT_BROWSER_STREAM_PORT` is: the guard neither needs nor passes it, on
+/// any system, so agent-browser's stream server stays off.
 const HOSTILE: &[(&str, &str)] = &[
     ("HTTP_PROXY", "http://evil:1"),
     ("https_proxy", "http://evil:2"),
@@ -21,6 +22,7 @@ const HOSTILE: &[(&str, &str)] = &[
     ("AGENT_BROWSER_PROVIDER", "browserbase"),
     ("AGENT_BROWSER_PROFILE", "/Users/lawyer/Library/Chrome"),
     ("AGENT_BROWSER_CDP", "9222"),
+    ("AGENT_BROWSER_STREAM_PORT", "61100"),
     ("AGENT_BROWSER_ARGS", "--foo"),
     ("AGENT_BROWSER_DAEMON", "1"),
     ("AGENT_BROWSER_ENGINE", "lightpanda"),
@@ -41,6 +43,10 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let cwd = scratch.cwd();
     let under = |name: &str| cwd.join(name).to_str().unwrap().to_owned();
     let mut map: BTreeMap<String, String> = host_env(scratch).into_iter().collect();
+    // The test's own knob for the guard, never agent-browser's.
+    map.remove("CLAUSEO_TEST_GUARD_PROGRAM_FILES");
+    // agent-browser's stream server is off on every system, and it gets no port for it.
+    map.insert("AGENT_BROWSER_STREAM_DISABLED".to_owned(), "1".to_owned());
     let fixed = [
         ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
         ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
@@ -53,13 +59,13 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     for (name, value) in fixed {
         map.insert(name.to_owned(), value.to_owned());
     }
-    // The WebRTC rule, then the host's CDP port, one per line.
+    // The WebRTC rule alone: the port is no longer pinned through agent-browser's launch.
     map.insert(
         "AGENT_BROWSER_ARGS".to_owned(),
-        format!(
-            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port={CDP_PORT}"
-        ),
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_owned(),
     );
+    // The guard's relay, never the agent's "9222": `child_env` checks its form and puts this in.
+    map.insert("AGENT_BROWSER_CDP".to_owned(), RELAY.to_owned());
     map.insert("AGENT_BROWSER_DOWNLOAD_PATH".to_owned(), under("downloads"));
     map.insert(
         "AGENT_BROWSER_SCREENSHOT_DIR".to_owned(),
@@ -87,7 +93,11 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
             }
         }
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-        map.insert("PATH".to_owned(), format!(r"{root}\System32;{root}"));
+        // Lower case, as `child_env` compares it (Windows paths compare without case).
+        map.insert(
+            "PATH".to_owned(),
+            format!(r"{root}\System32;{root}").to_lowercase(),
+        );
         map.insert("SystemRoot".to_owned(), root);
     } else {
         for name in ["http_proxy", "https_proxy", "all_proxy"] {
@@ -104,6 +114,18 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
         );
     }
     map
+}
+
+/// What [`child_env`] puts in place of a relay endpoint of the right form.
+const RELAY: &str = "<the guard's relay>";
+
+/// Whether `value` is the guard's relay endpoint. The stub's report reaches the test through the
+/// guard's stdout, which puts this mark in place of the whole relay URL agent-browser was given
+/// (`src/browser_guard/relay/redact.rs`), so the mark alone is that URL, character for character;
+/// its form, `ws://127.0.0.1:<port>/devtools/browser/<64 lowercase hex>`, is checked by the
+/// relay's own tests (`src/browser_guard/devtools/tests.rs`).
+fn is_relay(value: &str) -> bool {
+    value == "[relay url redacted]"
 }
 
 /// Variables Windows itself puts in a new process's environment whatever block it is given:
@@ -126,29 +148,25 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
         command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
     }
     let mut guard = Guard::start(command);
+    // A request while the browser is stopped: a one-shot agent-browser, with no Chrome yet, so
+    // no endpoint; its report is the answer the guard relays.
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let oneshot = guard.read();
+    let mut without_cdp = expected(&scratch);
+    without_cdp.remove("AGENT_BROWSER_CDP");
+    assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
+    // The first call starts Chrome, then agent-browser with the guard's relay. The stub exits
+    // without answering, so the guard answers the call with an error and exits with its 0.
+    guard.send_call("open");
     let report = guard.read();
     let (status, rest) = guard.finish();
     assert_eq!(status.code(), Some(0));
-    assert_eq!(rest, "");
-
-    let env: BTreeMap<String, String> = report["env"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
-        .collect();
-    let mut env = env;
-    if cfg!(windows) {
-        for name in OS_SET {
-            if let Some(value) = env.remove(*name) {
-                assert_ne!(
-                    value, OS_SET_HOSTILE,
-                    "{name} came through from the guard's env"
-                );
-            }
-        }
-    }
-    assert_eq!(env, expected(&scratch));
+    assert!(
+        rest.contains(r#""id":"open""#) && rest.contains("-32603"),
+        "{rest}"
+    );
+    assert_eq!(child_env(&report, scratch.session()), expected(&scratch));
+    assert_eq!(report["env"].get("AI_GATEWAY_API_KEY"), None::<&Value>);
     let args: Vec<&str> = report["args"]
         .as_array()
         .unwrap()
@@ -180,7 +198,120 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
         assert!(metadata.is_dir());
         assert_eq!(metadata.mode() & 0o7777, 0o700);
     }
-    assert_eq!(report["env"].get("AI_GATEWAY_API_KEY"), None::<&Value>);
+}
+
+/// No `AGENT_BROWSER_PROXY` from the host (the plain client's Codex entry): the guard starts,
+/// answers a request with no Chrome, then starts Chrome and agent-browser at the first call, and
+/// the child sees the same map as with a proxy but for every proxy variable, even one the agent's
+/// environment holds.
+#[test]
+fn without_a_proxy_the_guard_starts_and_the_child_gets_no_proxy_variable() {
+    let scratch = Scratch::new("env-no-proxy");
+    let args = ["mcp", "--tools", "core"].map(OsStr::new);
+    let mut command = guard_command(&scratch, &example("env_stub"), &args);
+    command.env_remove("AGENT_BROWSER_PROXY");
+    command.envs(HOSTILE.iter().copied());
+    if cfg!(windows) {
+        command.env("PROCESSOR_ARCHITECTURE", OS_SET_HOSTILE);
+    } else {
+        command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
+    }
+    let mut guard = Guard::start(command);
+    let mut wanted = expected(&scratch);
+    wanted.retain(|name, _| !name.to_ascii_uppercase().contains("PROXY"));
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let oneshot = guard.read();
+    let mut without_cdp = wanted.clone();
+    without_cdp.remove("AGENT_BROWSER_CDP");
+    assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
+    guard.send_call("open");
+    let report = guard.read();
+    let (status, rest) = guard.finish();
+    assert_eq!(status.code(), Some(0), "{rest}");
+    assert_eq!(child_env(&report, scratch.session()), wanted);
+}
+
+/// The environment in an `env_stub` report, with the run's own session name
+/// (`run-<guard pid>-<8 hex>`, and on Windows `-<n>` after it, `src/browser_guard/runs.rs`)
+/// checked and put back to the host's, a relay endpoint checked and put as [`RELAY`], and the
+/// variables Windows sets itself checked and dropped.
+fn child_env(report: &Value, host_session: &str) -> BTreeMap<String, String> {
+    let env: BTreeMap<String, String> = report["env"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
+        .collect();
+    let mut env = env;
+    if cfg!(windows) {
+        for name in OS_SET {
+            if let Some(value) = env.remove(*name) {
+                assert_ne!(
+                    value, OS_SET_HOSTILE,
+                    "{name} came through from the guard's env"
+                );
+            }
+        }
+        // PATH starts with the system directory Windows reports (`GetSystemDirectoryW`), which
+        // can differ in case from `<SystemRoot>\System32` (e.g. `system32`): Windows paths
+        // compare without case, so the test does too.
+        if let Some(path) = env.get_mut("PATH") {
+            *path = path.to_lowercase();
+        }
+    }
+    let session = env.remove("AGENT_BROWSER_SESSION").unwrap_or_default();
+    let parts: Vec<&str> = session
+        .strip_prefix("run-")
+        .unwrap_or_default()
+        .split('-')
+        .collect();
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let suffix_ok = if cfg!(windows) {
+        parts.get(2).is_some_and(|n| digits(n)) && parts.len() == 3
+    } else {
+        parts.len() == 2
+    };
+    assert!(
+        parts.first().is_some_and(|pid| digits(pid))
+            && parts.get(1).is_some_and(
+                |nonce| nonce.len() == 8 && nonce.bytes().all(|b| b.is_ascii_hexdigit())
+            )
+            && suffix_ok,
+        "{session}"
+    );
+    env.insert("AGENT_BROWSER_SESSION".to_owned(), host_session.to_owned());
+    if let Some(cdp) = env.get_mut("AGENT_BROWSER_CDP") {
+        assert!(is_relay(cdp), "not the guard's relay: {cdp}");
+        RELAY.clone_into(cdp);
+    }
+    env
+}
+
+/// A guard started without `AGENT_BROWSER_STREAM_PORT` (the host passes none) starts the
+/// browser and agent-browser, whose environment has no stream port and turns the stream server
+/// off. (A value in the guard's env is ignored: `HOSTILE` sets one.)
+#[test]
+fn no_stream_port_is_needed_and_the_stream_server_is_off() {
+    let scratch = Scratch::new("env_no_stream");
+    let args: [&OsStr; 0] = [];
+    let mut command = guard_command(&scratch, &example("env_stub"), &args);
+    command.env_remove("AGENT_BROWSER_STREAM_PORT");
+    let mut guard = Guard::start(command);
+    guard.send_call("open");
+    let report = guard.read();
+    let (status, rest) = guard.finish();
+    assert_eq!(status.code(), Some(0), "{rest}");
+    assert!(
+        scratch.path().join("chrome.pid").is_file(),
+        "the browser never started"
+    );
+    let env = &report["env"];
+    assert_eq!(env.get("AGENT_BROWSER_STREAM_PORT"), None, "{report}");
+    assert_eq!(env["AGENT_BROWSER_STREAM_DISABLED"], "1", "{report}");
+    assert!(
+        env["AGENT_BROWSER_CDP"].as_str().is_some_and(is_relay),
+        "{report}"
+    );
 }
 
 #[test]
@@ -190,6 +321,7 @@ fn folders_that_exist_are_kept() {
     write::write(scratch.cwd().join("downloads").join("kept.pdf"), "x").unwrap();
     let args: [&OsStr; 0] = [];
     let mut guard = Guard::start(guard_command(&scratch, &example("env_stub"), &args));
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
     guard.read();
     assert_eq!(guard.finish().0.code(), Some(0));
     assert!(scratch.cwd().join("downloads").join("kept.pdf").is_file());

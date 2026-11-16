@@ -83,6 +83,7 @@ impl Setup {
             },
             retention: Retention::KeepAll,
             probe: Arc::new(probe),
+            trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
         };
         Self {
             _dir: dir,

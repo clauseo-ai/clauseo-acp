@@ -28,12 +28,32 @@ export const HI = {
   Stopped: "रोका गया",
   "You stopped the answer. The answer so far is kept.":
     "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
-  "You didn't allow a request, so the answer stopped. The answer so far is kept.": null, // hi: later
+  "You didn't allow a request, so the answer stopped. The answer so far is kept.":
+    "आपने एक अनुरोध की अनुमति नहीं दी, इसलिए उत्तर रुक गया। अब तक का उत्तर सुरक्षित है।",
+  // Clauseo refused, unasked, a request into its own data folder (another matter's files), and the agent stopped;
+  // {name} is the agent as the error words name it (Claude, ChatGPT, or its own name), the AI where none is known
+  "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.":
+    "Clauseo ने उत्तर रोक दिया: {name} ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+  "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.":
+    "Clauseo ने उत्तर रोक दिया: AI ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+  // the model refused the turn as too long to read (StopReason too_long): {name} as the outside-matter line names the
+  // agent (Claude, ChatGPT, or its own name), the AI where none is known
+  "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.":
+    "यह {name} के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.":
+    "यह AI के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
   "This question was declined, so there is no answer.":
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",
   "The answer stopped. Your question and the answer so far are kept.":
     "उत्तर रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  // under a finished answer and on each of its code blocks: Copy, and what it says for a moment once it copied
+  // (D-026)
+  Copy: "कॉपी करें",
+  Copied: "कॉपी हो गया",
+  // a restore of the matter made from Versions while this conversation was open, as a quiet line in it
+  "You restored an earlier version of the matter.": "आपने मामले का एक पहले का संस्करण पुनर्स्थापित किया।",
+  "You undid the restore.": "आपने पुनर्स्थापन पूर्ववत किया।",
   // who said each row, for assistive technology ("You" is words.ts's)
   "Your question": "आपका प्रश्न",
   "Clauseo's answer": "Clauseo का उत्तर",
@@ -54,6 +74,21 @@ export const HI = {
   // nothing was saved or the question is gone; each first sentence matches the folded lines below
   "Don't allow for this matter": "इस मामले के लिए अनुमति न दें",
   "Clauseo asks before going on.": "आगे बढ़ने से पहले Clauseo आपसे पूछता है।",
+  // what a task asks to do, under the ask, where the agent gave no words of its own: the program it would run and
+  // the paper it would run it on (D-016); the command itself folds under "Show the command"
+  "Run {program} on {name}.": "{name} पर {program} चलाना।",
+  "Run {program}.": "{program} चलाना।",
+  // a chained command, counted rather than named by its first program (UC-302; provisional)
+  "Run {n} tasks.": "{n} काम चलाना।",
+  // what Clauseo asks to do, under the ask, where the agent named the request only by a tool's or a permission's
+  // name (UC-160 to UC-165; provisional): the name itself is never shown
+  "Clauseo asks to let a command reach the internet.":
+    "Clauseo एक कमांड को इंटरनेट तक पहुँचने देने की अनुमति माँगता है।",
+  "Clauseo asks to run a task.": "Clauseo एक काम चलाने की अनुमति माँगता है।",
+  "Clauseo asks to read a paper.": "Clauseo एक दस्तावेज़ पढ़ने की अनुमति माँगता है।",
+  "Clauseo asks to change a paper.": "Clauseo एक दस्तावेज़ बदलने की अनुमति माँगता है।",
+  "Clauseo asks to search the papers.": "Clauseo दस्तावेज़ों में खोजने की अनुमति माँगता है।",
+  "Clauseo asks to look online.": "Clauseo ऑनलाइन देखने की अनुमति माँगता है।",
   "No longer waiting for an answer.": "अब उत्तर की प्रतीक्षा नहीं है।",
   "Allowed once.": "एक बार अनुमति दी गई।",
   "Allowed for this matter.": "इस मामले के लिए अनुमति दी गई।",
@@ -67,7 +102,8 @@ export const HI = {
   "Not allowed. Clauseo left {paper} as it was.":
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
   // the prompt's line for Claude's own plan note, in place of the call's title: a provisional draft (stage C #418)
-  "Claude wants to save its plan as a note in its own folder, not in this matter.": null, // hi: later
+  "Claude wants to save its plan as a note in its own folder, not in this matter.":
+    "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",
   // drafts for Rohan (U4b): the agent's question as a form, inline in the thread. "Other" leads a question's own
   // free-text answer; "Required" marks a question that must be answered; the line under the answers shows while
   // nothing is filled in, since an answer with nothing in it is the same as Don't answer. "Don't answer" matches the
@@ -101,9 +137,54 @@ export const HI = {
   "{name} changed after Clauseo's edit.": "Clauseo के संपादन के बाद {name} में बदलाव हुए हैं।",
   "You undid Clauseo's changes to {n} papers.": "आपने {n} दस्तावेज़ों में Clauseo के बदलाव पूर्ववत किए।",
   "You undid Clauseo's changes to 1 paper.": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
+  // the host's notices in the app's words (a notice's kind; a kind this version doesn't know shows its text): a new
+  // agent session that doesn't remember the earlier turns (provisional, TN-01); papers an undo removed that a sync
+  // client put back, one or {n} (provisional, TN-02 and TN-03; {papers} as Versions' undo rows name them); a skill
+  // pack the launch left out, one full line per reason (provisional, TN-04 to TN-09; {pack} is the pack's id)
+  "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.":
+    "Clauseo को इस बातचीत के पहले के प्रश्न और उत्तर याद नहीं हैं। उनसे जो ज़रूरी हो, उसे अपने अगले प्रश्न में शामिल करें।",
+  "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.":
+    "पूर्ववत करने के बाद 1 दस्तावेज़ वापस आ गया: {papers}। Clauseo ने उसे फिर से नहीं हटाया।",
+  "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.":
+    "पूर्ववत करने के बाद {n} दस्तावेज़ वापस आ गए: {papers}। Clauseo ने उन्हें फिर से नहीं हटाया।",
+  "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। यह मामला इसे इस्तेमाल करने के लिए सेट है, पर यह चालू नहीं है।",
+  "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इस कंप्यूटर की स्किल पैक सेटिंग्स इसकी अनुमति नहीं देतीं।",
+  "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। चालू किए जाने के बाद इसकी फ़ाइलें बदल गईं। इसे इस्तेमाल करने के लिए फिर से चालू करें।",
+  "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo को यह इस कंप्यूटर पर नहीं मिला।",
+  "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
+  "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
+  // Claude's auto mode isn't available, so the session runs in acceptEdits (en settled, hi provisional, TN-10)
+  "Claude's automatic mode isn't available for this account, so Claude asks before running commands.":
+    "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+  // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the
+  // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
+  // the AI where none is known (provisional, TN-12)
+  "Clauseo stopped a step: {name} tried to reach outside this matter.":
+    "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  "Clauseo stopped a step: the AI tried to reach outside this matter.":
+    "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  // Clauseo declined, unasked, a shell command of the agent's that needed the internet (Codex's
+  // curl or wget); {name} as above (provisional, TN-13), and the AI where none is known
+  // (provisional, TN-14)
+  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.":
+    "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय {name} वेब खोज का उपयोग कर सकता है।",
+  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.":
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय यह वेब खोज का उपयोग कर सकता है।",
+  // the same in a session without web search (turned off): no web search offered (provisional,
+  // UC-570 with {name}, UC-571 the AI)
+  "Clauseo stopped a step: {name} tried to go online by running a command.":
+    "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  "Clauseo stopped a step: the AI tried to go online by running a command.":
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
-  "Archived. Read only.": null,
+  "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
   // the composer's `/` menu, the agent's commands, named for assistive technology
@@ -123,10 +204,24 @@ export const HI = {
   "Not every file in this folder is listed.": "इस फ़ोल्डर की सभी फ़ाइलें सूची में नहीं हैं।",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
+  // the same place while the plan runs on the lawyer's API key, named by its maker (UC-147, UC-148)
+  "Uses your Anthropic API key": "आपकी Anthropic API key का उपयोग करता है",
+  "Uses your OpenAI API key": "आपकी OpenAI API key का उपयोग करता है",
+  // the agent's own model and effort on the status line (PK): each menu's title, and its trigger's name before the value
+  Model: "मॉडल",
+  Effort: "प्रयास",
+  // after the model's name in its menu, quietly, on the row that follows the agent's own default (UC-152)
+  "(default)": "(डिफ़ॉल्ट)",
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":
     "नीचे पहला प्रश्न पूछें। हर उत्तर उसी दस्तावेज़ और पृष्ठ का हवाला देता है जिस पर वह आधारित है।",
   "Nothing in this matter matches '{q}'.": "इस मामले में '{q}' से मेल खाता कुछ नहीं है।",
   "Search covers the papers, the answers and Versions.": "खोज में दस्तावेज़, उत्तर और संस्करण शामिल हैं।",
+  // Latest, over the composer once the view has left the thread's end: its words, and its name for a screen reader
+  Latest: "नवीनतम",
+  "Go to the latest message": "नवीनतम संदेश पर जाएँ",
+  // a question past eight lines, folded, and open (UC-142, UC-143)
+  "Show all": "सभी दिखाएँ",
+  "Show less": "कम दिखाएँ",
 } as const;

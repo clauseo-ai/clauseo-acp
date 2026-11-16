@@ -32,20 +32,23 @@
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-05": {
-    "en": "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "en": "Sign in with ChatGPT in Codex first. Your question is kept.",
     "hi": "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-06": {
-    "en": "Sign in to {name} first. Your question is kept.",
-    "hi": "पहले {name} में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in with {name} first. Your question is kept.",
+    "hi": "पहले {name} से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (U6-followup page)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, via the orchestrator (U6-followup page)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U6F-07": {
     "en": "This version of Codex doesn't work with Clauseo.",
@@ -80,12 +83,15 @@
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-11": {
-    "en": "Sign in to the AI first. Your question is kept.",
-    "hi": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in first. Your question is kept.",
+    "hi": "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (U6-followup page)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, via the orchestrator (U6-followup page)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U6F-12": {
     "en": "This version of the AI doesn't work with Clauseo.",
@@ -97,26 +103,329 @@
   },
   "U6F-13": {
     "en": "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo यहाँ ChatGPT को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   },
   "U6F-14": {
     "en": "Clauseo can't start {name} safely here. Reinstall Clauseo.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo यहाँ {name} को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   },
   "U6F-15": {
     "en": "Clauseo can't start the AI safely here. Reinstall Clauseo.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
+  },
+  "U6F-16": {
+    "en": "Codex was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "Codex डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-17": {
+    "en": "{name} was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-18": {
+    "en": "The AI was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-19": {
+    "en": "ChatGPT had a problem on its side. Try again.",
+    "hi": "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "status": "approved",
+    "at": "2026-11-12",
+    "by": "orchestrator",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart"
+  },
+  "U6F-20": {
+    "en": "{name} had a problem on its side. Try again.",
+    "hi": "{name} की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-12",
+    "by": "orchestrator",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; an agent of no kind by its name, as U6F-04"
+  },
+  "U6F-21": {
+    "en": "The AI had a problem on its side. Try again.",
+    "hi": "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-12",
+    "by": "orchestrator",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; no name at all, as U6F-10"
+  },
+  "U6F-22": {
+    "en": "ChatGPT stopped answering. Try again.",
+    "hi": "ChatGPT ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): the agent sent nothing for 5 minutes with no tool running and no question waiting; Try again under the answer, never Restart"
+  },
+  "U6F-23": {
+    "en": "{name} stopped answering. Try again.",
+    "hi": "{name} ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): an agent of no kind by its name, as U6F-20; Try again under the answer, never Restart"
+  },
+  "U6F-24": {
+    "en": "The AI stopped answering. Try again.",
+    "hi": "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): no name at all, as U6F-21; Try again under the answer, never Restart"
+  },
+  "U6F-25": {
+    "en": "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "hi": "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; ChatGPT's"
+  },
+  "U6F-26": {
+    "en": "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "hi": "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; an agent of no kind by its name"
+  },
+  "U6F-27": {
+    "en": "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "hi": "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; no name at all"
+  },
+  "U6F-28": {
+    "en": "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "hi": "ChatGPT मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; ChatGPT's"
+  },
+  "U6F-29": {
+    "en": "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "hi": "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; an agent of no kind by its name"
+  },
+  "U6F-30": {
+    "en": "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "hi": "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; no name at all"
+  },
+  "U6F-31": {
+    "en": "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "hi": "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), the matter folder's own name has the backslash: the host didn't start the agent; Try again under the turn, never Restart; Claude's"
+  },
+  "U6F-32": {
+    "en": "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "hi": "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), the matter folder's own name has the backslash: the host didn't start the agent; Try again under the turn, never Restart; ChatGPT's"
+  },
+  "U6F-33": {
+    "en": "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "hi": "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), the matter folder's own name has the backslash: the host didn't start the agent; Try again under the turn, never Restart; an agent's by its name"
+  },
+  "U6F-34": {
+    "en": "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "hi": "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), the matter folder's own name has the backslash: the host didn't start the agent; Try again under the turn, never Restart; the nameless line"
+  },
+  "U6F-35": {
+    "en": "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.",
+    "hi": "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on the Mac (Finder), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; Claude's"
+  },
+  "U6F-36": {
+    "en": "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.",
+    "hi": "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on the Mac (Finder), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; ChatGPT's"
+  },
+  "U6F-37": {
+    "en": "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.",
+    "hi": "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on the Mac (Finder), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; an agent's by its name"
+  },
+  "U6F-38": {
+    "en": "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.",
+    "hi": "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on the Mac (Finder), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; the nameless line"
+  },
+  "U6F-39": {
+    "en": "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.",
+    "hi": "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; Claude's"
+  },
+  "U6F-40": {
+    "en": "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.",
+    "hi": "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; ChatGPT's"
+  },
+  "U6F-41": {
+    "en": "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.",
+    "hi": "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; an agent's by its name"
+  },
+  "U6F-42": {
+    "en": "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.",
+    "hi": "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash on Linux (\"your file manager\"), a folder above the matter's has the backslash, named by {folder} (the nearest one): the host didn't start the agent; Try again under the turn, never Restart; the nameless line"
   }
 }

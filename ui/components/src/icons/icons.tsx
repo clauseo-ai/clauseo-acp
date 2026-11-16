@@ -10,9 +10,12 @@
 // against it. IconArchived was cut from Lucide 1.66.0's archive (same commit) on 4 Nov 2026, the same way. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file. The web tools'
 // IconBrowser and IconDownload are in web-tools.tsx, cut from Lucide 1.66.0 on 3 Nov 2026 the same way and re-exported
-// here; IconInfo, at the end of this file, reuses the shape IconAbout draws.
+// here; IconInfo, at the end of this file, reuses the shape IconAbout draws. IconCopy is in copy.tsx, cut from Lucide
+// 1.66.0 on 11 Nov 2026 the same way and re-exported here.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
+// IconSettings, the rail's Settings, was cut from Lucide 1.66.0's settings (lucide-static@1.66.0) on 10 Nov 2026: its
+// points scaled about the centre by 0.725 onto the 20 px grid, as IconAppearance's and IconAbout's circles were.
 // IconSnooze was cut from Lucide 1.66.0's alarm-clock (the same commit) on 5 Nov 2026 for U16b: its points scaled about
 // the centre by 0.725, as IconChecking's clock was, so the two clocks read as one family.
 import { Icon, type IconProps } from "./icon.tsx";
@@ -20,9 +23,11 @@ import { Icon, type IconProps } from "./icon.tsx";
 export {
   IconAccept,
   IconFileEmail,
+  IconFileExcel,
   IconFileGeneric,
   IconFileMarkdown,
   IconFilePdf,
+  IconFilePowerPoint,
   IconFileWord,
   IconPageTurn,
   IconPaperBookPage,
@@ -37,7 +42,9 @@ export {
   IconToolSwitchMode,
   IconToolThink,
 } from "./tool-kinds.tsx";
+export { IconArrowDown, IconArrowUp } from "./arrows.tsx";
 export { IconBrowser, IconDownload } from "./web-tools.tsx";
+export { IconCopy } from "./copy.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {
@@ -142,16 +149,6 @@ export function IconBackToAnswer(props: IconProps) {
  * Turn to it already draws, so it reuses it) */
 export function IconArrowRight(props: IconProps) {
   return <IconTurnToIt {...props} />;
-}
-
-/** Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet) (source: arrowUp) */
-export function IconArrowUp(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M10 16V6" vectorEffect="non-scaling-stroke" />
-      <path d="M5.5 9.5L10 5l4.5 4.5" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
 }
 
 /** Send, the paper plane, not used in the room yet (source: send) */
@@ -577,4 +574,17 @@ export function IconSnooze(props: IconProps) {
  * reuses it) */
 export function IconInfo(props: IconProps) {
   return <IconAbout {...props} />;
+}
+
+/** Settings, at the rail's foot (source: settings, Lucide settings at 1.66.0) */
+export function IconSettings(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path
+        d="M8.311 4.299a1.697 1.697 0 0 1 3.378 0 1.697 1.697 0 0 0 2.406 1.388 1.697 1.697 0 0 1 1.689 2.924 1.697 1.697 0 0 0 0 2.777 1.697 1.697 0 0 1-1.689 2.924 1.697 1.697 0 0 0-2.406 1.388 1.697 1.697 0 0 1-3.378 0 1.697 1.697 0 0 0-2.407-1.388 1.697 1.697 0 0 1-1.689-2.924 1.697 1.697 0 0 0 0-2.777A1.697 1.697 0 0 1 5.904 5.687a1.697 1.697 0 0 0 2.406-1.388"
+        vectorEffect="non-scaling-stroke"
+      />
+      <circle cx="10" cy="10" r="2.175" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
 }

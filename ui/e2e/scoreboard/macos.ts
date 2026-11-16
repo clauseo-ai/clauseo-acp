@@ -142,10 +142,13 @@ export function config(env: NodeJS.ProcessEnv): Config {
   return { app, fakeAgent, out };
 }
 
-/** One play's scratch folders: the fake_agent settings and an empty matter folder. */
+/**
+ * One play's scratch folders: the fake_agent settings and an empty matter folder. The agents start
+ * as on a first run, as every macOS play has so far, so the measures compare with earlier runs.
+ */
 export function playScratch(cfg: Config, base?: string): Scratch {
   return makeScratch(
-    { scenario: SCENARIO, matterFiles: {}, agentArgs: PACE_ARGS },
+    { scenario: SCENARIO, matterFiles: {}, agentArgs: PACE_ARGS, firstRun: true },
     () => cfg.fakeAgent,
     base,
   );

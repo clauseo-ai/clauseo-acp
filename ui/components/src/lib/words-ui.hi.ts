@@ -10,6 +10,10 @@ export const HI = {
   "Show in folder": "फ़ोल्डर में दिखाएँ",
   "Remove from the list": "सूची से हटाएँ",
   "The folder and its papers stay where they are.": "फ़ोल्डर और उसके दस्तावेज़ अपनी जगह पर रहते हैं।",
+  // UC-131, UC-132: the confirm before Remove from the list; {name} is the matter's name as filed (new; provisional)
+  "Remove {name} from the list?": "{name} को सूची से हटाएँ?",
+  "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.":
+    "यह मामला और इसकी बातचीत सूची और ‘हाल के’ से हट जाएँगी। इसका फ़ोल्डर और दस्तावेज़ अपनी जगह पर रहेंगे।",
   // the plan to ask with
   "Plan to ask with": "प्रश्न किस प्लान से पूछें",
   // restoring a version
@@ -23,6 +27,8 @@ export const HI = {
   // settings, in sections
   Settings: "सेटिंग्स",
   Matters: "मामले",
+  // a build with the e2e feature, at the rail's foot and in Settings' About
+  "Test build": "टेस्ट बिल्ड",
   // lite, in settings: until the host reports remote desktops, On and Off only
   "Lite mode": "सादा मोड",
   "Takes away every shadow and all motion.": "सभी छायाएँ और सारी हलचल हटा देता है।",

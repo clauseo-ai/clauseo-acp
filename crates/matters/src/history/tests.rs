@@ -16,11 +16,13 @@ mod refusals;
 mod repo;
 mod trees;
 
-/// A new store in `dir`: `root/matter/history.git`, worktree `folder`.
+/// A new store in `dir`: `root/matter/history.git`, worktree `folder`. The git dir comes back
+/// as the store holds it (through `long_path`: verbatim on Windows), so the paths a test builds
+/// under it compare equal to the store's.
 fn new_store(dir: &TestDir) -> (PathBuf, GixStore) {
     let git_dir = dir.path().join("root").join("matter").join("history.git");
     let store = GixStore::create(&git_dir, &dir.path().join("folder")).unwrap();
-    (git_dir, store)
+    (crate::long_path::long_path(&git_dir), store)
 }
 
 fn write_file(path: &Path, bytes: &[u8]) {

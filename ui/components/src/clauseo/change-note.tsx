@@ -1,6 +1,7 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
 // on: Compare, and Undo, each when the caller gives it, and a way to open a paper where the caller gives one ("Open in
-// Word"). A refused undo, or a failed open, says why in a quiet line beside Undo. The note itself takes focus (not by
+// Word"). A refused undo, or a failed open, says why in a quiet line beside Undo, with the way on the caller gives for
+// it (Show in folder, for a path too long for Word). The note itself takes focus (not by
 // Tab) when the control under it that held focus goes. When a paper was edited after Clauseo's change, Undo asks
 // first, in the alert dialog, with Keep current as the safe choice: at once when the paper is given (editedSince), or,
 // given askUndo, once the caller has answered the press (Undo waits meanwhile).
@@ -41,6 +42,7 @@ export function ChangeNote({
   open,
   undoDisabled = false,
   error = null,
+  errorAction,
   testIds,
 }: {
   /** The papers Clauseo changed, by their names on the wall. */
@@ -48,8 +50,9 @@ export function ChangeNote({
   /** A paper edited after Clauseo's change, if one was: Undo asks first. */
   editedSince?: string | null;
   /** Asked on each press of Undo, before anything is undone, and Undo waits while it answers: the paper edited since,
-   * which the dialog asks about, or null to undo straight away. Given, it takes the place of editedSince. */
-  askUndo?: () => Promise<string | null>;
+   * which the dialog asks about, null to undo straight away, or false when the caller asks in a dialog of its own and
+   * undoes from there. Given, it takes the place of editedSince. */
+  askUndo?: () => Promise<string | null | false>;
   /** Given, the host says when the changes are undone; without it, Undo marks them undone itself. */
   state?: ChangeState;
   /** Undo shows only when given. */
@@ -62,7 +65,15 @@ export function ChangeNote({
   undoDisabled?: boolean;
   /** A refused undo: its words, in the language, and its code, as a quiet line beside Undo. */
   error?: { words: string; code: string } | null;
-  testIds?: { paper?: string; undo?: string; error?: string; open?: string };
+  /** A press beside the error line, in the words the caller gives: shows only with the error. */
+  errorAction?: { label: string; onAction: () => void } | undefined;
+  testIds?: {
+    paper?: string;
+    undo?: string;
+    error?: string;
+    errorAction?: string;
+    open?: string;
+  };
 }) {
   const w = useThreadWords();
   const counts = useCounts(papers.length);
@@ -91,6 +102,7 @@ export function ChangeNote({
     setPreviewing(true);
     void askUndo().then((paper) => {
       setPreviewing(false);
+      if (paper === false) return;
       if (paper === null) return undo();
       setAbout(paper);
       setAsked(true);
@@ -139,6 +151,16 @@ export function ChangeNote({
           >
             <Say>{error.words}</Say>
           </span>
+        )}
+        {error !== null && errorAction !== undefined && (
+          <Button
+            kind="quiet"
+            size="small"
+            onClick={errorAction.onAction}
+            data-testid={testIds?.errorAction}
+          >
+            <span className="deva-nudge">{errorAction.label}</span>
+          </Button>
         )}
         {onCompare !== undefined && (
           <Button kind="quiet" size="small" onClick={onCompare}>

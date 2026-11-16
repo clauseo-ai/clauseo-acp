@@ -20,11 +20,23 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/adopt.rs"]
+mod adopt;
+#[cfg(test)]
+#[path = "host/agent_homes.rs"]
+mod agent_homes;
+#[cfg(test)]
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
+#[cfg(test)]
+#[path = "host/blackline.rs"]
+mod blackline;
+#[cfg(test)]
+#[path = "host/blackline_partial.rs"]
+mod blackline_partial;
 #[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
@@ -32,8 +44,23 @@ mod blobs;
 #[path = "host/browser.rs"]
 mod browser;
 #[cfg(test)]
+#[path = "host/browser_codex.rs"]
+mod browser_codex;
+#[cfg(test)]
 #[path = "host/browser_install.rs"]
 mod browser_install;
+#[cfg(test)]
+#[path = "host/browser_policy.rs"]
+mod browser_policy;
+#[cfg(test)]
+#[path = "host/browser_shell.rs"]
+mod browser_shell;
+#[cfg(test)]
+#[path = "host/came_back.rs"]
+mod came_back;
+#[cfg(test)]
+#[path = "host/came_back_marker.rs"]
+mod came_back_marker;
 #[cfg(test)]
 #[path = "host/cancel.rs"]
 mod cancel;
@@ -44,11 +71,30 @@ mod cancel_leftovers;
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
+#[path = "host/claude_sandbox.rs"]
+mod claude_sandbox;
+#[cfg(test)]
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]
+#[path = "host/copied_folder.rs"]
+mod copied_folder;
+#[cfg(test)]
+#[path = "host/start_refused_log.rs"]
+mod start_refused_log;
+#[cfg(test)]
+#[path = "host/web_sources.rs"]
+mod web_sources;
+
+#[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
+#[cfg(test)]
+#[path = "host/codex_cap.rs"]
+mod codex_cap;
+#[cfg(test)]
+#[path = "host/codex_fence.rs"]
+mod codex_fence;
 #[cfg(test)]
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
@@ -58,12 +104,95 @@ mod codex_plans;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+
+#[cfg(test)]
+#[path = "host/case_law.rs"]
+mod case_law;
+#[cfg(test)]
+#[path = "host/case_law_hint.rs"]
+mod case_law_hint;
+#[cfg(test)]
+#[path = "host/case_law_sources.rs"]
+mod case_law_sources;
+#[cfg(test)]
+#[path = "host/connector_money.rs"]
+mod connector_money;
+#[cfg(test)]
+#[path = "host/connector_no_key.rs"]
+mod connector_no_key;
+#[cfg(test)]
+#[path = "host/connector_outcomes.rs"]
+mod connector_outcomes;
+#[cfg(test)]
+#[path = "host/connector_paid.rs"]
+mod connector_paid;
+#[cfg(test)]
+#[path = "host/connector_pay_link.rs"]
+mod connector_pay_link;
+#[cfg(test)]
+#[path = "host/connector_races.rs"]
+mod connector_races;
+#[cfg(test)]
+#[path = "host/connector_recharge.rs"]
+mod connector_recharge;
+#[cfg(test)]
+#[path = "host/connector_resume_order.rs"]
+mod connector_resume_order;
+#[cfg(test)]
+#[path = "host/connector_rig.rs"]
+mod connector_rig;
+#[cfg(test)]
+#[path = "host/connector_state.rs"]
+mod connector_state;
+#[cfg(test)]
+#[path = "host/connectors.rs"]
+mod connectors;
 #[cfg(test)]
 #[path = "host/counts.rs"]
 mod counts;
+// Its one test makes symlinks, so the module is Unix-only.
+#[cfg(test)]
+#[path = "host/allowed_integrity.rs"]
+mod allowed_integrity;
+#[cfg(test)]
+#[path = "host/allowed_saving.rs"]
+mod allowed_saving;
+#[cfg(test)]
+#[path = "host/allowed_sites.rs"]
+mod allowed_sites;
+#[cfg(test)]
+#[path = "host/allowed_stores.rs"]
+mod allowed_stores;
+#[cfg(all(test, unix))]
+#[path = "host/data_fence.rs"]
+mod data_fence;
+#[cfg(all(test, unix))]
+#[path = "host/data_fence_tool_shell.rs"]
+mod data_fence_tool_shell;
+#[cfg(test)]
+#[path = "host/documents_later.rs"]
+mod documents_later;
 #[cfg(test)]
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
+#[cfg(test)]
+#[path = "host/egress.rs"]
+mod egress;
+#[cfg(test)]
+#[path = "host/egress_allow.rs"]
+mod egress_allow;
+#[cfg(test)]
+#[path = "host/egress_block.rs"]
+mod egress_block;
+#[cfg(test)]
+#[path = "host/egress_wait.rs"]
+mod egress_wait;
+#[cfg(test)]
+#[path = "host/elicitation_withheld.rs"]
+mod elicitation_withheld;
+#[cfg(test)]
+#[path = "host/first_read.rs"]
+mod first_read;
 #[cfg(test)]
 #[path = "host/folder_query.rs"]
 mod folder_query;
@@ -83,8 +212,34 @@ mod guard_hook;
 #[path = "host/hindi.rs"]
 mod hindi;
 #[cfg(test)]
+#[path = "host/hold_appends.rs"]
+mod hold_appends;
+#[cfg(test)]
+#[path = "host/hold_reasons.rs"]
+mod hold_reasons;
+#[cfg(test)]
+#[path = "host/idle_stop.rs"]
+mod idle_stop;
+#[cfg(test)]
+#[path = "host/idle_stop_during.rs"]
+mod idle_stop_during;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
+#[cfg(test)]
+#[path = "host/key_retry.rs"]
+mod key_retry;
+#[path = "host/key_unreadable.rs"]
+mod key_unreadable;
+#[cfg(test)]
+#[path = "host/keys_loading.rs"]
+mod keys_loading;
+#[cfg(test)]
+#[path = "host/launch_folder.rs"]
+mod launch_folder;
+#[cfg(test)]
+#[path = "host/launch_refused.rs"]
+mod launch_refused;
 #[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
@@ -95,8 +250,17 @@ mod limits_asks;
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]
+#[path = "host/limits_login.rs"]
+mod limits_login;
+#[cfg(test)]
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
+#[cfg(test)]
+#[path = "host/limits_plan_added.rs"]
+mod limits_plan_added;
+#[cfg(test)]
+#[path = "host/limits_sandbox.rs"]
+mod limits_sandbox;
 #[cfg(test)]
 #[path = "host/limits_stop.rs"]
 mod limits_stop;
@@ -110,26 +274,98 @@ mod lists;
 #[path = "host/lists_folder.rs"]
 mod lists_folder;
 #[cfg(test)]
+#[path = "host/load_line_cap.rs"]
+mod load_line_cap;
+#[cfg(test)]
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
 #[path = "host/log_file.rs"]
 mod log_file;
 #[cfg(test)]
+#[path = "host/login_check.rs"]
+mod login_check;
+#[cfg(test)]
+#[path = "host/login_shared.rs"]
+mod login_shared;
+#[cfg(test)]
+#[path = "host/long_paths.rs"]
+mod long_paths;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
+#[cfg(test)]
+#[path = "host/max_prompt_reopen.rs"]
+mod max_prompt_reopen;
 #[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
+#[path = "host/mcp_import.rs"]
+mod mcp_import;
+#[cfg(test)]
+#[path = "host/mcp_tools.rs"]
+mod mcp_tools;
+#[cfg(test)]
+#[path = "host/mcp_tools_confirm.rs"]
+mod mcp_tools_confirm;
+#[cfg(test)]
+#[path = "host/mcp_tools_failures.rs"]
+mod mcp_tools_failures;
+#[cfg(test)]
+#[path = "host/mcp_trust.rs"]
+mod mcp_trust;
+#[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
+#[cfg(all(test, unix))]
+#[path = "host/outside_matter.rs"]
+mod outside_matter;
+#[cfg(all(test, unix))]
+#[path = "host/outside_told.rs"]
+mod outside_told;
+#[cfg(test)]
+#[path = "host/oversize_live.rs"]
+mod oversize_live;
+#[cfg(test)]
+#[path = "host/own_logout.rs"]
+mod own_logout;
+#[cfg(test)]
+#[path = "host/packs.rs"]
+mod packs;
+#[cfg(test)]
+#[path = "host/packs_log.rs"]
+mod packs_log;
+#[cfg(test)]
+#[path = "host/packs_timing.rs"]
+mod packs_timing;
 #[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]
+#[path = "host/too_long.rs"]
+mod too_long;
+#[cfg(test)]
+#[path = "host/too_long_log.rs"]
+mod too_long_log;
+// Every test here waits for a live folder watch, which Windows does not have (decision record
+// 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
+#[cfg(test)]
+#[path = "host/own_turn.rs"]
+mod own_turn;
+#[cfg(test)]
+#[path = "host/own_turn_cancel.rs"]
+mod own_turn_cancel;
+#[cfg(not(windows))]
+#[cfg(test)]
+#[path = "host/papers_live.rs"]
+mod papers_live;
+#[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
+#[cfg(test)]
+#[path = "host/pickers.rs"]
+mod pickers;
 #[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
@@ -142,6 +378,21 @@ mod profile;
 #[cfg(test)]
 #[path = "host/profile_rig.rs"]
 mod profile_rig;
+#[cfg(test)]
+#[path = "host/protection.rs"]
+mod protection;
+#[cfg(test)]
+#[path = "host/protection_edges.rs"]
+mod protection_edges;
+#[cfg(test)]
+#[path = "host/protection_parked.rs"]
+mod protection_parked;
+#[cfg(test)]
+#[path = "host/protection_rig.rs"]
+mod protection_rig;
+#[cfg(test)]
+#[path = "host/python_path.rs"]
+mod python_path;
 #[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
@@ -167,6 +418,12 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/revisions.rs"]
+mod revisions;
+#[cfg(test)]
+#[path = "host/revisions_real.rs"]
+mod revisions_real;
+#[cfg(test)]
 #[path = "host/search.rs"]
 mod search;
 #[cfg(test)]
@@ -176,8 +433,44 @@ mod search_review;
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]
+#[path = "host/settings_entries.rs"]
+mod settings_entries;
+#[cfg(test)]
+#[path = "host/shell_offline_owed.rs"]
+mod shell_offline_owed;
+#[cfg(test)]
+#[path = "host/sign_in_hold.rs"]
+mod sign_in_hold;
+#[cfg(test)]
+#[path = "host/site_blocked.rs"]
+mod site_blocked;
+#[cfg(test)]
+#[path = "host/skill_packs.rs"]
+mod skill_packs;
+#[cfg(test)]
+#[path = "host/skill_packs_cap.rs"]
+mod skill_packs_cap;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
+#[cfg(test)]
+#[path = "host/steer_at_head.rs"]
+mod steer_at_head;
+#[cfg(test)]
+#[path = "host/steer_confirm.rs"]
+mod steer_confirm;
+#[cfg(test)]
+#[path = "host/steer_grace.rs"]
+mod steer_grace;
+#[cfg(test)]
+#[path = "host/steer_wait.rs"]
+mod steer_wait;
+#[cfg(test)]
+#[path = "host/stop_for.rs"]
+mod stop_for;
+#[cfg(test)]
+#[path = "host/stop_hold.rs"]
+mod stop_hold;
 #[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
@@ -192,8 +485,23 @@ mod tool_switches;
 mod tools;
 
 #[cfg(test)]
+#[path = "host/lawyer_file.rs"]
+mod lawyer_file;
+#[cfg(test)]
+#[path = "host/lawyer_file_log.rs"]
+mod lawyer_file_log;
+#[cfg(test)]
+#[path = "host/lawyer_status.rs"]
+mod lawyer_status;
+#[cfg(test)]
+#[path = "host/shell_folder.rs"]
+mod shell_folder;
+#[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
+#[cfg(test)]
+#[path = "host/titles_restart.rs"]
+mod titles_restart;
 #[cfg(test)]
 #[path = "host/triage.rs"]
 mod triage;
@@ -204,11 +512,23 @@ mod triage_wake;
 #[path = "host/turn.rs"]
 mod turn;
 #[cfg(test)]
+#[path = "host/undo_note_more.rs"]
+mod undo_note_more;
+#[cfg(test)]
+#[path = "host/undo_note_restart.rs"]
+mod undo_note_restart;
+#[cfg(test)]
 #[path = "host/undo_preview.rs"]
 mod undo_preview;
 #[cfg(test)]
 #[path = "host/update.rs"]
 mod update;
+#[cfg(test)]
+#[path = "host/update_holds.rs"]
+mod update_holds;
+#[cfg(test)]
+#[path = "host/update_install.rs"]
+mod update_install;
 #[cfg(test)]
 #[path = "host/versions.rs"]
 mod versions;

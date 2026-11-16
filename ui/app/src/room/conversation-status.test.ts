@@ -22,7 +22,13 @@ test("rowWords for every status, and H6's marks over idle", () => {
   expect(unseen("cancelled")).toEqual({ state: "stopped", at: 42 });
   // a turn the agent ended on the lawyer's refusal (private #361) is stopped, never ready
   expect(unseen("not_allowed")).toEqual({ state: "stopped", at: 42 });
+  // nor one the agent ended on Clauseo's refusal of files outside the matter
+  expect(unseen("outside_matter")).toEqual({ state: "stopped", at: 42 });
   expect(unseen("failed")).toEqual({ state: "failed", at: 42 });
+  // the model's own stops, a turn too long to read among them, are neither the lawyer's stop nor a failure: there is
+  // something to read
+  for (const reason of ["max_tokens", "refusal", "too_long"] as const)
+    expect(unseen(reason)).toEqual({ state: "ready" });
   expect(words("idle", { seen: true, last_stop: { reason: "end_turn", at: 42 } })).toEqual({
     state: "idle",
   });

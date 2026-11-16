@@ -346,7 +346,7 @@ test("the computer's dialog puts the risk both ways, and keeping protection is i
   );
   expect(folder.primary).toBe("confirm");
   const off = edgeDialogWords("en", { kind: "off", matter: "Acme Ltd v. State" });
-  expect(off.title).toBe("Switch off protection for Acme Ltd v. State?");
+  expect(off.title).toBe("Switch off the Safe workspace for Acme Ltd v. State?");
   expect(off.primary).toBe("cancel");
   expect(off.remember).toBeNull();
 });

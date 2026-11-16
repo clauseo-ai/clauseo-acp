@@ -4,7 +4,8 @@
 # author is enough. GitHub never counts an author's own approval.
 
 # A change to a core crate also needs the code owner's approval.
-# The egress proxy lives in crates/sandbox, so that line covers it.
+# The egress proxy lives in crates/sandbox, so that line covers it; the block list it refuses
+# (crates/blocklist) has its own line.
 /crates/protocol/     @ro-hansolo
 /crates/reducer/      @ro-hansolo
 /crates/store/        @ro-hansolo
@@ -12,6 +13,7 @@
 /crates/host/         @ro-hansolo
 /crates/acp/          @ro-hansolo
 /crates/sandbox/      @ro-hansolo
+/crates/blocklist/    @ro-hansolo
 
 # Every decision record (0001 to 0003, TEMPLATE.md and each later one; 0002 and 0003 hold the
 # protocol's frozen event and error shapes) and the UI state table. A change to them needs the

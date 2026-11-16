@@ -1,6 +1,7 @@
 //! Reusing the lawyer's Codex login: the hard link, the guard and the split rule (the brief,
-//! "Codex, reused", "The split rule" and "The login source"). The one file under `src` that may
-//! name Codex's login file, and it never opens or reads it (`tests/credential_names.rs`).
+//! "Codex, reused", "The split rule" and "The login source"), and detection's stats of both
+//! agents' login files. The one file under `src` that may name Codex's login file and Claude's
+//! credential file, and it never opens or reads either (`tests/credential_names.rs`).
 //!
 //! Every operation here on a login file's name, for the security review:
 //! - `std::fs::symlink_metadata` to see whether a name is there and is a plain file: an `lstat`
@@ -14,15 +15,42 @@
 //! - `crate::write::remove_file` (`std::fs::remove_file`), which removes the home's name and
 //!   never reads it.
 //!
-//! Claude needs nothing here: its reuse is an environment (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`
-//! with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and "Claude needs no link anywhere".
+//! Claude needs only detection's stat here: its reuse is an environment
+//! (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""` with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and
+//! "Claude needs no link anywhere".
+//!
+//! On macOS Claude Code keeps its login in the Keychain, so detection adds one query of Claude's
+//! default item ([`claude_keychain`]): `/usr/bin/security find-generic-password -s
+//! "Claude Code-credentials"` (`-a <USER>` when that is Claude's account), attributes only. It
+//! never passes `-w`, `-g` or `-d`, so the secret is never read or printed, and it needs no
+//! Keychain approval; only the exit status counts, and its output is thrown away (it names the
+//! account). `tests/credential_names.rs` keeps the service name and the query in this file.
+//! A locked login keychain may show its unlock dialog even for this query (`security` searches
+//! the file-based keychain through `SecKeychainSearchCopyNext`, which unlocks on demand), so
+//! detection asks at most once per 10 minutes (`super::detect`).
+//!
+//! **Guard for the next person.** Reuse on macOS works only because a reused Claude reaches the
+//! lawyer's real item: `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` (no suffix) through Apple's
+//! `/usr/bin/security` and `SecurityServer`. Any Keychain shim, jail or `keychain(false)` sandbox
+//! profile for Claude (draft #815, plan-c's `keychain-shim/security`) must apply to source `own`
+//! only, never to `reused`: under it the reused login reads as signed out. Clauseo's own login
+//! is `Claude Code-credentials-<first 8 hex of sha256(home)>`, never the lawyer's item, because
+//! own runs strip the inherited `CLAUDE_SECURESTORAGE_CONFIG_DIR` (`signin/env.rs`).
 
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+use clauseo_process::{Launcher, Timer};
+use clauseo_protocol::AgentId;
 
 use crate::fileid::same_file;
 use crate::signin::Found;
 use crate::signin::marker::LoginSource;
+
+mod query;
 
 /// Codex's login file's name, in a `CODEX_HOME` and in `~/.codex`.
 const LOGIN_FILE: &str = "auth.json";
@@ -30,9 +58,142 @@ const LOGIN_FILE: &str = "auth.json";
 /// The lawyer's own Codex folder under their home folder.
 const LAWYER_CODEX: &str = ".codex";
 
+/// Claude Code's login in the lawyer's default store, as a file: `~/.claude/.credentials.json` on
+/// Linux and Windows (`%USERPROFILE%\.claude`, Node's `homedir()`). macOS keeps it in the
+/// Keychain ([`CLAUDE_KEYCHAIN_SERVICE`]), so there this file is normally absent.
+const CLAUDE_LAWYER_FILE: [&str; 2] = [".claude", ".credentials.json"];
+
+/// Detection's stat of Claude's login: whether `<lawyer_home>/.claude/.credentials.json` is a
+/// regular file (a symbolic link, junction or other reparse point there is no login found).
+/// Never an open: `symlink_metadata` (see the module docs).
+pub(crate) fn claude_login_present(lawyer_home: &Path) -> bool {
+    let file = CLAUDE_LAWYER_FILE
+        .iter()
+        .fold(lawyer_home.to_path_buf(), |path, part| path.join(part));
+    std::fs::symlink_metadata(file).is_ok_and(|meta| plain_file(&meta))
+}
+
+/// Claude Code's Keychain item (a generic password) for its default config on macOS, the item
+/// "Use it" reuses: Claude Code 0.3.293's service rule gives no suffix when neither
+/// `CLAUDE_CONFIG_DIR` nor `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set (or the latter is `""`).
+pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+
+/// Apple's `security`, by absolute path: never one found on `PATH`.
+pub(crate) const SECURITY: &str = "/usr/bin/security";
+
+/// The longest the Keychain query may take; past it the process is killed and nothing is found.
+pub(crate) const KEYCHAIN_LIMIT: Duration = Duration::from_secs(3);
+
+/// How the Keychain query ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeychainProbe {
+    /// It exited with this code (`None`: by a signal).
+    Exited(Option<i32>),
+    /// It outlasted [`KEYCHAIN_LIMIT`] and was killed.
+    TimedOut,
+    /// It did not start.
+    NotStarted,
+}
+
+/// The query's arguments: `find-generic-password -s <service>`, then `-a <account>` when given.
+/// Never `-w`, `-g` or `-d`: attributes only, so the secret is never read.
+pub(crate) fn keychain_args(service: &str, account: Option<&OsStr>) -> Vec<OsString> {
+    let mut args = vec![
+        OsString::from("find-generic-password"),
+        OsString::from("-s"),
+        OsString::from(service),
+    ];
+    if let Some(account) = account {
+        args.push(OsString::from("-a"));
+        args.push(account.to_owned());
+    }
+    args
+}
+
+/// Claude Code's account for its item when it is the lawyer's `USER` (from `env`): Claude takes
+/// `$USER` (else the OS user name) and falls back to `claude-code-user` when that is not
+/// `[A-Za-z0-9._-]+`. `None` (match the service only) when `USER` is unset or not that shape.
+pub(crate) fn claude_account(env: &BTreeMap<OsString, OsString>) -> Option<&OsStr> {
+    let user = env.get(OsStr::new("USER"))?;
+    let name = user.to_str()?;
+    let valid = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    valid.then_some(user.as_os_str())
+}
+
+/// What the Keychain query could tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeychainSeen {
+    /// Exit 0: the item is there.
+    Found,
+    /// Exit 44, "could not be found": a definite no.
+    Absent,
+    /// Any other end (another code, a signal, a timeout, a failed start): it could not tell.
+    Unknown,
+}
+
+/// What the query's end means: exit 0 is found, 44 ("could not be found") absent, and anything
+/// else could not tell, logged once with the code or a fixed word only. First-time detection
+/// takes both of the last two as no login; a recorded reuse is kept on `Unknown` (`found.rs`).
+pub(crate) fn keychain_seen(probe: KeychainProbe) -> KeychainSeen {
+    match probe {
+        KeychainProbe::Exited(Some(0)) => KeychainSeen::Found,
+        KeychainProbe::Exited(Some(44)) => KeychainSeen::Absent,
+        KeychainProbe::Exited(code) => {
+            tracing::warn!(
+                ?code,
+                "claude keychain query: unexpected exit; could not tell"
+            );
+            KeychainSeen::Unknown
+        }
+        KeychainProbe::TimedOut => {
+            tracing::warn!("claude keychain query: timed out and killed; could not tell");
+            KeychainSeen::Unknown
+        }
+        KeychainProbe::NotStarted => {
+            tracing::warn!("claude keychain query: did not start; could not tell");
+            KeychainSeen::Unknown
+        }
+    }
+}
+
+/// Detection's Keychain check on macOS: whether Claude Code's default item exists, by
+/// `program` (`/usr/bin/security` outside tests) with [`CLAUDE_KEYCHAIN_SERVICE`] and the
+/// lawyer's account from `env` ([`claude_account`]). See the module docs.
+pub(crate) async fn claude_keychain<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    program: &Path,
+    env: &BTreeMap<OsString, OsString>,
+) -> KeychainSeen {
+    let args = keychain_args(CLAUDE_KEYCHAIN_SERVICE, claude_account(env));
+    keychain_seen(query::run(launcher, timer, program, args, env, KEYCHAIN_LIMIT).await)
+}
+
 /// The login file in a Codex home (Clauseo's, or a matter's state folder in stage C).
 fn home_file(codex_home: &Path) -> PathBuf {
     codex_home.join(LOGIN_FILE)
+}
+
+/// The login file's path in `codex_home`, for a stat of it (`codex::written`).
+pub(crate) fn login_file(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
+/// Tests only: the login file's path in `codex_home`, so a test elsewhere in `src` need not name
+/// it.
+#[cfg(test)]
+pub(crate) fn login_file_for_tests(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
+/// Tests only: writes a dummy (never a credential) at `path`, making its folder.
+#[cfg(test)]
+pub(crate) fn write_for_tests(path: &Path, contents: &[u8]) {
+    crate::write::create_dir_all(path.parent().unwrap()).unwrap();
+    crate::write::write_atomic(path, contents).unwrap();
 }
 
 /// The lawyer's login file, `<lawyer_home>/.codex/<login file>`.
@@ -139,12 +300,76 @@ pub fn unlink_reused_login(codex_home: &Path) -> io::Result<()> {
     crate::write::remove_file(&home_file(codex_home))
 }
 
-/// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
-/// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
-/// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which
-/// cannot read the contents.
+/// Removes Clauseo's own login file from `codex_home` with `remove_file`, which never reads it: a
+/// login that ran but did not confirm, or a sign-out with no CLI to run `logout`. A missing file
+/// is fine. The caller has checked the guard ([`codex_login_shared`]), so the name is never the
+/// lawyer's file.
+pub(crate) fn remove_home_login(codex_home: &Path) -> io::Result<()> {
+    crate::write::remove_file(&home_file(codex_home))
+}
+
+/// When [`remove_empty_home_login`] looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Empty {
+    /// Right after a kill of a run that used the home: an empty file is that run's cut save.
+    AfterKill,
+    /// Before a status read: an empty file counts only when untouched since `cutoff`, so a
+    /// Codex writing it now (it truncates, then writes) is never cut short.
+    AtStatus {
+        /// The newest modification time an empty file may have.
+        cutoff: SystemTime,
+    },
+}
+
+/// Removes the login file of `codex_home` (a run's own `CODEX_HOME`) when, and only when, a stat
+/// (never an open; on Windows `symlink_metadata` opens a handle with access 0) says it is a file
+/// of 0 bytes, with `when`'s rule; logs fixed words with `agent`. Never while the file is the
+/// lawyer's, reused ([`codex_login_shared`] with `lawyer_home`), and never when the lawyer's home
+/// folder is not known, since that cannot then be told. Returns whether it was removed.
+pub(crate) fn remove_empty_home_login(
+    codex_home: &Path,
+    lawyer_home: Option<&Path>,
+    when: Empty,
+    agent: &AgentId,
+) -> bool {
+    let Some(lawyer_home) = lawyer_home else {
+        return false;
+    };
+    if codex_login_shared(codex_home, lawyer_home) {
+        return false;
+    }
+    let file = home_file(codex_home);
+    let Ok(meta) = std::fs::symlink_metadata(&file) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() != 0 {
+        return false;
+    }
+    if let Empty::AtStatus { cutoff } = when
+        && !meta.modified().is_ok_and(|modified| modified <= cutoff)
+    {
+        return false;
+    }
+    if crate::write::remove_file(&file).is_err() {
+        return false;
+    }
+    match when {
+        Empty::AfterKill => {
+            tracing::warn!(%agent, "codex auth.json was empty after a forced stop; removed");
+        }
+        Empty::AtStatus { .. } => {
+            tracing::warn!(%agent, "codex auth.json was empty at a status read; removed");
+        }
+    }
+    true
+}
+
+/// Detection's stat: whether the lawyer's login file is there as a regular file (a stat, never
+/// an open, of `~/.codex/auth.json`). A symbolic link, a junction or any other reparse point
+/// there is no login found: "Use it" would refuse to link it. On Windows `symlink_metadata`
+/// opens a handle with access 0, which cannot read the contents.
 pub(crate) fn lawyer_login_present(lawyer_home: &Path) -> bool {
-    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok()
+    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok_and(|meta| plain_file(&meta))
 }
 
 /// Whether a Codex home's login is the lawyer's, reused: `login-source` says `reused`, or, per
@@ -190,3 +415,6 @@ pub(crate) fn link_reused_login(
         Err(io::Error::other("the new link is not the lawyer's file"))
     }
 }
+
+#[cfg(test)]
+mod tests;

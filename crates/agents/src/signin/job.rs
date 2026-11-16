@@ -9,8 +9,12 @@
 //!   Every event goes through `SigninHub::emit_job`, which drops it once the job is no
 //!   longer the agent's: a superseded job is silent, and its child is killed by its
 //!   [`Ticket::cancel`].
-//! - `cancel_sign_in` sets the ticket's cancel but keeps the job the agent's, so the job itself
-//!   reports `Failed { code: Cancelled }`, after its child is killed and its URL file removed.
+//! - `cancel_sign_in` stops the ticket's cancel gracefully (`Cancel::stop`, the lawyer's 2 s
+//!   grace) but keeps the job the agent's, so the job itself reports how it ended, after its
+//!   child has ended (by itself, or killed past the grace: `super::stopping`) and its URL file
+//!   is removed: `Failed { code: Cancelled }`, or for Codex what a status check then says.
+//!   The app's quit stops every job the same way (`Cancel::stop(Stop::Quit)`) and kills at its
+//!   bound; a superseded job and the drop of `Agents` kill at once.
 //! - The flow's last state ends the job; `None` ends it with the state unchanged.
 //!
 //! Reuse (piece 5) adds the lawyer's choices about a login they already have as tasks
@@ -25,18 +29,21 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use clauseo_process::{Launcher, Timer};
 
+use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::marker::{self, LoginSource};
 use crate::signin::queue::{self, Gate, Queue};
 use crate::signin::run::RunSpec;
+use crate::signin::stopping::OnStop;
 use crate::signin::{
-    Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
+    Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, detect,
+    found,
 };
 use crate::state::Installed;
 use crate::worker::{Shared, Ticket};
@@ -92,8 +99,8 @@ pub(crate) struct SigninJob<T> {
     pub(crate) task: Task,
     pub(crate) vendor: Vendor,
     pub(crate) config: AgentsConfig,
-    /// The agent's install: `node` runs `script`. `None` only for a queued task until its
-    /// install is `Ready` ([`run`] fills it in before any run).
+    /// The agent's install: `node` runs [`SigninJob::script`]. `None` only for a queued task
+    /// until its install is `Ready` ([`run`] fills it in before any run).
     pub(crate) installed: Option<Installed>,
     /// The agent's home, `SigninConfig::homes`' text.
     pub(crate) home: PathBuf,
@@ -104,6 +111,10 @@ pub(crate) struct SigninJob<T> {
     pub(crate) shared: Arc<Shared>,
     /// Pasted codes, for a sign-in.
     pub(crate) paste: Option<async_channel::Receiver<PasteCode>>,
+    /// The limit every status run of this job takes instead of its vendor's own, while set:
+    /// the start-up status check's runs (15 s, then the retry's 20 s) and the quick check before a
+    /// sign-in (5 s).
+    pub(crate) status_limit: Mutex<Option<Duration>>,
 }
 
 /// The job thread's body: for a task that queues, the wait for the install and the network;
@@ -141,10 +152,12 @@ pub(crate) fn run<T: Timer + Send + Sync>(
                 ..
             })
         )
-        && job.shared.signin.is_job(&job.ticket)
+        && (job.shared.signin.is_job(&job.ticket) || stopped_for_quit(&job.ticket.cancel))
     {
         // "written … when Clauseo's sign-in ends". A failed write leaves no marker, which for
-        // Codex reads as reused while the home holds a login file: the safe side.
+        // Codex reads as reused while the home holds a login file: the safe side. The quit takes
+        // every job's slot as it starts, so a login confirmed during it is recorded too: it is a
+        // confirmed login of Clauseo's own, and unrecorded it would read as reused next time.
         drop(marker::write_source(
             &job.config.data_dir,
             &job.ticket.agent,
@@ -159,6 +172,22 @@ pub(crate) fn run<T: Timer + Send + Sync>(
     }
 }
 
+/// Whether the app's quit stopped the job (first, or after the lawyer's Cancel) and did not kill
+/// it: its confirmed sign-in still counts, though the job is no longer the agent's.
+fn stopped_for_quit(cancel: &Cancel) -> bool {
+    cancel.quit_seen() && !cancel.is_killed()
+}
+
+/// A script's file name for the log (`codex.js`, `index.js`): one of the two known names, so
+/// no part of a path ever reaches the log.
+fn cli_file_name(script: &std::path::Path) -> &'static str {
+    match script.file_name().and_then(|name| name.to_str()) {
+        Some("codex.js") => "codex.js",
+        Some("index.js") => "index.js",
+        _ => "other",
+    }
+}
+
 impl<T: Timer + Send + Sync> SigninJob<T> {
     async fn work(&self, paste: Option<async_channel::Receiver<PasteCode>>) -> Option<SigninState> {
         if !self.shared.signin.is_job(&self.ticket) {
@@ -170,6 +199,41 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             &self.config.data_dir,
             &self.home,
         ));
+        let Some(script) = self.script() else {
+            // Codex's CLI is not in the install: no CLI command runs, so the adapter is never
+            // asked. The tasks that need no run still do their file work: "Stop using it" its
+            // unlink and `no-reuse`, a sign-out its removal of the home's login file. A sign-in
+            // the lawyer started fails; any other task reads as not signed in.
+            self.note(SigninNote::CliMissing);
+            return match (self.vendor, self.task) {
+                (_, Task::StopUsing(why)) => found::stop_using(self, why).await,
+                (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
+                (Vendor::Claude, Task::SignOut) => Some(self.failed(SigninCode::Failed)),
+                (_, task) if task.signs_in() => Some(self.failed(SigninCode::Failed)),
+                _ => Some(SigninState::SignedOut { found: None }),
+            };
+        };
+        self.note(SigninNote::CliResolved {
+            file: cli_file_name(&script),
+        });
+        // Sign in pressed: a quick status check first, so a login already there is signed in
+        // with no login run and no browser.
+        if matches!(self.task, Task::SignIn(_)) {
+            if let Some(state) = found::quick_check(self).await {
+                return Some(state);
+            }
+            // Cancelled while the quick check ran (the card showed `Checking`): it ends here,
+            // with no login started and nothing after it (no `Waiting`, no status check, no
+            // removal of a login already there).
+            if self.ticket.cancel.is_cancelled() {
+                return Some(self.failed(SigninCode::Cancelled));
+            }
+            // Not signed in: the lawyer's own login, found by detection now, is offered first.
+            if let Some(found) = detect::at_press(self).await {
+                tracing::info!(agent = %self.ticket.agent, "sign in: the lawyer's login offered");
+                return Some(found);
+            }
+        }
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
                 Some(claude::sign_in(self, method == Method::Console, paste).await)
@@ -180,12 +244,29 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             (Vendor::Codex, Task::SignIn(method)) => Some(codex::sign_in(self, method).await),
             (Vendor::Codex, Task::TryAgain) => Some(codex::try_again(self).await),
             (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
-            (_, Task::Status) => found::check(self).await,
+            (_, Task::Status) => found::start_check(self).await,
             (_, Task::FindLogin) => found::find_login(self).await,
             (_, Task::UseFound) => Some(found::use_found(self).await),
             (_, Task::UseDifferent) => Some(found::use_different(self, paste).await),
             (_, Task::StopUsing(why)) => found::stop_using(self, why).await,
         }
+    }
+
+    /// The limit of a status run whose vendor's own is `base`: the job's override while one is
+    /// set ([`SigninJob::set_status_limit`]), else `base`.
+    pub(crate) fn status_limit(&self, base: Duration) -> Duration {
+        self.status_limit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or(base)
+    }
+
+    /// Sets (or with `None` clears) the limit the job's next status runs take.
+    pub(crate) fn set_status_limit(&self, limit: Option<Duration>) {
+        *self
+            .status_limit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = limit;
     }
 
     /// The clock's now: `since` and `at`.
@@ -236,7 +317,7 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             vendor: self.vendor,
             kind,
             os: self.config.platform.os,
-            proxy: self.config.install.proxy.as_deref(),
+            proxy: self.config.install.signin_proxy_for(&self.ticket.agent),
             ca_file: self
                 .config
                 .install
@@ -247,19 +328,35 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         })
     }
 
-    /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`.
+    /// The script every run of this job gives Node: for Claude the adapter's (its `--cli` runs
+    /// Claude Code), for Codex the Codex CLI's `codex.js` ([`Installed::codex_cli`]), never the
+    /// adapter's, which ignores the CLI's commands and exits 0. `None` with no install, or
+    /// when Codex's CLI is not in it.
+    pub(crate) fn script(&self) -> Option<PathBuf> {
+        let installed = self.installed.as_ref()?;
+        match self.vendor {
+            Vendor::Claude => Some(installed.script.clone()),
+            Vendor::Codex => installed.codex_cli(),
+        }
+    }
+
+    /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`;
+    /// `script` is [`SigninJob::script`]. Killed at once on any stop ([`OnStop::KILL`]); a
+    /// caller whose run has a gentler end sets `on_stop`.
     pub(crate) fn spec<A: Into<OsString>>(
         &self,
         args: impl IntoIterator<Item = A>,
         env: BTreeMap<OsString, OsString>,
         limit: Duration,
     ) -> RunSpec {
-        // Always set by now: a task without an install is refused or waits in `run`.
-        let (node, script) = self
+        // Always set by now: a task without an install is refused or waits in `run`, and `work`
+        // ends a job whose script is missing before any run. An empty path never starts.
+        let node = self
             .installed
             .as_ref()
-            .map(|installed| (installed.node.clone(), installed.script.clone()))
+            .map(|installed| installed.node.clone())
             .unwrap_or_default();
+        let script = self.script().unwrap_or_default();
         RunSpec {
             node,
             script,
@@ -267,6 +364,9 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             env,
             cwd: self.home.clone(),
             limit,
+            on_stop: OnStop::KILL,
+            agent: self.ticket.agent.clone(),
+            lawyer_home: self.config.signin.lawyer_home(),
         }
     }
 }

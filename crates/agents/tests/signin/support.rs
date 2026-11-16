@@ -1,6 +1,8 @@
 //! The fixture every sign-in test starts from: `Agents` on the embedded snapshot, with Claude's
 //! and Codex's installs taken as ready (`ready_for_tests`) and their CLIs played by `fake_agent`
-//! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode),
+//! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode;
+//! Codex's install is laid out as npm does it, the adapter's `codex-acp/dist/index.js`, which the
+//! fake plays as the adapter, beside the CLI's `@openai/codex/bin/codex.js`),
 //! Codex's callback port moved to one that is always free (port 0); a clearing launcher that
 //! records each run's arguments and pid; a timer whose waits the test ends one by one, by
 //! duration; a fixed clock; and a test resolver, online until the test says otherwise, which
@@ -15,20 +17,40 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use clauseo_agents::testing::{TempDir, installed, write_file};
+use clauseo_agents::testing::{TempDir, installed, signin_test_platform, write_file};
 use clauseo_agents::{
-    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, Platform,
-    SigninNote, SigninState, TestResolver,
+    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, TestResolver,
 };
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_protocol::AgentId;
 use futures::channel::oneshot;
+
+pub(crate) use crate::events::{Events, Seen};
+
+/// codex-acp's adapter script and the Codex CLI's `codex.js` in an install folder, as npm lays
+/// them out.
+pub(crate) const CODEX_ADAPTER: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
+pub(crate) const CODEX_CLI: &str = "node_modules/@openai/codex/bin/codex.js";
+
+/// `root` joined with the `/`-separated `parts`, one at a time, so it is spelled with the OS's
+/// separator.
+pub(crate) fn under(root: &Path, parts: &str) -> PathBuf {
+    parts
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
 
 /// The waits of a Claude sign-in.
 pub(crate) const POLL: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_LIMIT: Duration = Duration::from_secs(5);
 pub(crate) const NUDGE: Duration = Duration::from_secs(30);
 pub(crate) const LOGIN_LIMIT: Duration = Duration::from_secs(600);
+/// Codex's own limits: one `login status`, and the app-server's `account/read`. Only the
+/// Unix-only stalled runs wait them out.
+#[cfg(unix)]
+pub(crate) const CODEX_STATUS_LIMIT: Duration = Duration::from_secs(15);
+#[cfg(unix)]
+pub(crate) const APP_SERVER_LIMIT: Duration = Duration::from_secs(20);
 
 /// The remote hints the test's own environment sets, which no child may see.
 pub(crate) const REMOTE_HINTS: [&str; 4] = [
@@ -79,8 +101,10 @@ pub(crate) fn pause() {
     drop(Condvar::new().wait_timeout(guard, Duration::from_millis(10)));
 }
 
-/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s.
-const PATIENCE: u32 = 3000;
+/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s. On
+/// Windows a pause takes a timer tick (about 15.6 ms), so 1200 of them (about 19 s) keep a wait
+/// that never ends failing with its own message before nextest's 30 s timeout.
+const PATIENCE: u32 = if cfg!(windows) { 1200 } else { 3000 };
 
 /// One wait the code under test armed.
 struct Wait {
@@ -113,7 +137,7 @@ impl Timer for KeyedTimer {
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -192,13 +216,15 @@ struct Recording {
     inner: PassthroughLauncher,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
 }
 
 impl Launcher for Recording {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let stalled = lock(&self.stall)
-            .as_ref()
-            .is_some_and(|word| spec.args().iter().any(|arg| arg == word.as_str()));
+        let holds = |word: &str| spec.args().iter().any(|arg| arg == word);
+        let armed = lock(&self.panic_on).take_if(|word| holds(word));
+        assert!(armed.is_none(), "a test's panic in the job: {armed:?}");
+        let stalled = lock(&self.stall).as_deref().is_some_and(holds);
         let launched = if stalled {
             let sleep = LaunchSpec::new(
                 PathBuf::from("/bin/sleep"),
@@ -223,6 +249,25 @@ impl Launcher for Recording {
     }
 }
 
+/// [`Fixture::start_split`]'s install launcher: the environment inherited, each run's
+/// arguments recorded as their `Debug` text.
+#[derive(Clone, Default)]
+pub(crate) struct InstallRuns(Arc<Mutex<Vec<String>>>);
+
+impl InstallRuns {
+    /// Each run's arguments, in order.
+    pub(crate) fn args(&self) -> Vec<String> {
+        lock(&self.0).clone()
+    }
+}
+
+impl Launcher for InstallRuns {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        lock(&self.0).push(format!("{:?}", spec.args()));
+        PassthroughLauncher::new(SpawnOptions::new()).launch(spec)
+    }
+}
+
 /// One test's folders, config, timer and launches.
 pub(crate) struct Fixture {
     pub(crate) data: TempDir,
@@ -230,6 +275,7 @@ pub(crate) struct Fixture {
     pub(crate) timer: KeyedTimer,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
     online: Arc<AtomicBool>,
     lookups: Arc<Mutex<Vec<String>>>,
 }
@@ -243,19 +289,23 @@ impl Fixture {
             .expect("build fake_agent first: cargo build -p clauseo-fake_agent");
         let cli = root.join("adapter").join("claude-cli");
         write_file(&cli, b"").unwrap();
-        let codex_js = root.join("codex").join("codex.js");
-        write_file(&codex_js, b"").unwrap();
-        let mut config = AgentsConfig::new(root.to_path_buf(), Platform::current().unwrap());
+        // Codex's install as npm lays it out: the adapter's script, which `Installed::script`
+        // names and the fake plays as codex-acp's adapter, and the Codex CLI beside it, the only
+        // file named `codex.js`, which the engine must find and run for every Codex command.
+        let codex_folder = root.join("codex");
+        let adapter = under(&codex_folder, CODEX_ADAPTER);
+        write_file(&adapter, b"").unwrap();
+        write_file(&under(&codex_folder, CODEX_CLI), b"").unwrap();
+        let mut config = AgentsConfig::new(root.to_path_buf(), signin_test_platform());
         config.node_search = NodeSearch::none();
         config.clock = Arc::new(FixedClock);
         config.ready_for_tests.insert(
             claude(),
             installed(bin.clone(), cli, root.join("adapter"), "0.0.0-test"),
         );
-        config.ready_for_tests.insert(
-            codex(),
-            installed(bin, codex_js, root.join("codex"), "0.0.0-test"),
-        );
+        config
+            .ready_for_tests
+            .insert(codex(), installed(bin, adapter, codex_folder, "0.0.0-test"));
         config
             .signin
             .homes
@@ -282,6 +332,13 @@ impl Fixture {
         if let Some(path) = std::env::var_os("PATH") {
             base.insert("PATH".into(), path);
         }
+        // Windows: the launcher clears the environment, and a child without `SystemRoot` cannot
+        // start Winsock, so the fake's login could not bind its callback port. The app's own
+        // base environment (`SigninConfig::base_env`, all of its variables) always has it.
+        #[cfg(windows)]
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            base.insert("SystemRoot".into(), root);
+        }
         config.signin.base_env = base;
         let online = Arc::new(AtomicBool::new(true));
         let lookups: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -300,6 +357,7 @@ impl Fixture {
             timer: KeyedTimer::default(),
             launches: Arc::default(),
             stall: Arc::default(),
+            panic_on: Arc::default(),
             online,
             lookups,
         }
@@ -309,6 +367,27 @@ impl Fixture {
     /// install [`Agents::finish_install_for_tests`] can make `Ready` later.
     pub(crate) fn not_installed(&mut self, agent: &AgentId) -> Installed {
         self.config.ready_for_tests.remove(agent).unwrap()
+    }
+
+    /// Codex's browser login listens on a free port of the test's own, as Codex listens on
+    /// 1455, and ends on `GET /cancel` there (the fake's `FAKE_CODEX_PORT`). Returns the port.
+    pub(crate) fn listen_for_cancel(&mut self) -> u16 {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        self.config.signin.callback_port = Some(port);
+        self.set_env("FAKE_CODEX_PORT", &port.to_string());
+        port
+    }
+
+    /// Sets `name` to `value` in every run's base environment.
+    pub(crate) fn set_env(&mut self, name: &str, value: &str) {
+        self.config
+            .signin
+            .base_env
+            .insert(OsString::from(name), OsString::from(value));
     }
 
     /// Whether the resolver answers (online) or fails every lookup (offline).
@@ -343,18 +422,44 @@ impl Fixture {
     }
 
     fn start_quiet(&self, agent: AgentId) -> (Agents, Events) {
-        let launcher: Arc<dyn Launcher> = Arc::new(Recording {
+        let (agents, events) =
+            Agents::start(self.config.clone(), self.recording(), self.timer.clone());
+        (agents, Self::events(agent, events))
+    }
+
+    /// Starts `Agents` as R20 does: the recording launcher for sign-in, [`InstallRuns`] for
+    /// installs. Waits for `agent`'s install to report `Ready`.
+    pub(crate) fn start_split(&self, agent: AgentId) -> (Agents, Events, InstallRuns) {
+        let installs = InstallRuns::default();
+        let install: Arc<dyn Launcher> = Arc::new(installs.clone());
+        let (agents, events) = Agents::start_with_launchers(
+            self.config.clone(),
+            install,
+            self.recording(),
+            self.timer.clone(),
+        );
+        let events = Self::events(agent, events);
+        events.until_install_ready();
+        (agents, events, installs)
+    }
+
+    /// The clearing launcher that records each run in `launches`.
+    fn recording(&self) -> Arc<dyn Launcher> {
+        Arc::new(Recording {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
             stall: Arc::clone(&self.stall),
-        });
-        let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        let events = Events {
-            rx: events,
-            agent,
-            notes: Mutex::default(),
-        };
-        (agents, events)
+            panic_on: Arc::clone(&self.panic_on),
+        })
+    }
+
+    /// The next run whose arguments hold `word` panics in its job's thread instead of starting.
+    pub(crate) fn panic_on(&self, word: &str) {
+        *lock(&self.panic_on) = Some(word.to_owned());
+    }
+
+    fn events(agent: AgentId, events: async_channel::Receiver<AgentsEvent>) -> Events {
+        Events::new(agent, events)
     }
 
     /// From now on, runs whose arguments hold `word` (`app-server`, `status`) never answer
@@ -424,105 +529,42 @@ impl Fixture {
     }
 }
 
-/// A sign-in event.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Seen {
-    State(SigninState),
-    Open(String),
+/// Linux: kills each run the test started that still runs and waits until it is gone, so a test
+/// that failed or panicked mid-run leaves no fake behind; the folder goes after (`TempDir`). A
+/// run counts while it is still this process's child or its command line names the fixture's
+/// folder, so a pid reused by another process is never hit.
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        for launch in self.launches() {
+            if ours(launch.pid, self.data.path()) {
+                clauseo_process::kill(launch.pid);
+                gone(launch.pid);
+            }
+        }
+    }
 }
 
-/// One agent's events, read by blocking. Install events and other agents' are skipped; the
-/// agent's sign-in notes are kept aside ([`Events::notes`]).
-pub(crate) struct Events {
-    rx: async_channel::Receiver<AgentsEvent>,
-    agent: AgentId,
-    notes: Mutex<Vec<SigninNote>>,
-}
-
-impl Events {
-    fn until_install_ready(&self) {
-        let state = self.install_state();
-        assert!(matches!(state, InstallState::Ready { .. }), "{state:?}");
+/// Whether process `pid` runs as this process's child or with `folder` in its command line.
+#[cfg(target_os = "linux")]
+fn ours(pid: u32, folder: &Path) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    // After the command name's closing parenthesis: the state, then the parent's pid.
+    let mut fields = stat
+        .rsplit(')')
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
+    let state = fields.next().unwrap_or_default();
+    if state.starts_with(['Z', 'X']) {
+        return false;
     }
-
-    /// The agent's next install state; sign-in events before it are dropped.
-    pub(crate) fn install_state(&self) -> InstallState {
-        loop {
-            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
-            if let AgentsEvent::Install { agent, state } = event
-                && agent == self.agent
-            {
-                return state;
-            }
-        }
-    }
-
-    /// The next sign-in event for the agent.
-    pub(crate) fn next(&self) -> Seen {
-        loop {
-            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
-            match event {
-                AgentsEvent::Signin { agent, state } if agent == self.agent => {
-                    return Seen::State(state);
-                }
-                AgentsEvent::OpenUrl { agent, url } if agent == self.agent => {
-                    return Seen::Open(url);
-                }
-                AgentsEvent::SigninNote { agent, note } if agent == self.agent => {
-                    lock(&self.notes).push(note);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Events up to and including the first state for which `done` holds.
-    pub(crate) fn until(&self, done: impl Fn(&SigninState) -> bool) -> Vec<Seen> {
-        let mut seen = Vec::new();
-        loop {
-            let next = self.next();
-            let last = matches!(&next, Seen::State(state) if done(state));
-            seen.push(next);
-            if last {
-                return seen;
-            }
-        }
-    }
-
-    /// Events up to the run's last state (`SignedIn`, `SignedOut` or `Failed`), and that state.
-    pub(crate) fn until_end(&self) -> (Vec<Seen>, SigninState) {
-        let seen = self.until(|state| {
-            matches!(
-                state,
-                SigninState::SignedIn { .. }
-                    | SigninState::SignedOut { .. }
-                    | SigninState::Failed { .. }
-            )
-        });
-        let Some(Seen::State(last)) = seen.last().cloned() else {
-            unreachable!()
-        };
-        (seen, last)
-    }
-
-    /// The next sign-in state for the agent, `OpenUrl` skipped.
-    pub(crate) fn state(&self) -> SigninState {
-        loop {
-            if let Seen::State(state) = self.next() {
-                return state;
-            }
-        }
-    }
-
-    /// The agent's sign-in notes read so far.
-    pub(crate) fn notes(&self) -> Vec<SigninNote> {
-        lock(&self.notes).clone()
-    }
-
-    /// Every event already sent, without waiting, Install events included.
-    pub(crate) fn drain(&self) -> Vec<AgentsEvent> {
-        std::iter::from_fn(|| self.rx.try_recv().ok()).collect()
-    }
+    let parent = fields.next().and_then(|field| field.parse::<u32>().ok());
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    let folder = folder.to_string_lossy();
+    parent == Some(std::process::id()) || String::from_utf8_lossy(&cmdline).contains(&*folder)
 }
 
 /// Whether the process `pid` is gone (or a zombie no one has reaped), after a short wait.

@@ -307,3 +307,53 @@ test("a row's clock time leads it in a <time>, in the work list's quiet clock co
   expect(ruleOf(".step-row")).toMatch(/grid-template-columns:\s*subgrid/);
   expect(ruleOf(".step-row-text")).toMatch(/grid-column:\s*3;/);
 });
+
+test("a row's result slot (U17) stands in its words' column after the mark, data-result says open or closed, and failed draws the break with the mark in primary; without them the row is as before", () => {
+  const row = (extra: Partial<Parameters<typeof StepRow>[0]> = {}) => {
+    const el = document.createElement("ol");
+    el.innerHTML = renderToStaticMarkup(
+      <StepRow
+        id="tool_call:1"
+        toolCall="1"
+        status="completed"
+        kind="other"
+        text="Did one other thing."
+        hover={null}
+        mark={extra.failed === true ? "Failed" : null}
+        {...extra}
+      />,
+    );
+    return el.querySelector("li")!;
+  };
+  const plain = row();
+  expect(plain.getAttributeNames()).toEqual([
+    "class",
+    "data-testid",
+    "data-entry-id",
+    "data-tool-call-id",
+    "data-status",
+    "data-kind",
+  ]);
+  const slotted = row({
+    result: <button className="step-row-press">Show the result</button>,
+    resultOpen: false,
+  });
+  expect(slotted.dataset["result"]).toBe("closed");
+  expect(slotted.querySelector(".step-row-text")!.lastElementChild!.textContent).toBe(
+    "Show the result",
+  );
+  expect(row({ result: <span />, resultOpen: true }).dataset["result"]).toBe("open");
+  const failed = row({ failed: true });
+  expect(failed.dataset["failed"]).toBe("true");
+  expect(failed.dataset["status"]).toBe("completed");
+  expect(failed.querySelector("svg")!.outerHTML).toBe(svg(IconBreak, "step-icon"));
+  expect(failed.querySelector(".step-row-mark")?.textContent).toBe("Failed");
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "steps.css"), "utf8");
+  expect(css).toMatch(/\.step-row\[data-failed\] \.step-row-mark \{\s*color: var\(--primary\)/);
+  // the block: plain text, its line breaks kept, a long line broken anywhere; no border, no fill, no animation
+  const block = /\.step-row-result-text \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  expect(block).toMatch(/white-space:\s*pre-wrap/);
+  expect(block).toMatch(/overflow-wrap:\s*anywhere/);
+  const wrap = /\.step-row-result \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  expect(wrap).not.toMatch(/border|background|animation|transition/);
+});

@@ -22,6 +22,7 @@ zstd = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 futures = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 # Itself with test-support, so the reopen bench reaches `fixtures` with no flag.

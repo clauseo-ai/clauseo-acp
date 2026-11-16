@@ -4,7 +4,7 @@ description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/re
 expression: "Snapshot::of(&every)"
 ---
 {
-  "reducer_schema": 8,
+  "reducer_schema": 13,
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000c00000000",
@@ -187,8 +187,9 @@ expression: "Snapshot::of(&every)"
           "notice": {
             "order": 13,
             "event": "01900000-0000-7000-8000-000c00000015",
-            "level": "warning",
-            "text": "Context is nearly full.",
+            "level": "info",
+            "text": "Clauseo doesn't remember the earlier questions and answers.",
+            "kind": "context_not_restored",
             "ts": 13000
           }
         },
@@ -230,6 +231,7 @@ expression: "Snapshot::of(&every)"
               }
             ],
             "skipped": [],
+            "checkpoint_before": "01900000-0000-7000-8000-000c00000005",
             "checkpoint_after": "01900000-0000-7000-8000-000c00000018",
             "undone": true,
             "usage": {
@@ -273,7 +275,8 @@ expression: "Snapshot::of(&every)"
       "running": null,
       "after_turn": null,
       "files": {},
-      "failures": {}
+      "failures": {},
+      "before_checkpoints": {}
     }
   }
 }

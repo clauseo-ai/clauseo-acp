@@ -2,9 +2,10 @@
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
 //! bridge refuses is refused before any window has opened its stream. The settings window
 //! sends `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits` (Plan and
-//! usage, U12) and reads `GetSettings`, nothing else; `FirstAct` comes from `main` only; another
+//! usage, U12), both protection commands (0051), and reads `GetSettings` and `Protection`;
+//! `FirstAct` comes from `main` only; another
 //! label sends nothing (0028, 0036).
-//! The Chrome for Testing download's two commands are main's alone (0029). The updater's
+//! The browser's commands are main's alone (0029; `admit_browser.rs`). The updater's
 //! commands and `GetUpdate` go by the table in `the_update_commands_go_by_window` (0037).
 
 use clauseo_protocol::{MatterId, ThreadId};
@@ -59,6 +60,16 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"snooze_thread": {"thread": thread}}),
         json!({"mark_thread_done": {"thread": thread, "done": true}}),
         json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}),
+        // The room's tracked changes in a Word file.
+        json!({"decide_revisions": {"matter": matter, "path": "Lease.docx",
+            "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+            "ids": [1, 2], "decision": "accept"}}),
+        // The pickers: a choice of an option (the host takes only the model's or the effort's).
+        json!({"set_config_option": {"thread": thread, "option_id": "model",
+            "value": {"select": "opus"}}}),
+        json!({"update_matter": {"matter": matter, "agent_prefs": {"claude": {"effort": "high"}}}}),
+        // The window's network signal (D-050).
+        json!({"set_network": {"online": false}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -100,8 +111,8 @@ fn every_refused_command_is_refused_before_open_stream() {
             "request": Uuid::now_v7(), "option_id": "allow"}})),
         command(json!({"set_mode": {"thread": thread, "mode_id": "bypassPermissions"}})),
         command(
-            json!({"set_config_option": {"thread": thread, "option_id": "mode",
-            "value": {"select": "bypassPermissions"}}}),
+            json!({"set_config_option": {"thread": thread, "option_id": "fast",
+            "value": {"boolean": true}}}),
         ),
     ];
     for refused in refused {
@@ -225,6 +236,31 @@ fn preview_undo_is_read_from_main_and_refused_from_settings() {
     );
 }
 
+/// `ListRevisions` reaches the host from the main window, which refuses a file that is not a
+/// Word document with its own code, and the settings window is refused it by the bridge;
+/// `DecideRevisions` is main's alone.
+#[test]
+fn list_revisions_is_read_from_main_and_decide_revisions_is_mains() {
+    let scratch = Scratch::new("admit-revisions", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let body = json!({"list_revisions": {"matter": host.scratch(), "path": "notes.txt"}});
+    let refusal = block_on(bridge.query(MAIN, read(body.clone()))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::WordNotDocx, "{refusal:?}");
+    let refusal = block_on(bridge.query(SETTINGS, read(body))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(
+        refusal.to_string().contains("reads only the settings"),
+        "{refusal}"
+    );
+    let decide = command(json!({"decide_revisions": {"matter": host.scratch(),
+        "path": "Lease.docx",
+        "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        "ids": [1], "decision": "reject"}}));
+    let refusal = bridge.admit(SETTINGS, &decide).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
+}
+
 /// `ScanFolder` passes `admit` only with a folder this run's picker issued; `CancelScan`
 /// passes with any ref, even one never issued, and starts nothing: no scan event comes and the
 /// host answers `Done`.
@@ -278,12 +314,12 @@ fn folder_support_needs_a_picked_folder() {
         let answer = block_on(bridge.query(MAIN, ask(folder)));
         // Admitted: it reaches the host, which answers or refuses the folder as create would
         // (the scratch's folders sit in its data folder, so an import's is
-        // `matter.folder_in_matters_root`); never the bridge's `command.invalid`.
+        // `matter.folder_in_clauseo_data`); never the bridge's `command.invalid`.
         assert!(
             matches!(answer, Ok(QueryResult::FolderSupport(_)))
                 || answer
                     .as_ref()
-                    .is_err_and(|error| error.code() == ErrorCode::MatterFolderInMattersRoot),
+                    .is_err_and(|error| error.code() == ErrorCode::MatterFolderInClauseoData),
             "{kind}: {answer:?}"
         );
         let refusal = block_on(bridge.query(MAIN, ask(not_picked))).unwrap_err();
@@ -405,32 +441,6 @@ fn review_a_reloaded_main_window_can_search_again() {
     );
 }
 
-/// The Chrome for Testing download (0029) is the main window's: its consent dialog sends
-/// `install_browser` and its Cancel `cancel_browser_install`. The settings window and any other
-/// label are refused both with `command.invalid`, before the host sees them.
-#[test]
-fn only_the_main_window_starts_or_cancels_the_browser_download() {
-    let scratch = Scratch::new("admit-browser", &[]);
-    let host = scratch.start(Vec::new());
-    let bridge = host.bridge();
-    let install = command(json!({"install_browser": {}}));
-    let cancel = command(json!({"cancel_browser_install": {}}));
-    for browser in [&install, &cancel] {
-        assert!(bridge.admit(MAIN, browser).is_ok(), "{browser:?}");
-        for label in [SETTINGS, "other"] {
-            let refusal = block_on(bridge.dispatch(label, envelope(browser.clone()))).unwrap_err();
-            assert_eq!(
-                refusal.code(),
-                ErrorCode::CommandInvalid,
-                "{label} {browser:?}"
-            );
-        }
-    }
-    // With no download running, main's cancel reaches the host and does nothing.
-    let outcome = block_on(bridge.dispatch(MAIN, envelope(cancel)));
-    assert!(matches!(outcome, Ok(CommandOutcome::Done)), "{outcome:?}");
-}
-
 /// The updater (0037), one row per window and command: main installs, cancels a scheduled
 /// install and checks; the settings window sets the mode and checks; neither sends the other's,
 /// and a window of any other label sends none. `true` is admitted, `false` refused with
@@ -485,4 +495,105 @@ fn the_update_commands_go_by_window() {
     }
     let other = block_on(bridge.query("other", HostQuery::GetUpdate)).unwrap_err();
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
+}
+
+/// `SetSkillPack` (0040, PR-E) is the settings window's alone, as the other `Set*` switches
+/// are: the main window and any other label are refused with `command.invalid` before the host
+/// sees it.
+#[test]
+fn set_skill_pack_from_the_main_window_is_refused() {
+    let scratch = Scratch::new("admit-skill-pack-main", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for on in [true, false] {
+        let set = command(json!({"set_skill_pack": {"id": "nda-kit", "on": on}}));
+        for label in [MAIN, "other"] {
+            let refused = bridge.admit(label, &set).unwrap_err();
+            assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}");
+        }
+    }
+}
+
+/// The Skills pane in Settings turns packs on and off.
+#[test]
+fn set_skill_pack_from_the_settings_window_is_admitted() {
+    let scratch = Scratch::new("admit-skill-pack-settings", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for on in [true, false] {
+        let set = command(json!({"set_skill_pack": {"id": "nda-kit", "on": on}}));
+        assert!(bridge.admit(SETTINGS, &set).is_ok());
+    }
+}
+
+/// `ListSkillPacks` is read by both windows: the main window's matter picker and Settings'
+/// Skills pane. Any other window is refused.
+#[test]
+fn list_skill_packs_from_main_and_settings_is_admitted() {
+    let scratch = Scratch::new("admit-list-skill-packs", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for window in [MAIN, SETTINGS] {
+        let answer = block_on(bridge.query(window, read(json!("list_skill_packs"))));
+        assert!(
+            matches!(&answer, Ok(QueryResult::SkillPacks(packs)) if packs.is_empty()),
+            "{window}: {answer:?}"
+        );
+    }
+    let other = block_on(bridge.query("other", read(json!("list_skill_packs")))).unwrap_err();
+    assert_eq!(other.code(), ErrorCode::CommandInvalid);
+}
+
+/// Decision record 0051, R17 PR-B1: the settings window and `main` may send both protection
+/// commands and read the protection view, and their channels carry `protection_changed` and
+/// `protection_view_changed`; another label sends, reads and receives none of it. With no
+/// sandbox seam (desktop wires none yet) the host answers the view as not built.
+#[test]
+fn the_protection_query_commands_and_events_go_to_settings_and_main_only() {
+    let scratch = Scratch::new("admit-protection", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let bodies = [
+        json!({"retry_protection": {}}),
+        json!({"remove_sandbox_setup": {}}),
+    ];
+    let events = [
+        r#"{"protection_changed":{}}"#,
+        r#"{"protection_view_changed":{}}"#,
+    ];
+    let carries = |label: &str, json| pump::AppEvents::of(label).carries(Feed::App, json);
+    for label in [MAIN, SETTINGS] {
+        for body in &bodies {
+            bridge
+                .admit(label, &command(body.clone()))
+                .unwrap_or_else(|e| {
+                    panic!("{label}: {body}: {e}");
+                });
+        }
+        let answer = block_on(bridge.query(label, read(json!("protection")))).unwrap();
+        let QueryResult::Protection(view) = answer else {
+            panic!("{label}: {answer:?}");
+        };
+        assert_eq!(
+            view.computer,
+            clauseo_protocol::Protection::NotProtected {
+                cause: clauseo_protocol::NotProtectedCause::Unsupported {
+                    why: clauseo_protocol::UnsupportedWhy::NotBuilt,
+                },
+            },
+            "{label}"
+        );
+        for json in events {
+            assert!(carries(label, json), "{label}: {json}");
+        }
+    }
+    for body in &bodies {
+        let refused = bridge.admit("other", &command(body.clone())).unwrap_err();
+        assert_eq!(refused.code(), ErrorCode::CommandInvalid, "other: {body}");
+    }
+    let refused = block_on(bridge.query("other", read(json!("protection")))).unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::CommandInvalid);
+    for json in events {
+        assert!(!carries("other", json), "other: {json}");
+    }
 }

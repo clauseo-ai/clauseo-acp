@@ -9,20 +9,20 @@ use clauseo_counts::schema::Feature;
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
-    ErrorCode, FileChoice, FileDecision, MatterId, MatterPath, OutsideEdits, StepUndone, StreamId,
-    ThreadId, TurnId,
+    ErrorCode, FileChoice, FileDecision, InterruptedKind, MatterId, MatterPath, OutsideEdits,
+    StepUndone, StreamId, ThreadId, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
-use super::super::{Actor, Tag, counting};
+use super::super::{Actor, Tag, counting, last_exit};
 use super::out::Out;
 use super::{
-    Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
-    prompt, queue, state,
+    Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, came_back, end, failure, lost,
+    matter_of, queue, state,
 };
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::matter_worker::{MatterJob, UndoJob};
 use crate::pipeline::MatterEvent;
 
@@ -182,9 +182,35 @@ pub(super) fn on_log(
             Ok(())
         });
     match sent {
-        Ok(()) => send_undo(actor, thread, ask),
+        Ok(()) => record_then_send(actor, thread, ask),
         Err(error) => give_up(actor, thread, &ask, error),
     }
+}
+
+/// Records the undo with the files it puts back (`last_exit.rs`), then sends it once the record
+/// is durable. One that only keeps files touches none and is sent at once.
+fn record_then_send(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {
+    let files = ask.job.as_ref().map_or(0, |job| {
+        job.decisions
+            .iter()
+            .filter(|decision| decision.choice == FileChoice::Undo)
+            .count()
+    });
+    if files == 0 {
+        send_undo(actor, thread, ask);
+        return;
+    }
+    let files = u64::try_from(files).unwrap_or(u64::MAX);
+    let at = actor.now().wall;
+    let action = last_exit::action(
+        ask.matter,
+        InterruptedKind::Undo,
+        Some(files),
+        Some(thread),
+        at,
+    );
+    let then = move |actor: &mut Actor, _recorded: Result<(), Error>| send_undo(actor, thread, ask);
+    last_exit::record(actor, action, Box::new(then));
 }
 
 fn send_undo(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {
@@ -224,10 +250,13 @@ pub(super) fn on_undone(
     result: Result<Undone, Error>,
 ) {
     match result {
-        Ok(undone) => match undo_log(thread, &ask, undone) {
-            Ok(log) => send_log(actor, thread, log),
-            Err(error) => give_up(actor, thread, &ask, error),
-        },
+        Ok(undone) => {
+            log_undone(thread, &undone);
+            match undo_log(thread, &ask, undone) {
+                Ok(log) => send_log(actor, thread, log),
+                Err(error) => give_up(actor, thread, &ask, error),
+            }
+        }
         Err(Error::Matters(clauseo_matters::Error::UnexpectedDecision { path }))
             if !ask.retried && ask.filled.contains(&path) =>
         {
@@ -241,6 +270,21 @@ pub(super) fn on_undone(
     }
 }
 
+/// The lifecycle line of an undo R8 has done: the files undone and kept, and of its deletes how
+/// many went to the trash and how many were deleted for good (the trash could not take them;
+/// the history holds them). Counts only, never a path.
+fn log_undone(thread: ThreadId, undone: &Undone) {
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        undone = undone.restored.len(),
+        kept = undone.kept.len(),
+        trashed = undone.removals.trashed,
+        deleted = undone.removals.deleted,
+        "an undo ran"
+    );
+}
+
 /// The commit that logs an undo R8 has done, kept until it is durable so it can be sent once
 /// more: R8 has already put the files back.
 #[derive(Debug)]
@@ -251,6 +295,9 @@ pub(crate) struct UndoLog {
     matter_events: Vec<MatterEvent>,
     step: StepUndone,
     outcome: CommandOutcome,
+    /// The files R8 deleted, and those its checkpoint already found back (`came_back.rs`).
+    deleted: Vec<MatterPath>,
+    resurrected: Vec<MatterPath>,
     /// That commit failed; the unblock sends it again.
     failed: bool,
     /// The one retry was sent.
@@ -265,6 +312,9 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
         checkpoint,
         restored,
         kept,
+        unversioned,
+        deleted,
+        resurrected,
         ..
     } = undone;
     let (matter, turn) = (ask.matter, ask.turn);
@@ -285,8 +335,11 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
             checkpoint: undo,
             restored,
             kept,
+            unversioned,
         },
         outcome: CommandOutcome::StepUndone { checkpoint: undo },
+        deleted,
+        resurrected,
         failed: false,
         retried: false,
     })
@@ -367,20 +420,18 @@ fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
 }
 
 /// The commit logging the undo is durable (or its retry returned): the next prompt's note
-/// names the files put back, and the writer passes on.
+/// names the files put back, the host starts looking for deleted files a sync client puts
+/// back (`came_back.rs`), and the writer passes on.
 pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
     let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
         return;
     };
     counting::feature_used(actor, Feature::Undo);
-    prompt::ensure_note(actor, thread);
-    if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
-        for path in log.step.restored {
-            if !note.contains(&path) {
-                note.push(path);
-            }
-        }
+    super::note::ensure(actor, thread);
+    if let Some(state) = state(actor, thread) {
+        state.note.add_undone(&log.step.restored);
     }
+    came_back::watch(actor, thread, log.matter, log.deleted, &log.resurrected);
     release(actor, log.matter, thread);
 }
 

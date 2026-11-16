@@ -2,9 +2,14 @@
 //! servers on 127.0.0.1 and records each address dialled, so nothing leaves the machine while
 //! the loopback refusal stays real.
 
+mod allowed;
+mod blocked;
+mod browser;
 mod connect;
+mod failed;
 mod harness;
 mod http;
 mod limits;
 mod private;
+mod unreachable;
 mod upstream;

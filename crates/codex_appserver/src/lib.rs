@@ -14,6 +14,8 @@
 //!   test (`app-server-protocol/src/protocol/common.rs`) shows the wire form. Read messages may
 //!   carry `"jsonrpc": "2.0"` or not.
 //! - The schema drift test (`tests/schema_drift.rs`).
+//! - Where the Codex CLI's `codex.js` is in an install of codex-acp ([`codex_js_candidates`],
+//!   `cli.rs`), for the sign-in and the usage reader alike.
 //!
 //! # Interface
 //!
@@ -63,12 +65,14 @@
 //! fixtures in `tests/fixtures/`; `tests/schema_drift.rs` checks the types and the fixtures
 //! against the vendored schema.
 
+mod cli;
 mod client;
 mod driver;
 mod error;
 mod line;
 mod types;
 
+pub use cli::codex_js_candidates;
 pub use client::{Client, Notification, Notifications};
 pub use driver::Driver;
 pub use error::Error;

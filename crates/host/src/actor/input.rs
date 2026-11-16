@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId, FolderRefId,
-    HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
-    ThreadId, ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, ErrorCode,
+    FileRefId, FolderRefId, HostQuery, MatterId, Principal, QueryResult, SearchAnswer,
+    SearchRequest, Seq, StreamId, ThreadId, ViewEpoch,
 };
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
@@ -15,6 +15,7 @@ use futures::channel::oneshot;
 use super::limits::LimitsInput;
 use super::turn::{RestoreAsk, TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
+use crate::agent::login_link::{AgentsStopped, StopFor};
 use crate::error::Error;
 use crate::handle::{AppSubscription, EventSubscription, Subscription};
 use crate::matter_worker::MatterReply;
@@ -22,6 +23,47 @@ use crate::pipeline::Ticket;
 
 /// A reply to one handle call.
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, Error>>;
+
+/// A sign-in call from a handle (decision record 0048).
+#[derive(Debug)]
+pub(crate) enum SignInRequest {
+    /// `HostHandle::restart_agents`.
+    Restart { agent: AgentId, reply: Reply<()> },
+    /// `HostHandle::stop_agents` (`StopFor::LoginSwitch`) or `HostHandle::stop_agents_for`.
+    Stop {
+        agent: AgentId,
+        why: StopFor,
+        reply: Reply<AgentsStopped>,
+    },
+    /// `HostHandle::set_reused_login`.
+    Reused {
+        agent: AgentId,
+        reused: bool,
+        reply: Reply<()>,
+    },
+    /// The folders whose login links `HostHandle::remove_login_links` removes.
+    LinkHomes {
+        agent: AgentId,
+        reply: Reply<Vec<PathBuf>>,
+    },
+    /// `HostHandle::set_launch_refused`.
+    LaunchRefused {
+        agent: AgentId,
+        code: Option<ErrorCode>,
+        reply: Reply<()>,
+    },
+    /// `HostHandle::limits_login_changed`.
+    LimitsLogin { agent: AgentKind, reply: Reply<()> },
+}
+
+/// How `SetPlan` writes `plans.<agent>`.
+#[derive(Debug)]
+pub(crate) enum PlanWrite {
+    /// The whole entry, or `None` to remove it.
+    Whole(Option<Box<clauseo_settings::Plan>>),
+    /// The endpoint alone, or `None` to remove it, keeping the provider and the variables.
+    Endpoint(Option<String>),
+}
 
 /// A subscription's number, unique for the host's run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -91,6 +133,26 @@ pub(crate) enum Request {
         matter: MatterId,
         reply: Reply<PathBuf>,
     },
+    /// Desktop's write of an installed agent's entry (`actor/settings/entries.rs`).
+    SetAgentLaunch {
+        agent: AgentId,
+        launch: Box<clauseo_settings::AgentLaunch>,
+        reply: Reply<clauseo_settings::EntryWrite>,
+    },
+    /// Desktop's write of an agent's firm plan: the whole entry, or its endpoint alone.
+    SetPlan {
+        agent: AgentId,
+        plan: PlanWrite,
+        reply: Reply<()>,
+    },
+    /// A sign-in call (`turn/sign_in.rs`).
+    SignIn(SignInRequest),
+    /// `HostHandle::site_blocked`: the egress proxy refused a listed site (`blocked.rs`). No
+    /// reply: the proxy never waits for the host.
+    SiteBlocked {
+        session: crate::config::SessionKey,
+        site: crate::handle::BlockedSite,
+    },
     Shutdown {
         reply: Reply<()>,
     },
@@ -105,21 +167,33 @@ pub(crate) enum MatterTag {
     Scratch,
     /// The open the actor sends first to a matter's new worker; its reply is only logged.
     Open,
-    /// The locate of a `RelocateMatter` command, with the folder it locates.
+    /// The locate of a `RelocateMatter` command, with the folder it locates; `created` for an
+    /// import of a listed matter's moved folder, answered `MatterCreated` (`answer.rs`).
     Relocate {
         command: CommandId,
         folder: std::path::PathBuf,
+        created: bool,
     },
     /// A turn's job.
     Turn(TurnJob),
     /// A `RestoreVersion`'s restore.
     Restore(Box<RestoreAsk>),
+    /// A `DecideRevisions`' edit and write (`turn/restore/revisions.rs`).
+    Revisions(Box<super::turn::RevisionsAsk>),
     /// A query R8 answers: `CompareVersions`, `PreviewRestore`.
     Query(Reply<QueryResult>),
-    /// A `ListPapers` query, answered with the listing.
-    Papers(Reply<QueryResult>),
+    /// A `ListPapers` query of the matter's `folder` as its row named it, answered with the
+    /// listing.
+    Papers {
+        reply: Reply<QueryResult>,
+        folder: std::path::PathBuf,
+    },
     /// The discard of a matter made on disk whose commit failed (`matters/made.rs`).
     Discard,
+    /// A check for papers an undo removed that came back (`turn/came_back.rs`).
+    CameBack(super::turn::CameBackCheck),
+    /// A Word blackline's sides, then its stetdoc runs (`query/blackline.rs`).
+    Blackline(Box<super::query::blackline::Ask>),
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.
@@ -164,6 +238,8 @@ pub(crate) enum Input {
     Timer(TurnTimer),
     /// The snooze timer armed with `generation` fired (`triage/wake.rs`).
     SnoozeWake { generation: u64 },
+    /// The idle stop's deadline armed with `generation` fired (`turn/idle.rs`).
+    IdleDeadline { generation: u64 },
     /// A turn task's result: an agent call or a log read.
     Turn(TurnInput),
     /// A subscription drained its channel after the actor found it full.
@@ -181,11 +257,54 @@ pub(crate) enum Input {
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
     /// A folder scan's thread or throttle timer.
     Scan(super::scan::ScanInput),
+    /// A matter's papers scan read a batch (`papers/scan.rs`).
+    PaperMarks(super::papers::scan::Batch),
+    /// The Scratch matter's folder scan answered, or start-up's wait for it ended.
+    Scratch(super::scratch::ScratchInput),
+    /// The Documents lookup answered, or its bound passed (`documents.rs`).
+    Documents(super::documents::DocumentsInput),
+    /// A new matter folder's probe answered (`matters/probe.rs`).
+    NewFolder(Box<super::matters::probe::Probed>),
+    /// A `LocateFile`'s folder probe answered (`locate.rs`).
+    Located(Box<super::locate::Located>),
     /// Where the Chrome for Testing download stands, from its thread.
     BrowserInstall(clauseo_protocol::BrowserInstallState),
+    /// What the lawyer's re-read of the firm's browser policy found, from its thread, or its
+    /// deadline (`browser_policy.rs`).
+    BrowserPolicy(super::browser_policy::PolicyInput),
+    /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
+    SkillPack(Box<super::settings::packs::PackRead>),
+    /// A file action's record was put or cleared (`last_exit.rs`).
+    Recorded(Box<super::last_exit::Recorded>),
+    /// The updater's check, download, progress, timer or file thread (`update.rs`).
+    Update(super::update::UpdateInput),
+    /// A connector command's work, or a relay's event (`connectors.rs`).
+    Connector(Box<super::connectors::ConnectorInput>),
+    /// A keychain thread of an MCP server command (`mcp.rs`).
+    Mcp(Box<super::mcp::McpInput>),
+    /// A sandbox set-up, removal or check ended, from its thread (`protection/work.rs`).
+    Protection(Box<super::protection::work::Done>),
+    /// A session proxy's sink reports a site the block list made it refuse (`blocked.rs`), as
+    /// `HostHandle::site_blocked` does (`launch_checks/egress.rs`).
+    SiteBlocked {
+        session: crate::config::SessionKey,
+        site: crate::handle::BlockedSite,
+    },
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
+    /// The turn path's state as ids, stages and counts, for a test that timed out (tests).
+    #[cfg(feature = "test-support")]
+    StateForTest(oneshot::Sender<String>),
+    /// The allowed sites' start-up read or a save's outcome, from their thread, or the read's
+    /// deadline (`allowed/saving.rs`).
+    Allowed(Box<super::allowed::AllowedInput>),
+    /// The open matter's folder changed and went quiet, from its watch (`papers/watch.rs`).
+    #[cfg(not(windows))]
+    PapersChanged(super::papers::FolderChanged),
+    /// The open matter's folder watch started, or why not (`papers/watch.rs`).
+    #[cfg(not(windows))]
+    WatchStarted(Box<super::papers::WatchStarted>),
 }
 
 impl std::fmt::Debug for Input {
@@ -201,6 +320,7 @@ impl std::fmt::Debug for Input {
             Self::Agent { .. } => "Agent",
             Self::Timer(_) => "Timer",
             Self::SnoozeWake { .. } => "SnoozeWake",
+            Self::IdleDeadline { .. } => "IdleDeadline",
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",
@@ -209,9 +329,29 @@ impl std::fmt::Debug for Input {
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
+            Self::PaperMarks(_) => "PaperMarks",
+            Self::Scratch(_) => "Scratch",
+            Self::Documents(_) => "Documents",
+            Self::NewFolder(_) => "NewFolder",
+            Self::Located(_) => "Located",
             Self::BrowserInstall(_) => "BrowserInstall",
+            Self::BrowserPolicy(_) => "BrowserPolicy",
+            Self::SkillPack(_) => "SkillPack",
+            Self::Update(_) => "Update",
+            Self::Connector(_) => "Connector",
+            Self::Mcp(_) => "Mcp",
+            Self::Protection(_) => "Protection",
+            Self::SiteBlocked { .. } => "SiteBlocked",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
+            #[cfg(feature = "test-support")]
+            Self::StateForTest(_) => "StateForTest",
+            Self::Allowed(_) => "Allowed",
+            Self::Recorded(_) => "Recorded",
+            #[cfg(not(windows))]
+            Self::PapersChanged(_) => "PapersChanged",
+            #[cfg(not(windows))]
+            Self::WatchStarted(_) => "WatchStarted",
         };
         f.write_str(name)
     }

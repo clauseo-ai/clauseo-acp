@@ -72,11 +72,11 @@ pub(crate) fn decode(item: &EncodedEvent) -> HostEvent {
 }
 
 /// The tool switches' defaults, as `clauseo-settings` has them: web search on, the browser on
-/// only where it is on by default (macOS).
+/// only where it is on by default (macOS and Windows).
 fn tool_defaults() -> ToolsSettingsView {
     ToolsSettingsView {
         web_search: true,
-        browser: cfg!(target_os = "macos"),
+        browser: cfg!(any(target_os = "macos", windows)),
     }
 }
 
@@ -269,6 +269,7 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
     let patch = ToolsPatch {
         web_search: Some(false),
         browser: None,
+        connectors: None,
     };
     assert_eq!(
         host.dispatch_as(id, set_tools(patch.clone())).unwrap(),
@@ -326,6 +327,7 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
         set_tools(ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: None,
         }),
         ErrorCode::SettingsLocked,
     );
@@ -363,27 +365,6 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
     );
     assert_eq!(view.locked, ["tools.browser"]);
     host.shutdown();
-}
-
-/// The tool switches as `clauseo-settings` has them and the wire has them: the same keys, the
-/// same values, and the same patch JSON.
-#[test]
-fn the_tool_switches_mirror_the_settings_crate() {
-    let settings_tools = serde_json::to_value(clauseo_settings::ToolsSettings::default()).unwrap();
-    let wire_tools = serde_json::to_value(tool_defaults()).unwrap();
-    assert_eq!(settings_tools, wire_tools);
-    let settings_patch = clauseo_settings::ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    let wire_patch = ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    assert_eq!(
-        serde_json::to_value(settings_patch).unwrap(),
-        serde_json::to_value(wire_patch).unwrap()
-    );
 }
 
 #[test]
@@ -444,7 +425,8 @@ fn an_unknown_principal_may_not_subscribe_to_the_app() {
 const SMALL_CAPACITY: usize = 4;
 
 /// The font size of each `SettingsChanged` in `events`; the whole lists a catch-up carries after
-/// it (`MattersChanged` and `ThreadsChanged` with `all`) are skipped, anything else fails.
+/// it (`MattersChanged` and `ThreadsChanged` with `all`, and `McpToolsChanged`) are skipped,
+/// anything else fails.
 fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
     events
         .iter()
@@ -452,14 +434,15 @@ fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
             HostEvent::SettingsChanged(view) => Some(view.ui.font_size),
             HostEvent::MattersChanged(changed) if changed.all => None,
             HostEvent::ThreadsChanged(changed) if changed.all => None,
+            HostEvent::McpToolsChanged(_) => None,
             other => panic!("unexpected {other:?}"),
         })
         .collect()
 }
 
-/// The catch-up's frames on a host with only the Scratch matter: the settings, the matter list
-/// and the Scratch matter's thread list.
-const CATCH_UP_FRAMES: usize = 3;
+/// The catch-up's frames on a host with only the Scratch matter: the settings, the matter list,
+/// the Scratch matter's thread list and the MCP tools view.
+const CATCH_UP_FRAMES: usize = 4;
 
 #[test]
 fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {

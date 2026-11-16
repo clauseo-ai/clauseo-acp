@@ -1,0 +1,21 @@
+---
+source: crates/protocol/tests/snapshots/blackline.rs
+expression: "(ParagraphChange::ALL, RunKind::ALL)"
+---
+[
+  [
+    "same",
+    "changed",
+    "added",
+    "removed",
+    "formatted",
+    "not_shown",
+    "unknown"
+  ],
+  [
+    "same",
+    "ins",
+    "del",
+    "unknown"
+  ]
+]

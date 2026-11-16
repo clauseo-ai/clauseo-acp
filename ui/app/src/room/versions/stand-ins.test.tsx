@@ -26,7 +26,7 @@ test("each stand-in has the type of HostTransport's method of the same name, whe
   // H11's planned shapes fit
   expectTypeOf<
     Drift<{
-      openFile(file: FileRefId): Promise<void>;
+      openFile(file: FileRefId): Promise<{ protected_view: boolean }>;
       reveal(target: { matter: string } | "app_data"): Promise<void>;
     }>
   >().toEqualTypeOf<never>();

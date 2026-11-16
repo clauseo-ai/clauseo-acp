@@ -6,6 +6,10 @@
 /** A Word document: a path ending .doc or .docx, in any case. */
 export const isWordFile = (path: string): boolean => /\.docx?$/i.test(path);
 
+/** A .docx, in any case: the Word documents whose tracked changes Clauseo's Word tool reads (decide_revisions refuses
+ * any other path as word.not_docx). */
+export const isDocx = (path: string): boolean => /\.docx$/i.test(path);
+
 /** The matter-relative paths a refused act's lock is on: the files the host names for matter.file_locked, when it names
  * some; else `known`, files the host already named as locked (a restore's preview). A host that names none (older than
  * #376) leaves only a guess: the act's one file when it writes exactly one, and none when it writes several, since any

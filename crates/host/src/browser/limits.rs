@@ -6,6 +6,12 @@
 //! stays, so a session never finds its browser gone. The host counts at session start
 //! (`actor/turn/profile_loads.rs`) and frees the slot when the session's run folder goes
 //! (`actor/turn/launch_checks.rs`). Revisit after G17 item 6 measures a session's memory.
+//!
+//! A slot is freed only after the ended session's removal has waited for its processes, which
+//! takes a moment (on Windows at least the removal's short look at Chrome's port). A launch
+//! that finds every slot taken while such a removal runs ([`BrowserSlots::releasing`]) waits
+//! for it, up to `launch_checks::browser::SLOT_WAIT`, so a session started right after
+//! another ended still gets the browser.
 
 use std::collections::BTreeSet;
 
@@ -34,6 +40,8 @@ pub fn slot_limit(total_memory_bytes: u64) -> usize {
 pub(crate) struct BrowserSlots {
     limit: usize,
     held: BTreeSet<SessionKey>,
+    /// The holders whose session ended and whose removal runs.
+    releasing: BTreeSet<SessionKey>,
 }
 
 impl BrowserSlots {
@@ -42,6 +50,7 @@ impl BrowserSlots {
         Self {
             limit: memory.map_or(SMALL_MACHINE_SLOTS, slot_limit),
             held: BTreeSet::new(),
+            releasing: BTreeSet::new(),
         }
     }
 
@@ -59,6 +68,30 @@ impl BrowserSlots {
     /// `session` ended: its slot is free. A session without one changes nothing.
     pub(crate) fn release(&mut self, session: SessionKey) {
         self.held.remove(&session);
+        self.releasing.remove(&session);
+    }
+
+    /// `session` ended and its removal started: its slot may come free soon.
+    pub(crate) fn begin_release(&mut self, session: SessionKey) {
+        if self.held.contains(&session) {
+            self.releasing.insert(session);
+        }
+    }
+
+    /// `session`'s removal ended without freeing it: it keeps its slot. Answers whether it was
+    /// releasing.
+    pub(crate) fn end_release(&mut self, session: SessionKey) -> bool {
+        self.releasing.remove(&session)
+    }
+
+    /// Whether a slot is free for a session that holds none.
+    pub(crate) fn any_free(&self) -> bool {
+        self.held.len() < self.limit
+    }
+
+    /// Whether `session` has no slot now but one may come free once a removal that runs ends.
+    pub(crate) fn releasing(&self, session: SessionKey) -> bool {
+        !self.free_for(session) && !self.releasing.is_empty()
     }
 }
 

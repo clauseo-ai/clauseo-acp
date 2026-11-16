@@ -29,6 +29,7 @@ export function SettingsWindow({
   lead,
   caption,
   nativeLights = false,
+  focusHead = 0,
   children,
 }: {
   platform: Platform;
@@ -44,16 +45,46 @@ export function SettingsWindow({
   caption?: CaptionWiring | undefined;
   /** Whether macOS draws its own lights in the corner lights' place. */
   nativeLights?: boolean;
+  /** Optional: a count the app raises each time it opens a section for the address (a hash, not a press on the side);
+   * each rise moves focus to the open section's head, so a screen reader starts there. 0 moves none. */
+  focusHead?: number;
   /** The open section's body. */
   children: ReactNode;
 }) {
   const w = useSettingsWords();
   const pane = useRef<HTMLElement>(null);
   const head = useId();
+  const headEl = useRef<HTMLHeadingElement>(null);
   // a new section starts at its top
   useEffect(() => {
     pane.current?.scrollTo?.({ top: 0 });
   }, [current]);
+  // an open the address caused: the head takes focus (it is keyed by the section, so this is the new one's)
+  useEffect(() => {
+    if (focusHead > 0) headEl.current?.focus({ preventScroll: true });
+  }, [focusHead]);
+  // a control in the pane that takes itself away (a press whose answer redraws the block): focus that went with it
+  // goes to the section's head, never to the page, so the next Tab goes on in order
+  useEffect(() => {
+    const node = pane.current;
+    if (node === null || typeof MutationObserver === "undefined") return;
+    let last: Element | null = null;
+    const onFocus = (e: FocusEvent) => {
+      last = e.target instanceof Element ? e.target : null;
+    };
+    const watch = new MutationObserver(() => {
+      const at = document.activeElement;
+      if (last === null || last.isConnected || (at !== null && at !== document.body)) return;
+      last = null;
+      headEl.current?.focus({ preventScroll: true });
+    });
+    node.addEventListener("focusin", onFocus);
+    watch.observe(node, { childList: true, subtree: true });
+    return () => {
+      node.removeEventListener("focusin", onFocus);
+      watch.disconnect();
+    };
+  }, []);
   const open = sections.find((s) => s.id === current);
   return (
     <div className="set-win" data-platform={platform}>
@@ -99,7 +130,7 @@ export function SettingsWindow({
       <main className="set-pane" ref={pane} aria-labelledby={head}>
         <div className="set-pane-inner" key={current}>
           <div className="set-pane-head">
-            <Heading level={2} id={head} className="set-pane-title">
+            <Heading level={2} id={head} className="set-pane-title" tabIndex={-1} ref={headEl}>
               {say(open?.name ?? "")}
             </Heading>
             {lead !== undefined && <p className="set-pane-lead">{say(lead)}</p>}

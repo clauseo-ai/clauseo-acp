@@ -7,8 +7,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
-import { MarkdownHostContext } from "./host.ts";
-import type { MarkdownHost } from "./host.ts";
+import { MarkdownHostContext, PaperLinksContext } from "./host.ts";
+import type { MarkdownHost, PaperLinks } from "./host.ts";
 import { Markdown } from "./markdown.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +17,7 @@ const calls: string[] = [];
 const HOST: MarkdownHost = {
   openExternal: (url) => calls.push(`external ${url}`),
   openReference: (kind, id) => calls.push(`${kind} ${id}`),
+  openPath: (path) => calls.push(`path ${path}`),
 };
 
 let host: HTMLDivElement;
@@ -87,17 +88,156 @@ test.each([
   ).toBeNull();
 });
 
-test("a link click is cancelled and goes to the host; a relative link is inert", () => {
+test("a link click is cancelled and goes to the host; a file link that names no paper is its text alone", () => {
   show("Read [the act](https://indiacode.nic.in/act) or [this](/local/path).");
-  const [external, relative] = [...host.querySelectorAll("a")];
+  const links = [...host.querySelectorAll("a")];
+  expect(links).toHaveLength(1);
+  const [external] = links;
   expect(click(external).defaultPrevented).toBe(true);
   expect(click(external, { button: 1 }).defaultPrevented).toBe(true);
-  expect(relative?.hasAttribute("href")).toBe(false);
-  expect(click(relative).defaultPrevented).toBe(true);
+  expect(host.textContent).toBe("Read the act or this.");
+  expect(host.querySelector('[data-clauseo="link-text"]')?.textContent).toBe("this");
+  expect(host.querySelector('[role="link"], [tabindex]')).toBeNull();
   expect(calls).toEqual([
     "external https://indiacode.nic.in/act",
     "external https://indiacode.nic.in/act",
   ]);
+});
+
+test("a link click hands the host its visible text, whatever markup is inside", () => {
+  const seen: [string, string | undefined][] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext
+        value={{ ...HOST, openExternal: (url, shown) => seen.push([url, shown]) }}
+      >
+        <Markdown
+          text="See [the **Supreme** Court](https://sci.gov.in/x) and <https://example.com/y>."
+          streaming={false}
+        />
+      </MarkdownHostContext>,
+    ),
+  );
+  const [court, auto] = [...host.querySelectorAll("a")];
+  // rendering opens nothing: only a press does
+  expect(seen).toEqual([]);
+  click(court);
+  click(auto);
+  expect(seen).toEqual([
+    ["https://sci.gov.in/x", "the Supreme Court"],
+    ["https://example.com/y", "https://example.com/y"],
+  ]);
+  // what goes to the host is the text the link renders
+  expect([court?.textContent, auto?.textContent]).toEqual(seen.map(([, shown]) => shown));
+});
+
+test("an image inside a link counts as U+FFFC in its text, and a hidden character shows the real host", () => {
+  const seen: [string, string | undefined][] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext
+        value={{ ...HOST, openExternal: (url, shown) => seen.push([url, shown]) }}
+      >
+        <Markdown
+          text={
+            "[![](data:image/png;base64,iVBORw0KGgo=)](https://evil.io/a) and [bank\uFE0F.com](https://evil.io/b) and [bank\u00B7com](https://evil.io/c) and [the order](https://evil.io/d)"
+          }
+          streaming={false}
+        />
+      </MarkdownHostContext>,
+    ),
+  );
+  const links = [...host.querySelectorAll('a[data-clauseo="link"]')];
+  for (const link of links) click(link);
+  expect(seen.map(([url]) => url)).toEqual([
+    "https://evil.io/a",
+    "https://evil.io/b",
+    "https://evil.io/c",
+    "https://evil.io/d",
+  ]);
+  expect(seen[0]?.[1]).toContain("\uFFFC");
+  // the note names the real host where the desktop asks, and only there
+  expect(
+    links.map((link) => link.querySelector('[data-clauseo="link-host"]')?.textContent ?? null),
+  ).toEqual([" (evil.io)", " (evil.io)", " (evil.io)", null]);
+});
+
+test("a word that folds into a host, or an image nested in markup, shows the real host (iris's second round)", () => {
+  const dots = ["\u1803", "\u1809", "\u0660", "\u06F0", "\uA60E", "\u{1D16D}", "\u{10A50}"];
+  const spaces = ["\u200A", "\u2009", "\u00A0", "\u0BCD"];
+  const words = [
+    ...dots.map((dot) => `ｂａｎｋ${dot}ｃｏｍ`),
+    ...spaces.map((space) => `ｂａｎｋ${space}．ｃｏｍ`),
+    "𝐛𝐚𝐧𝐤᠃𝐜𝐨𝐦",
+    "аррӏе᠃сом",
+  ];
+  const text = [
+    ...words.map((word, k) => `[${word}](https://evil.io/${k})`),
+    "[**_![](data:image/png;base64,iVBORw0KGgo=)_**](https://evil.io/nested)",
+    "[निर्णय देखें](https://evil.io/plain)",
+  ].join(" and ");
+  const seen: (string | undefined)[] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext value={{ ...HOST, openExternal: (_url, shown) => seen.push(shown) }}>
+        <Markdown text={text} streaming={false} />
+      </MarkdownHostContext>,
+    ),
+  );
+  const links = [...host.querySelectorAll('a[data-clauseo="link"]')];
+  expect(links).toHaveLength(words.length + 2);
+  const notes = links.map(
+    (link) => link.querySelector('[data-clauseo="link-host"]')?.textContent ?? null,
+  );
+  expect(notes).toEqual([...words.map(() => " (evil.io)"), " (evil.io)", null]);
+  click(links[words.length]);
+  expect(seen[0]).toContain("\uFFFC");
+});
+
+test("a file link names a paper only through PaperLinksContext: a click or Enter sends that paper's path to openPath, never a navigation", () => {
+  const asked: string[] = [];
+  const papers: PaperLinks = (href) => {
+    asked.push(href);
+    return href.endsWith("Reply%20to%20bank.docx") ? "drafts/Reply to bank.docx" : undefined;
+  };
+  act(() =>
+    root.render(
+      <MarkdownHostContext value={HOST}>
+        <PaperLinksContext value={papers}>
+          <Markdown
+            text={
+              "See [Reply notes.md](Reply%20notes.md), [the draft](/Users/a/M/drafts/Reply%20to%20bank.docx) and [mail](mailto:a@b.in)."
+            }
+            streaming={false}
+          />
+        </PaperLinksContext>
+      </MarkdownHostContext>,
+    ),
+  );
+  const [draft, mail] = [...host.querySelectorAll("a")];
+  // a paper the context doesn't name is plain text; mailto never asks it
+  expect(host.querySelectorAll("a")).toHaveLength(2);
+  expect(host.textContent).toBe("See Reply notes.md, the draft and mail.");
+  expect([...new Set(asked)]).toEqual([
+    "Reply%20notes.md",
+    "/Users/a/M/drafts/Reply%20to%20bank.docx",
+  ]);
+  // no href to follow: a link the keyboard reaches, which the host opens
+  expect(draft?.hasAttribute("href")).toBe(false);
+  expect(draft?.getAttribute("role")).toBe("link");
+  expect(draft?.tabIndex).toBe(0);
+  expect(draft?.getAttribute("data-clauseo")).toBe("link");
+  expect(click(draft).defaultPrevented).toBe(true);
+  act(() => {
+    draft?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  click(mail);
+  expect(calls).toEqual([
+    "path drafts/Reply to bank.docx",
+    "path drafts/Reply to bank.docx",
+    "external mailto:a@b.in",
+  ]);
+  expect(mail?.getAttribute("role")).toBeNull();
 });
 
 test("a footnote reference reaches its note's id (one prefix, not two) and scrolls there, not out", () => {
@@ -276,6 +416,19 @@ test.each([
     "[bank.example.com or evil.example.net](https://evil.example.net/x)",
     "evil.example.net",
   ],
+  ["Hindi before a closing stop", "[आदेश देखें.](https://evil.example.net/x)", null],
+  ["a curly quote before a closing stop", "[the “judgment”.](https://evil.example.net/x)", null],
+  [
+    "a look-alike host with a closing stop",
+    "[ｂａｎｋ．ｅｘａｍｐｌｅ．ｃｏｍ.](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "Hindi touching a dot inside a word",
+    "[बैंक.example.com](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  ["a mixed word with a closing stop", "[naïve”.](https://evil.example.net/x)", "evil.example.net"],
 ])("the link-host hint with %s", (_, text, expected) => {
   show(text);
   const hint = host.querySelector('[data-clauseo="link-host"]');

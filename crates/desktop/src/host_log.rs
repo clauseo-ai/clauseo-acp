@@ -16,9 +16,10 @@ mod tests;
 pub(crate) struct HostLog(Option<LogGuard>);
 
 /// Starts the host's log file under the data folder that `dirs` and `env` resolve to. The
-/// guard holds nothing when the folders do not resolve or the file does not open.
+/// guard holds nothing when the folders do not resolve or the file does not open. It never asks
+/// for the Documents folder, which may sit on a share that is down.
 pub(crate) fn install(dirs: &dyn PlatformDirs, env: &dyn Env) -> HostLog {
-    let guard = Locations::resolve(dirs, env)
+    let guard = Locations::resolve_without_documents(dirs, env)
         .map(|locations| clauseo_host::log_file::install(&locations))
         .ok();
     HostLog(guard)

@@ -17,7 +17,11 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::{PendingMatter, Stage};
-use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
+use super::protection::work::{Asked as ProtectionAsked, command as protection};
+use super::settings::{
+    first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
+};
+use super::update::{Asked, command as update};
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -27,11 +31,24 @@ use crate::principal::{Access, authorize};
 pub(crate) struct PendingCommand {
     pub(super) hash: [u8; 32],
     /// Everyone waiting for the answer: the first caller and its duplicates.
-    waiters: Vec<Reply<CommandOutcome>>,
+    pub(super) waiters: Vec<Reply<CommandOutcome>>,
     /// The command, until it runs.
     command: Option<ValidatedCommand>,
     /// A matter being created or imported for it.
     pub(super) matter: Option<Box<PendingMatter>>,
+}
+
+/// Whether a command for `thread` that gives its agent work (a prompt, a config option, a mode)
+/// waits for its receipt check, so has not run yet: the idle stop leaves that agent alone.
+pub(crate) fn arriving_for(actor: &Actor, thread: ThreadId) -> bool {
+    actor.commands.values().any(|pending| {
+        pending.command.as_ref().is_some_and(|command| {
+            matches!(command.command(),
+                HostCommand::SendPrompt { thread: of, .. }
+                | HostCommand::SetConfigOption { thread: of, .. }
+                | HostCommand::SetMode { thread: of, .. } if *of == thread)
+        })
+    })
 }
 
 /// What a command's code needs to build its receipt and answer.
@@ -105,6 +122,13 @@ pub(super) fn dispatch(actor: &mut Actor, envelope: CommandEnvelope, reply: Repl
         }
     };
     let id = command.command_id();
+    // Connector commands store no receipt and their keys all hash alike, so an id one of them
+    // used is a conflict, never a join or a second run (`connectors.rs`, `UsedIds`).
+    if super::connectors::reused(actor, id, command.command()) {
+        let _gone = reply.send(Err(conflict(id)));
+        return;
+    }
+    super::connectors::record(actor, id, command.command());
     let hash = command_hash(command.command());
     if let Some(pending) = actor.commands.get_mut(&id) {
         if pending.hash == hash {
@@ -206,21 +230,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::matters::create_matter(actor, ctx, &name, source, (client, next_date));
         }
-        HostCommand::UpdateMatter {
-            matter,
-            client,
-            next_date,
-            pinned,
-        } => {
-            let update = super::matter_details::Update {
-                client,
-                next_date,
-                pinned,
-            };
-            super::matter_details::update_matter(actor, ctx, matter, update);
+        command @ HostCommand::UpdateMatter { .. } => {
+            super::matter_details::update_matter(actor, ctx, command);
         }
         HostCommand::OpenMatter { matter } => {
             super::matter_details::open_matter(actor, ctx, matter);
+            super::papers::follow::opened(actor, matter);
         }
         HostCommand::ForgetMatter { matter } => {
             super::matter_details::forget_matter(actor, ctx, matter);
@@ -232,8 +247,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
         HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
         HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
-        HostCommand::CreateThread { matter, agent } => {
-            if let Err(error) = create_thread(actor, ctx, matter, agent) {
+        HostCommand::CreateThread {
+            matter,
+            agent,
+            config,
+        } => {
+            if let Err(error) = create_thread(actor, ctx, (matter, agent), config) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
@@ -252,13 +271,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
         | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
-        HostCommand::RestoreVersion {
-            matter,
-            checkpoint,
-            scope,
-        } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
+        restore @ HostCommand::RestoreVersion { .. } => turn::restore_version(actor, *ctx, restore),
         HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
+        HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),
         HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
         HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
         HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),
@@ -268,17 +284,37 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
+        // R24's connector commands: no receipt, ever (decision D2), since nothing here commits,
+        // so the API key never reaches the receipts table, not even as a hash.
+        HostCommand::Connector(command) => super::connectors::run(actor, ctx, command),
+        HostCommand::Mcp(command) => super::mcp::run(actor, ctx, command),
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
-        HostCommand::CheckForUpdate {}
-        | HostCommand::InstallUpdate { .. }
-        | HostCommand::CancelScheduledUpdate {}
-        | HostCommand::SetUpdateMode { .. } => super::update::not_wired(actor, ctx),
+        HostCommand::RecheckBrowserPolicy {} => super::browser_policy::recheck(actor, ctx),
+        HostCommand::CheckForUpdate {} => update(actor, ctx, Asked::Check),
+        HostCommand::InstallUpdate { when } => update(actor, ctx, Asked::Install(when)),
+        HostCommand::CancelScheduledUpdate {} => update(actor, ctx, Asked::CancelScheduled),
+        HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
+        // Decision record 0051: held until the work ends, with no receipt.
+        HostCommand::RetryProtection {} => protection(actor, ctx, ProtectionAsked::Retry),
+        HostCommand::RemoveSandboxSetup {} => protection(actor, ctx, ProtectionAsked::Remove),
+        HostCommand::AllowBlockedSite { block_id, scope } => {
+            super::allowed::allow(actor, ctx, block_id, scope);
+        }
+        HostCommand::RevokeAllowedSite {
+            host,
+            scope,
+            matter,
+        } => {
+            super::allowed::revoke(actor, ctx, &host, scope, matter);
+        }
+        HostCommand::DecideRevisions(decide) => super::revisions::decide(actor, *ctx, decide),
+        HostCommand::SetNetwork { online } => turn::set_network(actor, ctx, online),
     }
 }
 
-/// A command the host does not run yet (`RestartAgent`): `command.invalid`.
+/// A command the host does not run yet (`RestartAgent`): `command.invalid`, with no receipt.
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
     actor.finish_command(ctx.id, Err(refusal));
@@ -374,12 +410,12 @@ pub(crate) fn check_matter(actor: &Actor, matter: MatterId) -> Result<&MatterEnt
 }
 
 /// `CreateThread`: the agent must be in the settings; `ThreadCreated` and the row. No
-/// launch.
+/// launch: the config waits on the entry for the session's start.
 fn create_thread(
     actor: &mut Actor,
     ctx: &CommandCtx,
-    matter: MatterId,
-    agent: clauseo_protocol::AgentId,
+    (matter, agent): (MatterId, clauseo_protocol::AgentId),
+    config: Option<clauseo_protocol::ConfigPicks>,
 ) -> Result<(), Error> {
     actor.check_matter(matter)?;
     if actor.effective.agent(agent.as_str()).is_none() {
@@ -387,6 +423,9 @@ fn create_thread(
             ErrorCode::CommandInvalid,
             format!("no agent {agent} in the settings"),
         ));
+    }
+    if let Some(refused) = super::protection::refusal(actor) {
+        return Err(refused);
     }
     let now = actor.now();
     let thread: ThreadId = actor.ids.mint(now.wall)?;
@@ -426,6 +465,8 @@ fn create_thread(
         header: None,
         last_stop: None,
         turn: turn::TurnState::default(),
+        came_back: turn::CameBackWatches::default(),
+        picks: config,
     };
     let tag = Tag::Command {
         id: ctx.id,

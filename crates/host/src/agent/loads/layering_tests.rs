@@ -25,6 +25,8 @@ fn folders() -> Folders<'static> {
     Folders {
         work: "/data/run/t-1/work",
         notes: "/data/agent-state/m/notes",
+        connectors: "",
+        browser: "",
     }
 }
 
@@ -169,6 +171,12 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         folders: folders(),
         seed_sites: SEED_SITES,
         forced_ask: false,
+        data: &crate::agent::data_fence::LaunchDeny::default(),
+        case_law: false,
+        browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -215,6 +223,12 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             folders: folders(),
             seed_sites: SEED_SITES,
             forced_ask,
+            data: &crate::agent::data_fence::LaunchDeny::default(),
+            case_law: false,
+            browser: false,
+            sandbox: None,
+            matter: None,
+            trusted_servers: &[],
         };
         session_meta(
             hook.as_object().cloned(),
@@ -272,6 +286,12 @@ fn forced_ask_adds_its_ask_rules_after_the_hooks() {
         folders: folders(),
         seed_sites: SEED_SITES,
         forced_ask: true,
+        data: &crate::agent::data_fence::LaunchDeny::default(),
+        case_law: false,
+        browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -293,6 +313,91 @@ fn forced_ask_adds_its_ask_rules_after_the_hooks() {
         settings["sandbox"],
         json!({"enabled": true, "autoAllowBashIfSandboxed": false})
     );
+}
+
+/// Every Claude session, forced ask or not, gets the data folder's deny rules in its flag
+/// settings, after the hook's own; a hook that empties `permissions.deny` or sets another type
+/// there loses, and the run folder and the notes are never denied. User settings cannot take
+/// them out: flag settings outrank them and Claude Code merges every source's deny rules.
+#[test]
+fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
+    let data = crate::agent::data_fence::LaunchDeny::fixed(vec![std::path::PathBuf::from("/data")]);
+    let meta_for = |hook: &Value, forced_ask: bool| {
+        let keys = ClaudeKeys {
+            web_search: ON,
+            login: Login::FirstParty,
+            folders: folders(),
+            seed_sites: SEED_SITES,
+            forced_ask,
+            data: &data,
+            case_law: false,
+            browser: false,
+            sandbox: None,
+            matter: None,
+            trusted_servers: &[],
+        };
+        let guard = Some(GuardHook {
+            program: Path::new("/app/clauseo"),
+            matter: Path::new("/m"),
+            ask_all: forced_ask,
+        });
+        let meta = session_meta(
+            hook.as_object().cloned(),
+            McpControl::Clauseo,
+            guard,
+            Some(&keys),
+        );
+        meta["claudeCode"]["options"]["settings"]["permissions"]["deny"].clone()
+    };
+    let own =
+        json!({"claudeCode": {"options": {"settings": {"permissions": {"deny": ["Bash(rm:*)"]}}}}});
+    for (hook, forced_ask) in [
+        (json!({}), false),
+        (json!({}), true),
+        (
+            json!({"claudeCode": {"options": {"settings": {"permissions": {"deny": []}}}}}),
+            false,
+        ),
+        (
+            json!({"claudeCode": {"options": {"settings": {"permissions": "none"}}}}),
+            false,
+        ),
+        (own.clone(), true),
+    ] {
+        let deny = meta_for(&hook, forced_ask);
+        let rules: Vec<&str> = deny
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(
+            rules.contains(&"Read(//data/skill-packs/**)"),
+            "{hook}: {rules:?}"
+        );
+        assert!(
+            rules.contains(&"Edit(//data/skill-packs/**)"),
+            "{hook}: {rules:?}"
+        );
+        assert!(
+            rules.contains(&"Read(//data/agents/codex-acp/**)"),
+            "{hook}: {rules:?}"
+        );
+        assert!(
+            rules.contains(&"Read(//data/settings.json)"),
+            "{hook}: {rules:?}"
+        );
+        assert!(
+            !rules.iter().any(|rule| {
+                (rule.contains("/run/")
+                    && !rule.ends_with("/run/*/relay-token)")
+                    && !rule.ends_with("/run/*/agent-browser/config.json)"))
+                    || rule.contains("/agent-state")
+            }),
+            "{rules:?}"
+        );
+    }
+    assert_eq!(meta_for(&own, false)[0], json!("Bash(rm:*)"));
 }
 
 /// A forced-ask launch is refused when no guard hook could go to the agent
@@ -320,4 +425,166 @@ fn a_guard_that_cannot_go_has_a_reason() {
         assert_eq!(guard_missing(guard(program, bad)), Some("matter_not_utf8"));
         assert_eq!(super::guard_entry(guard(program, bad).unwrap()), None);
     }
+}
+
+/// Whether Claude rule `rule` for `tool` covers `path` (a `//` form path), near enough for
+/// these rules: a pattern ending `/**` covers what is under its folder, one ending `*` what
+/// starts with the rest, any other only itself.
+fn covers(rule: &str, tool: &str, path: &str) -> bool {
+    let Some(pattern) = rule
+        .strip_prefix(tool)
+        .and_then(|rest| rest.strip_prefix('('))
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return false;
+    };
+    if let Some(folder) = pattern.strip_suffix("/**") {
+        path.starts_with(&format!("{folder}/"))
+    } else if let Some(start) = pattern.strip_suffix('*') {
+        path.starts_with(start)
+    } else {
+        pattern == path
+    }
+}
+
+/// A Claude session's flag settings allow a Read of Clauseo's built-in skill assets, for each
+/// spelling of the data folder, after the hook's own allow rules, so a built-in skill never asks
+/// the lawyer; no deny rule covers them, and no allow covers anything else in the data folder
+/// but a Read of the agents' commands and Clauseo's Python runtime (`data_fence::READ_ONLY`).
+#[test]
+fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data() {
+    let spellings = ["/data", "/link/data"];
+    let data = crate::agent::data_fence::LaunchDeny::fixed(
+        spellings.iter().map(std::path::PathBuf::from).collect(),
+    );
+    let keys = ClaudeKeys {
+        web_search: ON,
+        login: Login::FirstParty,
+        folders: folders(),
+        seed_sites: SEED_SITES,
+        forced_ask: true,
+        data: &data,
+        case_law: false,
+        browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
+    };
+    let hook = json!({"claudeCode": {"options": {"settings": {"permissions": {
+        "allow": ["Bash(ls:*)"]}}}}});
+    let meta = session_meta(
+        hook.as_object().cloned(),
+        McpControl::Clauseo,
+        None,
+        Some(&keys),
+    );
+    let permissions = &meta["claudeCode"]["options"]["settings"]["permissions"];
+    let strings = |key: &str| -> Vec<String> {
+        let list = permissions[key].as_array().cloned().unwrap_or_default();
+        list.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    };
+    let (allow, deny) = (strings("allow"), strings("deny"));
+    let want: Vec<String> = std::iter::once("Bash(ls:*)".to_owned())
+        .chain(spellings.iter().flat_map(|data| {
+            [
+                format!("Read(/{data}/profile/claude-plugin/skills/**)"),
+                format!("Read(/{data}/tools/**)"),
+                format!("Read(/{data}/agents/runtime/clauseo-python-*/**)"),
+            ]
+        }))
+        .collect();
+    assert_eq!(allow, want);
+    for data in spellings {
+        let asset =
+            format!("/{data}/profile/claude-plugin/skills/legal-drafting/section-checklists.md");
+        for tool in ["Read", "Edit"] {
+            let denied: Vec<&String> = deny.iter().filter(|r| covers(r, tool, &asset)).collect();
+            assert!(denied.is_empty(), "{tool} {asset}: {denied:?}");
+        }
+        assert!(allow.iter().any(|rule| covers(rule, "Read", &asset)));
+        for elsewhere in [
+            format!("/{data}/profile/claude-plugin/.claude-plugin/plugin.json"),
+            format!("/{data}/profile/claude-plugin/skills"),
+            format!("/{data}/profile/x"),
+            format!("/{data}/skill-packs/x/SKILL.md"),
+            format!("/{data}/run/other/work/a.txt"),
+            format!("/{data}/search.sqlite"),
+        ] {
+            for tool in ["Read", "Edit", "Write"] {
+                let allowed: Vec<&String> = allow
+                    .iter()
+                    .filter(|r| covers(r, tool, &elsewhere))
+                    .collect();
+                assert!(allowed.is_empty(), "{tool} {elsewhere}: {allowed:?}");
+            }
+        }
+        let asset_edit = allow.iter().any(|rule| covers(rule, "Edit", &asset));
+        assert!(!asset_edit && !allow.iter().any(|r| r.starts_with("Write(")));
+    }
+}
+
+/// A session outside forced ask (in `auto`, or its `acceptEdits` fallback) keeps every
+/// guard that does not depend on asking: the data folder's deny rules (deny wins in every mode),
+/// the pre-write guard's hook before each write and shell command, bypass off, and no
+/// `permission-mode` flag a hook could slip in. Its auto-edit scope beyond the matter folder is
+/// exactly the work folder and the matter's notes, as Codex's writable roots.
+#[test]
+fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() {
+    assert_eq!(super::CLAUDE_FALLBACK_MODE, "acceptEdits");
+    let data = crate::agent::data_fence::LaunchDeny::fixed(vec![std::path::PathBuf::from("/data")]);
+    let keys = ClaudeKeys {
+        web_search: ON,
+        login: Login::FirstParty,
+        folders: folders(),
+        seed_sites: SEED_SITES,
+        forced_ask: false,
+        data: &data,
+        case_law: false,
+        browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
+    };
+    let guard = Some(GuardHook {
+        program: Path::new("/app/clauseo"),
+        matter: Path::new("/m"),
+        ask_all: false,
+    });
+    let hook = json!({"claudeCode": {"options": {"extraArgs": {"permission-mode": "default"}}}});
+    let meta = session_meta(
+        hook.as_object().cloned(),
+        McpControl::Clauseo,
+        guard,
+        Some(&keys),
+    );
+    let options = &meta["claudeCode"]["options"];
+    let deny: Vec<&str> = options["settings"]["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for rule in [
+        "Read(//data/skill-packs/**)",
+        "Edit(//data/skill-packs/**)",
+        "Edit(//data/settings.json)",
+    ] {
+        assert!(deny.contains(&rule), "{rule}: {deny:?}");
+    }
+    let entry = &options["settings"]["hooks"]["PreToolUse"][0];
+    assert_eq!(entry["matcher"], json!(super::GUARD_MATCHER));
+    assert_eq!(
+        entry["hooks"][0]["args"],
+        json!(["--pre-write-guard", "--matter", "/m"])
+    );
+    assert_eq!(options["settings"]["disableAllHooks"], json!(false));
+    assert_eq!(options[super::ALLOW_BYPASS_OPTION], json!(false));
+    assert_eq!(options["extraArgs"], json!({}), "{options}");
+    assert_eq!(
+        options["additionalDirectories"],
+        json!(["/data/run/t-1/work", "/data/agent-state/m/notes"])
+    );
 }

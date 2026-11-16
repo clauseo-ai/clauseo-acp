@@ -4,10 +4,10 @@
 
 use clauseo_acp::PendingKey;
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced,
+    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced, ConfigValue,
     ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
     ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
-    PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
+    PermissionRequestId, PermissionResolved, Principal, RawPayload, StopReason, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -55,13 +55,15 @@ pub(super) fn answer_permission(
     let refused = matches!(
         option.kind,
         PermissionKind::RejectOnce | PermissionKind::RejectAlways
-    );
+    )
+    .then_some(StopReason::NotAllowed);
     let then = Then::Permission {
         agent: agent.id,
         key,
         option: option_id,
     };
     limits::asking_changed(actor);
+    super::offline::ask_ended(actor, thread);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = PermissionResolved {
         request,
@@ -165,7 +167,7 @@ pub(super) fn answer_elicitation(
             format!("elicitation {elicitation} is not pending"),
         )
     };
-    {
+    let form = {
         let request = actor
             .loaded(StreamId::Thread(thread))
             .and_then(|loaded| loaded.sent.elicitation(elicitation))
@@ -179,7 +181,8 @@ pub(super) fn answer_elicitation(
                 "the values do not match the form's schema",
             ));
         }
-    }
+        matches!(request, ElicitationRequest::Form { .. })
+    };
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref_mut())
         .ok_or_else(not_pending)?;
@@ -191,17 +194,31 @@ pub(super) fn answer_elicitation(
         // Only an accepted URL elicitation goes on in the browser.
         agent.url_elicitations.retain(|_, id| *id != elicitation);
     }
+    let agent = agent.id;
+    // An accepted form's strings are withheld from the tool output that follows (0002,
+    // `elicitation_resolved`), before the agent can echo them.
+    if let Some(current) = current(actor, thread) {
+        match &response {
+            ElicitationResponse::Accept { values } if form => {
+                current.withheld.accepted(elicitation, values);
+            }
+            ElicitationResponse::Accept { .. }
+            | ElicitationResponse::Decline
+            | ElicitationResponse::Cancel => current.withheld.forget(elicitation),
+        }
+    }
     let outcome = match &response {
         ElicitationResponse::Accept { .. } => ElicitationOutcome::Accepted,
         ElicitationResponse::Decline => ElicitationOutcome::Declined,
         ElicitationResponse::Cancel => ElicitationOutcome::Cancelled,
     };
     let then = Then::Elicitation {
-        agent: agent.id,
+        agent,
         key,
         response,
     };
     limits::asking_changed(actor);
+    super::offline::ask_ended(actor, thread);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = ElicitationResolved {
         elicitation,
@@ -310,17 +327,21 @@ fn field<'a>(object: &'a RawPayload, name: &str) -> Option<&'a RawPayload> {
         .map(|(_, value)| value)
 }
 
-/// `SetConfigOption` returned: log every option as the agent now has them.
+/// `SetConfigOption` of `pick` returned: log every option as the agent now has them, and keep
+/// the pick in the matter's prefs (`picks.rs`), in the same commit.
 pub(super) fn on_config(
     actor: &mut Actor,
     thread: ThreadId,
-    ctx: CommandCtx,
+    (ctx, pick): (CommandCtx, (AgentChoiceId, ConfigValue)),
     same: bool,
     result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
 ) {
     let done = answered(same, result).and_then(|options| {
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         out.push(actor, ConfigOptionsReplaced { options })?;
+        if let Some(row) = super::picks::remember(actor, thread, &pick) {
+            out.draft.matter_row(row);
+        }
         send_answer(actor, ctx, thread, out, Then::Nothing)
     });
     if let Err(error) = done {

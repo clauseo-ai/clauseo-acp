@@ -178,7 +178,9 @@ fn restore_and_its_preview_keep_a_file_not_downloaded_at_read() {
     write::append(&fx.file("a.txt"), b" again").unwrap();
     fault::fail(&fx.file("a.txt"), 0, ErrorKind::Deadlock);
 
-    let plan = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let plan = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(plan.kept, [path("a.txt")]);
     assert_eq!(plan.writes.len(), 1);
 
@@ -189,6 +191,7 @@ fn restore_and_its_preview_keep_a_file_not_downloaded_at_read() {
             outside_edits: cid(3),
             checkpoint: cid(4),
             at: super::at(4),
+            undoes: None,
         })
         .unwrap();
     assert_eq!(restored.kept, [path("a.txt")]);

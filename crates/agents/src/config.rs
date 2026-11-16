@@ -40,6 +40,10 @@ pub struct AgentsConfig {
     /// the field does not exist.
     #[cfg(feature = "test-support")]
     pub ready_for_tests: BTreeMap<AgentId, crate::state::Installed>,
+    /// Tests only: Smart App Control's state and Codex's layouts, used instead of the registry
+    /// and the pinned layouts, on any OS (`sac`). Outside `test-support` the field does not exist.
+    #[cfg(feature = "test-support")]
+    pub sac_for_tests: Option<crate::sac::SacForTests>,
 }
 
 impl AgentsConfig {
@@ -58,6 +62,8 @@ impl AgentsConfig {
             clock: Arc::new(SystemClock),
             #[cfg(feature = "test-support")]
             ready_for_tests: BTreeMap::new(),
+            #[cfg(feature = "test-support")]
+            sac_for_tests: None,
         }
     }
 }
@@ -77,8 +83,9 @@ impl std::fmt::Debug for AgentsConfig {
 
 /// A firm's install settings (R20's `install.*` keys and R17's `network.*` keys). With none
 /// set, packages come from the snapshot's registry and Node from its download host, through
-/// `HTTPS_PROXY` when the environment sets it.
-#[derive(Debug, Clone, Default)]
+/// `HTTPS_PROXY` when the environment sets it. Its `Debug` never prints a proxy: one may hold a
+/// password.
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct InstallConfig {
     /// `install.registry`: a firm npm mirror. Each tarball URL's registry prefix is replaced by
@@ -87,12 +94,21 @@ pub struct InstallConfig {
     /// `install.bundle`: an offline bundle folder (`node/<archive>`, `npm/<sha512 hex>.tgz`),
     /// read instead of the network, with the same checks.
     pub bundle: Option<PathBuf>,
-    /// The proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment (the caller
-    /// resolves which), else none.
+    /// The installs' proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment,
+    /// else the OS's proxy for the registry (the caller resolves which), else none. Also each
+    /// sign-in's, for an agent [`InstallConfig::signin_proxy`] has no entry for.
     pub proxy: Option<String>,
+    /// Each agent's sign-in proxy where the caller resolved it per agent (the OS's proxy for the
+    /// agent's first sign-in host, which a PAC script may answer differently): `None` signs in
+    /// with no proxy. An agent with no entry signs in through [`InstallConfig::proxy`].
+    pub signin_proxy: BTreeMap<AgentId, Option<String>>,
     /// `network.ca_certs`: an agent's extra CA file (PEM), the TLS roots of its downloads. npm
     /// never gets it, since npm makes no network call here.
     pub ca_certs: BTreeMap<AgentId, PathBuf>,
+    /// Called by each install try before it makes its HTTP client (S17's route refresh): the
+    /// network to use, resolved again by the caller when its last is stale, or `None` to take
+    /// the one [`crate::Agents::set_network`] last gave. It may block; the caller bounds it.
+    pub refresh: Option<Arc<RefreshFn>>,
     /// Tests only: resolves host names instead of the OS, so a test can be offline and come
     /// back, and can see every host a download looked up.
     #[cfg(feature = "test-support")]
@@ -101,6 +117,108 @@ pub struct InstallConfig {
     /// registry. Outside `test-support` the field does not exist, so every download is https.
     #[cfg(feature = "test-support")]
     pub allow_http_for_tests: bool,
+    /// Tests only: called before each rename of an install into place; an error it returns is
+    /// taken as the rename's, judged as Windows would judge it (raw 5, 32 and 33 are a held
+    /// file), so a test on any OS stands in for an antivirus holding the fresh files.
+    #[cfg(feature = "test-support")]
+    pub rename_fault: Option<Arc<RenameFault>>,
+    /// Tests only: the free bytes the disk checks read instead of the data folder's, so a test
+    /// stands in for a disk too small for two installs. `None` from it: not readable.
+    #[cfg(feature = "test-support")]
+    pub free_bytes: Option<Arc<FreeBytes>>,
+}
+
+/// Tests only: [`InstallConfig::rename_fault`].
+#[cfg(feature = "test-support")]
+pub type RenameFault = dyn Fn() -> Option<std::io::Error> + Send + Sync;
+
+/// Tests only: [`InstallConfig::free_bytes`].
+#[cfg(feature = "test-support")]
+pub type FreeBytes = dyn Fn() -> Option<u64> + Send + Sync;
+
+impl InstallConfig {
+    /// `agent`'s sign-in proxy: its [`InstallConfig::signin_proxy`] entry, else
+    /// [`InstallConfig::proxy`].
+    pub(crate) fn signin_proxy_for(&self, agent: &AgentId) -> Option<&str> {
+        match self.signin_proxy.get(agent) {
+            Some(proxy) => proxy.as_deref(),
+            None => self.proxy.as_deref(),
+        }
+    }
+
+    /// Its network part: the proxies and the CA files.
+    pub(crate) fn network(&self) -> Network {
+        Network {
+            proxy: self.proxy.clone(),
+            signin_proxy: self.signin_proxy.clone(),
+            ca_certs: self.ca_certs.clone(),
+        }
+    }
+
+    /// Takes in `network`: the proxies and the CA files, for the next job.
+    pub(crate) fn set_network(&mut self, network: Network) {
+        let Network {
+            proxy,
+            signin_proxy,
+            ca_certs,
+        } = network;
+        self.proxy = proxy;
+        self.signin_proxy = signin_proxy;
+        self.ca_certs = ca_certs;
+    }
+}
+
+/// What [`InstallConfig::refresh`] calls.
+pub type RefreshFn = dyn Fn() -> Option<Network> + Send + Sync;
+
+/// Names whether a proxy is set, never its text.
+fn shown(proxy: Option<&str>) -> Option<&'static str> {
+    proxy.map(|_| "<set>")
+}
+
+impl std::fmt::Debug for InstallConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let signin: BTreeMap<&AgentId, Option<&str>> = self
+            .signin_proxy
+            .iter()
+            .map(|(agent, proxy)| (agent, shown(proxy.as_deref())))
+            .collect();
+        f.debug_struct("InstallConfig")
+            .field("registry", &self.registry)
+            .field("bundle", &self.bundle)
+            .field("proxy", &shown(self.proxy.as_deref()))
+            .field("signin_proxy", &signin)
+            .field("ca_certs", &self.ca_certs)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The network part of [`InstallConfig`], which [`crate::Agents::set_network`] replaces while
+/// `Agents` runs (the settings changed): the next install and sign-in job take it. Its `Debug`
+/// never prints a proxy.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Network {
+    /// [`InstallConfig::proxy`].
+    pub proxy: Option<String>,
+    /// [`InstallConfig::signin_proxy`].
+    pub signin_proxy: BTreeMap<AgentId, Option<String>>,
+    /// [`InstallConfig::ca_certs`].
+    pub ca_certs: BTreeMap<AgentId, PathBuf>,
+}
+
+impl std::fmt::Debug for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let signin: BTreeMap<&AgentId, Option<&str>> = self
+            .signin_proxy
+            .iter()
+            .map(|(agent, proxy)| (agent, shown(proxy.as_deref())))
+            .collect();
+        f.debug_struct("Network")
+            .field("proxy", &shown(self.proxy.as_deref()))
+            .field("signin_proxy", &signin)
+            .field("ca_certs", &self.ca_certs)
+            .finish()
+    }
 }
 
 /// What S18's runs are built from. Proxy and CA come from [`InstallConfig::proxy`] and
@@ -127,6 +245,22 @@ pub struct SigninConfig {
     /// `test-support` the field does not exist, so the probe is always `127.0.0.1:1455`.
     #[cfg(feature = "test-support")]
     pub callback_port: Option<u16>,
+    /// Tests only: the program detection's macOS Keychain query runs in place of
+    /// `/usr/bin/security` (a fake that exits as a test tells it). Outside `test-support` the
+    /// field does not exist, so the query always runs Apple's `security` by absolute path.
+    #[cfg(feature = "test-support")]
+    pub security_program: Option<PathBuf>,
+    /// Tests only: lets a test with no [`SigninConfig::security_program`] run Apple's own
+    /// `security` (the one real-macOS test). Unset, such a test panics at the query instead of
+    /// asking the machine's Keychain.
+    #[cfg(feature = "test-support")]
+    pub allow_real_security: bool,
+    /// Tests only: the macOS login keychain's lock state the background status check sees
+    /// (`signin/keychain_lock.rs`). `None` makes the real `SecKeychainGetStatus` call, which
+    /// reads the machine's own default and login keychains (and its user record), so a test that
+    /// runs the status check on macOS must set it (`Some(false)` for an unlocked keychain).
+    #[cfg(feature = "test-support")]
+    pub keychain_locked: Option<bool>,
 }
 
 /// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
@@ -140,6 +274,12 @@ impl SigninConfig {
             base_env: std::env::vars_os().collect(),
             #[cfg(feature = "test-support")]
             callback_port: None,
+            #[cfg(feature = "test-support")]
+            security_program: None,
+            #[cfg(feature = "test-support")]
+            allow_real_security: false,
+            #[cfg(feature = "test-support")]
+            keychain_locked: None,
         }
     }
 
@@ -165,6 +305,31 @@ impl SigninConfig {
     )]
     pub(crate) fn callback_port(&self) -> u16 {
         CODEX_CALLBACK_PORT
+    }
+
+    /// The program the macOS Keychain query runs: a test's fake, or `/usr/bin/security` for a
+    /// test that allowed it. Any other test panics here rather than ask the machine's Keychain.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        if let Some(fake) = &self.security_program {
+            return fake.clone();
+        }
+        assert!(
+            self.allow_real_security,
+            "a test reached the real Keychain query: set SigninConfig::security_program to a \
+             fake, or allow_real_security"
+        );
+        PathBuf::from(crate::signin::reuse::SECURITY)
+    }
+
+    /// The program the macOS Keychain query runs: always `/usr/bin/security` outside tests.
+    #[cfg(not(feature = "test-support"))]
+    #[expect(
+        clippy::unused_self,
+        reason = "the test-support build reads a test's fake from self; one signature for both"
+    )]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        PathBuf::from(crate::signin::reuse::SECURITY)
     }
 }
 

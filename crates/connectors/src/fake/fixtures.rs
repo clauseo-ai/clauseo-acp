@@ -52,6 +52,38 @@ const FILES: &[(&str, &str)] = &[
         "recharge-paid.json",
         include_str!("../../fixtures/recharge-paid.json"),
     ),
+    (
+        "recharge-get-awaiting.json",
+        include_str!("../../fixtures/recharge-get-awaiting.json"),
+    ),
+    (
+        "recharge-get-paid.json",
+        include_str!("../../fixtures/recharge-get-paid.json"),
+    ),
+    (
+        "recharge-get-expired.json",
+        include_str!("../../fixtures/recharge-get-expired.json"),
+    ),
+    (
+        "recharge-get-held.json",
+        include_str!("../../fixtures/recharge-get-held.json"),
+    ),
+    (
+        "recharge-get-awaiting-with-id.json",
+        include_str!("../../fixtures/recharge-get-awaiting-with-id.json"),
+    ),
+    (
+        "recharge-get-paid-with-id.json",
+        include_str!("../../fixtures/recharge-get-paid-with-id.json"),
+    ),
+    (
+        "recharge-get-expired-with-id.json",
+        include_str!("../../fixtures/recharge-get-expired-with-id.json"),
+    ),
+    (
+        "recharge-get-held-with-id.json",
+        include_str!("../../fixtures/recharge-get-held-with-id.json"),
+    ),
     ("api-402.json", include_str!("../../fixtures/api-402.json")),
     (
         "mcp/initialize.json",
@@ -72,6 +104,48 @@ const FILES: &[(&str, &str)] = &[
     (
         "mcp/insufficient-credits-result.json",
         include_str!("../../fixtures/mcp/insufficient-credits-result.json"),
+    ),
+    // The live Indian Kanoon server's results (server main 921725f), read by the host's
+    // case-law sources tests; the fake connector does not serve them.
+    (
+        "mcp/ik-search-law.json",
+        include_str!("../../fixtures/mcp/ik-search-law.json"),
+    ),
+    (
+        "mcp/ik-search-law-two-queries.json",
+        include_str!("../../fixtures/mcp/ik-search-law-two-queries.json"),
+    ),
+    (
+        "mcp/ik-read-document.json",
+        include_str!("../../fixtures/mcp/ik-read-document.json"),
+    ),
+    (
+        "mcp/ik-read-document-two.json",
+        include_str!("../../fixtures/mcp/ik-read-document-two.json"),
+    ),
+    (
+        "mcp/ik-search-law-no-hits.json",
+        include_str!("../../fixtures/mcp/ik-search-law-no-hits.json"),
+    ),
+    // Results whose documents went to a download file (`output: "file"`, or past the inline
+    // cap). `ik-read-document-file.json` is the server's summary as it is (server main
+    // 921725f); the other three add the listing the server is asked for ("In the file:" and
+    // one line per document).
+    (
+        "mcp/ik-search-law-file.json",
+        include_str!("../../fixtures/mcp/ik-search-law-file.json"),
+    ),
+    (
+        "mcp/ik-search-law-over-cap-json.json",
+        include_str!("../../fixtures/mcp/ik-search-law-over-cap-json.json"),
+    ),
+    (
+        "mcp/ik-read-document-file.json",
+        include_str!("../../fixtures/mcp/ik-read-document-file.json"),
+    ),
+    (
+        "mcp/ik-read-document-file-listed.json",
+        include_str!("../../fixtures/mcp/ik-read-document-file-listed.json"),
     ),
 ];
 

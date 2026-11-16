@@ -4,17 +4,39 @@
 //! - The window opens at [`WINDOW_SIZE`], 1280 by 800 logical px, which the room needs for its
 //!   three columns; below 1000 px the room scrolls the page itself. The e2e and marks builds
 //!   open at it unfitted, so the speed scoreboard is the same everywhere. The release build
-//!   fits it to the primary monitor's work area ([`fitted`]) and centres it.
+//!   fits it to the primary monitor's work area ([`fitted`]) and centres it. It never goes
+//!   under [`MIN_WINDOW_SIZE`], 760 by 520, the least the room lays out for without a sideways
+//!   scroll (D-061).
 //! - The `settings` window opens at [`SETTINGS_SIZE`], 960 by 700, fitted and centred the same
 //!   way (`settings_window.rs`, 0028).
 //! - window-state restores the lawyer's own size of `main` on later launches, in the release
 //!   build. The e2e and marks builds deny `main` in window-state ([`state_denylist`]), so they
 //!   neither restore nor save the real app's state. Every build denies `settings`: it opens at
 //!   its own size, centred, each time.
-//! - The first frame is painted in the room's ground, night or day as the OS says
-//!   ([`paint_first_frame`]), so the webview is never white before the page draws.
+//! - The first frame is the room's ground, night or day as the OS says, so the window is never
+//!   white before the page draws. On Windows the builder takes the ground before the window
+//!   exists ([`with_ground`]): the window and the webview open in it, through `WebView2`'s start,
+//!   which can take seconds after a reboot. The theme is one registry read
+//!   (`windows_theme.rs`), never the lawyer's Settings choice, which only the host knows later;
+//!   the page's own first paint (`ui/app/index.html`) follows the OS too until the display is
+//!   set. Elsewhere the window takes the ground once built ([`paint_first_frame`]), which Windows
+//!   does as well, a no-op when the theme agrees. `WebView2` also takes the ground from
+//!   [`WEBVIEW2_BACKGROUND_ENV`] ([`ground_in_env`], first in `main`): on a fresh profile in
+//!   the dark theme, the builder's colour alone left `WebView2`'s #121212 for 0.5 to 0.75 s.
+//! - Off Windows the window is built hidden ([`with_ground`]) and shown only once it has the
+//!   ground ([`show_first_frame`], after [`paint_first_frame`] and the frame's own
+//!   `after_build`). Built visible, the Mac ordered the window front inside the build, before
+//!   the ground: its first frames could be `NSWindow`'s own grey and `WKWebView`'s white, which
+//!   draws its background until `drawsBackground` is turned off (wry's `set_background_color`).
+//!   Shown after, the first frame is the window's ground through a webview that draws none, then
+//!   the page's ground (`ui/app/index.html`), in the same OS light that `window.theme()` reads.
+//!   Windows stays visible through the build: the native mark (`native_mark.rs`) shows while
+//!   `WebView2` starts.
 
-use tauri::{AppHandle, Runtime, Theme, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder};
+
+#[cfg(windows)]
+mod windows_theme;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +45,21 @@ mod tests;
 /// builds open at it always, and the release build opens at it when the work area allows
 /// ([`fitted`]).
 pub(crate) const WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
+
+/// The `main` window's least inner size in logical px: under it the room's title is cut and the
+/// page scrolls sideways (D-061). The window manager keeps the lawyer's own sizing above it.
+pub(crate) const MIN_WINDOW_SIZE: (f64, f64) = (760.0, 520.0);
+
+/// `builder` opening at `size` (logical px), never made smaller than [`MIN_WINDOW_SIZE`]: the
+/// `main` window's size (`open_main_window` in `lib.rs`).
+pub(crate) fn with_size<R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+    (width, height): (f64, f64),
+) -> WebviewWindowBuilder<'_, R, M> {
+    builder
+        .inner_size(width, height)
+        .min_inner_size(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1)
+}
 
 /// The `settings` window's size in logical px: the design's settings window.
 pub(crate) const SETTINGS_SIZE: (f64, f64) = (960.0, 700.0);
@@ -72,6 +109,31 @@ pub(crate) const fn state_denylist() -> &'static [&'static str] {
     }
 }
 
+/// What window-state saves and restores: everything but the decorations, since the frame is the
+/// room's (`window_frame.rs`), never a saved one, and the visibility: a quit hides the windows
+/// before their state is saved (`quit.rs`), and the window is built visible. The quit saves
+/// with it too, on the main thread, as an `ExitRequested` quit begins ([`save_state`]): a restart
+/// or an install after it ends the app without the exit event the plugin saves on.
+pub(crate) fn state_flags() -> tauri_plugin_window_state::StateFlags {
+    tauri_plugin_window_state::StateFlags::all()
+        - tauri_plugin_window_state::StateFlags::DECORATIONS
+        - tauri_plugin_window_state::StateFlags::VISIBLE
+}
+
+/// Saves the windows' state with [`state_flags`]. On the main thread only
+/// (`quit::on_exit_requested`): the plugin's save holds its cache lock while it reads each
+/// window, and off the main thread each read waits on the main thread, which the plugin's own
+/// save at `RunEvent::Exit` can hold on that lock. A failure is logged without the plugin's text,
+/// which can name the config folder.
+#[cfg(not(feature = "e2e"))]
+pub(crate) fn save_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri_plugin_window_state::AppHandleExt as _;
+    if let Err(error) = app.save_window_state(state_flags()) {
+        drop(error);
+        tracing::warn!("the window state was not saved at quit");
+    }
+}
+
 /// The night ground, `--ground` in `ui/components/src/styles/tokens-colour.css`.
 pub(crate) const NIGHT_GROUND: (u8, u8, u8) = (27, 26, 24);
 
@@ -83,12 +145,82 @@ pub(crate) const fn ground(dark: bool) -> (u8, u8, u8) {
     if dark { NIGHT_GROUND } else { DAY_GROUND }
 }
 
+/// The ground as a Tauri colour, opaque.
+const fn colour((r, g, b): (u8, u8, u8)) -> tauri::window::Color {
+    tauri::window::Color(r, g, b, 255)
+}
+
+/// `builder` with the ground of Windows' app theme as the window's and the webview's background,
+/// from their first frame. Elsewhere `builder` hidden: the theme cannot be read before the
+/// window without a cost, so [`paint_first_frame`] paints it once built and
+/// [`show_first_frame`] shows the window after.
+pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    #[cfg(windows)]
+    let builder = builder.background_color(colour(ground(windows_theme::apps_dark())));
+    #[cfg(not(windows))]
+    let builder = builder.visible(BUILT_VISIBLE);
+    builder
+}
+
+/// Whether [`with_ground`] builds the window visible: on Windows only, where the native mark
+/// shows through `WebView2`'s start; elsewhere the window waits for [`show_first_frame`].
+pub(crate) const BUILT_VISIBLE: bool = cfg!(windows);
+
+/// Shows a window [`with_ground`] built hidden, once [`paint_first_frame`] has given it the
+/// ground, so its first frame is the ground. Nothing on Windows, where it is already shown.
+/// A refused show is logged: the window would stay hidden until the lawyer raises it.
+pub(crate) fn show_first_frame<R: Runtime>(window: &WebviewWindow<R>) {
+    if BUILT_VISIBLE {
+        return;
+    }
+    if let Err(error) = window.show() {
+        tracing::warn!(%error, "a window built hidden for its first frame was not shown");
+    }
+}
+
+/// The variable through which `WebView2` takes its default background before its controller
+/// exists (Microsoft's `DefaultBackgroundColor` docs: the property alone can leave a first frame
+/// in `WebView2`'s own colour).
+#[cfg(any(windows, test))]
+pub(crate) const WEBVIEW2_BACKGROUND_ENV: &str = "WEBVIEW2_DEFAULT_BACKGROUND_COLOR";
+
+/// [`WEBVIEW2_BACKGROUND_ENV`]'s value for the ground of a `dark` theme or not: opaque ARGB in
+/// hex, `FFE5E2DC` by day, `FF1B1A18` by night.
+#[cfg(any(windows, test))]
+pub(crate) fn webview2_background(dark: bool) -> String {
+    let (r, g, b) = ground(dark);
+    format!("FF{r:02X}{g:02X}{b:02X}")
+}
+
+/// Sets [`WEBVIEW2_BACKGROUND_ENV`] to the ground of Windows' app theme, the colour
+/// [`with_ground`] and the native mark (`native_mark.rs`) take, so a fresh profile's dark
+/// runs show the ground between the native mark and the page's, not `WebView2`'s #121212.
+/// `main` calls it before any thread starts.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "set_var, which is unsafe once other threads may read the environment"
+)]
+pub fn ground_in_env() {
+    let value = webview2_background(windows_theme::apps_dark());
+    // SAFETY: `main` calls this before any thread starts and before Tauri, logging or a runtime
+    // reads the environment, right after `keep_no_dns_in_env`.
+    unsafe { std::env::set_var(WEBVIEW2_BACKGROUND_ENV, value) };
+}
+
+/// Whether Windows' app theme is dark (`windows_theme.rs`): the native mark's colours
+/// (`native_mark.rs`).
+#[cfg(windows)]
+pub(crate) fn apps_dark() -> bool {
+    windows_theme::apps_dark()
+}
+
 /// Paints the window's background in the ground of the OS theme, so the first frame is not
 /// white. The day ground when the theme cannot be read.
 pub(crate) fn paint_first_frame<R: Runtime>(window: &WebviewWindow<R>) {
     let dark = matches!(window.theme(), Ok(Theme::Dark));
-    let (r, g, b) = ground(dark);
-    let color = tauri::window::Color(r, g, b, 255);
     // Best effort: a refused colour leaves the first frame white, as it was before.
-    let _refused = window.set_background_color(Some(color));
+    let _refused = window.set_background_color(Some(colour(ground(dark))));
 }

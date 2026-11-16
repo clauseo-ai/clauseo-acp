@@ -1,0 +1,23 @@
+{
+  "SAC-01": {
+    "en": "If Windows ever blocks Clauseo, turn off Smart App Control.",
+    "hi": "अगर Windows कभी Clauseo को रोके, तो Smart App Control बंद करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (one line, via the orchestrator)",
+    "note": "was three sentences with the Windows Security path; the path stays in the install guide behind How to do this (SAC-02)"
+  },
+  "SAC-02": {
+    "en": "How to do this",
+    "hi": "यह कैसे करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy"
+  }
+}

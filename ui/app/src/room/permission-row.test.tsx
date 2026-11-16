@@ -132,6 +132,9 @@ test("Cmd or Ctrl with Enter answers allow_always, saying the OS asks to confirm
   vi.spyOn(FakeTransport.prototype, "displayInfo").mockResolvedValue({
     platform: "mac",
     release_date: null,
+    test_build: false,
+    release_mode: "release",
+    smart_app_control: null,
   });
   h = await room([perm(3, 1)]);
   let done: () => void = () => {};

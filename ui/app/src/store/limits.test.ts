@@ -55,6 +55,44 @@ test("refresh sends refresh_limits with the agent, or none for every agent", asy
   ]);
 });
 
+test("asks that come together send one request; once it is answered the next goes out", async () => {
+  const t = new FakeTransport();
+  const store = limitsStoreOf(t);
+  const answers: (() => void)[] = [];
+  t.host.dispatch = () => new Promise<"done">((resolve) => answers.push(() => resolve("done")));
+  store.refresh(undefined, "shown");
+  store.refresh(undefined, "shown");
+  store.refresh(undefined, "shown");
+  await Promise.resolve();
+  expect(t.refreshes()).toEqual([{ agent: undefined, why: "shown" }]);
+  // a different ask is its own request
+  store.refresh("claude", "try_again");
+  await Promise.resolve();
+  expect(t.refreshes()).toHaveLength(2);
+  for (const answer of answers) answer();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  store.refresh(undefined, "shown");
+  await Promise.resolve();
+  expect(t.refreshes()).toHaveLength(3);
+});
+
+test("a refused ask frees the way for the next", async () => {
+  const t = new FakeTransport();
+  const store = limitsStoreOf(t);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  t.host.dispatch = () => {
+    throw new Error("refused");
+  };
+  store.refresh(undefined, "shown");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  store.refresh(undefined, "shown");
+  await Promise.resolve();
+  expect(t.refreshes()).toHaveLength(2);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(warn).toHaveBeenCalledTimes(2);
+  warn.mockRestore();
+});
+
 test("a transport that carries no limits gives an empty store", () => {
   expect(limitsStoreOf(new NullTransport()).view()).toEqual({});
 });

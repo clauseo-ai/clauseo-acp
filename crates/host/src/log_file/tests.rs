@@ -14,9 +14,11 @@ use super::{Cause, FileSink, LogGuard, Sink, build, kept_target, panic};
 use crate::clock::{Clock, SystemClock};
 use crate::pipeline::tests::support::TempDir;
 
-/// The events the full-disk and blocked-sink tests emit, and how long the caller may take.
+/// The events the full-disk and blocked-sink tests emit, and how long the caller may take. A
+/// caller that stalled would wait out the writer's 5 s `BACKOFF` at least, so 1 s still tells the
+/// two apart, with room for a loaded machine (200 ms failed at a load average of 27 on 8 cores).
 const EVENTS: u64 = 10_000;
-const CALLER_LIMIT: Duration = Duration::from_millis(200);
+const CALLER_LIMIT: Duration = Duration::from_secs(1);
 
 fn now() -> Duration {
     SystemClock.now().mono
@@ -268,10 +270,27 @@ fn the_file_keeps_clauseo_warn_error_and_lifecycle_info_only() {
         (Level::INFO, "agent_client_protocol::lifecycle", false),
         (Level::INFO, "clauseo_host::lifecycle", true),
         (Level::INFO, "clauseo_sandbox::lifecycle", true),
+        // The install's timing lines (agents' state sent, desktop's state published).
+        (Level::INFO, "clauseo_agents::lifecycle", true),
+        (Level::INFO, "clauseo_desktop::lifecycle", true),
         (Level::INFO, "clauseo_host::actor::turn", false),
         (Level::INFO, "other::lifecycle", false),
         (Level::DEBUG, "clauseo_host::lifecycle", false),
         (Level::TRACE, "clauseo_host", false),
+        // The ACP library logs each JSON-RPC message whole: `session/new` with an MCP server's
+        // header values and URL.
+        (
+            Level::DEBUG,
+            "agent_client_protocol::jsonrpc::outgoing_actor",
+            false,
+        ),
+        (
+            Level::TRACE,
+            "agent_client_protocol::jsonrpc::transport_actor",
+            false,
+        ),
+        (Level::DEBUG, "clauseo_acp::driver", false),
+        (Level::TRACE, "clauseo_acp::driver", false),
     ] {
         assert_eq!(kept_target(level, target), kept, "{level} {target}");
     }
@@ -309,6 +328,36 @@ fn a_partial_write_counts_what_reached_the_file_so_the_cap_holds() {
     let written = held.current.lock().unwrap().len() as u64;
     assert!(written <= cap, "{written} bytes past the cap {cap}");
     drop(guard);
+}
+
+/// The ACP library's DEBUG and TRACE lines carry each JSON-RPC message whole, a lawyer's MCP
+/// header values and URL in `session/new` among them; none reaches the file, nor a Clauseo
+/// crate's DEBUG or TRACE line.
+#[test]
+fn whole_messages_at_debug_and_trace_never_reach_the_file() {
+    let dir = TempDir::new("log-whole-messages");
+    let (dispatch, guard) =
+        build(FileSink::new(dir.path().to_owned()), 10_000, real_time()).unwrap();
+    let line = r#"{"method":"session/new","params":{"mcpServers":[{"type":"http","url":"https://mcp.example.com/mcp?key=q7-url-token","headers":[{"name":"Authorization","value":"Bearer h9-header-token"}]}]}}"#;
+    tracing::dispatcher::with_default(&dispatch, || {
+        tracing::debug!(target: "agent_client_protocol::jsonrpc::outgoing_actor", message = line, "send_raw_message");
+        tracing::trace!(target: "agent_client_protocol::jsonrpc::transport_actor", message = line, "Sending JSON-RPC message");
+        tracing::debug!(message = line, "a clauseo debug line");
+        tracing::trace!(message = line, "a clauseo trace line");
+        tracing::warn!("a clauseo line");
+    });
+    drained(&guard);
+    drop(guard);
+    let log = read(&dir.path().join("host.log"));
+    assert!(log.contains("a clauseo line"), "{log}");
+    for secret in [
+        "q7-url-token",
+        "h9-header-token",
+        "mcp.example.com",
+        "session/new",
+    ] {
+        assert!(!log.contains(secret), "{secret} in {log}");
+    }
 }
 
 #[test]

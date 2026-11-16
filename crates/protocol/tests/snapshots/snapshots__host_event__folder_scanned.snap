@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostEvent::FolderScanned(FolderScanned\n{\n    folder: folder_ref_id(2), files: 12, bytes: Count::new(40_960).unwrap(),\n    now_reading: Some(path(\"Leases/a.docx\")), place: FolderPlace::Synced\n    { service: \"OneDrive\".to_owned() }, cloud_only: 3, done: false, cancelled:\n    false,\n})"
+expression: "HostEvent::FolderScanned(FolderScanned\n{\n    folder: folder_ref_id(2), files: 12, bytes: Count::new(40_960).unwrap(),\n    now_reading: Some(path(\"Leases/a.docx\")), place: FolderPlace::Synced\n    { service: SyncService::OneDrive }, cloud_only: 3, done: false, cancelled:\n    false,\n})"
 ---
 {
   "folder_scanned": {
@@ -10,7 +10,7 @@ expression: "HostEvent::FolderScanned(FolderScanned\n{\n    folder: folder_ref_i
     "now_reading": "Leases/a.docx",
     "place": {
       "synced": {
-        "service": "OneDrive"
+        "service": "one_drive"
       }
     },
     "cloud_only": 3,

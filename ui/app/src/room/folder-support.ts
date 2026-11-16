@@ -23,3 +23,10 @@ export const FolderSupportContext = createContext<FolderSupportKind | undefined>
 export function useFolderReason(kind: string | undefined): boolean {
   return use(FolderSupportContext) === "cant_change_permissions" && kind === "edit";
 }
+
+/** The open matter's folder as the host shows it (`folder_display`), for the thread to cut a path inside the matter to
+ * the matter (thread/task-words.ts, D-046): matched as text, never a path to act on; null with none. */
+export const MatterFolderContext = createContext<string | null>(null);
+
+/** The open matter's folder for display, or null. */
+export const useMatterFolder = (): string | null => use(MatterFolderContext);

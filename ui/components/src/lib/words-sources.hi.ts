@@ -4,17 +4,15 @@ import type { Hindi } from "./words-core.ts";
 
 export const HI = {
   // the folded line: how many distinct pages its searches listed and it read, the singular apart
-  "1 source": null,
-  "{n} sources": null,
-  // the folded line's name when its searches list no page, so it has no count
-  Searches: null,
+  "1 source": "1 स्रोत",
+  "{n} sources": "{n} स्रोत",
   // a search: its query, quoted, after the search glyph; its results nested under it
-  "'{query}'": null,
-  "No results": null,
-  // Codex's search: its pages aren't told, after the info glyph
-  "{name} doesn't list its pages": null,
+  "'{query}'": "'{query}'",
+  "No results": "कोई परिणाम नहीं",
+  // Codex's search: which pages it found isn't told, after the info glyph
+  "{name} didn't say which pages it found": "{name} ने नहीं बताया कि उसे कौन-से पेज मिले",
   // a page Codex opened: its info tip's name and text
-  "Opened on OpenAI's side": null,
+  "Opened on OpenAI's side": "OpenAI की ओर खोला गया",
   // a page the browser opened: the browser glyph's name and tooltip, in the tile's place
-  "Opened in the browser": null,
+  "Opened in the browser": "ब्राउज़र में खोला गया",
 } as const satisfies Hindi<string>;

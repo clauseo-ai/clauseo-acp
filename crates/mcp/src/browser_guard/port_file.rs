@@ -4,13 +4,15 @@
 //! agent-browser writes the port each listener got to a file in the socket folder, and when the
 //! port it was asked for will not bind it silently takes another and writes that one:
 //!
-//! - the stream server (every OS): `<socket folder>/<session>.stream`, decimal, written after the
-//!   server starts with port fallback allowed (`native/daemon.rs`
-//!   `StreamServer::start_without_client`, `stream/mod.rs`); the guard expects
-//!   `AGENT_BROWSER_STREAM_PORT`;
 //! - the daemon (Windows): `<cwd>\run\<session>.port`, decimal, from a port it derives from the
 //!   session name, with an ephemeral fallback (`native/daemon.rs`, the `TcpListener::bind`
-//!   fallback); the guard expects `--daemon-port`.
+//!   fallback); the guard expects `--daemon-port`;
+//! - the stream server: `<socket folder>/<session>.stream`, decimal (`native/daemon.rs`
+//!   `StreamServer::start_without_client`). Since route 2 (decision record 0060) agent-browser
+//!   gets no stream port on any system and is told to start no server. On Windows
+//!   [`Expected::stream_off`] refuses any `.stream` file at all, so an agent-browser that still
+//!   starts the server (any but the patched one, W2) is ended at once; on macOS and Linux the
+//!   file is not read.
 //!
 //! A listener on any other port sits outside the ports the jail pins to the session. The guard
 //! reads every file after each line it relays, for the session's whole life: the daemon can end
@@ -40,8 +42,8 @@ pub(crate) struct Expected {
     pub(crate) what: &'static str,
     /// `<socket folder>/<session>.<extension>`.
     pub(crate) file: PathBuf,
-    /// The claimed port.
-    pub(crate) port: u16,
+    /// The claimed port; none for a listener that must not run at all.
+    pub(crate) port: Option<u16>,
 }
 
 impl Expected {
@@ -50,23 +52,25 @@ impl Expected {
         Self {
             what: "daemon port",
             file: socket_dir.join(format!("{session}.port")),
-            port,
+            port: Some(port),
         }
     }
 
-    /// The stream server's: `<socket folder>/<session>.stream`, against
-    /// `AGENT_BROWSER_STREAM_PORT`.
-    pub(crate) fn stream(socket_dir: &Path, session: &str, port: u16) -> Self {
+    /// Windows: the stream server's file, which must never be written: the server is off.
+    pub(crate) fn stream_off(socket_dir: &Path, session: &str) -> Self {
         Self {
             what: "stream port",
             file: socket_dir.join(format!("{session}.stream")),
-            port,
+            port: None,
         }
     }
 
     /// Reads the file and judges it.
     pub(crate) fn check(&self) -> Status {
-        judge(read(&self.file), self.port, self.what)
+        match self.port {
+            Some(port) => judge(read(&self.file), port, self.what),
+            None => judge_off(read(&self.file), self.what),
+        }
     }
 }
 
@@ -120,6 +124,18 @@ pub(crate) fn judge(found: Found, port: u16, what: &str) -> Status {
                 _ => refused("holds no port".to_owned()),
             }
         }
+    }
+}
+
+/// The verdict on what [`read`] found for a listener that must not run: nothing, or an empty
+/// file, is fine; anything else is refused. Pure.
+pub(crate) fn judge_off(found: Found, what: &str) -> Status {
+    match found {
+        Found::Missing => Status::Pending,
+        Found::Bytes(bytes) if bytes.is_empty() => Status::Pending,
+        _ => Status::Refused(format!(
+            "agent-browser wrote a {what} file, but its stream server must be off on Windows"
+        )),
     }
 }
 

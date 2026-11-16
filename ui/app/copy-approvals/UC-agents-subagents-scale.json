@@ -1,0 +1,10 @@
+{
+  "UC-710": {
+    "en": "When the sandbox or Clauseo refuses a command or a save, tell the lawyer plainly in your answer what you could not do and why, for example \"I couldn't save the copy there: Clauseo keeps my work inside this matter's folders.\" Never leave a refusal out of your answer, and never try another way round it.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "stage C (provisional; Rohan batch review)",
+    "note": "Model-facing: every Codex session's instructions (crates/profile/assets/instructions/codex-refusal.txt). English alone: the agent answers in the lawyer's language."
+  }
+}

@@ -1,7 +1,8 @@
 // The matter's versions as the Versions parts read them (ui/components versions-model.ts's Version), from the host's
 // `version` entries on the matter's stream. Who made each comes from its kind, as HANDOFF item 11's table gives it:
 // after_turn is Clauseo in the conversation `list_threads` names, outside_edits the lawyer outside Clauseo, undo an undo
-// of the change its turn made, restore a restore to the version its marker names, import the papers first brought in.
+// of the change its turn made, restore a restore to the version its marker names, import the papers first brought in,
+// revisions the lawyer's accept or reject of a Word file's tracked changes (room/word/changes-pane.tsx).
 // A before_turn version is shown only when it holds files: the lawyer's edits caught as a turn began. A kind this
 // version doesn't know shows its time alone. A turn's papers come from its step (StepEntry) where the room holds its
 // conversation; elsewhere a version says who and when only. Pure: the clock and the zone come in as arguments.
@@ -23,6 +24,7 @@ import type {
   TurnId,
   VersionEntry,
 } from "../../transport/protocol.ts";
+import { fileName } from "@clauseo/components/lib/words-core.ts";
 import { clockOf, dayOf } from "../when.ts";
 
 const DAY_MS = 86_400_000;
@@ -56,14 +58,7 @@ export const calendarOf = (now: Timestamp, zone: string): Calendar => ({
   words: dayWords,
 });
 
-/** A path or a name set apart from the words around it (FSI…PDI), so a right-to-left mark in it can't reorder them. */
-export const isolate = (text: string): string => `\u2068${text}\u2069`;
-
-/** A file's bare name: the last part of its path in the matter folder. */
-export const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
-
-/** A file's name as shown: its bare name, isolated. */
-export const fileName = (path: string): string => isolate(baseName(path));
+export { baseName, fileName, isolate } from "@clauseo/components/lib/words-core.ts";
 
 /** What the room knows of a version beyond the parts' Version: what the host says made it, and its turn's step. */
 export type VersionMeta = {
@@ -129,6 +124,11 @@ function whoOf(v: VersionEntry, input: TimelineInput, afterTurn: ReadonlyMap<Tur
       return { kind: "restore", to: input.restores.get(v.checkpoint) ?? "" };
     case "import":
       return { kind: "import", n: input.header?.import?.files ?? null };
+    case "revisions":
+      // the Word file whose tracked changes the lawyer decided; with none named, its time alone
+      return v.files.length === 0
+        ? { kind: "unknown" }
+        : { kind: "revisions", files: v.files.map((f) => f.path) };
     default:
       return { kind: "unknown" };
   }

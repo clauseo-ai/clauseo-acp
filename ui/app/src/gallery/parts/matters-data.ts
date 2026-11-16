@@ -7,9 +7,6 @@ import type { MatterRowProps } from "@clauseo/components/clauseo/rail-matter.tsx
 
 const none = () => {};
 
-/** The folder Clauseo makes for a new matter, as the form shows it. */
-export const folderFor = (name: string) => ["Documents", "Clauseo", name].join("/");
-
 export const ACME: MatterRowProps = {
   name: "Acme Ltd v. State",
   note: "Recovery suit, for the plaintiff",

@@ -2,7 +2,8 @@
 //! ending it) gets one commit. Pending requests expire `HostRestarted`; a started turn gets an
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); every turn that
-//! never started stays queued, held behind its own thread (`queue::restore`); an attached
+//! never started stays queued, held behind its own thread (`queue::restore`), but an
+//! agent-started one, with no prompt, ends `Cancelled` (`own_turn/restart.rs`); an attached
 //! session is detached. A turn with a `TurnEnded` is never touched, so each repair happens once,
 //! with one exception: every step of the thread that stopped `AtLimit` with no
 //! `TurnStoppedAtLimit` for its turn (the read that was to give its reset time was lost with a
@@ -48,7 +49,7 @@ use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, queue, st
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
-use crate::sent::{SentView, TurnPaths};
+use crate::sent::{CallFields, SentView, TurnPaths};
 
 /// A started turn's repair, while its after-turn checkpoint runs.
 #[derive(Debug)]
@@ -124,7 +125,10 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
         .is_some_and(|state| {
-            open_turn(state).is_some() || has_pending(state) || steer_unresolved(state)
+            open_turn(state).is_some()
+                || has_pending(state)
+                || steer_unresolved(state)
+                || super::own_turn::may_wait_at_start(state)
         });
     if !needs {
         looked_at(actor, thread);
@@ -259,6 +263,7 @@ pub(super) fn on_log(
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
+                super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
                 queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
@@ -273,6 +278,8 @@ pub(super) fn on_log(
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
                 // A steer never answered still comes back, held.
+                // An agent-started turn left waiting ends (`own_turn/restart.rs`).
+                super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
                 queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
@@ -334,11 +341,16 @@ fn repairs(actor: &mut Actor, thread: ThreadId) -> Option<&mut Repairs> {
 /// A started turn's repair waits for the rest of its matter ([`looked_at`] sends it); one
 /// whose matter is not known is sent now, and fails as it would have.
 fn hold(actor: &mut Actor, thread: ThreadId, turn: TurnId, log: &[Envelope], pending: Pending) {
+    let mut tool_paths = turn_paths(log, turn);
+    // Where its shell calls started: the matter thread reads Claude Code's policy settings, as
+    // the session's launch did (`settings::claude_shell_carries`).
+    let managed = actor.managed_mcp.parent().map(std::path::Path::to_path_buf);
+    tool_paths.set_start(crate::sent::ShellStart::Policy(managed.unwrap_or_default()));
     let repair = Waiting {
         thread,
         turn,
         started: turn_started(log, turn),
-        tool_paths: turn_paths(log, turn),
+        tool_paths,
         before: checkpoint_before(log, turn),
         pending,
     };
@@ -411,13 +423,13 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> TurnPaths {
             && started.turn == turn
         {
             tools.insert(started.tool_call);
-            paths.note(&started.locations, &started.content);
+            let key = started.tool_call.to_string();
+            paths.note(&key, &CallFields::of_started(started));
         } else if let DomainEvent::ToolCallUpdated(updated) = &envelope.event
             && tools.contains(&updated.tool_call)
         {
-            let locations = updated.patch.locations.as_deref().unwrap_or_default();
-            let content = updated.patch.content.as_deref().unwrap_or_default();
-            paths.note(locations, content);
+            let key = updated.tool_call.to_string();
+            paths.note(&key, &CallFields::of_patch(&updated.patch));
         }
     }
     paths
@@ -530,3 +542,6 @@ fn done(actor: &mut Actor, thread: ThreadId) {
     }
     actor.release(StreamId::Thread(thread));
 }
+
+#[cfg(test)]
+mod paths_tests;

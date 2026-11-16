@@ -6,10 +6,16 @@ import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 
+// It stands in the reading column, as the thread's entries and the SAC note do: the measure, centred, with the
+// thread's side padding, so its icon lines up with the matter title and the questions under it. Under 1000 px the
+// centre is one column on the ground, and the line sits under the matter title at the header's own inset.
 export function ScratchLine() {
   const { lang } = useWords();
   return (
-    <p className="flex items-start gap-s1-5 text-small text-quiet">
+    <p
+      className="mx-auto box-content flex max-w-measure items-start gap-s1-5 px-thread-pad pt-s6 pb-s2 text-small text-quiet max-mid:mx-0 max-mid:max-w-none max-mid:px-s4 max-mid:pt-0 max-mid:pb-s4"
+      data-testid="scratch-line"
+    >
       <IconScratchMatter size={16} className="flex-none mt-s0-5" />
       <span className="min-w-0">
         <Say>

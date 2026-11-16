@@ -4,7 +4,9 @@
 //!
 //! It runs on a thread of its own (`actor/browser_install.rs`), one at a time, and reports each
 //! [`BrowserInstallState`] as it goes. In order:
-//! 1. The machine: macOS (arm64, x64) or Windows x64 only; elsewhere `unsupported`.
+//! 1. The machine: macOS (arm64, x64) only; elsewhere `unsupported`. Never on Windows, where the
+//!    guard's piped browser cannot start from the per-user folder it would sit in
+//!    (`super::chrome`), whatever the app asks.
 //! 2. The disk: about 1 GB free in `<app data>/browsers` ([`MIN_FREE_BYTES`]), else `disk_space`.
 //! 3. The version list ([`VERSIONS_URL`]), and from it Stable's `chrome` zip for this platform
 //!    ([`manifest`]): a version of dotted digits and the one URL Google's layout gives it, else

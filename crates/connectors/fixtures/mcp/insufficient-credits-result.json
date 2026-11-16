@@ -27,11 +27,14 @@
     },
     "message_for_human": "The case-law connector is out of credit. Recharge to continue: https://data.clauseo.chat/pay/rch_example0001",
     "why_this_service": "Clauseo Case Law searches Indian Kanoon's judgments and returns citable links.",
+    "pending_call": "pc_example0001",
+    "then": "Once the human has paid, call recharge as next says: it runs this call and returns its result.",
     "next": [
       {
         "tool": "recharge",
         "arguments": {
           "recharge_id": "rch_example0001",
+          "resume": "pc_example0001",
           "wait": true
         }
       }

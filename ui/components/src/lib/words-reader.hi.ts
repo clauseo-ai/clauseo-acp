@@ -103,11 +103,24 @@ export const HI = {
     "ये बदलाव स्वीकार करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to reject these changes.":
     "ये बदलाव अस्वीकार करने के लिए Word में '{file}' बंद करें।",
-  "If it isn't open in Word, close Word and try again.": null, // hi: later
+  "If it isn't open in Word, close Word and try again.":
+    "अगर यह Word में खुली नहीं है, तो Word बंद करें और फिर से प्रयास करें।",
+  "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.":
+    "इस फ़ाइल का पाथ लंबा है, इसलिए Word इसे Protected View में खोलता है। बदलाव करने के लिए Enable Editing चुनें।",
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
   "Change by {who}, {when}": "{who} का बदलाव, {when}",
+  // a Word document's own tracked changes, from its tile on the wall (provisional Hindi)
+  "Tracked changes": "ट्रैक किए गए बदलाव",
+  "No tracked changes in this file.": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
+  "Formatting changed": "फ़ॉर्मैटिंग बदली गई",
+  Moved: "जगह बदली गई",
+  "In a header or footer": "हेडर या फ़ुटर में",
+  "In a footnote or endnote": "फ़ुटनोट या एंडनोट में",
+  "In a comment": "टिप्पणी में",
+  "The first {shown} are listed here. Accept all and Reject all decide all {n}.":
+    "यहाँ पहले {shown} दिखाए गए हैं। सभी स्वीकार करें और सभी अस्वीकार करें सभी {n} बदलावों पर लागू होते हैं।",
 
   // the citations checked
   "Checked {n} citations at {time}.": "{time} बजे {n} उद्धरण जाँचे गए।",

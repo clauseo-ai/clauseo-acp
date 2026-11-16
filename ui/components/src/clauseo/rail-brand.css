@@ -1,0 +1,32 @@
+/* Clauseo's lockup at the head of the rail's column (rail-brand.tsx). On a wide Mac window it stands in the toolbar's
+   lead, after the traffic lights (or in their place in full screen), centred on the matter title's line: the toolbar's
+   64 px row, not the lead's 52 px, so the lockup's word sits on the title's baseline. Elsewhere (Windows and Linux, whose
+   wide title stands over the rail's column, and any window where the rail folds away) it tops the rail, above New
+   matter, at New matter's own left. 96 px wide (--size-lockup-rail): the lockup's least size (design/logo, NOTES.md). */
+@layer components {
+  .room-brand {
+    flex: none;
+    display: flex;
+    align-items: center;
+  }
+  .room-brand-lockup {
+    width: var(--size-lockup-rail);
+  }
+  .room-brand[data-at="lead"] {
+    display: none;
+    margin-top: calc(var(--toolbar) - var(--lead-h));
+  }
+  .room-brand[data-at="rail"] {
+    min-height: var(--size-control);
+    padding-left: var(--s3);
+    margin-bottom: var(--s2);
+  }
+  @variant wide {
+    .room-top[data-platform="mac"] .room-brand[data-at="lead"] {
+      display: flex;
+    }
+    .room-brand[data-at="rail"][data-platform="mac"] {
+      display: none;
+    }
+  }
+}

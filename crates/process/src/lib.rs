@@ -9,10 +9,11 @@
 //!   `killpg`); on Windows a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the agent
 //!   joins while suspended (`CREATE_SUSPENDED`, then its threads resume) and which it never runs
 //!   outside. Windows children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
-//! - The shutdown ladder: close stdin, 2 s, SIGTERM to the group, 3 s, SIGKILL to the group, and
-//!   2 s more for the exit. On Windows: close stdin, 2 s, end the job, 2 s. On Unix the tree kill
-//!   then kills every descendant in the listing the caller passed to the shutdown, because a
-//!   command an agent starts in a session of its own (Codex does) has left the group.
+//! - The shutdown ladder: close stdin, the stdin grace (2 s, or [`SpawnOptions::stdin_grace`]),
+//!   SIGTERM to the group, 3 s, SIGKILL to the group, and 2 s more for the exit. On Windows: close
+//!   stdin, the stdin grace, end the job, 2 s. On Unix the tree kill then kills every descendant
+//!   in the listing the caller passed to the shutdown, because a command an agent starts in a
+//!   session of its own (Codex does) has left the group.
 //! - The agent's descendants: listed by parent pid on Unix (`/proc` on Linux, libproc on macOS)
 //!   and from the job's process list on Windows (parents from Toolhelp), each with its start
 //!   time so a reused pid is never signalled; and the sweep that ends those new since an earlier
@@ -30,6 +31,7 @@
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
 //!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, and on
 //!   Windows extra creation flags). By default the child inherits this process's environment.
+//!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default).
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
 //!   [`StderrPump`] the caller must drive, and the [`Handle`].
 //! - [`Handle::exited`] (the agent exited on its own; its tree is then killed),
@@ -41,6 +43,12 @@
 //!   (with what those start meanwhile), but executables the caller keeps (SIGTERM, 2 s, SIGKILL
 //!   on Unix; `TerminateProcess`, 2 s, again on Windows), and says what it did ([`Swept`]).
 //!   [`Handle::shutdown`] takes the snapshot the caller listed (where it chose) for its kill.
+//! - [`live_handles`]: how many processes this process has started or is starting and still
+//!   holds a handle for (counted first thing in [`spawn_in_tree`], before the child exists,
+//!   until the handle drops), and [`close_spawns`], the gate desktop's exit closes before it
+//!   reads that count: every later start is refused with [`Error::Closing`] and starts nothing.
+//!   The gate never reopens. So desktop's exit skips its wait only when nothing runs or can
+//!   start (`live.rs`).
 //!   With `test-support`, [`running`] says whether a pid still runs, [`started_before_now`]
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
 //!   process they did not start; on Windows, `image_and_parent` reads one's executable and
@@ -54,6 +62,8 @@
 //!
 //! # Invariants
 //!
+//! - Every start is counted before its child exists, and once [`close_spawns`] has run no start
+//!   happens again in this process: the gate never reopens.
 //! - No shell: never `sh -c`, `cmd.exe`, `npx` or a batch file, and no `PATH` lookup.
 //! - Executor-neutral: no spawn, no sleep, no clock. The caller drives every future, the stderr
 //!   pump included; [`AsyncIoTimer`] is the only real timer, and it is the caller's choice. The
@@ -66,6 +76,7 @@
 //! - However the agent ends (stdin closed, signal, crash, or the handle dropped), what is left of
 //!   its tree is killed: its group or job, and after a shutdown the listing it was given. An empty
 //!   group is fine.
+//! - No child gets `NODE_OPTIONS` or `NODE_PATH` ([`NODE_ENV`]), inherited or from its spec.
 //! - Only the redacted tail leaves the crate; the ring is never logged or returned whole. The tail
 //!   reads no variable: the home folder comes in [`SpawnOptions`], the secrets from the spec.
 //! - A running agent never makes an [`Error`]: how it ended is an [`ExitReport`]. The crate
@@ -84,10 +95,13 @@
 //! listings and the sweep), `stderr.rs` (the pump, the ring and the tail) and `stdin.rs`.
 //! Tests: unit tests in `src/*/tests.rs`; the pipe tests against `fake_agent` in `tests/pipes/`.
 
+#[cfg(any(windows, test))]
+mod browser;
 mod descendants;
 mod error;
 mod handle;
 mod launch;
+mod live;
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod named_tests;
 mod os;
@@ -98,10 +112,13 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
-pub use handle::{ExitReport, Handle, ShutdownOutcome};
-pub use launch::{Launched, Launcher, PassthroughLauncher, SpawnOptions, spawn_in_tree};
+pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
+pub use launch::{
+    Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
+};
+pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;
-pub use stderr::StderrPump;
+pub use stderr::{StderrPump, redact_tokens};
 pub use stdin::AgentStdin;
 #[cfg(feature = "test-support")]
 pub use timer::ManualTimer;

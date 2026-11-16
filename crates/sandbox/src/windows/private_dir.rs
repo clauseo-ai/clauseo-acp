@@ -11,35 +11,49 @@
     reason = "FFI to the file and security calls on the sandbox folder"
 )]
 
-use std::io;
+use std::ffi::OsString;
+use std::fs::File;
+use std::io::{self, Read as _};
 use std::iter::once;
-use std::os::windows::ffi::OsStrExt as _;
-use std::path::Path;
+use std::mem::ManuallyDrop;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::windows::io::FromRawHandle as _;
+use std::path::{Component, Path, PathBuf};
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, WIN32_ERROR,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE, HLOCAL,
+    LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
+    SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
+    DACL_SECURITY_INFORMATION, GetKernelObjectSecurity, OBJECT_SECURITY_INFORMATION,
     OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES,
+    SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR_CONTROL, SetKernelObjectSecurity,
+    SetSecurityDescriptorControl,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
+    WRITE_DAC, WRITE_OWNER,
 };
-use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
+use windows::core::{BOOL, PCWSTR, PWSTR};
 
+use super::acl_bytes::PROTECTED_DACL_CONTROL;
 use super::record::current_user_sid;
 use super::sids::Sid;
 use super::write::{Found, repair_plan};
+
+/// What a folder's or record file's DACL is written with: the DACL, protected.
+const PROTECTED_DACL: OBJECT_SECURITY_INFORMATION = OBJECT_SECURITY_INFORMATION(
+    DACL_SECURITY_INFORMATION.0 | PROTECTED_DACL_SECURITY_INFORMATION.0,
+);
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -58,17 +72,17 @@ pub(crate) fn file_sddl(user: &str) -> String {
     format!("D:P(A;;FA;;;{user})(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
-/// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`.
-pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
-    owner == user || owner.as_str() == SYSTEM || owner.as_str() == ADMINISTRATORS
-}
+pub(crate) use super::sids::owner_allowed;
 
 /// Makes the folder `path` (its parent must exist) with [`sddl`]'s protected DACL for this
-/// process's user in place from the start (`CreateDirectoryW` with the descriptor). `Ok(false)`
-/// when something is there already, which this leaves to [`protect`].
+/// thread's user (`current_user_sid`) in place from the start (`CreateDirectoryW` with the
+/// descriptor), then written again through a handle ([`secure_existing`]): NTFS drops
+/// `SE_DACL_AUTO_INHERITED` from a descriptor given at creation, and without it what is made
+/// inside gets entries not marked inherited. `Ok(false)` when something is there already,
+/// which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
     let user = current_user_sid()?;
-    let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
+    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
         lpSecurityDescriptor: descriptor.0.0,
@@ -78,7 +92,7 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
     // SAFETY: `target` is NUL-terminated and outlives the call; `attributes` and the descriptor
     // it points to live until this function returns.
     match unsafe { CreateDirectoryW(PCWSTR(target.as_ptr()), Some(&raw const attributes)) } {
-        Ok(()) => Ok(true),
+        Ok(()) => secure_existing(path).map(|()| true),
         Err(error) if error.code() == ERROR_ALREADY_EXISTS.to_hresult() => Ok(false),
         Err(error) => Err(os_error(&error)),
     }
@@ -86,20 +100,19 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
 
 /// Secures the folder already at `path` through one handle: refused if it is a link or not a
 /// folder; taken back for the user when another account owns it, or refused naming the owner;
-/// then given the protected DACL again.
+/// then given the protected DACL again, on the folder alone (`SetKernelObjectSecurity`, which
+/// never pushes its inheritable entries down to what is already inside, a set-aside junction
+/// included). Nothing inside needs them: each record file gets its own protected DACL
+/// (`check_file`), each folder its own here, and what a session set aside is handed back item
+/// by item (`acl::own`); what is made inside later inherits them as it is made.
 fn secure_existing(path: &Path) -> io::Result<()> {
     let user = current_user_sid()?;
     let handle =
         Handle::open(path).map_err(|error| named(path, "can't be opened to secure", &error))?;
     let handle = repair(path, handle, &user, true)?;
-    let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
-    let dacl = descriptor.dacl()?;
+    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
     handle
-        .set(
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            Some(dacl),
-        )
+        .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))
 }
 
@@ -114,28 +127,177 @@ pub(crate) fn protect(path: &Path) -> io::Result<()> {
 /// or refused naming the owner; then given [`file_sddl`]'s protected DACL, the folder's three
 /// entries written explicitly.
 pub(crate) fn check_file(path: &Path) -> io::Result<()> {
+    match Handle::open_with(path, 0) {
+        Ok(handle) => secure_file(path, handle).map(drop),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(named(path, "can't be opened to check", &error)),
+    }
+}
+
+/// [`check_file`]'s checks and DACL through `handle`, which it gives back.
+fn secure_file(path: &Path, handle: Handle) -> io::Result<Handle> {
     let user = current_user_sid()?;
-    let handle = match Handle::open(path) {
-        Ok(handle) => handle,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(named(path, "can't be opened to check", &error)),
-    };
     let handle = repair(path, handle, &user, false)?;
-    let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
-    let dacl = descriptor.dacl()?;
+    let descriptor = Descriptor::protected(&file_sddl(user.as_str()))?;
     handle
-        .set(
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            Some(dacl),
+        .set(PROTECTED_DACL, &descriptor)
+        .map_err(|error| named(path, "its DACL can't be set", &error))?;
+    Ok(handle)
+}
+
+/// Reads the record file `path` through the one handle [`check_file`]'s checks go through,
+/// opened for reading too, so what is read is the file checked; no second open by path.
+/// `None` when it is missing; refused when it holds more than `cap` bytes.
+pub(crate) fn read_checked_file(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    let handle = match Handle::open_with(path, FILE_READ_DATA.0 | SYNCHRONIZE.0) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(named(path, "can't be opened to read", &error)),
+    };
+    let mut bytes = Vec::new();
+    secure_file(path, handle)?
+        .into_file()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
+/// [`read_checked_file`] for a caller that must never write (`UserSetup::state`): one handle
+/// opened for reading only (`FILE_READ_ATTRIBUTES | READ_CONTROL | FILE_READ_DATA`), nothing
+/// taken back or set. A link, a folder or a second hard link is refused; a file whose owner
+/// isn't this user, or whose DACL isn't [`owner_only`], is `None`, as if missing.
+pub(crate) fn read_unchanged(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    let user = current_user_sid()?;
+    let access = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | FILE_READ_DATA.0 | SYNCHRONIZE.0;
+    let handle = match Handle::open_for(path, access) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(named(path, "can't be opened to read", &error)),
+    };
+    let info = handle
+        .information()
+        .map_err(|error| named(path, "can't be read", &error))?;
+    let found = Found {
+        reparse: info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0,
+        right_kind: info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0,
+        links: info.nNumberOfLinks,
+        owner_allowed: true,
+    };
+    repair_plan(found).map_err(|why| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} {why}", path.display()),
         )
-        .map_err(|error| named(path, "its DACL can't be set", &error))
+    })?;
+    let security = handle.security((OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0)?;
+    if !owner_only(&security, &user) {
+        tracing::debug!("a record file isn't this user's alone; read as missing");
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    handle
+        .into_file()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
+/// Whether the self-relative descriptor `security` is a record file's own: owned by `user`,
+/// its DACL protected, and every entry an allow for `user`, `SYSTEM` or `Administrators`
+/// ([`file_sddl`]'s, as [`check_file`] sets it).
+fn owner_only(security: &[u8], user: &Sid) -> bool {
+    use super::acl_bytes::{Acl, Descriptor, kind, owner_sid, sid, sid_text};
+
+    let Ok(read) = Descriptor::parse(security) else {
+        return false;
+    };
+    let Some(dacl) = read.dacl.and_then(|dacl| Acl::parse(dacl).ok()) else {
+        return false;
+    };
+    let allowed = [user.as_str(), SYSTEM, ADMINISTRATORS];
+    owner_sid(security).as_ref() == Some(user)
+        && read.dacl_protected()
+        && dacl.aces().iter().all(|ace| {
+            kind(ace) == 0
+                && sid(ace)
+                    .and_then(sid_text)
+                    .is_some_and(|sid| allowed.contains(&sid.as_str()))
+        })
+}
+
+/// The folder `path` (a full local path, `args.rs`'s form) resolved one component at a time.
+/// What is checked, exactly: the drive's root and every component below it, each opened
+/// without following a link and refused if it is one (a junction, a symbolic link or any other
+/// reparse point), the last refused unless a folder. The drive letter itself is not checked: it
+/// resolves through the calling user's own DOS device mappings, a `subst` drive included. So
+/// what the caller records and uses is never `path` but the final path Windows gives for the
+/// last component's handle (`GetFinalPathNameByHandleW`, `FILE_NAME_NORMALIZED`, with
+/// `\\?\` dropped), on the real volume; and that folder's owner. The caller acts as the user
+/// who asked, so a folder that user can't open is refused too.
+pub(crate) fn resolve_folder(path: &Path) -> io::Result<(PathBuf, Sid)> {
+    let mut walked = PathBuf::new();
+    let mut last = None;
+    for component in path.components() {
+        walked.push(component);
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        if matches!(component, Component::CurDir | Component::ParentDir) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} has a . or .. part", path.display()),
+            ));
+        }
+        let handle = Handle::open_for(&walked, FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .map_err(|error| named(&walked, "can't be opened", &error))?;
+        let info = handle
+            .information()
+            .map_err(|error| named(&walked, "can't be read", &error))?;
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is a junction or a link", walked.display()),
+            ));
+        }
+        if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is not a folder", walked.display()),
+            ));
+        }
+        last = Some(handle);
+    }
+    let handle = last.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} names no folder", path.display()),
+        )
+    })?;
+    let owner = handle.owner()?;
+    Ok((handle.final_path()?, owner))
 }
 
 #[cfg(test)]
 /// The owner of `path`, read through a handle opened without following a link.
 pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
     Handle::open(path)?.owner()
+}
+
+/// Makes this thread's user the owner of `path` (not followed if a link): S15 `PR5`'s launch file.
+pub(crate) fn own_file(path: &Path) -> io::Result<()> {
+    Handle::open(path)?.set_owner(&current_user_sid()?)
 }
 
 #[cfg(test)]
@@ -218,7 +380,12 @@ impl Handle {
     /// WRITE_OWNER`). When `WRITE_OWNER` is refused it opens without it, and a re-own then fails
     /// naming the owner.
     fn open(path: &Path) -> io::Result<Handle> {
-        let base = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0;
+        Handle::open_with(path, 0)
+    }
+
+    /// [`Handle::open`], asking for `extra` access too (reading the file, for one).
+    fn open_with(path: &Path, extra: u32) -> io::Result<Handle> {
+        let base = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0 | extra;
         match Handle::open_for(path, base | WRITE_OWNER.0) {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
                 Handle::open_for(path, base)
@@ -245,6 +412,70 @@ impl Handle {
         }
         .map(Handle)
         .map_err(|error| os_error(&error))
+    }
+
+    /// The file it names, read and closed through `File` from here.
+    fn into_file(self) -> File {
+        let handle = ManuallyDrop::new(self).0;
+        // SAFETY: `handle` is open and owned by this `Handle` alone, whose drop is skipped, so
+        // the `File` takes it over and closes it once.
+        unsafe { File::from_raw_handle(handle.0) }
+    }
+
+    /// Its full path as Windows resolves it, without the `\\?\` prefix when it is a drive path.
+    fn final_path(&self) -> io::Result<PathBuf> {
+        let mut buffer = vec![0u16; 512];
+        loop {
+            // SAFETY: the handle is open and `buffer` is writable for its length.
+            let length = unsafe {
+                GetFinalPathNameByHandleW(
+                    self.0,
+                    &mut buffer,
+                    GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0),
+                )
+            };
+            match usize::try_from(length).unwrap_or(0) {
+                0 => return Err(io::Error::last_os_error()),
+                n if n < buffer.len() => {
+                    buffer.truncate(n);
+                    let path = PathBuf::from(OsString::from_wide(&buffer));
+                    return Ok(dunce::simplified(&path).to_path_buf());
+                }
+                n => buffer.resize(n + 1, 0),
+            }
+        }
+    }
+
+    /// Its security descriptor's `info` parts, self-relative (`GetKernelObjectSecurity`).
+    fn security(&self, info: u32) -> io::Result<Vec<u8>> {
+        let mut size = 256_u32;
+        for _ in 0..4 {
+            let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+            let mut needed = 0_u32;
+            // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+            // `needed` is a live out-pointer.
+            let read = unsafe {
+                GetKernelObjectSecurity(
+                    self.0,
+                    info,
+                    Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                    size,
+                    &raw mut needed,
+                )
+            };
+            match read {
+                Ok(()) => {
+                    let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                    bytes.truncate(usize::try_from(size).unwrap_or(0));
+                    return Ok(bytes);
+                }
+                Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+                Err(e) => return Err(os_error(&e)),
+            }
+        }
+        Err(io::Error::other(
+            "a security descriptor kept growing while it was read",
+        ))
     }
 
     /// Its attributes and link count.
@@ -290,26 +521,16 @@ impl Handle {
 
     /// Makes `sid` its owner.
     fn set_owner(&self, sid: &Sid) -> io::Result<()> {
-        let mut parsed = PSID::default();
-        // SAFETY: the HSTRING is NUL-terminated and lives for the call; `parsed` is a live
-        // out-pointer, freed with LocalFree below.
-        unsafe { ConvertStringSidToSidW(&HSTRING::from(sid.as_str()), &raw mut parsed) }
-            .map_err(|error| os_error(&error))?;
-        let result = self.set(OWNER_SECURITY_INFORMATION, Some(parsed), None);
-        // SAFETY: ConvertStringSidToSidW allocated the SID with LocalAlloc; freed once.
-        unsafe { LocalFree(Some(HLOCAL(parsed.0))) };
-        result
+        let descriptor = Descriptor::from_sddl(&format!("O:{}", sid.as_str()))?;
+        self.set(OWNER_SECURITY_INFORMATION, &descriptor)
     }
 
-    /// `SetSecurityInfo` with `info`, an owner and a DACL, which the caller keeps alive.
-    fn set(
-        &self,
-        info: OBJECT_SECURITY_INFORMATION,
-        owner: Option<PSID>,
-        dacl: Option<*const ACL>,
-    ) -> io::Result<()> {
-        // SAFETY: the handle is open; the owner and DACL, when given, are valid for the call.
-        check(unsafe { SetSecurityInfo(self.0, SE_FILE_OBJECT, info, owner, None, dacl, None) })
+    /// Writes what `info` names from `descriptor` on this object alone
+    /// (`SetKernelObjectSecurity`): unlike `SetSecurityInfo`, it never propagates inheritable
+    /// entries to the children already there (ADR 0049, "Reparse points").
+    fn set(&self, info: OBJECT_SECURITY_INFORMATION, descriptor: &Descriptor) -> io::Result<()> {
+        // SAFETY: the handle is open; the descriptor is valid while `descriptor` lives.
+        unsafe { SetKernelObjectSecurity(self.0, info, descriptor.0) }.map_err(|e| os_error(&e))
     }
 }
 
@@ -343,20 +564,18 @@ impl Descriptor {
         Ok(Descriptor(descriptor))
     }
 
-    /// Its DACL, which lives as long as `self`.
-    fn dacl(&self) -> io::Result<*const ACL> {
-        let mut present = BOOL(0);
-        let mut dacl: *mut ACL = null_mut();
-        let mut defaulted = BOOL(0);
-        // SAFETY: the descriptor is valid while `self` lives; the out-pointers are live.
-        unsafe {
-            GetSecurityDescriptorDacl(self.0, &raw mut present, &raw mut dacl, &raw mut defaulted)
-        }
-        .map_err(io::Error::other)?;
-        if !present.as_bool() || dacl.is_null() {
-            return Err(io::Error::other("the sandbox folder's SDDL gave no DACL"));
-        }
-        Ok(dacl.cast_const())
+    /// The descriptor of `sddl`, a protected DACL, with the control
+    /// `SetSecurityInfo` gave it: `SetKernelObjectSecurity` writes the control as given, and a
+    /// folder whose DACL isn't marked auto-inherited gives what is made inside entries that
+    /// aren't marked inherited (`PROTECTED_DACL_CONTROL`).
+    fn protected(sddl: &str) -> io::Result<Descriptor> {
+        let descriptor = Descriptor::from_sddl(sddl)?;
+        let control = SECURITY_DESCRIPTOR_CONTROL(PROTECTED_DACL_CONTROL);
+        // SAFETY: the descriptor is valid and owned by `descriptor`; only inheritance bits that
+        // `SetSecurityDescriptorControl` allows are set.
+        unsafe { SetSecurityDescriptorControl(descriptor.0, control, control) }
+            .map_err(|e| os_error(&e))?;
+        Ok(descriptor)
     }
 }
 
@@ -368,3 +587,6 @@ impl Drop for Descriptor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

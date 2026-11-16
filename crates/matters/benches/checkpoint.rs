@@ -325,7 +325,7 @@ mod bench {
         c.bench_function("preview_restore_large", |b| {
             b.iter(|| {
                 let plan = matter
-                    .preview_restore(checkpoint_id(5), RestoreFiles::All)
+                    .preview_restore(checkpoint_id(5), RestoreFiles::All, None)
                     .unwrap();
                 assert!(plan.writes.len() >= 100, "{}", plan.writes.len());
                 plan
@@ -368,6 +368,7 @@ mod bench {
                 outside_edits: checkpoint_id(next_id),
                 checkpoint: checkpoint_id(next_id + 1),
                 at: Timestamp::new(1_800_000_000_000 + i64::try_from(next_id).unwrap()).unwrap(),
+                undoes: None,
             };
             matter.restore(&request).unwrap()
         };

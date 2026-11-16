@@ -6,9 +6,10 @@ use std::fmt::Debug;
 
 use clauseo_protocol::{
     CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent, ErrorCode,
-    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionAbout, PermissionKind, RawFrom,
-    RawPayload, RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob,
-    Timestamp, ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
+    ExpiryReason, HostError, LimitSource, Notice, NoticeKind, NoticeLevel, PackId, PackSkipReason,
+    PermissionAbout, PermissionKind, RawFrom, RawPayload, RenameSource, SkippedFileReason,
+    StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp, ToolCallStatus, ToolKind,
+    TurnFailed, UnavailableReason,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -113,7 +114,8 @@ fn permission_about() {
 #[test]
 fn stop_reason() {
     use StopReason::{
-        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, OutsideMatter,
+        Refusal, TooLong,
     };
     let cases = [
         (EndTurn, "end_turn"),
@@ -122,8 +124,10 @@ fn stop_reason() {
         (Refusal, "refusal"),
         (Cancelled, "cancelled"),
         (NotAllowed, "not_allowed"),
+        (OutsideMatter, "outside_matter"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
+        (TooLong, "too_long"),
     ];
     unit_enum(&StopReason::ALL, &cases, StopReason::Unknown);
     let names: Vec<_> = StopReason::ALL
@@ -144,6 +148,69 @@ fn notice_level() {
 }
 
 #[test]
+fn pack_skip_reason() {
+    let cases = [
+        (PackSkipReason::NotTurnedOn, "not_turned_on"),
+        (PackSkipReason::NotAdmitted, "not_admitted"),
+        (PackSkipReason::Changed, "changed"),
+        (PackSkipReason::Missing, "missing"),
+        (PackSkipReason::Invalid, "invalid"),
+        (PackSkipReason::TooMany, "too_many"),
+    ];
+    unit_enum(&PackSkipReason::ALL, &cases, PackSkipReason::Unknown);
+}
+
+#[test]
+fn notice_kind() {
+    decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
+    decodes_in_both(
+        r#""auto_mode_unavailable""#,
+        &NoticeKind::AutoModeUnavailable,
+    );
+    decodes_in_both(
+        r#""outside_matter_blocked""#,
+        &NoticeKind::OutsideMatterBlocked,
+    );
+    decodes_in_both(
+        r#""shell_network_blocked""#,
+        &NoticeKind::ShellNetworkBlocked,
+    );
+    decodes_in_both(
+        r#""shell_network_blocked_no_web_search""#,
+        &NoticeKind::ShellNetworkBlockedNoWebSearch,
+    );
+    let pack = PackId::new("nda-kit").unwrap();
+    let skipped = NoticeKind::SkillPackNotLoaded {
+        pack,
+        reason: PackSkipReason::Changed,
+    };
+    decodes_in_both(
+        r#"{"skill_pack_not_loaded":{"pack":"nda-kit","reason":"changed"}}"#,
+        &skipped,
+    );
+    round_trips(&skipped);
+    data_enum_unknown(&unknown_of::<NoticeKind>("later"));
+}
+
+/// A notice logged before `kind` reads with none. A skill pack reason from a newer Clauseo reads
+/// as `Unknown`, and a notice left without its kind writes none.
+#[test]
+fn a_notice_without_or_with_a_newer_skill_pack_reason() {
+    let old: Notice = serde_json::from_str(r#"{"level":"warning","text":"Old."}"#).unwrap();
+    assert_eq!(old.kind, None);
+    let newer = r#"{"level":"warning","text":"Skipped.",
+        "kind":{"skill_pack_not_loaded":{"pack":"nda-kit","reason":"a_later_reason"}}}"#;
+    let notice: Notice = serde_json::from_str(newer).unwrap();
+    let expected = NoticeKind::SkillPackNotLoaded {
+        pack: PackId::new("nda-kit").unwrap(),
+        reason: PackSkipReason::Unknown,
+    };
+    assert_eq!(notice.kind, Some(expected));
+    let written = serde_json::to_string(&old).unwrap();
+    assert_eq!(written, r#"{"level":"warning","text":"Old."}"#);
+}
+
+#[test]
 fn deliverable() {
     let cases = [
         (Deliverable::Live, "live"),
@@ -154,7 +221,7 @@ fn deliverable() {
 
 #[test]
 fn checkpoint_kind() {
-    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Undo};
+    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Revisions, Undo};
     let cases = [
         (Import, "import"),
         (BeforeTurn, "before_turn"),
@@ -162,6 +229,7 @@ fn checkpoint_kind() {
         (OutsideEdits, "outside_edits"),
         (Undo, "undo"),
         (Restore, "restore"),
+        (Revisions, "revisions"),
     ];
     unit_enum(&CheckpointKind::ALL, &cases, CheckpointKind::Unknown);
 }
@@ -202,6 +270,7 @@ fn skipped_file_reason() {
     let cases = [
         (SkippedFileReason::OverSizeCap, "over_size_cap"),
         (SkippedFileReason::CloudOnly, "cloud_only"),
+        (SkippedFileReason::UnreadFolder, "unread_folder"),
     ];
     unit_enum(&SkippedFileReason::ALL, &cases, SkippedFileReason::Unknown);
 }
@@ -325,6 +394,7 @@ fn steer_outcome() {
         (SteerOutcome::Injected { turn }, "injected"),
         (SteerOutcome::Requeued { turn }, "requeued"),
         (SteerOutcome::SentNow { turn }, "sent_now"),
+        (SteerOutcome::NotSent { turn }, "not_sent"),
     ];
     for (value, key) in &cases {
         let json = format!(r#"{{"{key}":{{"turn":"{}"}}}}"#, v7_text(7));
@@ -340,7 +410,10 @@ fn steer_outcome() {
         r#"invalid type: string "not-a-uuid", expected 16 bytes"#,
     );
     let names = SteerOutcome::VARIANT_NAMES;
-    assert_eq!(names, ["Injected", "Requeued", "SentNow", "Unknown"]);
+    assert_eq!(
+        names,
+        ["Injected", "Requeued", "SentNow", "NotSent", "Unknown"]
+    );
 }
 
 #[test]

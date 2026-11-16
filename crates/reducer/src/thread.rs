@@ -60,21 +60,36 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
                 set_some(&mut h.agent_name, &event.agent_name)
             });
         }
-        // An attach changes the status not yet: the next prompt gives it. Going back to `Idle`
-        // after an exit is a restart transition, not folded yet. Its capabilities say whether a
-        // steer joins the running turn.
+        // An attach leaves `IdleStopped` for the settled status, so the stopped agent's thread
+        // shows its real state again, and it ends a resume's cue (`resuming_since`) even while
+        // the status stays `Starting`. Going back to `Idle` after an exit is a restart
+        // transition, not folded yet. Its capabilities say whether a steer joins the running
+        // turn.
         DomainEvent::AgentSessionAttached(event) => {
             queue::session_attached(state, &event.capabilities, out);
+            update_header(state, "agent_session_attached", out, |h| {
+                set(&mut h.resuming_since, None)
+            });
+            if state.status() == ThreadStatus::IdleStopped {
+                let status = turn::settled_status(state);
+                set_status(state, "agent_session_attached", out, status);
+            }
+            // A stop held for a running turn's end is over too: the new session is live.
+            if state.after_turn == Some(ThreadStatus::IdleStopped) {
+                state.after_turn = None;
+            }
         }
         DomainEvent::WebSearchRecorded(event) => web::search_recorded(state, event, out),
         DomainEvent::PageVisited(event) => web::page_visited(state, event, out),
         DomainEvent::Unknown { .. } => {}
-        DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
+        DomainEvent::AgentSessionDetached(event) => {
+            turn::detached(state, &event.reason, ts, out);
+        }
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
         DomainEvent::SteerResolved(event) => queue::steer_resolved(state, event, out),
-        DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
+        DomainEvent::TurnStarted(event) => turn::turn_started(state, event, out),
         DomainEvent::TextAppended(event) => text_appended(state, seq, event, out),
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
         DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, ts, event, out),
@@ -126,7 +141,19 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::MatterCreated(_) => wrong_stream(out, "matter_created"),
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
-        DomainEvent::VersionRestored(_) => wrong_stream(out, "version_restored"),
+        // A restore asked from this conversation: its marker, as the matter's stream has it.
+        DomainEvent::VersionRestored(event) => {
+            let kind = MarkerKind::VersionRestored {
+                from: event.from,
+                checkpoint: event.checkpoint,
+                scope: event.scope.clone(),
+                undoes: event.undoes,
+                written: event.written.clone(),
+                removed: event.removed.clone(),
+                more: event.more,
+            };
+            insert_marker(state, seq, event_id, ts, kind, out);
+        }
         DomainEvent::MatterRelocated(_) => wrong_stream(out, "matter_relocated"),
     }
 }
@@ -198,13 +225,19 @@ pub(super) fn update_header(
     }
 }
 
+/// Sets the status, and clears `resuming_since` when the status leaves `Starting`: the resume
+/// cue lasts only while the thread is starting. One `Upsert` when either changed.
 pub(super) fn set_status(
     state: &mut ThreadState,
     event: &'static str,
     out: &mut Applied,
     to: ThreadStatus,
 ) {
-    update_header(state, event, out, |h| set(&mut h.status, to));
+    update_header(state, event, out, |h| {
+        let left_starting = to != ThreadStatus::Starting;
+        let cleared = left_starting && set(&mut h.resuming_since, None);
+        set(&mut h.status, to) | cleared
+    });
 }
 
 fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out: &mut Applied) {
@@ -223,7 +256,9 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         agent: event.agent.clone(),
         agent_name: None,
         status: ThreadStatus::Idle,
+        resuming_since: None,
         queue_held: false,
+        queue_held_reason: None,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
         tools: Vec::new(),
         snoozed_until: None,
@@ -275,6 +310,7 @@ fn notice(
         event: event_id,
         level: event.level,
         text: event.text.clone(),
+        kind: event.kind.clone(),
         ts,
     };
     insert_new(state, seq, ViewEntry::Notice(entry), out);

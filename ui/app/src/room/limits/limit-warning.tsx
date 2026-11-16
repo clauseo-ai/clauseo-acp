@@ -6,7 +6,7 @@
 // The note itself is in the thread's chunk (thread/limit-warning-note.tsx, re-exported by list.tsx), where
 // limit-note.tsx already is: loaded lazily on its own it would share a chunk with the thread's, which the release
 // build's bare dynamic imports can't load (vite-config.test.ts).
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { useAgentSelect, useNow } from "../../store/limits.ts";
 import { useAgentPlan } from "../thread/agent-plan.ts";
@@ -17,13 +17,14 @@ const WarningNote = lazy(() =>
   late(import("../thread/list.tsx")).then((m) => ({ default: m.WarningNote })),
 );
 
-/** The open conversation's agent's warning; nothing when there is none. */
-export function LimitWarning() {
+/** The open conversation's agent's warning; `fallback` when there is none (U15's out-of-credit note, which yields to
+ * the warning, since the warning affects every answer). */
+export function LimitWarning({ fallback = null }: { fallback?: ReactNode }) {
   const plan = useAgentPlan();
   const key = useAgentSelect(plan?.kind, warningKey);
   // its time against this render's clock: the host sends a new view at each shown reset, nothing ticks here
   const now = useNow();
-  if (key === "") return null;
+  if (key === "") return fallback;
   return (
     <Suspense fallback={null}>
       <WarningNote warning={key} now={now} />

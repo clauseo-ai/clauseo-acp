@@ -101,6 +101,8 @@ fn round_trip(test: &str, name: &str) {
 /// the restore wrote (kind `Restore`), which is new and not the one restored from.
 fn restore(host: &Running, matter: MatterId, checkpoint: CheckpointId, name: &str) {
     let outcome = host.ok(HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter,
         checkpoint,
         scope: RestoreRequest::Files {

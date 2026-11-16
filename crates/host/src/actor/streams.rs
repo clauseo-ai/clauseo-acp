@@ -182,10 +182,13 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     {
         sent.on_sent(std::slice::from_ref(envelope));
     }
-    // The queue's held flag is the host's, never in the log or a snapshot.
+    // The queue's held flag and its reason are the host's, never in the log or a snapshot.
     if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread_mut()) {
         actor.triage.loaded();
-        let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_held(actor, thread));
+        let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_hold(actor, thread));
+    }
+    if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread()) {
+        turn::history_settles(actor, thread, thread_state);
     }
     let loaded = Box::new(Loaded {
         state,
@@ -229,11 +232,13 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
     }
     if let Some(StreamSlot::Loaded(loaded)) = actor.streams.remove(&stream)
         && let (StreamId::Thread(thread), Some(state)) = (stream, loaded.state.as_thread())
-        && let Some(entry) = actor.threads.get_mut(&thread)
     {
-        entry.header = state.header().cloned();
-        if let Some(stop) = super::rail::last_step(state) {
-            entry.last_stop = Some(stop);
+        turn::history_settles(actor, thread, state);
+        if let Some(entry) = actor.threads.get_mut(&thread) {
+            entry.header = state.header().cloned();
+            if let Some(stop) = super::rail::last_step(state) {
+                entry.last_stop = Some(stop);
+            }
         }
         actor.lists.touch_thread(thread);
     }

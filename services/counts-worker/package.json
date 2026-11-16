@@ -1,0 +1,14 @@
+{
+  "name": "clauseo-counts-worker",
+  "private": true,
+  "type": "module",
+  "description": "Checks and tests for the counts Worker: wrangler, and the deploy guard's TOML reader.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 'scripts/*.test.mjs' 'tests/*.test.mjs'",
+    "test:scripts": "node --test 'scripts/*.test.mjs' tests/source.test.mjs"
+  },
+  "devDependencies": {
+    "smol-toml": "1.9.1",
+    "wrangler": "4.157.0"
+  }
+}

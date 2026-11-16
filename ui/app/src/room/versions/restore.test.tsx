@@ -68,7 +68,8 @@ const answering =
 
 for (const [name, path, pdf] of [
   ["a PDF", "exhibit.pdf", true],
-  ["a Word document", "reply.docx", false],
+  // a Word document is marked up instead (blackline.test.tsx)
+  ["a document whose words can't be compared yet", "reply.txt", false],
 ] as const) {
   test(`comparing with now shows ${name} on the same sheet, with the PDF's sentence on PDFs only`, async () => {
     h = await mountVersions(VERSIONS, STEPS, {
@@ -129,7 +130,7 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
 
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
   ]);
   // the host's restore version, and its marker, on the matter's stream
   await h.deliver(MATTER_STREAM, [
@@ -162,9 +163,9 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   ).toBe(`Restored to ${at2} today`);
 
   await h.click(done?.querySelector(".ver-restored-undo"));
-  // the Undo asks first, with what restoring the version before writes now
+  // the Undo asks first, with what restoring the version before writes now, as an undo of the restore cp4
   expect(queried(h, "preview_restore").at(-1)).toEqual({
-    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
   });
   expect(describedBy()).toBe(
     "2 documents will change: \u2068brief.txt\u2069 and \u2068notes.docx\u2069. You can undo this.",
@@ -172,8 +173,8 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   expect(h.sent("restore_version")).toHaveLength(1);
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
-    { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4", thread: THREAD },
   ]);
   expect(document.body.textContent).toContain(
     `Undid the restore. The matter stands as it did at ${at3}.`,
@@ -215,8 +216,8 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   await h.click(h.one("dialog-try-again"));
   expect(queried(h, "preview_restore")).toHaveLength(2);
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
   ]);
   expect(dialog()).toBeNull();
   expect(document.body.textContent).not.toContain(errorWords("en", "matter.file_locked"));

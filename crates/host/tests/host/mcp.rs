@@ -18,7 +18,11 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 struct Hook(Value, BTreeMap<OsString, OsString>);
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         self.0.as_object().cloned()
     }
 
@@ -147,6 +151,28 @@ fn a_policy_list_replaces_the_users() {
     host.shutdown();
 }
 
+/// R24 (decision D7): a firm's policy server named `case-law` (the name of Clauseo's case-law
+/// connector, in any case) is dropped when settings load, so the launch carries the firm's other
+/// server alone: the same `mcp-policy` scenario, which accepts only `firm`, passes.
+#[test]
+fn a_policy_server_named_case_law_never_reaches_the_launch() {
+    let dir = Dir::new("mcp_policy_case_law", &[]);
+    let bin = dir.folder("bin", &[]);
+    let user = json!({"mcp": {"servers": {
+        "case-law": {"command": command(&bin, "mine"), "enabled": true},
+    }}});
+    dir.set_settings(&[(FAKE, Scenario::Local("mcp-policy"))], user);
+    let policy = json!({"mcp": {"servers": {
+        "firm": {"command": command(&bin, "firm"), "enabled": true},
+        "case-law": {"command": command(&bin, "firm-case-law"), "enabled": true},
+        "CASE-LAW": {"command": command(&bin, "firm-case-law"), "enabled": true},
+    }}});
+    dir.set_policy(&policy.to_string());
+    let host = start(&dir, 0, None);
+    one_turn(&dir, &host);
+    host.shutdown();
+}
+
 /// A policy list that is not an object, and a `policy.json` that does not parse, both lock the
 /// list empty: the user's enabled server does not go.
 #[test]
@@ -234,14 +260,15 @@ fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
 
 /// R21's done-when "Hook servers": the lawyer's enabled servers first, in name order, then the
 /// hook's `browser` with its per-session values, on `session/new` and then `session/load`, for a
-/// `claude-acp` and a `codex-acp` agent (both `fake_agent`). The new session plays the
+/// kind-less agent (`BROWSING`: Claude has no browser on macOS and Linux) and a `codex-acp` agent
+/// (both `fake_agent`). The new session plays the
 /// checked-in `tools-mcp-servers`; the load and the Codex session check the filled folder and
 /// session id exactly.
 #[test]
 fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     use crate::profile_rig::{
-        CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
-        filled_browser, settings, template, turn,
+        BROWSING, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
+        codex_servers, filled_browser, settings, template, turn,
     };
     let dir = Dir::new("mcp_hook_servers", &[]);
     let bin = dir.folder("bin", &[]);
@@ -253,20 +280,21 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     }}});
     let lawyers = json!([
         {"name": "alpha", "command": "{{any}}", "args": ["--stdio"],
-            "env": [{"name": "REGION", "value": "uk"}]},
-        {"name": "gamma", "command": "{{any}}", "args": [], "env": []},
+            "env": crate::support::lawyer_env(vec![json!({"name": "REGION", "value": "uk"})])},
+        {"name": "gamma", "command": "{{any}}", "args": [],
+            "env": crate::support::lawyer_env(Vec::new())},
     ]);
     let mut servers = lawyers.as_array().cloned().unwrap();
     servers.push(filled_browser());
     let codex = template(
         &dir,
         "hs-codex",
-        &codex_lines("hs-codex", &json!({"mcpServers": servers})),
+        &codex_lines("hs-codex", &json!({"mcpServers": codex_servers(&servers)})),
     );
     let claude = crate::support::Scenario::Local("tools-mcp-servers");
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({})), (CODEX, &codex, json!({}))]),
+        agents(&[(BROWSING, &claude, json!({})), (CODEX, &codex, json!({}))]),
         mcp.clone(),
     );
     let hook = Hook {
@@ -285,7 +313,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
         wire(config, first)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
     host.shutdown();
@@ -300,7 +328,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
             &[],
         ),
     );
-    settings(&dir, agents(&[(CLAUDE, &load, json!({}))]), mcp);
+    settings(&dir, agents(&[(BROWSING, &load, json!({}))]), mcp);
     let host = dir.start_launching(1, launcher, |config| wire(config, hook));
     turn(&host, thread);
     host.shutdown();

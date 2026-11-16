@@ -244,6 +244,8 @@ fn a_recharge_is_created_and_a_wait_poll_returns_when_paid() {
         pending["status"], "awaiting_payment",
         "held for the cap, then answered"
     );
+    assert_eq!(pending["recharge_id"], json!(id));
+    assert!(pending["then"].is_string(), "{pending}");
 
     fake.set_wait_cap(Duration::from_secs(10));
     std::thread::scope(|scope| {
@@ -253,7 +255,11 @@ fn a_recharge_is_created_and_a_wait_poll_returns_when_paid() {
         }
         assert!(fake.mark_paid(&id));
         let paid: Value = serde_json::from_slice(&poll.join().unwrap().body).unwrap();
+        // The connector's paid shape: the asked id at the top, no `payment`, the balance.
         assert_eq!(paid["status"], "paid");
+        assert_eq!(paid["recharge_id"], json!(id));
+        assert_eq!(paid.get("payment"), None);
+        assert_eq!(paid["balance_credits"], fake.balance());
     });
     assert_eq!(
         get(&fake, "/v1/case-law/recharges/rch_nope", Some(&access)).status,

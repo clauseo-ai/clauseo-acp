@@ -40,7 +40,9 @@ Each step is one commit on the thread stream unless it names the matter stream.
    stored session id when the agent offers it, else `session/new` (with a "context not restored"
    `Notice` when the thread has turns). `AgentSessionAttached`. A failure ends the turn with
    `TurnFailed` and `TurnEnded { Failed }`, no `TurnStarted`.
-3. The matter's writer held by another thread: `TurnQueued`, first in first out per matter.
+3. The matter's writer held by another thread: `TurnQueued`, first in first out per matter. An
+   agent-started turn that takes a free writer logs `TurnQueued` behind its own thread instead,
+   as it has no `UserMessage` to show it on its way.
 4. Before-turn checkpoint, then `TurnStarted`. A checkpoint failure ends the turn with
    `TurnFailed` carrying the matter error's code, and nothing goes to the agent.
 5. Once `TurnStarted` is durable, `session/prompt`, the undo note first. It ends on a stop
@@ -63,6 +65,48 @@ checkpoint.
 Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited }`, then
 `AgentSessionDetached { Exited }` last.
 
+**Agent-started turns** (2026-11-11, `actor/turn/own_turn.rs`). claude-agent-acp starts a turn of
+its own, with no `session/prompt`, when a command Claude Code put in the background finishes (a
+steer during a Bash call backgrounds the command and ends the prompt `end_turn`). Its updates
+come with no prompt in flight (`Origin::Idle`), and agent output outside a turn is never
+dropped: answer or thought text, a tool call the host does not have, or a permission request or
+elicitation (`acp` now tags those with their `Origin` too) opens a turn on the same thread; a
+request is asked once the turn is live, never cancelled as outside a turn. It has no `UserMessage` and is otherwise a turn: step 3 (the writer) at once, step 4
+(the before checkpoint, with the outside edits since the last turn as for a prompt, then
+`TurnStarted`), its updates logged live, steps 6 to 8 with the after checkpoint, so the view shows
+an exchange with no question and Undo has its step. No protocol change: `TurnStarted` needs no
+prompt, the reducer's step needs only the turn, and the UI already draws an exchange with no
+question. With no `UserMessage`, its `TurnQueued` shows it from its open (2026-11-12): behind the
+holder when another thread has the writer, else behind its own thread as it takes the writer,
+before its checkpoint, which the reducer folds to `Starting` (a wait with no prompt and no turn
+ahead), so Stop shows from the moment it opens; a prompt queued behind it meanwhile leaves it
+`Starting`, as behind any turn still on its way (0002). Until it is live, and while another turn of the thread starts or ends, the updates
+wait in memory in order; they are logged in the agent-started turn once it starts, or in a turn
+a prompt starts meanwhile, which they then come first in. It ends `EndTurn` on the agent's
+`usage_update` with a cost (claude-agent-acp sends it from the SDK's `result` at the end of every
+turn, its own turns included, with `_meta._claude/origin.kind: "task-notification"` there, read
+from 0.89.1's source, not recorded), or after 60 s with no update, unless a tool call or request
+of the turn is open, which it waits for up to 10 minutes of silence. Queued prompts wait behind
+it as behind any turn. A cancel (Stop, Send now), in every phase (waiting for the writer,
+checkpointing, starting or live), sends `session/cancel`, drops the output waiting for the turn
+and ends it `Cancelled` (at once once live, as no prompt answers it), and opens the turn's late
+window, the own-turn counterpart of a prompt's `Origin::Late`: no prompt response tells the host
+when the agent has stopped, so until its stop signal (the cost-bearing `usage_update`) or 3 s with
+no answer, thought, tool or plan update with no prompt in flight, that output is dropped (a
+lifecycle line counts it, with no text), no agent-started turn opens, and a prompt sent now (or
+sent meanwhile) waits, at most 3 s after the cancel, so the agent's late edits come before the new
+turn's before checkpoint and its Undo takes back only its own. The window closes at the latest
+30 s after the cancel. Agent output while a prompted turn is cancelled, waiting when it ends, or
+within 5 s of its end is that turn's tail and is dropped too. `acp`'s `Origin::Late` now ends at
+the cancelled prompt's response, so output after it can open such a turn. A host restart repairs
+an agent-started turn left open as it repairs any (`Failed`, `thread.interrupted`), keeping what
+it logged; one that never started (its `TurnQueued` durable, no `TurnStarted` or `TurnEnded`) has
+no prompt to queue again, so it ends `TurnEnded { Cancelled }` with no step, the session's detach
+after it (`own_turn/restart.rs`), and the thread is `Idle`. codex-acp
+does not start turns of its own for a client without AIR's async tasks (its background terminals
+are AIR-only), so this applies to Claude; were it to, the same path would take it, ended by the
+quiet period, as Codex sends no cost-bearing usage at a turn's end.
+
 ### Queue, send now and steer
 
 Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/queue.rs` and its
@@ -75,7 +119,8 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   `thread.queue_full` and nothing is logged. A thread whose own undo holds the writer still
   refuses with `thread.turn_running`, as does one whose last end failed twice.
 - The queue moves on when the current turn's `TurnEnded` is durable: always to a head sent now
-  (send now, `SendQueuedNow`, a requeued steer), else only after `EndTurn`. Any other stop holds
+  (send now, `SendQueuedNow`, a steer the lawyer sent now), else only after `EndTurn`, which
+  also starts a steer the host held (below). Any other stop holds
   it, `AtLimit` included (taken from `TurnEnded`, never from a later `TurnStoppedAtLimit`), until
   `ResumeQueue`, `SendQueuedNow` or a new `SendPrompt`. While a steer request is out the queue
   waits for its answer, and while the thread's own undo holds the matter's writer nothing
@@ -88,18 +133,65 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   behind the current turn, the receipt and, for a steer, `SteerResolved { SentNow }`; the new turn
   takes the head and the current turn takes the Cancel path. With no current turn it starts at
   once, ahead of a held queue, which moves on after it. Send now is not counted against the limit.
-- A real steer needs the running turn's prompt in flight and both of the agent's
-  `SteeringCapability` flags (claude-agent-acp; `acp` reads `_meta.steering.supported` and
-  `agentCapabilities._meta.claudeCode.promptQueueing`). Its `UserMessage` names the running turn
-  and is durable before `_session/steering` goes out with `idleBehavior: promptRequired`.
-  `Injected` logs `SteerResolved { Injected }` with `aside`, the running turn's tool calls not yet
-  finished (the view marks them as carried on in the background); `promptRequired`, a failure or
-  `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a `TurnQueued` behind
-  the steered turn, and the new turn takes the head with the steered content. An answer that
-  has not come 30 s after the steered turn's end counts as a failure, so an agent that never
-  answers cannot freeze the queue (a later answer is ignored). The wait starts at the end, not
-  at the send: an agent may answer only once it takes the message in, and a steer requeued
-  while its turn runs would reach the agent twice.
+- Steering (amended 2026-11-11: a steer counts as delivered only once confirmed). A real steer
+  goes only to an agent with both `SteeringCapability` flags (claude-agent-acp; `acp` reads
+  `_meta.steering.supported` and `agentCapabilities._meta.claudeCode.promptQueueing`), and only
+  while Claude can take it now: the turn is prompting, not cancelled, and no permission or
+  question is open (claude-agent-acp defers a steer while one is, and a cancel then drops it).
+  Its `UserMessage` names the running turn and is durable before `_session/steering` goes out
+  with `idleBehavior: promptRequired`. Every other steer is a send now (`SentNow`), Codex's
+  included, or is held by the host.
+- Host-held steers. A steer Claude could take later but not now waits as the next turn: its
+  `UserMessage` with a new turn, `TurnQueued` behind the running turn marked `at_head`, and
+  `SteerResolved { Requeued }`; it is never sent as a steer. It starts once the running turn ends
+  `EndTurn` (a permission allowed or rejected, the turn carrying on to its end). After any other
+  stop (Stop, Send now of another message, a failure) it is not sent: one commit of its turn's
+  `TurnEnded { Cancelled }`, as `RemoveQueuedPrompt` logs it, and `SteerResolved { NotSent }`
+  naming the turn that ended. A steer requeued before Claude took it is held the same way.
+- Confirmation. claude-agent-acp answers `injected` once the steer is in its own queue, not when
+  the model reads it, sends nothing when it does, and drops a queued steer unread on
+  `session/cancel`. So for an agent with a Claude home `injected` only accepts the steer; nothing
+  is logged until Claude's transcript (`<home>/projects/<project key>/<session>.jsonl`) shows it
+  taken in: a line stamped no earlier than 2 s before the send whose words hold one of its text
+  blocks exactly (both trimmed). The words are a `user` line's message content (a string, or its
+  `text` blocks; never a `tool_result` block nor anything beside the message, which hold a tool's
+  output), a `queued_command` attachment's `prompt`, or the `content` of a queue operation
+  `remove` with `absorbed_mid_turn`. Just before the steer goes out the host marks each
+  transcript file at its length (one `stat` each, in the host's data folder; a file not there yet
+  is marked at its start), and each check reads on from where the last stopped, off the actor, at
+  most 2 MiB per file, up to the last whole line: a line cut by that cap or still being written is
+  read again from its start, one longer than the cap is skipped (never a steer's own: eight times
+  the longest prompt text), and a file shorter than its mark is read from its start. A read that
+  stopped at the cap is followed by the next check at once. Nothing before the mark is read and
+  nothing is ever read whole; a missing or unreadable file counts as not taken in. Checks run every
+  2 s on the host clock while the steer's turn runs, at once when it ends, then every 2 s for 10 s
+  more: Claude Code may write the line late, or run the queued steer as a turn of its own once the
+  turn has ended (an agent-started turn, `own_turn.rs`), which then shows it taken in. Confirmed,
+  it logs `SteerResolved { Injected }` naming the steered turn, with `aside`, the turn's tool
+  calls not finished when the agent answered (the view marks them as carried on in the
+  background). An agent with no Claude home (Codex never steers for real; the tests' fake agent)
+  has no better signal, so its `injected` counts as confirmed at once; a Claude agent whose
+  transcript cannot be placed (no home or no session known) has nothing to read, so its steer gets
+  no check and no timer and is `NotSent` as soon as its turn ends.
+- The steered turn's end, whatever its stop, with a steer unconfirmed: the checks go on for 10 s
+  after the end (after a cancel, which drops the steer, the check at the end is the last), then
+  `Injected` or `SteerResolved { NotSent }` with that turn; never sent again on its own. Nothing in
+  the queue waits for those checks: the next queued turn starts as it would (`move_on` waits only
+  for steers not answered yet), and Send now naming the ended turn within the 10 s requeues the
+  steer as for a running one. A steer still unanswered at the end: after `EndTurn` the queue
+  waits for its answer within 30 s of the send (`promptRequired` requeues it and it runs next;
+  `injected` starts its checks with 10 s from the answer; no answer is `NotSent`); after any
+  other stop it is `NotSent` at once and a later answer is ignored. `promptRequired`, `failed`, an
+  error or `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a
+  `TurnQueued` behind the steered turn marked `at_head`; no answer within 30 s of the send while
+  the turn still runs does too, so an agent that never answers cannot freeze the queue.
+- Send now on a steer. `SendQueuedNow` naming the turn a steer not yet settled was sent into is
+  the lawyer sending it: its steers unanswered or unconfirmed move at once to new turns at the
+  head (`Requeued`), which start once that turn has ended whatever its stop, and a running turn
+  is cancelled.
+- Logs. Each steer is logged at info on the lifecycle target, with no text: sent, answered (with
+  the answer's kind), requeued (why), confirmed, and not sent (why: `turn_stopped`,
+  `no_confirmation`, `restart`).
 - `EditQueuedPrompt { thread, turn, text }` replaces the prompt's first text block, drops its other
   text blocks and keeps its file blocks (`QueuedPromptEdited`); empty text for a prompt without
   files is `command.invalid`. `RemoveQueuedPrompt` logs `TurnEnded { Cancelled }` without holding
@@ -113,16 +205,25 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   whole log (edits applied, requeued steers in their new turns) and holds it; the started open
   turn is the one the fold shows running, no longer the last prompt, and a held queue is found
   behind a later turn that ended (the newest prompt without a step counts, not the last one). A
-  steer saved but never answered before the stop moves to a new held queued turn
-  (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it.
-  A restart restores the log's order: a requeued steer keeps its message's place, behind prompts
-  queued before it, and a send now or a requeue's place at the head is not kept. A send now or a
-  `SendQueuedNow` move not yet started when the host stops is lost; the turn stays queued, held.
+  steer saved but never settled before the stop (no `SteerResolved`: unanswered or unconfirmed)
+  gets `SteerResolved { NotSent }` with the turn it was sent into, which has ended or which the
+  repair ends `Failed`; nothing is queued for it.
+  A restart restores the log's order, except for the turns put back at the head: a requeued
+  steer and a turn held for its agent's sign-in keep that head place as they have it live (their
+  `TurnQueued` is `at_head`), the latest put back first. A send now's place at the head is not
+  kept. A send now or a `SendQueuedNow` move not yet started when the host stops is lost; the
+  turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
-lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before
-relying on what you remember about them." The paths are the undo and restore checkpoints' files
-since the thread's last `TurnStarted`. An undo keeps the writer and leaves the note unchanged
+lawyer put these files back to an earlier version, and removed those it did not have: notes/a.txt,
+brief.txt. Read them again before relying on what you remember about them." The removed files are
+those an undo deleted (its turn made them). The paths are the undo checkpoints' files since the
+thread's last `TurnStarted`. A Versions restore has a line of its own, after what came before it,
+so a file an undo removed and a restore brought back reads as back: "The lawyer restored
+brief.txt from Versions; it's back as of 2026-11-11 14:05 UTC." (the time in UTC, to the minute;
+"they're back" for several files), and for the files it removed, "That restore also removed
+draft.docx, which that version did not have." Undos after a restore get a line starting "Then
+the lawyer put these files back". An undo keeps the writer and leaves the note unchanged
 until `StepUndone` is durable; a failed undo commit is retried once, as a turn's end is.
 
 ### Versions
@@ -138,7 +239,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 - `RestoreVersion` holds the matter's writer for the whole restore, and is refused with
   `matter.turn_running` while a turn or an undo holds it or turns wait. A turn reaching step 3
   meanwhile logs `TurnQueued` behind its own thread, the form start-up reconciliation uses; the
-  reducer folds that to `Idle` while no turn of the thread runs, so the thread shows Idle, not
+  reducer folds that to `Idle` while no turn of the thread runs (an agent-started turn's, with no
+  prompt, to `Starting`), so the thread shows Idle, not
   Queued, for the few moments the restore holds the writer. The
   version must be the matter's (`command.invalid`). One commit of the matter's stream logs the
   outside-edits checkpoint, `CheckpointRecorded { Restore }` and `VersionRestored`; a failed one
@@ -149,6 +251,11 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   nothing to write logs only the outside edits (and the reused id, if the log lacks it) and
   answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
   `VersionRestored` event, not the outcome, tells the client nothing was written.
+- `RestoreVersion { undoes }` takes back an earlier restore: the files that restore added (in
+  its tree, not the checkpoint before it) are deleted too, each only while it holds what the
+  restore wrote; `PreviewRestore { undoes }` lists them in `removes`. `RestoreVersion { thread }`
+  names the conversation it was asked from (one of the matter's, else `command.invalid`): the
+  same commit logs `VersionRestored` in that thread's stream, where it folds to the same marker.
 - The files a restore wrote join the note of every thread of the matter once its commit is
   durable. `VersionRestored` does not list them, so this part of the note is held in memory and
   lost if the host restarts before that thread's next prompt (clauseo-acp-private#183 makes it
@@ -165,8 +272,24 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   undo), then answers `QueryResult::UndoPreview { edited_since }` from `Matter::edited_since` on
   the matter's thread: the step's files whose content differs from the after-turn checkpoint,
   by the stat cache and else a blob hash. It writes nothing, logs nothing and takes no writer.
-  It is what Undo's "changed after Clauseo's edit" ask reads; a `FileChange`'s
-  `may_include_lawyer_edits` (no agent tool call named the path during the turn) is not.
+  It is what Undo's "changed after Clauseo's edit" ask reads. A `FileChange`'s
+  `may_include_lawyer_edits` (no agent tool call wrote the path during the turn: a diff's path or
+  an edit, delete or move call's location, `clauseo_matters::names_a_write`; never a read's,
+  search's or shell call's location; nor did a shell command of the turn, read from its text by
+  `shell_writes`, Bash's or PowerShell's: redirects, `-o`, `tee`, `cp`, and `stetdoc`'s forms,
+  its default `NAME.edited.docx` and `--in-place`; relative targets join the call's own folder
+  only, since each call starts in the matter's folder (Claude runs under
+  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, Codex runs each exec in its own process), or
+  from an unknown folder when Claude Code's policy settings set that variable to a value it
+  reads as false (read at launch and again by the restart repair);
+  added or modified; only a call that ended
+  `Completed` by the checkpoint wrote anything, so a denied command, an edit whose ask was open
+  at a Stop, or a call the close settles afterwards wrote nothing) is read too: a step with such
+  a file asks in Versions' undo dialog, from Versions or the thread, with Keep current chosen for it, whatever `edited_since`
+  says, since a file the lawyer saved during the turn is unchanged since its after-turn
+  checkpoint. #360 had the thread's Undo read `edited_since` alone, while every shell-made file
+  was flagged; #1023 unflagged those, and the release dry run lost a note the lawyer saved
+  mid-turn to that Undo.
 
 ### Cancel, reconciliation, shutdown
 
@@ -253,6 +376,10 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   `ConfigOptionsReplaced`, `UsageUpdated`, `Notice`, `ThreadRenamed { by: Agent }` and
   `CompactionChanged`.
 - An undo keeps every path of the step the command leaves out.
+- Undo's and restore's deletes go to the OS's trash first, as decision record 0007 says
+  (`clauseo_matters::Settings::trash`): the host passes `OsTrash`, its unit tests a folder in
+  the data folder, and its integration tests a folder of their own
+  (`HostConfig::with_matter_trash`).
 - The agent's launch spec carries the inherited environment, so `process` redacts every
   inherited secret from stderr tails. An inherited name an agent or hook variable also names,
   ignoring case, is left out: on Windows `Path` and `PATH` are one variable, and the inherited

@@ -1,5 +1,6 @@
 //! A strict RFC 3339 reader for the reset times in usage reads:
-//! `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)`, to milliseconds since the epoch.
+//! `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)`, to milliseconds since the epoch. The host reads
+//! Claude's transcript stamps with it too (`actor/turn/queue/transcript.rs`).
 
 use clauseo_protocol::Timestamp;
 
@@ -10,7 +11,7 @@ const MAX_FRACTION: usize = 9;
 /// day the month does not have (leap years counted), an hour past 23, a minute or second past
 /// 59, or an offset past 23:59. `T` and `Z` may be lower case. A fraction past milliseconds is
 /// cut, not rounded.
-pub(crate) fn parse_rfc3339(text: &str) -> Option<Timestamp> {
+pub fn parse_rfc3339(text: &str) -> Option<Timestamp> {
     let bytes = text.as_bytes();
     let year = digits(bytes, 0, 4)?;
     let month = digits(bytes, 5, 2)?;

@@ -5,6 +5,10 @@
 use url::{Host, Url};
 
 use super::Route;
+#[cfg(any(target_os = "macos", windows, test))]
+use super::answer::FailKind;
+#[cfg(any(windows, test))]
+use super::os::OsError;
 
 /// The port of an `http://` proxy URL with none.
 const HTTP_PORT: u16 = 80;
@@ -176,6 +180,159 @@ impl NoProxy {
 fn is_within(host: &str, domain: &str) -> bool {
     host.strip_suffix(domain)
         .is_some_and(|head| head.is_empty() || head.ends_with('.'))
+}
+
+/// `ERROR_WINHTTP_AUTODETECTION_FAILED`: WPAD found no PAC file URL.
+#[cfg(any(windows, test))]
+const AUTODETECTION_FAILED: u32 = 12_180;
+
+/// `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`.
+#[cfg(any(windows, test))]
+pub(super) const UNABLE_TO_DOWNLOAD_SCRIPT: u32 = 12_167;
+
+/// `ERROR_WINHTTP_AUTOPROXY_SERVICE_ERROR`.
+#[cfg(any(windows, test))]
+pub(super) const AUTOPROXY_SERVICE_ERROR: u32 = 12_178;
+
+/// `ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`: a PAC script was got and would not run.
+#[cfg(any(windows, test))]
+pub(super) const BAD_AUTO_PROXY_SCRIPT: u32 = 12_166;
+
+/// `WinHTTP`'s errors for a PAC host that does not answer: `ERROR_WINHTTP_TIMEOUT` (12002),
+/// `..._NAME_NOT_RESOLVED` (12007) and `..._CANNOT_CONNECT` (12029).
+#[cfg(any(windows, test))]
+const PAC_HOST_SILENT: [u32; 3] = [12_002, 12_007, 12_029];
+
+/// Where a PAC file came from, for [`pac_error`].
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum PacFrom {
+    /// WPAD (auto-detect), by DHCP and DNS.
+    AutoDetect,
+    /// The PAC URL the settings name.
+    Url,
+}
+
+/// What a failed PAC lookup (`WinHttpGetProxyForUrl`, its Win32 error, after the in-process
+/// retry) means when nothing after it is set. From a PAC URL the firm named, any error is a
+/// failed lookup, so the caller keeps an earlier answer. From auto-detect, "no proxy here" reads
+/// as `DIRECT`: no WPAD file found (12180), a `wpad` name that answers but serves no script
+/// (12167, a home or ISP name answering 404), and the auto-proxy service off (12178), each of
+/// which would otherwise fail every lookup on that network; any other error (a bad script,
+/// 12166; a timeout, 12002; and the rest) is a failed lookup. `WinHTTP` reports "no WPAD on this
+/// network" and a transient discovery failure with the same code (12180), so a transient one
+/// still reads as direct on a refresh.
+/// A failure's kind is [`pac_kind`]'s.
+#[cfg(any(windows, test))]
+pub(super) fn pac_error(from: PacFrom, error: u32) -> Result<Route, OsError> {
+    let none_here = [
+        AUTODETECTION_FAILED,
+        UNABLE_TO_DOWNLOAD_SCRIPT,
+        AUTOPROXY_SERVICE_ERROR,
+    ];
+    let why = match from {
+        PacFrom::AutoDetect if none_here.contains(&error) => return Ok(Route::Direct),
+        PacFrom::AutoDetect => format!("WPAD failed (WinHTTP error {error})"),
+        PacFrom::Url => format!("the PAC file failed (WinHTTP error {error})"),
+    };
+    Err(OsError {
+        why,
+        kind: pac_kind(from, error),
+    })
+}
+
+/// The kind of a failed PAC lookup's Win32 error. A PAC URL that could not be fetched (12167)
+/// or whose host does not answer ([`PAC_HOST_SILENT`]) is [`FailKind::PacUnreachable`]; WPAD's
+/// never is, its fetch failures meaning no proxy here. A script that would not run (12166) is
+/// [`FailKind::BadScript`] from either. The rest, the auto-proxy service's 12178 included, are
+/// [`FailKind::Other`].
+#[cfg(any(windows, test))]
+pub(super) fn pac_kind(from: PacFrom, error: u32) -> FailKind {
+    match (from, error) {
+        (_, BAD_AUTO_PROXY_SCRIPT) => FailKind::BadScript,
+        (PacFrom::Url, UNABLE_TO_DOWNLOAD_SCRIPT) => FailKind::PacUnreachable,
+        (PacFrom::Url, error) if PAC_HOST_SILENT.contains(&error) => FailKind::PacUnreachable,
+        _ => FailKind::Other,
+    }
+}
+
+/// `kCFErrorPACFileError`: `CFNetwork`'s error for a PAC script that fails to evaluate.
+#[cfg(any(target_os = "macos", test))]
+const CF_PAC_FILE_ERROR: isize = 308;
+
+/// How a macOS PAC run failed, for [`cf_pac_kind`].
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum CfPacFailure<'a> {
+    /// `CFNetwork` called back with an error of this domain and code.
+    Error(&'a str, isize),
+    /// No callback within the run's 5 s.
+    TimedOut,
+}
+
+/// The kind of a failed macOS PAC run: `url` for a PAC URL, else a script held inline. A
+/// script that fails to evaluate (`kCFErrorPACFileError`, 308) is [`FailKind::BadScript`]. A
+/// PAC URL's fetch failure (`NSURLErrorDomain`, or a negative URL-loading code in
+/// `kCFErrorDomainCFNetwork`), or a PAC URL's run with no answer in 5 s, is
+/// [`FailKind::PacUnreachable`]. The rest are [`FailKind::Other`].
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn cf_pac_kind(url: bool, failure: CfPacFailure<'_>) -> FailKind {
+    const CF_NETWORK: &str = "kCFErrorDomainCFNetwork";
+    let not_fetched = match failure {
+        CfPacFailure::Error("NSURLErrorDomain", _) | CfPacFailure::TimedOut => true,
+        CfPacFailure::Error(CF_NETWORK, code) => code < 0,
+        CfPacFailure::Error(..) => false,
+    };
+    if matches!(failure, CfPacFailure::Error(CF_NETWORK, CF_PAC_FILE_ERROR)) {
+        FailKind::BadScript
+    } else if url && not_fetched {
+        FailKind::PacUnreachable
+    } else {
+        FailKind::Other
+    }
+}
+
+/// What the PAC settings answer ([`pac_answer`]).
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PacAnswer {
+    /// The answer, whatever else is set.
+    Final(Result<Route, OsError>),
+    /// WPAD's, when auto-detect is the only PAC setting and it found no route: a static proxy
+    /// set beside it answers instead.
+    Fallback(Result<Route, OsError>),
+    /// Neither auto-detect nor a PAC URL is set.
+    Unset,
+}
+
+/// The PAC settings' answer, `ask` running one lookup (its Win32 error on failure). A PAC URL
+/// the settings name is asked first, so a slow WPAD (with its in-process retry) cannot use up
+/// the lookup's 10 s bound before it: a firm's GPO often sets both. Its route is the answer;
+/// when it fails, auto-detect's route, if it finds one, else the PAC URL's failure. With
+/// auto-detect alone, its route, or its error read by [`pac_error`] as a fallback.
+#[cfg(any(windows, test))]
+pub(super) fn pac_answer(
+    auto_detect: bool,
+    url_set: bool,
+    mut ask: impl FnMut(PacFrom) -> Result<Route, u32>,
+) -> PacAnswer {
+    if url_set {
+        let failed = match ask(PacFrom::Url) {
+            Ok(route) => return PacAnswer::Final(Ok(route)),
+            Err(error) => pac_error(PacFrom::Url, error),
+        };
+        if auto_detect && let Ok(route) = ask(PacFrom::AutoDetect) {
+            return PacAnswer::Final(Ok(route));
+        }
+        return PacAnswer::Final(failed);
+    }
+    if !auto_detect {
+        return PacAnswer::Unset;
+    }
+    match ask(PacFrom::AutoDetect) {
+        Ok(route) => PacAnswer::Final(Ok(route)),
+        Err(error) => PacAnswer::Fallback(pac_error(PacFrom::AutoDetect, error)),
+    }
 }
 
 /// A `WinHTTP` proxy string, as `WinHttpGetIEProxyConfigForCurrentUser` and

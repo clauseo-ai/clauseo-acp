@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use clauseo_protocol::{
-    AgentTextEntry, ErrorCode, HeaderEntry, MatterHeaderEntry, MatterId, MessageId, Seq, TextKind,
-    ThreadId, ThreadStatus, TurnId, ViewEntry,
+    AgentTextEntry, CheckpointId, ErrorCode, HeaderEntry, MatterHeaderEntry, MatterId, MessageId,
+    Seq, TextKind, ThreadId, ThreadStatus, TurnId, ViewEntry,
 };
 use serde::de::{self, IgnoredAny, MapAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct};
@@ -28,7 +28,7 @@ use crate::{Error, StreamState};
 /// events. Bump it with any change to a state field, to how it serialises, or to how events fold
 /// into it (a snapshot folded under the old rule holds the old result): the insta test
 /// `snapshot_shape_is_pinned` fails on a shape change, not on a fold-rule change.
-pub const REDUCER_SCHEMA_VERSION: u32 = 8;
+pub const REDUCER_SCHEMA_VERSION: u32 = 13;
 
 /// A snapshot as read: the schema it was written with and the state.
 #[derive(Debug, Clone, PartialEq)]
@@ -150,7 +150,7 @@ impl SnapshotRef<'_> {
 
 impl Serialize for ThreadState {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("ThreadState", 10)?;
+        let mut s = serializer.serialize_struct("ThreadState", 11)?;
         s.serialize_field("thread", &self.thread)?;
         s.serialize_field("seq", &self.seq)?;
         s.serialize_field("header", &unheld(self.header.as_ref()))?;
@@ -161,18 +161,20 @@ impl Serialize for ThreadState {
         s.serialize_field("after_turn", &self.after_turn)?;
         s.serialize_field("files", &self.files)?;
         s.serialize_field("failures", &self.failures)?;
+        s.serialize_field("before_checkpoints", &self.before_checkpoints)?;
         s.end()
     }
 }
 
-/// The header as the fold left it: `queue_held` is the host's flag, set after each load
-/// ([`crate::set_queue_held`]), so a snapshot writes it `false` and still equals the fold of the
-/// log. Copies the header only while the flag is set.
+/// The header as the fold left it: `queue_held` and its reason are the host's, set after each
+/// load ([`crate::set_queue_held`]), so a snapshot writes them `false` and `None` and still
+/// equals the fold of the log. Copies the header only while either is set.
 fn unheld(header: Option<&HeaderEntry>) -> Option<std::borrow::Cow<'_, HeaderEntry>> {
     header.map(|header| {
-        if header.queue_held {
+        if header.queue_held || header.queue_held_reason.is_some() {
             std::borrow::Cow::Owned(HeaderEntry {
                 queue_held: false,
+                queue_held_reason: None,
                 ..header.clone()
             })
         } else {
@@ -276,6 +278,7 @@ struct ThreadWire {
     after_turn: Option<ThreadStatus>,
     files: BTreeMap<TurnId, TurnFiles>,
     failures: BTreeMap<TurnId, ErrorCode>,
+    before_checkpoints: BTreeMap<TurnId, CheckpointId>,
 }
 
 impl<'de> Deserialize<'de> for ThreadState {
@@ -294,6 +297,7 @@ impl<'de> Deserialize<'de> for ThreadState {
             after_turn: wire.after_turn,
             files: wire.files,
             failures: wire.failures,
+            before_checkpoints: wire.before_checkpoints,
             index,
         })
     }

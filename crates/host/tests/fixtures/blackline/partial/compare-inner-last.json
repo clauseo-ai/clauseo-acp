@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "validation_failed",
+    "message": "The edit would add 1 violation. t1: a table cell does not end with a paragraph.",
+    "next": "Change the edit so it does not add the violation the message describes, then retry. A check of the document lists problems that were already there."
+  }
+}

@@ -18,7 +18,9 @@ golden! { HostCommand::name_of {
         matter: matter_id(1),
         client: FieldChange::Set(ClientName::new("Rathi Steels").unwrap()),
         next_date: FieldChange::Clear,
+        skill_packs: FieldChange::Set(pack_list(&["nda-kit", "a1"])),
         pinned: Some(true),
+        agent_prefs: FieldChange::Set(agent_prefs()),
     };
     OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
     ForgetMatter => forget_matter: HostCommand::ForgetMatter { matter: matter_id(1) };
@@ -37,6 +39,7 @@ golden! { HostCommand::name_of {
     CreateThread => create_thread: HostCommand::CreateThread {
         matter: matter_id(1),
         agent: agent("claude-acp"),
+        config: Some(picks(&[("model", "opus"), ("effort", "high")])),
     };
     SendPrompt => send_prompt: HostCommand::SendPrompt {
         thread: thread_id(2),
@@ -93,6 +96,8 @@ golden! { HostCommand::name_of {
         files: vec![FileDecision { path: path("a.docx"), choice: FileChoice::Undo }],
     };
     RestoreVersion => restore_version: HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: matter_id(1),
         checkpoint: checkpoint_id(17),
         scope: RestoreRequest::Files { paths: vec![path("a.docx")] },
@@ -109,7 +114,12 @@ golden! { HostCommand::name_of {
         patch: ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: Some(false),
         },
+    };
+    SetSkillPack => set_skill_pack: HostCommand::SetSkillPack {
+        id: PackId::new("nda-kit").unwrap(),
+        on: true,
     };
     SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
         patch: privacy::privacy_patch(),
@@ -123,10 +133,39 @@ golden! { HostCommand::name_of {
     CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
     InstallBrowser => install_browser: HostCommand::InstallBrowser {};
     CancelBrowserInstall => cancel_browser_install: HostCommand::CancelBrowserInstall {};
+    RecheckBrowserPolicy => recheck_browser_policy: HostCommand::RecheckBrowserPolicy {};
     CheckForUpdate => check_for_update: HostCommand::CheckForUpdate {};
     InstallUpdate => install_update: HostCommand::InstallUpdate { when: InstallWhen::AfterTurn };
     CancelScheduledUpdate => cancel_scheduled_update: HostCommand::CancelScheduledUpdate {};
     SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
+    RetryProtection => retry_protection: HostCommand::RetryProtection {};
+    RemoveSandboxSetup => remove_sandbox_setup: HostCommand::RemoveSandboxSetup {};
+    AllowBlockedSite => allow_blocked_site: HostCommand::AllowBlockedSite {
+        block_id: blocked_site_id(3),
+        scope: AllowScope::Matter,
+    };
+    RevokeAllowedSite => revoke_allowed_site: HostCommand::RevokeAllowedSite {
+        host: "evil.example".to_owned(),
+        scope: AllowScope::Matter,
+        matter: Some(matter_id(1)),
+    };
+    DecideRevisions => decide_revisions: HostCommand::DecideRevisions(DecideRevisions {
+        matter: matter_id(1),
+        path: path("Lease.docx"),
+        version: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+            .parse()
+            .unwrap(),
+        ids: vec![2, 3],
+        decision: RevisionDecision::Reject,
+        all: false,
+    });
+    SetNetwork => set_network: HostCommand::SetNetwork { online: false };
+    // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
+    Connector => connector: HostCommand::Connector(super::connectors::add_credits());
+    // Each `McpCommand` has its own golden in `snapshots/mcp.rs`.
+    Mcp => mcp: HostCommand::Mcp(clauseo_protocol::McpCommand::RemoveServer {
+        name: "github".to_owned(),
+    });
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

@@ -276,6 +276,10 @@
   [data-quiet-start] :focus-visible {
     outline-color: transparent;
   }
+  /* nor does focus a press gave back on a dialog's close, until a key is pressed (components/ui/dialog-start.ts) */
+  [data-quiet-focus]:focus-visible {
+    outline-color: transparent;
+  }
   a {
     color: inherit;
     text-decoration-thickness: 1px;
@@ -305,8 +309,11 @@
     color: var(--muted);
     opacity: 1;
   }
+  /* no native clear button: Escape clears Find, and WebKit's button reads "cancel" in English whatever the app's
+     language (D-069) */
   input::-webkit-search-cancel-button {
     -webkit-appearance: none;
+    display: none;
   }
 
   /* the probe display.ts sets to learn whether the browser honours the Devanagari face's centred metrics */

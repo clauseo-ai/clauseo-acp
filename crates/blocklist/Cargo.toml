@@ -1,0 +1,24 @@
+[package]
+name = "clauseo-blocklist"
+version = "0.1.0"
+description = "Clauseo's unsafe-site block list: the v1 format's parse, its minisign check, matching and the rollback rule. No I/O."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Every test is under tests/ (one binary) and the docs hold no examples.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+# The list's signature: minisign (ed25519 over the BLAKE2b-512 of the .gz bytes).
+minisign-verify = { workspace = true }
+# The list is published gzip; it is decompressed in memory under the size cap.
+flate2 = { workspace = true }
+# The tag and the time travel in the proxy's denials, which print as JSON lines.
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true

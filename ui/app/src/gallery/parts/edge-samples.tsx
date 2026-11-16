@@ -15,7 +15,7 @@ import {
   type EdgeState,
 } from "@clauseo/components/clauseo/edge.tsx";
 import { OsDialogPreview } from "@clauseo/components/clauseo/os-dialog.tsx";
-import { NotProtectedNote } from "@clauseo/components/clauseo/protection.tsx";
+import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import {
@@ -115,7 +115,7 @@ export function RefusalFlow() {
 }
 
 /** Not protected, explained once. Its trigger is the mark itself, so the note stays shut until a press. */
-export function NoteSample({ why }: { why: Unprotected["why"] }) {
+export function NoteSample({ why }: { why: NoteWhy }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -126,6 +126,9 @@ export function NoteSample({ why }: { why: Unprotected["why"] }) {
         open={open}
         matter={MATTER_NAME}
         why={why}
+        {...(why === "pool"
+          ? { pool: { size: 8, open: 5, held: 0, owed: 2, set_aside: 1 }, addRoom: true }
+          : {})}
         onClose={() => setOpen(false)}
         onProtect={() => setOpen(false)}
       />

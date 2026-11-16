@@ -63,7 +63,8 @@ macro_rules! logged_enums {
                 ElicitationRequest(Unknown),
                 ConfigOptionKind(Unknown),
                 ChangeKind(Unknown),
-                RestoreScope(Unknown);
+                RestoreScope(Unknown),
+                NoticeKind(Unknown);
             unit:
                 ErrorCode,
                 ToolKind,
@@ -87,9 +88,11 @@ macro_rules! logged_enums {
                 LimitStopReason,
                 MatterKind,
                 PageVia,
+                SearchSource,
                 DoneBy,
                 SnoozeBy,
-                PermissionAbout;
+                PermissionAbout,
+                PackSkipReason;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

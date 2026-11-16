@@ -89,6 +89,21 @@ test("an approved entry whose by names provisional becomes provisional, its by k
   );
 });
 
+test("an approved English with a provisional Hindi keeps its English status: only by names provisional", () => {
+  const row = {
+    en: "Archived. Read only.",
+    hi: "संग्रहीत। केवल पढ़ने के लिए।",
+    hi_status: "provisional",
+    hi_at: "2026-11-06",
+    hi_by: "app track (provisional; Hindi-speaking lawyer to review)",
+    status: "approved",
+    at: "2026-11-04",
+    by: "Rohan",
+  };
+  const files = splitApprovals(JSON.stringify({ "AR-01": row }));
+  expect(files.get("AR.json")).toBe(`${JSON.stringify({ "AR-01": row }, null, 2)}\n`);
+});
+
 test("splitFile writes the folder and removes the old file; it refuses a folder already split unless forced", () => {
   const dir = mkdtempSync(join(tmpdir(), "split-approvals-"));
   dirs.push(dir);

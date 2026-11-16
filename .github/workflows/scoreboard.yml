@@ -55,8 +55,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       # Its own key: the marks feature changes the desktop crate's build. Saved on main only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -110,6 +115,14 @@ jobs:
           path: ${{ runner.temp }}/scoreboard-out/runs
           if-no-files-found: warn
 
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
   scoreboard-windows-lto:
     name: scoreboard-windows-lto
     runs-on: windows-2025
@@ -141,8 +154,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       # Its own key: the full-LTO release build shares no dependency builds with smoke's. Saved by
       # the nightly run (on main) only.
@@ -183,3 +201,12 @@ jobs:
           name: scoreboard-windows-lto-runs
           path: ${{ github.workspace }}/scoreboard-out/runs
           if-no-files-found: warn
+
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+

@@ -5,7 +5,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import type { PlanState } from "@clauseo/components/ui/meter.tsx";
-import type { AgentKind, AgentLimitsView, LimitMeter } from "../../transport/protocol.ts";
+import type { AgentKind, AgentLimitsView, LimitMeter, SignIn } from "../../transport/protocol.ts";
 import { stamp } from "../thread/clock.ts";
 // the at-limit words, said once for the toolbar and the paused composer, both on the first screen
 import { atLimitWords } from "../thread/limit-words.ts";
@@ -150,6 +150,28 @@ export function planLine(
     ...(look === "stale" ? { look: "stale" as const } : {}),
     tone: meter.tone,
     freshness: entry.freshness,
+  };
+}
+
+/** Whether the header may name an agent's plan and who bills it, from the sign-in the setup store
+ * holds for it: signed in, by a plan login, a key or the firm's endpoint, whether or not the
+ * sign-in names the plan (the limits' line then stands as it is). Signed out, signing in,
+ * switching, failed, or no sign-in heard yet: false, and the header names the agent alone. */
+export function planNamedBy(signIn: SignIn | undefined): boolean {
+  return typeof signIn === "object" && signIn.signed_in !== undefined;
+}
+
+/** The header's line for an agent not signed in: its name alone, with no meter, no status and no
+ * card. */
+export function nameOnlyLine(kind: AgentKind, freshness: string): PlanLine {
+  return {
+    name: PLAN_NAME[kind],
+    left: 0,
+    valueText: "",
+    status: "",
+    state: "plenty",
+    look: "bare",
+    freshness,
   };
 }
 

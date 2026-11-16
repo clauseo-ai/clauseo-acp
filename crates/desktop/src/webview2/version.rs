@@ -3,9 +3,13 @@
 use std::cmp::Ordering;
 
 /// The oldest runtime the app starts on: `bundle.windows.minimumWebview2Version` in
-/// `tauri.conf.json`, which the installer also uses (a test holds the two together). Raised only
-/// on purpose (`docs/decisions/0035-release-builds.md`).
-pub(super) const MINIMUM: &str = "155.0.0.0";
+/// `tauri.conf.json`, which the installer also uses (a test holds the two together). It is what
+/// the app needs: the UI's newest required feature is CSS `color-mix()` (Chromium 111, whose
+/// first stable runtime is 111.0.1661.41), and without `Object.hasOwn` (93) or `:has()` (105)
+/// it would start broken instead of showing the too-old dialog. wry alone needs 89.0.774.44
+/// (`ICoreWebView2Controller2`), and Tauri states no minimum. Raised only on purpose, when the
+/// app comes to need a newer runtime (`docs/decisions/0035-release-builds.md`).
+pub(super) const MINIMUM: &str = "111.0.1661.41";
 
 /// A `WebView2` version: major, minor, build and patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

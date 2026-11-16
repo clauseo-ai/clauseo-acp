@@ -16,11 +16,12 @@ import { QUEUE_CAP, type QueueHold, type QueuedMessage, type QueueTestIds } from
 export { OtherConversationWait } from "./queue-wait.tsx";
 // the steer's parts live apart, for the same reason: the hint in the composer, the marks in the thread's chunk
 export { SteerHint } from "./steer-hint.tsx";
-export { SteerMark, SteerNote } from "./steer-marks.tsx";
+export { SteerMark, SteerNote, SteerWaiting } from "./steer-marks.tsx";
 
 function QueueItem({
   item,
   index,
+  when,
   onEdit,
   onRemove,
   onSendNow,
@@ -28,6 +29,7 @@ function QueueItem({
 }: {
   item: QueuedMessage;
   index: number;
+  when: string | null;
   onEdit: OnEdit;
   onRemove: (id: string) => void;
   onSendNow: (id: string) => void;
@@ -96,35 +98,38 @@ function QueueItem({
       </li>
     );
   }
-  // Edit and Remove come in under the pointer or with focus, as the answer's Accept does; Send now stays in view
+  // Edit and Remove come in under the pointer or with focus, over the line's end before Send now, which stays in
+  // view; at rest they take no width, and they stay first in the tab order
   return (
     <li className="queue-item" data-testid={testIds?.row} data-turn={item.turn}>
       <p className="queue-text">
         <Say>{item.text}</Say>
       </p>
       <span className="queue-acts">
-        <Button
-          kind="quiet"
-          size="small"
-          className="queue-more-act"
-          data-testid={testIds?.edit}
-          ref={editButton}
-          onClick={() => {
-            setDraft(item.text);
-            setEditing(true);
-          }}
-        >
-          {w.m("Edit")}
-        </Button>
-        <Button
-          kind="quiet"
-          size="small"
-          className="queue-more-act"
-          data-testid={testIds?.remove}
-          onClick={() => onRemove(item.id)}
-        >
-          {w.m("Remove")}
-        </Button>
+        <span className="queue-more">
+          <Button
+            kind="quiet"
+            size="small"
+            className="queue-more-act"
+            data-testid={testIds?.edit}
+            ref={editButton}
+            onClick={() => {
+              setDraft(item.text);
+              setEditing(true);
+            }}
+          >
+            {w.m("Edit")}
+          </Button>
+          <Button
+            kind="quiet"
+            size="small"
+            className="queue-more-act"
+            data-testid={testIds?.remove}
+            onClick={() => onRemove(item.id)}
+          >
+            {w.m("Remove")}
+          </Button>
+        </span>
         <Button
           kind="quiet"
           size="small"
@@ -135,6 +140,11 @@ function QueueItem({
           {w.m("Send now")}
         </Button>
       </span>
+      {when !== null && (
+        <p className="queue-when" data-testid={testIds?.when}>
+          <Say>{when}</Say>
+        </p>
+      )}
     </li>
   );
 }
@@ -152,11 +162,15 @@ const SHOWN = 2;
  * the next at the top. Two show, then a row that opens the rest; opened, the list scrolls and casts an edge where it
  * is cut. Nothing in it is numbered: the order is the order they stand in. Held with no stop to name, the head says
  * only how many wait ("2 queued.", nothing sent until the lawyer sends) and offers Send next. A refused press's words stand under the head while the host gives them.
- * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). */
+ * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). Under
+ * each message's words, while the queue isn't held, when it goes (`when`, "Sends when Claude finishes"): held, the
+ * head says nothing goes until the lawyer sends, so the rows say nothing of it. */
 export function QueueStrip({
   items,
-  held = null,
+  held: heldProp = null,
+  resume = null,
   note = null,
+  when = null,
   onEdit,
   onRemove,
   onSendNow,
@@ -167,8 +181,13 @@ export function QueueStrip({
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
+  /** The resume cue's line (R20b): it takes the head, over a held line, and alone it is the strip with no queued
+   * message; null for none. */
+  resume?: string | null;
   /** A refused press's words and its code, under the head; null for none. */
   note?: { words: string; code: string } | null;
+  /** When each message goes, under its words while the queue isn't held; null for none. */
+  when?: string | null;
   onEdit: OnEdit;
   onRemove: OnRowPress;
   onSendNow: OnRowPress;
@@ -194,6 +213,8 @@ export function QueueStrip({
     focusOut.current = onFocusOut;
     sayTo.current = onSay;
   });
+  // the resume cue wins over the hold's line: while it shows, the head says only that
+  const held = resume === null ? heldProp : null;
   const n = items.length;
   const rest = n - SHOWN;
   const showing = open || rest <= 0 ? items : items.slice(0, SHOWN);
@@ -234,9 +255,17 @@ export function QueueStrip({
       if (going.current?.id === id) going.current = null;
     });
   };
+  // UD2: a hold with a reason the lawyer can't lift here (sign-in, switching, an update, the limit, one to come): the
+  // count alone and no Send next; an update's hold says why beneath it
+  const reason = held?.reason;
+  const nextable = reason === undefined || reason === "paused";
+  const why =
+    reason === "update"
+      ? w.m("Clauseo is installing an update. Your queued questions go once it's done.")
+      : null;
   // held with no stop to name, nothing goes until the lawyer sends: the count alone
   const count = [
-    held?.kind === "held"
+    held !== null && (held.kind === "held" || !nextable)
       ? n === 1
         ? w.m("1 queued.")
         : w.m("{n} queued.", { n })
@@ -248,23 +277,35 @@ export function QueueStrip({
     .filter((x) => x !== null)
     .join(" ");
   const head =
-    held === null || held.kind === "held"
-      ? count
-      : w.m(
-          held.kind === "stopped"
-            ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
-            : held.kind === "not_allowed"
-              ? "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send."
-              : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
-          { time: w.clock(held.at) },
-        );
+    resume !== null
+      ? resume
+      : held === null || held.kind === "held" || !nextable
+        ? count
+        : w.m(
+            held.kind === "stopped"
+              ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
+              : held.kind === "not_allowed"
+                ? "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send."
+                : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
+            { time: w.clock(held.at) },
+          );
   // what the host's region says: the head, then a refused press's words; nothing once the queue is empty
-  const said = n === 0 ? "" : note === null ? head : `${head} ${note.words}`;
+  const said =
+    n === 0
+      ? (resume ?? "")
+      : [head, why, note?.words].filter((x) => x != null && x !== "").join(" ");
   useLayoutEffect(() => {
     sayTo.current?.(said);
   }, [said]);
   useLayoutEffect(() => () => sayTo.current?.(""), []);
-  if (n === 0) return null;
+  if (n === 0)
+    return resume === null ? null : (
+      <section className="queue" data-testid={testIds?.resume}>
+        <p className="queue-say">
+          <Say>{resume}</Say>
+        </p>
+      </section>
+    );
   return (
     <section
       ref={section}
@@ -281,13 +322,19 @@ export function QueueStrip({
           data-testid={testIds?.say}
         >
           <Say>{head}</Say>
+          {why !== null && " "}
+          {why !== null && (
+            <span className="queue-note queue-why" data-testid={testIds?.why}>
+              <Say>{why}</Say>
+            </span>
+          )}
           {note !== null && (
             <span className="queue-note" data-code={note.code} data-testid={testIds?.note}>
               <Say>{note.words}</Say>
             </span>
           )}
         </p>
-        {held !== null && (
+        {held !== null && nextable && (
           <Button
             kind="tone"
             size="small"
@@ -305,6 +352,7 @@ export function QueueStrip({
             key={item.id}
             item={item}
             index={i}
+            when={held === null ? when : null}
             onEdit={onEdit}
             onRemove={(id) => press(id, onRemove)}
             onSendNow={(id) => press(id, onSendNow)}

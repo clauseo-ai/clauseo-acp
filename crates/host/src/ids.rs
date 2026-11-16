@@ -2,8 +2,8 @@
 //! `SequentialIds` (feature `test-support`) for ids that repeat run to run.
 
 use clauseo_protocol::{
-    CheckpointId, ElicitationId, EventId, FileRefId, FolderRefId, MatterId, MessageId,
-    PermissionRequestId, ThreadId, Timestamp, ToolCallId, TurnId, ViewEpoch,
+    BlockedSiteId, CheckpointId, ElicitationId, EventId, FileRefId, FolderRefId, MatterId,
+    MessageId, PermissionRequestId, ThreadId, Timestamp, ToolCallId, TurnId, ViewEpoch,
 };
 use uuid::Uuid;
 
@@ -123,6 +123,7 @@ mint_id!(
     FileRefId,
     FolderRefId,
     ViewEpoch,
+    BlockedSiteId,
 );
 
 /// The host's id source, typed.

@@ -4,42 +4,32 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_matters::{Matter, Settings};
-use clauseo_protocol::{CheckpointId, ErrorCode, MatterId, Timestamp};
+use clauseo_protocol::{CheckpointId, MatterId, Timestamp};
 
-use super::Slot;
+use super::{Claimed, Held, Slot, check_registry};
 use crate::error::Error;
 use crate::log_file::Cause;
 
 /// What a folder is checked against before it becomes a matter's folder again (locate) or gets
-/// its `matter.json` back (relink): the folders import refuses, and every other registered
-/// matter's folder. Built on the actor from memory; the paths are compared here, off the actor,
-/// since the comparison canonicalises them.
+/// its `matter.json` back (relink): the folders import refuses, and the other claimed folders
+/// (`claimed_folders` on the actor, from memory; the paths are compared here, off the actor,
+/// since the comparison canonicalises them).
 #[derive(Debug, Clone)]
 pub(crate) struct Registry {
     /// The protected folders import refuses (`HostConfig::with_refused_folders` and the data
     /// folder).
     pub(crate) refused: Vec<PathBuf>,
-    /// Every other registered matter and its folder.
-    pub(crate) others: Vec<(MatterId, PathBuf)>,
+    /// Every other claim, with `command` cleared: a locate cannot join a create in flight, so
+    /// the folder it is making refuses like any other.
+    pub(crate) others: Vec<Claimed>,
 }
 
 impl Registry {
-    /// `matter.folder_refused` when `folder` is, holds or sits inside another matter's folder.
+    /// Refuses `folder` as `check_registry` does for a new matter: `matter.folder_is_matter`
+    /// when it is another matter's folder, `matter.folder_inside_matter` inside one,
+    /// `matter.folder_holds_matter` holding one.
     pub(super) fn check(&self, folder: &Path) -> Result<(), Error> {
-        match self
-            .others
-            .iter()
-            .find(|(_, other)| clauseo_matters::same_or_nested(folder, other))
-        {
-            Some((other, _)) => Err(Error::refused(
-                ErrorCode::MatterFolderRefused,
-                format!(
-                    "the folder may not be this matter's: it is, holds or sits inside the \
-                     folder of matter {other}"
-                ),
-            )),
-            None => Ok(()),
-        }
+        check_registry(folder, &self.others, false).map(|_: Held| ())
     }
 }
 
@@ -64,6 +54,8 @@ pub(super) fn locate(
 ) -> Result<Option<CheckpointId>, Error> {
     registry.check(folder)?;
     *slot = Slot::Empty;
+    #[cfg(test)]
+    super::crash::hook::fire(&settings.matters_root, "Locate:emptied");
     match Matter::locate(settings.clone(), id, folder, &registry.refused) {
         Ok(matter) => {
             let last = matter.last_checkpoint();

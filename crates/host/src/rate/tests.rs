@@ -145,11 +145,13 @@ fn non_mergeable_event_flushes_held_first() {
     // A permission request is not an update: it flushes too.
     let _admitted = cap.admit(ms(6), titled("a", "two"));
     let ask = RatedUpdate(Box::new(AcpEvent::PermissionRequested {
+        origin: clauseo_acp::Origin::Idle,
         session: session(),
         key: PendingKey(1),
         acp_tool_call_id: CompactString::from("a"),
         options: Vec::new(),
         paths: Vec::new(),
+        raw_input: None,
     }));
     let items: Vec<RatedUpdate> = cap.admit(ms(7), ask.clone()).into_iter().collect();
     assert_eq!(items, vec![titled("a", "two"), ask]);

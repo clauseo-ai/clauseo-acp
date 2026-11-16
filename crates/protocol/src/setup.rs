@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::install::{
     InstallLog, InstallProgress, MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES,
+    PythonBlockedBy, PythonFailureCause, PythonProgress,
 };
 pub use self::secret::{MAX_SECRET_BYTES, Secret};
 use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
@@ -29,13 +30,18 @@ use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum SetupCommand {
-    /// Install the agent, after a native confirm naming it and its size; another agent's
-    /// download pauses.
+    /// Install the agent (the lawyer chose its card, which shows the size): no confirm;
+    /// another agent's download pauses.
     InstallAgent {
         /// The agent.
         agent: AgentId,
     },
-    /// Start a failed or paused install again.
+    /// Start a failed or paused install again. On a ready agent it retries the Python runtime
+    /// instead (when Python is missing, waiting or failed): Python is one for the computer, so
+    /// retrying any ready agent's install retries it, and the window may send any ready plan's
+    /// id. The ready agent's own install is left alone: it stays ready and nothing of it is
+    /// fetched or installed again. While another agent's install runs, it starts nothing and
+    /// pauses nothing: that install fetches Python as its own second step.
     RetryAgentInstall {
         /// The agent.
         agent: AgentId,
@@ -44,7 +50,8 @@ pub enum SetupCommand {
         use_system_proxy: bool,
     },
     /// Sign in with the agent's plan login. A sign-in already running for the agent is joined,
-    /// not restarted.
+    /// not restarted. On an agent not installed yet it starts the install and signs in once
+    /// it is ready (`Queued` meanwhile).
     StartSignIn {
         /// The agent.
         agent: AgentId,
@@ -95,7 +102,11 @@ pub enum SetupCommand {
         /// The agent.
         agent: AgentId,
     },
-    /// Look again for a login the lawyer already has.
+    /// Look again for a login the lawyer already has, turning reuse back on. An **accepted**
+    /// `FindLogin` ends in exactly one `SignInChanged`, sent even when the state is unchanged:
+    /// `LoginFound`, `SignedOut` with `found` (`none_found` for nothing), `SignedIn`, or `Failed`
+    /// (`signin.failed`) when the search could not tell. A refused one (the agent is not
+    /// installed) gets an error reply and no `SignInChanged`.
     FindLogin {
         /// The agent.
         agent: AgentId,
@@ -235,6 +246,10 @@ pub enum SetupEvent {
         /// Whether the OS keychain can hold an API key: false where Linux has no Secret
         /// Service, and the key screens are hidden.
         keys_available: bool,
+        /// The Python runtime's state, sent again with each change; missing from older hosts
+        /// and before it is known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        python: Option<PythonProgress>,
     },
     /// An agent's install state changed, or its download made progress.
     AgentInstallProgress {
@@ -259,10 +274,16 @@ pub enum SetupEvent {
 pub enum SignIn {
     /// Not signed in.
     SignedOut {
-        /// A login seen but not reusable, or why reuse stopped; missing when neither.
+        /// What the search for a login saw (a login not reusable, none, or reuse off), or why
+        /// reuse stopped; missing when nothing was looked for (the agent not installed, a key
+        /// or an endpoint that took over, a sign-out).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<FoundLogin>,
     },
+    /// The sign-in status check is running and nothing was shown before it (at start, and
+    /// through its retries after a check that timed out): the card says it is checking. Ends
+    /// in the check's state, or `SignedOut` once its retries time out too.
+    Checking,
     /// Waiting for the install to finish or the network to return; the sign-in then starts by
     /// itself.
     Queued,
@@ -304,6 +325,11 @@ pub enum SignIn {
         source: SignInSource,
         /// When the sign-in was confirmed.
         at: Timestamp,
+        /// When the agent last refused this sign-in's API key (the provider answered that the
+        /// key is not valid); only with `method: ApiKey`; cleared when a key is saved or
+        /// removed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refused: Option<Timestamp>,
     },
     /// The sign-in stopped: a `signin.*` code, `agent.auth_required`, or
     /// `signin.policy_unreadable`.
@@ -313,9 +339,19 @@ pub enum SignIn {
         /// When.
         at: Timestamp,
     },
+    /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
+    /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and
+    /// nothing of the agent launches meanwhile. Ends when a try succeeds (the state after it)
+    /// or a new sign-in arrives; it has no failed end.
+    Switching {
+        /// When the first try did not finish; a later try never moves it.
+        since: Timestamp,
+        /// Whether it has gone on for 2 minutes or more.
+        stuck: bool,
+    },
 }
 
-/// A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`.
+/// What the search for a login saw, or why reuse stopped: [`SignIn::SignedOut`]'s `found`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -334,11 +370,19 @@ pub enum FoundLogin {
     ReusedChanged,
     /// Reuse stopped: Codex's shared login file was replaced, so it is no longer shared.
     CodexLinkSplit,
+    /// The search for a login ran and found none of the lawyer's on this computer.
+    NoneFound,
+    /// Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
+    /// nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
+    ReuseOff,
+    /// "Use it" (or a later start) found the lawyer's login but the agent could not use it here
+    /// (it may have expired), so reuse is off as with `ReuseOff`; this says why, once.
+    ReuseUnusable,
 }
 
 impl FoundLogin {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::ClaudeSettings,
         Self::ClaudeWindowsSandbox,
         Self::CodexKeyring,
@@ -346,6 +390,9 @@ impl FoundLogin {
         Self::ReusedSignedOut,
         Self::ReusedChanged,
         Self::CodexLinkSplit,
+        Self::NoneFound,
+        Self::ReuseOff,
+        Self::ReuseUnusable,
     ];
 }
 

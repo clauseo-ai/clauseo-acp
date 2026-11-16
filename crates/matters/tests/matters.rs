@@ -28,8 +28,24 @@ mod checkpoint;
 mod skipped;
 
 #[cfg(test)]
+#[path = "matters/first_read.rs"]
+mod first_read;
+
+#[cfg(test)]
+#[path = "matters/start_record.rs"]
+mod start_record;
+
+#[cfg(test)]
 #[path = "matters/undo.rs"]
 mod undo;
+
+#[cfg(test)]
+#[path = "matters/own_file.rs"]
+mod own_file;
+
+#[cfg(test)]
+#[path = "matters/written.rs"]
+mod written;
 
 #[cfg(test)]
 #[path = "matters/undo_case.rs"]
@@ -38,6 +54,14 @@ mod undo_case;
 #[cfg(test)]
 #[path = "matters/restore.rs"]
 mod restore;
+
+#[cfg(test)]
+#[path = "matters/undo_restore.rs"]
+mod undo_restore;
+
+#[cfg(test)]
+#[path = "matters/replace.rs"]
+mod replace;
 
 #[cfg(test)]
 #[path = "matters/compare.rs"]
@@ -65,6 +89,10 @@ mod errors;
 #[cfg(test)]
 #[path = "matters/refuse.rs"]
 mod refuse;
+
+#[cfg(test)]
+#[path = "matters/adopt.rs"]
+mod adopt;
 
 #[cfg(test)]
 #[path = "matters/undo_corrupt_object.rs"]
@@ -109,3 +137,8 @@ mod papers;
 #[cfg(test)]
 #[path = "matters/devanagari.rs"]
 mod devanagari;
+
+#[cfg(test)]
+#[cfg(windows)]
+#[path = "matters/word_no_owner.rs"]
+mod word_no_owner;

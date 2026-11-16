@@ -9,6 +9,8 @@ test("no step string says I or a banned word, and each Hindi sentence ends in th
     expect(en).not.toMatch(
       /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|command|safe)\b/i,
     );
+    // a string whose Hindi is still to come (hi: later) has only its English to screen
+    if (hi === null) continue;
     expect(hi).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/);
     if (en.endsWith(".")) expect(hi.endsWith("।"), en).toBe(true);
   }
@@ -16,6 +18,7 @@ test("no step string says I or a banned word, and each Hindi sentence ends in th
 
 test("each string takes the same slots in both languages", () => {
   for (const [en, hi] of Object.entries(ALL)) {
+    if (hi === null) continue;
     const slots = (s: string) =>
       [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1] ?? "").sort((a, b) => a.localeCompare(b));
     expect(slots(hi), en).toEqual(slots(en));

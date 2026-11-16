@@ -39,9 +39,9 @@ fn npm_args(spec: &clauseo_process::LaunchSpec) -> Option<Vec<String>> {
         .then_some(args)
 }
 
-/// The `.tgz` files in `<data>/agents/downloads`.
+/// The `.tgz` files in `<data>/agents/downloads/agent-a`, agent A's own.
 fn downloaded(data: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(data.join("agents/downloads"))
+    std::fs::read_dir(data.join("agents/downloads/agent-a"))
         .map(|entries| {
             entries
                 .flatten()
@@ -141,6 +141,7 @@ fn a_tarball_changed_after_its_check_fails_npm_ci_with_eintegrity() {
     let InstallState::Failed(failure) = last else {
         panic!("the install succeeded with swapped tarballs: {last:?}");
     };
+    // npm's own check of a tarball is a download's failure, not the set-up's: no "try again".
     assert_eq!(failure.kind, FailureKind::Failed);
     let log = failure.log.to_string();
     assert!(log.contains("npm error code EINTEGRITY"), "{log}");

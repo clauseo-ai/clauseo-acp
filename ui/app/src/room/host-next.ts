@@ -12,24 +12,36 @@ import type { AppFeedSource, HostTransport } from "../transport/host-transport.t
 import type {
   AgentSummary,
   ErrorCode,
+  McpToolsView,
   FolderRefId,
+  FolderScanned,
   HostError,
+  HostEvent,
   MatterId,
   MatterSource,
   MatterSummary,
   MattersChanged,
   MessageId,
+  Protection,
   QueryResult,
+  SettingsView,
   ThreadId,
   ThreadSummary,
   BrowserInstallState,
+  BrowserPolicyState,
+  ConnectorsState,
   ThreadsChanged,
   Timestamp,
+  TurnId,
   ToolsPatch,
   ToolsSettingsView,
+  PrivacyPatch,
+  PrivacySettings,
+  UpdateView,
 } from "../transport/protocol.ts";
 import {
   wireAgentsHost,
+  wireLocationHost,
   wireAppHost,
   wireMattersHost,
   wirePapersHost,
@@ -74,6 +86,11 @@ export type Settings = {
    * without a host (the settings then live in localStorage, and nothing would apply the switches), or from a fake that
    * leaves them out; Privacy's switches show only with them. */
   tools?: ToolsSettingsView;
+  /** Each agent's firm plan (`plans.<id>`, SettingsView.plans): Plans shows the firm's address from it (UD2). */
+  plans?: SettingsView["plans"];
+  /** The privacy switches in force (`privacy.counts`), as SettingsView carries them: Privacy's counts switch shows
+   * only with them. Absent without a host, or from a fake that leaves them out. */
+  privacy?: PrivacySettings;
 };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
@@ -180,6 +197,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
   | { set_tool_settings: { patch: ToolsPatch } }
+  | { set_privacy_settings: { patch: PrivacyPatch } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
@@ -202,11 +220,38 @@ export type { ThreadsChanged };
 export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterInfo[] };
 
 /** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
- * and the Chrome download's state (browser-install.ts). */
+ * the Chrome download's state (no window listens for it: the app offers no download); the re-read of the firm's browser policy (browser-policy.ts), the
+ * latest in every catch-up; and the connectors' state (R24, store/connectors.ts), the latest in
+ * every catch-up; the case-law hint for a turn (R24), never in a catch-up; and how far the scan of a folder picked
+ * in New matter has got (R20a, room/scan/), never logged; and a site the unsafe-site list
+ * blocked (0053, store/blocked-sites.ts), never in a catch-up; and that a matter's papers changed (the tracked-changes
+ * scan found more), so the wall lists them again (use-papers.ts), never in a catch-up; and the lawyer's MCP servers
+ * (Settings › Tools, settings/sections/tools-model.ts), in every catch-up and after every change. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
-  | { browser_install: { state: BrowserInstallState } };
+  | { browser_install: { state: BrowserInstallState } }
+  | { browser_policy: { state: BrowserPolicyState } }
+  | { connectors_changed: ConnectorsState }
+  | { case_law_hint: CaseLawHint }
+  | { folder_scanned: FolderScanned }
+  | { protection_changed: ProtectionChanged }
+  | { protection_view_changed: unknown }
+  | { site_blocked: SiteBlocked }
+  | { papers_changed: { matter: MatterId } }
+  | { update_changed: UpdateView }
+  | { mcp_tools_changed: McpToolsView };
+
+/** 0053: a site the unsafe-site list blocked in a turn; re-sent with the same `block_id` and a
+ * higher `count`. */
+export type SiteBlocked = Extract<HostEvent, { site_blocked: unknown }>["site_blocked"];
+
+/** UC: a matter's protection now (decision record 0051), app-wide and in no catch-up. `protection_view_changed` is R17
+ * PR-B's whole ProtectionView, not in bindings.ts yet: store/protection.ts reads it defensively. */
+export type ProtectionChanged = { matter: MatterId; protection: Protection };
+
+/** R24: the host's offer of the case-law connector under a turn's answer (store/connectors.ts); never logged. */
+export type CaseLawHint = { matter: MatterId; thread: ThreadId; turn: TurnId };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
 export const WIRE = {
@@ -215,6 +260,8 @@ export const WIRE = {
   setUiSettings: "set_ui_settings",
   /** HostCommand::SetToolSettings; only the settings window sends it, the main window's host refuses it. */
   setToolSettings: "set_tool_settings",
+  /** HostCommand::SetPrivacySettings; only the settings window sends it from Settings, the main window's host refuses it. */
+  setPrivacySettings: "set_privacy_settings",
   settingsChanged: "settings_changed",
   listMatters: "list_matters",
   listThreads: "list_threads",
@@ -234,6 +281,7 @@ export const WIRE = {
 
 /** H8: a matter's papers. */
 export interface PapersHost {
+  /** Listing a matter also makes it the one whose folder the host watches (decision record 0055). */
   listPapers(matter: MatterId): Promise<Papers>;
 }
 
@@ -243,6 +291,8 @@ export interface SettingsHost {
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
   /** The tools' switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
   setToolSettings(patch: ToolsPatch): Promise<void>;
+  /** The privacy switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
+  setPrivacySettings(patch: PrivacyPatch): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
 }
@@ -327,8 +377,8 @@ const hasAppFeed = (transport: object): transport is AppFeedSource =>
 
 /** The calls the room needs beyond today's host, each part null where the transport's host lacks it. A NextHostSource
  * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings, papers,
- * agents, matters (H3, H5, H6) and the app events (H4) over the wire. Not the rest: the desktop host refuses
- * restart_agent and has no retry_from, and the default location stays off so Create picks the parent folder, as today.
+ * agents, matters (H3, H5, H6), the default location (H20, New matter's "Use a new folder in") and the app events (H4)
+ * over the wire. Not the rest: the desktop host refuses restart_agent and has no retry_from.
  * The one place the room asks for them. */
 export function nextHostOf(transport: HostTransport): NextHost {
   if (isSource(transport)) return transport.nextHost();
@@ -339,6 +389,7 @@ export function nextHostOf(transport: HostTransport): NextHost {
       papers: wirePapersHost(transport),
       agents: wireAgentsHost(transport),
       matters: wireMattersHost(transport),
+      location: wireLocationHost(transport),
       app: wireAppHost(transport),
     };
   return NO_NEXT;

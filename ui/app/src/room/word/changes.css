@@ -1,0 +1,59 @@
+/* The tracked changes' own sheet, loaded with their chunk the first time a .docx tile's Tracked changes is pressed
+   (changes-chunk.ts), so the room's first load carries none of it: the draft review's cards (word.css), compiled
+   against the design system's (referenced, not repeated), then the panel's own bar, head and lines. */
+@reference "../../styles/system.css";
+@import "@clauseo/components/clauseo/word.css";
+
+@layer components {
+  .wc-pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .wc-bar {
+    display: flex;
+    align-items: center;
+    margin-left: calc(-1 * var(--s2));
+  }
+  .wc-head {
+    display: grid;
+    gap: var(--s0-5);
+  }
+  .wc-head .wall-title:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+    border-radius: var(--r-ref);
+  }
+  .wc-file {
+    @apply text-small text-quiet;
+    overflow-wrap: anywhere;
+  }
+  /* what the host said: the draft review's set-in line, with Try again where it offers one */
+  .wc-line {
+    @apply text-small-row text-primary;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s1) var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-control);
+    background: var(--inset);
+    box-shadow: var(--set-in-field);
+  }
+  /* the latest decision, with Undo: a decided card's foot, standing above the list its changes left */
+  .wc-decided {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s1) var(--s2);
+    min-height: var(--size-control-small);
+    padding: 0 var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--tile);
+  }
+  .wc-decided .rd-change-state {
+    color: var(--primary);
+  }
+}

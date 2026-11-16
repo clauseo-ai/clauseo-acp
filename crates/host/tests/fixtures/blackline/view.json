@@ -1,0 +1,51 @@
+{
+  "base": "0e40ae2defaf041a:0:0e40ae2defaf041a",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 14
+      }
+    ],
+    "count": 14,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 0,
+        "deleted": "000 monthly",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 1,
+        "deleted": null,
+        "inserted": "200 each month in advance",
+        "kind": "insert"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 2,
+        "deleted": "The deposit is returned within 30 days.\n",
+        "inserted": null,
+        "kind": "paragraph deleted"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p15",
+    "remaining_tokens": 0,
+    "scope": "p1..p15",
+    "shown": 12,
+    "total": 12
+  },
+  "text": "{stet 1 view=body base=0e40ae2defaf041a:0:0e40ae2defaf041a mode=redline common-style=\"Normal\" range=p1..p15}\n{authors: C \"Clauseo\"}\n{summary: 16 tracked changes (C 16) · 1 footnote · 1 section · 1 read-only paragraph}\np1 {style \"heading 1\"} Lease Agreement\np2 The Tenant shall pay rent of $1,{--000 monthly--}{#7 C}{++200 each month in advance++}{#6 C}.\np3 {¶- #3 C} {--The deposit is returned within 30 days.--}{#2 C}\np4 Governing law is {--New York--}{#9 C}{++Delaware++}{#8 C}.\np5 {§\"1.\"} Pay on time.\np6 {§\"2.\"} Keep the premises clean{++ and tidy++}{#10 C}.\nt1 {table cols=2}\nr1 {row}\np7 Rent\np8 $1,{--000--}{#15 C}{++200++}{#14 C}\nr2 {row}\np9 Term\np10 12 months\n{/table}\np11 A notice period applies.{fn1}\np12 Odd \\{{--braces--}{#12 C}{++curly++}{#11 C}\\} and back\\\\slash and\\ttab here.\np13 {rev run #13 C} This clause is important.\np14 {¶+ #5 C} {++Notices go by email.++}{#4 C}\np15 {style \"heading 2\"} Signatures\n{appendix}\n{fn1} Sixty days.\n{position: p1..p15 of p1..p15 (12 of 12 blocks)}\n",
+  "tokens": 255,
+  "warnings": []
+}

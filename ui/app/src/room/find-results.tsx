@@ -1,8 +1,10 @@
-// Find's results on the rail (U16a), in their own chunk (find-load.ts loads it as the field is hovered or focused): the
-// search inside (store/search.ts) for the words in the field, shaped by find.ts and drawn as the approved page draws
-// them. A matter opens as from its row; a conversation opens, and one found in something said opens at that entry
-// (thread/jump-entry.ts); a paper opens its matter and the paper in its own app, as a paper named in an answer does
-// (open.ts): there is no reader in the room yet. More hits come a page at a time as the rail is scrolled to its foot.
+// Find's results on the rail (U16a), in their own chunk (find-load.ts loads it as the field is
+// hovered or focused): the search inside (store/search.ts) for the words in the field, shaped by
+// find.ts and drawn as the approved page draws them. A matter opens as from its row; a conversation
+// opens, and one found in something said opens at that entry (thread/jump-entry.ts); a paper opens
+// its matter and the paper in its own app, as a paper named in an answer does (open.ts): there is
+// no reader in the room yet. A paper's refused open says why on the room's composer line. More hits
+// come a page at a time as the rail is scrolled to its foot.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import {
@@ -20,7 +22,7 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { Tooltip } from "@clauseo/components/ui/tooltip.tsx";
 import { Search } from "../store/search.ts";
 import { streamOf } from "../store/view.ts";
-import { toHostError, type HostTransport } from "../transport/host-transport.ts";
+import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId, SnippetPart } from "../transport/protocol.ts";
 import type { Conversations, ConversationsView } from "./conversations.ts";
 import {
@@ -33,7 +35,6 @@ import {
 import type { Matters, MattersView } from "./matters.ts";
 import { openConversation } from "./open-conversation.ts";
 import type { AllThreadsView } from "./all-threads.ts";
-import { quietly } from "./open.ts";
 import { clearJump, jumpTo } from "./thread/jump-entry.ts";
 
 export type FindResultsProps = {
@@ -91,7 +92,12 @@ function PaperRow({ paper, onOpen }: { paper: FoundPaper; onOpen: () => void }) 
   const { lang } = useDisplay();
   return (
     <li>
-      <button type="button" className="room-matter-row" data-testid="find-paper" onClick={onOpen}>
+      <button
+        type="button"
+        className="room-matter-row room-find-row"
+        data-testid="find-paper"
+        onClick={onOpen}
+      >
         <span className="room-matter-name">
           <Own text={paper.name} />
         </span>
@@ -116,7 +122,7 @@ function ConversationRow({ found, onOpen }: { found: FoundConversation; onOpen: 
   const row = (
     <button
       type="button"
-      className="room-matter-row"
+      className="room-matter-row room-find-row"
       data-testid="find-conversation"
       data-order={found.order}
       onClick={onOpen}
@@ -188,7 +194,7 @@ export function FindResults({
   }, [search, state.next, state.hits]);
   const openTalk = (found: FoundConversation) => () => {
     // asked before it opens, so the thread's first rows already page back to the entry
-    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order);
+    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order, found.parts);
     else clearJump();
     const known = found.archived
       ? archivedSummary(every, found.matter, found.thread, talks.agent)
@@ -203,13 +209,13 @@ export function FindResults({
     onMoved();
     const papers = matters.next.papers;
     if (papers === null) return;
-    papers.listPapers(paper.matter).then(
-      ({ papers: listed }) => {
-        const found = listed.find((p) => p.path === paper.path);
-        if (found !== undefined) void quietly("open_file", transport.openFile(found.file));
-      },
-      (error: unknown) => console.warn(`list_papers failed: ${toHostError(error).code}`),
-    );
+    // a refusal, the list's or the open's, stands on the composer's line of the matter it opened
+    // (act-refusals.ts)
+    const opened = papers.listPapers(paper.matter).then(({ papers: listed }) => {
+      const found = listed.find((p) => p.path === paper.path);
+      return found === undefined ? undefined : transport.openFile(found.file);
+    });
+    void matters.refusals.track("open", paper.matter, opened);
   };
   const scope = fw(lang, "Searches titles, paper names and conversations.");
   return (
@@ -266,18 +272,24 @@ export function FindResults({
         </section>
       )}
       {shown.nothing && (
+        // what Find covers, said in words under it: an info icon alone here meant nothing (D-071)
         <div className="room-find-none" role="status">
           <p className="text-ui font-chip text-primary">
             <Say>{fw(lang, 'Nothing found for "{words}".', { words: field.query.trim() })}</Say>
           </p>
+          <p className="text-small text-muted">
+            <Say>{scope}</Say>
+          </p>
         </div>
       )}
       <p ref={foot} className="room-find-foot">
-        <Tooltip content={scope}>
-          <button type="button" className="room-find-scope" aria-label={scope}>
-            <IconAbout size={14} />
-          </button>
-        </Tooltip>
+        {!shown.nothing && (
+          <Tooltip content={scope}>
+            <button type="button" className="room-find-scope" aria-label={scope}>
+              <IconAbout size={14} />
+            </button>
+          </Tooltip>
+        )}
       </p>
     </>
   );

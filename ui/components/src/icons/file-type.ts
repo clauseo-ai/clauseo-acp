@@ -1,22 +1,30 @@
-// A paper's file type, by its name's extension, and the glyph that shows it: the wall's tiles at 24 px and the @ menu's
-// rows at 20 px. Word (.doc, .docx), PDF, Markdown (.md, .markdown) and email (.eml, .msg); anything else, or a name with
-// no extension, is the generic page. Case doesn't matter, and only the last dot counts.
+// A paper's file type, by its name's extension, the glyph that shows it (the wall's tiles at 24 px and the @ menu's rows
+// at 20 px) and the colour its tab takes on the wall. Word (.doc, .docx), PDF, Excel (.xlsx, .xls, .csv), PowerPoint
+// (.pptx, .ppt), Markdown (.md, .markdown) and email (.eml, .msg); anything else, or a name with no extension, is the
+// generic page. Case doesn't matter, and only the last dot counts.
 import type { ComponentType } from "react";
 import type { IconProps } from "./icon.tsx";
 import {
   IconFileEmail,
+  IconFileExcel,
   IconFileGeneric,
   IconFileMarkdown,
   IconFilePdf,
+  IconFilePowerPoint,
   IconFileWord,
 } from "./icons.tsx";
 
-export type FileType = "word" | "pdf" | "markdown" | "email" | "generic";
+export type FileType = "word" | "pdf" | "excel" | "powerpoint" | "markdown" | "email" | "generic";
 
 const BY_EXTENSION: Readonly<Record<string, FileType>> = {
   doc: "word",
   docx: "word",
   pdf: "pdf",
+  xlsx: "excel",
+  xls: "excel",
+  csv: "excel",
+  pptx: "powerpoint",
+  ppt: "powerpoint",
   md: "markdown",
   markdown: "markdown",
   eml: "email",
@@ -26,9 +34,35 @@ const BY_EXTENSION: Readonly<Record<string, FileType>> = {
 const GLYPH: Readonly<Record<FileType, ComponentType<IconProps>>> = {
   word: IconFileWord,
   pdf: IconFilePdf,
+  excel: IconFileExcel,
+  powerpoint: IconFilePowerPoint,
   markdown: IconFileMarkdown,
   email: IconFileEmail,
   generic: IconFileGeneric,
+};
+
+/** The colour a file's tab takes on a wall tile: the four apps' own, muted to the palette, or neutral, the tile's quiet
+ * ink, for everything else (Markdown, email, images, any other file, a folder). */
+export type FileTone = "word" | "pdf" | "excel" | "powerpoint" | "neutral";
+
+const TONE: Readonly<Record<FileType, FileTone>> = {
+  word: "word",
+  pdf: "pdf",
+  excel: "excel",
+  powerpoint: "powerpoint",
+  markdown: "neutral",
+  email: "neutral",
+  generic: "neutral",
+};
+
+/** Each tone's colour token (tokens-colour.css, day and night), as wall.css reads it for a tile's data-file; neutral
+ * keeps the glyph's own quiet ink. A dimmed tile, a file only online, takes the token's -away twin. */
+export const FILE_TONE_TOKEN: Readonly<Record<FileTone, string>> = {
+  word: "--file-word",
+  pdf: "--file-pdf",
+  excel: "--file-excel",
+  powerpoint: "--file-powerpoint",
+  neutral: "--quiet",
 };
 
 /** A file's type, by the extension after its name's last dot (in any folder, in any case). */
@@ -41,9 +75,15 @@ export function fileTypeOf(name: string): FileType {
   return Object.hasOwn(BY_EXTENSION, ext) ? (BY_EXTENSION[ext] ?? "generic") : "generic";
 }
 
-/** The glyph for a file by its name: the letter badge for Word, PDF and Markdown, the envelope for email, the bare page
- * for anything else. Draw it at 24 px on a wall tile and 20 px in a menu row, hidden from assistive technology: the
- * file's name names it. */
+/** The glyph for a file by its name: the letter badge for Word, PDF, Excel, PowerPoint and Markdown, the envelope for
+ * email, the bare page for anything else. Draw it at 24 px on a wall tile and 20 px in a menu row, hidden from
+ * assistive technology: the file's name names it. */
 export function fileTypeIcon(name: string): ComponentType<IconProps> {
   return GLYPH[fileTypeOf(name)];
+}
+
+/** The colour of a file's tab on its wall tile, by its name: Word blue, PDF red, Excel and CSV green, PowerPoint
+ * orange, anything else neutral. */
+export function fileToneOf(name: string): FileTone {
+  return TONE[fileTypeOf(name)];
 }

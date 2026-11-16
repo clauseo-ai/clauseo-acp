@@ -185,7 +185,8 @@ function WebTools() {
         <span lang="en" className="flex items-center gap-s1-5 font-en text-small text-primary">
           Brave Search
           <InfoTip label="More about Brave Search">
-            Anthropic lists Brave Search as its web search subprocessor.
+            Claude's web searches go through Brave Search, a service Anthropic uses to run web
+            searches.
           </InfoTip>
         </span>
       </State>

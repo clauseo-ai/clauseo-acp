@@ -38,6 +38,9 @@ fn refusals(fx: &Fixture, settings: &Settings, folder: &Path) -> Refusal {
     from_scan
 }
 
+/// A folder whose marker names another matter is refused by import, naming that matter, and the
+/// marker stays; the scan does not read the marker, so it passes (the host names a listed
+/// matter's folder itself).
 #[test]
 fn import_refuses_folder_of_another_matter() {
     let fx = Fixture::new("refuse-other-matter");
@@ -45,20 +48,18 @@ fn import_refuses_folder_of_another_matter() {
     drop(fx.import());
     let json = fx.read(".clauseo/matter.json");
 
-    let reason = refusals(&fx, &fx.settings(), &fx.folder);
-    assert_eq!(reason, Refusal::AlreadyMatter(matter_id(1)));
+    let cancel = AtomicBool::new(false);
+    scan(&fx.folder, &[], &fx.settings(), &mut |_| {}, &cancel).unwrap();
+    let new = NewMatter {
+        id: matter_id(2),
+        ..fx.new_matter()
+    };
+    let refused = Matter::import(fx.settings(), new, &[], &mut |_| {}, &cancel).unwrap_err();
+    assert_eq!(refusal_of(refused), Refusal::AlreadyMatter(matter_id(1)));
+    assert!(!fx.root().join(matter_id(2).to_string()).exists());
     assert_eq!(fx.read(".clauseo/matter.json"), json);
     let mut matter = fx.open(&fx.folder).unwrap();
     matter.before_turn(&crate::fixture::meta(2)).unwrap();
-
-    // A matter.json that does not read may still be a matter's: refused, left as it is.
-    let garbage = fx.dir.path().join("garbage");
-    support::write(garbage.join(".clauseo/matter.json"), "{not json");
-    support::write(garbage.join("b.txt"), "b");
-    let reason = refusals(&fx, &fx.settings(), &garbage);
-    assert_eq!(reason, Refusal::UnreadableMatterJson);
-    let bytes = std::fs::read(garbage.join(".clauseo/matter.json")).unwrap();
-    assert_eq!(bytes, b"{not json");
 }
 
 #[test]

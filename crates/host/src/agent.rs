@@ -17,14 +17,27 @@
 //! [`PUMP_END_ROUNDS`] bounds. It never gives up on the bound alone: a host thread that ran late
 //! (or a test clock moved on) must not leave the agent's last chunk unposted behind its `Ended`.
 
+pub(crate) mod claude_tmp;
 pub(crate) mod codex;
+pub(crate) mod codex_fence;
+pub(crate) mod data_fence;
 pub(crate) mod data_folder;
+pub(crate) mod folder_access;
+pub(crate) mod folder_name;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
+pub(crate) mod home;
+pub(crate) mod launch_refusals;
+pub(crate) mod launch_settings;
 pub(crate) mod leftovers;
 pub(crate) mod loads;
+pub(crate) mod login_link;
+pub(crate) mod login_splits;
+pub(crate) mod mcp_trust;
 pub(crate) mod plan_note;
+pub(crate) mod shell_path;
 mod spec;
+pub(crate) mod temp;
 pub(crate) mod title;
 
 use std::cell::{Cell, RefCell};
@@ -37,7 +50,9 @@ use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use clauseo_acp::{AcpClient, AcpEvent, ReadProgress};
-use clauseo_process::{Descendants, Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
+use clauseo_process::{
+    Descendants, Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome, TreeWatch,
+};
 use clauseo_protocol::DetachReason;
 use futures::channel::oneshot;
 use futures::executor::LocalSpawner;
@@ -47,7 +62,9 @@ use futures::task::LocalSpawnExt;
 use crate::clock::{Clock, ProcessTimer};
 use crate::error::Error;
 
+#[cfg(test)]
 pub(crate) use spec::launch_spec;
+pub(crate) use spec::{PYTHON_VARS, launch_env, session_path, spec_of};
 
 /// How long the owner waits, after the agent is gone, for its stderr pipe and its stdout to end,
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the
@@ -142,12 +159,32 @@ impl StopStep {
     }
 }
 
+/// Where the owner task is, for its debug log and the tests' dump of the stop path: every step
+/// after a stop waits on the host clock as well as on the OS, so a test's frozen clock shows a
+/// step that never ended as the one it stayed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerStep {
+    /// Waiting for the agent to exit or for a stop.
+    Running,
+    /// Stopping: listing the agent's descendants before the ladder.
+    Listing,
+    /// Stopping: the shutdown ladder runs.
+    Ladder,
+    /// The agent is gone: waiting for its pipes and fenced calls to end.
+    Settling,
+    /// `Ended` was posted.
+    Posted,
+}
+
 /// A running agent as the actor holds it. Dropping it stops the agent like [`AgentLink::stop`].
 #[derive(Debug)]
 pub(crate) struct AgentLink {
     /// The ACP connection; its calls run as spawned tasks that post their results.
     pub(crate) client: AcpClient,
     pid: u32,
+    /// Whether the agent's tree is gone, for the run folder's removal (`launch_checks::discard`);
+    /// it outlives the process handle the owner task holds.
+    tree: TreeWatch,
     /// The agent's descendants, which a cancelled turn's sweep lists and ends
     /// ([`leftovers`]); it keeps nothing alive.
     descendants: Descendants,
@@ -156,12 +193,19 @@ pub(crate) struct AgentLink {
     events: async_channel::Receiver<AcpEvent>,
     /// The fenced calls in flight, which the owner waits for before it posts [`Ended`].
     calls: Rc<Calls>,
+    /// Where the owner task is.
+    step: Rc<Cell<OwnerStep>>,
 }
 
 impl AgentLink {
     /// The agent's process id, for logs.
     pub(crate) fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// A watch on the agent's tree, for the wait before its session's run folder goes.
+    pub(crate) fn tree_watch(&self) -> TreeWatch {
+        self.tree.clone()
     }
 
     /// The agent's descendants, for a cancelled turn's sweep.
@@ -188,6 +232,17 @@ impl AgentLink {
         }
     }
 
+    /// Where the owner task is: `stop_agents`' wait names it when it runs out.
+    pub(crate) fn owner_step(&self) -> OwnerStep {
+        self.step.get()
+    }
+
+    /// How many fenced calls are in flight (the tests' dump).
+    #[cfg(feature = "test-support")]
+    pub(crate) fn fenced_calls(&self) -> usize {
+        self.calls.open.get()
+    }
+
     /// Whether the connection is gone: the event channel's only sender, held by R10's
     /// connection state, is dropped once the driver has ended (the agent's stdout ended, or
     /// a fatal error closed it). Every call then comes back `Closed`.
@@ -212,13 +267,16 @@ impl AgentLink {
 
 /// Launches the agent, connects ACP over its pipes and spawns its tasks on `spawner`. Every event
 /// and the final [`Ended`] go to `post`. Nothing is sent to the agent until the actor calls the
-/// client (`initialize` first).
+/// client (`initialize` first). `tree` gets the agent's [`TreeWatch`] as soon as its process
+/// exists, so a launch that fails after that (a task that cannot be spawned, which drops and
+/// kills the process) still has its tree waited for before the session's run is freed.
 pub(crate) fn start(
     spawner: &LocalSpawner,
     launcher: &dyn Launcher,
     spec: &LaunchSpec,
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
+    tree: &mut Option<TreeWatch>,
 ) -> Result<AgentLink, Error> {
     let Launched {
         stdin,
@@ -229,6 +287,8 @@ pub(crate) fn start(
     } = launcher.launch(spec)?;
     let pid = handle.pid();
     let descendants = handle.descendants();
+    let handle_tree = handle.tree_watch();
+    *tree = Some(handle_tree.clone());
     #[cfg(not(test))]
     let (client, events, driver) =
         clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
@@ -272,14 +332,22 @@ pub(crate) fn start(
         // The connection is gone, so each call in flight has its answer or `Closed` by now.
         owner_calls.idle().await;
     };
-    spawn(spawner, own(handle, stop_asked, ends, output, clock, post))?;
+    let step = Rc::new(Cell::new(OwnerStep::Running));
+    let owner = Owner {
+        step: Rc::clone(&step),
+        clock,
+        post,
+    };
+    spawn(spawner, own(handle, stop_asked, ends, output, owner))?;
     Ok(AgentLink {
         client,
         pid,
+        tree: handle_tree,
         descendants,
         stop: Some(stop),
         events: fence_events,
         calls,
+        step,
     })
 }
 
@@ -373,15 +441,29 @@ fn spawn(spawner: &LocalSpawner, task: impl Future<Output = ()> + 'static) -> Re
         .map_err(|_shut_down| Error::Closed)
 }
 
+/// What the owner task reports to and waits on, beside the process.
+struct Owner {
+    step: Rc<Cell<OwnerStep>>,
+    clock: Arc<dyn Clock>,
+    post: Rc<dyn Fn(AgentInput)>,
+}
+
+impl Owner {
+    fn enter(&self, pid: u32, step: OwnerStep) {
+        tracing::debug!(pid, ?step, "the agent's owner moves on");
+        self.step.set(step);
+    }
+}
+
 /// The owner task: exit or stop, then the bounded wait for the pipes, then the report.
 async fn own(
     mut handle: Handle,
     stop_asked: oneshot::Receiver<()>,
     ends: impl Future<Output = ()>,
     output: Output,
-    clock: Arc<dyn Clock>,
-    post: Rc<dyn Fn(AgentInput)>,
+    owner: Owner,
 ) {
+    let Owner { clock, .. } = &owner;
     let pid = handle.pid();
     let exited = {
         let exit = pin!(handle.exited());
@@ -393,19 +475,22 @@ async fn own(
     };
     let ended = if let Some(report) = exited {
         // The agent is gone: all it wrote is in its stdout or already read.
+        owner.enter(pid, OwnerStep::Settling);
         let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &*clock).await;
+        settle(ends, || output.posted_since(mark), &**clock).await;
         Ended::Exited(report.detach_reason())
     } else {
         // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
         // ends a descendant that left the agent's group, as a Codex command does.
+        owner.enter(pid, OwnerStep::Listing);
         let listed = if cfg!(unix) {
-            leftovers::snapshot(handle.descendants(), Arc::clone(&clock)).await
+            leftovers::snapshot(handle.descendants(), Arc::clone(clock)).await
         } else {
             None
         };
+        owner.enter(pid, OwnerStep::Ladder);
         let outcome = handle
-            .shutdown(&ProcessTimer(Arc::clone(&clock)), listed)
+            .shutdown(&ProcessTimer(Arc::clone(clock)), listed)
             .await;
         let step = StopStep::of(&outcome);
         if step == StopStep::Unresponsive {
@@ -414,14 +499,16 @@ async fn own(
                 "the agent did not exit after its kill; it is reaped later"
             );
         }
+        owner.enter(pid, OwnerStep::Settling);
         let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &*clock).await;
+        settle(ends, || output.posted_since(mark), &**clock).await;
         Ended::Stopped {
             step,
             report: outcome.report().detach_reason(),
         }
     };
-    post(AgentInput::Ended(ended));
+    owner.enter(pid, OwnerStep::Posted);
+    (owner.post)(AgentInput::Ended(ended));
 }
 
 /// Waits for `ends` on the host clock; true when it ended. Each time [`PUMP_END_BOUND`] passes

@@ -13,7 +13,7 @@
 // set, so a first paint never shows the whole scribble.
 import { useEffect, useRef } from "react";
 import { useDisplay } from "../lib/display.ts";
-import { inkLookup } from "./ink-lookup.ts";
+import { inkPoints, type InkPoints } from "./ink-lookup.ts";
 
 const N = (v: number) => +v.toFixed(2);
 
@@ -61,6 +61,8 @@ const SPEED = 36;
 /** The fewest milliseconds between two drawn frames: 30 a second. */
 const FRAME_MS = 1000 / 30;
 const PATH_D = `M 0 0 ${Array(UNITS).fill(UNIT).join(" ")}`;
+/** The ink's points, worked out when the first pen is set up and shared by every pen after it. */
+let inkAt: InkPoints | null = null;
 
 /** The pen writing. `writing` false holds its last frame still and stops asking for frames: the turn is done. */
 export function PenMark({ writing = true, className }: { writing?: boolean; className?: string }) {
@@ -79,14 +81,17 @@ export function PenMark({ writing = true, className }: { writing?: boolean; clas
     const ink = inkRef.current;
     const nib = nibRef.current;
     if (!svg || !pan || !ink || !nib) return;
+    // the page's one measure of the ink, for the dash; every point comes from the script's (ink-lookup.ts)
     const LEN = ink.getTotalLength();
     const PU = LEN / UNITS;
     const shift = PEN_REF - VIEW_W * PEN_AT;
-    // the clock stays in [4.35, 5.35] PU, so the table covers it with margin
-    const at = inkLookup((k) => ink.getPointAtLength(k), PU * 3.3, PU * 5.4);
+    const points = (inkAt ??= inkPoints(PATH_D));
+    // a length in the page's measure, read in the script's: the two ends meet, so the nib stays on the dash's end
+    const scale = LEN > 0 ? points.length / LEN : 1;
+    const at = (k: number) => points.at(k * scale);
     const c = (clock.current ??= {
       penK: PU * 4.35,
-      paperX: ink.getPointAtLength(PU * 4.35).x - PEN_REF,
+      paperX: at(PU * 4.35).x - PEN_REF,
     });
     const draw = () => {
       const p = at(c.penK);

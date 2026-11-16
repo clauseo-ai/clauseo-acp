@@ -76,7 +76,10 @@ const HITS: SearchHit[] = [
     snippet: [
       { text: "A personal bond of ₹50,000 with one ", hit: false },
       { text: "surety", hit: true },
-      { text: ".", hit: false },
+      {
+        text: ". Arbitration and the listed invoices follow; the order is at ecourts.gov.in/ecourts_home/static/bail-conditions-order-14-october.pdf",
+        hit: false,
+      },
     ],
   },
   {

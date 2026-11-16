@@ -107,6 +107,7 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
     log.push(Notice {
         level: NoticeLevel::Warning,
         text,
+        kind: None,
     })
     .unwrap();
     let status = CompactionStatus::Completed;
@@ -129,6 +130,7 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
         checkpoint: log.fresh().unwrap(),
         restored: vec![doc_path(1).unwrap()],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     log.push(undo).unwrap();
     let settled = Settled {
@@ -255,6 +257,7 @@ fn a_step_shows_when_its_turn_ended_and_a_turn_that_never_ended_has_no_step() {
         checkpoint: log.fresh().unwrap(),
         restored: vec![],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     log.push(undo).unwrap();
     let state = fold(&retimed(log.into_events()));

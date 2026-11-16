@@ -6,9 +6,11 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
+import { locateLine } from "../../room/locate-refusal.ts";
+import { MovedFolder } from "../../room/moved.tsx";
 import { Group, Sample } from "./frame.tsx";
 import { LimitSamples } from "./matters-limits.tsx";
-import { folderFor, WINDOWS } from "./matters-data.ts";
+import { WINDOWS } from "./matters-data.ts";
 import { QueueSamples } from "./matters-queue.tsx";
 import { RailSamples } from "./matters-rail.tsx";
 
@@ -21,8 +23,30 @@ function NewMatterTrigger() {
       <Button kind="tone" size="small" onClick={() => setOpen(true)}>
         {w.t("New matter")}
       </Button>
-      <NewMatterDialog open={open} onOpenChange={setOpen} onCreate={() => {}} />
+      <NewMatterDialog
+        open={open}
+        onOpenChange={setOpen}
+        location="Documents/Clauseo"
+        pickFolder={() => "Documents/Clients/Acme Holdings"}
+        onCreate={() => {}}
+      />
     </>
+  );
+}
+
+/** The moved folder's line after a Locate the host refused for a folder inside another matter, which the list names. */
+function MovedRefused() {
+  const { lang } = useWords();
+  return (
+    <MovedFolder
+      folder="Documents/Khan Leather Works"
+      refused={locateLine(
+        lang,
+        { code: "matter.folder_inside_matter" },
+        "Khan Leather Works v. Customs",
+      )}
+      onLocate={() => {}}
+    />
   );
 }
 
@@ -33,15 +57,23 @@ export function MattersParts() {
     <Group title="Matters">
       <RailSamples />
       <QueueSamples />
+      <Sample name="Folder moved, Locate refused: inside another matter">
+        <MovedRefused />
+      </Sample>
       <Sample name="New matter form, first launch">
-        <NewMatterForm folderFor={folderFor} onCreate={() => {}} />
+        <NewMatterForm
+          location="Documents/Clauseo"
+          pickFolder={() => "Documents/Clients/Acme Holdings"}
+          onCreate={() => {}}
+        />
       </Sample>
       <Sample name="New matter form, filled in">
         <NewMatterForm
-          folderFor={folderFor}
-          name="Acme Ltd v. State"
-          client="Acme Ltd"
-          next="30 October 2026"
+          name="Acme share purchase"
+          client="Acme Holdings"
+          folder="Documents/Clients/Acme Holdings/Share purchase"
+          location="Documents/Clauseo"
+          pickFolder={() => "Documents/Clients/Acme Holdings"}
           titled={false}
           onCreate={() => {}}
           onCancel={() => {}}

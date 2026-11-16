@@ -22,6 +22,10 @@ pub const MAX_URL_CHARS: usize = 4_096;
 /// order the agent got them.
 pub const MAX_SEARCH_RESULTS: usize = 50;
 
+/// Most characters in a recorded search's `tool`, an MCP tool name. A longer one is cut to this
+/// by `WebSearchRecorded::with_source`.
+pub const MAX_SEARCH_TOOL_CHARS: usize = 64;
+
 /// What a redacted query parameter's value becomes.
 pub const REDACTED: &str = "REDACTED";
 

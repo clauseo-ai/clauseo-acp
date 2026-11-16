@@ -34,6 +34,23 @@
   .room-find-key {
     flex: none;
   }
+  /* a found row: its words wrap inside the rail, a long word or address broken where it must be, never pushing the
+     rail wider */
+  .room-find-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .room-find-row > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* a snippet in three lines at most: one long answer can't fill the rail */
+  .room-find-said {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
   /* a found word inside a snippet or a file name */
   .room-find-hit {
     @apply text-primary font-chip;
@@ -149,14 +166,8 @@
     background: var(--surface);
     box-shadow: var(--e0);
   }
-  .room-recent-row .room-conv-line {
-    align-items: flex-start;
-  }
   .room-recent-row .room-conv-title {
     @apply text-ui text-muted;
-  }
-  .room-recent-row .room-conv-mark {
-    margin-top: var(--icon-line-drop);
   }
   @media (hover: hover) {
     .room-recent-row:hover .room-conv-title {
@@ -238,10 +249,10 @@
     @apply text-primary font-chip;
   }
   /* one line: the title, the plan where it differs from the matter's first, and the status's icon at the line's end, where
-     every row's icon lines up with the next */
+     every row's icon lines up with the next, on the title's first line when it wraps */
   .room-conv-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--s1-5);
     min-width: 0;
   }
@@ -254,6 +265,7 @@
     flex: none;
   }
   .room-conv-mark {
+    margin-top: var(--icon-line-drop);
     color: var(--muted);
   }
   .room-conv[data-state="ready"] .room-conv-mark:not([data-waits]) {
@@ -262,6 +274,10 @@
   /* a question for the lawyer, the one status said in words on the row */
   .room-conv-ask {
     @apply text-small font-chip text-primary;
+  }
+  /* an answer ready, a failure or Answering.: said under the title, muted, below the hand's weight */
+  .room-conv-said {
+    @apply text-small text-muted;
   }
   .room-conv-more {
     position: absolute;
@@ -337,7 +353,6 @@
     gap: var(--s1);
     max-height: var(--mat-queue-max);
     overflow-y: auto;
-    scrollbar-gutter: stable;
   }
   /* each message is a slip on the tray, in the lawyer's own words at the lawyer's weight */
   .queue-item {
@@ -356,27 +371,52 @@
     min-width: 0;
     padding: var(--s1-5) 0;
   }
+  /* when a message goes, under its words across the slip: quiet, as the head's line */
+  .queue-when {
+    @apply text-small text-muted;
+    flex: 1 0 100%;
+    margin-top: calc(-1 * var(--s1));
+    padding-bottom: var(--s1);
+  }
   .queue-acts {
+    position: relative;
     flex: none;
+    align-self: stretch;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--s0-5);
     margin-left: auto;
   }
   .queue-send {
     color: var(--primary);
   }
-  /* Edit and Remove come in under the pointer or with focus, as the answer's Accept does, and never move a line */
-  .queue-more-act {
+  /* Edit and Remove come in under the pointer or with focus, as the answer's Accept does, over the line's end before
+     Send now, on the slip's own fill: at rest they hold no width, so the words run to Send now, and nothing moves when
+     they show (the rail's Snooze and Done, triage.css) */
+  .queue-more {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s0-5);
+    padding-left: var(--s2);
+    background: var(--surface);
     opacity: 0;
     transition: opacity var(--dur-quick) var(--ease-arrive);
   }
-  .queue-item:hover .queue-more-act,
-  .queue-item:focus-within .queue-more-act {
+  .queue-item:hover .queue-more,
+  .queue-item:focus-within .queue-more {
     opacity: 1;
   }
+  /* no pointer to bring them in: they stand in the row, in view */
   @media (hover: none) {
-    .queue-more-act {
+    .queue-more {
+      position: static;
+      padding-left: 0;
+      background: none;
       opacity: 1;
     }
   }
@@ -476,6 +516,25 @@
   }
   .steer-mark-text {
     @apply text-ui-loose font-accepted text-primary;
+  }
+  /* words the agent hasn't taken in yet: a slip like a queued message's, where the mark would stand */
+  .steer-wait {
+    margin: var(--s1) 0;
+    padding: var(--s1-5) var(--s0-5) var(--s0-5) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .steer-wait-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s0-5) var(--s3);
+  }
+  .steer-wait-when {
+    @apply text-small text-muted;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
   }
   .steer-note {
     max-width: var(--measure);

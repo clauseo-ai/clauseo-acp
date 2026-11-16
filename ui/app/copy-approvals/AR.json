@@ -1,8 +1,10 @@
 {
   "AR-01": {
     "en": "Archived. Read only.",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "संग्रहीत। केवल पढ़ने के लिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-04",
     "by": "Rohan",

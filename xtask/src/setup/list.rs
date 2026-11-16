@@ -79,7 +79,16 @@ pub(super) fn list_with<W: Write, E: Write>(
         }
         ListFormat::Json => {
             let tools: Vec<serde_json::Value> = (pins.tools.iter())
-                .map(|t| serde_json::json!({ "name": t.name, "version": t.version }))
+                .map(|t| {
+                    let bin_sha256: Vec<serde_json::Value> = (t.bin_sha256.iter())
+                        .map(|p| serde_json::json!({ "os": p.os, "arch": p.arch, "sha256": p.sha256 }))
+                        .collect();
+                    serde_json::json!({
+                        "name": t.name,
+                        "version": t.version,
+                        "bin_sha256": bin_sha256,
+                    })
+                })
                 .collect();
             let binaries: Vec<serde_json::Value> = (assets.iter())
                 .map(|(b, pin, download)| {

@@ -23,6 +23,7 @@ use futures::{FutureExt, StreamExt};
 use crate::codex::CODEX;
 use crate::permissions::{KINDS_ANSWERS, answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread, wait};
+use crate::update::STANDING_TIMERS;
 
 /// The agent id that makes an agent Claude.
 pub(crate) const CLAUDE: &str = "claude-acp";
@@ -410,12 +411,12 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     feed.changed("the try-again read");
 
     refresh(&host, RefreshWhy::Shown);
-    host.clock.advance(Duration::from_secs(299));
+    host.clock.advance(Duration::from_secs(119));
     refresh(&host, RefreshWhy::Shown);
     assert_eq!(
         reads.count(AgentKind::Claude),
         2,
-        "the last read is under 5 minutes old"
+        "the last read is under 2 minutes old (Claude's shown age)"
     );
     host.clock.advance(Duration::from_secs(1));
     refresh(&host, RefreshWhy::Shown);
@@ -423,7 +424,7 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     assert_eq!(
         reads.count(AgentKind::Claude),
         3,
-        "two shown at 5 minutes: one read"
+        "two shown at 2 minutes: one read"
     );
     host.settle();
     assert_eq!(feed.ready(), [], "a throttled shown publishes nothing");
@@ -489,7 +490,7 @@ fn deadlines_run_only_with_a_subscriber() {
     host.settle();
     assert_eq!(
         host.clock.armed(),
-        0,
+        STANDING_TIMERS,
         "no limits timer without a subscriber"
     );
 
@@ -538,13 +539,13 @@ fn deadlines_run_only_with_a_subscriber() {
     host.wait_armed(15 * MINUTE);
     drop(feed);
     let mut settles = 0;
-    while host.clock.armed() > 0 && settles < 100 {
+    while host.clock.armed() > STANDING_TIMERS && settles < 100 {
         host.settle();
         settles += 1;
     }
     assert_eq!(
         host.clock.armed(),
-        0,
+        STANDING_TIMERS,
         "the last subscriber took the timer with it"
     );
     host.shutdown();
@@ -571,7 +572,7 @@ fn no_claude_or_codex_entry_reads_nothing() {
         (0, 0)
     );
     assert_eq!(feed.ready(), []);
-    assert_eq!(host.clock.armed(), 0);
+    assert_eq!(host.clock.armed(), STANDING_TIMERS);
 
     let phone: Principal = serde_json::from_str("\"some_phone\"").unwrap();
     let refused = wait("subscribe_limits", host.handle.subscribe_limits(phone)).unwrap_err();

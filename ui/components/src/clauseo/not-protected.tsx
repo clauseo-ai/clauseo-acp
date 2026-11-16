@@ -12,29 +12,45 @@ import { Say } from "./say.tsx";
 export function NotProtectedMark({
   short = false,
   meaning,
+  onPress,
 }: {
-  short?: boolean;
-  /** What Not protected means where it isn't protection switched off. When the workspace couldn't
-   * be set up, or Windows was told no, Clauseo falls back to asking before each change, and the caller says so in its
-   * own words: "Clauseo asks before each change in this matter." Without it, the sentence about protection switched
-   * off stands. */
-  meaning?: string;
-}) {
+  /** Optional: a press explains it (UC's note, from the toolbar); the mark is then a button. */
+  onPress?: (() => void) | undefined;
+} & (
+  | { short: true; meaning?: undefined }
+  | {
+      short?: false;
+      /** What Not protected means, in the caller's words, true for the plan it runs: Claude changes files in this matter without asking;
+       * ChatGPT reads any file the lawyer can open and asks before changing files outside the matter's folder.
+       * Protection switched off says the same, since the host runs each plan there as it does without protection. */
+      meaning: string;
+    }
+)) {
   const w = useToolbarWords();
+  const Tag = onPress === undefined ? "span" : "button";
   return (
-    <span className="np-mark" data-short={short ? "" : undefined}>
+    <Tag
+      className="np-mark"
+      data-short={short ? "" : undefined}
+      {...(onPress === undefined
+        ? {}
+        : {
+            type: "button" as const,
+            onClick: onPress,
+            "aria-haspopup": "dialog" as const,
+            "data-testid": "protection-mark",
+          })}
+    >
       <IconNotProtected size={14} className="np-icon" />
       <span className="np-words">
         <b className="np-name">{short ? w.v("Not protected") : w.v("Not protected.")}</b>
         {!short && (
           <>
             {" "}
-            <Say>
-              {meaning ?? w.v("Clauseo can reach beyond this matter's folder without asking.")}
-            </Say>
+            <Say>{meaning ?? ""}</Say>
           </>
         )}
       </span>
-    </span>
+    </Tag>
   );
 }

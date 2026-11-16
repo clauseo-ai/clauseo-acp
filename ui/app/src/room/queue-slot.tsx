@@ -6,6 +6,8 @@
 // can queue and the strip shows in the same frame as its first entry; a loaded chunk never suspends. Before it
 // arrives the slot shows nothing. The slot keeps the strip's status region, empty and visually hidden, mounted for its
 // whole life: a region that mounts holding words says nothing, so the strip says its head there (QueueStrip's onSay).
+// While the thread resumes after an idle stop the strip mounts too, for the resume cue (R20b: resume-cue.ts), which
+// is its own line and shows nothing until it has run past its threshold.
 import { Suspense, useCallback, useEffect, useRef } from "react";
 import { useStreamPart, useViewStore } from "../store/hooks.ts";
 import type { StreamView } from "../store/view.ts";
@@ -30,11 +32,13 @@ export type QueueSlotProps = {
 export type QueueStripProps = QueueSlotProps & { onSay: (said: string) => void };
 
 const pickHeld = (v: StreamView | undefined) => v?.header?.header?.queue_held === true;
+const pickResuming = (v: StreamView | undefined) => v?.header?.header?.resuming_since !== undefined;
 
 export function QueueSlot(props: QueueSlotProps) {
   const store = useViewStore();
   const count = useStreamPart(store, props.stream, queueCountPick);
   const held = useStreamPart(store, props.stream, pickHeld);
+  const resuming = useStreamPart(store, props.stream, pickResuming);
   useEffect(() => void loadQueueStrip(), []);
   // the strip's status region, mounted empty for the slot's life so the strip's first line is said as it comes
   const region = useRef<HTMLParagraphElement>(null);
@@ -44,7 +48,7 @@ export function QueueSlot(props: QueueSlotProps) {
   return (
     <>
       <p ref={region} className="sr-only" role="status" data-testid="queue-said" />
-      {(count > 0 || held) && (
+      {(count > 0 || held || resuming) && (
         <Suspense fallback={null}>
           <LazyQueueStrip {...props} onSay={say} />
         </Suspense>

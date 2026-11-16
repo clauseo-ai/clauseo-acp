@@ -14,10 +14,10 @@ use zeroize::Zeroizing;
 
 use crate::account::Account;
 use crate::cancel::CancelFlag;
-use crate::config::{Config, ConnectorUrls};
+use crate::config::{Config, ConnectorUrls, Origin};
 use crate::credential::{Credential, CredentialKind, CredentialStatus, SignOutReport};
 use crate::error::{AuthError, Error, SignInError, StoreError};
-use crate::http::{self, SendBody};
+use crate::http;
 use crate::known::{CASE_LAW, KNOWN, KnownConnector};
 use crate::mcp::{McpReply, McpRequestHeaders};
 use crate::oauth::Metadata;
@@ -38,7 +38,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// file's contents and the liveness cache.
 pub(crate) struct Shared {
     pub(crate) config: Config,
-    pub(crate) agent: ureq::Agent,
+    pub(crate) agent: http::Agents,
     pub(crate) store: Arc<dyn SecretStore>,
     /// The state file as last read or written.
     pub(crate) state: Mutex<State>,
@@ -86,8 +86,10 @@ impl Connectors {
     /// Checks the origin, builds the HTTP agent and reads the state file. Makes no request and
     /// reads no keychain item.
     pub fn new(config: Config, store: Arc<dyn SecretStore>) -> Result<Connectors, Error> {
-        config.origin.check()?;
-        let agent = http::agent(&config)?;
+        if !config.origin.allowed() {
+            return Err(Error::BadOrigin);
+        }
+        let agent = http::Agents::new(&config)?;
         let state = State::load(&config.state_file)?;
         let case_law = config.origin.urls(&CASE_LAW);
         let shared = Arc::new(Shared {
@@ -112,6 +114,13 @@ impl Connectors {
     /// nothing is fetched in the background.
     pub fn liveness(&self) -> Liveness {
         crate::pricing::cached_liveness(&self.shared)
+    }
+
+    /// The origin the config named: where every request goes and whose pay links are taken.
+    /// Fixed for the life of the value; the host reads it to recheck a pay link before it opens
+    /// one (`PayUrl::is_for`).
+    pub fn origin(&self) -> &Origin {
+        &self.shared.config.origin
     }
 
     /// The handle of a known connector (`case-law`); `None` for any other id. Every call for
@@ -156,8 +165,11 @@ pub(crate) struct HandleInner {
     /// Bumped whenever the credential is replaced or ends; the account cache is kept only for
     /// the generation it was read under.
     pub(crate) generation: AtomicU64,
-    /// The last account read and the generation it belongs to.
-    pub(crate) account: Mutex<Option<(u64, Account)>>,
+    /// Bumped by [`ConnectorHandle::forget_account`]: the account cache is kept only for the
+    /// count it was read under, so a read in flight when it is forgotten does not refill it.
+    pub(crate) forgets: AtomicU64,
+    /// The last account read, with the generation and the forget count it belongs to.
+    pub(crate) account: Mutex<Option<(u64, u64, Account)>>,
     pub(crate) metadata: Mutex<Option<Arc<Metadata>>>,
     /// The pending sign-in's number and cancel flag.
     pub(crate) pending: Mutex<Option<(u64, CancelFlag)>>,
@@ -215,6 +227,7 @@ impl ConnectorHandle {
                 slot: Mutex::new(Slot::Unread),
                 persist_failed: AtomicBool::new(false),
                 generation: AtomicU64::new(0),
+                forgets: AtomicU64::new(0),
                 account: Mutex::new(None),
                 metadata: Mutex::new(None),
                 pending: Mutex::new(None),
@@ -274,13 +287,22 @@ impl ConnectorHandle {
         crate::calls::account(self)
     }
 
+    /// Drops the account's copy, so the next [`ConnectorHandle::account`] asks the connector:
+    /// for a balance that changed where this crate did not see it (a paid `recharge` tool
+    /// result through the relay).
+    /// Never waits: a read in flight keeps the lock, and stores nothing once this is called.
+    pub fn forget_account(&self) {
+        self.inner.forgets.fetch_add(1, Ordering::SeqCst);
+    }
+
     /// Opens a recharge for `pack`; its pay link is always ours.
     pub fn create_recharge(&self, pack: &str) -> Result<Recharge, Error> {
         crate::calls::create_recharge(self, pack)
     }
 
-    /// Polls the recharge until it is paid (or otherwise settled), the recharge deadline
-    /// passes, or `cancel` is set.
+    /// Polls the recharge (a plain GET every
+    /// [`Config::recharge_interval`](crate::Config::recharge_interval), never `wait` or
+    /// `resume`) until it is settled, the recharge deadline passes, or `cancel` is set.
     pub fn wait_recharge(&self, recharge_id: &str, cancel: &CancelFlag) -> Result<Recharge, Error> {
         crate::calls::wait_recharge(self, recharge_id, cancel)
     }
@@ -322,48 +344,15 @@ impl ConnectorHandle {
     /// Adds a firm's pasted API key: refuses anything that is not `cdk_live_` and 32 base62
     /// characters before any request, then checks it with one account read and stores it.
     pub fn add_api_key(&self, key: &str) -> Result<(), Error> {
-        if !crate::credential::is_api_key(key) {
-            return Err(Error::BadKeyFormat);
-        }
-        let key = Secret::from(key);
-        let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
-        let url = self.account_url();
-        let headers = [
-            ("Authorization", auth.as_str()),
-            ("Accept", "application/json"),
-        ];
-        let shared = &self.inner.shared;
-        let reply = http::send(
-            &shared.agent,
-            "GET",
-            &url,
-            &headers,
-            SendBody::None,
-            shared.timeout(),
-        )
-        .map_err(Error::Network)?;
-        match reply.status {
-            // A 402 is a valid key on an empty account.
-            200 | 402 => {}
-            401 => return Err(Error::Auth(AuthError::KeyRevoked)),
-            status => return Err(Error::Http { status }),
-        }
-        let credential = Credential::ApiKey(key);
-        self.store_new(credential, CredentialKind::ApiKey)?;
-        if reply.status == 200 {
-            let now = shared.config.clock.now();
-            let parsed = crate::account::parse_account(
-                &reply.body,
-                self.inner.known,
-                &shared.config.origin,
-                now,
-            );
-            if let Ok(account) = parsed {
-                let generation = self.inner.generation.load(Ordering::SeqCst);
-                *lock(&self.inner.account) = Some((generation, account));
-            }
-        }
-        Ok(())
+        self.add_api_key_while(key, &|| true)
+    }
+
+    /// As [`add_api_key`](Self::add_api_key), storing the key only if `still` answers `true`
+    /// when asked under the credential's lock, just before the store: a caller whose sign-out
+    /// or switch-off came in while the key was checked gets `Error::Cancelled`, and nothing is
+    /// stored.
+    pub fn add_api_key_while(&self, key: &str, still: &dyn Fn() -> bool) -> Result<(), Error> {
+        crate::calls::add_api_key(self, key, still)
     }
 
     /// Signs out: revokes the refresh token (`POST /revoke`; an API key has no revoke call),
@@ -373,6 +362,8 @@ impl ConnectorHandle {
         if let Some((_, pending)) = lock(&self.inner.pending).take() {
             pending.cancel();
         }
+        // Asked before the lock: a slow proxy lookup never holds the credential.
+        let route = self.inner.shared.agent.route();
         let mut slot = lock(&self.inner.slot);
         let credential = match self.load(&mut slot) {
             Ok(credential) => credential.cloned(),
@@ -382,7 +373,9 @@ impl ConnectorHandle {
             }
         };
         let revoked = match &credential {
-            Some(Credential::OAuth(tokens)) => crate::refresh::revoke(self, &tokens.refresh_token),
+            Some(Credential::OAuth(tokens)) => {
+                crate::refresh::revoke_on(self, &tokens.refresh_token, &route)
+            }
             Some(Credential::ApiKey(_)) | None => false,
         };
         let deleted = self.inner.shared.store.delete(self.id());
@@ -513,14 +506,21 @@ impl ConnectorHandle {
     /// old credential as they were. Once the lock is released, the OAuth refresh tokens the new
     /// credential replaced (in memory or in the keychain) are revoked, best effort: a failure is
     /// logged without the token. The new credential's own token is never revoked.
+    ///
+    /// `still` is asked under the slot's lock first: `false` stores nothing and answers
+    /// `Ok(false)` (the caller's credential ended while it was being made).
     pub(crate) fn store_new(
         &self,
         credential: Credential,
         kind: CredentialKind,
-    ) -> Result<(), StoreError> {
+        still: &dyn Fn() -> bool,
+    ) -> Result<bool, StoreError> {
         let bytes = credential.encode()?;
         let replaced = {
             let mut slot = lock(&self.inner.slot);
+            if !still() {
+                return Ok(false);
+            }
             let replaced = self.replaced_refresh_tokens(&mut slot, &credential);
             self.inner.shared.store.set(self.id(), &bytes)?;
             self.save_state(|state| state.add(self.id(), kind))?;
@@ -537,7 +537,7 @@ impl ConnectorHandle {
                 );
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// The OAuth refresh tokens `new` replaces: the one in memory and the one in the keychain,

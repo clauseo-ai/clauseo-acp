@@ -1,5 +1,5 @@
 //! The launch profile tests' rig (`profile.rs`, `tools.rs`, `mcp.rs`): a launcher ([`Wired`])
-//! that sees each launch after its prep made the session's folders and fills `@WORK@`,
+//! that sees each launch after its prep made the session's folders and fills `@RUN@`, `@WORK@`,
 //! `@BROWSER@` and `@SESSION@` into the scenario the agent is about to read, so every value is
 //! checked exactly; a profile hook; and scenario builders.
 
@@ -23,12 +23,23 @@ use crate::write;
 pub(crate) const CLAUDE: &str = "claude-acp";
 pub(crate) const CODEX: &str = "codex-acp";
 
+/// The agent the browser entry's own tests launch (slots, policy, egress): one with no kind
+/// (`AgentKind::of` gives none), so it may have the browser on every OS. [`Hook`] offers its
+/// servers, the `browser` entry among them, to every agent, where the real profile offers the
+/// entry to Codex alone (`servers::browser_mcp`); and Claude has no browser on macOS and Linux,
+/// Codex none on Windows (`servers::no_browser`).
+pub(crate) const BROWSING: &str = "browsing-agent";
+
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
-/// launch whose prep made none) and its environment.
+/// launch whose prep made none), its environment, and the files its pack plugin
+/// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
 #[derive(Debug, Clone)]
 pub(crate) struct Seen {
     pub(crate) run: Option<PathBuf>,
     pub(crate) env: BTreeMap<OsString, OsString>,
+    pub(crate) packs: Vec<String>,
+    /// The secrets the spec names for the stderr tail to hide (`LaunchSpec::redacted`).
+    pub(crate) redacted: Vec<String>,
 }
 
 impl Seen {
@@ -94,20 +105,51 @@ impl Launcher for Wired {
             let template = PathBuf::from(format!("{scenario}.tmpl"));
             if let Ok(text) = std::fs::read_to_string(&template) {
                 let session = run.file_name().unwrap().to_str().unwrap();
+                // The guard's `--cwd`: `<data>/browser/run/<session>`, outside the run folder.
+                let data = run.parent().and_then(Path::parent).unwrap();
+                let browser = data.join("browser").join("run").join(session);
                 let text = text
+                    .replace("@RUN@", &escaped(&path_text(run)))
                     .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
-                    .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
-                    .replace("@SESSION@", &escaped(session));
+                    .replace("@BROWSER@", &escaped(&path_text(&browser)))
+                    .replace("@SESSION@", &escaped(session))
+                    .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());
                 FILLED.lock().unwrap().push(text);
             }
         }
+        let packs = run
+            .as_ref()
+            .map(|run| files_under(&run.join("skill-packs")))
+            .unwrap_or_default();
         self.seen.lock().unwrap().push(Seen {
             run,
             env: spec.env().clone(),
+            packs,
+            redacted: spec.redacted().to_vec(),
         });
         self.inner.launch(spec)
     }
+}
+
+/// Every file under `root`, by path under it with `/`, sorted; none when it does not exist.
+pub(crate) fn files_under(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_owned()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let rel = path.strip_prefix(root).unwrap();
+                let parts: Vec<_> = rel.iter().map(|part| part.to_str().unwrap()).collect();
+                files.push(parts.join("/"));
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 /// Every scenario [`Wired`] filled in this process, for [`turn`]'s failure message. nextest
@@ -149,7 +191,8 @@ pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
 
 /// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with
 /// `profile`, that profile's keys for the launch's skills token), `servers` and `skills` for
-/// every agent. `tokens` records the token each Codex launch's keys were built from.
+/// every agent, `codex_servers` for a Codex agent only. `tokens` records the token each Codex
+/// launch's keys were built from.
 #[derive(Clone, Default)]
 pub(crate) struct Hook {
     pub(crate) meta: Value,
@@ -158,10 +201,21 @@ pub(crate) struct Hook {
     pub(crate) skills: Vec<SkillWrite>,
     pub(crate) profile: Option<Arc<ClauseoProfile>>,
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
+    /// The shell browser's folder (`ProfileHook::browser_tool`).
+    pub(crate) browser_tool: Option<PathBuf>,
+    /// The servers a Codex agent gets after `servers`, as the launch profile gives Codex alone
+    /// the `browser` entry (`clauseo_profile::servers::browser_mcp`).
+    pub(crate) codex_servers: Vec<McpServer>,
+    /// Every agent's session `PATH` folders (`ProfileHook::agent_path`).
+    pub(crate) agent_path: Vec<PathBuf>,
 }
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         (agent.as_str() == CLAUDE)
             .then(|| self.meta.as_object().cloned())
             .flatten()
@@ -171,15 +225,32 @@ impl ProfileHook for Hook {
         BTreeMap::new()
     }
 
-    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
-        self.servers.clone()
+    fn mcp_servers(&self, agent: &AgentId) -> Vec<McpServer> {
+        let mut servers = self.servers.clone();
+        if agent.as_str() == CODEX {
+            servers.extend(self.codex_servers.iter().cloned());
+        }
+        servers
     }
 
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         self.skills.clone()
     }
 
-    fn codex_config(&self, agent: &AgentId, written: Option<&SkillsWritten>) -> Map<String, Value> {
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.browser_tool.clone()
+    }
+
+    fn agent_path(&self, _agent: &AgentId) -> Vec<PathBuf> {
+        self.agent_path.clone()
+    }
+
+    fn codex_config(
+        &self,
+        agent: &AgentId,
+        written: Option<&SkillsWritten>,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Map<String, Value> {
         if agent.as_str() != CODEX {
             return Map::new();
         }
@@ -239,12 +310,22 @@ pub(crate) fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
-            (
-                "AGENT_BROWSER_STREAM_PORT".to_owned(),
-                "{stream_port}".to_owned(),
-            ),
         ],
     }
+}
+
+/// [`browser_server`]'s parts: its name, program, arguments and environment.
+pub(crate) fn browser_parts() -> (String, PathBuf, Vec<String>, Vec<(String, String)>) {
+    let McpServer::Stdio {
+        name,
+        command,
+        args,
+        env,
+    } = browser_server()
+    else {
+        panic!("the browser entry is a stdio server");
+    };
+    (name, command, args, env)
 }
 
 /// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
@@ -265,20 +346,50 @@ pub(crate) fn filled_browser() -> Value {
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
         {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
-        {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]})
+}
+
+/// `servers` as a Codex `session/new` carries them on this OS: without the `browser` entry
+/// where Codex has no browser at all (Windows, `clauseo_profile::servers::no_browser`), else
+/// all of them. Claude's keep it everywhere.
+pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Codex));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
+/// `servers` as a Claude `session/new` carries them: without the `browser` entry, since Claude
+/// has no browser on any OS (`clauseo_profile::servers::no_browser`).
+pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
+/// A Claude session's header tools with web search on: web search alone, since Claude has no
+/// browser on any OS (`servers::no_browser`). `_browser` is the reason the browser state would
+/// carry, kept so each caller still says what a session with the browser would show.
+pub(crate) fn claude_tools(_browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
+    vec![tool(ClauseoTool::WebSearch, None)]
 }
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
 /// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
-/// 0.89.1's modes, in `default`, as a Claude agent's launch requires (`claude-handshake`).
+/// 0.89.1's modes, in `auto`, as a Claude agent's launch outside forced ask requires
+/// (`claude-handshake`).
 pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]) -> String {
     let label = if method == "session/new" {
         "new"
     } else {
         "load"
     };
-    let modes = json!({"currentModeId": "default", "availableModes": [
+    let modes = json!({"currentModeId": "auto", "availableModes": [
         {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
         {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let respond = if method == "session/new" {
@@ -306,6 +417,19 @@ pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]
 /// A Codex agent's scenario, as `codex-handshake` (codex-acp 2.2.2): `initialize`,
 /// `session/new` matching `params`, the switch to its ask mode, one prompt.
 pub(crate) fn codex_lines(name: &str, params: &Value) -> String {
+    codex_lines_for(name, "session/new", params)
+}
+
+/// [`codex_lines`] with `method`, `session/new` or `session/load` (of `sess-1`).
+pub(crate) fn codex_lines_for(name: &str, method: &str, params: &Value) -> String {
+    let modes = json!({"currentModeId": "agent", "availableModes": [
+        {"id": "read-only", "name": "Read-only"}, {"id": "workspace-write", "name": "Workspace access"},
+        {"id": "agent", "name": "Auto review"}, {"id": "agent-full-access", "name": "Full access"}]});
+    let result = if method == "session/new" {
+        json!({"sessionId": "sess-1", "modes": modes})
+    } else {
+        json!({"modes": modes})
+    };
     [
         json!({"scenario": name, "description": "a launch profile test, Codex", "on_stdin_close": "exit"}),
         json!({"expect": {"method": "initialize", "as": "init", "params": {"protocolVersion": 1}}}),
@@ -315,11 +439,8 @@ pub(crate) fn codex_lines(name: &str, params: &Value) -> String {
             "delete": {}, "additionalDirectories": {}, "resume": {}, "close": {}}},
             "authMethods": [], "agentInfo": {"name": "@agentclientprotocol/codex-acp",
             "title": "Codex", "version": "2.2.2"}}}}),
-        json!({"expect": {"method": "session/new", "as": "new", "params": params}}),
-        json!({"respond": {"to": "new", "result": {"sessionId": "sess-1", "modes": {
-            "currentModeId": "agent", "availableModes": [{"id": "read-only", "name": "Read-only"},
-            {"id": "workspace-write", "name": "Workspace access"}, {"id": "agent", "name": "Auto review"},
-            {"id": "agent-full-access", "name": "Full access"}]}}}}),
+        json!({"expect": {"method": method, "as": "start", "params": params}}),
+        json!({"respond": {"to": "start", "result": result}}),
         json!({"expect": {"method": "session/set_mode", "as": "set-mode",
             "params": {"sessionId": "sess-1", "modeId": "workspace-write"}}}),
         json!({"respond": {"to": "set-mode", "result": {}}}),

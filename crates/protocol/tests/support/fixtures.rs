@@ -13,10 +13,10 @@
 use std::fmt::{Debug, Display};
 
 use clauseo_protocol::{
-    AgentChoiceId, AgentId, BlobHash, BlobRef, CheckpointId, CommandId, CompactString, Count,
-    DomainEvent, ElicitationId, Envelope, EventId, FileRefId, Finite, FolderRefId, MatterId,
-    MatterPath, MessageId, PermissionRequestId, RawPayload, Seq, StreamId, ThreadId, Timestamp,
-    Title, ToolCallId, TurnId,
+    AgentChoiceId, AgentId, BlobHash, BlobRef, BlockedSiteId, CheckpointId, CommandId,
+    CompactString, Count, DomainEvent, ElicitationId, Envelope, EventId, FileRefId, Finite,
+    FolderRefId, MatterId, MatterPath, MessageId, PermissionRequestId, RawPayload, Seq, StreamId,
+    ThreadId, Timestamp, Title, ToolCallId, TurnId,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -49,6 +49,11 @@ pub fn matter_id(n: u64) -> MatterId {
 /// A `TurnId` from `v7(n)`.
 pub fn turn_id(n: u64) -> TurnId {
     TurnId::new(v7(n)).unwrap()
+}
+
+/// A `BlockedSiteId` from `v7(n)`.
+pub fn blocked_site_id(n: u64) -> BlockedSiteId {
+    BlockedSiteId::new(v7(n)).unwrap()
 }
 
 /// A `MessageId` from `v7(n)`.

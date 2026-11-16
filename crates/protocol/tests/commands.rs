@@ -3,7 +3,8 @@
 //! name rules in `commands/names.rs`, file lists in `commands/files.rs`, the display settings'
 //! wire form in `commands/settings.rs`, `list_agents` in `commands/agents.rs`, `refresh_limits` in
 //! `commands/limits.rs`, `preview_undo` in `commands/undo_preview.rs`, folder support in
-//! `commands/folder_support.rs`, the updater's in `commands/update.rs`.
+//! `commands/folder_support.rs`, the updater's in `commands/update.rs`, `last_exit` in
+//! `commands/last_exit.rs`.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -54,6 +55,34 @@ mod folder_support;
 #[cfg(test)]
 #[path = "commands/update.rs"]
 mod update;
+
+#[cfg(test)]
+#[path = "commands/last_exit.rs"]
+mod last_exit;
+
+#[cfg(test)]
+#[path = "commands/protection.rs"]
+mod protection;
+
+#[cfg(test)]
+#[path = "commands/allowed_sites.rs"]
+mod allowed_sites;
+
+#[cfg(test)]
+#[path = "commands/blackline.rs"]
+mod blackline;
+
+#[cfg(test)]
+#[path = "commands/revisions.rs"]
+mod revisions;
+
+#[cfg(test)]
+#[path = "commands/picks.rs"]
+mod picks;
+
+#[cfg(test)]
+#[path = "commands/prompt_text.rs"]
+mod prompt_text;
 
 use std::str::FromStr;
 
@@ -216,52 +245,18 @@ fn command_rejects_unknown_field() {
 }
 
 #[test]
-fn command_size_limits() {
-    let max_text = "a".repeat(MAX_PROMPT_TEXT_BYTES);
-    // Bytes, not characters: 2-byte characters reach the limit at half as many characters.
-    let accented = "é".repeat(MAX_PROMPT_TEXT_BYTES / 2);
-    let half = "b".repeat(MAX_PROMPT_TEXT_BYTES / 2);
-    let over = MAX_PROMPT_TEXT_BYTES + 1;
-    {
-        let build = send_prompt;
-        // Text: at the limit passes, one byte over fails, summed across blocks.
-        assert!(build(vec![text(&max_text)]).validate().is_ok());
-        assert!(build(vec![text(&accented)]).validate().is_ok());
-        assert!(build(vec![text(&half), text(&half)]).validate().is_ok());
-        let one_over = build(vec![text(&(max_text + "x"))]).validate();
-        assert!(
-            too_large(&one_over, over, MAX_PROMPT_TEXT_BYTES),
-            "{one_over:?}"
-        );
-        let split = build(vec![
-            text(&half),
-            files(1).remove(0),
-            text(&(half.clone() + "x")),
-        ]);
-        assert!(too_large(&split.validate(), over, MAX_PROMPT_TEXT_BYTES));
-        let accented_over = build(vec![text(&(accented + "x"))]).validate();
-        assert!(too_large(&accented_over, over, MAX_PROMPT_TEXT_BYTES));
-        // Files: 50 pass, 51 fail.
-        let mut at_limit = files(MAX_PROMPT_FILES);
-        at_limit.push(text("see these"));
-        assert!(build(at_limit).validate().is_ok());
-        let too_many = build(files(MAX_PROMPT_FILES + 1)).validate();
-        assert!(too_large(&too_many, MAX_PROMPT_FILES + 1, MAX_PROMPT_FILES));
-        // An empty prompt is refused.
-        assert!(invalid(&build(Vec::new()).validate()));
-    }
-}
-
-/// `EditQueuedPrompt` carries text only (its file blocks stay with the queued turn): the text
-/// limit applies, and empty text passes the shape check, since the host knows the files.
-#[test]
-fn edit_queued_text_limit() {
-    let max_text = "a".repeat(MAX_PROMPT_TEXT_BYTES);
-    assert!(edit_queued(&max_text).validate().is_ok());
-    assert!(edit_queued("").validate().is_ok());
-    let over = edit_queued(&(max_text + "x")).validate();
-    let size = MAX_PROMPT_TEXT_BYTES + 1;
-    assert!(too_large(&over, size, MAX_PROMPT_TEXT_BYTES), "{over:?}");
+fn prompt_file_limit() {
+    let build = send_prompt;
+    // Files: 50 pass, 51 fail, as `command.invalid`.
+    let mut at_limit = files(MAX_PROMPT_FILES);
+    at_limit.push(text("see these"));
+    assert!(build(at_limit).validate().is_ok());
+    let too_many = build(files(MAX_PROMPT_FILES + 1)).validate();
+    assert!(too_large(&too_many, MAX_PROMPT_FILES + 1, MAX_PROMPT_FILES));
+    let code = HostError::invalid_command(too_many.unwrap_err()).code();
+    assert_eq!(code, ErrorCode::CommandInvalid);
+    // An empty prompt is refused.
+    assert!(invalid(&build(Vec::new()).validate()));
 }
 
 #[test]
@@ -299,7 +294,7 @@ fn limits_are_public() {
     assert_eq!(MAX_ID_TEXT_BYTES, 256);
     assert_eq!(MAX_FILE_LIST, 10_000);
     assert_eq!(MAX_PATH_LIST_BYTES, 1024 * 1024);
-    assert_eq!(MAX_PROMPT_TEXT_BYTES, 256 * 1024);
+    assert_eq!(MAX_PROMPT_TEXT_BYTES, 6 * 1024 * 1024);
     assert_eq!(MAX_ELICITATION_VALUES_BYTES, 64 * 1024);
     assert_eq!(MAX_BLOB_READ_BYTES, 1024 * 1024);
     assert_eq!(MAX_QUEUED_TURNS, 10);
@@ -500,8 +495,8 @@ fn compare_versions_to_is_a_checkpoint_or_the_folder_now() {
 #[test]
 fn list_papers_and_its_answer_on_the_wire() {
     use clauseo_protocol::{
-        Count, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult, SkippedFile,
-        SkippedFileReason, Timestamp,
+        Count, FolderPlace, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
+        SkippedFile, SkippedFileReason, SyncService, Timestamp,
     };
     let matter = MatterId::new(fixtures::v7(1)).unwrap();
     let query = HostQuery::ListPapers { matter };
@@ -516,6 +511,7 @@ fn list_papers_and_its_answer_on_the_wire() {
             path: MatterPath::new("pleadings/claim.docx").unwrap(),
             size: Count::from(1200_u32),
             modified: Timestamp::new(1_577_836_800_250).unwrap(),
+            tracked: false,
         }],
         skipped: vec![SkippedFile {
             path: MatterPath::new("video.mp4").unwrap(),
@@ -523,6 +519,9 @@ fn list_papers_and_its_answer_on_the_wire() {
         }],
         unread: vec![MatterPath::new("OneDrive/Archive").unwrap()],
         truncated: false,
+        place: FolderPlace::Synced {
+            service: SyncService::OneDrive,
+        },
     };
     round_trips(&result);
     assert_eq!(
@@ -531,7 +530,8 @@ fn list_papers_and_its_answer_on_the_wire() {
             r#"{"papers":{"papers":[{"file":"01900000-0000-7000-8000-000000000002","#,
             r#""path":"pleadings/claim.docx","size":1200,"modified":1577836800250}],"#,
             r#""skipped":[{"path":"video.mp4","reason":"over_size_cap"}],"#,
-            r#""unread":["OneDrive/Archive"],"truncated":false}}"#
+            r#""unread":["OneDrive/Archive"],"truncated":false,"#,
+            r#""place":{"synced":{"service":"one_drive"}}}}"#
         )
     );
     assert_eq!(MAX_PAPERS, 2_000);

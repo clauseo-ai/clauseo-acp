@@ -206,7 +206,8 @@ export function NoticeCard({
 }) {
   const line =
     note != null && note !== "" ? (
-      <p className="lim-note-line">
+      // a status: the line often comes after a press, such as a refused one's words
+      <p className="lim-note-line" role="status">
         <Say>{note}</Say>
       </p>
     ) : null;
@@ -294,32 +295,48 @@ export function WayTile({
 
 /** A quiet note under the composer's field, above the room's line: plain words, never a gauge. `lead` stands in
  * primary, the rest in the muted tone. `wait` leads it with the clock, where the note says what waits and until
- * when; advice carries no icon, and its words start on the room's line's words. */
+ * when; advice carries no icon, and its words start on the room's line's words. `action` follows the last sentence
+ * inline, wrapping as its words do. `end` sits at the note's end, such
+ * as a quiet icon button that hides it (U15's out-of-credit note). `lead` is words, or the caller's own parts (the first
+ * read's line, its file's name fitted). `oneLine`: the note never wraps, and the caller's lead fits itself to the line
+ * (limits.css, [data-line="one"]). */
 export function FieldNotice({
   lead,
   rest,
   action,
+  end,
   wait = false,
+  oneLine = false,
 }: {
-  lead: string;
+  lead: string | ReactNode;
   rest?: string | null;
   action?: ReactNode;
+  end?: ReactNode;
   wait?: boolean;
+  oneLine?: boolean;
 }) {
   return (
-    <p className="lim-field-note" role="status" data-wait={wait ? "" : undefined}>
+    <p
+      className="lim-field-note"
+      role="status"
+      data-wait={wait ? "" : undefined}
+      data-line={oneLine ? "one" : undefined}
+    >
       {wait && <IconChecking size={14} className="lim-field-icon" />}
       <span className="min-w-0">
         <span className="lim-field-lead">
-          <Say>{lead}</Say>
+          {typeof lead === "string" ? <Say>{lead}</Say> : lead}
         </span>
-        {rest != null && rest !== "" && (
+        {rest != null && rest !== "" ? (
           <span className="lim-field-rest">
             <Say>{rest}</Say>
+            {action != null && <> {action}</>}
           </span>
+        ) : (
+          action != null && <> {action}</>
         )}
-        {action != null && <> {action}</>}
       </span>
+      {end != null && <span className="lim-field-end">{end}</span>}
     </p>
   );
 }

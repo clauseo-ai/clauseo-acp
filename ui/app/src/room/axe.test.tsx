@@ -33,7 +33,7 @@ import {
 } from "../testing/stream-script.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates, railThreads } from "./fake-next.ts";
-import type { PaperSummary, UiSettings } from "./host-next.ts";
+import type { Papers, PaperSummary, UiSettings } from "./host-next.ts";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
 import { createViewStore } from "../store/store.ts";
@@ -71,6 +71,8 @@ const PAPERS: PaperSummary[] = ["Notice to the bank.pdf", "उत्तर.docx"
 type Scene = {
   matters: boolean | "fails" | "states";
   papers: readonly PaperSummary[] | undefined;
+  /** The rest of the listing: files only online and folders not opened, the wall's dimmed tiles. */
+  listing?: Partial<Omit<Papers, "papers">>;
   /** New matter, pressed: the dialog open over the room. */
   dialog?: boolean;
   /** The open matter's one thread, with these entries, waiting on the lawyer. */
@@ -90,6 +92,19 @@ const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
 const SCENES: Record<string, Scene> = {
   "a matter with papers": { matters: true, papers: PAPERS },
   "a matter with none": { matters: true, papers: [] },
+  // dimmed tiles among the papers: two files only in OneDrive and a folder not opened
+  "a matter with papers away from this computer": {
+    matters: true,
+    papers: PAPERS,
+    listing: {
+      place: { synced: { service: "one_drive" } },
+      skipped: [
+        { path: "Lease deed.pdf", reason: "cloud_only" },
+        { path: "वकालतनामा.pdf", reason: "cloud_only" },
+      ],
+      unread: ["Annexures"],
+    },
+  },
   // the empty rail too: "No matters yet" and "Add a matter's folder."
   "no matter": { matters: false, papers: undefined },
   // list_matters rejects: no heading, and nothing else in the title's place
@@ -227,6 +242,7 @@ function transportFor(scene: Scene): FakeTransport {
           next: fakeNext({
             matters: () => infos,
             papers: scene.papers,
+            ...(scene.listing === undefined ? {} : { listing: scene.listing }),
             // Needs you and Recent: every matter's threads, as the host's first frames give them
             ...(scene.matters === "states"
               ? { frames: true, threads: railThreads(OPEN, SCRATCH, Date.now()) }

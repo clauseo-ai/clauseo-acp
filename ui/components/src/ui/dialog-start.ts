@@ -46,21 +46,69 @@ export function startAtField(plane: PlaneNode): () => HTMLElement | true {
     plane()?.querySelector<HTMLElement>("input:not(:disabled), textarea:not(:disabled)") ?? true;
 }
 
-/** One dialog's plane: `mount` is the popup's ref (it marks the plane quiet until a key is pressed), and `start` and
- * `field` give Base UI's initialFocus by the rules above. Make it once per dialog: useState(focusPlane). */
+/** Base UI's focus guards, the plane's siblings, take the dialog's title as their name (D-075). On WebKit under macOS,
+ * the desktop app's webview, Base UI gives them role="button" so VoiceOver's cursor lands in the focus trap
+ * (FocusGuard), and left so they were buttons with no name. */
+export function nameGuards(plane: HTMLElement | null) {
+  const title = plane?.querySelector(":is(h1, h2, h3)")?.textContent?.trim() ?? "";
+  if (plane == null || title === "") return;
+  for (const guard of plane.parentElement?.children ?? [])
+    if (guard.hasAttribute("data-base-ui-focus-guard")) guard.setAttribute("aria-label", title);
+}
+
+/** Focus given back to `el` after a press, not a key, draws no ring (D-075): a press that closes a dialog holding a
+ * field (which always draws its ring) would otherwise leave the browser's keyboard ring on the button it goes back to.
+ * data-quiet-focus until a key is pressed anywhere or the focus leaves; base.css hides the ring meanwhile. */
+export function quietReturn(el: HTMLElement) {
+  const doc = el.ownerDocument;
+  el.dataset["quietFocus"] = "";
+  const wake = () => {
+    delete el.dataset["quietFocus"];
+    doc.removeEventListener("keydown", wake, true);
+    el.removeEventListener("blur", wake);
+  };
+  doc.addEventListener("keydown", wake, true);
+  el.addEventListener("blur", wake);
+}
+
+/** One dialog's plane: `mount` is the popup's ref (it marks the plane quiet until a key is pressed, names Base UI's
+ * focus guards, and hears whether the last press was a pointer's or a key's), `start` and `field` give Base UI's
+ * initialFocus by the rules above, and `back` its finalFocus: `target`, quiet when a press closed the dialog. Make it
+ * once per dialog: useState(focusPlane). */
 export function focusPlane() {
   let node: HTMLElement | null = null;
+  let pressed = false;
   const plane: PlaneNode = () => node;
+  const onPointer = () => {
+    pressed = true;
+  };
+  const onKey = () => {
+    pressed = false;
+  };
   return {
     mount: (next: HTMLElement | null) => {
       node = next;
       const stop = quietStart(next);
+      nameGuards(next);
+      const doc = next?.ownerDocument;
+      pressed = false;
+      doc?.addEventListener("pointerdown", onPointer, true);
+      doc?.addEventListener("keydown", onKey, true);
       return () => {
         stop?.();
+        doc?.removeEventListener("pointerdown", onPointer, true);
+        doc?.removeEventListener("keydown", onKey, true);
         node = null;
       };
     },
     start: (undoable: boolean | undefined) => startOf(undoable, plane),
     field: () => startAtField(plane),
+    back:
+      (target: { readonly current: HTMLElement | null } | undefined) => (): HTMLElement | true => {
+        const el = target?.current ?? null;
+        if (el === null) return true;
+        if (pressed) quietReturn(el);
+        return el;
+      },
   };
 }

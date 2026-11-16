@@ -103,6 +103,8 @@ pub fn matter_row() -> MatterRow {
         pinned: false,
         last_opened: None,
         forgotten: None,
+        skill_packs: None,
+        agent_prefs: None,
     }
 }
 

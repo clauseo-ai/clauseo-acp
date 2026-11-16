@@ -1,4 +1,4 @@
-use super::{read, write_user_settings};
+use super::{read, user_sets, write_user_settings};
 use crate::error::Error;
 use crate::leaf::Leaf;
 use crate::locations::Locations;
@@ -235,4 +235,25 @@ fn an_open_comment_or_a_lone_slash_is_still_a_syntax_error() {
         let error = write_user_settings(&locations(), &files, &dark()).unwrap_err();
         assert!(matches!(error, Error::Parse { .. }), "{text:?}: {error}");
     }
+}
+
+#[test]
+fn user_sets_tells_the_lawyers_own_value_from_the_default() {
+    let sets = |text: Option<&str>| {
+        let files = text.map_or_else(MemFiles::default, |text| {
+            MemFiles::with(&settings_file(), text)
+        });
+        user_sets(&locations(), &files, "ui.language")
+    };
+    assert!(
+        sets(Some(r#"{"ui": {"language": "en"}}"#)),
+        "the default, written"
+    );
+    assert!(
+        sets(Some(r#"{"ui": {"language": "fr"}}"#)),
+        "a value that does not type"
+    );
+    assert!(!sets(Some(r#"{"ui": {"theme": "dark"}}"#)), "another key");
+    assert!(!sets(Some("{not json")), "a file that does not parse");
+    assert!(!sets(None), "no file");
 }

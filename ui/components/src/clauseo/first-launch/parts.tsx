@@ -27,18 +27,27 @@ export function Done({
   );
 }
 
-/** The fine print, up front: what stays on this computer and what the AI company sees. Its glyph is the paper's, so
+/** The fine print, up front: what stays on this computer and what the AI company sees (both plans named until one is
+ * picked). Its glyph is the paper's, so
  * the lock stays the Safe workspace's alone. */
-export function DocumentsLine({ name }: { name: string }) {
+export function DocumentsLine({ name }: { name: string | null }) {
   const w = useFirstLaunchWords();
   return (
     <>
       <IconPaperBookPage size={14} className="flex-none" />
       <span>
         <Say>
-          {w("Your papers stay on this computer. {name} sees what each question sends it.", {
-            name,
-          })}
+          {/* null: no plan picked yet, and the line names both */}
+          {name === null
+            ? w(
+                "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+              )
+            : w(
+                "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+                {
+                  name,
+                },
+              )}
         </Say>
       </span>
     </>
@@ -82,7 +91,7 @@ export function Note({ children }: { children: string }) {
 }
 
 /** One line of text the lawyer pastes in: a code from the browser, or an API key. It is handed on, never kept: the
- * field is the only place it stands, and it clears the moment it is sent. */
+ * field is the only place it stands, and it clears once it is taken (at once, when `onGo` promises nothing). */
 export function PasteRow({
   label,
   secret,
@@ -94,16 +103,30 @@ export function PasteRow({
   label: string;
   secret: boolean;
   go: string;
-  onGo: (value: string) => void;
+  /** Hands the words on. A promise says whether desktop took them: the field keeps them until it settles, cleared
+   * once taken and kept after a refusal, so a retry needs no second paste; Send waits meanwhile. */
+  onGo: (value: string) => void | Promise<boolean>;
   cancel?: ReactNode;
   testId?: string | undefined;
 }) {
   const [value, setValue] = useState("");
+  const [sending, setSending] = useState(false);
   const send = () => {
     const v = value.trim();
-    if (v === "") return;
-    setValue("");
-    onGo(v);
+    if (v === "" || sending) return;
+    const taken = onGo(v);
+    if (taken === undefined) {
+      setValue("");
+      return;
+    }
+    setSending(true);
+    void taken.then(
+      (ok) => {
+        setSending(false);
+        if (ok) setValue("");
+      },
+      () => setSending(false),
+    );
   };
   return (
     <div className="fl-gate-act">
@@ -124,7 +147,12 @@ export function PasteRow({
           send();
         }}
       />
-      <Button kind="tone" className="room-field-ask" disabled={value.trim() === ""} onClick={send}>
+      <Button
+        kind="tone"
+        className="room-field-ask"
+        disabled={value.trim() === "" || sending}
+        onClick={send}
+      >
         {go}
       </Button>
       {cancel}

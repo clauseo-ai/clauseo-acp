@@ -88,6 +88,7 @@ fn load_replay_tagged_replay() {
         let request = LoadSession {
             session: sess1(),
             cwd: ctx.cwd.clone(),
+            additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
             meta: None,
         };

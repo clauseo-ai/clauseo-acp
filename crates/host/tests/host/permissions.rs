@@ -2,7 +2,7 @@
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand,
-    MatterPath, PermissionChoice, StopReason, StreamId, ThreadId,
+    MatterPath, NoticeKind, PermissionChoice, StopReason, StreamId, ThreadId,
 };
 
 use crate::observe::Events;
@@ -150,5 +150,174 @@ fn permission_first_answer_wins() {
         matches!(&first, Some(PermissionChoice::Selected { option_id, .. }) if option_id == "allow-once"),
         "{first:?}"
     );
+    host.shutdown();
+}
+
+/// The tools of the permission requests the lawyer saw, by the agent's tool call id (`None` for
+/// a request whose tool call the host never logged).
+fn requested_tools(events: &Events) -> Vec<Option<String>> {
+    let started: std::collections::BTreeMap<_, String> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::ToolCallStarted(started) => {
+                Some((started.tool_call, started.acp_id.to_string()))
+            }
+            _ => None,
+        })
+        .collect();
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::PermissionRequested(requested) => Some(
+                requested
+                    .tool_call
+                    .and_then(|tool| started.get(&tool).cloned()),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Codex's approvals of the guarded browser server: a click and an eval (correlated with their
+/// tool calls) and a snapshot and an eval (standalone) are answered `allow_session` by the host
+/// with nothing logged, the guard refusing eval itself; a case-law search (no case-law entry was
+/// sent this session, `agent/mcp_trust.rs`) and a shell command reach the lawyer. The scenario
+/// checks each answer the agent gets.
+#[test]
+fn codex_browser_tools_are_allowed_unseen() {
+    const CODEX: &str = "codex-acp";
+    let dir = Dir::new(
+        "codex_browser_approvals",
+        &[(CODEX, Scenario::Local("codex-browser-approvals"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "approved"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let seen = requested_tools(&events);
+    assert_eq!(seen.len(), 2, "{}", events.dump());
+    assert_eq!(seen[0].as_deref(), Some("tc-law"));
+    assert_eq!(seen[1].as_deref(), Some("tc-shell"));
+    assert!(
+        !seen
+            .iter()
+            .any(|tool| matches!(tool.as_deref(), Some("tc-click" | "tc-eval"))),
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// A Codex launch whose folder check failed is unprotected (`forced_ask::applies`), so its
+/// browser tool approval reaches the lawyer as a card; in a checked folder the host answers it
+/// `allow_session` with nothing logged. Each scenario checks the answer the agent gets.
+#[test]
+fn a_codex_browser_approval_is_a_card_only_when_the_folder_is_unprotected() {
+    const CODEX: &str = "codex-acp";
+    for unprotected in [true, false] {
+        let scenario = if unprotected {
+            "codex-browser-click-unprotected"
+        } else {
+            "codex-browser-click"
+        };
+        let dir = Dir::new(
+            &format!("codex_browser_click_{unprotected}"),
+            &[(CODEX, Scenario::Local(scenario))],
+        );
+        let host = if unprotected {
+            dir.start_with(0, clauseo_host::HostConfig::with_folder_check_failed)
+        } else {
+            dir.start(0)
+        };
+        let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Open the judgment.");
+        if unprotected {
+            answer_from(&host, &mut events, thread, 0, &["allow_once"]);
+        }
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+        let seen = requested_tools(&events);
+        let want: &[Option<&str>] = if unprotected {
+            &[Some("tc-click")]
+        } else {
+            &[]
+        };
+        let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+        assert_eq!(seen, want, "{}", events.dump());
+        host.shutdown();
+    }
+}
+
+/// Codex asking to run curl or wget, or for a host's network, is declined by the host with no
+/// permission row, one `ShellNetworkBlocked` notice a turn, and its offline note steered once a
+/// turn before the answer
+/// (`actor/turn/shell_network.rs`); `rm -rf` (Codex's dangerous-command prompt) and `echo curl`
+/// reach the lawyer. The scenario checks each answer and each steer the agent gets.
+#[test]
+fn codex_shell_network_is_declined_unseen_with_one_note_a_turn() {
+    const CODEX: &str = "codex-acp";
+    let dir = Dir::new(
+        "codex_shell_offline",
+        &[(CODEX, Scenario::Local("codex-shell-offline"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Save the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "allow_once"]);
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let (turn, _) = host.prompt(thread, "And the order.");
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let seen = requested_tools(&events);
+    let ids: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+    assert_eq!(
+        ids,
+        [Some("tc-rm-1"), Some("tc-echo-1")],
+        "{}",
+        events.dump()
+    );
+    // The note is never logged as a message.
+    let dump = events.dump();
+    assert!(!dump.contains("your shell has no internet"), "{dump}");
+    // One notice a turn, two turns: the lawyer sees what Clauseo declined.
+    let kinds: Vec<_> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => Some(notice.kind.clone()),
+            _ => None,
+        })
+        .collect();
+    let want = Some(NoticeKind::ShellNetworkBlocked);
+    assert_eq!(kinds, [want.clone(), want], "{dump}");
+    host.shutdown();
+}
+
+/// A Claude session's requests are never answered by the host, even in Codex's browser shapes
+/// with `allow_session` offered.
+#[test]
+fn a_claude_sessions_browser_approval_reaches_the_lawyer() {
+    const CLAUDE: &str = "claude-acp";
+    let dir = Dir::new(
+        "claude_browser_approval",
+        &[(CLAUDE, Scenario::Local("claude-browser-approval"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "allow_once"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(requested_tools(&events).len(), 2, "{}", events.dump());
     host.shutdown();
 }

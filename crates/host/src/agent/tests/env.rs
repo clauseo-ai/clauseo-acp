@@ -49,7 +49,7 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
         &[],
         inherited,
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -58,6 +58,51 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
         .map(|(k, v)| (k.to_str().unwrap(), v.to_str().unwrap()))
         .collect();
     assert_eq!(env, kept);
+}
+
+/// Inherited and settings `AGENT_BROWSER_*` variables never reach an agent; the hook's (the
+/// host's own six, for a session with the browser) do, over them.
+#[test]
+fn only_the_hosts_agent_browser_variables_reach_the_agent() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::from([("AGENT_BROWSER_PROXY".to_owned(), "http://x:1".to_owned())]),
+    };
+    let inherited = [
+        ("AGENT_BROWSER_CDP", "9222"),
+        ("agent_browser_headed", "1"),
+        ("AGENT_BROWSER_SESSION", "theirs"),
+        ("HOME", "/home/ada"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let hook = BTreeMap::from([(
+        OsString::from("AGENT_BROWSER_SESSION"),
+        OsString::from("t-1"),
+    )]);
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        &[],
+        inherited.into_iter(),
+        std::env::temp_dir(),
+        &[],
+    )
+    .unwrap();
+    let browser: Vec<_> = spec
+        .env()
+        .iter()
+        .filter(|(name, _)| {
+            name.to_str()
+                .unwrap()
+                .to_ascii_uppercase()
+                .starts_with("AGENT_BROWSER_")
+        })
+        .map(|(k, v)| (k.to_str().unwrap(), v.to_str().unwrap()))
+        .collect();
+    assert_eq!(browser, [("AGENT_BROWSER_SESSION", "t-1")]);
+    assert!(spec.env().contains_key(&OsString::from("HOME")));
 }
 
 /// The drop lists, as `crates/limits/src/readers/env.rs` copies them for the plan readers: a change
@@ -73,4 +118,69 @@ fn the_drop_lists_are_the_plan_readers() {
     let codex = crate::agent::codex::DROPPED_VARS.join(" ");
     let expected = "CODEX_PATH APP_SERVER_LOGS DEFAULT_AUTH_REQUEST MODEL_PROVIDER";
     assert_eq!(codex, expected);
+}
+
+/// R24: the case-law connector's `clauseo-mcp` is started by the agent's MCP client, which
+/// passes on the agent's own `SystemRoot`; without it Winsock cannot start on Windows. So no
+/// agent's spec (a Claude agent's, or a Codex agent's with its drops and forced variables)
+/// loses it, whatever case the host's environment spells it in.
+#[test]
+fn every_agents_spec_keeps_system_root_for_the_connectors_it_starts() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    };
+    for (name, dropped) in [
+        ("SystemRoot", &[][..]),
+        ("SYSTEMROOT", &crate::agent::codex::DROPPED_VARS[..]),
+    ] {
+        let inherited = [(OsString::from(name), OsString::from("C:\\Windows"))];
+        let forced = BTreeMap::from([(OsString::from("CODEX_HOME"), OsString::from("/h"))]);
+        let spec = launch_spec(
+            &agent,
+            BTreeMap::new(),
+            forced,
+            dropped,
+            inherited.into_iter(),
+            std::env::temp_dir(),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            spec.env().get(&OsString::from(name)),
+            Some(&OsString::from("C:\\Windows")),
+            "{name}"
+        );
+    }
+}
+
+/// `NODE_OPTIONS` and `NODE_PATH` reach no agent from anywhere: inherited (in any case), the
+/// agent's settings or the hook (the desktop's `SetupHook`).
+#[test]
+fn launch_spec_drops_node_options_and_node_path_from_every_source() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::from([("NODE_OPTIONS".to_owned(), "--require=/x.js".to_owned())]),
+    };
+    let hook = BTreeMap::from([(OsString::from("NODE_PATH"), OsString::from("/hook"))]);
+    let inherited = [
+        ("node_options", "--inspect"),
+        ("NODE_PATH", "/inherited"),
+        ("PATH", "/usr/bin"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        &[],
+        inherited.into_iter(),
+        std::env::temp_dir(),
+        &[],
+    )
+    .unwrap();
+    let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
+    assert_eq!(names, ["PATH"]);
 }

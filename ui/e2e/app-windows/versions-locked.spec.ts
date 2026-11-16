@@ -8,7 +8,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
+import {
+  FILES_SCENARIO,
+  expectTurnEnded,
+  finishFirstRead,
+  openMatter,
+  sendPrompt,
+} from "./flow.ts";
 import { readTree } from "./scratch.ts";
 import { window } from "./selectors.ts";
 
@@ -29,7 +35,7 @@ const OWNER_BYTES = "owner file: open in Word";
 /** matter.file_locked's line (words-errors.ts). */
 const LOCKED_LINE = "A paper is open in another program. Close it, then try again.";
 
-test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
+test.use({ scenario: FILES_SCENARIO, matterFiles: BEFORE });
 
 test("Restore waits while Word holds a file, then lands once it is closed", async ({
   app,
@@ -38,6 +44,7 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
 }) => {
   const w = window(app.page);
   await openMatter(w);
+  await finishFirstRead(w);
   await sendPrompt(w, "Finalise clause 4");
   await expect(w.agentMessages.last()).toHaveText(
     "Created one note, edited the brief and deleted the old file.",

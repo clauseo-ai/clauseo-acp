@@ -9,7 +9,7 @@ use super::super::super::commands::{AfterCommand, CommandCtx};
 use super::super::super::{Actor, Tag};
 use super::super::out::Out;
 use super::super::{TurnPhase, cancel, lost, state};
-use super::{After, command_tag, move_on, queue, sync_held, with_stream};
+use super::{After, command_tag, move_on, queue, steer, sync_held, with_stream};
 use crate::build;
 use crate::error::Error;
 
@@ -66,6 +66,8 @@ fn edit_loaded(
         (queued.message, queued.content.clone())
     };
     let content = edited(&old, text)?;
+    super::super::logout::refuse(actor, thread, &content)?;
+    super::super::codex_cap::refuse(actor, thread, &content)?;
     let built = build::queued_prompt_edited(turn, message, content.clone());
     let now = actor.now().wall;
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
@@ -218,6 +220,12 @@ pub(super) fn removed(actor: &mut Actor, thread: ThreadId, turn: TurnId, ok: boo
     };
     let (at, queued) = queue.removing.remove(index);
     if ok {
+        if queue.sign_in == Some(turn) {
+            // The turn held for the sign-in is gone: the queue stays held the usual way, and the
+            // next turn waits for the lawyer's "Send next", not for `restart_agents`.
+            queue.sign_in = None;
+            tracing::info!(%thread, "the turn held for the sign-in was removed; the queue stays held");
+        }
         if queue.is_empty() {
             queue.held = false;
         }
@@ -246,8 +254,20 @@ fn receipt_only(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<
     out.send_tagged(actor, done_tag(ctx))
 }
 
+/// Whether `Stop` is among `thread`'s holds (`hold.rs`), `stop_agents` holding its agent:
+/// `ResumeQueue` and `SendQueuedNow` then log their receipt and change nothing, `SignIn` not
+/// lifted either, so the queue stays held and marked and runs once, in order, at
+/// `restart_agents` (decision record 0048, P4d). Under `UpdateNow` or `SignIn` alone they act as
+/// usual, and `move_on` still starts nothing while `UpdateNow` is left.
+fn held_by_stop(actor: &Actor, thread: ThreadId) -> bool {
+    super::hold::holds(actor, thread).stop()
+}
+
 /// `SendQueuedNow`: the turn moves to the head and starts once the current turn, cancelled
 /// now, has ended; with no current turn it starts now. The move logs nothing but the receipt.
+/// Naming the turn a steer not settled yet was sent into, it sends that steer now instead
+/// (`steer.rs`): the turn is cancelled if it still runs, and the steer goes next. Under
+/// `stop_agents`' hold nothing moves (`held_by_stop`).
 pub(in super::super) fn send_now(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -265,27 +285,42 @@ fn send_now_loaded(
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
+    if steer::unsettled(actor, thread, turn) {
+        receipt_only(actor, ctx, thread)?;
+        if !held_by_stop(actor, thread) {
+            steer::send_now(actor, thread, turn);
+            move_on(actor, thread);
+            sync_held(actor, thread);
+        }
+        return Ok(());
+    }
     if find(actor, thread, turn)? {
         // Already the turn being started.
         return receipt_only(actor, ctx, thread);
     }
     receipt_only(actor, ctx, thread)?;
+    if held_by_stop(actor, thread) {
+        return Ok(());
+    }
     if let Some(queue) = queue(actor, thread)
         && let Some(at) = queue.position(turn)
         && let Some(mut queued) = queue.turns.remove(at)
     {
+        // Sent now by the lawyer: it starts whatever the current turn's stop (`unsent.rs`).
         queued.forced = true;
+        queued.host_held = false;
         queue.turns.push_front(queued);
         queue.held = false;
     }
-    cancel::cancel_current(actor, thread);
+    cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
     move_on(actor, thread);
     sync_held(actor, thread);
     Ok(())
 }
 
 /// `ResumeQueue`: a held queue's head starts at step 2; nothing else happens when the queue is
-/// empty or not held. Only the receipt is logged.
+/// empty or not held. Only the receipt is logged, and under `stop_agents`' hold nothing else
+/// changes (`held_by_stop`).
 pub(in super::super) fn resume(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) {
     with_stream(actor, ctx, thread, move |actor| {
         resume_loaded(actor, ctx, thread)
@@ -294,6 +329,9 @@ pub(in super::super) fn resume(actor: &mut Actor, ctx: CommandCtx, thread: Threa
 
 fn resume_loaded(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<(), Error> {
     receipt_only(actor, ctx, thread)?;
+    if held_by_stop(actor, thread) {
+        return Ok(());
+    }
     if let Some(queue) = queue(actor, thread) {
         queue.held = false;
     }

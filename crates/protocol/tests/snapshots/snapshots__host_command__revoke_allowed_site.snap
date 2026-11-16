@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::RevokeAllowedSite\n{\n    host: \"evil.example\".to_owned(), scope: AllowScope::Matter, matter:\n    Some(matter_id(1)),\n}"
+---
+{
+  "revoke_allowed_site": {
+    "host": "evil.example",
+    "scope": "matter",
+    "matter": "01900000-0000-7000-8000-000000000001"
+  }
+}

@@ -28,10 +28,16 @@ const FAKE_TOOLS: [Tool; 2] = [
     Tool {
         name: "cargo-a",
         version: "1.2.3",
+        bin_sha256: &[AssetSha256 {
+            os: "linux",
+            arch: "x86_64",
+            sha256: "cc",
+        }],
     },
     Tool {
         name: "cargo-b",
         version: "4.5.6",
+        bin_sha256: &[],
     },
 ];
 
@@ -101,8 +107,11 @@ fn list_json_prints_one_object_with_the_same_pins() {
     };
     let expected = serde_json::json!({
         "tools": [
-            { "name": "cargo-a", "version": "1.2.3" },
-            { "name": "cargo-b", "version": "4.5.6" },
+            {
+                "name": "cargo-a", "version": "1.2.3",
+                "bin_sha256": [{ "os": "linux", "arch": "x86_64", "sha256": "cc" }],
+            },
+            { "name": "cargo-b", "version": "4.5.6", "bin_sha256": [] },
         ],
         "binaries": [
             asset("faketool", "linux", "x86_64", ASSET_SHA256),

@@ -129,7 +129,7 @@ async fn read(
 /// Only a missing path, or one that is not a folder, is `Missing`; a stat that fails
 /// otherwise (permissions, an offline share) is `Found`, and opening the matter gives the
 /// reason.
-fn stat(folder: &Path) -> FolderState {
+pub(crate) fn stat(folder: &Path) -> FolderState {
     match std::fs::metadata(folder) {
         Ok(metadata) if metadata.is_dir() => FolderState::Found,
         Ok(_) => FolderState::Missing,

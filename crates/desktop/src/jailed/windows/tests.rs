@@ -6,7 +6,7 @@ use windows::Win32::Security::{TOKEN_USER, TokenUser};
 use windows::core::PWSTR;
 
 use super::super::signals::{Failure, Token as _};
-use super::{LocalSid, Token, sandbox_user_sid};
+use super::{LocalSid, Token, sandbox_pool_sids};
 
 /// This process's user SID, spelled as `ConvertSidToStringSidW` spells it.
 fn own_sid(token: &Token) -> String {
@@ -47,13 +47,15 @@ fn an_unsandboxed_token_has_no_signal() {
         .unwrap();
     assert!(matches!(token.app_container(), Ok(false)));
     assert!(matches!(token.restricted(), Ok(false)));
+    // The CI runner runs at Medium or High.
+    assert!(matches!(token.below_medium(), Ok(false)));
 }
 
 #[test]
-fn the_sandbox_user_record_reads() {
+fn the_pool_record_reads() {
     // The registry read itself is tested in clauseo-sandbox (`windows/tests.rs`). The real
-    // record: a CI runner has none, a developer's machine may.
-    let record = sandbox_user_sid();
+    // record: a CI runner has none, so no pool; a developer's machine may.
+    let record = sandbox_pool_sids();
     assert!(record.is_ok(), "{record:?}");
 }
 

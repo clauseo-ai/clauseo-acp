@@ -1,6 +1,6 @@
 // U16b's Done and matter snooze on the rail over FakeTransport: Mark as done and its Undo, the Done fold's count and
-// Mark as not done, a matter snoozed (one snooze_thread per conversation not done) and Mark all done, the picker, the
-// open shelf's Wake now, and axe over the new parts in both themes.
+// Mark as not done, a matter snoozed (one snooze_thread per conversation not done) and Mark all conversations done,
+// the picker, the open shelf's Wake now, and axe over the new parts in both themes.
 // @vitest-environment happy-dom
 import axe from "axe-core";
 import { act } from "react";
@@ -66,11 +66,24 @@ test("the Done fold: its count, its rows once open, and Mark as not done", async
     "Chronology from the FIR",
     "Earlier bail order, 2024",
   ]);
-  expect(fold()?.querySelector(".room-fold-info button")?.getAttribute("aria-label")).toBe(
+  expect(fold()?.querySelector(".room-fold-head .room-info")?.getAttribute("aria-label")).toBe(
     "Conversations you've read, with nothing waiting, move here each morning.",
   );
   await press(rows[0]?.querySelector('[data-testid="mark-not-done"]'));
   expect(sent(transport, "mark_thread_done")).toEqual([{ thread: T_OLD.thread, done: false }]);
+});
+
+test("a done row's Mark as not done is in the DOM, named with its title, and Tab reaches it right after the row", async () => {
+  await mount({ lists: lists() });
+  await press(fold()?.querySelector(".room-fold"));
+  const row = fold()?.querySelector<HTMLElement>('[data-testid="done-row"]');
+  const open = row?.querySelector<HTMLElement>(".room-conv");
+  const back = row?.querySelector<HTMLElement>('[data-testid="mark-not-done"]');
+  expect(back?.getAttribute("aria-label")).toBe("Mark as not done, Chronology from the FIR");
+  const order = [
+    ...(rail()?.querySelectorAll<HTMLElement>("button, [href], [tabindex]") ?? []),
+  ].filter((e) => e.tabIndex >= 0 && !e.hasAttribute("disabled"));
+  expect(order.indexOf(back as HTMLElement)).toBe(order.indexOf(open as HTMLElement) + 1);
 });
 
 test("Mark as done: mark_thread_done, the line in the row's place, and Undo sends done false", async () => {
@@ -109,7 +122,7 @@ test("a done row moves into the fold once the pointer leaves", async () => {
   expect(fold()?.querySelector(".room-fold-count")?.textContent).toBe("3");
 });
 
-test("a matter's Snooze until sends one snooze_thread per conversation not done; Mark all done one mark_thread_done each", async () => {
+test("a matter's Snooze until sends one snooze_thread per conversation not done; Mark all conversations done one mark_thread_done each", async () => {
   const transport = await mount({ lists: lists() });
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
   await press(item("Snooze until"));
@@ -126,7 +139,7 @@ test("a matter's Snooze until sends one snooze_thread per conversation not done;
     { thread: T_LIST.thread },
   ]);
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
-  await press(item("Mark all done"));
+  await press(item("Mark all conversations done"));
   expect(sent(transport, "mark_thread_done")).toEqual([
     { thread: T_A.thread, done: true },
     { thread: T_LIST.thread, done: true },
@@ -183,6 +196,33 @@ test("the open shelf: a row with its matter and time, Wake now sending snooze_th
   expect(row?.textContent).toBe(`${T_ASK.title}${B.name}Until 6:00\u00a0pm`);
   await press(row?.querySelector('[data-testid="wake-now"]'));
   expect(sent(transport, "snooze_thread")).toEqual([{ thread: T_ASK.thread }]);
+});
+
+test("an open fold's info icon stands in its heading's row after its name, outside the heading, for Done and the shelf", async () => {
+  const l = lists();
+  l.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + 3_600_000 }]);
+  await mount({ lists: l });
+  const shelf = rail()?.querySelector<HTMLElement>('[data-testid="rail-shelf"]');
+  for (const f of [fold(), shelf]) {
+    // folded: the slot stands empty, so nothing moves as the icon comes
+    expect(f?.querySelector(".room-fold-slot")?.childElementCount).toBe(0);
+    await press(f?.querySelector(".room-fold"));
+    const head = f?.querySelector(".room-fold-head");
+    const info = head?.querySelector(".room-info");
+    expect(info).not.toBeNull();
+    // beside the heading, never in its name, and nowhere under the list
+    expect(info?.closest("h1, h2, h3, h4, h5, h6, .room-fold")).toBeNull();
+    expect(
+      info?.parentElement?.previousElementSibling?.querySelector(".room-fold-name"),
+    ).not.toBeNull();
+    expect(f?.querySelectorAll(".room-info")).toHaveLength(1);
+  }
+  expect(fold()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
+    "Conversations you've read, with nothing waiting, move here each morning.",
+  );
+  expect(shelf?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
+    "Back sooner if Clauseo needs you or an answer finishes.",
+  );
 });
 
 const violations = async () =>

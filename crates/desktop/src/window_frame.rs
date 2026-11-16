@@ -24,10 +24,14 @@
 //!   can drag, zoom, minimise or close the other. 0028 records why that is harmless between
 //!   `main` and `settings`; no third window without a record (0015; a test counts the
 //!   builders).
+//! - On Windows the main window's system menu (Alt+Space) ends with Quit Clauseo, which quits
+//!   as `quit_app` does (`quit_item.rs`).
 
 #[cfg(any(windows, test))]
 mod caption;
 pub(crate) mod geometry;
+#[cfg(any(windows, test))]
+pub(crate) mod quit_item;
 #[cfg(windows)]
 mod windows;
 

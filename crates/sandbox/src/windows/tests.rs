@@ -3,6 +3,7 @@
 //!
 //! Past 500 lines: split tier B's record tests (from the registry read down) into a file of
 //! their own when this grows.
+#![expect(unsafe_code, reason = "FFI to read a test folder's DACL back as SDDL")]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -161,7 +162,7 @@ fn admin_share_root(path: &Path) -> PathBuf {
 }
 
 /// `path` as a UNC path through the admin share: `C:\x\y` gives `\\localhost\C$\x\y`.
-fn admin_share_path(path: &Path) -> PathBuf {
+pub(in crate::windows) fn admin_share_path(path: &Path) -> PathBuf {
     let (drive, rest) = drive_and_rest(path);
     PathBuf::from(format!(r"\\localhost\{drive}$\{rest}"))
 }
@@ -188,7 +189,7 @@ fn the_registry_read_tells_missing_wrong_type_and_a_string_apart() {
     use super::RecordError;
     use super::record::read_string;
 
-    let missing = read_string(w!("SOFTWARE\\Clauseo\\NoSuchKeyForTests"), w!("UserSid"));
+    let missing = read_string(w!("SOFTWARE\\Clauseo\\NoSuchKeyForTests"), w!("OwnerSid"));
     assert!(matches!(missing, Ok(None)), "{missing:?}");
     // Values every Windows has: ProductName is a REG_SZ, InstallDate a REG_DWORD.
     let version = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
@@ -209,8 +210,56 @@ fn the_registry_read_tells_missing_wrong_type_and_a_string_apart() {
     );
     assert!(matches!(expand, Err(RecordError::WrongType)), "{expand:?}");
     // The real record: a CI runner has none, a developer's machine may.
-    let record = super::sandbox_user_sid();
+    let record = super::sandbox_pool_sids();
     assert!(record.is_ok(), "{record:?}");
+}
+
+#[test]
+fn the_registry_read_tells_a_multi_sz_and_a_dword_apart() {
+    use windows::Win32::System::Registry::RRF_RT_REG_MULTI_SZ;
+    use windows::core::w;
+
+    use super::RecordError;
+    use super::pool::pool_sids_from_multi_sz;
+    use super::record::{read_dword, read_string, read_units};
+
+    // Values every Windows has: ServiceGroupOrder's List is a REG_MULTI_SZ of group names.
+    let order = w!("SYSTEM\\CurrentControlSet\\Control\\ServiceGroupOrder");
+    let list = read_units(order, w!("List"), RRF_RT_REG_MULTI_SZ)
+        .unwrap()
+        .unwrap();
+    assert!(list.ends_with(&[0, 0]), "{list:?}");
+    // Group names are not SIDs: the pool decoder refuses the list whole.
+    assert!(pool_sids_from_multi_sz(&list).is_err());
+    let as_string = read_string(order, w!("List"));
+    assert!(
+        matches!(as_string, Err(RecordError::WrongType)),
+        "{as_string:?}"
+    );
+    let version = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let date = read_dword(version, w!("InstallDate"));
+    assert!(matches!(date, Ok(Some(_))), "{date:?}");
+    let name = read_dword(version, w!("ProductName"));
+    assert!(matches!(name, Err(RecordError::WrongType)), "{name:?}");
+    let missing = read_dword(version, w!("NoSuchValueForTests"));
+    assert!(matches!(missing, Ok(None)), "{missing:?}");
+}
+
+#[test]
+fn a_machine_without_the_record_has_no_pool_and_needs_set_up() {
+    // A CI runner was never set up, so it has no HKLM\SOFTWARE\Clauseo\Sandbox.
+    let owner = super::sandbox_owner_sid();
+    assert!(
+        matches!(owner, Ok(None)),
+        "this machine has a record: {owner:?}"
+    );
+    let pool = super::sandbox_pool_sids();
+    assert!(matches!(&pool, Ok(sids) if sids.is_empty()), "{pool:?}");
+    assert!(matches!(super::sandbox_group_sid(), Ok(None)));
+    assert!(matches!(super::sandbox_data_dir(), Ok(None)));
+    assert!(matches!(super::record::sandbox_removing(), Ok(false)));
+    let temp = TempDir::new("setup-state-no-record");
+    assert_eq!(super::setup_state(temp.path()), crate::SetupState::Needed);
 }
 
 #[test]
@@ -220,11 +269,17 @@ fn this_users_sid_is_a_canonical_account_sid() {
 }
 
 #[test]
-fn the_runner_is_a_supported_windows() {
+fn the_runners_architecture_and_build_are_read() {
     let os = super::os_facts();
-    assert!(!os.arm64, "{os:?}");
+    assert_eq!(os.arm64, cfg!(target_arch = "aarch64"), "{os:?}");
     let build = os.build.unwrap();
     assert!(build >= crate::detect::FIRST_BUILD, "{build}");
+    // ARM64 is tier C on purpose; the nightly's ARM64 runner checks that on real hardware.
+    if os.arm64 {
+        let found = crate::detect::detect(None);
+        let unsupported = Some(crate::detect::NoSandbox::UnsupportedOs);
+        assert_eq!(found.reason, unsupported, "{found:?}");
+    }
 }
 
 #[test]
@@ -256,9 +311,9 @@ fn machine_accounts_never_load_as_matter_sids() {
     let user = super::record::current_user_sid().unwrap();
     matters_with(&temp, user.as_str());
     assert!(MatterSids::load(temp.path()).is_err(), "{user}");
-    if let Some(record) = super::sandbox_user_sid().unwrap() {
+    if let Some(record) = super::sandbox_pool_sids().unwrap().first() {
         // A machine that was set up: the real record.
-        matters_with(&temp, &record);
+        matters_with(&temp, record.as_str());
         assert!(MatterSids::load(temp.path()).is_err(), "{record}");
     } else {
         // A CI runner has no record: the same reservation, given by hand.

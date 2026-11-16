@@ -1,12 +1,13 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostCommand::SetToolSettings\n{ patch: ToolsPatch { web_search: Some(false), browser: Some(true), }, }"
+expression: "HostCommand::SetToolSettings\n{\n    patch: ToolsPatch\n    {\n        web_search: Some(false), browser: Some(true), connectors: Some(false),\n    },\n}"
 ---
 {
   "set_tool_settings": {
     "patch": {
       "web_search": false,
-      "browser": true
+      "browser": true,
+      "connectors": false
     }
   }
 }

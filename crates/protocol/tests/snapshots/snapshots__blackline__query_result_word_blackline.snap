@@ -1,0 +1,59 @@
+---
+source: crates/protocol/tests/snapshots/blackline.rs
+expression: answer
+---
+{
+  "word_blackline": {
+    "paragraphs": [
+      {
+        "change": "same",
+        "runs": [
+          {
+            "kind": "same",
+            "text": "Lease Agreement"
+          }
+        ]
+      },
+      {
+        "change": "changed",
+        "runs": [
+          {
+            "kind": "same",
+            "text": "Governing law is "
+          },
+          {
+            "kind": "del",
+            "text": "New York"
+          },
+          {
+            "kind": "ins",
+            "text": "Delaware"
+          },
+          {
+            "kind": "same",
+            "text": "."
+          }
+        ]
+      },
+      {
+        "change": "added",
+        "runs": [
+          {
+            "kind": "ins",
+            "text": "Notices go by email."
+          }
+        ]
+      },
+      {
+        "change": "removed",
+        "runs": [
+          {
+            "kind": "del",
+            "text": "Old clause."
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  }
+}

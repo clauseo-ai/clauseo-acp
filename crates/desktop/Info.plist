@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the app's Info.plist by Tauri (it reads Info.plist beside tauri.conf.json).
+  macOS privacy protection asks the lawyer before Clauseo, or an agent it starts, opens a matter
+  folder in Documents, Desktop, Downloads, a removable or network volume, or iCloud Drive, and
+  shows this sentence; without it macOS refuses in silence. One sentence for all six keys, which
+  tests/info_plist.rs checks.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>Clauseo opens the matter folders you choose, so Claude and ChatGPT can read and edit the papers in them.</string>
+</dict>
+</plist>

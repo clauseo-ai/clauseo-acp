@@ -282,6 +282,35 @@ test("Word holding the file: close it in Word, and Try again", async () => {
   expect(onTryAgain).toHaveBeenCalledTimes(1);
 });
 
+test("Word holding two files: each name stays whole, so the title breaks only at the words' own spaces", async () => {
+  await show(
+    <RestoreDialog
+      ask={{ kind: "word", files: ["Notice to the bank.docx", "Lease of the office.docx"] }}
+      waiting={null}
+      onClose={() => {}}
+      onChoice={() => {}}
+      onRestore={() => {}}
+      onTryAgain={() => {}}
+    />,
+  );
+  const title = one('[role="dialog"] h2');
+  const whole = [...title.querySelectorAll("[data-whole]")];
+  // each name with its quotes in one box that never breaks across lines
+  expect(whole.map((n) => n.textContent?.replace(/[\u2068\u2069]/g, ""))).toEqual([
+    "'Notice to the bank.docx'",
+    "'Lease of the office.docx'",
+  ]);
+  for (const n of whole) expect(n.className).toContain("inline-block");
+  // the spaces around "and", and the words' own, stay outside them: the places a line can break
+  const between = [...title.childNodes]
+    .filter((n) => !(n instanceof Element && n.hasAttribute("data-whole")))
+    .map((n) => n.textContent);
+  expect(between).toEqual(["Close ", " and ", " in Word to restore it."]);
+  expect(title.textContent?.replace(/[\u2068\u2069]/g, "")).toBe(
+    "Close 'Notice to the bank.docx' and 'Lease of the office.docx' in Word to restore it.",
+  );
+});
+
 test("Word holding two files: close them in Word, both named in one line", async () => {
   await show(
     <RestoreDialog

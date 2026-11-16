@@ -1,22 +1,21 @@
-//! The status parsers, table-driven: Claude's JSON and its detection and sign-in verdicts,
+//! The status parsers, table-driven: Claude's JSON and sign-in verdict, both detection verdicts,
 //! Codex's exit codes and `account/read`, and the sign-in-again text.
 
 use clauseo_codex_appserver::GetAccountResponse;
 
 use super::{
-    ClaudeStatus, CodexDetect, Identity, claude_detection, claude_signed_in, codex_identity,
-    codex_logged_in, is_sign_in_again, parse_claude_status,
+    ClaudeStatus, Identity, claude_detection, claude_signed_in, codex_detection, codex_identity,
+    codex_logged_in, codex_says_logged_in, is_sign_in_again, parse_claude_status,
 };
 use crate::signin::{Found, LoginFrom, SigninState};
 
 /// The fake's signed-in line (the brief, "The fakes").
 const SIGNED_IN: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"test@example.com","subscriptionType":"max"}"#;
 
-fn status(auth_method: &str, api_provider: Option<&str>) -> ClaudeStatus {
+fn status(auth_method: &str) -> ClaudeStatus {
     ClaudeStatus {
         logged_in: auth_method != "none",
         auth_method: Some(auth_method.to_owned()),
-        api_provider: api_provider.map(str::to_owned),
         email: Some("lawyer@firm.example".to_owned()),
         subscription_type: Some("pro".to_owned()),
     }
@@ -30,7 +29,6 @@ fn claude_status_parses_with_unknown_fields_ignored() {
             Some(ClaudeStatus {
                 logged_in: true,
                 auth_method: Some("claude.ai".to_owned()),
-                api_provider: Some("firstParty".to_owned()),
                 email: Some("test@example.com".to_owned()),
                 subscription_type: Some("max".to_owned()),
             }),
@@ -59,73 +57,22 @@ fn claude_status_parses_with_unknown_fields_ignored() {
     }
 }
 
+/// Claude's detection is a stat: a regular login file is `LoginFound` with no email, anything
+/// else nothing found.
 #[test]
-fn claude_detection_finds_only_a_first_party_claude_ai_login() {
-    let found = |email: &str| SigninState::LoginFound {
-        from: LoginFrom::ClaudeCode,
-        email: Some(email.to_owned()),
-    };
-    let out = |found| SigninState::SignedOut { found };
-    let table = [
-        (
-            Some(0),
-            Some(status("claude.ai", Some("firstParty"))),
-            found("lawyer@firm.example"),
-        ),
-        (
-            Some(0),
-            Some(status("claude.ai", None)),
-            found("lawyer@firm.example"),
-        ),
-        (
-            Some(0),
-            Some(status("claude.ai", Some("bedrock"))),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("third_party", Some("vertex"))),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("api_key_helper", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("api_key", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("oauth_token", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (Some(0), Some(status("none", None)), out(None)),
-        (
-            Some(1),
-            Some(status("claude.ai", Some("firstParty"))),
-            out(None),
-        ),
-        (
-            None,
-            Some(status("claude.ai", Some("firstParty"))),
-            out(None),
-        ),
-        (Some(0), None, out(None)),
-    ];
-    for (exit, status, want) in table {
-        assert_eq!(
-            claude_detection(exit, status.as_ref()),
-            want,
-            "{exit:?} {status:?}"
-        );
-    }
-    let parsed = parse_claude_status(SIGNED_IN);
+fn claude_detection_is_found_with_no_email_or_nothing() {
     assert_eq!(
-        claude_detection(Some(0), parsed.as_ref()),
-        found("test@example.com")
+        claude_detection(true),
+        SigninState::LoginFound {
+            from: LoginFrom::ClaudeCode,
+            email: None
+        }
+    );
+    assert_eq!(
+        claude_detection(false),
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin)
+        }
     );
 }
 
@@ -136,14 +83,10 @@ fn claude_signed_in_reads_the_account_and_plan() {
         plan: Some("pro".to_owned()),
     };
     let table = [
-        (
-            Some(0),
-            Some(status("claude.ai", Some("firstParty"))),
-            Some(identity.clone()),
-        ),
-        (Some(0), Some(status("api_key", None)), Some(identity)),
-        (Some(0), Some(status("none", None)), None),
-        (Some(1), Some(status("claude.ai", None)), None),
+        (Some(0), Some(status("claude.ai")), Some(identity.clone())),
+        (Some(0), Some(status("api_key")), Some(identity)),
+        (Some(0), Some(status("none")), None),
+        (Some(1), Some(status("claude.ai")), None),
         (Some(0), None, None),
     ];
     for (exit, status, want) in table {
@@ -156,37 +99,42 @@ fn claude_signed_in_reads_the_account_and_plan() {
 }
 
 #[test]
-fn codex_detection_reads_the_exit_code_and_the_stat() {
-    assert!(codex_logged_in(Some(0)));
+fn codex_status_lines_are_read_by_their_signed_in_start_only() {
+    assert!(codex_says_logged_in("Logged in using ChatGPT"));
+    assert!(codex_says_logged_in(
+        "Logged in using an API key - sk-proj-***ABCDE\r"
+    ));
+    for line in [
+        "Not logged in",
+        "",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602}}",
+        "Error: not logged in using ChatGPT",
+    ] {
+        assert!(!codex_says_logged_in(line), "{line}");
+    }
+}
+
+#[test]
+fn codex_detection_reads_the_exit_code_the_line_and_the_stat() {
+    assert!(codex_logged_in(Some(0), true));
     for exit in [Some(1), Some(2), None] {
-        assert!(!codex_logged_in(exit));
+        assert!(!codex_logged_in(exit, true));
+        assert!(!codex_logged_in(exit, false));
     }
-    let email = || Some("test@example.com".to_owned());
-    let table = [
-        (Some(0), true, CodexDetect::Reusable),
-        (Some(0), false, CodexDetect::Keyring),
-        (Some(1), true, CodexDetect::SignedOut),
-        (None, false, CodexDetect::SignedOut),
-    ];
-    for (exit, present, want) in table {
-        assert_eq!(CodexDetect::classify(exit, present), want);
-    }
+    // Exit 0 with no signed-in line (codex-acp's adapter run by mistake) is not signed in.
+    assert!(!codex_logged_in(Some(0), false));
     assert_eq!(
-        CodexDetect::Reusable.state(email()),
+        codex_detection(true),
         SigninState::LoginFound {
             from: LoginFrom::Codex,
-            email: email()
+            email: None
         }
     );
     assert_eq!(
-        CodexDetect::Keyring.state(email()),
+        codex_detection(false),
         SigninState::SignedOut {
-            found: Some(Found::CodexKeyring)
+            found: Some(Found::NoLogin)
         }
-    );
-    assert_eq!(
-        CodexDetect::SignedOut.state(None),
-        SigninState::SignedOut { found: None }
     );
 }
 

@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::SetSkillPack { id: PackId::new(\"nda-kit\").unwrap(), on: true, }"
+---
+{
+  "set_skill_pack": {
+    "id": "nda-kit",
+    "on": true
+  }
+}

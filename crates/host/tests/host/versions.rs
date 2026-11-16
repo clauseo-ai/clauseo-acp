@@ -37,6 +37,8 @@ pub(crate) fn recorded(events: &Events) -> Vec<(CheckpointId, CheckpointKind, u6
 
 fn restore_brief(matter: MatterId, checkpoint: CheckpointId) -> HostCommand {
     HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter,
         checkpoint,
         scope: RestoreRequest::Files {
@@ -85,6 +87,7 @@ fn restore_writes_files_notes_next_prompt_and_rows_survive() {
     write::write(&folder.join("added.txt"), b"new since\n");
     let previewed = host
         .query(HostQuery::PreviewRestore {
+            undoes: None,
             matter,
             checkpoint: import,
             scope: RestoreRequest::Matter,
@@ -258,6 +261,7 @@ fn restore_and_preview_refused_for_another_matter_or_a_bad_scope() {
         "{error}"
     );
     let preview = |checkpoint, scope| HostQuery::PreviewRestore {
+        undoes: None,
         matter,
         checkpoint,
         scope,
@@ -383,4 +387,127 @@ fn compare_with_the_folder_now_refuses_a_version_of_another_matter() {
         "{error}"
     );
     host.shutdown();
+}
+
+/// The restore that a restore of the version before it takes back: the file the first restore
+/// brought back goes again, the preview says so first, and the conversation named in each
+/// command records it in its own stream.
+#[test]
+fn undoing_a_restore_removes_what_it_brought_back_and_the_conversation_records_both() {
+    let dir = Dir::new(
+        "undoing_a_restore_removes_what_it_brought_back",
+        &[(FAKE, Scenario::Local("restore-note"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, folder) =
+        matter_with_thread(&dir, &host, "m", &[("brief.txt", "Clause 4 draft\n")], FAKE);
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    let notes = folder.join("Reply notes.md");
+    let restore = |checkpoint, undoes| HostCommand::RestoreVersion {
+        matter,
+        checkpoint,
+        scope: RestoreRequest::Matter,
+        undoes,
+        thread: Some(thread),
+    };
+    // A version holding the notes (the outside edits a restore with nothing to write records),
+    // then the notes deleted and that version restored: the restore brings them back.
+    write::write(&notes, b"notes\n");
+    host.ok(restore(import, None));
+    let with_notes = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::OutsideEdits)
+        .unwrap();
+    write::remove_file(&notes);
+    let CommandOutcome::VersionRestored {
+        checkpoint: brought,
+    } = host.ok(restore(with_notes, None))
+    else {
+        panic!("the restore wrote nothing");
+    };
+    assert!(notes.exists(), "the restore brought the notes back");
+    let before = recorded(&matter_events(&host, matter))
+        .into_iter()
+        .rev()
+        .find(|(id, kind, _)| *kind == CheckpointKind::OutsideEdits && *id != with_notes)
+        .map(|(id, _, _)| id)
+        .unwrap();
+
+    // Undo: restoring the version before the restore, taking it back, removes the notes.
+    let name = MatterPath::new("Reply notes.md").unwrap();
+    let previewed = host
+        .query(HostQuery::PreviewRestore {
+            matter,
+            checkpoint: before,
+            scope: RestoreRequest::Matter,
+            undoes: Some(brought),
+        })
+        .unwrap();
+    let QueryResult::RestorePreview(preview) = previewed else {
+        panic!("PreviewRestore answered {previewed:?}");
+    };
+    assert_eq!(preview.removes, std::slice::from_ref(&name), "{preview:?}");
+    assert!(
+        preview.changes.is_empty() && preview.added_since.is_empty(),
+        "{preview:?}"
+    );
+    // a plain restore of that version keeps the file, as a restore never deletes
+    let plain = host
+        .query(HostQuery::PreviewRestore {
+            matter,
+            checkpoint: before,
+            scope: RestoreRequest::Matter,
+            undoes: None,
+        })
+        .unwrap();
+    let QueryResult::RestorePreview(plain) = plain else {
+        panic!("PreviewRestore answered {plain:?}");
+    };
+    assert!(
+        plain.removes.is_empty() && plain.added_since == [name],
+        "{plain:?}"
+    );
+
+    let CommandOutcome::VersionRestored { checkpoint: undid } =
+        host.ok(restore(before, Some(brought)))
+    else {
+        panic!("the undo wrote nothing");
+    };
+    assert!(!notes.exists(), "undoing the restore removed the notes");
+
+    // Each restore that wrote something is in the conversation's stream, the undo marked so.
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let restores: Vec<_> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::VersionRestored(restored) => Some(restored.clone()),
+            _ => None,
+        })
+        .collect();
+    let marks: Vec<_> = restores
+        .iter()
+        .map(|restored| (restored.checkpoint, restored.undoes))
+        .collect();
+    assert_eq!(
+        marks,
+        [(brought, None), (undid, Some(brought))],
+        "{}",
+        events.dump()
+    );
+
+    // A conversation of no matter of this host is refused, and nothing is restored.
+    let stranger = clauseo_protocol::ThreadId::new(crate::support::foreign_uuid(2)).unwrap();
+    host.refused(
+        HostCommand::RestoreVersion {
+            matter,
+            checkpoint: with_notes,
+            scope: RestoreRequest::Matter,
+            undoes: None,
+            thread: Some(stranger),
+        },
+        ErrorCode::CommandInvalid,
+    );
+    assert!(!notes.exists());
 }

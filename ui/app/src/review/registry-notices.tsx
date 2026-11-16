@@ -1,0 +1,213 @@
+// Host notices' copy review entries (TN-01 on), apart from registry.tsx to keep that file under the size limit: a
+// notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
+// thread the notice is in, as the host sends it.
+import type { ReactNode } from "react";
+import type { Lang } from "@clauseo/components/lib/display.ts";
+import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import { uuid, userMessage } from "../testing/stream-script.ts";
+import type { NoticeEntry, PackSkipReason, ViewEntry } from "../transport/protocol.ts";
+import type { Entry } from "./entry.ts";
+import { threadHost } from "./hosts.ts";
+import { RoomOver } from "./states.tsx";
+import { threadWords } from "./words.ts";
+
+const CONTEXT =
+  "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.";
+const AUTO_UNAVAILABLE =
+  "Claude's automatic mode isn't available for this account, so Claude asks before running commands.";
+const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.";
+const MANY_BACK =
+  "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
+/** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
+const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
+  not_turned_on:
+    "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.",
+  not_admitted:
+    "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.",
+  changed:
+    "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.",
+  missing:
+    "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.",
+  invalid: "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.",
+  too_many:
+    "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.",
+};
+
+/** A skill pack the launch left out, for a reason, as the host sends it. */
+const packSkipped = (reason: PackSkipReason): ViewEntry =>
+  notice(6, {
+    text: "A skill pack was left out of this launch.",
+    kind: { skill_pack_not_loaded: { pack: "nda-kit", reason } },
+  });
+
+/** The lawyer's question, then the host's notice, in a thread of claude-acp. */
+const thread =
+  (notice: ViewEntry): (() => ReactNode) =>
+  () => (
+    <RoomOver
+      host={() =>
+        threadHost({
+          entries: [
+            userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+            notice,
+          ],
+        })
+      }
+    />
+  );
+
+/** A host notice at `order`, with its kind and text as given. */
+const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
+  notice: {
+    order,
+    event: uuid(1, 10),
+    level: "info",
+    text: "Papers came back after the undo.",
+    ts: 6000,
+    ...over,
+  },
+});
+
+const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
+/** Claude's auto mode isn't available, so the session runs in acceptEdits. */
+const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
+const BLOCKED = "Clauseo stopped a step: {name} tried to reach outside this matter.";
+const BLOCKED_ALONE = "Clauseo stopped a step: the AI tried to reach outside this matter.";
+/** Clauseo's data fence refused, unasked, a request of the agent's (once a turn). */
+const BLOCKED_NOTICE = notice(6, {
+  level: "warning",
+  text: BLOCKED_ALONE,
+  kind: "outside_matter_blocked",
+});
+const OFFLINE =
+  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.";
+const OFFLINE_ALONE =
+  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.";
+/** Clauseo declined, unasked, a Codex shell command that needed the internet (once a turn). */
+const OFFLINE_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
+  kind: "shell_network_blocked",
+});
+const OFFLINE_NO_SEARCH = "Clauseo stopped a step: {name} tried to go online by running a command.";
+const OFFLINE_NO_SEARCH_ALONE =
+  "Clauseo stopped a step: the AI tried to go online by running a command.";
+/** The same, in a session without web search: it offers none. */
+const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
+  kind: "shell_network_blocked_no_web_search",
+});
+/** One paper a sync client put back after the undo. */
+const ONE_PAPER = notice(6, {
+  kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
+});
+/** Five papers and three more; two of them share the name Reply.docx, so the list shows their whole paths. */
+const MANY_PAPERS = notice(6, {
+  kind: {
+    files_came_back: {
+      files: [
+        "Drafts/Reply.docx",
+        "Lease/Rent review.docx",
+        "Lease/Schedule 2.docx",
+        "Notice to the bank.docx",
+        "Pleadings/Reply.docx",
+      ],
+      more: 3,
+    },
+  },
+});
+
+/** The notices' entries: "TN-01" and so on, each id written as it is. */
+export const TN: Entry[] = [
+  {
+    id: "TN-01",
+    words: threadWords(CONTEXT),
+    screen: "room/thread",
+    render: thread(CONTEXT_NOTICE),
+  },
+  {
+    id: "TN-02",
+    words: threadWords(ONE_BACK),
+    screen: "room/thread",
+    render: thread(ONE_PAPER),
+  },
+  {
+    id: "TN-03",
+    words: threadWords(MANY_BACK),
+    screen: "room/thread",
+    render: thread(MANY_PAPERS),
+  },
+  ...(
+    [
+      ["TN-04", "not_turned_on"],
+      ["TN-05", "not_admitted"],
+      ["TN-06", "changed"],
+      ["TN-07", "missing"],
+      ["TN-08", "invalid"],
+      ["TN-09", "too_many"],
+    ] as const
+  ).map(([id, reason]): Entry => ({
+    id,
+    words: threadWords(PACK_LINE[reason]),
+    screen: "room/thread",
+    render: thread(packSkipped(reason)),
+  })),
+  {
+    id: "TN-10",
+    words: threadWords(AUTO_UNAVAILABLE),
+    screen: "room/thread",
+    render: thread(AUTO_NOTICE),
+  },
+  {
+    id: "TN-11",
+    words: threadWords(BLOCKED),
+    screen: "room/thread",
+    render: thread(BLOCKED_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, which it never has today: rendered alone, as U3-53.
+    id: "TN-12",
+    words: threadWords(BLOCKED_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, BLOCKED_ALONE)}</p>
+      </main>
+    ),
+  },
+  {
+    id: "TN-13",
+    words: threadWords(OFFLINE),
+    screen: "room/thread",
+    render: thread(OFFLINE_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, which it never has today: rendered alone, as TN-12.
+    id: "TN-14",
+    words: threadWords(OFFLINE_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, OFFLINE_ALONE)}</p>
+      </main>
+    ),
+  },
+  {
+    id: "UC-570",
+    words: threadWords(OFFLINE_NO_SEARCH),
+    screen: "room/thread",
+    render: thread(OFFLINE_NO_SEARCH_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, as TN-14: rendered alone.
+    id: "UC-571",
+    words: threadWords(OFFLINE_NO_SEARCH_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, OFFLINE_NO_SEARCH_ALONE)}</p>
+      </main>
+    ),
+  },
+];

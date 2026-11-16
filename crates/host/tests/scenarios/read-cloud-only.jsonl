@@ -1,0 +1,10 @@
+{"scenario":"read-cloud-only","description":"One turn that only reads notes.txt, a cloud-only placeholder: the OS downloads it unchanged, which the test's probe sees as its notes.txt.cloud.tmp marker going (an excluded name, never versioned)","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"delete_file":{"path":"notes.txt.cloud.tmp"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-read-notes","title":"Read notes.txt","name":"Read","kind":"read","status":"completed","locations":[{"path":"{{cwd}}/notes.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"I read the notes."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

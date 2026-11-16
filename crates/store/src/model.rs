@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
-    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, RenameSource, Seq, StreamId,
-    ThreadId, Timestamp,
+    AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
+    CommandOutcome, Count, Date, Envelope, InterruptedKind, MatterId, MatterKind, PackList,
+    RenameSource, Seq, StreamId, ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -175,6 +175,12 @@ pub struct MatterRow {
     /// When `ForgetMatter` took it off the list; `None` while it is on it (schema 2). The row,
     /// its threads, checkpoints and log stay, so the matter can come back.
     pub forgotten: Option<Timestamp>,
+    /// The skill packs it narrows to, once set; `None` takes the global `skills.enabled` list
+    /// (schema 5; `NULL` before). Stored as a JSON array of pack ids.
+    pub skill_packs: Option<PackList>,
+    /// The model and effort a new conversation starts with, per agent kind, once set; `None`
+    /// leaves each agent at its own defaults (schema 6; `NULL` before). Stored as JSON.
+    pub agent_prefs: Option<AgentPrefs>,
 }
 
 /// A thread's summary row.
@@ -282,4 +288,20 @@ pub struct Reopen {
     pub tail: Vec<Envelope>,
     /// The stream's last `seq`; `None` for a stream with no events.
     pub head: Option<Seq>,
+}
+
+/// A row of `pending_actions` (schema 7): the file action holding a matter's writer, kept from
+/// before it touches a file until the writer passes on. One per matter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAction {
+    /// The matter whose files it changes.
+    pub matter: MatterId,
+    /// What it is.
+    pub kind: InterruptedKind,
+    /// How many files it sets out to change, when known before it begins.
+    pub files: Option<Count>,
+    /// The conversation it was asked from, if any.
+    pub thread: Option<ThreadId>,
+    /// When it was recorded.
+    pub at: Timestamp,
 }

@@ -42,6 +42,8 @@
 //! - `write_file`, `delete_file` and `move_file` change files only under the current session's
 //!   `cwd`, with relative paths and no `..`. `spawn_child` writes its `pid_file` relative to the
 //!   process folder (the agent's working directory), not the session `cwd`, also with no `..`.
+//!   `transcript_user` appends only to the current session's transcript under
+//!   `CLAUDE_CONFIG_DIR/projects`, as Claude Code does.
 //! - Only `main` exits the process.
 //!
 //! # Depends on
@@ -83,6 +85,9 @@ pub const EXIT_MISMATCH: i32 = 3;
 pub(crate) fn diagnostic(what: impl std::fmt::Display) -> String {
     format!("fake_agent: {what}\n")
 }
+
+/// How long `on_stdin_close: "hang_briefly"` holds before it exits: under nextest's 30 s kill.
+pub const HANG_BRIEFLY: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Parks the calling thread forever: `--hold`, and stdin closed under `"hang"`.
 pub(crate) fn park_forever() -> ! {

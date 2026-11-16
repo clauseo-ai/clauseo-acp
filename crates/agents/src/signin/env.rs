@@ -1,4 +1,4 @@
-//! The whole environment of a sign-in, status or detection child, built from a base (the app's
+//! The whole environment of a sign-in or status child, built from a base (the app's
 //! own environment, [`crate::SigninConfig::base_env`]).
 //!
 //! The child gets exactly this map: the caller's launcher is made with
@@ -7,13 +7,19 @@
 //! the lawyer's own store). Nothing here touches this process's environment.
 //!
 //! The rules, from the brief (S18, "The environment of every run"):
-//! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`";
+//! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`", and minus
+//!   `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops anyway);
 //! - "plus the agent's home variables";
 //! - "`ANTHROPIC_API_KEY=""` for Claude and `CODEX_API_KEY=""` for Codex, so a stray key cannot
 //!   win and status reports only the plan login";
-//! - "`HTTPS_PROXY` from `network.upstream_proxy`";
+//! - "`HTTPS_PROXY` from `network.upstream_proxy`", with `NO_PROXY` holding the loopback names
+//!   (then the inherited ones), since the OAuth callback is on this computer (S17);
 //! - "the agent's `network.ca_certs` entry as `NODE_EXTRA_CA_CERTS` for Claude and as
-//!   `SSL_CERT_FILE` for Codex (Codex is a native binary)";
+//!   `CODEX_CA_CERTIFICATE` for Codex" (S17: Codex loads it beside the system roots, while
+//!   `SSL_CERT_FILE` would reach the tools in its shell, many of which take it to replace them;
+//!   an inherited `SSL_CERT_FILE` is left as it is);
+//! - `NODE_USE_SYSTEM_CA=1` unless the base sets it (S17: Node trusts the OS store too, where a
+//!   firm's TLS-inspecting proxy puts its root; Node 24.6 and 22.19 on, older ones ignore it);
 //! - "and `BROWSER`" (the shim, Claude's login runs on macOS and Linux).
 //!
 //! Names are matched without regard to ASCII case: Windows reads them that way, and on Unix a
@@ -30,19 +36,15 @@ use crate::platform::Os;
 pub(crate) enum Vendor {
     /// Claude Code, through the adapter's `--cli`.
     Claude,
-    /// Codex, through `@openai/codex/bin/codex.js`.
+    /// Codex, through `@openai/codex/bin/codex.js` found in the install (`Installed::codex_cli`),
+    /// never the install's `script`, codex-acp's ACP adapter.
     Codex,
 }
 
-/// What a run is for, and so which home variables it gets.
+/// What a run is for, and so which home variables it gets. Detection starts no run (it is a
+/// stat, `super::detect`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunKind<'a> {
-    /// Detection: the lawyer's own login, looked at where the CLI keeps it by default.
-    ///
-    /// "with the run environment below minus the home variables and `HOME` change, and without
-    /// the store override"; Claude "with `CLAUDE_CONFIG_DIR` and
-    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset"; Codex "with `CODEX_HOME` unset".
-    Detect,
     /// Clauseo's own login, in `home` (`Locations::agent_home`, as text, never canonicalised).
     ///
     /// Claude: "`CLAUDE_CONFIG_DIR=<data_dir>/agents/claude-acp/home` (new),
@@ -114,7 +116,7 @@ const STRIPPED_PREFIXES: [&str; 1] = ["SSH_"];
 
 /// Names dropped from every run: the remote-session hints the CLIs read to skip the browser,
 /// and every variable this module sets itself, so an inherited one never survives a run that
-/// does not set it (detection's homes) or leaks a stale value.
+/// does not set it or leaks a stale value.
 /// An inherited `BROWSER` stays when there is no shim (Windows, Codex): it is the lawyer's own
 /// choice of browser.
 const STRIPPED: [&str; 6] = [
@@ -143,16 +145,18 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
     match inputs.vendor {
         Vendor::Claude => {
             set(&mut env, "ANTHROPIC_API_KEY", OsStr::new(""));
+            // The split between Clauseo's own login and the lawyer's. Own: the inherited
+            // `CLAUDE_SECURESTORAGE_CONFIG_DIR` is stripped, so Claude's item is
+            // `Claude Code-credentials-<hash of home>`, never the lawyer's. Reused: `""`, the
+            // lawyer's unsuffixed item. Any Keychain shim or jail (draft #815, plan-c) applies to
+            // Own only: on macOS a Reused run must reach Apple's `security` and SecurityServer
+            // (decision 0046, "Guard"; `signin/reuse.rs`).
             match inputs.kind {
-                RunKind::Detect => {}
                 RunKind::Own { home } => set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str()),
                 RunKind::Reused { home } => {
                     set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str());
                     set(&mut env, "CLAUDE_SECURESTORAGE_CONFIG_DIR", OsStr::new(""));
                 }
-            }
-            if let Some(ca) = inputs.ca_file {
-                set(&mut env, "NODE_EXTRA_CA_CERTS", ca.as_os_str());
             }
             if let Some(shim) = inputs.shim {
                 set(&mut env, "BROWSER", shim.browser.as_os_str());
@@ -165,32 +169,69 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
         }
         Vendor::Codex => {
             set(&mut env, "CODEX_API_KEY", OsStr::new(""));
-            if let RunKind::Own { home } | RunKind::Reused { home } = inputs.kind {
-                set(&mut env, "CODEX_HOME", home.as_os_str());
-                if matches!(inputs.os, Os::Darwin | Os::Linux) {
-                    set(&mut env, "HOME", home.as_os_str());
-                }
-            }
-            if let Some(ca) = inputs.ca_file {
-                set(&mut env, "SSL_CERT_FILE", ca.as_os_str());
+            let (RunKind::Own { home } | RunKind::Reused { home }) = inputs.kind;
+            set(&mut env, "CODEX_HOME", home.as_os_str());
+            if matches!(inputs.os, Os::Darwin | Os::Linux) {
+                set(&mut env, "HOME", home.as_os_str());
             }
         }
     }
+    if let Some(ca) = inputs.ca_file {
+        set(&mut env, ca_var(inputs.vendor), ca.as_os_str());
+    }
     if let Some(proxy) = inputs.proxy {
         set(&mut env, "HTTPS_PROXY", OsStr::new(proxy));
+        let no_proxy = with_loopback(&env);
+        set(&mut env, "NO_PROXY", OsStr::new(&no_proxy));
+    }
+    let system_ca = env.iter().any(|(name, value)| {
+        name.to_string_lossy().eq_ignore_ascii_case(SYSTEM_CA_VAR) && !value.is_empty()
+    });
+    if !system_ca {
+        set(&mut env, SYSTEM_CA_VAR, OsStr::new("1"));
     }
     env
 }
 
-/// The arguments every Codex run but detection adds after its command:
-/// `-c cli_auth_credentials_store="file"`. Detection gets none ("without the store override").
-pub(crate) fn codex_store_args(kind: RunKind<'_>) -> Vec<OsString> {
-    match kind {
-        RunKind::Detect => Vec::new(),
-        RunKind::Own { .. } | RunKind::Reused { .. } => {
-            CODEX_STORE.iter().map(OsString::from).collect()
+/// The variable that makes Node trust the OS's certificate store beside its own roots:
+/// `NODE_USE_SYSTEM_CA=1`, for every Node Clauseo starts (sign-in's runs here, desktop's
+/// launches and readers through [`crate::SYSTEM_CA_VAR`]).
+pub(crate) const SYSTEM_CA_VAR: &str = "NODE_USE_SYSTEM_CA";
+
+/// What a run with a proxy never sends through it: this computer, where the OAuth callback
+/// listens.
+const LOOPBACK: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
+
+/// The loopback names, then those of `env`'s `NO_PROXY` (in any case) not already there.
+fn with_loopback(env: &BTreeMap<OsString, OsString>) -> String {
+    let inherited = env
+        .iter()
+        .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case("NO_PROXY"))
+        .map(|(_, value)| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut names: Vec<&str> = LOOPBACK.to_vec();
+    for name in inherited.split(',').map(str::trim) {
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
         }
     }
+    names.join(",")
+}
+
+/// The variable `vendor`'s CLI reads an extra CA file from: `NODE_EXTRA_CA_CERTS` for Claude
+/// (Node), `CODEX_CA_CERTIFICATE` for Codex (which loads it beside the system roots; never
+/// `SSL_CERT_FILE`, which the tools in an agent's shell take to replace theirs). Desktop's launch
+/// env takes the same mapping (`crate::ca_cert_var`).
+pub(crate) fn ca_var(vendor: Vendor) -> &'static str {
+    match vendor {
+        Vendor::Claude => "NODE_EXTRA_CA_CERTS",
+        Vendor::Codex => "CODEX_CA_CERTIFICATE",
+    }
+}
+
+/// The arguments every Codex run adds after its command: `-c cli_auth_credentials_store="file"`.
+pub(crate) fn codex_store_args() -> Vec<OsString> {
+    CODEX_STORE.iter().map(OsString::from).collect()
 }
 
 /// Whether `name` is dropped from every run.
@@ -200,6 +241,7 @@ fn stripped(name: &OsStr) -> bool {
         .iter()
         .any(|prefix| upper.starts_with(prefix))
         || STRIPPED.contains(&upper.as_str())
+        || clauseo_process::is_node_env(name)
 }
 
 /// Sets `name` to `value`, first removing the base's spelling of it in any case, so a Windows

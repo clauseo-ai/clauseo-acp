@@ -84,6 +84,13 @@ impl ManualClock {
         .await
     }
 
+    /// Forgets the timers armed so far for [`ManualClock::next_armed`], so its next answer is a
+    /// timer armed after this call: for a test that waits for one call's timer by its delay
+    /// when an earlier step (a launch's folder check) armed one of the same delay.
+    pub fn forget_armed(&self) {
+        lock(&self.inner).armed_log.clear();
+    }
+
     /// How many timers are armed and not yet fired or dropped.
     pub fn armed(&self) -> usize {
         lock(&self.inner).pending.len()

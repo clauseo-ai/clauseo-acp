@@ -12,6 +12,7 @@ expression: entry
     "agent_name": "Gemini CLI",
     "status": "idle",
     "queue_held": true,
+    "queue_held_reason": "paused",
     "steer_joins_turn": true,
     "done": false,
     "mode_id": "plan",

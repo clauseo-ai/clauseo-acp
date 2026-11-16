@@ -84,9 +84,55 @@ pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation.
+/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, and a
+/// rejected `allowed.json` set aside (`blocklist/allowed/integrity.rs`).
 pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
+}
+
+/// Moves the file `from` to `to`, failing (`AlreadyExists`) when `to` exists, never replacing
+/// it: a hard link, then `from` removed, then the folder synced. A rejected `allowed.json` set
+/// aside (`blocklist/allowed/integrity.rs`). A crash between leaves both names, which is safe.
+/// Where the folder takes no hard link (FAT, exFAT, some network shares: any failure but
+/// `AlreadyExists` or `NotFound`), it checks that `to` is free, then renames: there alone a
+/// file made at `to` between the two would be replaced.
+pub(crate) fn move_file_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    move_no_replace_with(from, to, |from, to| std::fs::hard_link(from, to))
+}
+
+/// [`move_file_no_replace`] with `link` making the hard link (a test's seam).
+pub(crate) fn move_no_replace_with(
+    from: &Path,
+    to: &Path,
+    link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    match link(from, to) {
+        Ok(()) => std::fs::remove_file(from)?,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::AlreadyExists | io::ErrorKind::NotFound
+            ) =>
+        {
+            return Err(error);
+        }
+        Err(_no_link) => {
+            if to.symlink_metadata().is_ok() {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            std::fs::rename(from, to)?;
+        }
+    }
+    sync_dir(to.parent().unwrap_or(to))
+}
+
+/// Removes the file `path`; a missing one is fine. An old set-aside `allowed.json`, a launch's
+/// Claude settings file.
+pub(crate) fn remove_old_file(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 
 /// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
@@ -96,6 +142,15 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
+}
+
+/// The new file `path`, opened to write; anything already there, a link included, fails with
+/// `AlreadyExists` and is never followed. A Word blackline's copies (`matter_worker/sides.rs`).
+pub(crate) fn create_new_file(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 /// Removes the link or file `path` itself, never what a link points to: a leftover download's
@@ -126,6 +181,25 @@ pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
 /// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a
 /// data folder) never share one.
 pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    place_private_file(path, bytes, |temp, path| std::fs::rename(temp, path))
+}
+
+/// Writes `bytes` to the new file `path` atomically: a fresh temp file beside it (0600 on Unix,
+/// named as [`replace_private_file`] names it), written and synced, then moved to `path`
+/// without replacing anything there ([`move_file_no_replace`]): a file or link already at
+/// `path` fails with `AlreadyExists`, and the temp file is removed. A launch's Claude settings
+/// file (`agent/launch_settings.rs`).
+pub(crate) fn write_new_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    place_private_file(path, bytes, move_file_no_replace)
+}
+
+/// `bytes` written to a fresh private temp file beside `path`, then `place` moving it there;
+/// the temp file is removed when either fails.
+fn place_private_file(
+    path: &Path,
+    bytes: &[u8],
+    place: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNT: AtomicU64 = AtomicU64::new(0);
@@ -141,12 +215,31 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
         file.write_all(bytes)?;
         file.sync_all()
     });
-    let renamed = written.and_then(|()| std::fs::rename(&temp, path));
+    let renamed = written.and_then(|()| place(&temp, path));
     if renamed.is_err() {
         // What is left of the temp file is ours; the error that matters is the write's.
         drop(std::fs::remove_file(&temp));
     }
     renamed
+}
+
+/// Syncs the folder `path`, so a rename into it survives a power cut (Unix: `fsync` of the
+/// folder). On Windows a folder cannot be opened this way, and NTFS journals the rename itself.
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "one signature on every OS; only Unix can fail, Windows has nothing to sync"
+    )
+)]
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return std::fs::File::open(path)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 /// Removes the temp files a crashed [`replace_private_file`] of `path` left beside it
@@ -205,6 +298,22 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
+/// Opens `path` for reading, never through a link at its last component: `O_NOFOLLOW` on Unix
+/// (the open fails on a link), and on Windows `FILE_FLAG_OPEN_REPARSE_POINT`, which opens the
+/// link itself, not what it points at. A read changes nothing; it lives here for the flags.
+pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, nix::libc::O_NOFOLLOW);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    options.open(path)
+}
+
 /// Opens `path` for reading with a share mode that lets others read but not write or delete
 /// (`FILE_SHARE_READ`), as Word holds a document. For the pre-write guard's Windows test.
 #[cfg(all(test, windows))]
@@ -222,4 +331,11 @@ pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
+}
+
+/// Makes `link` a symbolic link to the folder `target`; fails without the right to make links
+/// (Developer Mode or an elevated token). For unit tests.
+#[cfg(all(test, windows))]
+pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
 }

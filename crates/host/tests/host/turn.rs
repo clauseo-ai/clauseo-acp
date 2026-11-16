@@ -140,7 +140,7 @@ fn text_reaches_view_before_durable() {
     assert_eq!(events.count(is_text), 1, "{}", events.dump());
     assert_eq!(events.text(TextKind::Answer), "The clause ");
     events.assert_no_mismatch();
-    host.shutdown_past_cancel();
+    crate::support::shutdown_past_cancel(host);
 }
 
 #[test]

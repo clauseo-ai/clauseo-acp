@@ -1,37 +1,55 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
-// Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome, the
-// download: Download Chrome is the consent, then its bar, Unpacking, then the reason Ready for new conversations or what
-// went wrong with Try again. A tool
+// Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome (or
+// Edge, on Windows), what to install, in full. Under the browser the firm's policy blocks, or whose policy Clauseo
+// couldn't check, the reason in full; for the policy not checked, Try again, which asks the host to read it now and
+// waits (disabled, busy) until the read ends, then the row follows what it found: Ready for new conversations.
+// A tool
 // the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
 // there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
 // (tool-line.tsx).
 import { useId, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import {
-  DownloadBar,
-  LineTip,
-  ToolLinePopover,
-} from "@clauseo/components/clauseo/tool-line-popover.tsx";
-import {
-  IconBreak,
-  IconDownload,
-  IconTick,
-  IconTryAgain,
-} from "@clauseo/components/icons/icons.tsx";
+import { LineTip, ToolLinePopover } from "@clauseo/components/clauseo/tool-line-popover.tsx";
+import { IconTick, IconTryAgain } from "@clauseo/components/icons/icons.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { cn } from "@clauseo/components/lib/cn.ts";
 import { useToolsWords } from "@clauseo/components/lib/words-tools.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { chip } from "@clauseo/components/ui/recipes.ts";
-import type { BrowserInstall, BrowserInstallStore } from "./browser-install.ts";
+import type { BrowserPolicy, BrowserPolicyStore } from "./browser-policy.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
-import { toolRow, type DownloadPart } from "./tool-rows.ts";
+import { toolRow, type RecheckPart } from "./tool-rows.ts";
 import type { KnownTool } from "./tools.ts";
 
 const nothing = () => () => {};
-const none = (): BrowserInstall | null => null;
+const unheard = (): BrowserPolicy | null => null;
 
-function useInstall(store: BrowserInstallStore | null): BrowserInstall | null {
-  return useSyncExternalStore(store?.subscribe ?? nothing, store?.get ?? none, store?.get ?? none);
+function usePolicy(store: BrowserPolicyStore | null): BrowserPolicy | null {
+  return useSyncExternalStore(
+    store?.subscribe ?? nothing,
+    store?.get ?? unheard,
+    store?.get ?? unheard,
+  );
+}
+
+/** Try again under the browser whose policy Clauseo couldn't check: disabled and busy while the read runs. */
+function Recheck({ part, onRecheck }: { part: RecheckPart; onRecheck: () => void }) {
+  return (
+    <div className="tool-row-sub flex items-center gap-s2">
+      <Button
+        kind="tone"
+        size="small"
+        data-testid="tool-recheck"
+        data-waiting={part.waiting}
+        disabled={part.waiting}
+        aria-busy={part.waiting}
+        onClick={onRecheck}
+      >
+        <IconTryAgain size={16} />
+        {part.button}
+      </Button>
+    </div>
+  );
 }
 
 /** A button whose tooltip says more than its words, the same words its description, for assistive technology. The
@@ -58,84 +76,8 @@ function Described({
   );
 }
 
-function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => void }) {
-  const w = useToolsWords();
-  switch (part.kind) {
-    case "offer":
-      return (
-        <div className="tool-row-sub flex items-center gap-s2">
-          <Described tip={part.tip} side="bottom">
-            {(id) => (
-              <Button
-                kind="tone"
-                size="small"
-                data-testid="tool-download"
-                aria-describedby={id}
-                onClick={onInstall}
-              >
-                <IconDownload size={16} />
-                {part.button}
-              </Button>
-            )}
-          </Described>
-          <span className="text-small text-muted" data-testid="tool-download-size">
-            {part.size}
-          </span>
-        </div>
-      );
-    case "none":
-      return (
-        <p className="tool-row-sub text-small text-muted" data-testid="tool-row-note">
-          {part.line}
-        </p>
-      );
-    case "progress":
-      return (
-        <DownloadBar
-          value={part.value}
-          max={part.max}
-          text={part.text}
-          name={part.name}
-          className="tool-row-sub"
-        />
-      );
-    case "unpacking":
-      // no bar: DESIGN's bars are determinate only, and nothing spins
-      return (
-        <p
-          className="tool-row-sub flex items-center gap-s2 text-small text-primary"
-          data-testid="tool-progress-text"
-        >
-          <IconDownload size={14} />
-          {part.text}
-        </p>
-      );
-    case "done":
-      // the row's reason says it
-      return null;
-    case "failed":
-      return (
-        <div className="tool-row-sub flex items-center gap-s2 text-small text-primary">
-          <IconBreak size={14} />
-          <span data-testid="tool-row-note">{part.cause}</span>
-          <LineTip content={w.t("Try again")}>
-            <Button
-              kind="quiet"
-              size="small"
-              shape="icon"
-              aria-label={w.t("Try again")}
-              data-testid="tool-retry"
-              onClick={onInstall}
-            >
-              <IconTryAgain size={16} />
-            </Button>
-          </LineTip>
-        </div>
-      );
-  }
-}
-
-/** A reason on its own line under the row's name; once Chrome is in, a tick before it and a tooltip on when. */
+/** A reason on its own line under the row's name; once a policy read found nothing blocking, a tick before it and a
+ * tooltip on when. */
 function Reason({ text, tip }: { text: string; tip: string | null }) {
   if (tip === null)
     return (
@@ -173,12 +115,13 @@ export function ToolPopover({
   room: ToolLineRoom;
 }) {
   const w = useToolsWords();
-  const install = useInstall(room.install);
+  const { platform } = useDisplay();
+  const policy = usePolicy(room.policy);
   const rows = tools.map((tool) =>
-    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, install }),
+    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, platform, policy }),
   );
   const settings = rows.some((row) => row.settings);
-  const onInstall = () => room.install?.install();
+  const onRecheck = () => room.policy?.recheck();
   return (
     <ToolLinePopover label={label} glyphs={glyphs}>
       <ul className="grid">
@@ -207,7 +150,12 @@ export function ToolPopover({
               )}
             </span>
             {row.reason !== null && !row.beside && <Reason text={row.reason} tip={row.reasonTip} />}
-            {row.download !== null && <Download part={row.download} onInstall={onInstall} />}
+            {row.note !== null && (
+              <p className="tool-row-sub text-small text-muted" data-testid="tool-row-full">
+                {row.note}
+              </p>
+            )}
+            {row.recheck !== null && <Recheck part={row.recheck} onRecheck={onRecheck} />}
           </li>
         ))}
       </ul>

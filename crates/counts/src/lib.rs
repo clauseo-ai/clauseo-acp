@@ -3,9 +3,10 @@
 //!
 //! # Owns
 //!
-//! - Schema 1 ([`schema`]): the day report, the weekly tally, the 18 events and every value they
-//!   may hold. No I/O, no clock; it builds for `wasm32`, so S23's Worker validates with these
-//!   types ([`schema::parse_batch`], [`schema::parse_tally`]) with `default-features = false`.
+//! - Schema 1 ([`schema`]): the day report, the weekly tally, the crash report, the 18 events
+//!   and every value they may hold. No I/O, no clock; it builds for `wasm32`, so S23's Worker
+//!   validates with these types ([`schema::parse_batch`], [`schema::parse_tally`],
+//!   [`schema::parse_crash`]) with `default-features = false`.
 //! - Behind the default feature `client`: the install id, the open day's cells, the queue of
 //!   closed days, the weekly tallies, their files under `<data_dir>/counts/`, the first-act
 //!   marker `<data_dir>/first_act_done`, and the sender's schedule and bodies.

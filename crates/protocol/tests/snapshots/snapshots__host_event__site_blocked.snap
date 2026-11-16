@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::SiteBlocked\n{\n    block_id: blocked_site_id(4), matter: matter_id(1), thread:\n    Some(thread_id(2)), turn: Some(turn_id(3)), host:\n    \"login.bank-secure.test\".to_owned(), tag: SiteTag::Phishing,\n    list_generated: Timestamp::new(1_794_031_200_000).unwrap(),\n    override_allowed: true, count: 2,\n}"
+---
+{
+  "site_blocked": {
+    "block_id": "01900000-0000-7000-8000-000000000004",
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "host": "login.bank-secure.test",
+    "tag": "phishing",
+    "list_generated": 1794031200000,
+    "override_allowed": true,
+    "count": 2
+  }
+}

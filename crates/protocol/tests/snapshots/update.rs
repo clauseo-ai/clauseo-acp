@@ -52,13 +52,13 @@ golden! { UpdateState::name_of {
     Managed => update_state_managed: UpdateState::Managed { by: ManagedBy::PerMachine };
 } }
 
-/// `GetUpdate`'s answer as `NoUpdater` gives it: managed by the package, no optional field.
+/// `GetUpdate`'s answer as `NoUpdater` gives it: updates unavailable, no optional field.
 #[test]
 fn query_result_update() {
     let answer = QueryResult::Update(UpdateView {
         current: "0.4.0".to_owned(),
         state: UpdateState::Managed {
-            by: ManagedBy::Package,
+            by: ManagedBy::Unavailable,
         },
         mode: UpdateMode::Auto,
         checked_at: None,

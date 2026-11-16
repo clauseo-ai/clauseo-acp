@@ -140,10 +140,16 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 }
 
 /// The top-level keys the reader takes for a message of the bridge's own, never an event's.
-const RESERVED: [&str; 3] = ["fragment", "stream_failed", "timed"];
+const RESERVED: [&str; 5] = [
+    "fragment",
+    "stream_failed",
+    "setup",
+    "window_full_screen",
+    "timed",
+];
 
 /// The number of `HostEvent` variants [`variant`] names.
-const VARIANTS: usize = 11;
+const VARIANTS: usize = 19;
 
 /// Each `HostEvent` variant's place. A new variant fails to compile here, so it gets a place, a
 /// sample in the test below, and its key checked against [`RESERVED`].
@@ -160,6 +166,29 @@ fn variant(event: &HostEvent) -> usize {
         HostEvent::FolderScanned(_) => 8,
         HostEvent::BrowserInstall { .. } => 9,
         HostEvent::UpdateChanged(_) => 10,
+        HostEvent::ConnectorsChanged(_) => 11,
+        HostEvent::CaseLawHint { .. } => 12,
+        HostEvent::ProtectionChanged { .. } => 13,
+        HostEvent::ProtectionViewChanged { .. } => 14,
+        HostEvent::SiteBlocked { .. } => 15,
+        HostEvent::BrowserPolicy { .. } => 16,
+        HostEvent::PapersChanged { .. } => 17,
+        HostEvent::McpToolsChanged(_) => 18,
+    }
+}
+
+/// A `SiteBlocked` sample (decision record 0053).
+fn site_blocked() -> HostEvent {
+    HostEvent::SiteBlocked {
+        block_id: clauseo_protocol::BlockedSiteId::new(v7()).unwrap(),
+        matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
+        thread: None,
+        turn: None,
+        host: "evil.example".to_owned(),
+        tag: clauseo_protocol::SiteTag::Phishing,
+        list_generated: Timestamp::ZERO,
+        override_allowed: true,
+        count: 1,
     }
 }
 
@@ -240,6 +269,39 @@ fn no_host_event_kind_takes_a_reserved_key() {
             checked_at: None,
             updated_from: None,
         }),
+        HostEvent::ConnectorsChanged(clauseo_protocol::ConnectorsState {
+            available: true,
+            locked: false,
+            connectors: Vec::new(),
+        }),
+        HostEvent::CaseLawHint {
+            matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
+            thread: ThreadId::new(v7()).unwrap(),
+            turn: clauseo_protocol::TurnId::new(v7()).unwrap(),
+        },
+        HostEvent::ProtectionChanged {
+            matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
+            protection: clauseo_protocol::Protection::Protected {
+                tier: clauseo_protocol::ProtectionTier::A,
+            },
+        },
+        HostEvent::ProtectionViewChanged {
+            view: clauseo_protocol::ProtectionView::new(
+                clauseo_protocol::Protection::Protected {
+                    tier: clauseo_protocol::ProtectionTier::A,
+                },
+                false,
+                false,
+            ),
+        },
+        site_blocked(),
+        HostEvent::BrowserPolicy {
+            state: clauseo_protocol::BrowserPolicyState::Checking,
+        },
+        HostEvent::PapersChanged {
+            matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
+        },
+        HostEvent::McpToolsChanged(clauseo_protocol::McpToolsView::EMPTY),
     ];
     let mut places: Vec<usize> = samples.iter().map(variant).collect();
     places.sort_unstable();
@@ -370,4 +432,17 @@ fn an_event_too_long_to_wrap_goes_as_it_would_untimed() {
     // A time that is not finite goes plain.
     let small = event_of(500);
     assert_eq!(timed_messages(&small, f64::NAN, 0), messages(&small, 0));
+}
+
+/// `main`'s full-screen message, desktop's own on the app feed, under its reserved key.
+#[test]
+fn the_full_screen_message_is_one_bool_under_its_key() {
+    assert_eq!(
+        window_full_screen_text(true),
+        r#"{"window_full_screen":true}"#
+    );
+    assert_eq!(
+        window_full_screen_text(false),
+        r#"{"window_full_screen":false}"#
+    );
 }

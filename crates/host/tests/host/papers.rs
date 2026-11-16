@@ -6,8 +6,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::{
-    ErrorCode, FileRefId, HostQuery, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
-    SkippedFile, SkippedFileReason,
+    ErrorCode, FileRefId, FolderPlace, HostQuery, MAX_PAPERS, MatterId, MatterPath, PaperSummary,
+    QueryResult, SkippedFile, SkippedFileReason,
 };
 
 use crate::support::{Dir, Running, foreign_uuid, wait};
@@ -24,6 +24,7 @@ struct Listed {
     skipped: Vec<SkippedFile>,
     unread: Vec<MatterPath>,
     truncated: bool,
+    place: FolderPlace,
 }
 
 fn list(host: &Running, matter: MatterId) -> Listed {
@@ -33,11 +34,13 @@ fn list(host: &Running, matter: MatterId) -> Listed {
             skipped,
             unread,
             truncated,
+            place,
         } => Listed {
             papers,
             skipped,
             unread,
             truncated,
+            place,
         },
         other => panic!("ListPapers answered {other:?}"),
     }
@@ -102,6 +105,8 @@ fn papers_are_the_folder_now_sorted_with_skipped_apart() {
     );
     assert_eq!(listed.unread, []);
     assert!(!listed.truncated);
+    // Where the folder lives, as the scan says it: a temp folder no cloud service syncs.
+    assert_eq!(listed.place, FolderPlace::Local);
     host.shutdown();
 }
 

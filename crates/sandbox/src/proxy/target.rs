@@ -120,6 +120,17 @@ fn authority(target: &str) -> Option<(Name, u16)> {
     Some((Name::parse(host)?, port))
 }
 
+/// The hosts a request's `Host` headers name; a value that names no host is skipped.
+pub(crate) fn host_headers(request: &Request) -> Vec<Name> {
+    request
+        .values("host")
+        .into_iter()
+        .filter_map(|value| std::str::from_utf8(value).ok())
+        .filter_map(|value| host_and_port(value, 80))
+        .map(|(name, _)| name)
+        .collect()
+}
+
 /// A `Host` header's host and port (`default` when it has none).
 fn host_and_port(value: &str, default: u16) -> Option<(Name, u16)> {
     match value.rsplit_once(':') {

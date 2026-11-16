@@ -233,7 +233,12 @@ fn a_codex_launch_writes_exactly_the_files_its_index_names() {
     let keys = profile.codex_keys(Some(AgentKind::Codex), &done[0]);
     assert_eq!(
         keys["developer_instructions"],
-        format!("{}\n\n{}", profile.instructions(), profile.skills_index()).as_str()
+        format!(
+            "{}\n\n{}",
+            profile.codex_instructions(),
+            profile.skills_index()
+        )
+        .as_str()
     );
     assert!(
         profile
@@ -248,7 +253,7 @@ fn a_codex_launch_writes_exactly_the_files_its_index_names() {
     let keys = profile.codex_keys(Some(AgentKind::Codex), &theirs);
     assert_eq!(
         keys["developer_instructions"],
-        profile.instructions().as_str()
+        profile.codex_instructions().as_str()
     );
     let mut written: Vec<std::path::PathBuf> = writes
         .iter()
@@ -309,5 +314,52 @@ fn every_index_path_is_where_the_write_puts_the_file() {
         assert_eq!(Path::new(listed), want);
         let md = skill.files().iter().find(|f| f.path == SKILL_MD).unwrap();
         assert_eq!(read(Path::new(listed)), md.bytes, "{listed}");
+    }
+}
+
+/// The browser's skill goes into Claude's plugin only with the `agent-browser` copy, as `name`
+/// and `description` alone, its description saying it is for a session that has a browser; a
+/// later start without the copy removes it. Codex's index never lists it.
+#[test]
+fn the_browser_skill_comes_and_goes_with_the_browser() {
+    use clauseo_profile::skills::builtin::AGENT_BROWSER;
+    let root = Scratch::new("browser-skill");
+    let paths = profile_paths(&root);
+    let skill = paths.claude_skills().join(AGENT_BROWSER).join(SKILL_MD);
+    let (with, refused) = ClauseoProfile::new(paths.clone(), None).with_tool_skills(None, true);
+    assert!(refused.is_empty(), "{refused:?}");
+    assert!(with.browser());
+    write_skills(&with.skill_files(Some(AgentKind::Claude)).unwrap()).unwrap();
+    let text = String::from_utf8(read(&skill)).unwrap();
+    let front = text.split("\n---\n").next().unwrap();
+    assert!(front.starts_with("---\nname: agent-browser\ndescription: "));
+    assert_eq!(front.lines().count(), 3, "{front}");
+    assert!(
+        front.contains("When this session has a browser, use it for web pages"),
+        "{front}"
+    );
+    assert!(text.contains("Apache License 2.0. Modified by Clauseo"));
+    // Claude's plugin gets the skill; Codex's index never lists it: Codex has the `browser` MCP
+    // entry's tools instead of the shell command (`servers::browser_mcp`).
+    assert!(!with.skills_index().contains("agent-browser"));
+    assert!(
+        manifest(&paths.claude_skills())
+            .to_string()
+            .contains(AGENT_BROWSER)
+    );
+
+    let (without, _) = ClauseoProfile::new(paths.clone(), None).with_builtin_skills(None);
+    assert!(!without.browser());
+    let written = write_skills(&without.skill_files(Some(AgentKind::Claude)).unwrap()).unwrap();
+    assert!(!skill.exists());
+    assert!(written.report().removed.contains(&skill));
+    assert!(
+        !manifest(&paths.claude_skills())
+            .to_string()
+            .contains(AGENT_BROWSER)
+    );
+    assert!(!without.skills_index().contains("agent-browser"));
+    for name in BUILTIN {
+        assert!(paths.claude_skills().join(name).join(SKILL_MD).is_file());
     }
 }

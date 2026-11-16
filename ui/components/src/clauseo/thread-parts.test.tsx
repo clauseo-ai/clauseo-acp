@@ -135,8 +135,15 @@ test("the room's own placeholder and line replace the matter's", async () => {
 
 test("without its own line the composer says what the Safe workspace does", async () => {
   await mount(composer({}));
-  expect(txt(document.querySelector(".room-line"))).toContain(
-    "Clauseo works inside this matter's folder",
+  expect(txt(document.querySelector(".room-line"))).toBe(
+    "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+  );
+});
+
+test("once Clauseo works on its own in the Safe workspace (D2d), the line says it changes files without asking", async () => {
+  await mount(composer({ worksOnItsOwn: true }));
+  expect(txt(document.querySelector(".room-line"))).toBe(
+    "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.",
   );
 });
 

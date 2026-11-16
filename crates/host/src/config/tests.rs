@@ -6,7 +6,7 @@ use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, Timestamp};
 use clauseo_settings::{Effective, Files, Locations};
 
-use super::{HostConfig, NoProfile, ProfileHook};
+use super::{ConfigParts, HostConfig, NoProfile, ProfileHook};
 use crate::clock::ManualClock;
 use crate::ids::SequentialIds;
 use crate::window::PATCH_WINDOW_BYTES;
@@ -31,12 +31,12 @@ fn effective() -> Effective {
 #[test]
 fn defaults_and_setters() {
     let launcher = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
-    let parts = HostConfig::new(effective(), launcher).into_parts();
+    let parts = ConfigParts::from(HostConfig::new(effective(), launcher));
     assert_eq!(parts.patch_window_bytes, PATCH_WINDOW_BYTES);
     assert_eq!(parts.refused_folders, Vec::<PathBuf>::new());
     assert_eq!(parts.effective.data_dir(), Path::new("/nowhere"));
     let agent: AgentId = "fake-agent".parse().unwrap();
-    assert!(parts.profile.session_meta(&agent).is_none());
+    assert!(parts.profile.session_meta(&agent, None).is_none());
     assert_eq!(
         NoProfile.launch_env(&agent),
         std::collections::BTreeMap::new()
@@ -44,17 +44,30 @@ fn defaults_and_setters() {
 
     let clock = ManualClock::new(Timestamp::new(7).unwrap());
     let launcher = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
-    let parts = HostConfig::new(effective(), launcher)
+    let parts: ConfigParts = HostConfig::new(effective(), launcher)
         .with_clock(Arc::new(clock.clone()))
         .with_ids(Box::new(SequentialIds::new()))
         .with_refused_folders(vec![PathBuf::from("/refused")])
         .with_profile_hook(Box::new(NoProfile))
         .with_patch_window_bytes(1024)
-        .into_parts();
+        .into();
     assert_eq!(parts.patch_window_bytes, 1024);
     assert_eq!(parts.refused_folders, vec![PathBuf::from("/refused")]);
     clock.advance(Duration::from_millis(3));
     assert_eq!(parts.clock.now().wall, Timestamp::new(10).unwrap());
+}
+
+/// D-050: the quiet watch (the probe after 30 s of silence, the 5-minute backstop) is on in a
+/// host as desktop builds it; only the unit tests (`TurnPath::new`) and the host suite
+/// (`with_quiet_watch(false)`) turn it off.
+#[test]
+fn the_quiet_watch_is_on_unless_turned_off() {
+    let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let parts = ConfigParts::from(HostConfig::new(effective(), launcher()));
+    assert!(parts.idle.quiet_watch);
+    assert!(super::IdleStop::default().quiet_watch);
+    let off = ConfigParts::from(HostConfig::new(effective(), launcher()).with_quiet_watch(false));
+    assert!(!off.idle.quiet_watch);
 }
 
 #[test]
@@ -93,10 +106,10 @@ fn machine_memory_sets_the_browser_slots() {
     use crate::browser::limits::BrowserSlots;
     const GB: u64 = 1024 * 1024 * 1024;
     let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
-    let parts = HostConfig::new(effective(), launcher()).into_parts();
+    let parts = ConfigParts::from(HostConfig::new(effective(), launcher()));
     assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(8 * GB)));
-    let parts = HostConfig::new(effective(), launcher())
+    let parts: ConfigParts = HostConfig::new(effective(), launcher())
         .with_machine_memory(16 * GB)
-        .into_parts();
+        .into();
     assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(32 * GB)));
 }

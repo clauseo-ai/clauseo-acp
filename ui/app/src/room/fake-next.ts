@@ -9,6 +9,7 @@ import {
   type AgentSummary,
   type MatterInfo,
   type NextPart,
+  type Papers,
   type PaperSummary,
   type ThreadInfo,
 } from "./host-next.ts";
@@ -28,6 +29,7 @@ export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): Matt
 export function fakeNext({
   matters,
   papers = [],
+  listing = {},
   location = null,
   threads = () => [],
   agents = [],
@@ -36,9 +38,14 @@ export function fakeNext({
   frames = false,
 }: {
   matters: () => readonly MatterInfo[];
-  papers?: readonly PaperSummary[];
+  /** The papers, or a read of them on each list_papers (a folder changed while the matter is open, 0055). */
+  papers?: readonly PaperSummary[] | (() => readonly PaperSummary[]);
+  /** The rest of each list_papers answer, or a read of it beside the papers: the files left out, the folders not read,
+   * where the folder lives (none, nowhere, here by default). */
+  listing?: Partial<Omit<Papers, "papers">> | (() => Partial<Omit<Papers, "papers">>);
   threads?: (matter: MatterId) => readonly ThreadInfo[];
-  agents?: readonly AgentSummary[];
+  /** The agents, or a read of them on each list_agents (a plan set up while the room is open). */
+  agents?: readonly AgentSummary[] | (() => readonly AgentSummary[]);
   location?: string | null;
   command?: FakeNextHost["command"];
   parts?: readonly NextPart[];
@@ -53,9 +60,19 @@ export function fakeNext({
         if (location === null) throw new Error("no default location in this host");
         return { default_location: { display: location } };
       }
-      if (query === WIRE.listAgents) return { agents: [...agents] };
+      if (query === WIRE.listAgents)
+        return { agents: [...(typeof agents === "function" ? agents() : agents)] };
       if (WIRE.listPapers in query)
-        return { papers: { papers: [...papers], skipped: [], unread: [], truncated: false } };
+        return {
+          papers: {
+            papers: [...(typeof papers === "function" ? papers() : papers)],
+            skipped: [],
+            unread: [],
+            truncated: false,
+            place: "local",
+            ...(typeof listing === "function" ? listing() : listing),
+          },
+        };
       return { threads: [...threads(query.list_threads.matter)] };
     },
     ...(command === undefined ? {} : { command }),
@@ -78,36 +95,54 @@ export function fakeNext({
 
 /** The probe's ?rail=states and axe's: `open` working and opened last (its row says nothing: its work is in view),
  * then a matter in every state the rail draws (working, a question, a permission, an answer ready, stopped today and on
- * another day, the limit with a reset today, another day and none, a moved folder), across every date group in the
- * lawyer's zone on `now`, one pinned, and the scratch matter. */
+ * another day, the limit with a reset today, another day and none, a moved folder), each with its latest activity,
+ * one pinned, and the scratch matter. */
 export function railStates(open: MatterSummary, scratch: MatterSummary, now: number): MatterInfo[] {
-  const iso = (days: number) => {
-    const d = new Date(now + days * 86_400_000);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  };
-  const sunday = (7 - new Date(now).getDay()) % 7;
+  const min = 60_000;
+  const hour = 60 * min;
+  const day = 24 * hour;
   const m = (n: number, name: string, over: Partial<MatterInfo>) =>
     detailed({ matter: uuid(n, 2), name, kind: "folder" }, over);
   return [
-    detailed(open, { status: "working", next_date: iso(1), last_opened: now }),
-    m(2, "Kapoor Exports v. State Bank of India", { status: "needs_answer", next_date: iso(1) }),
-    m(3, "Rao v. Union of India", { status: "needs_permission", next_date: iso(sunday + 2) }),
-    m(4, "Mehta Builders v. Kapoor", { status: "ready", next_date: iso(sunday + 3) }),
-    m(5, "In re Gupta Textiles", {
+    detailed(open, { status: "working", last_opened: now, last_activity: now - 60_000 }),
+    m(2, "Kapoor Exports, export credit facility", {
+      status: "needs_answer",
+      last_activity: now - 20 * min,
+    }),
+    m(3, "Rao family settlement", { status: "needs_permission", last_activity: now - 10 * min }),
+    m(4, "Mehta Builders, joint development", { status: "ready", last_activity: now - 30 * min }),
+    m(5, "Gupta Textiles, trademarks", {
       status: { stopped: { at: now - 3_600_000 } },
-      next_date: iso(40),
+      last_activity: now - 2 * hour,
     }),
-    m(13, "Chopra Steel v. Chopra", { status: "working", next_date: iso(sunday + 4) }),
-    m(12, "Menon v. Menon", { status: { stopped: { at: now - 2 * 86_400_000 } } }),
-    m(6, "Iyer v. Iyer", { status: { paused_at_limit: { resets_at: now + 3_600_000 } } }),
-    m(7, "Bose v. Calcutta Port Trust", {
+    m(13, "Chopra Steel, share purchase", { status: "working", last_activity: now - 5 * min }),
+    m(12, "Menon arbitration", {
+      status: { stopped: { at: now - 2 * 86_400_000 } },
+      last_activity: now - 2 * day,
+    }),
+    m(6, "Iyer employment contracts", {
+      status: { paused_at_limit: { resets_at: now + 3_600_000 } },
+      last_activity: now - 3 * hour,
+    }),
+    m(7, "Bose, port lease renewal", {
       status: { paused_at_limit: { resets_at: now + 3 * 86_400_000 } },
+      last_activity: now - 4 * hour,
     }),
-    m(8, "State v. Thomas", { status: { paused_at_limit: {} } }),
-    m(9, "Khan Leather Works v. Customs", { folder_state: "missing", status: "working" }),
-    m(10, "Desai v. Municipal Corporation", { pinned: true, client: "Asha Desai" }),
-    m(11, "Nair v. Kerala State Electricity Board", { next_date: iso(-3) }),
+    m(8, "Thomas family estate", {
+      status: { paused_at_limit: {} },
+      last_activity: now - 5 * hour,
+    }),
+    m(9, "Khan Leather Works, customs advice", {
+      folder_state: "missing",
+      status: "working",
+      last_activity: now - 6 * hour,
+    }),
+    m(10, "Desai, municipal licence", {
+      pinned: true,
+      client: "Asha Desai",
+      last_activity: now - 3 * day,
+    }),
+    m(11, "Nair, power purchase agreement", { last_activity: now - 6 * day }),
     detailed(scratch),
   ];
 }
@@ -141,11 +176,11 @@ export function railThreads(
     [
       open.matter,
       [
-        t(open.matter, "Bail conditions for Mr. Sharma", {
+        t(open.matter, "Supply terms, first read", {
           status: "running",
           last_activity: now - 60_000,
         }),
-        t(open.matter, "Chronology from the FIR", { last_activity: now - 2 * day }),
+        t(open.matter, "Chronology of the orders", { last_activity: now - 2 * day }),
       ],
     ],
     [
@@ -159,12 +194,17 @@ export function railThreads(
     ],
     [
       id(3),
-      [t(id(3), "Draft rejoinder", { status: "needs_you", last_activity: now - 10 * 60_000 })],
+      [
+        t(id(3), "Draft the settlement deed", {
+          status: "needs_you",
+          last_activity: now - 10 * 60_000,
+        }),
+      ],
     ],
     [
       id(4),
       [
-        t(id(4), "Limitation for the counterclaim", {
+        t(id(4), "Stamp duty on the development agreement", {
           seen: false,
           last_stop: { reason: "end_turn", at: now - 30 * 60_000 },
           last_activity: now - 30 * 60_000,
@@ -174,12 +214,12 @@ export function railThreads(
     [
       id(5),
       [
-        t(id(5), "Judgments since 2005 that cite it", {
+        t(id(5), "Earlier marks in class 24", {
           seen: false,
           last_stop: { reason: "failed", at: now - 2 * hour },
           last_activity: now - 2 * hour,
         }),
-        t(id(5), "Stay application, grounds", {
+        t(id(5), "Opposition, grounds", {
           seen: false,
           last_stop: { reason: "cancelled", at: now - 3 * hour },
           last_activity: now - 3 * hour,
@@ -188,15 +228,20 @@ export function railThreads(
     ],
     [
       id(13),
-      [t(id(13), "Recovery suit, issues", { status: "running", last_activity: now - 5 * 60_000 })],
+      [
+        t(id(13), "Disclosure schedule, open points", {
+          status: "running",
+          last_activity: now - 5 * 60_000,
+        }),
+      ],
     ],
-    [id(12), [t(id(12), "Maintenance, interim order", { last_activity: now - day })]],
+    [id(12), [t(id(12), "Statement of claim, first draft", { last_activity: now - day })]],
     [id(10), [t(id(10), "Reply to the show cause notice", { last_activity: now - 3 * day })]],
-    [id(11), [t(id(11), "Counter to the stay application", { last_activity: now - 6 * day })]],
+    [id(11), [t(id(11), "Tariff clause review", { last_activity: now - 6 * day })]],
     [
       scratch.matter,
       [
-        t(scratch.matter, "Is a cheque bounce notice by email valid?", {
+        t(scratch.matter, "Is an e-signed lease valid?", {
           last_activity: now - day - hour,
         }),
       ],

@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    LimitStopReason, MatterPath, RawFrom, SteeringCapability, TextOrBlob, ToolCallContent,
-    ToolLocation,
+    LimitStopReason, MatterPath, NoticeLevel, RawFrom, SteeringCapability, TextOrBlob,
+    ToolCallContent, ToolLocation,
 };
 use serde_json::json;
 
 use super::content::MAX_TEXT_CHUNK_BYTES;
 use super::*;
-use crate::event::{LimitSignal, LimitStatus};
+use crate::event::{AgentFailed, ConnectionLost, LimitSignal, LimitStatus};
 
 fn session() -> AgentSessionId {
     AgentSessionId::new("s-1").unwrap()
@@ -236,15 +236,18 @@ fn rate_limit_fields_and_unknown_status() {
 
 #[test]
 fn session_failure_categories() {
-    let failure = |category: &str, severity: &str, actions: Value| {
+    let failure_titled = |category: &str, severity: &str, actions: Value, title: &str| {
         let meta = json!({"jetbrains": {"air": {"sessionFailure": {
             "id": "f", "revision": 1, "category": category, "severity": severity,
-            "title": "T", "actions": actions,
+            "title": title, "actions": actions,
         }}}});
         session_failure(meta.as_object().unwrap()).unwrap()
     };
+    let failure = |category: &str, severity: &str, actions: Value| {
+        failure_titled(category, severity, actions, "T")
+    };
     let stopped = |reason| {
-        Ok(LimitSignal::Stopped {
+        Failure::Limit(LimitSignal::Stopped {
             reason,
             title: Some("T".to_owned()),
         })
@@ -257,20 +260,202 @@ fn session_failure_categories() {
         failure("limit", "error", json!(["retry"])),
         stopped(LimitStopReason::Temporary)
     );
-    for (category, severity, actions) in [
-        ("limit", "error", json!(["new_session"])),
-        ("limit", "warning", json!([])),
-        ("context", "error", json!([])),
+    // Too long to read, never a limit: codex-acp's context_exhausted, and Claude's API refusal
+    // of a prompt over the context (its title, any case, the token counts after it).
+    assert_eq!(
+        failure("limit", "error", json!(["new_session"])),
+        Failure::TooLong(crate::TooLong::ContextExhausted)
+    );
+    // Claude's recorded shape: category service, actions ["retry"]; and request, from source.
+    for (category, title) in [
+        ("service", "Prompt is too long"),
+        ("request", "Prompt is too long"),
+        (
+            "request",
+            "prompt is too long: 1043211 tokens > 1000000 maximum",
+        ),
     ] {
         assert_eq!(
-            failure(category, severity, actions),
-            Err(ProtocolWarning::SessionFailure {
-                category: Some(category.to_owned()),
-                severity: Some(severity.to_owned()),
-                title: Some("T".to_owned()),
-            })
+            failure_titled(category, "error", json!(["retry"]), title),
+            Failure::TooLong(crate::TooLong::PromptTooLong),
+            "{category} {title}"
         );
     }
+    for (category, severity, actions, title) in [
+        ("limit", "warning", json!([]), "T"),
+        ("limit", "warning", json!(["new_session"]), "T"),
+        ("limit", "error", json!(["retry", "new_session"]), "T"),
+        ("context", "error", json!([]), "T"),
+        ("access", "error", json!(["login"]), "T"),
+        ("unknown", "warning", json!([]), "T"),
+        (
+            "request",
+            "error",
+            json!([]),
+            "Claude could not process this request.",
+        ),
+        ("request", "warning", json!([]), "Prompt is too long"),
+        ("service", "warning", json!(["retry"]), "Prompt is too long"),
+        // Without severity `error`, a give-up shape is only a warning.
+        ("service", "warning", json!(["retry", "new_session"]), "T"),
+        ("service", "info", json!(["retry"]), "T"),
+    ] {
+        assert_eq!(
+            failure_titled(category, severity, actions, title),
+            Failure::Warning(ProtocolWarning::SessionFailure {
+                category: Some(category.to_owned()),
+                severity: Some(severity.to_owned()),
+                title: Some(title.to_owned()),
+            }),
+            "{category} {severity} {title}"
+        );
+    }
+}
+
+/// Severity `error` with `retry` or `new_session`, in a category no earlier rule reads: the agent
+/// gave up on the turn. codex-acp 2.2.2's `internal_error` (also Codex's recorded refusal of an
+/// over-long input, indistinguishable from it), `provider_error` and `overloaded`. Limit, too
+/// long and connection are read first (`session_failure_categories`, and the connection test).
+#[test]
+fn a_failure_the_agent_gave_up_on_ends_the_turn_failed() {
+    let failure = |category: &str, actions: Value, title: &str| {
+        let meta = json!({"jetbrains": {"air": {"sessionFailure": {
+            "category": category, "severity": "error", "title": title, "actions": actions,
+        }}}});
+        session_failure(meta.as_object().unwrap()).unwrap()
+    };
+    for (category, actions, title) in [
+        (
+            "service",
+            json!(["retry", "new_session"]),
+            "Codex encountered an internal error.",
+        ),
+        ("service", json!(["retry"]), "T"),
+        ("request", json!(["new_session"]), "T"),
+        ("unknown", json!(["retry"]), "T"),
+    ] {
+        assert_eq!(
+            failure(category, actions, title),
+            Failure::Failed(AgentFailed {
+                category: Some(category.to_owned()),
+                title: Some(title.to_owned()),
+            }),
+            "{category} {title}"
+        );
+    }
+    // Earlier rules win: a limit, Claude's too-long title, a lost connection.
+    assert!(matches!(
+        failure("limit", json!(["retry"]), "T"),
+        Failure::Limit(_)
+    ));
+    assert!(matches!(
+        failure("limit", json!(["retry", "new_session"]), "T"),
+        Failure::Warning(_)
+    ));
+    assert!(matches!(
+        failure("service", json!(["retry"]), "Prompt is too long"),
+        Failure::TooLong(crate::TooLong::PromptTooLong)
+    ));
+    assert!(matches!(
+        failure("connection", json!(["retry", "new_session"]), "T"),
+        Failure::Connection(_)
+    ));
+    // On an update it ends no turn (codex-acp sends it so only for another turn): a warning.
+    let meta = json!({"jetbrains": {"air": {"sessionFailure": {
+        "category": "service", "severity": "error", "title": "T", "actions": ["retry"],
+    }}}});
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": meta});
+    assert!(matches!(
+        &map_update(update, None)[..],
+        [AcpEvent::Warning {
+            warning: ProtocolWarning::SessionFailure { .. },
+            ..
+        }]
+    ));
+}
+
+/// A too-long `sessionFailure` on a `session_info_update` is its own event, so a failure sent only
+/// on the update still ends the turn `TooLong`; it is never a limit nor a warning.
+#[test]
+fn a_too_long_failure_update_is_its_own_event() {
+    let failure = json!({"jetbrains": {"air": {"sessionFailure": {
+        "id": "f", "revision": 1, "category": "limit", "severity": "error",
+        "title": "Codex ran out of room in the model's context window.",
+        "actions": ["new_session"],
+    }}}});
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": failure});
+    assert_eq!(
+        map_update(update, None),
+        [AcpEvent::TooLong {
+            session: session(),
+            origin: Origin::Idle,
+            kind: crate::TooLong::ContextExhausted,
+        }]
+    );
+}
+
+/// codex-acp 2.2.2's `transport_lost` as `CodexEventHandler.recordSessionFailure` builds it:
+/// a retry (`recordRetryWarning`: severity `warning`, no actions, Codex's retry line as the
+/// title), and the end once the retries ran out (`recordTypedSessionFailure`).
+#[test]
+fn codex_connection_failures_are_lost_connections() {
+    let retry = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+        "id": "019a-turn:error", "revision": 3, "category": "connection",
+        "severity": "warning", "title": "Reconnecting... waiting for network", "actions": [],
+    }}}});
+    let gave_up = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+        "id": "019a-turn:error", "revision": 4, "category": "connection", "severity": "error",
+        "title": "stream disconnected before completion: Connection refused (os error 61)",
+        "actions": ["retry", "new_session"],
+    }}}});
+    assert_eq!(
+        session_failure(retry.as_object().unwrap()),
+        Some(Failure::Connection(ConnectionLost {
+            gave_up: false,
+            title: Some("Reconnecting... waiting for network".to_owned()),
+        }))
+    );
+    let Some(Failure::Connection(lost)) = session_failure(gave_up.as_object().unwrap()) else {
+        panic!("expected a lost connection");
+    };
+    assert!(lost.gave_up);
+    // Too long reads categories limit, service and request only: a lost connection whose
+    // title has Claude's too-long words is still a lost connection, never `TooLong`.
+    let titled = json!({"jetbrains": {"air": {"sessionFailure": {
+        "category": "connection", "severity": "error", "title": "Prompt is too long",
+        "actions": ["retry", "new_session"],
+    }}}});
+    assert!(matches!(
+        session_failure(titled.as_object().unwrap()),
+        Some(Failure::Connection(ConnectionLost { gave_up: true, .. }))
+    ));
+    // In a `session_info_update`, it is its own event, with no title change.
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": retry});
+    let events = map_update(update, None);
+    assert!(
+        matches!(
+            &events[..],
+            [AcpEvent::ConnectionLost { origin: Origin::Idle, lost, .. }] if !lost.gave_up
+        ),
+        "{events:?}"
+    );
+}
+
+/// Codex's warning that its WebSocket failed, as codex-acp 2.2.2 sends it to a client that
+/// takes notices (`createWarningEvent`, `createSessionNotice`): a warning notice, never a
+/// `sessionFailure`.
+#[test]
+fn codex_fallback_warning_is_a_notice() {
+    let text = "Falling back from WebSockets to HTTPS transport. stream disconnected before \
+                completion: Connection refused (os error 61)";
+    let notice = json!({"sessionUpdate": "notice", "severity": "warning", "title": text});
+    assert_eq!(
+        only_update(map_update(notice, None)),
+        AgentUpdate::Notice {
+            level: NoticeLevel::Warning,
+            text: text.to_owned(),
+        }
+    );
 }
 
 #[test]
@@ -314,6 +499,15 @@ fn agent_info_without_a_title_has_none() {
     }))));
     assert_eq!(info.name.as_deref(), Some("fake_agent"));
     assert_eq!(info.title, None);
+}
+
+/// `mcpCapabilities.http` reaches the host, which trusts a remote server only where it goes.
+#[test]
+fn agent_info_says_whether_the_agent_takes_http_mcp_servers() {
+    assert!(!agent_info(initialize_answer(None)).mcp_http);
+    let answer = json!({"protocolVersion": 1,
+        "agentCapabilities": {"mcpCapabilities": {"http": true, "sse": false}}});
+    assert!(agent_info(serde_json::from_value(answer).unwrap()).mcp_http);
 }
 
 #[test]

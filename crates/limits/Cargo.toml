@@ -21,6 +21,8 @@ futures = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# The read's variables, the stored API key among them, zeroed when dropped.
+zeroize = { workspace = true }
 
 [dev-dependencies]
 # Itself with live-tap, so the live tests reach `with_stdout_tap` with no flag.

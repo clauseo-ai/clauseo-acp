@@ -86,6 +86,17 @@ fn install_type(windows: bool, dirs: &dyn PlatformDirs, exe: Option<&Path>) -> I
     }
 }
 
+/// Whether the executable `exe` sits under the Program Files known folder, by
+/// [`install_type`]'s rule: the updater's install kind (`update/install_kind.rs`) counts it per
+/// machine too.
+#[cfg(windows)]
+pub(crate) fn under_program_files(exe: Option<&Path>) -> bool {
+    matches!(
+        install_type(true, &SystemDirs, exe),
+        InstallType::PerMachine
+    )
+}
+
 /// Whether `path` is inside `folder`, comparing each part without regard to case, as Windows
 /// names files.
 fn is_under(path: &Path, folder: &Path) -> bool {

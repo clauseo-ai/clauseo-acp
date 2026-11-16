@@ -79,11 +79,7 @@ pub(crate) fn guard_command(
             format!("http://127.0.0.1:{proxy_port}"),
         )
         .env("AGENT_BROWSER_SESSION", &scratch.session)
-        .env("AGENT_BROWSER_EXECUTABLE_PATH", chrome)
-        .env(
-            "AGENT_BROWSER_STREAM_PORT",
-            scratch.stream.port().to_string(),
-        );
+        .env("AGENT_BROWSER_EXECUTABLE_PATH", chrome);
     #[cfg(unix)]
     command.env("AGENT_BROWSER_SOCKET_DIR", scratch.socket_dir.path());
     for name in PASSED {

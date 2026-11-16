@@ -32,12 +32,6 @@ const at = (h: number, days = 0) => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h).getTime();
 };
-/** An ISO day `days` on. */
-const isoIn = (days: number) => {
-  const d = new Date(at(12, days));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
 
 function lists(): Map<string, ThreadInfo[]> {
   const now = Date.now();
@@ -91,8 +85,8 @@ const triageHost = (): FakeTransport => {
   return new FakeTransport({
     next: fakeNext({
       matters: () => [
-        detailed(SHARMA, { last_opened: Date.now(), next_date: isoIn(8) }),
-        detailed(JOSHI, { next_date: isoIn(3) }),
+        detailed(SHARMA, { last_opened: Date.now() }),
+        detailed(JOSHI),
         detailed(KAPOOR),
         detailed(RAO, { status: "needs_permission" }),
         detailed(SCRATCH),
@@ -173,10 +167,8 @@ export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
   return <RoomOver host={triageHost} />;
 }
 
-/** The snooze menu alone, its times worked out for `hour`:00 today, with the open matter's next date `nextIn` days on, or
- * none. */
-export function MenuAt({ hour, nextIn }: { hour: number; nextIn?: number }) {
-  const next = nextIn === undefined ? undefined : isoIn(nextIn);
+/** The snooze menu alone, its times worked out for `hour`:00 today. */
+export function MenuAt({ hour }: { hour: number }) {
   const { lang } = useDisplay();
   const [now] = useState(() => at(hour));
   return (
@@ -185,7 +177,7 @@ export function MenuAt({ hour, nextIn }: { hour: number; nextIn?: number }) {
         <MenuTrigger render={<span />} />
         <MenuPopup>
           <SnoozeItems
-            choices={snoozeChoices(now, localZone(), next, lang, () => {})}
+            choices={snoozeChoices(now, localZone(), lang, () => {})}
             onChoose={() => {}}
           />
         </MenuPopup>

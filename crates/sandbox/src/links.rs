@@ -1,4 +1,5 @@
-//! The one walk of the matter per launch: links that lead outside it, and every `.git` in it.
+//! The one walk of the matter per launch: links that lead outside it, and every `.git`, other
+//! [`PROTECTED_AT_ANY_DEPTH`] name and repository-shaped folder in it.
 
 use std::collections::BTreeMap;
 use std::fs::{self, FileType};
@@ -7,8 +8,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::Error;
-use crate::policy::{same, under};
+use crate::policy::{opens_as, same, under};
+use crate::windows::acl_plan::local_share_as_drive;
+use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -42,12 +44,15 @@ pub struct LinkFinding {
     pub target: Option<PathBuf>,
 }
 
-/// What one walk of the matter found: the links of [`scan_links`] and every `.git`.
+/// What one walk of the matter found: the links of [`scan_links`], every `.git`, and every other
+/// [`PROTECTED_AT_ANY_DEPTH`] name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatterScan {
     links: Vec<LinkFinding>,
     git: Vec<PathBuf>,
     git_dirs: Vec<PathBuf>,
+    bare: Vec<PathBuf>,
+    nested: Vec<PathBuf>,
     /// Files with more than one name, every name of which is in the matter: each group's
     /// names, sorted. Not findings; the policy checks that no group joins a read-only name
     /// to a writable one.
@@ -59,6 +64,8 @@ pub(crate) struct ScanParts {
     pub(crate) links: Vec<LinkFinding>,
     pub(crate) git: Vec<PathBuf>,
     pub(crate) git_dirs: Vec<PathBuf>,
+    pub(crate) bare: Vec<PathBuf>,
+    pub(crate) nested: Vec<PathBuf>,
     pub(crate) linked: Vec<Vec<PathBuf>>,
 }
 
@@ -75,11 +82,27 @@ impl MatterScan {
         &self.git
     }
 
-    /// The folders that `.git` files' `gitdir:` lines name inside the matter, and that `.git`
-    /// links lead to inside it, canonical, sorted. One outside the matter is left out: the jail
-    /// denies it anyway.
+    /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD` name
+    /// inside the matter, and that `.git` links lead to inside it, canonical, sorted. One outside
+    /// the matter is left out: the jail denies it anyway.
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
+    }
+
+    /// The folders outside any `.git` that hold a `HEAD` file or link, sorted: git's discovery
+    /// takes one with `objects` and `refs` folders, or a `commondir` file, for a git dir (no
+    /// `.git` name involved), and the agent could add those.
+    pub fn bare_repos(&self) -> &[PathBuf] {
+        &self.bare
+    }
+
+    /// Every `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md` in the matter at any depth, root
+    /// included, in any letter case (the other [`PROTECTED_AT_ANY_DEPTH`] names), sorted: a
+    /// folder, a file, or a link to something in the matter. Found by name in the listings the
+    /// walk reads anyway, so no probe is added. None is listed inside a `.git` folder, whose
+    /// names the walk doesn't read; one inside another is, and the policy drops it.
+    pub fn nested(&self) -> &[PathBuf] {
+        &self.nested
     }
 
     /// Adds `more` findings (from an earlier scan, say) to this one's.
@@ -94,6 +117,8 @@ impl MatterScan {
             links: self.links,
             git: self.git,
             git_dirs: self.git_dirs,
+            bare: self.bare,
+            nested: self.nested,
             linked: self.linked,
         }
     }
@@ -133,9 +158,10 @@ struct Walk {
 }
 
 /// The one walk of `matter`: [`scan_links`]'s findings and every `.git`, with the folders the
-/// `.git` files name. A sub-folder that cannot be read is skipped with a warning: the agent
-/// runs as the same user, so it cannot read it either (and a file whose other name is in it
-/// counts as linked outside). Fails if `matter` cannot be resolved or listed.
+/// `.git` files name, and every other [`PROTECTED_AT_ANY_DEPTH`] name. A sub-folder that
+/// cannot be read is skipped with a warning: the agent runs as the same user, so it cannot read
+/// it either (and a file whose other name is in it counts as linked outside). Fails if `matter`
+/// cannot be resolved or listed.
 pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     let matter = dunce::canonicalize(matter).map_err(Error::Probe)?;
     let mut walk = Walk {
@@ -192,23 +218,40 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git.sort();
     scan.git_dirs.sort();
     scan.git_dirs.dedup();
+    scan.bare.sort();
+    scan.bare.dedup();
+    scan.nested.sort();
     Ok(scan)
 }
 
 impl Walk {
     /// One entry of the walk outside any `.git` folder.
     fn visit(&mut self, matter: &Path, path: PathBuf, kind: FileType, entry: &fs::DirEntry) {
-        let is_git = entry.file_name().eq_ignore_ascii_case(".git");
+        let name = entry.file_name();
+        let is_git = name.eq_ignore_ascii_case(".git");
+        // The other names write-denied at any depth: one name check per entry listed.
+        let nested = !is_git
+            && PROTECTED_AT_ANY_DEPTH
+                .iter()
+                .any(|protected| name.eq_ignore_ascii_case(protected));
+        if nested && !kind.is_symlink() {
+            self.scan.nested.push(path.clone());
+        }
+        if (kind.is_file() || kind.is_symlink()) && opens_as(&name, "head") {
+            self.bare_repo(matter, &path);
+        }
         if kind.is_symlink() {
             match symlink_finding(matter, &path, kind) {
                 Some(finding) => self.scan.links.push(finding),
                 // A `.git` link to a folder in the matter: that folder is the repository.
                 None if is_git => {
                     if let Ok(dir) = dunce::canonicalize(&path) {
-                        self.scan.git_dirs.push(dir);
+                        self.scan.git_dirs.push(local_share_as_drive(dir));
                     }
                     self.scan.git.push(path);
                 }
+                // One to something in the matter, as a `.git` link is: the deny is on its name.
+                None if nested => self.scan.nested.push(path),
                 None => {}
             }
         } else if kind.is_dir() {
@@ -224,6 +267,30 @@ impl Walk {
                 }
             }
             self.hard_link(path, entry);
+        }
+    }
+
+    /// Lists the folder holding the `HEAD` file or link at `head`: with one, the agent could
+    /// complete it into a git dir (`objects/` and `refs/`, or `commondir`). Also lists the
+    /// folder each `commondir` file in it names inside the matter (where git reads `config`),
+    /// by the `gitdir:` rule. Names compare by [`opens_as`]: one listing of the folder per
+    /// `HEAD`.
+    fn bare_repo(&mut self, matter: &Path, head: &Path) {
+        let Some(folder) = head.parent() else {
+            return;
+        };
+        self.scan.bare.push(folder.to_owned());
+        let Ok(entries) = fs::read_dir(folder) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if opens_as(&entry.file_name(), "commondir")
+                && let Some(dir) = read_small(&entry.path())
+                    .ok()
+                    .and_then(|text| dir_named(matter, folder, text.lines().next()?))
+            {
+                self.scan.git_dirs.push(dir);
+            }
         }
     }
 
@@ -305,13 +372,20 @@ fn file_id(_entry: &fs::DirEntry) -> Option<((u64, u64), u64)> {
 fn git_dir_named(matter: &Path, git_file: &Path) -> Option<PathBuf> {
     let text = read_small(git_file).ok()?;
     let line = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+    dir_named(matter, git_file.parent()?, line)
+}
+
+/// The folder `line` names (absolute, or relative to `base`), canonical, if it exists inside
+/// `matter`: a `gitdir:` line or a `commondir` file's.
+fn dir_named(matter: &Path, base: &Path, line: &str) -> Option<PathBuf> {
     let named = Path::new(line.trim());
     let joined = if named.is_absolute() {
         named.to_owned()
     } else {
-        git_file.parent()?.join(named)
+        base.join(named)
     };
-    let dir = dunce::canonicalize(joined).ok()?;
+    // Through this machine's admin share it is named by its drive, as the rules expect.
+    let dir = local_share_as_drive(dunce::canonicalize(joined).ok()?);
     // The matter itself is left out: naming it would make the whole matter read-only.
     (under(&dir, matter) && !same(&dir, matter)).then_some(dir)
 }

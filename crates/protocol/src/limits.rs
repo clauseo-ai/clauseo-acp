@@ -34,10 +34,19 @@ impl AgentKind {
     /// Codex. Any other id (`fake-agent` in tests) has no kind, so it has no limits. The one
     /// place an id becomes a kind.
     pub fn of(id: &crate::AgentId) -> Option<AgentKind> {
-        match id.as_str() {
-            "claude-acp" => Some(AgentKind::Claude),
-            "codex-acp" => Some(AgentKind::Codex),
-            _ => None,
+        [AgentKind::Claude, AgentKind::Codex]
+            .into_iter()
+            .find(|kind| kind.id() == id.as_str())
+    }
+
+    /// The registry id of this kind's agent, the one [`AgentKind::of`] maps back to it:
+    /// `claude-acp` or `codex-acp`. Whatever is keyed by an agent id and must agree for a kind
+    /// (its home, `Locations::agent_home`, and the profile's copy of the skills in it) takes the
+    /// id from here.
+    pub fn id(self) -> &'static str {
+        match self {
+            AgentKind::Claude => "claude-acp",
+            AgentKind::Codex => "codex-acp",
         }
     }
 }

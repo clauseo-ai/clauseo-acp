@@ -1,12 +1,17 @@
 //! A stand-in for agent-browser in the guard's Windows tree test (`tests/guard/tree.rs`). Usage:
-//! `tree_stub`. It starts itself again as `tree_stub --grandchild` the way agent-browser starts
+//! `tree_stub`. It answers each line that has an `id` with an empty result, and exits 0 at the
+//! end of its stdin, so the guard's one-shot answers (`initialize` while the browser is stopped)
+//! work as agent-browser's do. At its first `tools/call` (where agent-browser's CLI starts its
+//! daemon) it first starts itself again as `tree_stub --grandchild` the way agent-browser starts
 //! its daemon on Windows (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), with the guard's stderr
-//! inherited, then prints one JSON line and waits to be killed. The grandchild only waits: while
-//! it lives it holds the guard's stderr open, so a test that reads stderr to its end sees the end
-//! only once the grandchild is gone. Elsewhere it prints the line and waits, so it builds on
-//! every OS. Cargo builds it for the tests; it is never shipped.
+//! inherited, and names its pid on stderr. The grandchild only waits: while it lives it holds the
+//! guard's stderr open, so a test that reads stderr to its end sees the end only once the
+//! grandchild is gone. Elsewhere it starts no grandchild, so it builds on every OS. Cargo builds
+//! it for the tests; it is never shipped.
 
-use std::io::Write;
+use std::io::{BufRead, Write};
+
+use serde_json::{Value, json};
 
 /// `DETACHED_PROCESS`.
 #[cfg(windows)]
@@ -46,11 +51,21 @@ fn main() -> std::io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--grandchild") {
         wait_forever();
     }
-    #[cfg(windows)]
-    start_grandchild()?;
     let mut out = std::io::stdout().lock();
-    writeln!(out, r#"{{"jsonrpc":"2.0","id":1,"result":{{}}}}"#)?;
-    out.flush()?;
-    drop(out);
-    wait_forever();
+    let mut called = false;
+    for line in std::io::stdin().lock().lines() {
+        let Ok(message) = serde_json::from_str::<Value>(&line?) else {
+            continue;
+        };
+        if !called && message.get("method").and_then(Value::as_str) == Some("tools/call") {
+            called = true;
+            #[cfg(windows)]
+            start_grandchild()?;
+        }
+        if let Some(id) = message.get("id") {
+            writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "result": {}}))?;
+            out.flush()?;
+        }
+    }
+    Ok(())
 }

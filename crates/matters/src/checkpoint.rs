@@ -1,20 +1,23 @@
 //! Taking a checkpoint: walk the folder against the stat cache, hash only what changed, build
 //! the tree, diff it against the last checkpoint, and commit it unless nothing changed.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use clauseo_protocol::{
-    CheckpointId, CheckpointKind, FileChange, MatterPath, SkippedFile, Timestamp,
+    CheckpointId, CheckpointKind, FileChange, MatterPath, SkippedFile, SkippedFileReason, Timestamp,
 };
 
-use crate::diff::{DiffFile, diff, diff_by, flag};
-use crate::history::{CommitRecord, GixStore, Hasher, HistoryStore, Oid, TreeFile};
+use crate::diff::{DiffFile, TurnStart, diff_by, flag};
+use crate::first_read::{FirstReads, StepReads, first_reads};
+use crate::history::{GixStore, Hasher, HistoryStore, Oid, TreeFile};
 use crate::no_download::NoDownload;
-use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
+use crate::skip_record::{self, SkipRecord, SkipsRef};
+use crate::stat::{CacheEntry, EntryState, Stat, StatCache, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
-use crate::{Error, trailers};
+use crate::{Error, rules, trailers};
+pub(crate) use timeline::Timeline;
 pub(crate) use walk_folder::OnHeld;
 use walk_folder::walk_folder;
 
@@ -29,85 +32,23 @@ pub(crate) struct Core {
     pub(crate) timeline: Timeline,
 }
 
-/// The checkpoints, oldest first, and their commits, plus the ref's tip.
-#[derive(Debug, Default)]
-pub(crate) struct Timeline {
-    pub(crate) entries: Vec<TimelineEntry>,
-    commits: Vec<(Oid, Oid)>,
-    by_id: HashMap<CheckpointId, usize>,
-    /// The commit the ref names and its tree, checkpoint or not: the parent of the next commit
-    /// and the tree the stat cache describes.
-    tip: Option<(Oid, Oid)>,
-}
-
-impl Timeline {
-    /// The timeline of `records` (oldest first). A commit without a valid `Clauseo-Checkpoint`
-    /// trailer is left out with a warning (it can still be the tip); of two commits with one id,
-    /// the later wins.
-    pub(crate) fn from_records(records: &[CommitRecord]) -> Self {
-        let mut timeline = Self::default();
-        for record in records {
-            if let Some(entry) = trailers::parse(&record.message) {
-                timeline.push(entry, record.id, record.tree);
-            } else {
-                tracing::warn!(commit = ?record.id, "a commit without a checkpoint id");
-            }
-        }
-        timeline.tip = records.last().map(|record| (record.id, record.tree));
-        timeline
-    }
-
-    fn push(&mut self, entry: TimelineEntry, commit: Oid, tree: Oid) {
-        self.by_id.insert(entry.id, self.entries.len());
-        self.entries.push(entry);
-        self.commits.push((commit, tree));
-        self.tip = Some((commit, tree));
-    }
-
-    /// The last checkpoint: its id, commit and tree. Not always the tip: a later version may
-    /// put a commit without a trailer after it.
-    pub(crate) fn head(&self) -> Option<(CheckpointId, Oid, Oid)> {
-        let entry = self.entries.last()?;
-        let (commit, tree) = self.commits.last()?;
-        Some((entry.id, *commit, *tree))
-    }
-
-    /// The commit the ref names and its tree.
-    pub(crate) const fn tip(&self) -> Option<(Oid, Oid)> {
-        self.tip
-    }
-
-    /// Whether checkpoint `id` is on the timeline.
-    pub(crate) fn contains(&self, id: CheckpointId) -> bool {
-        self.by_id.contains_key(&id)
-    }
-
-    /// The commit of checkpoint `id`, if it is on the timeline.
-    pub(crate) fn commit(&self, id: CheckpointId) -> Option<Oid> {
-        self.by_id
-            .get(&id)
-            .and_then(|index| self.commits.get(*index))
-            .map(|(commit, _)| *commit)
-    }
-
-    /// The tree of checkpoint `id`.
-    pub(crate) fn tree(&self, id: CheckpointId) -> Result<Oid, Error> {
-        self.by_id
-            .get(&id)
-            .and_then(|index| self.commits.get(*index))
-            .map(|(_, tree)| *tree)
-            .ok_or(Error::UnknownCheckpoint { id })
-    }
+/// What an after-turn checkpoint's turn wrote: the paths its tool calls wrote
+/// ([`crate::names_a_write`]), and the paths its shell commands wrote
+/// (`crate::Matter::after_turn_named`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Named<'a> {
+    pub(crate) paths: &'a BTreeSet<MatterPath>,
+    pub(crate) commands: &'a BTreeSet<String>,
 }
 
 /// What a checkpoint is for: its trailers and, after a turn, the paths the agent's tool calls
-/// named.
+/// wrote.
 pub(crate) struct Spec<'a> {
     pub(crate) entry: TimelineEntry,
     pub(crate) at: Timestamp,
-    /// `Some` for an `after-turn` checkpoint: a change to a path outside the set may hold the
-    /// lawyer's edits.
-    pub(crate) tool_paths: Option<&'a BTreeSet<MatterPath>>,
+    /// `Some` for an `after-turn` checkpoint: a change to a path the turn did not write may
+    /// hold the lawyer's edits.
+    pub(crate) tool_paths: Option<Named<'a>>,
 }
 
 /// A walk's result: the new cache entries, the skipped files worth listing, whether any file
@@ -118,6 +59,13 @@ pub(crate) struct Walked {
     /// A file was read: if only racily clean files were, the entries may equal the cache's and
     /// the cache must still be written, so its time moves past them.
     read_any: bool,
+    /// The walk's size cap, in bytes: tells why a file the cache has as skipped was skipped.
+    cap: u64,
+    /// The folders that did not list, relative to the matter folder.
+    unread: Vec<String>,
+    /// Why each file this walk skipped was skipped, by path; one kept from the cache under a
+    /// folder that did not list has none.
+    reasons: BTreeMap<String, SkippedFileReason>,
     /// The files whose read failed because another program holds them (Windows: a sharing or
     /// lock violation), sorted by path bytes; only a walk with [`OnHeld::Report`] has any.
     /// Their entries are the cache's, as it last knew them, so such a walk is never committed.
@@ -162,7 +110,7 @@ impl Core {
 
     /// Makes the cache describe the tip's tree: kept if its blobs match the tree, otherwise
     /// rebuilt from the tree with empty stats, so every file is read once.
-    fn check_cache(&mut self) -> Result<(), Error> {
+    pub(crate) fn check_cache(&mut self) -> Result<(), Error> {
         let Some((_, tree)) = self.timeline.tip() else {
             self.cache = StatCache::default();
             self.cache_tree = None;
@@ -181,7 +129,9 @@ impl Core {
     /// `None` when the cache's blobs match tree `tree`; otherwise the cache rebuilt from the tree
     /// with empty stats.
     fn rebuilt_cache(&self, tree: Oid) -> Result<Option<StatCache>, Error> {
-        let files = self.history.read_tree(tree)?;
+        let mut files = self.history.read_tree(tree)?;
+        // A file versioned before the exclusion rule covered it is never walked again.
+        files.retain(|file| !rules::is_excluded_path(&file.path));
         let cached = self
             .cache
             .entries
@@ -293,20 +243,35 @@ impl Core {
             entries,
             skipped,
             read_any,
+            cap,
+            unread,
+            reasons,
             held,
         } = walked;
         // A held file's entry is only what the cache last knew: never committed as the folder.
         if !held.is_empty() {
             return Err(Error::FileLocked { paths: held });
         }
-        let old_tree = tree_of(&self.cache.entries);
+        // A file the cache has from before the exclusion rule covered it is not taken for a
+        // deletion (the walk never lists it now).
+        let mut old_tree = tree_of(&self.cache.entries);
+        old_tree.retain(|file| !rules::is_excluded_path(file.path.as_str()));
         let new_tree = tree_of(&entries);
         let over_cap: BTreeSet<&str> = entries
             .iter()
             .filter(|entry| entry.state == EntryState::Skipped)
             .map(|entry| entry.path.as_str())
             .collect();
-        let mut changes = diff(&old_tree, &new_tree, &over_cap)?;
+        // What the folder holds but does not version, as the last commit recorded it (or, for a
+        // tip from before records, as the cache knows it) and as this walk found it.
+        let (tip_record, tip_recorded) = self.tip_record(cap);
+        let record = SkipRecord::of_walk(&entries, &unread, &reasons, cap);
+        // A file read for the first time was there before: a baseline is no change, and a
+        // changed one is never taken for the new name of a renamed file.
+        let versioned =
+            |path: &str| find_by_path(&old_tree, path, |file| file.path.as_str()).is_some();
+        let mut reads = first_reads(&tip_record, &entries, &versioned);
+        let mut changes = diff_reads(&old_tree, &new_tree, &over_cap, &reads)?;
         let head = self.timeline.head();
         let tip = self.timeline.tip();
         let same_tree = old_tree.len() == new_tree.len()
@@ -315,7 +280,12 @@ impl Core {
                 .zip(&new_tree)
                 .all(|(old, new)| old.path == new.path && old.blob == new.blob);
         let tip_is_head = head.map(|(_, _, tree)| tree) == tip.map(|(_, tree)| tree);
-        if let (Some((last, last_commit, _)), true) = (head, same_tree && tip_is_head) {
+        // Reused only when the commit would record the same: an undo reads what was there at a
+        // turn's start from the checkpoint it started at.
+        let same_record = tip_recorded && tip_record == record;
+        if let (Some((last, last_commit, _)), true) =
+            (head, same_tree && tip_is_head && same_record)
+        {
             if read_any || entries != self.cache.entries {
                 let mut cache = StatCache {
                     entries,
@@ -331,13 +301,21 @@ impl Core {
                 skipped,
             });
         }
-        if self.timeline.by_id.contains_key(&spec.entry.id) {
+        if self.timeline.contains(spec.entry.id) {
             return Err(Error::DuplicateCheckpoint { id: spec.entry.id });
         }
-        if let Some(tools) = spec.tool_paths {
+        if let Some(named) = spec.tool_paths {
+            let start = TurnStart {
+                commands: named.commands,
+                record: tip_recorded.then_some(&tip_record),
+                tree: &old_tree,
+                reads: &reads,
+                entries: &entries,
+                at: spec.at,
+            };
             changes = changes
                 .into_iter()
-                .map(|change| flag(change, tools))
+                .map(|change| flag(change, named.paths, &start))
                 .collect();
         }
         let files: Vec<TreeFile> = new_tree
@@ -353,7 +331,12 @@ impl Core {
         } else {
             changes.len()
         };
-        let message = trailers::message(&spec.entry, count);
+        reads.skips = if record.is_empty() {
+            SkipsRef::Empty
+        } else {
+            SkipsRef::Blob(self.history.write_blob(record.encode().as_bytes())?)
+        };
+        let message = trailers::message(&spec.entry, count, &reads);
         let parent = tip.map(|(commit, _)| commit);
         let seconds = spec.at.as_millis().div_euclid(1000);
         let commit = self.history.write_commit(tree, parent, &message, seconds)?;
@@ -370,7 +353,7 @@ impl Core {
         }
         self.cache = cache;
         self.cache_tree = Some(tree);
-        self.timeline.push(spec.entry, commit, tree);
+        self.timeline.push(spec.entry, commit, tree, reads);
         Ok(Checkpoint {
             outcome: CheckpointOutcome::Created(spec.entry.id),
             commit: CommitId::of(commit),
@@ -430,28 +413,81 @@ impl Core {
             .collect()
     }
 
-    /// The changes from checkpoint `before` to `after`, sorted by path, unflagged: the diff of
-    /// only the files that differ, read without the subtrees both share. Sizes are looked up
-    /// only for the files a change reports.
+    /// The changes from checkpoint `before` to `after` (either may be the later), sorted by
+    /// path, unflagged: the diff of only the files that differ, read without the subtrees both
+    /// share. Sizes are looked up only for the files a change reports. A file a checkpoint
+    /// between them read for the first time (`first_read.rs`) is compared from its baseline, so
+    /// one unchanged since is no change, and is never a rename's new name, as each checkpoint's
+    /// own diff had it.
     pub(crate) fn changes_between(
         &self,
         before: CheckpointId,
         after: CheckpointId,
     ) -> Result<Vec<FileChange>, Error> {
-        let (old, new) = self
-            .history
-            .changed_files(self.timeline.tree(before)?, self.timeline.tree(after)?)?;
-        let (old, new) = (version_entries(old)?, version_entries(new)?);
-        diff_by(&old, &new, &BTreeSet::new(), &mut |file| {
+        let (old_tree, new_tree) = (self.timeline.tree(before)?, self.timeline.tree(after)?);
+        let (old, new) = self.history.changed_files(old_tree, new_tree)?;
+        let (mut old, mut new) = (version_entries(old)?, version_entries(new)?);
+        let reads = self.timeline.step_reads(before, after);
+        if self.timeline.index(before) <= self.timeline.index(after) {
+            baselines::pin(&self.history, &reads.baseline, new_tree, &mut old, &mut new)?;
+        } else {
+            baselines::pin(&self.history, &reads.baseline, old_tree, &mut new, &mut old)?;
+        }
+        let there: BTreeSet<&str> = reads.there.keys().map(MatterPath::as_str).collect();
+        diff_by(&old, &new, &BTreeSet::new(), &there, &mut |file| {
             self.size_of(file.path.as_str(), file.blob)
         })
     }
+
+    /// The files `walked` (a walk not committed) reads for the first time unchanged, each with
+    /// its blob now: the baselines its checkpoint would record.
+    pub(crate) fn live_baselines(&self, walked: &Walked) -> Vec<(MatterPath, Oid)> {
+        let (record, _) = self.tip_record(walked.cap);
+        let versioned = |path: &str| {
+            self.cache
+                .get(path)
+                .is_some_and(|entry| entry.state.blob().is_some())
+        };
+        let reads = first_reads(&record, &walked.entries, &versioned);
+        reads
+            .baseline
+            .into_iter()
+            .filter_map(|file| {
+                let entry = find_by_path(&walked.entries, file.path.as_str(), |e| e.path.as_str())?;
+                Some((file.path, entry.state.blob()?))
+            })
+            .collect()
+    }
+
+    /// The skip record of the tip commit and whether it was recorded: one written before
+    /// records were, or whose blob does not read, gives what the stat cache knows instead.
+    fn tip_record(&self, cap: u64) -> (SkipRecord, bool) {
+        match skip_record::read(&self.history, self.timeline.tip_skips()) {
+            Some(record) => (record, true),
+            None => (SkipRecord::of_cache(&self.cache.entries, cap), false),
+        }
+    }
+
+    /// The skip record of checkpoint `id`: what its walk found in the folder but did not
+    /// version. `None` when that is unknown: a commit written before records were, or one
+    /// whose record does not read.
+    pub(crate) fn skip_record(&self, id: CheckpointId) -> Option<SkipRecord> {
+        skip_record::read(&self.history, self.timeline.skips(id))
+    }
+
+    /// What the step from `before` to `after` read for the first time.
+    pub(crate) fn step_reads(&self, before: CheckpointId, after: CheckpointId) -> StepReads {
+        self.timeline.step_reads(before, after)
+    }
 }
 
-/// `files` (sorted by path bytes) as checked paths.
+/// `files` (sorted by path bytes) as checked paths, without the ones the exclusion rule passes
+/// over: a history may hold files versioned before the rule covered them (a `.claude` folder),
+/// and a version, a step's changes, undo and restore never show or touch them.
 fn version_entries(files: Vec<TreeFile>) -> Result<Vec<VersionEntry>, Error> {
     files
         .into_iter()
+        .filter(|file| !rules::is_excluded_path(&file.path))
         .map(|file| {
             let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
             Ok(VersionEntry {
@@ -479,6 +515,39 @@ impl DiffFile for VersionEntry {
     }
 }
 
+/// The changes from `old` to `new` (trees with sizes), with the files read for the first time
+/// `reads`: a baseline is no change (left out of both sides), and a changed one is never taken
+/// for the new name of a renamed file.
+fn diff_reads(
+    old: &[SizedFile],
+    new: &[SizedFile],
+    over_cap: &BTreeSet<&str>,
+    reads: &FirstReads,
+) -> Result<Vec<FileChange>, Error> {
+    let mut sized = |file: &SizedFile| Ok(file.size);
+    if reads.is_empty() {
+        return diff_by(old, new, over_cap, &BTreeSet::new(), &mut sized);
+    }
+    let baseline: BTreeSet<&str> = reads
+        .baseline
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    let changed: BTreeSet<&str> = reads
+        .changed
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    let without = |files: &[SizedFile]| -> Vec<SizedFile> {
+        files
+            .iter()
+            .filter(|file| !baseline.contains(file.path.as_str()))
+            .cloned()
+            .collect()
+    };
+    diff_by(&without(old), &without(new), over_cap, &changed, &mut sized)
+}
+
 /// The tree a list of cache entries describes, with sizes.
 fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
     entries
@@ -493,7 +562,12 @@ fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
         .collect()
 }
 
+mod baselines;
+mod timeline;
 mod walk_folder;
+
+#[cfg(test)]
+mod dot_folder_tests;
 
 #[cfg(test)]
 mod tests;

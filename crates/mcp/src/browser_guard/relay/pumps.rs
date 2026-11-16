@@ -1,0 +1,376 @@
+//! The two pumps and agent-browser's start. The agent pump reads the agent's lines, runs each
+//! through `filter.rs` and routes what passes (`route`); one stdout pump per start of
+//! agent-browser copies its lines to the agent, whole lines and unchanged bytes but the relay's
+//! URL, which `redact.rs` takes out of them and of agent-browser's stderr.
+
+use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::io::{self, BufRead};
+use std::path::Path;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, mpsc};
+
+use serde_json::Value;
+
+use super::super::Child;
+use super::super::chrome::STAGING;
+use super::super::chrome::sandbox::REFUSAL;
+use super::super::downloads::{self, OPEN_WAIT};
+use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict, domains};
+use super::super::parent::Parent;
+use super::super::port_file::{Expected, Status};
+use super::super::session::{self, Request, Shared, StartError};
+use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
+use super::redact;
+use super::{
+    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, OPEN_TOOL, PROFILES_TOOL,
+    closed_reply, oneshot, send,
+};
+use crate::browser_guard::note;
+use crate::connector::head;
+
+/// The error a tool call gets when the browser cannot start, but for Chrome's sandbox
+/// ([`REFUSAL`]).
+const NOT_STARTED: &str = "the browser could not start; the guard is ending the browser server";
+
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the guard's one fixed child: agent-browser, whose tree the host kills; the host \
+              starts the guard itself through the process crate (docs/decisions/0029-browser.md)"
+)]
+pub(crate) fn spawn_child(
+    program: &Path,
+    args: &[OsString],
+    cwd: &Path,
+    env: &BTreeMap<String, OsString>,
+) -> io::Result<Child> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let secrets = redact::Secrets::of(env);
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(if secrets.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
+        // A group of its own, which `end_group` kills whole.
+        .process_group(0);
+    let mut child = command.spawn()?;
+    forward_stderr(&mut child, secrets);
+    Ok(child)
+}
+
+/// Copies the child's piped stderr to the guard's on a thread of its own, without `secrets`,
+/// and notes them for its stdout (`redact.rs`).
+fn forward_stderr(child: &mut Child, secrets: Option<redact::Secrets>) {
+    let Some(secrets) = secrets else {
+        return;
+    };
+    redact::remember(&secrets);
+    if let Some(stderr) = child.stderr.take() {
+        redact::start(stderr, secrets);
+    }
+}
+
+/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`), hardened from
+/// its first instruction by the job's descriptors (`harden.rs`). Its own children (the CLI's
+/// daemon, which holds the relay's URL too) start with agent-browser's defaults: hardening them
+/// is the patched agent-browser's part (route 2's W2), each process setting the same DACL on
+/// itself and passing it to its children.
+#[cfg(windows)]
+pub(crate) fn spawn_child(
+    program: &Path,
+    args: &[OsString],
+    cwd: &Path,
+    env: &BTreeMap<String, OsString>,
+    job: &super::super::job::Job,
+) -> io::Result<Child> {
+    use super::super::job::{Io, Launch};
+    let secrets = redact::Secrets::of(env);
+    let mut child = job.spawn(&Launch {
+        program,
+        args,
+        cwd,
+        env,
+        stdin: Io::Piped,
+        stdout: Io::Piped,
+        stderr: if secrets.is_some() {
+            Io::Piped
+        } else {
+            Io::Inherit
+        },
+        inherit: &[],
+    })?;
+    forward_stderr(&mut child, secrets);
+    Ok(child)
+}
+
+/// Agent to child: every line through the filter, then [`route`]. On EOF, sends the close
+/// request to a running agent-browser.
+pub(crate) fn pump_agent(
+    stdin: &mut impl BufRead,
+    shared: &Arc<Shared>,
+    parent: &Parent,
+    events: &mpsc::Sender<Event>,
+) {
+    let mut line = Vec::new();
+    loop {
+        let verdict = match read_line(stdin, &mut line, MAX_LINE_BYTES, Overflow::Skip) {
+            Ok(Line::Eof) | Err(_) => break,
+            Ok(Line::Oversize) => filter::parse_error(),
+            // The agent's last line may lack its newline; it is checked like any other.
+            Ok(Line::Whole | Line::Partial) => filter::check(&line),
+        };
+        match verdict {
+            Verdict::Forward(text) => {
+                if !route(shared, parent, events, &text) {
+                    return;
+                }
+            }
+            // The agent has gone if its stdout fails; its stdin EOF follows.
+            Verdict::Answer(text) => drop(emit(&shared.out, format!("{text}\n").as_bytes())),
+            Verdict::Drop => {}
+        }
+    }
+    shared.closing.store(true, Ordering::SeqCst);
+    let to_child = {
+        let mut state = lock(&shared.state);
+        state.closing = true;
+        state.live.as_ref().map(|live| Arc::clone(&live.to_child))
+    };
+    send(events, Event::AgentEnded);
+    if let Some(to_child) = to_child
+        && write_child(&to_child, CLOSE_REQUEST).is_err()
+    {
+        send(events, Event::CloseAnswered);
+    }
+}
+
+/// Sends one checked line on. While the browser runs, to agent-browser, noting a request's id
+/// until its reply. While it is stopped, a tool call starts it first; any other message with an
+/// id goes to a one-shot agent-browser (`oneshot.rs`), which answers it as the running one would,
+/// with no Chrome; a notification is dropped, as agent-browser drops it (`mcp.rs:661-692`).
+/// Once the relay has ended (`State::ended`) a request gets an error and nothing starts.
+/// `false` once the guard is ending and the pump stops.
+fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, text: &str) -> bool {
+    let message: Value = serde_json::from_str(text).unwrap_or_default();
+    let id = message.get("id").cloned();
+    let method = message.get("method").and_then(Value::as_str);
+    let call = id.is_some() && method == Some("tools/call");
+    let request = match (call, message["params"]["name"].as_str()) {
+        (true, Some(CLOSE_TOOL)) => Request::Close,
+        (true, Some(OPEN_TOOL)) => Request::Open,
+        (true, Some(PROFILES_TOOL)) => Request::Profiles,
+        (true, _) => Request::Call,
+        (false, _) if method == Some("tools/list") => Request::List,
+        (false, _) => Request::Other,
+    };
+    let to_child = {
+        let mut state = lock(&shared.state);
+        if state.ended {
+            drop(state);
+            answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), ENDED);
+            return true;
+        }
+        // A close while the browser is stopped starts nothing: the guard answers it as
+        // agent-browser would (`relay.rs`). One that waited on this lock for a start is not
+        // here: the browser runs by then, so the close goes on and its reply stops it again.
+        if state.live.is_none()
+            && request == Request::Close
+            && let Some(id) = &id
+        {
+            drop(state);
+            drop(emit(&shared.out, closed_reply(id).as_bytes()));
+            return true;
+        }
+        if state.live.is_none()
+            && call
+            && let Err(failure) = session::start(shared, &mut state, parent, events)
+        {
+            drop(state);
+            let told = match (&failure.reason, failure.agent_note) {
+                (StartError::Sandbox(_), _) => REFUSAL.to_owned(),
+                (StartError::Other(_), Some(note)) => format!("{NOT_STARTED}. {note}"),
+                (StartError::Other(_), None) => NOT_STARTED.to_owned(),
+            };
+            answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), &told);
+            send(events, Event::StartFailed(failure.reason));
+            return false;
+        }
+        let to_child = state.live.as_ref().map(|live| Arc::clone(&live.to_child));
+        if let (Some(_), Some(id)) = (&to_child, &id) {
+            state.sent(id.clone(), request);
+        }
+        to_child
+    };
+    match (to_child, id) {
+        // A failed write: agent-browser has ended or Chrome died, and the relay answers the call.
+        (Some(to_child), _) => drop(write_child(&to_child, text)),
+        (None, Some(id)) => {
+            return oneshot::answer(shared, events, text, &id, method);
+        }
+        (None, None) => {}
+    }
+    true
+}
+
+/// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
+/// read (a tool call's result with the download notes added, `downloads/held.rs` and
+/// `downloads/saved.rs`; an `open` that became a download answered as saved; the profiles
+/// without JavaScript eval, `filter::without_eval`; and the tool list without the tools and
+/// argument keys the guard refuses, `filter::advertised_tools`), but the
+/// reply to the close request, and nothing once the guard has ended this start
+/// (it answered what was in flight itself). A tool call's reply that is agent-browser's
+/// refusal of `--allowed-domains` (`filter::domains`) stops this start first, as the idle stop
+/// does, and goes to the agent as [`domains::RESTARTED`]; only once per run, after which it
+/// goes as [`domains::STUCK`] and stops nothing. After each line, every one of the
+/// port checks.
+/// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
+/// [`Event::PortRefused`].
+pub(crate) fn pump_child(
+    mut stdout: impl BufRead,
+    shared: &Shared,
+    generation: u64,
+    events: &mpsc::Sender<Event>,
+) -> Event {
+    let mut line = Vec::new();
+    // Once the agent stops reading, the child's output is still drained so it never blocks.
+    let mut agent_reads = true;
+    loop {
+        match read_line(&mut stdout, &mut line, CHILD_MAX_LINE_BYTES, Overflow::Stop) {
+            Ok(Line::Eof) | Err(_) => return Event::ChildEnded(generation),
+            // `browser_guard::run` says so on stderr once the child is killed.
+            Ok(Line::Oversize) => return Event::ChildOversize(generation),
+            Ok(Line::Partial) => {
+                note(&format!(
+                    "agent-browser ended in the middle of a line; dropped its last {} bytes",
+                    line.len()
+                ));
+                return Event::ChildEnded(generation);
+            }
+            Ok(Line::Whole) => {}
+        }
+        if shared.closing.load(Ordering::SeqCst) && is_close_reply(&line) {
+            send(events, Event::CloseAnswered);
+            continue;
+        }
+        // Before the lock: a byte search, and a parse only when it finds the sentence.
+        let restricted = domains::domain_restricted(&line);
+        let answered = {
+            let mut state = lock(&shared.state);
+            if state.generation != generation {
+                continue;
+            }
+            let id = reply_id(&line);
+            let answered = id.as_ref().and_then(|id| state.answered(id));
+            // agent-browser refused `--allowed-domains` after all, and the restriction sticks on
+            // its session: the first time in the run, stopped here, under the lock, before the
+            // reply is out, so the agent's next call waits for the stop and then starts a clean
+            // session; any later time, the reply says how to get out: a close, whose reply goes
+            // on as read and stops the browser as every close's does (`relay.rs`).
+            if restricted
+                && answered.is_some_and(Request::is_call)
+                && let Some(id) = id
+            {
+                if state.domain_restarts > 0 {
+                    if answered != Some(Request::Close) {
+                        drop(state);
+                        note("agent-browser refused --allowed-domains again; it restarts once");
+                        let mut reply = domains::replacement(&id, domains::STUCK);
+                        reply.push(b'\n');
+                        drop(emit(&shared.out, &reply));
+                        continue;
+                    }
+                } else {
+                    state.domain_restarts += 1;
+                    drop(session::stop(&shared.launcher, &mut state));
+                    let in_flight = state.take_in_flight();
+                    drop(state);
+                    restart_after_restriction(shared, &id, &in_flight);
+                    continue;
+                }
+            }
+            (answered, state.sent_count())
+        };
+        let (answered, sent) = answered;
+        // An `open` that turned into a download waits for the file (`downloads/saved.rs`); the
+        // profiles lose eval; a tool call's result carries the download notes; the tool list
+        // loses the tools the guard refuses.
+        let first = match answered {
+            Some(Request::Open) => {
+                let staging = shared.launcher.profile.join(STAGING);
+                downloads::open_reply(&line, &shared.saved, &staging, OPEN_WAIT)
+            }
+            Some(Request::Profiles) => filter::without_eval(&line),
+            Some(Request::List) => filter::advertised_tools(&line),
+            Some(Request::Call | Request::Close | Request::Other) | None => None,
+        };
+        if let Some(changed) = first {
+            line = changed;
+        }
+        if answered.is_some_and(Request::is_call) {
+            if let Some(changed) = shared.held.note_into(&line) {
+                line = changed;
+            }
+            if let Some(changed) = shared.saved.note_into(&line) {
+                line = changed;
+            }
+        }
+        // Last, so nothing put in above can bring the relay's URL back (`redact.rs`).
+        if let Some(changed) = redact::line(&line) {
+            line = changed;
+        }
+        line.push(b'\n');
+        if agent_reads && emit(&shared.out, &line).is_err() {
+            agent_reads = false;
+        }
+        // After the reply is out: the relay's thread stops the browser (`relay.rs`).
+        if answered == Some(Request::Close) {
+            send(events, Event::Closed(generation, sent));
+        }
+        if let Some(reason) = refusal(&shared.launcher.port_checks) {
+            return Event::PortRefused(generation, reason);
+        }
+    }
+}
+
+/// After the stop for agent-browser's domain-restriction error: the reply to `id` becomes
+/// [`domains::RESTARTED`], and each request still in flight (`in_flight`, which the stopped
+/// agent-browser will never answer) gets that text as an error.
+fn restart_after_restriction(shared: &Shared, id: &Value, in_flight: &[Value]) {
+    note(
+        "agent-browser refused --allowed-domains on the guard's Chrome; stopped Chrome and \
+         agent-browser, keeping the profile, so the next browser call starts clean",
+    );
+    let mut reply = domains::replacement(id, domains::RESTARTED);
+    reply.push(b'\n');
+    drop(emit(&shared.out, &reply));
+    answer_all(&shared.out, in_flight, domains::RESTARTED);
+}
+
+/// The id of a reply (a message with an id and no method), if `line` is one. Read with the
+/// connector's reader, which skips the rest of the line without building it.
+fn reply_id(line: &[u8]) -> Option<Value> {
+    head::read(line).filter(|head| !head.method)?.id
+}
+
+/// The first refusal among `checks`, each read now; none while every file is missing, empty or
+/// on its claimed port. Never stops checking: a match now says nothing about the next line.
+pub(crate) fn refusal(checks: &[Expected]) -> Option<String> {
+    checks.iter().find_map(|check| match check.check() {
+        Status::Pending | Status::Matches => None,
+        Status::Refused(reason) => Some(reason),
+    })
+}
+
+fn is_close_reply(line: &[u8]) -> bool {
+    reply_id(line).is_some_and(|id| id.as_str() == Some(CLOSE_ID))
+}

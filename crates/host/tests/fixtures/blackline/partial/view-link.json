@@ -1,0 +1,16 @@
+{
+  "base": "48774492b7f4cfa6:0:48774492b7f4cfa6",
+  "mode": "redline",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=48774492b7f4cfa6:0:48774492b7f4cfa6 mode=redline common-style=\"Normal\" range=p1..p2}\n{summary: 1 section}\np1 Intro.\np2 Pay to {link \"https://bank.example/acct-999\"}the account{/link}\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 63,
+  "warnings": []
+}

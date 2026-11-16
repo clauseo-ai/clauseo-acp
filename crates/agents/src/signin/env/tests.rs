@@ -50,6 +50,13 @@ fn inputs<'a>(
     }
 }
 
+/// A run in Clauseo's own home, for the tests about what every run gets.
+fn own() -> RunKind<'static> {
+    RunKind::Own {
+        home: Path::new("/data/agents/x/home"),
+    }
+}
+
 fn get<'a>(env: &'a BTreeMap<OsString, OsString>, name: &str) -> Option<&'a str> {
     env.get(&OsString::from(name))
         .and_then(|value| value.to_str())
@@ -85,36 +92,10 @@ fn every_run_strips_the_remote_hints() {
     let base = base();
     let home = Path::new("/data/agents/x/home");
     for vendor in [Vendor::Claude, Vendor::Codex] {
-        for kind in [
-            RunKind::Detect,
-            RunKind::Own { home },
-            RunKind::Reused { home },
-        ] {
+        for kind in [RunKind::Own { home }, RunKind::Reused { home }] {
             assert_stripped(&run_env(&inputs(&base, vendor, kind)));
         }
     }
-}
-
-#[test]
-fn detection_runs_have_no_home_variables() {
-    let base = base();
-    for vendor in [Vendor::Claude, Vendor::Codex] {
-        let env = run_env(&inputs(&base, vendor, RunKind::Detect));
-        for name in [
-            "CLAUDE_CONFIG_DIR",
-            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-            "CODEX_HOME",
-            "CLAUSEO_SIGNIN_URL_FILE",
-        ] {
-            assert_eq!(
-                get(&env, name),
-                None,
-                "{name} in a {vendor:?} detection run"
-            );
-        }
-        assert_eq!(get(&env, "HOME"), Some("/home/lawyer"), "HOME moved");
-    }
-    assert_eq!(codex_store_args(RunKind::Detect), Vec::<OsString>::new());
 }
 
 #[test]
@@ -168,14 +149,14 @@ fn codex_runs_but_detection_get_their_home_and_the_file_store() {
             "HOME moved on Windows"
         );
         assert_eq!(
-            codex_store_args(kind),
+            codex_store_args(),
             [
                 OsString::from("-c"),
                 OsString::from("cli_auth_credentials_store=\"file\"")
             ]
         );
     }
-    let detect = run_env(&inputs(&base, Vendor::Codex, RunKind::Detect));
+    let detect = run_env(&inputs(&base, Vendor::Codex, own()));
     assert_eq!(get(&detect, "CODEX_API_KEY"), Some(""));
 }
 
@@ -187,20 +168,46 @@ fn proxy_and_ca_go_to_each_vendor_s_own_variable() {
         run_env(&EnvInputs {
             proxy: Some("http://proxy.firm:8080"),
             ca_file: Some(ca),
-            ..inputs(&base, vendor, RunKind::Detect)
+            ..inputs(&base, vendor, own())
         })
     };
     let claude = with(Vendor::Claude);
     assert_eq!(get(&claude, "NODE_EXTRA_CA_CERTS"), Some("/firm/ca.pem"));
-    assert_eq!(get(&claude, "SSL_CERT_FILE"), None);
+    assert_eq!(get(&claude, "CODEX_CA_CERTIFICATE"), None);
     assert_eq!(get(&claude, "HTTPS_PROXY"), Some("http://proxy.firm:8080"));
     let codex = with(Vendor::Codex);
-    assert_eq!(get(&codex, "SSL_CERT_FILE"), Some("/firm/ca.pem"));
+    assert_eq!(get(&codex, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
+    assert_eq!(
+        get(&codex, "SSL_CERT_FILE"),
+        None,
+        "never the firm's CA alone"
+    );
     assert_eq!(get(&codex, "NODE_EXTRA_CA_CERTS"), None);
     assert_eq!(get(&codex, "HTTPS_PROXY"), Some("http://proxy.firm:8080"));
-    let none = run_env(&inputs(&base, Vendor::Codex, RunKind::Detect));
-    assert_eq!(get(&none, "SSL_CERT_FILE"), None);
+    let none = run_env(&inputs(&base, Vendor::Codex, own()));
+    assert_eq!(get(&none, "CODEX_CA_CERTIFICATE"), None);
     assert_eq!(get(&none, "HTTPS_PROXY"), None);
+    assert_eq!(get(&none, "NO_PROXY"), None);
+}
+
+/// With a proxy, the loopback names (where the OAuth callback listens) never go through it:
+/// `NO_PROXY` holds them, then the inherited entries.
+#[test]
+fn a_proxied_run_keeps_loopback_off_the_proxy() {
+    let mut base = base();
+    base.insert(
+        OsString::from("no_proxy"),
+        OsString::from("*.firm.local, localhost"),
+    );
+    let env = run_env(&EnvInputs {
+        proxy: Some("http://proxy.firm:8080"),
+        ..inputs(&base, Vendor::Claude, own())
+    });
+    assert_eq!(
+        get(&env, "NO_PROXY"),
+        Some("localhost,127.0.0.1,::1,*.firm.local")
+    );
+    assert_eq!(get(&env, "no_proxy"), None, "one NO_PROXY, in one case");
 }
 
 #[test]
@@ -241,11 +248,40 @@ fn env_inputs_debug_prints_names_never_values() {
         OsString::from("HTTPS_PROXY"),
         OsString::from("http://user:hunter2-env@proxy.example:3128"),
     );
-    let mut inputs = inputs(&base, Vendor::Codex, RunKind::Detect);
+    let mut inputs = inputs(&base, Vendor::Codex, own());
     inputs.proxy = Some("http://user:hunter2-set@proxy.example:3128");
     let printed = format!("{inputs:?}");
     for secret in ["hunter2-env", "hunter2-set", "sk-stray", "/home/lawyer"] {
         assert!(!printed.contains(secret), "{printed}");
     }
     assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}
+
+/// Every run trusts the OS's store too (`NODE_USE_SYSTEM_CA=1`), unless the base sets it; an
+/// inherited `SSL_CERT_FILE` (a whole root set some launchers build) is left as it is beside a
+/// firm CA.
+#[test]
+fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let env = run_env(&inputs(&base(), vendor, own()));
+        assert_eq!(get(&env, "NODE_USE_SYSTEM_CA"), Some("1"), "{vendor:?}");
+    }
+    let mut base = base();
+    base.insert(OsString::from("node_use_system_ca"), OsString::from("0"));
+    base.insert(
+        OsString::from("SSL_CERT_FILE"),
+        OsString::from("/all-roots.pem"),
+    );
+    let env = run_env(&EnvInputs {
+        ca_file: Some(Path::new("/firm/ca.pem")),
+        ..inputs(&base, Vendor::Codex, own())
+    });
+    assert_eq!(
+        get(&env, "node_use_system_ca"),
+        Some("0"),
+        "an explicit value stays"
+    );
+    assert_eq!(get(&env, "NODE_USE_SYSTEM_CA"), None);
+    assert_eq!(get(&env, "SSL_CERT_FILE"), Some("/all-roots.pem"));
+    assert_eq!(get(&env, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
 }

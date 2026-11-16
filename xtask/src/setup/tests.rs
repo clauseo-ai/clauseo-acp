@@ -91,6 +91,7 @@ pub(super) fn linux(bin: &Path, on_path: bool) -> Machine<'static> {
         arch: "x86_64",
         cargo_bin: Some(bin.to_path_buf()),
         path,
+        fetcher: install::Fetcher::Curl,
     }
 }
 
@@ -162,6 +163,32 @@ fn each_binary_pins_one_sha256_and_names_one_asset_per_platform() {
                 Some(expected_asset(b, os, arch)),
                 "{} {os}-{arch}",
                 b.name
+            );
+        }
+    }
+}
+
+/// Each cargo tool pins the sha256 of its prebuilt binary on every platform, in `PLATFORMS`
+/// order, except where taiki-e/install-action has none to install: cargo-mutants on Linux arm64.
+/// Each is 64 lowercase hex digits.
+#[test]
+fn each_cargo_tool_pins_its_binary_sha256_per_platform() {
+    for t in TOOLS {
+        let expected: Vec<(&str, &str)> = (PLATFORMS.iter().copied())
+            .filter(|p| !(t.name == "cargo-mutants" && *p == ("linux", "aarch64")))
+            .collect();
+        let pinned: Vec<(&str, &str)> = t.bin_sha256.iter().map(|p| (p.os, p.arch)).collect();
+        assert_eq!(pinned, expected, "{}", t.name);
+        for pin in t.bin_sha256 {
+            assert!(
+                pin.sha256.len() == 64
+                    && (pin.sha256.bytes())
+                        .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+                "{} {}-{}: {}",
+                t.name,
+                pin.os,
+                pin.arch,
+                pin.sha256
             );
         }
     }

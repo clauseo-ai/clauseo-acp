@@ -216,3 +216,14 @@ test("by night the pen's faded tail starts part way in, so it reads as it does b
     "mask-image: linear-gradient(to right, transparent -20%, var(--primary) 24%);",
   );
 });
+
+test("an offered row has no icon and no slot for one: its words start at the row's own padding; icon rows keep 16 px", () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "live.css"), "utf8");
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n  ${selector} {`);
+    expect(at).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  expect(rule('.working-lead[data-lead="none"]')).toMatch(/display: none;/);
+  expect(rule('.working-lead[data-lead="pen"]')).toMatch(/width: var\(--s4\);/);
+});

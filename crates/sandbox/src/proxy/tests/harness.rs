@@ -10,11 +10,12 @@ use std::time::Duration;
 
 use async_io::Async;
 use base64::Engine;
+use clauseo_blocklist::Current;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
-use crate::proxy::upstream::{Env, OsRoute, Scheme};
+use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Reach, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
@@ -190,12 +191,26 @@ impl Clock for TestClock {
 pub(crate) struct Setup {
     pub(crate) allow: Vec<&'static str>,
     pub(crate) silent: Vec<&'static str>,
+    /// The block list in use (unloaded by default).
+    pub(crate) block: Arc<Current>,
+    /// The hosts allowed despite the list (none by default).
+    pub(crate) allowed: Arc<clauseo_blocklist::Allowed>,
     pub(crate) upstream: Upstream,
     pub(crate) limits: Limits,
     /// For `Upstream::System`: the host's proxy variables; the OS answers direct.
     pub(crate) env: Option<Env>,
     /// For `Upstream::System`: the OS lookup (direct when `None`).
     pub(crate) os: Option<Box<OsRoute>>,
+    /// For `Upstream::System`: an OS lookup that may fail, in place of `os`.
+    pub(crate) answers: Option<Box<OsAnswer>>,
+    /// For `Upstream::System`: the settings read when a lookup fails without asking the OS
+    /// (nothing meant when `None`).
+    pub(crate) intent: Option<Box<Intent>>,
+    /// The probe of an earlier proxy over a PAC that could not be fetched (the real one when
+    /// `None`).
+    pub(crate) reach: Option<Box<Reach>>,
+    /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
+    pub(crate) browser: bool,
 }
 
 impl Default for Setup {
@@ -203,10 +218,16 @@ impl Default for Setup {
         Setup {
             allow: Vec::new(),
             silent: Vec::new(),
+            block: Arc::new(Current::default()),
+            allowed: Arc::default(),
             upstream: Upstream::Direct,
             limits: Limits::default(),
             env: None,
             os: None,
+            answers: None,
+            intent: None,
+            reach: None,
+            browser: true,
         }
     }
 }
@@ -248,24 +269,36 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let config = ProxyConfig {
         allow: list(&setup.allow),
         silent: list(&setup.silent),
+        block: setup.block,
+        allowed: setup.allowed,
         upstream: setup.upstream,
         denials: Arc::clone(&sink) as Arc<dyn DenialSink>,
         record: Some(Arc::new(move |exchange: &Exchange| {
             kept.kept.lock().unwrap().push(exchange.clone());
             kept.added.notify_all();
         })),
+        browser: setup.browser,
+        listener: crate::ports::ListenerFor::Other,
     };
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,
         limits: setup.limits,
-        system: match (setup.env, setup.os) {
-            (None, None) => None,
-            (env, os) => {
-                let direct = |_: Scheme, _: &str, _: u16| Route::Direct;
-                let os = os.unwrap_or_else(|| Box::new(direct));
-                Some((env.unwrap_or_default(), os))
+        system: match (setup.env, setup.os, setup.answers) {
+            (None, None, None) => None,
+            (env, os, answers) => {
+                let os = os.unwrap_or_else(|| Box::new(|_: Scheme, _: &str, _: u16| Route::Direct));
+                let answers = answers.unwrap_or_else(|| {
+                    Box::new(move |scheme: Scheme, host: &str, port: u16| -> Answer {
+                        os(scheme, host, port).into()
+                    })
+                });
+                let intent = setup
+                    .intent
+                    .unwrap_or_else(|| Box::new(|| Failure::Unmeant));
+                Some((env.unwrap_or_default(), answers, intent))
             }
         },
+        reach: setup.reach,
     };
     let handle = start_with(config, Arc::clone(&net) as Arc<dyn Network>, options).unwrap();
     Rig {
@@ -311,7 +344,7 @@ impl Rig {
     }
 
     pub(crate) fn browser(&self) -> TcpStream {
-        client(self.handle.browser_port())
+        client(self.handle.browser_port().expect("a browser listener"))
     }
 
     /// Sends a CONNECT with the token on the agent listener; the stream and the status.

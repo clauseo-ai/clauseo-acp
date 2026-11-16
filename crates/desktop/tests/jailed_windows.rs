@@ -1,6 +1,7 @@
 //! The built app under a restricted token (Windows CI): started with a token from
 //! `CreateRestrictedToken` that has restricting SIDs, it refuses with exit 77 and exactly its one
-//! line; the pre-write guard still runs under such a token, and under one without restricting
+//! line, which names the restricted token (the token is no `AppContainer`, the one check before
+//! it); the pre-write guard still runs under such a token, and under one without restricting
 //! SIDs. The restricting SIDs are the process's own user and groups, so every access check passes
 //! as before (the exe, its DLLs, the window station) and only the restriction is under test. A
 //! start that wrongly reached the app would open a window and hang until nextest's timeout ends
@@ -20,7 +21,7 @@ use std::io::{Read as _, Write as _};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::AsRawHandle as _;
 
-use clauseo_desktop::{REFUSAL, SANDBOXED_EXIT};
+use clauseo_desktop::{REFUSAL, SANDBOXED_EXIT, Signal, refusal};
 use windows::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation, WAIT_OBJECT_0,
 };
@@ -211,13 +212,18 @@ fn codex_write() -> Vec<u8> {
 #[cfg(test)]
 fn assert_refused((code, text): (u32, String)) {
     assert_eq!(code, u32::try_from(SANDBOXED_EXIT).unwrap(), "{text}");
-    assert_eq!(text, format!("{REFUSAL}\n"));
+    assert_eq!(
+        text,
+        "Clauseo will not start inside the agent sandbox (restricted token).\n"
+    );
+    assert_eq!(text, format!("{}\n", refusal(Signal::RestrictedToken)));
 }
 
 #[cfg(test)]
 fn assert_guard_refused((code, text): (u32, String)) {
     assert_eq!(code, 2, "{text}");
-    assert!(!text.is_empty() && !text.contains(REFUSAL), "{text}");
+    let stem = REFUSAL.strip_suffix('.').unwrap();
+    assert!(!text.is_empty() && !text.contains(stem), "{text}");
 }
 
 #[test]

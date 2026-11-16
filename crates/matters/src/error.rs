@@ -9,8 +9,10 @@ use clauseo_protocol::{CheckpointId, ErrorCode, MatterId, MatterPath};
 /// Every failure of a matter operation. [`Error::code`] gives the code a client sees.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The folder is gone, or its `.clauseo/matter.json` is missing, unreadable or names another
-    /// matter (`matter.folder_missing`): the "Locate folder" answer.
+    /// The folder is gone (`matter.folder_missing`), or it is there but its
+    /// `.clauseo/matter.json` is missing, unreadable or names another matter
+    /// (`matter.folder_not_a_matter`): the "Locate folder" answer either way. [`Error::code`]
+    /// tells them apart by `reason`.
     #[error("the matter folder {} is missing: {reason}", folder.display())]
     FolderMissing {
         /// The folder the host passed.
@@ -36,6 +38,23 @@ pub enum Error {
     FileLocked {
         /// The locked files, sorted.
         paths: Vec<MatterPath>,
+    },
+    /// [`Matter::replace_file`](crate::Matter::replace_file): the file's content in the folder
+    /// is not the bytes the new content was made from (missing, behind a link), or it changed
+    /// after the walk (`word.revisions_stale`). Nothing was written.
+    #[error("{path} changed since it was read")]
+    ChangedSince {
+        /// The file.
+        path: MatterPath,
+    },
+    /// [`Matter::replace_file`](crate::Matter::replace_file) and
+    /// [`Matter::read_local`](crate::Matter::read_local): the file is one a checkpoint does not
+    /// read (over the size cap, or cloud-only), so no write of it could be checkpointed and a
+    /// retry would meet the same (`word.edit_failed`). Nothing was written.
+    #[error("{path} is over the size cap or not on this computer")]
+    NotVersioned {
+        /// The file.
+        path: MatterPath,
     },
     /// The matter has no checkpoint with this id (`command.invalid`).
     #[error("the matter has no checkpoint {id}")]
@@ -117,7 +136,8 @@ pub enum Error {
     },
 }
 
-/// Why [`Error::FolderMissing`].
+/// Why [`Error::FolderMissing`]: `NoFolder` is `matter.folder_missing`, the others
+/// `matter.folder_not_a_matter`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingReason {
     /// The folder does not exist (moved, deleted, or its drive is not mounted).
@@ -152,10 +172,14 @@ pub enum Refusal {
     Listed(PathBuf),
     /// It holds a `.clauseo/matter.json` naming this matter: it already belongs to one.
     AlreadyMatter(MatterId),
-    /// It holds a `.clauseo/matter.json` that does not read, so it may belong to a matter.
+    /// It holds a `.clauseo/matter.json` that does not read. Not produced since 2026-11-11: an
+    /// import sets such a marker aside and goes on.
     UnreadableMatterJson,
     /// It is, contains or sits inside the matters root.
     MattersRoot,
+    /// Its path is too long for Windows to start programs in it (over
+    /// [`WINDOWS_FOLDER_LIMIT`](crate::WINDOWS_FOLDER_LIMIT) UTF-16 units). Windows only.
+    TooDeep,
 }
 
 impl fmt::Display for Refusal {
@@ -176,6 +200,9 @@ impl fmt::Display for Refusal {
             Self::MattersRoot => {
                 f.write_str("it is, holds or sits inside Clauseo's matters folder")
             }
+            Self::TooDeep => {
+                f.write_str("its path is too long for Windows to start programs in it")
+            }
         }
     }
 }
@@ -189,9 +216,21 @@ impl Error {
     /// The protocol error code a client sees for this failure.
     pub const fn code(&self) -> ErrorCode {
         match self {
-            Self::FolderMissing { .. } => ErrorCode::MatterFolderMissing,
+            Self::FolderMissing {
+                reason: MissingReason::NoFolder,
+                ..
+            } => ErrorCode::MatterFolderMissing,
+            Self::FolderMissing {
+                reason:
+                    MissingReason::NoMatterJson
+                    | MissingReason::Unreadable
+                    | MissingReason::OtherMatter(_),
+                ..
+            } => ErrorCode::MatterFolderNotAMatter,
             Self::FolderRefused { .. } => ErrorCode::MatterFolderRefused,
             Self::FileLocked { .. } => ErrorCode::MatterFileLocked,
+            Self::ChangedSince { .. } => ErrorCode::WordRevisionsStale,
+            Self::NotVersioned { .. } => ErrorCode::WordEditFailed,
             Self::UnknownCheckpoint { .. }
             | Self::DuplicateCheckpoint { .. }
             | Self::MissingDecision { .. }

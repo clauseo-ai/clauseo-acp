@@ -11,11 +11,16 @@ export const ids = {
   matterName: "matter-name",
   /** The rail's New matter, which opens the form. */
   newMatter: "new-matter",
-  /** In the form: Change, pick_folder for an existing folder (`existing_folder`). */
+  /** In the form: Choose folder…, pick_folder for an existing folder (`existing_folder`). */
   matterExisting: "matter-existing",
   /**
-   * In the form: Create the matter. With a folder picked by Change, that folder; without,
-   * pick_folder for the parent and the host makes `<parent>/<name>` (`new_folder`).
+   * In the form: Use a new folder in the host's default location (`default_location`), shown
+   * where the host has one; the host makes `<location>/<name>`.
+   */
+  matterMade: "matter-made",
+  /**
+   * In the form: Create matter, enabled once there is a name and a folder: the one Choose folder…
+   * picked, or the new one Use a new folder chose.
    */
   createMatter: "create-matter",
   /**
@@ -74,6 +79,21 @@ export const ids = {
    * failed turn, `data-failure` (its ErrorCode).
    */
   turnStopped: "turn-stopped",
+  /**
+   * The first read's line under the composer (UD2), shown while its "First read" conversation is
+   * open, with `data-state`: reading, read or stopped.
+   */
+  firstRead: "first-read",
+  /**
+   * "Read the papers" (UD2, D-015): the button under the new conversation's line in a matter added during the first
+   * run with papers. Pressing it sends the first read; nothing sends it by itself.
+   */
+  firstReadOffer: "first-read-offer",
+  /**
+   * The first run's sign-in card, which stands in the composer's place while the conversation's
+   * plan is signed out, with `data-agent`.
+   */
+  signIn: "signin",
   /**
    * The working line once Claude stopped mid-answer (limits/stopped), with `data-code`: shown for
    * a break this window saw arrive, until the next question.
@@ -162,12 +182,14 @@ export const ids = {
    * the count line otherwise.
    */
   queueSay: "queue-say",
-  /** The line above the field while the lawyer types during an answer the agent can steer. */
+  /** The line above the field while the lawyer types during an answer. */
   steerHint: "steer-hint",
-  /** In steerHint: sends the typed words now, steering the answer or stopping it. */
+  /** In steerHint: sends the typed words now (`delivery: "send_now"`), stopping the answer, on every agent. */
   steerSendNow: "steer-send-now",
-  /** The lawyer's words steered into an answer, standing in it where they arrived (`data-entry-id`). */
+  /** The lawyer's words steered into an answer, once the host confirmed the agent took them in (`data-entry-id`). */
   steerMark: "steer-mark",
+  /** A steer the host never sent: its words, and that they were not sent; they are back in the field. */
+  steerNotSent: "steer-not-sent",
   /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
   steerOutcome: "steer-outcome",
   /** The status line's tool line, after the plan: the conversation's tools as glyphs, named in words (aria-label),
@@ -214,6 +236,7 @@ export function window(page: Page) {
     matterName: id(ids.matterName),
     newMatter: id(ids.newMatter),
     matterExisting: id(ids.matterExisting),
+    matterMade: id(ids.matterMade),
     /**
      * The New matter form's folder line: the path it names, once there is one (the matter form's
      * `.matter-form-path`; a part's class, not a test id, as ui/app/src/perf/autoplay.ts reads it).
@@ -309,6 +332,9 @@ export function window(page: Page) {
     permissionButton: (card: Locator, kind: OptionKind): Locator =>
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
+    firstRead: id(ids.firstRead),
+    firstReadOffer: id(ids.firstReadOffer),
+    signIn: id(ids.signIn),
     agentStopped: id(ids.agentStopped),
     restart: id(ids.restart),
     streamFailed: id(ids.streamFailed),
@@ -377,12 +403,16 @@ export function window(page: Page) {
     sendNext: id(ids.sendNext),
     /** The strip's head line: the held line, or the count line. */
     queueSay: id(ids.queueSay),
-    /** The steer hint above the field, shown while the lawyer types during a steerable answer. */
+    /** The steer hint above the field, shown while the lawyer types during an answer. */
     steerHint: id(ids.steerHint),
+    /** The hint's words: what Enter and Send now do with this agent. */
+    steerHintText: id(ids.steerHint).locator(".steer-hint-text"),
     /** Send now in the steer hint. */
     steerSendNow: id(ids.steerSendNow),
     /** The steered words in the answer. */
     steerMark: id(ids.steerMark),
+    /** The rows of steers never sent. */
+    steerNotSent: id(ids.steerNotSent),
     /** The steer outcome line of `outcome`: `requeued` or `sent_now`. */
     steerOutcome: (outcome: SteerOutcomeKind): Locator =>
       page.locator(`[data-testid="${ids.steerOutcome}"][data-outcome="${outcome}"]`),

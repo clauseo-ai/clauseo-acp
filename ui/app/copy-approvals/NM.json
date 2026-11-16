@@ -1,0 +1,134 @@
+{
+  "NM-01": {
+    "en": "Matter name",
+    "hi": "मामले का नाम",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the new matter form's first field, required"
+  },
+  "NM-02": {
+    "en": "Client (optional)",
+    "hi": "मुवक्किल (वैकल्पिक)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the form's second field"
+  },
+  "NM-03": {
+    "en": "Folder",
+    "hi": "फ़ोल्डर",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the Folder row's label"
+  },
+  "NM-04": {
+    "en": "No folder chosen",
+    "hi": "कोई फ़ोल्डर नहीं चुना गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the Folder row before a folder is chosen"
+  },
+  "NM-05": {
+    "en": "Choose folder…",
+    "hi": "फ़ोल्डर चुनें…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "opens the computer's own folder picker at once; replaces Change"
+  },
+  "NM-06": {
+    "en": "Use a new folder in {folder}",
+    "hi": "{folder} में नया फ़ोल्डर इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the default location offered under the Folder row; {folder} is ~/Documents/Clauseo"
+  },
+  "NM-07": {
+    "en": "Clauseo creates this folder. Add papers to it any time.",
+    "hi": "Clauseo यह फ़ोल्डर बना देगा। इसमें कभी भी दस्तावेज़ जोड़ें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "orchestrator (decided 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decided 2026-11-10)",
+    "note": "under the Folder row once the new folder is chosen (the old folder line's title, now shown)"
+  },
+  "NM-08": {
+    "en": "Name the matter.",
+    "hi": "मामले का नाम लिखें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "under the name, when Enter is pressed without one"
+  },
+  "NM-09": {
+    "en": "Choose a folder for the matter.",
+    "hi": "मामले के लिए फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "under the Folder row, when Enter is pressed without a folder"
+  },
+  "NM-10": {
+    "en": "Create matter",
+    "hi": "मामला बनाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the form's act; replaces Create the matter"
+  },
+  "NM-11": {
+    "en": "Working",
+    "hi": "काम चल रहा है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "orchestrator (decided 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the rail's group of matters answering now, under Needs you"
+  },
+  "NM-12": {
+    "en": "Other matters",
+    "hi": "बाकी मामले",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "the rail's group of every other matter, by latest activity"
+  }
+}

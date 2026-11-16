@@ -1,14 +1,14 @@
 //! The download rules: resume, integrity, offline, blocked, disk space and the log.
 
 use std::io;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_agents::testing::Behaviour;
-use clauseo_agents::{Failure, FailureKind, InstallState, TestResolver};
+use clauseo_agents::testing::{Behaviour, TestRegistry};
+use clauseo_agents::{Failure, FailureKind, InstallState, Network, TestResolver};
 
-use crate::support::{BASE, Fixture, agent_a, node_entry, snapshot, tarball_path};
+use crate::support::{BASE, Fixture, agent_a, agent_b, node_entry, snapshot, tarball_path};
 
 const fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -99,6 +99,104 @@ fn offline_waits_30_seconds_with_no_try_counted_and_resumes_by_itself() {
     let (_, last) = events.until_end(&agent_a());
     assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
     assert_eq!(fx.timer.install_waits(), [secs(30)]);
+}
+
+/// A job waiting offline takes a proxy set meanwhile (`Agents::set_network`, S17): its next
+/// try goes through it, and never to the registry direct.
+#[test]
+fn a_job_waiting_offline_takes_a_proxy_set_meanwhile() {
+    let mut fx = Fixture::new("offline-proxy");
+    let proxy = TestRegistry::start().unwrap();
+    let proxy_addr = proxy.addr();
+    let names = Arc::new(Mutex::new(Vec::<String>::new()));
+    let asked = Arc::clone(&names);
+    // Only the proxy's name resolves: a direct try is offline.
+    fx.config.install.resolver = Some(TestResolver(Arc::new(move |name: &str| {
+        asked.lock().unwrap().push(name.to_owned());
+        if name == "proxy.test" {
+            Ok(vec![proxy_addr])
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no {name}"),
+            ))
+        }
+    })));
+    // Agent B is IT's: an install of it answers `Managed` from the worker, in command order.
+    fx.config.managed.insert(agent_b());
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    events.until(&agent_a(), |s| matches!(s, InstallState::Waiting { .. }));
+    let before = names.lock().unwrap().len();
+    assert!(
+        names
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|name| name == "registry.test")
+    );
+    agents.set_network(Network {
+        proxy: Some(format!("http://proxy.test:{}", proxy_addr.port())),
+        ..Network::default()
+    });
+    // The worker has taken the network once B's `Managed` is back.
+    agents.install(&agent_b());
+    events.until(&agent_b(), |s| matches!(s, InstallState::Managed));
+    fx.timer.fire_next(secs(30));
+    // The proxy here refuses the `CONNECT` (405), a failed try: its 2 s back-off is armed once
+    // the try is over.
+    fx.timer.fire_next(secs(2));
+    let first = proxy.requests().remove(0);
+    assert_eq!(
+        (first.method.as_str(), first.path.as_str()),
+        ("CONNECT", "registry.test:80")
+    );
+    let after = names.lock().unwrap()[before..].to_vec();
+    assert!(!after.is_empty(), "the proxy's name was looked up");
+    assert!(after.iter().all(|name| name == "proxy.test"), "{after:?}");
+    assert!(agents.shutdown(secs(10)));
+}
+
+/// A try takes the network `InstallConfig::refresh` gives (S17's route refresh: desktop's route
+/// resolved again past 60 s) over the one `Agents` started with.
+#[test]
+fn a_try_takes_the_network_the_refresh_gives() {
+    let mut fx = Fixture::new("refresh-proxy");
+    let proxy = TestRegistry::start().unwrap();
+    let proxy_addr = proxy.addr();
+    fx.config.install.resolver = Some(TestResolver(Arc::new(move |name: &str| {
+        if name == "proxy.test" {
+            Ok(vec![proxy_addr])
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no {name}"),
+            ))
+        }
+    })));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asked);
+    let fresh = format!("http://proxy.test:{}", proxy_addr.port());
+    fx.config.install.refresh = Some(Arc::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Some(Network {
+            proxy: Some(fresh.clone()),
+            ..Network::default()
+        })
+    }));
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    // The proxy here refuses the `CONNECT` (405), a failed try: its back-off follows.
+    fx.timer.fire_next(secs(2));
+    let first = proxy.requests().remove(0);
+    assert_eq!(
+        (first.method.as_str(), first.path.as_str()),
+        ("CONNECT", "registry.test:80")
+    );
+    assert!(asked.load(Ordering::SeqCst) >= 1);
+    assert!(agents.shutdown(secs(10)));
 }
 
 #[test]

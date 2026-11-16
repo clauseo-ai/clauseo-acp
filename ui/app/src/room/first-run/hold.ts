@@ -2,11 +2,26 @@
 // chunk (slot.tsx) sets the hold; the composer reads it (thread/work-composer.tsx): the gate in the field's row while
 // the conversation's plan isn't signed in, the install's working line, and the room's line under the field. Until the
 // chunk sets one there is none, so a lawyer whose plan is signed in sends without waiting for the chunk, and a host
-// with no setup wire (no event ever arrives) never holds a question back.
+// whose setup events have not arrived never holds a question back.
 import { useSyncExternalStore, type ReactNode } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
+import type { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 
-export type Hold = { gate?: ReactNode; working?: WorkingState | null; line?: ReactNode };
+/** `also`: the other plan's working line, compact under `working`, while both plans have something to say (both
+ * downloading, or one waiting on the other's sign-in). */
+export type Hold = {
+  gate?: ReactNode;
+  working?: WorkingState | null;
+  also?: WorkingState | null;
+  line?: ReactNode;
+};
+
+/** The hold's working line for the composer, the other plan's line carried under it as its `also`; null without one. */
+export function holdLine(hold: Hold | null | undefined): WorkingState | null {
+  const working = hold?.working ?? null;
+  const also = hold?.also ?? null;
+  return working === null || also === null ? working : { ...working, also };
+}
 
 /** `read` gives the hold for the setup store's state now (the first run sets it, null before); `heard` hears each change,
  * the store's own emits forwarded, so the composer renders in the same commit as the first run. */
@@ -42,3 +57,64 @@ export function useHold(transport: object | null): Hold | null {
 /** Whether the transport carries the setup wire (store/setup.ts's SetupSource): only then does the first run load. */
 export const hasSetup = (transport: object): boolean =>
   typeof (transport as { onSetup?: unknown }).onSetup === "function";
+
+/** UD2's expired sign-in card, which the first run's chunk gives as it loads (it holds the setup store and the gate the
+ * card shows), so the thread's chunk, which places it, shares no chunk with the first run's; null before. */
+export type NoticeFrame = typeof NoticeCard;
+export type ExpiredCardProps = {
+  transport: object;
+  agent: string;
+  failedAt: number;
+  /** The note's frame, the thread chunk's NoticeCard: the card's own chunk shares none of the thread's. */
+  frame: NoticeFrame;
+};
+/** Makes the card's element: the component itself stays the first run's. */
+export type ExpiredCardOf = (props: ExpiredCardProps) => ReactNode;
+let expiredCard: ExpiredCardOf | null = null;
+const cardHeard = new Set<() => void>();
+
+export function provideExpiredCard(card: ExpiredCardOf): void {
+  expiredCard = card;
+  for (const heard of cardHeard) heard();
+}
+
+const readCard = () => expiredCard;
+const hearCard = (heard: () => void) => {
+  cardHeard.add(heard);
+  return () => void cardHeard.delete(heard);
+};
+
+/** The card, once the first run's chunk is in. */
+export const useExpiredCard = (): ExpiredCardOf | null =>
+  useSyncExternalStore(hearCard, readCard, readCard);
+
+/** D-015: the first read's offer, which the first run gives and the room places under its new-conversation line, as
+ * the action after that sentence; null with none. One per transport. */
+type OfferSlot = { node: ReactNode; heard: Set<() => void> };
+const offers = new WeakMap<object, OfferSlot>();
+const offerOf = (transport: object): OfferSlot => {
+  let slot = offers.get(transport);
+  if (slot === undefined) offers.set(transport, (slot = { node: null, heard: new Set() }));
+  return slot;
+};
+
+export function provideOffer(transport: object, node: ReactNode): void {
+  const slot = offerOf(transport);
+  slot.node = node;
+  for (const heard of slot.heard) heard();
+}
+
+/** The offer, under the room's new-conversation line. */
+export function OfferSlot({ transport }: { transport: object }): ReactNode {
+  "use no memo";
+  const slot = offerOf(transport);
+  const read = () => slot.node;
+  return useSyncExternalStore(
+    (heard) => {
+      slot.heard.add(heard);
+      return () => slot.heard.delete(heard);
+    },
+    read,
+    read,
+  );
+}

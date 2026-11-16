@@ -8,13 +8,18 @@
 // plan the conversation uses; paused at the plan's limit, it says where the answer stopped (U12). `/` opens the menu
 // of the agent's commands, as the thread's header lists them, and `@` the matter's papers (paper-mentions.ts): a send,
 // queued or steered too, names each paper its tokens still mention.
-// U7: while Clauseo works, Enter queues the field's words (the host queues a send during a turn, H9), and the line above
-// the field offers Send now and Queue (composer-steer.tsx); at QUEUE_CAP Enter queues nothing and keeps the words, and a
+// U7: while Clauseo works, Enter gives the field's words to the running answer where the agent takes words mid-answer
+// (the header's `steer_joins_turn`: `delivery: "steer"`, which the host queues at the head when the agent can't take
+// them now), else queues them (the host queues a send during a turn, H9); the line above the field offers Send now
+// (`delivery: "send_now"`: the answer stops and the words go next) and Queue (composer-steer.tsx); at QUEUE_CAP Enter
+// sends nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
 // with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
-// last queued, the working line says so until the next send or the drained turn starts (else the strip does).
+// last queued, the working line says so until the next send or the drained turn starts (else the strip does). A steer
+// the host never sent comes back the same way, as it turns not sent, each once (steer-restore.ts).
+// Escape, and ⌘. on the Mac or Ctrl+. elsewhere, stop a running answer as Stop does (stop-key.ts).
 import {
   use,
   useCallback,
@@ -23,11 +28,13 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react";
 import {
   Composer,
   type ComposerHandle,
+  type ConfigMenu,
   type Mentions,
   type PlanChoice,
   type SlashCommand,
@@ -38,6 +45,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -48,20 +56,25 @@ import { useOtherWait } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
+import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
-import { pickFull, queueFullLine } from "./composer-queue.ts";
+import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
+import { useNotSentRestore } from "./steer-restore.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
-import { useHold } from "../first-run/hold.ts";
+import { holdLine, useHold } from "../first-run/hold.ts";
+import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
+import { ProtectionContext } from "../protection/context.ts";
 
 export function WorkComposer({
   ref,
   drafts,
   draftKey,
   choice,
+  menus,
   plan = "",
   tools = null,
   commands,
@@ -71,8 +84,11 @@ export function WorkComposer({
   doing = null,
   asks = null,
   refused,
+  refusedActions,
   failed,
   stopped = null,
+  noteFor,
+  gateYields = false,
   refill = null,
   onAsk,
   onStop,
@@ -91,6 +107,8 @@ export function WorkComposer({
   draftKey: string | null;
   /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
   choice?: PlanChoice | undefined;
+  /** The agent's model and effort menus, the draft's or the thread's (config-menus.ts); none without options. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
   /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
@@ -109,10 +127,17 @@ export function WorkComposer({
   asks?: "permission" | "question" | null;
   /** The code of a refused command, until the next Ask. */
   refused: string | null;
+  /** Optional: the refused line's way on, such as Locate folder for a folder gone or not the
+   * matter's. */
+  refusedActions?: ReactNode;
   /** The lost stream's line, until Try again brings it back. */
   failed: BreakLine | null;
   /** The stopped answer's line, while nothing runs. */
   stopped?: BreakLine | null;
+  /** UD2: the notice line's note, given the one it would show otherwise (the expired card, the first read's line). */
+  noteFor?: ((fallback: ReactNode) => ReactNode) | undefined;
+  /** UD2: the expired card holds the question and offers the sign-in itself: the gate leaves the field's row. */
+  gateYields?: boolean;
   /** The stopped question, once per break, for an empty field. */
   refill?: { key: EntryId; text: string } | null;
   /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
@@ -137,12 +162,17 @@ export function WorkComposer({
   // the view store, read as Enter queues (the cap); none where the composer is mounted alone
   const store = use(StoreContext);
   const w = useWords();
+  // Escape and ⌘. (Ctrl+. off the Mac) stop the running answer, as Stop does (stop-key.ts)
+  const { platform } = useDisplay();
+  useStopKey(busy, onStop, platform === "mac");
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
   // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
   const hold = useHold(transport);
-  const gated = hold?.gate !== undefined;
+  // UC: the room's protection line, and the firm's hold on send while the open matter has no protection
+  const shield = use(ProtectionContext);
+  const gated = hold?.gate !== undefined && !gateYields;
   const field = useRef<ComposerHandle>(null);
   // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
   // its turn stopped before the answer cleared the field (the refill below)
@@ -206,13 +236,13 @@ export function WorkComposer({
     if (text === "") drafts.delete(draftKey);
     else drafts.set(draftKey, text);
   };
-  // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it queues the
-  // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
-  // the wait instead, whose Queue sends
+  // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it steers the
+  // words where the agent takes words mid-answer, else queues them, but not past the cap, when they stay in the field;
+  // while another conversation holds the matter, it raises the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     if (busy) {
-      queue(asked);
+      queue(asked, joinsIn(stream === null ? undefined : store?.view(stream)));
       return;
     }
     if (wait !== null && !wait.sent) {
@@ -221,13 +251,14 @@ export function WorkComposer({
     }
     send(asked);
   };
-  // the field's words behind the running turn: the host queues them (send_prompt with no `delivery`)
-  const queue = (asked: string) => {
+  // the field's words behind the running turn: the host queues them (send_prompt with no `delivery`), or, `steer`,
+  // gives them to the running answer (or the queue's head, when the agent can't take them now)
+  const queue = (asked: string, steer = false) => {
     if (pickFull(stream === null ? undefined : store?.view(stream))) return;
-    send(asked, { behind: true });
+    send(asked, steer ? { behind: true, delivery: "steer" } : { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
@@ -255,7 +286,7 @@ export function WorkComposer({
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
   const queueNow = () => send(field.current?.text() ?? "");
-  // the hint's Queue, as Enter; its Send now steers the running answer
+  // the hint's Queue, as Enter where the agent takes no words mid-answer; its Send now stops the answer for the words
   const queueField = () => queue(field.current?.text() ?? "");
   const focusField = useCallback(() => field.current?.focus(), []);
   // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
@@ -273,7 +304,20 @@ export function WorkComposer({
     },
     [lost, store, stream],
   );
-  const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
+  // a steer never sent: its words back into the field, after the words there on a new line; with no field, the draft
+  useNotSentRestore(store, stream, (text) => {
+    const f = field.current;
+    if (f !== null) {
+      const there = f.text();
+      if (there === "") f.fill(text);
+      else f.setText(`${there}\n${text}`);
+    } else if (draftKey !== null) {
+      const there = drafts.get(draftKey) ?? "";
+      drafts.set(draftKey, there === "" ? text : `${there}\n${text}`);
+    }
+  });
+  const sendNowField = () =>
+    send(field.current?.text() ?? "", { behind: true, delivery: "send_now" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition. The host's answer to send_prompt and the turn over the
   // stream come back two ways, in either order: an agent that exits at once can stop the turn while the field still
@@ -317,6 +361,7 @@ export function WorkComposer({
                 : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,
+            ...(refusedActions === undefined ? {} : { actions: refusedActions }),
           },
           testId: "error",
         }
@@ -346,21 +391,36 @@ export function WorkComposer({
           : busy
             ? { state: answering, testId: "working" }
             : stopped);
+  const credit =
+    transport === null ? null : (
+      <OutOfCredit
+        transport={transport}
+        conversation={thread ?? draftKey}
+        onFocusField={focusField}
+      />
+    );
   return (
     <Composer
       ref={field}
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
-      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
-      notice={paused === null ? <LimitWarning /> : null}
+      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time. With no
+      // warning, U15's out-of-credit note, hidden by this conversation's thread (or its draft's key before it has one)
+      notice={
+        shield?.blocked === true
+          ? shield.notice
+          : (noteFor ?? same)(paused === null ? <LimitWarning fallback={credit} /> : credit)
+      }
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
       tools={tools}
+      // under the gate the plan isn't ready: its model and effort wait with it
+      menus={gated ? undefined : menus}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}
       mentions={mentions}
-      working={line?.state ?? hold?.working ?? null}
+      working={line?.state ?? holdLine(hold)}
       {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}
@@ -372,7 +432,7 @@ export function WorkComposer({
         // while Clauseo works and the field holds words, unless the conversation waits behind another (design
         // room.tsx: `busy && hasText && live.behind === null`)
         busy && !empty && !disabled && wait === null ? (
-          <ComposerSteer stream={stream} onSendNow={steerField} onQueue={queueField} />
+          <ComposerSteer stream={stream} onSendNow={sendNowField} onQueue={queueField} />
         ) : null
       }
       queue={
@@ -411,8 +471,8 @@ export function WorkComposer({
           )}
         </>
       }
-      disabled={disabled}
-      line={hold?.line ?? false}
+      disabled={disabled || shield?.blocked === true}
+      line={hold?.line ?? (shield === null ? false : shield.line)}
       testIds={{
         field: "composer",
         ask: "send",
@@ -440,3 +500,6 @@ function markOf(v: StreamView | undefined): string | null {
   const said = status === undefined ? "" : typeof status === "string" ? status : "queued";
   return `${said} ${v.latestOutput ?? ""}`;
 }
+
+/** The notice line's note as it stands, with no UD2 note over it. */
+const same = (note: ReactNode): ReactNode => note;

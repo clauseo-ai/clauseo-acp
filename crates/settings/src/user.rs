@@ -1,9 +1,10 @@
 //! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
-//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>` or `plans.<id>` entry.
-//! Only [`crate::Effective::apply_ui_patch`], [`crate::Effective::apply_tools_patch`],
-//! [`crate::Effective::apply_privacy_patch`], [`crate::Effective::apply_update_mode`],
-//! [`crate::Effective::set_agent_launch`] and [`crate::Effective::set_plan`] call those
-//! writes, after they have checked policy locks.
+//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>`, `plans.<id>` or
+//! `skills.enabled` entry. Only [`crate::Effective::apply_ui_patch`],
+//! [`crate::Effective::apply_tools_patch`], [`crate::Effective::apply_privacy_patch`],
+//! [`crate::Effective::apply_update_mode`], [`crate::Effective::set_agent_launch`],
+//! [`crate::Effective::set_plan`] and [`crate::Effective::set_skill_pack`] call those writes,
+//! after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -45,8 +46,19 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
         }
     };
     match json::read(path, &bytes) {
-        Ok((raws, file_warnings)) => {
+        Ok((raws, file_warnings, _wrapped, _places)) => {
             warnings.extend(file_warnings);
+            // A key twice in one object: the last copy wins, with a warning at the second.
+            if let Ok(Some(position)) = json::duplicate(&bytes) {
+                warnings.push(Warning {
+                    origin: Origin::File {
+                        path: path.to_owned(),
+                        position: Some(position),
+                    },
+                    kind: WarningKind::DuplicateKey,
+                });
+            }
+            let raws = leaf::without_policy_only(raws, warnings);
             leaf::typed(raws, Vec::new(), warnings)
         }
         Err(syntax) => {
@@ -62,6 +74,16 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
             Vec::new()
         }
     }
+}
+
+/// Whether the user's `settings.json` sets `key` (dotted, such as `ui.language`), with a value
+/// that types or one that does not. A missing, unreadable or unparsable file sets none.
+/// [`crate::Effective::settings`] cannot tell the lawyer's own value from the default; this
+/// can.
+pub fn user_sets(locations: &Locations, files: &dyn Files, key: &str) -> bool {
+    read(locations.settings_file(), files, &mut Vec::new())
+        .iter()
+        .any(|leaf| leaf.key() == key)
 }
 
 /// Saves a [`UiPatch`] to the user's `settings.json`: the patch's fields replace those in the
@@ -159,6 +181,104 @@ pub(crate) fn write_entry(
     }
     save_document(locations, files, &document)?;
     Ok(true)
+}
+
+/// Saves one entry of `skills.enabled` in the user's `settings.json`: `hash` becomes the entry
+/// `id`, or `None` removes it, and every other key stays, as [`write_user_settings`] keeps
+/// them. A `skills` or `enabled` that is not an object is replaced by one. It checks neither
+/// locks nor the id and hash: [`crate::Effective::set_skill_pack`] does, before it calls this.
+pub(crate) fn write_skill_pack(
+    locations: &Locations,
+    files: &dyn Files,
+    id: &str,
+    hash: Option<&str>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(skills) = section_mut(&mut document, "skills")
+        && let Value::Object(entries) = section_mut(skills, "enabled")
+    {
+        match hash {
+            Some(hash) => {
+                entries.insert(id.to_owned(), Value::String(hash.to_owned()));
+            }
+            None => {
+                entries.remove(id);
+            }
+        }
+    }
+    save_document(locations, files, &document)
+}
+
+/// Saves one entry of `mcp.servers` in the user's `settings.json`: `previous`'s entry (when it
+/// is another name) goes, and `entry` becomes the entry `name`, or with `None` that entry goes;
+/// every other key stays, as [`write_user_settings`] keeps them, in one write. An `mcp` or
+/// `servers` that is not an object is replaced by one. It checks nothing:
+/// [`crate::Effective::save_mcp_server`] and its siblings do, before they call this.
+pub(crate) fn write_mcp_server(
+    locations: &Locations,
+    files: &dyn Files,
+    previous: Option<&str>,
+    name: &str,
+    entry: Option<Value>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(mcp) = section_mut(&mut document, "mcp")
+        && let Value::Object(servers) = section_mut(mcp, "servers")
+    {
+        if let Some(previous) = previous.filter(|previous| *previous != name) {
+            servers.remove(previous);
+        }
+        match entry {
+            Some(entry) => {
+                servers.insert(name.to_owned(), entry);
+            }
+            None => {
+                servers.remove(name);
+            }
+        }
+    }
+    save_document(locations, files, &document)
+}
+
+/// Sets `enabled` in the entry `name` of `mcp.servers` in the user's `settings.json`, and
+/// nothing else: every other key of the entry stays as the file has it, a key this version does
+/// not read included. Answers `Ok(false)`, with nothing written, when the file has no such entry
+/// as an object. It checks nothing: [`crate::Effective::set_mcp_server_enabled`] does.
+pub(crate) fn write_mcp_enabled(
+    locations: &Locations,
+    files: &dyn Files,
+    name: &str,
+    enabled: bool,
+) -> Result<bool, Error> {
+    let mut document = read_document(locations, files)?;
+    let entry = document
+        .get_mut("mcp")
+        .and_then(|mcp| mcp.get_mut("servers"))
+        .and_then(|servers| servers.get_mut(name))
+        .and_then(Value::as_object_mut);
+    let Some(entry) = entry else {
+        return Ok(false);
+    };
+    entry.insert("enabled".to_owned(), Value::Bool(enabled));
+    save_document(locations, files, &document)?;
+    Ok(true)
+}
+
+/// Adds each of `entries` to `mcp.servers` in the user's `settings.json`, in one write, as
+/// [`write_mcp_server`] adds one: the file holds all of them, or (the write failing) none. It
+/// checks nothing: [`crate::Effective::add_mcp_servers`] does, before it calls this.
+pub(crate) fn write_mcp_servers(
+    locations: &Locations,
+    files: &dyn Files,
+    entries: Vec<(String, Value)>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(mcp) = section_mut(&mut document, "mcp")
+        && let Value::Object(servers) = section_mut(mcp, "servers")
+    {
+        servers.extend(entries);
+    }
+    save_document(locations, files, &document)
 }
 
 /// The user's `settings.json` as one object: empty when the file is missing; an error, with

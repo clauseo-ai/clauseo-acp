@@ -27,6 +27,8 @@ use crate::error::Error;
 use crate::pipeline::tests::support::TempDir;
 use crate::{HostConfig, ManualClock, SequentialIds};
 
+mod watchdog;
+
 /// How long one wait for an input may take in real time before the test fails.
 const WATCHDOG: Duration = Duration::from_secs(20);
 
@@ -52,7 +54,7 @@ pub(super) struct Rig {
     /// Inputs taken off the channel and held back.
     pub(super) held: Vec<Input>,
     pub(super) clock: ManualClock,
-    _dir: TempDir,
+    dir: TempDir,
 }
 
 impl Rig {
@@ -73,11 +75,15 @@ impl Rig {
         Self::open(dir, 0, None)
     }
 
-    /// Shuts the host down and starts it again on the same data folder, minting ids with run
-    /// number `run` so they never repeat the earlier runs' ids.
+    /// Stops the host and starts it again on the same folder; run `run` mints fresh ids.
     pub(super) fn restart(self, run: u16) -> Self {
         let dir = self.close();
         Self::open(dir, run, None)
+    }
+
+    /// [`Rig::restart`] after a clean quit that never stopped the host (an idle quit, a logoff).
+    pub(super) fn restart_unstopped(self, run: u16) -> Self {
+        Self::open(self.release(), run, None)
     }
 
     /// [`Rig::restart`], with the start-up load of `stream` failing as a corrupt store fails.
@@ -94,7 +100,7 @@ impl Rig {
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
-    fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
+    pub(super) fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
         crate::write::create_dir_all(&root.join("home")).unwrap();
         let scenario = root.join(format!("{test}.jsonl"));
         let header = format!(
@@ -125,7 +131,22 @@ impl Rig {
 
     /// The host on the data folder `dir`, started and serving, with the start-up read
     /// `failing` names failing.
-    fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
+    pub(super) fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
+        // The idle stop is off unless a test turns it on (`Rig::start_idle`).
+        Self::open_with(dir, run, failing, |config| {
+            config
+                .with_idle_limit(Duration::MAX)
+                .with_live_agents(usize::MAX)
+        })
+    }
+
+    /// [`Rig::open`], with `adjust` given the host config last.
+    pub(super) fn open_with(
+        dir: TempDir,
+        run: u16,
+        failing: Option<Failing>,
+        adjust: impl FnOnce(HostConfig) -> HostConfig,
+    ) -> Self {
         let root = dir.path();
         let effective = Effective::load(&Locations::under_home(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
@@ -134,10 +155,12 @@ impl Rig {
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(root.join("managed-mcp.json"));
+        let config = adjust(config);
         let mut pool = LocalPool::new();
         let (post, internal) = async_channel::unbounded();
         let (ready, _ready) = std::sync::mpsc::channel();
-        let open = startup::open(config, pool.spawner(), post, ready);
+        let first = crate::actor::protection::observe(config.sandbox());
+        let open = startup::open((config, first), pool.spawner(), post, ready);
         let mut actor = pool.run_until(open).unwrap();
         startup::begin_startup(&mut actor);
         let mut rig = Self {
@@ -146,14 +169,14 @@ impl Rig {
             internal,
             held: Vec::new(),
             clock,
-            _dir: dir,
+            dir,
         };
         for _ in 0..100_000 {
             let _exit = rig.actor.settle();
             if matches!(rig.actor.phase, HostPhase::Serving) {
                 return rig;
             }
-            let mut input = rig.next();
+            let mut input = rig.next("start-up");
             if let Some(failing) = failing {
                 failing.apply(&mut input);
             }
@@ -172,8 +195,9 @@ impl Rig {
             .unwrap()
     }
 
-    /// The next input, under the watchdog.
-    fn next(&mut self) -> Input {
+    /// The next input, under the watchdog, for the step `what`. A wait that runs out fails
+    /// naming `what` with the host's state (`watchdog.rs`).
+    fn next(&mut self, what: &str) -> Input {
         let recv = self.internal.recv();
         let waited = self.pool.run_until(async {
             let recv = std::pin::pin!(recv);
@@ -182,7 +206,7 @@ impl Rig {
                 Either::Right(_) => None,
             }
         });
-        waited.unwrap_or_else(|| panic!("no input for {WATCHDOG:?}"))
+        waited.unwrap_or_else(|| panic!("{}", watchdog::report(self, what)))
     }
 
     /// Handles inputs until `done` holds, holding back those `hold` picks.
@@ -197,7 +221,7 @@ impl Rig {
             if done(&mut self.actor) {
                 return;
             }
-            let input = self.next();
+            let input = self.next(what);
             if hold(&self.actor, &input) {
                 self.held.push(input);
             } else {
@@ -229,7 +253,7 @@ impl Rig {
     pub(super) fn hold_next(&mut self, what: &str, mut hold: impl FnMut(&Actor, &Input) -> bool) {
         for _ in 0..100_000 {
             let _exit = self.actor.settle();
-            let input = self.next();
+            let input = self.next(what);
             if hold(&self.actor, &input) {
                 self.held.push(input);
                 return;
@@ -242,6 +266,18 @@ impl Rig {
     /// Handles inputs until `done` holds.
     pub(super) fn run_until(&mut self, what: &str, done: impl FnMut(&mut Actor) -> bool) {
         self.run_holding(what, |_, _| false, done);
+    }
+
+    /// Runs the tasks that can go on and handles every input they posted, until none is left;
+    /// waits for nothing else (an agent's exit).
+    pub(super) fn drain(&mut self) {
+        loop {
+            self.pool.run_until_stalled();
+            let Ok(input) = self.internal.try_recv() else {
+                return;
+            };
+            self.actor.on_input(input);
+        }
     }
 
     /// Handles the inputs held back, in the order they came.
@@ -261,11 +297,12 @@ impl Rig {
         self.run_until("no commit in flight", |actor| actor.work.commits == 0);
     }
 
-    /// Dispatches `command` as command `n` and handles inputs until it is answered.
-    pub(super) fn dispatch(
+    /// Dispatches `command` as command `n`; inputs `hold` picks wait in `held` until answered.
+    pub(super) fn dispatch_holding(
         &mut self,
         n: u128,
         command: HostCommand,
+        mut hold: impl FnMut(&Actor, &Input) -> bool,
     ) -> Result<CommandOutcome, Error> {
         let (reply, mut answer) = oneshot::channel();
         let command = CommandEnvelope {
@@ -274,13 +311,22 @@ impl Rig {
         };
         self.actor.on_request(Request::Dispatch { command, reply });
         let mut got = None;
-        self.run_until("the command's answer", |_| {
+        self.run_holding("the command's answer", &mut hold, |_| {
             if let Ok(Some(result)) = answer.try_recv() {
                 got = Some(result);
             }
             got.is_some()
         });
         got.unwrap()
+    }
+
+    /// Dispatches `command` as command `n` and handles inputs until it is answered.
+    pub(super) fn dispatch(
+        &mut self,
+        n: u128,
+        command: HostCommand,
+    ) -> Result<CommandOutcome, Error> {
+        self.dispatch_holding(n, command, |_, _| false)
     }
 
     /// A new thread of the Scratch matter, made by command [`STORED`].
@@ -293,6 +339,7 @@ impl Rig {
         let command = HostCommand::CreateThread {
             matter: self.matter(),
             agent: AgentId::new("fake-agent").unwrap(),
+            config: None,
         };
         let created = self.dispatch(n, command).unwrap();
         let CommandOutcome::ThreadCreated { thread } = created else {
@@ -475,7 +522,7 @@ impl Rig {
             if self.actor.settle().is_some() {
                 return;
             }
-            let input = self.next();
+            let input = self.next("shutdown");
             self.actor.on_input(input);
         }
     }
@@ -486,7 +533,7 @@ impl Rig {
     }
 
     /// Shuts the host down, closes the store and hands back the data folder.
-    fn close(mut self) -> TempDir {
+    pub(super) fn close(mut self) -> TempDir {
         shutdown::begin_shutdown(&mut self.actor, None);
         // A cancelled turn with no agent to answer ends at its fallback.
         self.clock.advance(super::super::CANCEL_WAIT);
@@ -494,23 +541,23 @@ impl Rig {
             if self.actor.settle().is_some() {
                 break;
             }
-            let input = self.next();
+            let input = self.next("shutdown");
             self.actor.on_input(input);
         }
-        let Self {
-            actor,
-            mut pool,
-            _dir: dir,
-            ..
-        } = self;
-        pool.run_until(shutdown::close(actor)).unwrap();
-        dir
+        self.release()
+    }
+
+    /// Lets go of the threads and the store, as a process's end does, with no stop before it.
+    fn release(self) -> TempDir {
+        let mut pool = self.pool;
+        pool.run_until(shutdown::close(self.actor)).unwrap();
+        self.dir
     }
 }
 
 /// A store read that fails during a start-up.
 #[derive(Debug, Clone, Copy)]
-enum Failing {
+pub(super) enum Failing {
     /// The load of a stream.
     Load(StreamId),
     /// Reconciliation's whole-log read of a thread.

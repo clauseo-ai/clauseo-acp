@@ -6,6 +6,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
+use clauseo_connectors::fake::FakeOptions;
 use clauseo_connectors::{AuthError, CredentialStatus, Error, McpRequestHeaders};
 use serde_json::json;
 
@@ -378,4 +379,29 @@ fn a_5xx_on_refresh_before_expiry_returns_the_current_token() {
     assert!(matches!(rig.handle.bearer(), Err(AuthError::Network(_))));
     assert!(rig.store.peek("case-law").is_some());
     assert_ne!(rig.handle.bearer().unwrap(), current);
+}
+
+/// A refresh's route lookup runs before the credential's lock: while one caller's lookup is
+/// held (a WPAD miss), a sign-out on another thread goes through.
+#[test]
+fn a_slow_route_lookup_does_not_hold_the_credential() {
+    let slow = SlowRoute::default();
+    let resolver = slow.resolver();
+    let rig = rig_with(FakeOptions::default(), true, move |config| {
+        config.proxy = clauseo_connectors::ProxyChoice::Resolve(resolver);
+    });
+    sign_in(&rig);
+    // The access token is due for a refresh.
+    rig.clock().advance(Duration::from_hours(2));
+    let (entered, release) = slow.arm();
+    let handle = rig.handle.clone();
+    let refreshing = thread::spawn(move || handle.bearer().map(drop));
+    entered.recv().unwrap();
+    let handle = rig.handle;
+    ends_while_held("a sign-out", move || handle.sign_out().map(drop)).unwrap();
+    release.send(()).unwrap();
+    assert!(
+        refreshing.join().unwrap().is_err(),
+        "a token after the sign-out"
+    );
 }

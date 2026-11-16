@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
+    "appDirectoriesOverride": { "config": "$LOCALDATA/ai.clauseo.desktop" },
     "windows": [],
     "security": {
       "freezePrototype": true,
@@ -34,15 +35,19 @@
     "windows": {
       "allowDowngrades": false,
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
-      "minimumWebview2Version": "155.0.0.0",
+      "minimumWebview2Version": "111.0.1661.41",
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "icons/installer-sidebar.bmp",
         "headerImage": "icons/installer-header.bmp",
-        "languages": ["English"],
-        "customLanguageFiles": { "English": "windows/nsis/English.nsh" }
+        "languages": ["English", "Hindi"],
+        "customLanguageFiles": {
+          "English": "windows/nsis/English.nsh",
+          "Hindi": "windows/nsis/Hindi.nsh"
+        },
+        "template": "windows/nsis/installer.nsi"
       }
     },
     "linux": {
@@ -54,7 +59,10 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": []
+      "endpoints": [],
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "windows": { "installMode": "passive" }
     }
   }
 }

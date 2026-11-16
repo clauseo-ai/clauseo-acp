@@ -10,6 +10,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
 use crate::{Error, Loopback, PathRule, Policy};
@@ -19,10 +20,6 @@ const BASE: &str = include_str!("base.sb");
 
 /// Every tag starts with this, so one log predicate finds every launch's denials.
 pub(crate) const TAG_PREFIX: &str = "clauseo-";
-
-/// [`INSTRUCTIONS_AT_ANY_DEPTH`](crate::INSTRUCTIONS_AT_ANY_DEPTH) as a path-free pattern on
-/// the last name, each letter in both cases (Seatbelt's regex has no case flag).
-const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
 
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
@@ -188,6 +185,7 @@ impl Writer {
         self.denies(policy, &p);
         self.allow_again(&p);
         self.fixed_folders(&p);
+        self.credential_link_metadata(&p);
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
@@ -203,6 +201,7 @@ impl Writer {
             "file-read* file-write*",
             &[subpath(&matter), subpath(&state)],
         );
+        self.tmpdir(p);
 
         self.note("\n; Runtime: read, run and map as code.");
         let runtime = self.subpaths(&p.runtime);
@@ -225,9 +224,10 @@ impl Writer {
         read.extend(self.subpaths(&p.allowed));
         self.rule("allow", "file-read*", &read);
 
-        self.note("\n; Notes, the credential link and the Claude store's names: read and write.");
+        self.note("\n; Notes and the Claude store's names: read and write.");
         let shared = self.shared(p);
         self.rule("allow", "file-read* file-write*", &shared);
+        self.credential_link(p);
 
         self.note("\n; The folders above every allowed path: metadata only, so paths resolve.");
         let mut above: Vec<String> = vec![ancestors(&matter), ancestors(&state)];
@@ -240,23 +240,48 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &above);
     }
 
-    /// Notes, the credential link and the Claude store's names, as filters.
+    /// The session's temp folder (`TMPDIR`), read and write. Only this folder: the run folder
+    /// that holds it, and the token there, stay under the hidden data dir's deny.
+    fn tmpdir(&mut self, p: &Params) {
+        let Some(tmpdir) = &p.tmpdir else {
+            return;
+        };
+        self.note(
+            "; The session's temp folder (TMPDIR): read and write. Not the run folder above.",
+        );
+        let tmpdir = subpath(&self.param("TMPDIR", tmpdir));
+        self.rule("allow", "file-read* file-write*", &[tmpdir]);
+    }
+
+    /// Notes and the Claude store's names, as filters.
     fn shared(&mut self, p: &Params) -> Vec<String> {
         let mut filters = Vec::new();
         if let Some(notes) = &p.notes {
             filters.push(subpath(&self.param("NOTES", notes)));
-        }
-        if let Some(link) = &p.credential_link {
-            filters.push(literal(&self.param("CREDENTIAL_LINK", link)));
         }
         filters.extend(self.literals(&p.claude_files));
         filters.extend(self.subpaths(&p.claude_locks));
         filters
     }
 
+    /// The credential link: read, and its data written in place (Codex's token refresh). Its
+    /// metadata is refused after every allow that covers it, in
+    /// [`Writer::credential_link_metadata`].
+    fn credential_link(&mut self, p: &Params) {
+        let Some(link) = &p.credential_link else {
+            return;
+        };
+        self.note("; The credential link: read, and its data written in place (a token refresh).");
+        let link = literal(&self.param("CREDENTIAL_LINK", link));
+        self.rule("allow", "file-read* file-write-data", &[link]);
+    }
+
     /// The ancestors of the paths allowed again after the hidden paths.
     fn reallowed_ancestors(&mut self, p: &Params) -> Vec<String> {
         let mut out = vec![ancestors("(param \"STATE\")")];
+        if let Some(tmpdir) = &p.tmpdir {
+            out.push(ancestors(&self.param("TMPDIR", tmpdir)));
+        }
         out.extend(self.ancestors_of(&p.runtime));
         out.extend(self.ancestors_of(&p.read));
         if let Some(notes) = &p.notes {
@@ -294,6 +319,11 @@ impl Writer {
                 "(require-all (subpath (param \"MATTER\")) (regex #\"{INSTRUCTIONS_REGEX}\"))"
             )],
         );
+        self.note("; No new .git, folder or file, at any depth, in any letter case: not made, not");
+        self.note("; renamed onto (Seatbelt checks a rename's destination path).");
+        self.matter_regex(GIT_NAME_REGEX);
+        self.note("; No HEAD, the file that makes a folder with objects/ and refs/ a bare repo.");
+        self.matter_regex(HEAD_REGEX);
 
         self.note("\n; Links that lead outside the matter, and where they lead.");
         let mut links = Vec::new();
@@ -315,6 +345,12 @@ impl Writer {
         self.rule("deny", "file-read* file-write*", &hidden);
     }
 
+    /// A write deny on the matter's paths that `regex` matches.
+    fn matter_regex(&mut self, regex: &str) {
+        let filter = format!("(require-all (subpath (param \"MATTER\")) (regex #\"{regex}\"))");
+        self.rule("deny", "file-write*", &[filter]);
+    }
+
     /// The paths some hidden paths hold, allowed again after them.
     fn allow_again(&mut self, p: &Params) {
         self.note(
@@ -325,6 +361,8 @@ impl Writer {
         let mut shared = vec![state];
         shared.extend(self.shared(p));
         self.rule("allow", "file-read* file-write*", &shared);
+        self.tmpdir(p);
+        self.credential_link(p);
         let runtime = self.subpaths(&p.runtime);
         self.rule(
             "allow",
@@ -337,7 +375,7 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &above);
     }
 
-    /// The matter, state and notes folders themselves cannot be removed or made again: a
+    /// The matter, state, notes and temp folders themselves cannot be removed or made again: a
     /// subpath rule matches the folder too, so without this an agent could put a symbolic link
     /// in its place for the next launch to follow.
     fn fixed_folders(&mut self, p: &Params) {
@@ -346,7 +384,33 @@ impl Writer {
         if p.notes.is_some() {
             filters.push(literal("(param \"NOTES\")"));
         }
+        if p.tmpdir.is_some() {
+            self.note("; The session's temp folder too: the launcher makes it, outside the jail.");
+            filters.push(literal("(param \"TMPDIR\")"));
+        }
         self.rule("deny", "file-write-unlink file-write-create", &filters);
+    }
+
+    /// The credential link's metadata, refused after every allow that covers it (the state
+    /// folder's among them) and before the state folder's read-only denies, which still win:
+    /// the link is a hard link to the lawyer's login file.
+    fn credential_link_metadata(&mut self, p: &Params) {
+        let Some(link) = &p.credential_link else {
+            return;
+        };
+        self.note("\n; The credential link, a hard link to the lawyer's login file: no chmod,");
+        self.note("; chflags, xattr, chown, setugid, times or ACL. After every allow that covers");
+        self.note("; it, so it wins over the state folder's (Seatbelt applies the last match).");
+        self.note("; Seatbelt checks utimes as file-write* itself, not file-write-times, so all");
+        self.note("; writes are denied and data, unlink and create allowed back. Unlink and");
+        self.note("; create stay: the host finds a split link and re-links or refuses the launch.");
+        let link = literal(&self.param("CREDENTIAL_LINK", link));
+        self.rule("deny", "file-write*", std::slice::from_ref(&link));
+        self.rule(
+            "allow",
+            "file-write-data file-write-unlink file-write-create",
+            &[link],
+        );
     }
 
     /// Read-only paths in the state folder, last of the file rules.
@@ -496,6 +560,7 @@ fn directory_ancestors(param: &str) -> String {
     format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
+mod names;
 mod params;
 #[cfg(test)]
 mod tests;

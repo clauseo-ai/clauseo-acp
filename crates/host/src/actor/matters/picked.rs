@@ -7,15 +7,17 @@
 //! - `ExistingFolder`: the import's own checks before it makes anything, in its order: the
 //!   place check (`clauseo_matters::check_place`: a drive root, the home folder, a system
 //!   folder, the data folder) and the registry (`check_registry`: a folder that is, holds or
-//!   sits inside another matter's), as `MatterJob::Import` runs them on its worker, then the
+//!   sits inside another matter's; a listed matter's own folder passes, since the import
+//!   answers with that matter, and so does one being made), as `MatterJob::Import` runs them
+//!   on its worker, then the
 //!   protected-tree check `Matter::import` runs (`clauseo_matters::check_protected`: inside
 //!   the data folder or the matters root).
-//! - `NewFolder`: the parent, canonicalised as `matter_folder` does, then the protected-tree
-//!   check create runs on the new folder (`clauseo_matters::check_protected`: inside the data
-//!   folder or the matters root). The new folder's name is not known, so a sentinel child
-//!   (`parent/_`) stands for it: a parent that holds the data folder (the home folder) is
-//!   accepted, and one inside it is refused. The "exists" check and the registry check need
-//!   the name, so create's own refusals there are not shown.
+//! - `NewFolder`: the parent, canonicalised as create's probe does (`probe.rs`), then the
+//!   protected-tree check create runs on the new folder (`clauseo_matters::check_protected`:
+//!   inside the data folder or the matters root). The new folder's name is not known, so a
+//!   sentinel child (`parent/_`) stands for it: a parent that holds the data folder (the home
+//!   folder) is accepted, and one inside it is refused. The "exists" check and the registry
+//!   check need the name, so create's own refusals there are not shown.
 //! - `DefaultLocation`: the default location, as a new folder's parent. It may not exist before
 //!   the first matter (create makes it), so its nearest folder that exists is checked: the one
 //!   the new folders are made in.
@@ -24,9 +26,11 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterSource;
 
-use super::{Actor, RefusalNames, check_registry, claimed_folders, refused_folders, registered};
+use super::{
+    Actor, RefusalNames, check_registry, claimed_folders, refused_folders, registered, settings_of,
+};
 use crate::error::Error;
-use crate::matter_worker::matter_settings;
+use crate::matter_worker::Held;
 
 /// The refusals of [`place`], run off the actor: the folder to check, or create's refusal.
 pub(crate) type PlaceCheck = Box<dyn FnOnce() -> Result<PathBuf, Error> + Send>;
@@ -40,11 +44,13 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
             let refused = refused_folders(actor);
             let registry = claimed_folders(actor);
             let names = RefusalNames::of(actor);
-            let settings = matter_settings(actor.effective.data_dir());
+            let settings = settings_of(actor);
             Ok(Box::new(move || {
                 clauseo_matters::check_place(&path, &refused)
                     .map_err(Error::Matters)
-                    .and_then(|()| check_registry(&path, &registry, true))
+                    // A listed matter's own folder passes: the import answers with that
+                    // matter, which opens. One being made passes: the import joins it.
+                    .and_then(|()| check_registry(&path, &registry, true).map(|_: Held| ()))
                     .and_then(|()| {
                         clauseo_matters::check_protected(&path, &settings).map_err(Error::Matters)
                     })
@@ -57,7 +63,7 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
         MatterSource::NewFolder { folder } => {
             let parent = registered(actor, folder)?;
             let names = RefusalNames::of(actor);
-            let settings = matter_settings(actor.effective.data_dir());
+            let settings = settings_of(actor);
             Ok(Box::new(move || {
                 let parent = dunce::canonicalize(&parent).unwrap_or(parent);
                 // A child of the parent, not the parent: create makes `parent/<name>`, and the
@@ -70,7 +76,7 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
             }))
         }
         MatterSource::DefaultLocation => {
-            let location = actor.effective.default_matters_dir().to_path_buf();
+            let location = super::default_location(actor)?;
             Ok(Box::new(move || Ok(nearest_existing(&location))))
         }
     }

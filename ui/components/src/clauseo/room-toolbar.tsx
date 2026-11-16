@@ -16,6 +16,8 @@ import { sentences } from "../lib/sentences.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
 import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
+import { useFullScreen } from "../lib/full-screen.ts";
+import { RailBrand } from "./rail-brand.tsx";
 import { useRoom } from "./room-scope.ts";
 import { mt } from "../lib/words-matters.ts";
 import { Dot, Say } from "./say.tsx";
@@ -26,11 +28,8 @@ export type RoomToolbarProps = {
   /** The matter's name as filed, in English in both languages. Empty, the toolbar draws no heading at all, never an
    * empty one: a title still on its way, or one that could not be read. */
   title: string;
-  /** "{court}. {caseNo}. {forWhom}", the title's hint. */
+  /** The title's hint, under the pointer: the matter's client, where there is one. */
   titleHint: string;
-  nextDate: string;
-  caseNo: string;
-  court: string;
   /** The plan: its name, the share left, that share in words, and the state's line, "Plenty left until the 9:40 pm
    * reset". state follows the share unless given: close to the limit from 75% used, that is under a quarter left,
    * reached at nothing. Null before the lawyer has signed in to a plan, as on first launch: the plan stands only once
@@ -73,10 +72,12 @@ export type RoomToolbarProps = {
   onRail: () => void;
   /** The window's chrome, where it isn't the computer's own. Defaults to the computer's platform. */
   platform?: Platform;
-  /** Words in the next date's place, for a matter with no date, such as the scratch matter's "Quick questions". */
+  /** Words under the title, such as the scratch matter's "Quick questions"; none, an empty line holds its place. */
   subtitle?: string;
   /** Optional: the current matter isn't protected. Its line carries the short Not protected mark, last. */
   unprotected?: boolean;
+  /** Optional: a press on the Not protected mark explains it (UC's note); without it the mark isn't pressable. */
+  onUnprotected?: (() => void) | undefined;
   /** Optional: a matter on the rail waits on the lawyer, with a question or for permission. While the rail is
    * folded behind Matters, the button carries one 8 px court-yellow dot, so the wait is seen without opening it. */
   railWaits?: boolean;
@@ -93,6 +94,11 @@ export type RoomToolbarProps = {
   /** Optional: macOS draws its own traffic lights over the corner lights' place (with chrome "own", on the Mac), so the
    * lights keep their box and paint nothing. */
   nativeLights?: boolean;
+  /** Optional: whether the window is in macOS's full screen, where the host says so; left out, the window's size against
+   * the screen's tells (useFullScreen). Read only with nativeLights, on the Mac. */
+  fullScreen?: boolean;
+  /** Optional: Clauseo's lockup in the lead, on a wide Mac window (rail-brand.tsx); the rail draws it elsewhere. */
+  brand?: boolean;
   /** Optional, true by default: false leaves the search field out. */
   search?: boolean;
   /** Optional, true by default: false leaves the Versions and Undo pair out. (Not `history`, which holds Versions'
@@ -129,6 +135,10 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
   const own = p.chrome !== "os";
+  const fullScreen = useFullScreen(
+    own && platform === "mac" && p.nativeLights === true,
+    p.fullScreen,
+  );
   // Windows and Linux: the caption buttons at the top right, and no corner lights
   const captions = own && platform !== "mac";
   const search = p.search !== false;
@@ -179,10 +189,16 @@ export function RoomToolbar(p: RoomToolbarProps) {
       ref={top}
       className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
+      // macOS's full screen: no lights, and the lead starts at the rail's own left (shell.css)
+      data-full-screen={fullScreen ? "" : undefined}
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
-        {own && platform === "mac" && <CornerLights native={p.nativeLights === true} />}
+        {/* in macOS's full screen the native lights are gone until the pointer reaches the top: the lead keeps no room */}
+        {own && platform === "mac" && !fullScreen && (
+          <CornerLights native={p.nativeLights === true} />
+        )}
+        {p.brand === true && <RailBrand at="lead" platform={platform} />}
         <Button
           kind="tone"
           size="small"
@@ -216,35 +232,16 @@ export function RoomToolbar(p: RoomToolbarProps) {
             {p.title}
           </Heading>
         )}
-        {p.subtitle !== undefined ? (
-          <p className="room-next" data-tauri-drag-region>
-            <Say>{p.subtitle}</Say>
-            {p.unprotected === true && (
-              <span className="room-case">
-                <Dot />
-                <NotProtectedMark short />
-              </span>
-            )}
-          </p>
-        ) : (
-          <p className="room-next" data-tauri-drag-region>
-            <span>{w.t("Next date")}</span> <span className="room-next-value">{p.nextDate}</span>
-            {p.caseNo !== "" && (
-              <span className="room-case" title={p.court}>
-                <Dot />
-                <span>
-                  <Say>{p.caseNo}</Say>
-                </span>
-              </span>
-            )}
-            {p.unprotected === true && (
-              <span className="room-case">
-                <Dot />
-                <NotProtectedMark short />
-              </span>
-            )}
-          </p>
-        )}
+        <p className="room-next" data-tauri-drag-region>
+          <Say>{p.subtitle ?? ""}</Say>
+          {p.unprotected === true && (
+            <span className="room-case">
+              {/* a dot only between two parts: with no subtitle, Not protected starts the line */}
+              {(p.subtitle ?? "") !== "" && <Dot />}
+              <NotProtectedMark short onPress={p.onUnprotected} />
+            </span>
+          )}
+        </p>
       </div>
       {/* on Windows the caption buttons take the toolbar's last 158 px, so the tools give way a hundred times faster
           than the title, which then never loses the fraction of a pixel that would wrap it */}

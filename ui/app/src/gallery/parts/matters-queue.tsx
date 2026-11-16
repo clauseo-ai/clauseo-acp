@@ -8,6 +8,7 @@ import {
   SteerHint,
   SteerMark,
   SteerNote,
+  SteerWaiting,
 } from "@clauseo/components/clauseo/queue.tsx";
 import { Sample } from "./frame.tsx";
 import { FULL_QUEUE, QUEUED } from "./matters-data.ts";
@@ -63,13 +64,20 @@ export function QueueSamples() {
       </Sample>
       <Sample name="Steer hint, while Clauseo answers">
         <SteerHint
-          text="Send now gives your words to Clauseo while it writes."
+          text="Enter adds your words to this answer. Send now stops the answer and sends them."
           onSendNow={() => {}}
           onQueue={() => {}}
         />
       </Sample>
       <Sample name="Steer mark, the lawyer's words in the answer">
         <SteerMark who="You, 4:35 pm, while Clauseo answered" text="Deal with the notice first." />
+      </Sample>
+      <Sample name="Steer waiting, words the answer hasn't taken in yet">
+        <SteerWaiting
+          text="Deal with the notice first."
+          when="Sends when Claude finishes"
+          onSendNow={() => {}}
+        />
       </Sample>
       <Sample name="Steer note, a search moved aside">
         <SteerNote

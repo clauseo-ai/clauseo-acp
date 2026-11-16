@@ -11,44 +11,78 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
-    Limits, Matter, MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored,
-    Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
-    matter_path_in,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter,
+    OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
+    TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
-    RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
 };
 
+use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
+use crate::clock::Clock;
 use crate::error::Error;
 use crate::log_file::Cause;
-use crate::sent::TurnPaths;
+use crate::network_paths::resolve::Disk;
+use crate::network_paths::{self, NetEnv};
+use crate::sent::{Places, TurnPaths};
+use crate::shell_writes;
 
-/// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
-/// session folder by text, and each `outside` path that [`matter_path_in`] resolves into
-/// `folder` on the disk (a spelling through a symlink, or in another case where the file system
-/// ignores case). The rest lie outside the matter.
-pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath> {
-    let TurnPaths {
+pub(crate) use jobs::{RestoreJob, UndoJob};
+
+/// The matter paths a turn's tool calls wrote ([`TurnPaths::written`]), in `folder`: those
+/// `acp` placed inside the session folder by text, and each `outside` path that the network-safe
+/// walk resolves into `folder` on the disk (a spelling through a symlink, or in another case
+/// where the file system ignores case). The rest lie outside the matter, and so does a path the
+/// network-safe walk does not vouch for, or one in a matter kept on a share, which is never
+/// resolved ([`network_paths::touchable`]; its walked path compared by
+/// [`matter_path_of_resolved`]).
+pub(crate) fn tool_paths(folder: &Path, paths: &TurnPaths) -> BTreeSet<MatterPath> {
+    let Places {
         mut inside,
         outside,
-    } = paths;
+    } = paths.written();
+    let net = NetEnv::current();
+    let disk = Disk::resolved(&net);
     for path in outside {
-        if let Some(found) = matter_path_in(folder, Path::new(&path)) {
+        // The walked path, compared as it is: the agent's text is never resolved again.
+        let Some(walked) = network_paths::touchable(Path::new(&path), folder, &disk) else {
+            continue;
+        };
+        if let Some(found) = matter_path_of_resolved(folder, &walked) {
             inside.insert(found);
         }
     }
     inside
 }
 
+/// The files the turn's shell commands write that lie in `folder`, as paths relative to it: by
+/// text first ([`shell_writes::in_matter`]), else, for an absolute target, where the
+/// network-safe walk leads, compared with the folder as [`tool_paths`] compares an `outside`
+/// place. So a spelling through a symlink (macOS's `/var` for `/private/var`, a matter under a
+/// linked cloud folder) is the matter's file, a file not made yet resolves through
+/// its folder, and a target in a matter kept on a share is never resolved.
+fn writes_in(folder: &Path, writes: &BTreeSet<String>) -> BTreeSet<String> {
+    let net = NetEnv::current();
+    let disk = Disk::resolved(&net);
+    writes
+        .iter()
+        .filter_map(|target| {
+            shell_writes::in_matter(folder, target).or_else(|| {
+                let walked = network_paths::touchable(Path::new(target), folder, &disk)?;
+                matter_path_of_resolved(folder, &walked).map(|path| path.as_str().to_owned())
+            })
+        })
+        .collect()
+}
+
 /// The name every matter thread carries.
 const THREAD_NAME: &str = "clauseo-matter";
 
 /// R8's settings for the host: matters under `<data folder>/matters`, the data folder refused
-/// with everything inside it, the default limits, every checkpoint kept, and the OS's cloud-only
-/// probe.
+/// with everything inside it, the default limits, every checkpoint kept, the OS's cloud-only
+/// probe, and the OS's trash for undo's and restore's deletes ([`trash`]).
 pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
     Settings {
         matters_root: data_dir.join("matters"),
@@ -56,30 +90,25 @@ pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: trash(data_dir),
     }
 }
 
-/// An undo request that owns its decisions, so it can cross to the matter thread.
-#[derive(Debug, Clone)]
-pub(crate) struct UndoJob {
-    pub(crate) before: CheckpointId,
-    pub(crate) after: CheckpointId,
-    pub(crate) decisions: Vec<FileDecision>,
-    pub(crate) thread: Option<ThreadId>,
-    pub(crate) turn: Option<TurnId>,
-    pub(crate) outside_edits: CheckpointId,
-    pub(crate) checkpoint: CheckpointId,
-    pub(crate) at: Timestamp,
-}
-
-/// A restore request that owns its scope, so it can cross to the matter thread.
-#[derive(Debug, Clone)]
-pub(crate) struct RestoreJob {
-    pub(crate) from: CheckpointId,
-    pub(crate) scope: RestoreRequest,
-    pub(crate) outside_edits: CheckpointId,
-    pub(crate) checkpoint: CheckpointId,
-    pub(crate) at: Timestamp,
+/// The OS's trash (the Trash on macOS, the Recycle Bin on Windows). In this crate's unit tests,
+/// the folder `<data folder>/test-trash`, so no test run fills the machine's Trash; the
+/// integration tests set theirs (`HostConfig::with_matter_trash`).
+fn trash(data_dir: &Path) -> Arc<dyn clauseo_matters::Trash> {
+    #[cfg(test)]
+    {
+        Arc::new(clauseo_matters::FolderTrash::new(
+            data_dir.join("test-trash"),
+        ))
+    }
+    #[cfg(not(test))]
+    {
+        let _ = data_dir;
+        Arc::new(clauseo_matters::OsTrash)
+    }
 }
 
 /// One job for a matter thread.
@@ -90,8 +119,12 @@ pub(crate) enum MatterJob {
     Create { new: NewMatter, check: CheckSource },
     /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
     /// Before it, the place check (`check_place`) and then the registry: a folder that is,
-    /// holds or sits inside one of `registry`'s folders is `matter.folder_is_matter`
-    /// (`check_registry`). Its folder check uses `check`, the actor's source.
+    /// holds or sits inside one of `registry`'s folders is refused (`check_registry`:
+    /// `matter.folder_is_matter`, `matter.folder_inside_matter`, `matter.folder_holds_matter`),
+    /// and a listed matter's own folder or one being made is answered
+    /// without an import (`ImportEnd::Listed`, `ImportEnd::Making`). A marker naming a matter
+    /// the registry does not hold is adopted or set aside (`import.rs`). Its folder check uses
+    /// `check`, the actor's source.
     Import {
         new: NewMatter,
         refused: Vec<PathBuf>,
@@ -119,8 +152,8 @@ pub(crate) enum MatterJob {
     /// The before-turn checkpoint.
     BeforeTurn(TurnMeta),
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
-    /// resolves them), and the turn's before-turn checkpoint when the host knows it (for a
-    /// reused id's changes).
+    /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
+    /// (for a reused id's changes).
     AfterTurn {
         meta: TurnMeta,
         tool_paths: TurnPaths,
@@ -148,13 +181,16 @@ pub(crate) enum MatterJob {
     Preview {
         from: CheckpointId,
         scope: RestoreRequest,
+        undoes: Option<CheckpointId>,
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
     /// lies in `folder` and that Word or another program holds open, by
-    /// `clauseo_matters::held_open_at`. Needs no open matter.
+    /// `clauseo_matters::held_open_at`, after the data-folder check `fence`
+    /// (`agent/data_fence.rs`), when there is one. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
+        fence: Option<Box<FenceCheck>>,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -164,64 +200,16 @@ pub(crate) enum MatterJob {
         before: CheckpointId,
         after: CheckpointId,
     },
+    /// `Matter::still_gone`: which of `paths`, files an undo deleted, are in the folder again.
+    /// Stats only; writes nothing.
+    StillGone { paths: Vec<MatterPath> },
     /// `Matter::discard`: undoes the create or import this worker ran, for a matter the host
     /// could not record; the worker holds no matter afterwards. With none held, nothing to do.
     Discard,
-}
-
-/// How an import ended.
-#[derive(Debug)]
-pub(crate) enum ImportEnd {
-    /// The matter exists; the worker keeps it.
-    Done {
-        /// The root checkpoint's commit.
-        commit: CommitId,
-        summary: ImportSummary,
-        warnings: Vec<ImportWarning>,
-        /// The folder check's answer (`agent/folder_support.rs`), made on this thread.
-        folder_support: Option<FolderSupportKind>,
-    },
-    /// The cancel flag was set; nothing was kept.
-    Cancelled,
-}
-
-/// A made matter's root commit and import summary, and its folder check's answer.
-pub(crate) type Made = ((CommitId, Option<ImportSummary>), Option<FolderSupportKind>);
-
-/// The root checkpoint's commit and the import summary of a create or import that succeeded
-/// (`None` for a new folder), and the folder check's answer.
-pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
-    match reply {
-        MatterReply::Created(result) => result.map(|(commit, support)| ((commit, None), support)),
-        MatterReply::Imported(result) => match result? {
-            ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-                folder_support,
-            } => {
-                for warning in &warnings {
-                    tracing::info!(?warning, "import warning");
-                }
-                Ok(((commit, Some(summary)), folder_support))
-            }
-            ImportEnd::Cancelled => Err(Error::Closed),
-        },
-        MatterReply::Opened(_)
-        | MatterReply::Located(_)
-        | MatterReply::BeforeTurn(_)
-        | MatterReply::AfterTurn(_)
-        | MatterReply::Undone(_)
-        | MatterReply::Restored(_)
-        | MatterReply::Compared(_)
-        | MatterReply::Previewed(_)
-        | MatterReply::EditedSince(_)
-        | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_)
-        | MatterReply::Discarded(_) => Err(Error::Internal(
-            "a matter's create got another job's reply".to_owned(),
-        )),
-    }
+    /// A Word blackline's two sides of `path`, copied into the new folder `dir` (`sides.rs`).
+    WriteSides(Sides),
+    /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
+    Revisions(Box<crate::revisions::RevisionsJob>),
 }
 
 /// One job's result, one variant per [`MatterJob`] kind.
@@ -242,10 +230,17 @@ pub(crate) enum MatterReply {
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
-    HeldOpen(Option<(MatterPath, HeldOpen)>),
-    Papers(Result<PaperList, Error>),
+    HeldOpen(PathsChecked),
+    /// The folder's listing, with where the folder lives (`clauseo_matters::place`), asked
+    /// here beside the listing: it stats the folder, so never on the actor.
+    Papers(Result<(PaperList, Place), Error>),
     EditedSince(Result<Vec<MatterPath>, Error>),
+    /// The paths in the folder again.
+    StillGone(Result<Vec<MatterPath>, Error>),
     Discarded(Result<(), Error>),
+    /// The blackline's folder with both sides in it.
+    SidesWritten(Result<BlacklineDir, Error>),
+    Revisions(Box<crate::revisions::RevisionsDone>),
 }
 
 impl MatterReply {
@@ -265,7 +260,10 @@ impl MatterReply {
             Self::HeldOpen(_) => "HeldOpen",
             Self::Papers(_) => "Papers",
             Self::EditedSince(_) => "EditedSince",
+            Self::StillGone(_) => "StillGone",
             Self::Discarded(_) => "Discarded",
+            Self::SidesWritten(_) => "SidesWritten",
+            Self::Revisions(_) => "Revisions",
         }
     }
 }
@@ -324,15 +322,18 @@ pub(crate) struct MatterWorker<T: Send + 'static> {
 }
 
 impl<T: Send + 'static> MatterWorker<T> {
-    /// Starts the thread. Each reply goes to `post` with its job's tag, in job order.
+    /// Starts matter `matter`'s thread, which reads `clock` only to pace a worker that keeps
+    /// panicking. Each reply goes to `post` with its job's tag, in job
+    /// order; a job that panics is answered too (`crash.rs`).
     pub(crate) fn start(
+        (matter, clock): (MatterId, Arc<dyn Clock>),
         settings: Settings,
         post: Box<dyn Fn(T, MatterReply) + Send>,
     ) -> Result<Self, Error> {
         let (jobs, receiver) = mpsc::channel::<(MatterJob, T)>();
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_owned())
-            .spawn(move || run(&settings, &receiver, &*post))
+            .spawn(move || crash::run((matter, &*clock), &settings, &receiver, &*post))
             .map_err(|err| Error::Internal(format!("could not start {THREAD_NAME}: {err}")))?;
         Ok(Self {
             jobs: Some(jobs),
@@ -344,6 +345,23 @@ impl<T: Send + 'static> MatterWorker<T> {
     pub(crate) fn send(&self, job: MatterJob, tag: T) -> Result<(), Error> {
         let jobs = self.jobs.as_ref().ok_or(Error::Closed)?;
         jobs.send((job, tag)).map_err(|_closed| Error::Closed)
+    }
+
+    /// A worker whose thread has ended, as after a panic outside `crash.rs`'s guard (tests).
+    #[cfg(test)]
+    pub(crate) const fn ended() -> Self {
+        Self {
+            jobs: None,
+            thread: None,
+        }
+    }
+
+    /// Whether the thread still runs. It ends only when a panic escapes `crash.rs`'s guard;
+    /// then the actor starts a new worker (`actor/matters.rs`).
+    pub(crate) fn is_alive(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
     }
 
     /// Lets the thread finish the jobs already queued, then joins it. Set an import's cancel flag
@@ -369,20 +387,11 @@ impl<T: Send + 'static> Drop for MatterWorker<T> {
     }
 }
 
-/// The thread's loop: one job at a time until the actor drops its sender.
-fn run<T>(
-    settings: &Settings,
-    jobs: &mpsc::Receiver<(MatterJob, T)>,
-    post: &dyn Fn(T, MatterReply),
-) {
-    let mut slot = Slot::Empty;
-    while let Ok((job, tag)) = jobs.recv() {
-        let reply = handle(settings, &mut slot, job);
-        post(tag, reply);
-    }
-}
-
 /// Runs one job against the slot.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per job, each calling out; a split would only scatter the match"
+)]
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
         MatterJob::Create { new, check } => {
@@ -412,7 +421,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             clauseo_matters::check_place(&new.folder, &refused)
                 .map_err(Error::Matters)
                 .and_then(|()| check_registry(&new.folder, &registry, true))
-                .and_then(|()| import(settings, slot, new, &refused, &cancel, check)),
+                .and_then(|held| match held {
+                    Held::Free => {
+                        import(settings, slot, new, (&refused, &registry), &cancel, check)
+                    }
+                    Held::Listed(matter) => Ok(ImportEnd::Listed(matter)),
+                    Held::Making(command) => Ok(ImportEnd::Making(command)),
+                }),
         ),
         MatterJob::Open { id, folder, relink } => {
             *slot = Slot::Unopened { id, folder, relink };
@@ -435,18 +450,21 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             tool_paths,
             before,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
-            let checkpoint = matter.after_turn(&meta, &tool_paths)?;
+            let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
+            let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
+            let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
         MatterJob::Repair {
             meta,
-            tool_paths,
+            mut tool_paths,
             before,
             last,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
-            repair(matter, &meta, &tool_paths, before, last)
+            tool_paths.resolve_start();
+            let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
+            let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
+            repair(matter, &meta, &named, before, last)
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
@@ -463,6 +481,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         })),
         MatterJob::Restore(job) => MatterReply::Restored(open(settings, slot).and_then(|matter| {
             let request = Restore {
+                undoes: job.undoes,
                 from: job.from,
                 files: (&job.scope).into(),
                 outside_edits: job.outside_edits,
@@ -480,65 +499,40 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             open(settings, slot)
                 .and_then(|matter| Ok(matter.compare(CompareSide::Checkpoint(from), to)?)),
         ),
-        MatterJob::Preview { from, scope } => MatterReply::Previewed(
-            open(settings, slot)
-                .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
-        ),
-        MatterJob::HeldOpen { folder, paths } => MatterReply::HeldOpen(
-            paths
-                .into_iter()
-                .find_map(|path| held_open_at(&folder, &path)),
-        ),
+        MatterJob::Preview {
+            from,
+            scope,
+            undoes,
+        } => MatterReply::Previewed(open(settings, slot).and_then(|matter| {
+            Ok(Box::new(matter.preview_restore(
+                from,
+                (&scope).into(),
+                undoes,
+            )?))
+        })),
+        MatterJob::HeldOpen {
+            folder,
+            paths,
+            fence,
+        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
         MatterJob::ListPapers { limit } => {
-            MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
+            MatterReply::Papers(open(settings, slot).and_then(|matter| {
+                let papers = matter.papers(limit)?;
+                Ok((papers, clauseo_matters::place(matter.folder())))
+            }))
         }
         MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
             open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
         ),
+        MatterJob::StillGone { paths } => {
+            MatterReply::StillGone(open(settings, slot).map(|matter| matter.still_gone(&paths)))
+        }
+        MatterJob::Revisions(job) => crate::revisions::reply(open(settings, slot), &job),
         MatterJob::Discard => MatterReply::Discarded(match std::mem::replace(slot, Slot::Empty) {
             Slot::Open(matter) => matter.discard().map_err(Error::from),
             Slot::Empty | Slot::Unopened { .. } => Ok(()),
         }),
-    }
-}
-
-/// The commit of a new matter's root checkpoint `root`.
-fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
-    matter
-        .commit_of(root)
-        .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
-}
-
-fn import(
-    settings: &Settings,
-    slot: &mut Slot,
-    new: NewMatter,
-    refused: &[PathBuf],
-    cancel: &AtomicBool,
-    check: CheckSource,
-) -> Result<ImportEnd, Error> {
-    let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
-    match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
-        Imported::Done {
-            matter,
-            summary,
-            warnings,
-        } => {
-            let commit = root_commit(&matter, root)?;
-            let folder_check = crate::agent::folder_support::FolderCheck {
-                matter: Some(id),
-                source: check,
-            };
-            let folder_support = folder_check.run(&folder).row_kind();
-            *slot = Slot::Open(matter);
-            Ok(ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-                folder_support,
-            })
-        }
-        Imported::Cancelled => Ok(ImportEnd::Cancelled),
+        MatterJob::WriteSides(sides) => sides.reply(settings, slot),
     }
 }
 
@@ -550,6 +544,7 @@ fn import(
 /// spends the relink whatever it finds; every later open is answered as it is.
 fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, Error> {
     if let Slot::Unopened { id, folder, relink } = slot {
+        refuse_too_deep(folder.as_path())?;
         // Spent by this open whatever it finds: a later open may meet a folder another matter
         // has claimed since the registry was taken.
         let relink = relink.take();
@@ -578,12 +573,23 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
 
 mod checkpoints;
 mod claims;
+mod crash;
+mod import;
+mod jobs;
 mod relocate;
+mod sides;
+mod too_deep;
 
-use checkpoints::{repair, timeline_entry, turn_checkpoint};
-pub(crate) use claims::{Claim, Claimed, check_registry};
+use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
+pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
+#[cfg(test)]
+pub(crate) use crash::hook;
+use import::import;
+pub(crate) use import::{ImportEnd, made};
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
+pub(crate) use sides::{BlacklineDir, NEW, OLD, Sides};
+pub(crate) use too_deep::refuse_too_deep;
 
 #[cfg(test)]
 mod tests;

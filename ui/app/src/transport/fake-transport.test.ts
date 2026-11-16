@@ -5,13 +5,18 @@ describe("FakeTransport", () => {
   test("open_external, open_file and reveal are recorded and succeed unscripted", async () => {
     const t = new FakeTransport();
     await t.openExternal("mailto:a@example.com");
-    await t.openFile("ref-1");
+    await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: false });
     await t.reveal({ matter: "m-1" });
     expect(t.calls).toEqual([
       { call: "open_external", url: "mailto:a@example.com" },
       { call: "open_file", file: "ref-1" },
       { call: "reveal", target: { matter: "m-1" } },
     ]);
+  });
+
+  test("a scripted open_file says whether Word opened the file in Protected View", async () => {
+    const t = new FakeTransport({ openFile: () => ({ protected_view: true }) });
+    await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: true });
   });
 
   test("a scripted refusal rejects as a HostError; a thrown Error becomes internal", async () => {

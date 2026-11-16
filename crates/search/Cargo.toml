@@ -11,6 +11,8 @@ publish.workspace = true
 clauseo-protocol = { path = "../protocol" }
 # The same bundled SQLite as clauseo-store (FTS5 and JSON are compiled in).
 rusqlite = { workspace = true, features = ["bundled"] }
+# A prompt's or an answer's Markdown read to its plain words (plain.rs).
+pulldown-cmark = { workspace = true }
 # NFC for the one normalisation of stored and query text (decision 0043).
 unicode-normalization = { workspace = true }
 

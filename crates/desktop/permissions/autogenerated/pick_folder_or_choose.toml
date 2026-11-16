@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pick-folder-or-choose"
+description = "Enables the pick_folder_or_choose command without any pre-configured scope."
+commands.allow = ["pick_folder_or_choose"]
+
+[[permission]]
+identifier = "deny-pick-folder-or-choose"
+description = "Denies the pick_folder_or_choose command without any pre-configured scope."
+commands.deny = ["pick_folder_or_choose"]

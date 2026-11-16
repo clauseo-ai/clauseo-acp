@@ -1,12 +1,14 @@
 //! The frozen corpus of log entries that must keep decoding. `corpus/v1/` holds entries written
 //! at `SCHEMA_VERSION` 1 that hold every kind and every variant of every open enum then known,
 //! data and unit alike, in JSON (`events.jsonl`) and in `MessagePack` (`events.msgpack`). A kind
-//! added after v1 brings its own frozen entry under `corpus/added/`, listed in
-//! [`ADDED_AFTER_V1`]; the ignored test `write_the_added_pairs` writes those files into
-//! `target/` from `support/examples.rs`, for the author to move in. Every entry must keep
-//! decoding with the current types, so a new required field in any variant, a renamed field or a
-//! removed kind fails here. Nothing writes into `corpus/`; the files' fingerprints are pinned
-//! below, so an edit to them shows up as a change to this test.
+//! added after v1 brings its own frozen pair under `corpus/added/`, with a `.pin` beside it, and
+//! no Rust file lists them: `corpus/pins.rs` finds them. It embeds the folder when the test target
+//! is built, so a file added since then shows up only after a rebuild (`touch` this file). The
+//! ignored test `write_the_added_pairs` writes the three files into `target/` from
+//! `support/examples.rs`, for the author to move in. Every entry must keep decoding with the
+//! current types, so a new required field in any variant, a renamed field or a removed kind fails
+//! here. Nothing writes into `corpus/`; the files' fingerprints are pinned (v1's below, each added
+//! pair's in its `.pin`), so an edit to them shows up as a change to this test.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -31,6 +33,14 @@ mod enums;
 #[path = "corpus/writer.rs"]
 mod writer;
 
+#[cfg(test)]
+#[path = "corpus/pins.rs"]
+mod pins;
+
+#[cfg(test)]
+#[path = "corpus/pins_tests.rs"]
+mod pins_tests;
+
 use std::collections::BTreeSet;
 
 use clauseo_protocol::{self as p, DomainEvent, Envelope, MAX_MSGPACK_DEPTH};
@@ -39,10 +49,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use helpers::{json_entries, json_lines, kinds, missing, packed_entries, table_open_enums, values};
-
-#[path = "corpus/added_rows.rs"]
-mod added_rows;
-use added_rows::ADDED_AFTER_V1;
 
 /// A frozen set of log entries: its name under `corpus/`, its JSON (one `Envelope` per line,
 /// as `serde_json::to_string` wrote it), its `MessagePack` (one array of the same entries, as
@@ -64,18 +70,11 @@ const V1: Corpus = (
     (34_613, 0x383c_376f_5604_7c2e),
 );
 
-/// V1, then every file in [`ADDED_AFTER_V1`].
+/// V1, then every pair in `corpus/added/`, sorted by name.
 fn every_corpus() -> Vec<Corpus> {
     [V1].into_iter()
-        .chain(ADDED_AFTER_V1.iter().copied())
+        .chain(pins::added().iter().copied())
         .collect()
-}
-
-/// The 64-bit FNV-1a hash of `bytes`.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-    })
 }
 
 /// The decision record whose enum table classifies every logged enum.
@@ -289,7 +288,7 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     let removed: Vec<&String> = v1.difference(&known).collect();
     assert!(removed.is_empty(), "v1 kinds no longer known: {removed:?}");
     let mut held = v1;
-    for added in ADDED_AFTER_V1 {
+    for added in pins::added() {
         let name = added
             .0
             .strip_prefix("added/")
@@ -306,8 +305,8 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     let unfrozen: Vec<&String> = known.difference(&held).collect();
     assert!(
         unfrozen.is_empty(),
-        "kinds with no frozen entry: {unfrozen:?}; add corpus/added/<kind>.jsonl and .msgpack \
-         and list them in ADDED_AFTER_V1 (see corpus/v1/README.md)"
+        "kinds with no frozen entry: {unfrozen:?}; add corpus/added/<kind>.jsonl, .msgpack and \
+         .pin (see corpus/v1/README.md)"
     );
 }
 
@@ -347,17 +346,31 @@ fn the_corpus_holds_every_variant_of_every_open_enum() {
 }
 
 /// The variants written as a missing field, never as a value, so no value in the corpus holds
-/// them: `Delivery::Queue` (a `user_message` without `delivery`).
+/// them: `Delivery::Queue` (a `user_message` without `delivery`) and `SearchSource::Web` (a
+/// `web_search_recorded` without `source`, R24).
 /// [`a_variant_written_as_absent_decodes_from_an_entry_without_its_field`] checks each instead.
-const WRITTEN_AS_ABSENT: [(&str, &str); 1] = [("Delivery", "Queue")];
+const WRITTEN_AS_ABSENT: [(&str, &str); 2] = [("Delivery", "Queue"), ("SearchSource", "Web")];
 
 /// `Delivery::Queue` is written as no `delivery` field, and the corpus holds a `user_message`
-/// without one that decodes to it.
+/// without one that decodes to it. `SearchSource::Web` likewise: a `web_search_recorded` frozen
+/// before R24 has no `source` or `tool` and decodes as a web search with no tool.
 #[test]
 fn a_variant_written_as_absent_decodes_from_an_entry_without_its_field() {
     let mut queued = 0;
+    let mut web = 0;
     for corpus in every_corpus() {
         for entry in json_entries(&corpus) {
+            if let DomainEvent::WebSearchRecorded(search) = &entry.event {
+                let written = serde_json::to_value(&entry.event).unwrap();
+                let has_field = written["web_search_recorded"].get("source").is_some();
+                assert_eq!(
+                    has_field,
+                    search.source != p::SearchSource::Web,
+                    "{written}"
+                );
+                assert_eq!(search.tool.is_some(), has_field, "{written}");
+                web += usize::from(!has_field);
+            }
             if let DomainEvent::UserMessage(message) = &entry.event {
                 let written = serde_json::to_value(&entry.event).unwrap();
                 let has_field = written["user_message"].get("delivery").is_some();
@@ -373,6 +386,10 @@ fn a_variant_written_as_absent_decodes_from_an_entry_without_its_field() {
     assert!(
         queued > 0,
         "the corpus holds no user_message without delivery"
+    );
+    assert!(
+        web > 0,
+        "the corpus holds no web_search_recorded without source"
     );
 }
 
@@ -412,74 +429,13 @@ fn every_stored_field_survives_a_round_trip() {
     }
 }
 
-/// What is wrong with a corpus file's pin, if anything: a new `(0, 0)` pin for a file in
-/// `corpus/added/` is to be set to the file's length and hash; a `(0, 0)` pin anywhere else is
-/// refused, since a frozen file is pinned from the start; any other mismatch means the frozen
-/// file changed.
-fn pin_problem(path: &str, bytes: &[u8], frozen: (usize, u64)) -> Option<String> {
-    let found = (bytes.len(), fnv1a(bytes));
-    if found == frozen {
-        None
-    } else if frozen == (0, 0) && path.starts_with("added/") {
-        Some(format!(
-            "corpus/{path}: set this pin to ({}, {:#018x})",
-            found.0, found.1
-        ))
-    } else if frozen == (0, 0) {
-        Some(format!(
-            "corpus/{path} is frozen, so its pin is its length and hash, never (0, 0)"
-        ))
-    } else {
-        Some(format!(
-            "corpus/{path} changed: it is frozen, never edit or regenerate it; a new schema adds \
-             corpus/v2 beside v1, a new kind a file in corpus/added/"
-        ))
-    }
-}
-
 #[test]
 fn the_corpus_files_are_unchanged() {
     for corpus in every_corpus() {
         let (name, json, packed, json_pin, packed_pin) = corpus;
         for (file, bytes, frozen) in [("jsonl", json, json_pin), ("msgpack", packed, packed_pin)] {
-            let problem = pin_problem(&format!("{name}.{file}"), bytes, frozen);
+            let problem = pins::pin_problem(&format!("{name}.{file}"), bytes, frozen);
             assert!(problem.is_none(), "{}", problem.unwrap_or_default());
         }
     }
-}
-
-#[test]
-fn a_new_pin_says_what_to_set_it_to() {
-    let set = pin_problem("added/x.jsonl", b"a", (0, 0)).unwrap();
-    assert_eq!(
-        set,
-        "corpus/added/x.jsonl: set this pin to (1, 0xaf63dc4c8601ec8c)"
-    );
-    let changed = pin_problem("added/x.jsonl", b"a", (1, 7)).unwrap();
-    assert!(changed.contains("changed: it is frozen"), "{changed}");
-    assert_eq!(
-        pin_problem("added/x.jsonl", b"a", (1, 0xaf63_dc4c_8601_ec8c)),
-        None
-    );
-}
-
-/// A `(0, 0)` pin is the friendly "set this pin" message only for a new file in `corpus/added/`;
-/// a frozen file's pin is never `(0, 0)`.
-#[test]
-fn a_zero_pin_is_refused_outside_added() {
-    for path in ["v1/events.jsonl", "v1/events.msgpack"] {
-        assert_eq!(
-            pin_problem(path, b"a", (0, 0)),
-            Some(format!(
-                "corpus/{path} is frozen, so its pin is its length and hash, never (0, 0)"
-            ))
-        );
-    }
-}
-
-#[test]
-fn fnv1a_matches_the_reference_values() {
-    assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
-    assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
-    assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
 }

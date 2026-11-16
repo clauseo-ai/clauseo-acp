@@ -128,19 +128,19 @@ fn agents_that_is_no_dictionary_and_unknown_keys_are_warnings() {
 #[test]
 fn each_plist_type_becomes_its_json_value() {
     // `matters.default_location` takes a string, so every other type is refused when typed;
-    // the message shows the JSON value it became.
+    // the message shows the type of the JSON value it became, never the value.
     let cases = [
         (
             PlistValue::Bool(true),
-            "invalid type: boolean `true`, expected path string",
+            "invalid type: boolean, expected path string",
         ),
         (
             PlistValue::Integer(-3),
-            "invalid type: integer `-3`, expected path string",
+            "invalid type: integer, expected path string",
         ),
         (
             PlistValue::Real(1.5),
-            "invalid type: floating point `1.5`, expected path string",
+            "invalid type: floating point, expected path string",
         ),
         (
             PlistValue::Array(vec![string("a")]),

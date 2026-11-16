@@ -72,13 +72,17 @@ pub(crate) fn launch_env(
 /// The top-level keys `config` takes from the launch profile's side
 /// (`agent::loads::profile::codex_keys`): the profile's own [`PROFILE_KEYS`], and the host's
 /// `web_search` and `sandbox_workspace_write` (only its `writable_roots`, the session's work
-/// and notes folders). Any other key is refused with a warning: `hooks`, `mcp_servers`,
+/// and notes folders), and the data-folder fence's `default_permissions` and `permissions`
+/// (`agent::codex_fence`; `codex_keys` drops both from the profile hook, so only the host's
+/// reach here). Any other key is refused with a warning: `hooks`, `mcp_servers`,
 /// `sandbox_mode`, `approval_policy`, `skills`, `features`, `projects`, `model_providers`,
 /// `profiles`, `notify` and the rest.
-const LAUNCH_KEYS: [&str; 3] = [
+const LAUNCH_KEYS: [&str; 5] = [
     "developer_instructions",
     "web_search",
     "sandbox_workspace_write",
+    "default_permissions",
+    "permissions",
 ];
 
 /// The `CODEX_CONFIG` keys the launch profile itself may supply: what R21 and R22 need, which
@@ -100,7 +104,11 @@ pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 /// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
 /// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
 /// over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
-/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]).
+/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
+/// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
+/// `features.shell_snapshot = false` ([`without_login_shell`]), so Codex's shells keep the
+/// `PATH` the agent gets (`agent/shell_path.rs`): this object is the session's own, where the
+/// home's `config.toml` is shared by every session of the agent.
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
@@ -150,6 +158,23 @@ pub(crate) fn config_on(
         config.insert("hooks".to_owned(), Value::Object(hooks));
     }
     config
+}
+
+/// Sets the two keys that let Codex's shell commands keep the session's `PATH` on macOS and
+/// Linux (`agent/shell_path.rs`, decision record 0048), at `rust-v0.162.1`:
+/// `allow_login_shell = false`, so `exec_command` runs `<shell> -c`, never `-lc`
+/// (`core/src/tools/handlers/unified_exec.rs:104-113, 135`), and `features.shell_snapshot =
+/// false`, so no login-shell snapshot is made or sourced (the wrap only takes `-lc` anyway,
+/// `core/src/tools/runtimes/mod.rs:323-326`). The command then gets Codex's process
+/// environment (`protocol/src/shell_environment.rs:91-158`; `PATH` is in no default exclude)
+/// with Codex's own folders put first on its `PATH` (its bundled tools,
+/// `core/src/tools/runtimes/unified_exec.rs:505-520`). No `shell_environment_policy.set.PATH`:
+/// that would stop Codex replaying those folders after a snapshot (`runtimes/mod.rs:105-111`).
+/// The other features (`clauseo_limits::CODEX_OVERRIDES`) stay. Only with folders on the
+/// session's `PATH`.
+pub(crate) fn without_login_shell(config: &mut Map<String, Value>) {
+    config.insert("allow_login_shell".to_owned(), Value::Bool(false));
+    insert_dotted(config, "features.shell_snapshot", Value::Bool(false));
 }
 
 /// Merges `keys` into `config` without replacing anything: objects on both sides merge key by
@@ -252,7 +277,10 @@ pub(crate) fn home_config() -> String {
 /// cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57 skills;
 /// `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
 /// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing
-/// else in the home is read or touched: `auth.json` and the rest are Codex's.
+/// else in the home is read or touched: `auth.json` and the rest are Codex's. Nor does the
+/// session's shell keys go here (`allow_login_shell` and `features.shell_snapshot`,
+/// [`without_login_shell`]): they come with the session's `PATH`, which differs between
+/// sessions of the agent, so they ride in each session's own `CODEX_CONFIG`.
 ///
 /// The hooks table never goes in this file, only through `CODEX_CONFIG`: the guard's trust entry
 /// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a
@@ -295,10 +323,16 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
 /// The failure of a Codex launch whose home or `config.toml` could not be made: the error's
 /// codes go to the log only, never the path (it holds the user's name).
 fn home_failed(error: &dyn std::fmt::Display) -> Error {
-    tracing::warn!(%error, "Codex's folder could not be prepared");
+    agent_home_failed("Codex", error)
+}
+
+/// The failure of `who`'s launch (`Codex`, `Claude Code`) whose home could not be made: the
+/// error's codes go to the log only, never the path (it holds the user's name).
+fn agent_home_failed(who: &str, error: &dyn std::fmt::Display) -> Error {
+    tracing::warn!(who, %error, "an agent's folder could not be prepared");
     Error::refused(
         ErrorCode::AgentLaunchFailed,
-        "Clauseo couldn't prepare Codex's folder.",
+        format!("Clauseo couldn't prepare {who}'s folder."),
     )
 }
 
@@ -406,9 +440,15 @@ pub(crate) fn guard_untrusted(answer: &Value) -> Error {
 /// points. The data folder itself may be a link: `CLAUSEO_DATA_DIR` may name one, and the
 /// store lives there too.
 pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
+    make_agent_home(data, home, "Codex")
+}
+
+/// [`make_home`] for `who`'s home (`Codex`, `Claude Code`), whose name its failure carries.
+pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(), Error> {
+    let failed = |error: &dyn std::fmt::Display| agent_home_failed(who, error);
     let below = home
         .strip_prefix(data)
-        .map_err(|_outside| home_failed(&"not under the data folder"))?;
+        .map_err(|_outside| failed(&"not under the data folder"))?;
     let mut at = data.to_owned();
     for part in below.components() {
         at.push(part);
@@ -426,14 +466,14 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
         // `symlink_metadata` never follows a link, so a link is not a folder here.
         let meta = made
             .and_then(|()| std::fs::symlink_metadata(&at))
-            .map_err(|error| home_failed(&Cause(&error)))?;
+            .map_err(|error| failed(&Cause(&error)))?;
         if !meta.is_dir() {
-            return Err(home_failed(&"a link or not a folder"));
+            return Err(failed(&"a link or not a folder"));
         }
     }
     // Off Unix a folder's privacy is its parent's: there is nothing to set.
     #[cfg(unix)]
-    crate::write::make_private_dir(home).map_err(|error| home_failed(&Cause(&error)))?;
+    crate::write::make_private_dir(home).map_err(|error| failed(&Cause(&error)))?;
     Ok(())
 }
 
@@ -460,5 +500,7 @@ pub(crate) fn prepare_launch(
 
 pub(crate) mod prepare;
 
+#[cfg(test)]
+mod code_mode_tests;
 #[cfg(test)]
 mod tests;

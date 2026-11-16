@@ -105,3 +105,28 @@ test.each([
     expect(button?.textContent).toBe("Locate folder");
   },
 );
+
+test("Locate runs its picker inside the caller's around, so the caller's wait sees the pick and its end", async () => {
+  const transport = new FakeTransport({
+    pickFolder: () => ({ folder: "ref-found", display: "Desktop/Khan" }),
+    next: fakeNext({ matters: () => [MOVED], command: () => undefined }),
+  });
+  const matters = new Matters(
+    transport,
+    createViewStore(transport, { batch: () => () => () => {} }),
+  );
+  const stop = matters.start();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  const open = matters.view().open;
+  if (open === null) throw new Error("no open matter");
+  const seen: string[] = [];
+  await matters.locate(open.matter, async (pick) => {
+    seen.push("pick");
+    const answer = await pick();
+    seen.push("answered");
+    return answer;
+  });
+  expect(seen).toEqual(["pick", "answered"]);
+  expect(transport.only("pick_folder")).toHaveLength(1);
+  stop();
+});

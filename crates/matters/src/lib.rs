@@ -10,37 +10,47 @@
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
 //!   again, locating a moved folder and repairing a deleted `matter.json`, `before-turn` and
 //!   `after-turn` checkpoints with their diff, undoing a step, restoring a version (the whole
-//!   matter or chosen files), and comparing and reading versions.
+//!   matter or chosen files), replacing one file with content made outside the folder, and
+//!   comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
 //!   read), racily clean files.
 //!
 //! # Interface
 //!
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one, and
-//!   [`Matter::discard`] undoes a create or import the host could not record;
+//!   [`Matter::discard`] undoes a create or import the host could not record, and
+//!   [`remove_marker_of`] removes its `matter.json` again if a sync client put it back;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
 //!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does,
 //!   and [`check_place`] runs import's place check (drive root, refused list) alone, and
-//!   [`check_protected`] its protected-tree check (matters root, refused trees);
+//!   [`check_protected`] its protected-tree check (matters root, refused trees, on Windows a
+//!   path too deep to start programs in, [`is_too_deep`]);
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
-//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
-//!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
+//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included),
+//!   and [`names_a_write`] says which places a turn's tool call named count as written by it;
+//!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]),
+//!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
-//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
-//!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
-//!   versions and take `&self`; [`Matter::papers`] lists the folder as it is now ([`PaperList`],
-//!   [`Paper`]) by the checkpoint walk's rules.
+//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]);
+//!   [`Matter::replace_file`] writes one file's new content made outside the folder, between an
+//!   `outside-edits` and a `revisions` checkpoint ([`ReplaceFile`], [`Replaced`]);
+//!   [`Matter::compare`] ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and
+//!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
+//!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules;
+//!   [`is_excluded_path`] says whether that walk passes a path over.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
-//!   as an agent names it, resolved into the folder by [`matter_path_in`];
+//!   as an agent names it, resolved into the folder by [`matter_path_in`], and
+//!   [`held_open_resolved`] and [`matter_path_of_resolved`] one a caller already resolved;
 //!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
 //!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
 //!   The host asks them before letting an agent write a file. An owner file a crashed Word left
 //!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
 //! - With the `test-support` feature, [`test_support::pretend_word_running_since_epoch`], for
-//!   tests that plant an owner file and need it held through the stale rule.
+//!   tests that plant an owner file and need it held through the stale rule, and
+//!   [`test_support::bring_back_after_delete`], a sync client putting back a file just deleted.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
 //!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
@@ -57,7 +67,7 @@
 //!   sets an environment variable, never runs `git` or any process, never reads or writes a `.git`
 //!   in the folder, and opens repositories isolated from every git config and variable.
 //! - The timeline only moves forward: one ref, each checkpoint a commit whose parent is the ref's
-//!   tip. No empty commits: an unchanged tree reuses the last checkpoint
+//!   tip. No empty commits: an unchanged tree and skip record reuse the last checkpoint
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Every object read from history is checked against its id: blobs as they stream, trees and
@@ -77,7 +87,8 @@
 //!   other change is the hidden attribute of `.clauseo` on Windows. Undo and
 //!   restore check every target and lock before writing any, and never write or delete a file
 //!   whose name the folder holds only spelled otherwise (another case or normalisation). A
-//!   restore never deletes. One exception to names matching byte for byte: a folder on the way
+//!   restore never deletes, but for the files an earlier restore it undoes added
+//!   (`Restore::undoes`). One exception to names matching byte for byte: a folder on the way
 //!   that the folder spells otherwise (`sub/` for the history's `Sub/c.txt`) is written into
 //!   as the file system finds it, so the next checkpoint records `sub/c.txt`; no file is
 //!   replaced.
@@ -121,45 +132,57 @@ mod checkpoint;
 mod compare;
 mod diff;
 mod error;
+mod first_read;
 mod folder_scan;
 mod fsync;
 mod history;
 mod locks;
+mod long_path;
 mod matter;
 mod no_download;
 mod papers;
 mod place;
 mod probe;
 mod refuse;
+mod replace;
 mod restore;
 mod rules;
 mod scan;
+mod skip_record;
 mod stat;
 #[cfg(test)]
 mod test_dir;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 mod trailers;
+mod trash;
 mod types;
 mod undo;
 mod walk;
 mod write;
 mod writeback;
 
+pub use diff::names_a_write;
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
-    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, matter_path_in,
+    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,
+    matter_path_in, matter_path_of_resolved,
 };
-pub use matter::Matter;
+pub use matter::{
+    Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
+};
 pub use papers::{Paper, PaperList};
-pub use place::{Place, place};
+pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
-pub use refuse::{check_place, check_protected, same_or_nested};
+pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
+pub use rules::is_excluded_path;
 pub use scan::scan;
+pub use trash::{FolderTrash, OsTrash, Removals, Trash, TrashError};
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,
-    NewMatter, Progress, Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport,
-    Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
+    NewMatter, Progress, ReplaceFile, Replaced, Restore, RestoreFiles, RestorePlan, Restored,
+    Retention, ScanReport, Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    VersionFile,
 };

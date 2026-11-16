@@ -21,6 +21,8 @@ import {
   webviewFolder,
 } from "./scratch.ts";
 
+const PLANS = { "claude-acp": { provider: "anthropic" }, "codex-acp": { provider: "anthropic" } };
+
 let base: string;
 let agent: string;
 
@@ -95,6 +97,7 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   expect(settings).toEqual({
     matters: { default_location: scratch.mattersDir },
     agents: { "claude-acp": { command: agent, args: ["--scenario", "files-one-turn"] } },
+    plans: PLANS,
   });
   expect(scratch.mattersDir.startsWith(scratch.root)).toBe(true);
   expect(existsSync(scratch.mattersDir)).toBe(true);
@@ -108,6 +111,7 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
     CLAUSEO_DATA_DIR: scratch.dataDir,
     E2E_MATTER_DIR: scratch.matterDir,
     E2E_CONFIRM_ALWAYS: "accept",
+    E2E_AGENTS_MANAGED: "claude-acp,codex-acp",
   });
   const first = webviewFolder(scratch, 1);
   expect(webviewFolder(scratch, 2)).not.toBe(first);
@@ -130,11 +134,12 @@ test("the settings file holds the other agents, each on its scenario", async () 
       "claude-acp": { command: agent, args: ["--scenario", "prompt-stream"] },
       "codex-acp": { command: agent, args: ["--scenario", "codex-handshake"] },
     },
+    plans: PLANS,
   });
   await removeScratch(scratch);
 });
 
-test("no scenario: settings hold only the matters' location, and fake_agent is never asked for", () => {
+test("no scenario: settings hold the matters' location and the plans, and fake_agent is never asked for", () => {
   const scratch = makeScratch(
     { scenario: null, matterFiles: {} },
     () => {
@@ -145,7 +150,7 @@ test("no scenario: settings hold only the matters' location, and fake_agent is n
   const settings: unknown = JSON.parse(
     readFileSync(join(scratch.dataDir, "settings.json"), "utf8"),
   );
-  expect(settings).toEqual({ matters: { default_location: scratch.mattersDir } });
+  expect(settings).toEqual({ matters: { default_location: scratch.mattersDir }, plans: PLANS });
   expect(scratch.agentCommand).toBeNull();
 });
 

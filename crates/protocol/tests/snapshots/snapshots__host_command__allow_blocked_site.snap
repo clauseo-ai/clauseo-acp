@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::AllowBlockedSite\n{ block_id: blocked_site_id(3), scope: AllowScope::Matter, }"
+---
+{
+  "allow_blocked_site": {
+    "block_id": "01900000-0000-7000-8000-000000000003",
+    "scope": "matter"
+  }
+}

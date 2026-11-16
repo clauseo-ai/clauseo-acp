@@ -21,7 +21,8 @@ folder, and a line in the matter's history.
   (`matter.turn_running`). The relocate then holds the writer (`Holder::Relocate`, beside a
   thread's turn or undo and a restore) until its commit returns or it is refused, so a turn
   sent meanwhile queues behind it and an undo, a restore or a second relocate is refused. On the matter's worker thread
-  come the registry check (`matter.folder_refused`) and `Matter::locate`. The registry is every
+  come the registry check (`matter.folder_is_matter`, `matter.folder_holds_matter` or
+  `matter.folder_inside_matter`, as for a new matter; 2026-11-15) and `Matter::locate`. The registry is every
   other registered matter's folder plus the folders other commands are making matters of (a
   create, an import or a relocate in progress, held on the actor until each is answered). Only
   after `Ok` does one commit carry the new event, the matter's row with the new path and the
@@ -52,7 +53,8 @@ folder, and a line in the matter's history.
   `created_at` when it fails with `NoMatterJson` or `Unreadable`, after the same registry check,
   and logs a warning. That first open spends the relink whatever it finds, so a later open never
   relinks with a registry taken before. When another matter claims the folder the open's own
-  `matter.folder_missing` stands and nothing is written.
+  `matter.folder_not_a_matter` stands (`matter.folder_missing` before 2026-11-07, decision
+  record 0003) and nothing is written.
 - Each agent remembers the folder it was started in. When a turn takes the writer (step 4) and
   its agent's folder is not the one the matter's row names (the matter was relocated since), the
   agent is stopped (`AgentSessionDetached { restarting }`) and started again in the new folder

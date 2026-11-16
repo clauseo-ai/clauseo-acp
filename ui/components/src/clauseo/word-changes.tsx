@@ -1,0 +1,310 @@
+// A Word document's own tracked changes, in the wall's place: each with its author as Word recorded it, its time,
+// what it does and its words, with Accept and Reject one at a time or all at once; the latest decision with its time
+// and Undo; and the host's line where it couldn't list or decide them. The room reads and decides them
+// (app/src/room/word/changes-pane.tsx); this part shows what it is given and hands the lawyer's choice back. It wears
+// the draft review's cards (draft-pane.tsx's ChangesList, word.css).
+import { useEffect, useId, useRef, type RefObject } from "react";
+import { IconAccept, IconBackToAnswer } from "../icons/icons.tsx";
+import { errorWords } from "../lib/words-errors.ts";
+import { mf } from "../lib/words-matter-form.ts";
+import { useReaderWords, type ReaderKey } from "../lib/words-reader.ts";
+import { langOfText } from "../lib/script.ts";
+import { Button } from "../ui/button.tsx";
+import { Heading } from "./heading.tsx";
+import { isLatinOnly } from "./matter.ts";
+import { Say } from "./say.tsx";
+
+/** What a tracked change does, as the host lists it; unknown for a kind from a newer Clauseo. */
+export type TrackedKind = "insert" | "delete" | "move" | "format" | "unknown";
+
+/** Where a tracked change is when it is not in the document's main text, as the host lists it; unknown for a place
+ * from a newer Clauseo. */
+export type TrackedPlace = "header_footer" | "note" | "comment" | "unknown";
+
+/** Accept or reject. */
+export type TrackedDecision = "accept" | "reject";
+
+/** One tracked change as the panel shows it: its ids (what a decision names), its author as Word recorded it, when, in
+ * the language ("" where the file records no time), where it is (null in the main text), and its words, or null for a
+ * change with none (formatting). */
+export type TrackedChange = {
+  key: string;
+  ids: readonly number[];
+  kind: TrackedKind;
+  author: string;
+  when: string;
+  place: TrackedPlace | null;
+  text: string | null;
+};
+
+/** Each kind's label over its words. A kind this version doesn't know shows its words with no label: no label here
+ * would be true of it. */
+const LABEL: Readonly<Record<TrackedKind, ReaderKey | null>> = {
+  insert: "Added",
+  delete: "Taken out",
+  format: "Formatting changed",
+  move: "Moved",
+  unknown: null,
+};
+
+/** Where a change outside the main text is, beside its kind's label, so a change in a header or a note isn't looked for
+ * in the body. A place this version doesn't know says nothing: no words here would be true of it. */
+const PLACE: Readonly<Record<TrackedPlace, ReaderKey | null>> = {
+  header_footer: "In a header or footer",
+  note: "In a footnote or endnote",
+  comment: "In a comment",
+  unknown: null,
+};
+
+/** Content as Word holds it: lang="en" where it is Latin only, Hindi where it reads as Hindi. */
+const langOf = (text: string) => (isLatinOnly(text) ? "en" : langOfText(text));
+
+function ChangeWords({
+  kind,
+  place,
+  text,
+}: {
+  kind: TrackedKind;
+  place: TrackedPlace | null;
+  text: string | null;
+}) {
+  const w = useReaderWords();
+  const label = LABEL[kind] ?? null;
+  const where = place === null ? null : (PLACE[place] ?? null);
+  if (label === null && where === null && text === null) return null;
+  const words =
+    text === null ? null : kind === "insert" ? (
+      <ins className="rd-ins" lang={langOf(text)}>
+        {text}
+      </ins>
+    ) : kind === "delete" ? (
+      <del className="rd-del" lang={langOf(text)}>
+        {text}
+      </del>
+    ) : (
+      <span lang={langOf(text)}>{text}</span>
+    );
+  return (
+    <div className="rd-change-words">
+      <p className="rd-change-run" data-kind={kind}>
+        {(label !== null || where !== null) && (
+          <span className="rd-change-kind">
+            {label !== null && <span>{w.r(label)}</span>}
+            {where !== null && <span className="rd-change-place">{w.r(where)}</span>}
+          </span>
+        )}
+        {words}
+      </p>
+    </div>
+  );
+}
+
+/** The tracked changes of one Word file, beside the work in the wall's place, with Back to the wall. `changes` is null
+ * until the list is read, and while the host can't read it (its line says why); `total` is how many the file holds,
+ * more than `changes` when the list stops short, and Accept all and Reject all decide every one. Every Accept and
+ * Reject is held while a decision or an undo is on its way (`sending`). */
+export function WordChanges({
+  file,
+  changes,
+  total,
+  sending,
+  decided,
+  line,
+  backRef,
+  onBack,
+  onDecide,
+  onDecideAll,
+  onUndo,
+  onRetry,
+}: {
+  /** The file's name. */
+  file: string;
+  changes: readonly TrackedChange[] | null;
+  /** How many changes the file holds; `changes.length` where not given. */
+  total?: number;
+  sending: boolean;
+  /** The latest decision, with its clock time in English ("3:42 pm"), while it can be undone here. */
+  decided: { decision: TrackedDecision; time: string } | null;
+  /** What the host refused with, by its code, and whether Try again sends the decision again. */
+  line: { code: string; retry: boolean } | null;
+  backRef?: RefObject<HTMLButtonElement | null>;
+  onBack: () => void;
+  onDecide: (ids: readonly number[], decision: TrackedDecision) => void;
+  /** Accept all or Reject all: every change in the file, listed here or not. */
+  onDecideAll: (decision: TrackedDecision) => void;
+  onUndo: () => void;
+  onRetry: () => void;
+}) {
+  const w = useReaderWords();
+  const { lang } = w;
+  const headId = useId();
+  const head = useRef<HTMLHeadingElement>(null);
+  // the panel takes the focus as it opens, and again when a decided row leaves the list with the focus in it
+  useEffect(() => {
+    const at = document.activeElement;
+    if (at === null || at === document.body) head.current?.focus();
+  }, [changes, decided]);
+  const shown = changes?.length ?? 0;
+  const n = Math.max(total ?? shown, shown);
+  return (
+    <section className="rd-review wc-pane" aria-labelledby={headId} data-testid="word-changes">
+      <div className="wc-bar">
+        <Button
+          ref={backRef}
+          kind="quiet"
+          size="small"
+          className="pr-s3 pl-s2"
+          data-testid="word-changes-back"
+          onClick={onBack}
+        >
+          <IconBackToAnswer size={16} />
+          {mf(lang, "Back")}
+        </Button>
+      </div>
+      <header className="wc-head">
+        <Heading level={2} className="wall-title" id={headId} ref={head} tabIndex={-1}>
+          {w.r("Tracked changes")}
+        </Heading>
+        <p className="wc-file" lang={langOf(file)}>
+          {file}
+        </p>
+      </header>
+      {line !== null && (
+        <div className="wc-line" role="alert" data-testid="word-changes-line">
+          <p>
+            <Say>{errorWords(lang, line.code)}</Say>
+          </p>
+          {line.retry && (
+            <Button
+              kind="quiet"
+              size="small"
+              disabled={sending}
+              focusableWhenDisabled
+              data-testid="word-changes-retry"
+              onClick={onRetry}
+            >
+              {w.r("Try again")}
+            </Button>
+          )}
+        </div>
+      )}
+      {decided !== null && (
+        <div className="wc-decided" data-testid="word-changes-decided">
+          <span className="rd-change-state" role="status">
+            {decided.decision === "accept" && <IconAccept size={14} />}
+            {decided.decision === "accept"
+              ? w.r("Accepted {time}", { time: w.clock(decided.time) })
+              : w.r("Rejected {time}", { time: w.clock(decided.time) })}
+          </span>
+          <Button
+            kind="quiet"
+            size="small"
+            className="rd-undo"
+            disabled={sending}
+            focusableWhenDisabled
+            data-testid="word-changes-undo"
+            onClick={onUndo}
+          >
+            {w.t("Undo")}
+          </Button>
+        </div>
+      )}
+      {changes !== null && changes.length === 0 && (
+        <p className="rd-review-sub" data-testid="word-changes-empty">
+          <Say>{w.r("No tracked changes in this file.")}</Say>
+        </p>
+      )}
+      {changes !== null && changes.length > 0 && (
+        <div>
+          <div className="rd-review-head">
+            <p className="rd-review-sub">
+              <Say>
+                {w.r("{n} changes, each with its author and time, as Word shows them.", { n })}
+              </Say>
+            </p>
+            {n > shown && (
+              <p className="rd-review-sub" data-testid="word-changes-more">
+                <Say>
+                  {w.r(
+                    "The first {shown} are listed here. Accept all and Reject all decide all {n}.",
+                    {
+                      shown,
+                      n,
+                    },
+                  )}
+                </Say>
+              </p>
+            )}
+            <div className="rd-review-all">
+              <Button
+                kind="tone"
+                size="small"
+                className="rd-accept-all"
+                disabled={sending}
+                focusableWhenDisabled
+                onClick={() => onDecideAll("accept")}
+              >
+                <IconAccept size={14} />
+                {w.r("Accept all")}
+              </Button>
+              <Button
+                kind="quiet"
+                size="small"
+                className="rd-reject-all"
+                disabled={sending}
+                focusableWhenDisabled
+                onClick={() => onDecideAll("reject")}
+              >
+                {w.r("Reject all")}
+              </Button>
+            </div>
+          </div>
+          <ol className="rd-changes">
+            {changes.map((c) => {
+              const about = w.r("Change by {who}, {when}", { who: c.author, when: c.when });
+              return (
+                <li key={c.key} className="rd-change" data-state="pending" data-kind={c.kind}>
+                  <p className="rd-change-head">
+                    <b lang={langOf(c.author)}>{c.author}</b>
+                    {c.when !== "" && <span className="rd-change-when">{c.when}</span>}
+                  </p>
+                  <ChangeWords kind={c.kind} place={c.place} text={c.text} />
+                  <div className="rd-change-foot">
+                    <span className="rd-change-state">{w.r("Not yet accepted")}</span>
+                    <span className="rd-change-acts">
+                      <Button
+                        kind="tone"
+                        size="small"
+                        className="rd-accept"
+                        aria-label={`${w.r("Accept")}. ${about}`}
+                        disabled={sending}
+                        focusableWhenDisabled
+                        onClick={() => onDecide(c.ids, "accept")}
+                      >
+                        {w.r("Accept")}
+                      </Button>
+                      <Button
+                        kind="quiet"
+                        size="small"
+                        className="rd-reject"
+                        aria-label={`${w.r("Reject")}. ${about}`}
+                        disabled={sending}
+                        focusableWhenDisabled
+                        onClick={() => onDecide(c.ids, "reject")}
+                      >
+                        {w.r("Reject")}
+                      </Button>
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="rd-review-foot">
+            <Say>{w.r("Accepting here accepts the change in the Word file too.")}</Say>
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}

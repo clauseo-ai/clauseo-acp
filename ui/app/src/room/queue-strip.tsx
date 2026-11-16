@@ -1,7 +1,9 @@
 // The queue over the composer, filled from the thread's view (U7, matters/queue, queue-full, held, held-failed): the
 // parts' QueueStrip with the queued messages in the order they go and why the queue holds. Its own chunk, which
-// queue-slot.tsx loads, so the room's first load carries none of it. Edit sends the new text alone (the host keeps a
-// message's file blocks), Remove, Send now and Send next their H9 commands, one at a time per row, and once accepted
+// queue-slot.tsx loads, so the room's first load carries none of it. Each message says it sends when the agent finishes
+// (planNameOf: Claude, ChatGPT for Codex), while the queue isn't held. Edit sends the new text alone (the host keeps a
+// message's file blocks), or, over the host's cap on a prompt's text (prompt-cost.ts), says prompt.too_long's words and
+// sends nothing; Remove, Send now and Send next their H9 commands, one at a time per row, and once accepted
 // not again until the row has gone. Replies land with
 // the next frame's flush (#253): a refusal shows its words under the head until the next press or until the queue
 // changes; `thread.turn_not_queued` says the message had already gone, and the strip follows the view, where it now
@@ -22,6 +24,9 @@ import { heldPick, queuedPick } from "./queue-picks.ts";
 import type { QueueStripProps } from "./queue-slot.tsx";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { stamp } from "./thread/clock.ts";
+import { planNameOf } from "./thread/limit-words.ts";
+import { tooLong } from "./thread/prompt-cost.ts";
+import { useResumeCue } from "./resume-cue.ts";
 
 const TEST_IDS = {
   row: "queued",
@@ -29,11 +34,15 @@ const TEST_IDS = {
   remove: "queued-remove",
   sendNow: "queued-send-now",
   sendNext: "send-next",
+  why: "queue-why",
   say: "queue-say",
   note: "queue-error",
+  resume: "resume-cue",
+  when: "queued-when",
 } as const;
 
 const GONE = "thread.turn_not_queued";
+const TOO_LONG = "prompt.too_long";
 /** Send next's key among the presses on their way (a row's is its turn). */
 const NEXT = "next";
 
@@ -57,6 +66,9 @@ export function LiveQueueStrip({
   const store = useViewStore();
   const { lang } = useWords();
   const plan = useAgentPlan();
+  // R20b: the resume cue after an idle stop, once it has run past its threshold; it takes the strip's head line
+  const cue = useResumeCue(store, stream);
+  const resume = cue ? mt(lang, "Getting {plan} ready.", { plan: planNameOf(plan) }) : null;
   const [pickQueued] = useState(queuedPick);
   const [pickHeld] = useState(heldPick);
   const queue = useStreamPart(store, stream, pickQueued);
@@ -89,7 +101,7 @@ export function LiveQueueStrip({
         : held.kind === "held"
           ? held
           : // the step's time, with its day when not today ("Monday 4:31 pm"), in the language
-            { kind: held.kind, at: stamp(lang, held.at, now) },
+            { kind: held.kind, at: stamp(lang, held.at, now), reason: held.reason },
     [held, lang, now],
   );
   const turnOf = (id: string): TurnId | undefined => queue.find((q) => q.id === id)?.turn;
@@ -134,6 +146,15 @@ export function LiveQueueStrip({
     const turn = turnOf(id);
     // the text alone: the host keeps the message's file blocks; its own key, so the row's Remove and Send now still go
     if (thread === null || turn === undefined) return;
+    // over the host's cap on a prompt's text: refused here as the host would refuse it, landing as the host's refusal
+    // does, with the next frame's flush, so the edit (closed by Save) opens again with the words
+    if (tooLong(text)) {
+      store.inFrame(() => {
+        refuse({ code: TOO_LONG, queue: stream === null ? NONE : pickQueued(store.view(stream)) });
+        refused();
+      });
+      return;
+    }
     send(`edit:${turn}`, { edit_queued_prompt: { thread, turn, text } }, "no", refused, (left) => {
       // the message went with the edit on its way: its words are never lost, they go to the composer. With other
       // messages left the strip stays and says it had gone; with none, the strip is gone or going and the composer says it
@@ -160,7 +181,9 @@ export function LiveQueueStrip({
     <QueueStrip
       items={queue}
       held={hold}
+      resume={resume}
       note={note}
+      when={mt(lang, "Sends when {name} finishes", { name: planNameOf(plan) })}
       onEdit={onEdit}
       onRemove={onRow((t, turn) => ({ remove_queued_prompt: { thread: t, turn } }))}
       onSendNow={onRow((t, turn) => ({ send_queued_now: { thread: t, turn } }))}

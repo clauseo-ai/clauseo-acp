@@ -26,7 +26,7 @@ fn raw(key: &str, value: serde_json::Value, line: usize, column: usize) -> Raw {
 fn values_come_in_file_order_with_dotted_keys_and_their_places() {
     let text = "{\n  // comment\n  \"ui\": { \"theme\": \"dark\",\n    \"font_size\": 16, },\n  \
                 \"agents\": { \"a\": { \"command\": \"/x\" } },\n}\n";
-    let (raws, warnings) = read(Path::new(PATH), text.as_bytes()).unwrap();
+    let (raws, warnings, _, _) = read(Path::new(PATH), text.as_bytes()).unwrap();
     assert_eq!(
         raws,
         vec![
@@ -40,7 +40,7 @@ fn values_come_in_file_order_with_dotted_keys_and_their_places() {
 
 #[test]
 fn a_byte_order_mark_is_skipped_and_columns_start_after_it() {
-    let (raws, _) = read(
+    let (raws, _, _, _) = read(
         Path::new(PATH),
         b"\xEF\xBB\xBF{\"ui\": {\"theme\": \"light\"}}",
     )
@@ -51,7 +51,7 @@ fn a_byte_order_mark_is_skipped_and_columns_start_after_it() {
 #[test]
 fn an_unknown_section_and_a_section_that_is_no_object_are_warnings() {
     let text = "{\"telemetry\": {\"on\": true},\n\"ui\": 3, \"matters\": {}}";
-    let (raws, warnings) = read(Path::new(PATH), text.as_bytes()).unwrap();
+    let (raws, warnings, _, _) = read(Path::new(PATH), text.as_bytes()).unwrap();
     assert_eq!(raws, Vec::new());
     assert_eq!(
         warnings,
@@ -103,7 +103,7 @@ fn the_file_must_be_one_object() {
 fn trailing_commas_inside_sections_and_values_are_read() {
     let text = "{\"ui\": {\"theme\": \"dark\",},\n\"agents\": {\"a\": {\"args\": [\"x\",], \
                 \"command\": \"/x\",}, },}";
-    let (raws, warnings) = read(Path::new(PATH), text.as_bytes()).unwrap();
+    let (raws, warnings, _, _) = read(Path::new(PATH), text.as_bytes()).unwrap();
     assert_eq!(
         raws,
         vec![
@@ -153,7 +153,7 @@ fn a_section_the_file_sets_twice_is_its_last_copy_whole() {
     // is the section, as the save keeps it.
     let text = "{\"ui\": {\"theme\": \"dark\", \"font_size\": 16}, \"agents\": {\"a\": {\"command\": \"/x\"}}, \
                 \"ui\": {\"density\": \"compact\"}, \"agents\": {\"b\": {\"command\": \"/y\"}}}";
-    let (raws, warnings) = read(Path::new(PATH), text.as_bytes()).unwrap();
+    let (raws, warnings, _, _) = read(Path::new(PATH), text.as_bytes()).unwrap();
     assert_eq!(
         raws,
         vec![
@@ -162,4 +162,28 @@ fn a_section_the_file_sets_twice_is_its_last_copy_whole() {
         ]
     );
     assert_eq!(warnings, Vec::new());
+}
+
+#[test]
+fn names_nested_in_an_unknown_section_are_walked_through_arrays_and_fail_when_unreadable() {
+    let (_, _, wrapped, _) = read(
+        Path::new(PATH),
+        br#"{"clauseo": [1, {"skills": [{"extra": 1}]}]}"#,
+    )
+    .unwrap();
+    let names: Vec<String> = wrapped.unwrap().into_iter().map(|raw| raw.key).collect();
+    assert_eq!(names, ["clauseo.skills.extra", "clauseo.skills"]);
+    // The file reads, but the wrapper's names cannot all be read.
+    let (_, _, wrapped, _) = read(
+        Path::new(PATH),
+        br#"{"clauseo": {"skills": {}, "n": 1e400}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        wrapped.unwrap_err().position,
+        Position {
+            line: 1,
+            column: 13
+        }
+    );
 }

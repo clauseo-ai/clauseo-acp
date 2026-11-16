@@ -17,8 +17,21 @@ export const HI = {
   "Read {name} online.": "{name} ऑनलाइन पढ़ा गया।",
   "Looked online.": "ऑनलाइन देखा गया।",
   "Ran a task.": "एक काम चलाया गया।",
+  // a task named by the program it ran and the paper it ran on, where the agent gave no words of its own (D-017)
+  "Ran {program} on {name}.": "{name} पर {program} चलाया गया।",
+  "Ran {program}.": "{program} चलाया गया।",
+  // a web search limited to one site, the site said apart from the words searched for (D-028)
+  "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
+  // a task named by its own title or the text it shows (UC-246, UC-247; provisional)
+  "Ran {description}.": "{description} चलाया गया।",
+  "Tried to run {description}.": "{description} चलाने की कोशिश की गई।",
+  // a skill Clauseo doesn't ship, read as a guide (UC-248, UC-249; provisional)
+  "Read a guide.": "एक मार्गदर्शिका पढ़ी गई।",
+  "Tried to read a guide.": "एक मार्गदर्शिका पढ़ने की कोशिश की गई।",
+  // a step named only by the sandbox's permission for the internet (UC-166; provisional)
+  "Let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
   // mark (Failed, Stopped) says how it ended
   "Tried to read {name}.": "{name} पढ़ने की कोशिश की गई।",
@@ -35,8 +48,16 @@ export const HI = {
   "Tried to read {name} online.": "{name} ऑनलाइन पढ़ने की कोशिश की गई।",
   "Tried to look online.": "ऑनलाइन देखने की कोशिश की गई।",
   "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
+  "Tried to run {program} on {name}.": "{name} पर {program} चलाने की कोशिश की गई।",
+  "Tried to run {program}.": "{program} चलाने की कोशिश की गई।",
+  // a chained command, counted rather than named by its first program (UC-300; provisional); done, it says the
+  // folded line's "Ran {n} tasks."
+  "Tried to run {n} tasks.": "{n} काम चलाने की कोशिश की गई।",
+  "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  // UC-167; provisional
+  "Tried to let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने देने की कोशिश की गई।",
   // a step named only by the agent's own words (its title or a task's description), tried and not done: those words
   // after the attempt, so the agent's imperative is never told as done; the words stay as the agent sent them
   "Tried: {title}.": "कोशिश की गई: {title}।",
@@ -82,7 +103,16 @@ export const HI = {
   // the live line, after what is being done now
   "1 done so far.": "अब तक 1 पूरा हुआ।",
   "{n} done so far.": "अब तक {n} पूरे हुए।",
+  // a step of Clauseo's case-law connector, done and tried (tool-names.ts, caseLawOf): case law searched (UC-476,
+  // UC-477); the lawyer's credits read (UC-480, UC-481); a payment link got, never a payment (UC-482, UC-483).
+  // Provisional; hi: later
+  "Searched case law.": null,
+  "Tried to search case law.": null,
+  "Checked your case-law credits.": null,
+  "Tried to check your case-law credits.": null,
+  "Got a payment link for case-law credits.": null,
+  "Tried to get a payment link for case-law credits.": null,
 } as const;
 
-/** Every key, for the banned-words screen in the tests. */
-export const stepWords: Readonly<Record<keyof typeof HI, string>> = HI;
+/** Every key, for the banned-words screen in the tests (null: hi: later). */
+export const stepWords: Readonly<Record<keyof typeof HI, string | null>> = HI;
