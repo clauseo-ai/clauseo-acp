@@ -1,8 +1,10 @@
 //! A Claude agent (`claude-acp`) outside forced ask runs in Clauseo's mode, `auto`, whatever
 //! mode it started in: claude-agent-acp's own `default` on `session/new` and `session/resume`, a
 //! resumed transcript's `bypassPermissions` on `session/load`. The host sends `session/set_mode
-//! auto` before the first prompt, with `allowDangerouslySkipPermissions: false` in `_meta` (the
-//! scenarios check both), and `SetMode` still works after the start. When auto is not available
+//! auto` before the first prompt, with `allowDangerouslySkipPermissions: false` and
+//! `settingSources: ["user"]` in `_meta` on new, load and resume (the scenarios check them; user
+//! only keeps Claude Code from loading any project-level `.claude` skills, agents, commands or
+//! `CLAUDE.md` it finds walking up from the matter), and `SetMode` still works after the start. When auto is not available
 //! (not offered, the switch refused, or the agent moving off it at once) the session runs in
 //! `acceptEdits`, with one notice. An answer with no modes, one offering neither mode, and a
 //! refused fallback each fail the launch before any prompt. A matter whose folder Claude's

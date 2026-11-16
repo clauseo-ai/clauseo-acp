@@ -146,6 +146,10 @@ any ACP message, including permission requests with misleading text.
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one
+- `built`: Claude Code loads no project-level `.claude` contents (skills, agents, commands,
+  `CLAUDE.md`) from the matter or any folder above it, because every Claude session call (new,
+  load, resume) sends user-only setting sources (`settingSources: ["user"]`, `agent/loads.rs`
+  `CLAUDE_SETTING_SOURCES`); the `claude-mode-*` scenarios pin it (`tests/host/claude_mode.rs`)
 - `built`: Permission answers are checked against the options offered, in the bridge and again in
   the host; `designed`: options are labelled by kind, not by the agent's text (the permission prompt)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the
