@@ -104,10 +104,10 @@ test("a changed document goes back alone: the dialog says the copy now is replac
   expect(done?.querySelector(".ver-notice-text")?.textContent).toMatch(
     /^Restored \u2068brief\.txt\u2069 to how it was at .+ today\.$/,
   );
-  // the restore can be taken back like any other, by restoring the version just before it
+  // the restore can be taken back, by restoring that document alone as it was just before it
   await h.click(done?.querySelector(".ver-restored-undo"));
   expect(h.queried("preview_restore").at(-1)).toEqual({
-    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: ONE_FILE, undoes: "cp4" },
   });
 });
 
@@ -270,10 +270,14 @@ test("Undo of a one-document restore says that document is back as it was", asyn
   ]);
   await h.click(document.body.querySelector(".ver-restored-undo"));
   await h.click(h.one("dialog-confirm"));
+  // that document alone: an edit to another since the restore stays
+  expect(h.queried("preview_restore").at(-1)).toEqual({
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: ONE_FILE, undoes: "cp4" },
+  });
   expect(h.sent("restore_version").at(-1)).toEqual({
     matter: MATTER,
     checkpoint: "cp3",
-    scope: "matter",
+    scope: ONE_FILE,
     undoes: "cp4",
     thread: THREAD,
   });

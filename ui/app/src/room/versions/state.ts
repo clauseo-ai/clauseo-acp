@@ -81,16 +81,15 @@ export type Done =
       kept?: readonly SkippedFile[];
     };
 
-/** What a restore that went through did: undid the restore it undoes (undoneFile: the one file that one put back, if
- * it put back one), restored the matter, or restored one file. */
+/** What a restore that went through did: undid the restore it undoes (that file alone, for a one-file restore's undo),
+ * restored the matter, or restored one file. */
 export const restoreDone = (
   ask: Pick<RestoreAsk, "id" | "preview" | "undoes" | "file">,
   outcome: Outcome,
   at: Timestamp,
-  undoneFile: string | null,
 ): Done =>
   ask.undoes !== null
-    ? { kind: "undidRestore", at, file: undoneFile }
+    ? { kind: "undidRestore", at, file: ask.file }
     : ask.file === null
       ? { kind: "restored", to: ask.id, n: ask.preview.changes.length, outcome }
       : { kind: "restoredFile", to: ask.id, file: ask.file, outcome };

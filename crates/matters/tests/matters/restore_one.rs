@@ -6,7 +6,9 @@
 use clauseo_matters::{CheckpointOutcome, Error, Matter, RestoreFiles};
 use clauseo_protocol::{CheckpointKind, ErrorCode, MatterPath};
 
-use crate::fixture::{Fixture, assert_none, cid, meta, path, read_at, restore_request, tools};
+use crate::fixture::{
+    Fixture, assert_no_temp_files, assert_none, cid, meta, path, read_at, restore_request, tools,
+};
 use crate::support;
 
 /// Checkpoint 1 holds `a.txt` "one", `b.txt` "bee" and `sub/deep/c.txt` "cee"; checkpoint 3,
@@ -110,6 +112,7 @@ fn assert_refused(fx: &Fixture, matter: &mut Matter, chosen: &[MatterPath]) {
     assert_eq!(err.code(), ErrorCode::MatterFileFolderClash);
     assert_eq!(ids(matter), before, "nothing is recorded");
     assert_eq!(fx.read("b.txt"), b"bee, edited");
+    assert_no_temp_files(&fx.folder);
 }
 
 #[test]
@@ -136,4 +139,90 @@ fn a_file_whose_folder_is_now_a_file_is_refused() {
 
     assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"));
     assert_eq!(fx.read("sub"), b"a file now");
+}
+
+/// A socket where a folder of the chosen file goes is a clash too, not a failure to read.
+#[cfg(unix)]
+#[test]
+fn a_file_whose_folder_is_now_a_socket_is_refused() {
+    let (fx, mut matter) = versioned("restore-one-folder-now-socket");
+    support::remove_dir_all(fx.file("sub"));
+    let _socket = support::socket(fx.file("sub"));
+
+    assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"));
+}
+
+/// Undo of a one-file restore, scoped to that file as Versions asks it: the file goes back to
+/// the copy it replaced, and another file edited since the restore keeps its edit.
+#[test]
+fn undoing_a_one_file_restore_leaves_other_edits_alone() {
+    let (fx, mut matter) = versioned("restore-one-undo-scoped");
+    fx.write("a.txt", "three, by hand");
+    let chosen = only("a.txt");
+    matter
+        .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
+        .unwrap();
+    fx.write("b.txt", "bee, edited after the restore");
+
+    let mut back = restore_request(4, RestoreFiles::Only(&chosen), 6, 7);
+    back.undoes = Some(cid(5));
+    let plan = matter
+        .preview_restore(cid(4), RestoreFiles::Only(&chosen), Some(cid(5)))
+        .unwrap();
+    let planned: Vec<&str> = plan.writes.iter().map(|w| w.path().as_str()).collect();
+    assert_eq!(planned, ["a.txt"]);
+    let undone = matter.restore(&back).unwrap();
+    assert_eq!(undone.written, chosen);
+    assert_eq!(fx.read("a.txt"), b"three, by hand");
+    assert_eq!(fx.read("b.txt"), b"bee, edited after the restore");
+}
+
+/// A file moved since comes back at its old path (Versions asks by the rename's `from`), and
+/// the moved copy stays; a file the lawyer made at the old path since is kept in history first.
+#[test]
+fn a_moved_file_comes_back_at_its_old_path() {
+    let (fx, mut matter) = versioned("restore-one-moved");
+    support::rename(fx.file("a.txt"), fx.file("moved.txt"));
+    let chosen = only("a.txt");
+    let restored = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
+        .unwrap();
+    assert_eq!(restored.written, chosen);
+    assert_eq!(fx.read("a.txt"), b"one");
+    assert_eq!(fx.read("moved.txt"), b"two");
+
+    fx.write("a.txt", "a new file at the old path");
+    let again = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&chosen), 6, 7))
+        .unwrap();
+    assert_eq!(again.written, chosen);
+    assert_eq!(fx.read("a.txt"), b"one");
+    assert_eq!(read_at(&matter, 6, "a.txt"), b"a new file at the old path");
+}
+
+/// A link at the chosen file is kept as it is, never written through, and is no error.
+#[cfg(unix)]
+#[test]
+fn a_link_at_the_chosen_file_is_kept() {
+    let (fx, mut matter) = versioned("restore-one-link");
+    support::remove_file(fx.file("a.txt"));
+    support::symlink(fx.file("b.txt"), fx.file("a.txt"));
+    let chosen = only("a.txt");
+    let restored = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
+        .unwrap();
+    assert_none(&restored.written);
+    assert_eq!(
+        fx.read("b.txt"),
+        b"bee, edited",
+        "nothing written through the link"
+    );
+    assert!(
+        fx.file("a.txt")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_no_temp_files(&fx.folder);
 }

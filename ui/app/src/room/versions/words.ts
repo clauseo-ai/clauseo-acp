@@ -109,7 +109,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
-    if (ask.file !== null)
+    if (ask.file !== null && ask.undoes === null)
       return {
         ...fileAskOf(lang, cal, v, name(ask.file), changes[0]?.change, kept.length > 0),
         stays: stays.length === 0 ? null : stays.join(" "),
