@@ -13,6 +13,18 @@
 //!   forwarded `<Domain>.enable` or `.disable` is noted per session (when forwarded, not when
 //!   the browser confirms it: a refused enable brings no events anyway); a new client starts
 //!   with none noted ([`Routes::client_connected`]).
+//! - **Certificate warnings:** a command that would let a page past a certificate error is
+//!   answered here with a CDP error, on every session, the root and each page's alike
+//!   ([`certificate_bypass`]): `Security.setIgnoreCertificateErrors` unless `ignore` is
+//!   `false`, `Security.setOverrideCertificateErrors` unless `override` is `false`,
+//!   `Security.handleCertificateError` unless `action` is `"cancel"`, and two commands that would
+//!   carry any command past this check: `Target.sendMessageToTarget` (a command inside a string,
+//!   for a session agent-browser never uses: it attaches flat) and `Target.exposeDevToolsProtocol`
+//!   (a page's own script gets a `DevTools` connection that does not pass through the guard).
+//!   Those are all of Chrome for Testing 147's protocol (`/json/protocol`) that touch a
+//!   certificate error; it has no command that sets a preference or a flag. The profile's `ssl`
+//!   preferences (`quiet.rs`) take the warning's "Proceed" away; these keep `DevTools` from
+//!   skipping the warning altogether.
 //! - **Replies** with a guard id go to the relay's own waiting call if it sent the command, else
 //!   to the guard's clients; never to agent-browser. Every other reply goes to agent-browser as
 //!   the browser wrote it.
@@ -134,6 +146,9 @@ impl Routes {
             return FromClient::Refuse(refusal(id, "the id is outside agent-browser's range"));
         }
         if let Some(method) = message.get("method").and_then(Value::as_str) {
+            if let Some(why) = certificate_bypass(method, message.get("params")) {
+                return FromClient::Refuse(refusal(id, why));
+            }
             let session = session_of(message.get("sessionId")).to_owned();
             if session.is_empty() && self.domains.contains(domain_of(method)) {
                 return FromClient::Refuse(refusal(
@@ -191,6 +206,34 @@ impl Routes {
         }
     }
 }
+
+/// Why the guard refuses `method` with `params`, on any session, when it would let a page past a
+/// certificate error (the top of this file); `None` for every other command. A switch is let
+/// through only when it is exactly off: `false`, or the action `"cancel"`; a missing, `null` or
+/// mistyped value is refused.
+pub(crate) fn certificate_bypass(method: &str, params: Option<&Value>) -> Option<&'static str> {
+    let param = |name: &str| params.and_then(|params| params.get(name));
+    let off = |name: &str| param(name) == Some(&Value::Bool(false));
+    let refused = match method {
+        "Security.setIgnoreCertificateErrors" => !off("ignore"),
+        "Security.setOverrideCertificateErrors" => !off("override"),
+        "Security.handleCertificateError" => {
+            param("action").and_then(Value::as_str) != Some("cancel")
+        }
+        "Target.sendMessageToTarget" | "Target.exposeDevToolsProtocol" => {
+            return Some(CARRIES_COMMANDS);
+        }
+        _ => false,
+    };
+    refused.then_some(CERTIFICATE_BYPASS)
+}
+
+/// The refusal of a command that skips a certificate error.
+pub(crate) const CERTIFICATE_BYPASS: &str =
+    "Clauseo does not allow skipping a certificate error in the browser";
+/// The refusal of a command that would carry other commands past the guard's checks.
+pub(crate) const CARRIES_COMMANDS: &str =
+    "Clauseo does not allow a DevTools command that carries other commands past its checks";
 
 /// The local CDP error (-32600, as JSON-RPC's invalid request) for agent-browser's command `id`.
 fn refusal(id: &Value, message: &str) -> String {

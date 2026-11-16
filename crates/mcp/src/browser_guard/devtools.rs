@@ -471,6 +471,8 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
+mod cert_tests;
+#[cfg(test)]
 mod peer_tests;
 #[cfg(test)]
 mod seam_tests;

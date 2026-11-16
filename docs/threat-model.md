@@ -175,6 +175,18 @@ any ACP message, including permission requests with misleading text.
   2026-11-16); every Windows acceptance row runs on a Git-free machine with 5.1 only and with
   `pwsh` 7 installed
 - `designed`: The launch self-test (#1167) refuses a launch whose pre-write guard cannot start
+- `built`: In the guarded browser (Codex, through `clauseo-mcp browser-guard`) a page whose
+  certificate does not verify shows Chrome's warning with no way past it: the guard's own
+  profile sets `ssl.error_override_allowed` false and an empty allow-list at every start, with
+  remembered "proceed" decisions taken out (`browser_guard/quiet.rs`, `chrome/profile.rs`; no
+  policy, so the lawyer's Chrome and Edge are untouched); the guard's DevTools relay refuses every
+  certificate-skipping command on every session (`devtools/routes.rs`); Chrome's own pages and
+  added switches are refused (`filter.rs`). The real-Chrome test proves it for clicks, typed
+  `thisisunsafe`, reload, history, new tabs and an `http://` redirect. A condition of switching
+  on Claude's unguarded shell-browser path (`agent/loads/browser.rs:322-347`, `shell_env`; off
+  today; there the agent runs agent-browser in its own shell and could pass
+  `--ignore-https-errors`): that path must get the same protection first. Not yet run on Edge
+  (Windows)
 
 ## Sandbox
 

@@ -297,3 +297,43 @@ fn chrome_flags_choices_are_reset_before_each_start() {
     assert_eq!(local["chrome_own"], 7, "{local}");
     write::remove_dir_all(&dir).unwrap();
 }
+
+/// Every start writes the certificate settings again, whatever the kept file says, and takes
+/// out any remembered "proceed" past a certificate warning; the rest of the exceptions stay.
+#[cfg(unix)]
+#[test]
+fn every_start_forbids_proceeding_past_a_certificate_warning() {
+    let (dir, profile, _outside) = kept("ssl");
+    let file = profile.join("Default").join("Preferences");
+    assert_eq!(json(&file)["ssl"]["error_override_allowed"], false);
+    assert_eq!(
+        json(&file)["ssl"]["error_override_allowed_for_origins"],
+        serde_json::json!([])
+    );
+    let tampered = serde_json::json!({
+        "ssl": {
+            "error_override_allowed": true,
+            "error_override_allowed_for_origins": ["https://bad.example"],
+        },
+        "profile": {"content_settings": {"exceptions": {
+            "ssl_cert_decisions": {"https://bad.example:443,*": {"setting": {"x": 1}}},
+            "mixed_script": {"http://*:*,*": {"setting": 1}},
+        }}},
+    });
+    write::write(&file, tampered.to_string()).unwrap();
+    ready_again(&dir, &profile);
+    let written = json(&file);
+    assert_eq!(written["ssl"]["error_override_allowed"], false);
+    assert_eq!(
+        written["ssl"]["error_override_allowed_for_origins"],
+        serde_json::json!([])
+    );
+    let exceptions = &written["profile"]["content_settings"]["exceptions"];
+    assert!(exceptions.get("ssl_cert_decisions").is_none(), "{written}");
+    assert_eq!(exceptions["mixed_script"]["http://*:*,*"]["setting"], 1);
+    // Not an object where Chrome keeps it: replaced, never kept.
+    write::write(&file, r#"{"ssl": "on"}"#).unwrap();
+    ready_again(&dir, &profile);
+    assert_eq!(json(&file)["ssl"]["error_override_allowed"], false);
+    write::remove_dir_all(&dir).unwrap();
+}
