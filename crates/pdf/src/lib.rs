@@ -1,6 +1,8 @@
-//! Clauseo's own `pdftoppm` and `pdfinfo` (scanned PDFs, PR-P1): two small programs that run
-//! Clauseo's Python runtime on [`SCRIPT`], which renders pages and reads page counts with the
-//! runtime's `pypdfium2` (`PDFium`, BSD/Apache) and Pillow. No poppler (GPL) code ships.
+//! Clauseo's own `pdftoppm` and `pdfinfo` (scanned PDFs, PR-P1) and `pdftotext` (PR-O2): small
+//! programs that run Clauseo's Python runtime on [`SCRIPT`], which renders pages and reads page
+//! counts with the runtime's `pypdfium2` (`PDFium`, BSD/Apache) and Pillow, or on
+//! [`PDFTOTEXT`], which prints a PDF's text layer and recognises pages without one with the
+//! runtime's tesseract. No poppler (GPL) code ships.
 //!
 //! Claude Code's Read renders a long PDF by running `pdftoppm -v` (it runs: the tool is there),
 //! then `pdftoppm -jpeg -r 100 [-f N] [-l M] <pdf> <prefix>`, and counts pages with
@@ -29,8 +31,12 @@ use std::process::{Command, ExitCode};
 #[cfg(windows)]
 mod job;
 
-/// The Python script both programs run: `pdftoppm` and `pdfinfo` over `pypdfium2` and Pillow.
+/// The Python script `pdftoppm` and `pdfinfo` run, over `pypdfium2` and Pillow.
 pub const SCRIPT: &str = include_str!("clauseo_pdf.py");
+
+/// The Python script `pdftotext` runs: the text layer over `pypdfium2`, the other pages OCR'd
+/// by the runtime's tesseract, kept in the matter's notes (`CLAUSEO_OCR_DIR`).
+pub const PDFTOTEXT: &str = include_str!("pdftotext.py");
 
 /// The receipt every installed Clauseo Python runtime folder holds (`clauseo_agents`'
 /// `python.rs`, `PYTHON_RECEIPT`).
@@ -49,6 +55,8 @@ pub enum Tool {
     Pdftoppm,
     /// `pdfinfo`: the page count and the document's details.
     Pdfinfo,
+    /// `pdftotext`: the text, with pages that have no text layer recognised by OCR.
+    Pdftotext,
 }
 
 impl Tool {
@@ -57,6 +65,15 @@ impl Tool {
         match self {
             Self::Pdftoppm => "pdftoppm",
             Self::Pdfinfo => "pdfinfo",
+            Self::Pdftotext => "pdftotext",
+        }
+    }
+
+    /// The Python script the tool runs.
+    pub const fn script(self) -> &'static str {
+        match self {
+            Self::Pdftoppm | Self::Pdfinfo => SCRIPT,
+            Self::Pdftotext => PDFTOTEXT,
         }
     }
 }
@@ -117,12 +134,12 @@ pub fn find_python_with(
         })
 }
 
-/// The interpreter's command for `tool` with `args`: `python -I -X utf8 -c <SCRIPT> <tool>
+/// The interpreter's command for `tool` with `args`: `python -I -X utf8 -c <script> <tool>
 /// <args…>`, without [`DROPPED`] in its environment.
 pub fn command(python: &Path, tool: Tool, args: &[OsString]) -> Command {
     let mut command = Command::new(python);
     command
-        .args(["-I", "-X", "utf8", "-c", SCRIPT, tool.name()])
+        .args(["-I", "-X", "utf8", "-c", tool.script(), tool.name()])
         .args(args);
     for var in DROPPED {
         command.env_remove(var);
