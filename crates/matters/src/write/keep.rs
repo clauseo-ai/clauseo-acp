@@ -11,8 +11,12 @@
 //!
 //! The order lets a read-only original (`0o444`) keep everything: setting an attribute needs a
 //! writable file, so the mode comes after the attributes. macOS: the attributes, then the ACL,
-//! then the mode. Linux: the attributes but the ACL, then the mode, then the ACL attribute
-//! (setting it rewrites the group bits to the ACL's mask, as the original has them).
+//! then the quarantine flag, then the mode. `fcopyfile` with `COPYFILE_ACL` (`macos::copy_acl`)
+//! also hands the source's quarantine to libquarantine, which writes a fresh stamp (the time of
+//! the call, no agent) over the one copied before it; the flag goes after it, byte for byte, and
+//! a temp file that got one from an original without it has it removed.
+//! Linux: the attributes but the ACL, then the mode, then the ACL attribute (setting it rewrites
+//! the group bits to the ACL's mask, as the original has them).
 //!
 //! Nothing here fails the write: each attribute that could not be read or set counts as one lost,
 //! with its errno, and the caller logs the total once.
@@ -32,6 +36,10 @@ const MAX_VALUE: usize = 64 << 20;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const ACL_ACCESS: &[u8] = b"system.posix_acl_access";
 
+/// macOS's quarantine flag: copied after the ACL, which would stamp over it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const QUARANTINE: &[u8] = b"com.apple.quarantine";
+
 /// Copies what the file `original` has to the open temp file `temp`; what could not be copied.
 /// A missing `original` (a new file, or a restore of a deleted one: checkpoints record no
 /// metadata) or one that is not a plain file leaves the temp file with the defaults, and is no
@@ -45,11 +53,17 @@ pub(super) fn copy(original: &Path, temp: &File) -> Lost {
     };
     let mut lost = Lost::default();
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    lost.add(xattrs::copy(original, temp, |name| name != ACL_ACCESS));
+    lost.add(xattrs::copy(original, temp, |name| {
+        name != ACL_ACCESS && name != QUARANTINE
+    }));
     #[cfg(target_os = "macos")]
     if let Err(err) = super::macos::copy_acl(original, temp) {
         lost.add(Lost::one(err.raw_os_error()));
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    lost.add(xattrs::copy(original, temp, |name| name == QUARANTINE));
+    #[cfg(target_os = "macos")]
+    lost.add(xattrs::remove_unless_on(original, temp, QUARANTINE));
     if let Err(err) = temp.set_permissions(Permissions::from_mode(metadata.mode() & 0o777)) {
         lost.add(Lost::one(err.raw_os_error()));
     }
@@ -96,6 +110,20 @@ mod xattrs {
             }
         }
         lost
+    }
+
+    /// macOS: removes the attribute `name` from `temp` when `original` has none (`copy_acl`
+    /// may have stamped one); what was not removed. An original whose attribute could not be read
+    /// leaves `temp` as it is (the copy counted that loss).
+    #[cfg(target_os = "macos")]
+    pub(super) fn remove_unless_on(original: &Path, temp: &File, name: &[u8]) -> Lost {
+        if !matches!(value(original, name), Ok(None)) {
+            return Lost::default();
+        }
+        match rustix::fs::fremovexattr(temp, name) {
+            Err(err) if !absent(err) => Lost::one(Some(err.raw_os_error())),
+            _ => Lost::default(),
+        }
     }
 
     /// The NUL-separated names of `path`'s extended attributes.

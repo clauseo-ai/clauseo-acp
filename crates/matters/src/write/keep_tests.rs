@@ -149,6 +149,20 @@ fn a_rewrite_keeps_finder_tags_on_macos() {
     assert_eq!(xattr(&target, "com.apple.quarantine"), quarantine);
 }
 
+/// macOS: an original without the quarantine flag gives a rewrite without one (the ACL copy's
+/// `fcopyfile` may stamp one; it is removed).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_rewrite_of_an_unquarantined_file_stays_unquarantined_on_macos() {
+    let dir = TestDir::new("keep-unquarantined");
+    let target = old_file(&dir, "Lease.docx");
+    let none = rustix::fs::getxattr_query(&target, "com.apple.quarantine");
+    assert_eq!(none.unwrap_err(), rustix::io::Errno::NOATTR);
+    assert_eq!(rewrite(&target), 0);
+    let none = rustix::fs::getxattr_query(&target, "com.apple.quarantine");
+    assert_eq!(none.unwrap_err(), rustix::io::Errno::NOATTR);
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn only_the_systems_own_attributes_are_skipped() {
