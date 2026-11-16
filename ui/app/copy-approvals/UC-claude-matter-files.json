@@ -1,0 +1,146 @@
+{
+  "U3-err-matter.claude_tasks_file": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start Claude in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and Claude can work here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds .claude/scheduled_tasks.json (matter.claude_tasks_file, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; Claude's line, also for an agent not known."
+  },
+  "U3-err-matter.claude_tasks_file.mac": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start Claude in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and Claude can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.claude_tasks_file.chatgpt": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start ChatGPT in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and ChatGPT can work here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds .claude/scheduled_tasks.json (matter.claude_tasks_file, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; a thread on the ChatGPT plan."
+  },
+  "U3-err-matter.claude_tasks_file.chatgpt.mac": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start ChatGPT in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.claude_tasks_file.named": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start {name} in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and {name} can work here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds .claude/scheduled_tasks.json (matter.claude_tasks_file, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; an agent of no kind, by its {name}."
+  },
+  "U3-err-matter.claude_tasks_file.named.mac": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start {name} in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and {name} can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.claude_tasks_file.nameless": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start the AI in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and the AI can work here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds .claude/scheduled_tasks.json (matter.claude_tasks_file, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; an agent with no name."
+  },
+  "U3-err-matter.claude_tasks_file.nameless.mac": {
+    "en": "This matter's folder holds a file named \"scheduled_tasks.json\", in a folder named \".claude\". Clauseo doesn't start the AI in a matter that holds it. Move it out of this matter's folder, rename it or remove it, and the AI can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.git_folder": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start Claude in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and Claude can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds a .git folder or file (matter.git_folder, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; Claude's line, also for an agent not known."
+  },
+  "U3-err-matter.git_folder.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start Claude in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and Claude can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.git_folder.chatgpt": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start ChatGPT in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and ChatGPT can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds a .git folder or file (matter.git_folder, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; a thread on the ChatGPT plan."
+  },
+  "U3-err-matter.git_folder.chatgpt.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start ChatGPT in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and ChatGPT can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.git_folder.named": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start {name} in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and {name} can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds a .git folder or file (matter.git_folder, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; an agent of no kind, by its {name}."
+  },
+  "U3-err-matter.git_folder.named.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start {name} in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and {name} can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  },
+  "U3-err-matter.git_folder.nameless": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start the AI in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and the AI can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "Refusal of a send in a matter whose folder holds a .git folder or file (matter.git_folder, crates/host/src/agent/claude_files.rs CLAUDE_REFUSED_ENTRIES), at launch and before each prompt; an agent with no name."
+  },
+  "U3-err-matter.git_folder.nameless.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start the AI in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and the AI can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (via the orchestrator; provisional)",
+    "note": "The same line on the Mac, where Finder hides dot folders (words-errors-dot.ts)."
+  }
+}

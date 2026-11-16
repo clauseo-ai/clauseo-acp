@@ -30,12 +30,14 @@ use crate::sent::SentView;
 mod ended;
 mod launch;
 mod path;
+mod recheck;
 mod start_failure;
 mod waiting;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
+pub(super) use recheck::folder_recheck;
 pub(super) use start_failure::launch_failed;
 use waiting::fail_waiting;
 pub(super) use waiting::{fail_all, run_waiting};

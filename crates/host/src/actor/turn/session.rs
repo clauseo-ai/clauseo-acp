@@ -19,7 +19,7 @@ use clauseo_protocol::{
 
 use super::super::Actor;
 use super::super::input::Input;
-use super::agents::{Stage, call, launch_failed, run_waiting};
+use super::agents::{Stage, call, folder_recheck, launch_failed, run_waiting};
 use super::key_retry;
 use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
@@ -122,12 +122,7 @@ pub(super) fn on_replay_log(
     }
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        Arc::clone(&clock),
-        matter,
-        agent.codex.is_some().then(|| agent.folder.clone()),
-        no_git,
-    );
+    let check = codex::prepare::recheck(Arc::clone(&clock), matter, folder_recheck(agent), no_git);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -175,12 +170,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        Arc::clone(&clock),
-        matter,
-        agent.codex.is_some().then(|| agent.folder.clone()),
-        no_git,
-    );
+    let check = codex::prepare::recheck(Arc::clone(&clock), matter, folder_recheck(agent), no_git);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -224,12 +214,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        Arc::clone(&clock),
-        matter,
-        agent.codex.is_some().then(|| agent.folder.clone()),
-        no_git,
-    );
+    let check = codex::prepare::recheck(Arc::clone(&clock), matter, folder_recheck(agent), no_git);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {

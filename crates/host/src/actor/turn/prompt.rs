@@ -29,10 +29,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         .and_then(|agent| {
             let session = agent.session.clone()?;
             Some((
-                (
-                    agent.id,
-                    agent.codex.is_some().then(|| agent.folder.clone()),
-                ),
+                (agent.id, super::agents::folder_recheck(agent)),
                 (agent.link.client.clone(), agent.link.descendants().clone()),
                 agent.link.fence(),
                 session,
@@ -105,10 +102,10 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let list_clock = std::sync::Arc::clone(&actor.clock);
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, and every
-            // agent's `git` that does nothing, and the agent's descendants are listed, all off
-            // the actor, before the prompt goes out: a cancelled turn ends what is new since this
-            // listing.
+            // A Codex or Claude agent's matter folder is checked again first (`.codex`, or
+            // Claude's refused entries), and every agent's `git` that does nothing, and the
+            // agent's descendants are listed, all off the actor, before the prompt goes out: a
+            // cancelled turn ends what is new since this listing.
             let (checked, listed) = join(
                 codex::prepare::recheck(clock, matter, check, no_git),
                 leftovers::snapshot(descendants, list_clock),

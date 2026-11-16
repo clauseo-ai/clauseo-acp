@@ -252,6 +252,39 @@ export const HI = {
     'AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
   // agent.folder_inaccessible: the agent couldn't open the matter folder as it started. Draft English (Rohan to
   // approve); this Hindi is provisional
+  // provisional (U3-err-matter.claude_tasks_file, U3-err-matter.git_folder, their agents' and .mac lines): Hindi later
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start Claude in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and Claude can work here.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start ChatGPT in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and ChatGPT can work here.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start {name} in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and {name} can work here.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start the AI in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and the AI can work here.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start Claude in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and Claude can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start ChatGPT in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start {name} in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and {name} can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a file named "scheduled_tasks.json", in a folder named ".claude". Clauseo doesn\'t start the AI in a matter that holds it. Move it out of this matter\'s folder, rename it or remove it, and the AI can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
   "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
     "Claude मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":

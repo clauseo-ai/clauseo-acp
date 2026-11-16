@@ -9,7 +9,9 @@ use clauseo_protocol::{ErrorCode, MatterId};
 
 use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
+use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
 /// that, the host's first launch sets aside the `run` folder an earlier run left ([`RunSweep`]).
@@ -188,4 +190,23 @@ pub(super) fn remove_folders(run: &RunFolders) {
             remove_tree(folder);
         }
     }
+}
+
+/// A Claude agent's part of the prep, for the matter folder `stored` it starts in at `cwd`: an
+/// entry the folder may not hold refuses the launch (`agent/claude_files.rs`); the folder check's
+/// answer never does, it decides forced ask; then its home is made and its settings written.
+pub(super) fn prepare_claude(
+    check: &FolderCheck,
+    stored: &Path,
+    cwd: &Path,
+    data: &Path,
+    home: &Path,
+) -> Result<Answer, Error> {
+    crate::agent::claude_files::refuse_claude_entries(&crate::agent::session_folder(stored))?;
+    let answer = check.run(cwd);
+    crate::agent::codex::make_agent_home(data, home, "Claude Code")?;
+    if let Err(error) = crate::agent::home::write_claude_settings(home) {
+        tracing::warn!(error = %Cause(&error), "Claude's home settings were not written");
+    }
+    Ok(answer)
 }

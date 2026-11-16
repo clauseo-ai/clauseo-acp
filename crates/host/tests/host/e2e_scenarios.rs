@@ -12,7 +12,8 @@
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use clauseo_host::ManualClock;
@@ -106,22 +107,30 @@ fn answered(event: &DomainEvent) -> bool {
     )
 }
 
-/// Moves the test's clock past each durability timer (streamed text commits on it) and each
-/// 5 s cancel fallback as they are armed, until dropped.
+/// Moves the test's clock past each durability timer (streamed text commits on it) as they are
+/// armed, and past each 5 s timer once [`Mover::cancelling`] is called, until dropped. Before the
+/// cancel a 5 s timer is the folder re-check's before each prompt (`PREPARE_WAIT`), which answers
+/// on its own thread; moving past it would fail the prompt.
 struct Mover {
     stop: Option<oneshot::Sender<()>>,
+    cancelling: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Mover {
     fn start(clock: ManualClock) -> Self {
         let (stop, mut stopped) = oneshot::channel::<()>();
+        let cancelling = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::clone(&cancelling);
         let thread = std::thread::spawn(move || {
             futures::executor::block_on(async move {
                 loop {
                     let next = std::pin::pin!(clock.next_armed());
                     match futures::future::select(next, &mut stopped).await {
-                        Either::Left((delay, _)) if delay == DURABLE || delay == CANCEL_WAIT => {
+                        Either::Left((delay, _))
+                            if delay == DURABLE
+                                || (delay == CANCEL_WAIT && cancel.load(Ordering::SeqCst)) =>
+                        {
                             clock.advance(delay);
                         }
                         Either::Left(_) => {}
@@ -132,8 +141,14 @@ impl Mover {
         });
         Self {
             stop: Some(stop),
+            cancelling,
             thread: Some(thread),
         }
+    }
+
+    /// From now on a 5 s timer is the cancel fallback, and the clock moves past it.
+    fn cancelling(&self) {
+        self.cancelling.store(true, Ordering::SeqCst);
     }
 }
 
@@ -189,6 +204,7 @@ fn play(n: usize, spec: &str, scenario: &Scenario) {
     events.assert_no_mismatch();
     // A turn still running (a permission asked, a cancel never answered) is cancelled and
     // reaches its end, by the 5 s fallback at the latest, before the host stops.
+    mover.cancelling();
     drop(host.dispatch(HostCommand::Cancel { thread }));
     events.until(&format!("{arg} ({spec}): the turn's end"), ended);
     drop(mover);

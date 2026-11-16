@@ -364,16 +364,8 @@ pub(super) fn prepare(
                     }
                     None => None,
                 };
-                // Claude is never refused for its folder: the answer decides its forced ask.
                 if let Some(home) = &claude_home {
-                    answer = Some(check.run(&cwd));
-                    codex::make_agent_home(&data, home, "Claude Code")?;
-                    if let Err(error) = crate::agent::home::write_claude_settings(home) {
-                        tracing::warn!(
-                            error = %Cause(&error),
-                            "Claude's home settings were not written"
-                        );
-                    }
+                    answer = Some(prepare_claude(&check, &stored, &cwd, &data, home)?);
                 }
                 run.make(&data, &sweep)?;
                 make_guard(&mut run, &data, claude)?;
@@ -576,7 +568,9 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
+use folders::{
+    browser_run_dir, launch_deny, make_guard, notes_dir, prepare_claude, remove_tree, run_dir,
+};
 mod paths;
 pub(super) use paths::no_git_check;
 use paths::{LaunchPaths, launch_paths};

@@ -1555,7 +1555,9 @@ expression: counts_schema()
         "blackline.too_large",
         "blackline.format_unknown",
         "agent.unreachable",
-        "agent.tool_missing"
+        "agent.tool_missing",
+        "matter.claude_tasks_file",
+        "matter.git_folder"
       ],
       "type": "string"
     },
