@@ -8,7 +8,9 @@
 # - workflow_dispatch from main with `publish`: the same check and builds, then `attest` signs the
 #   archives' build provenance and `publish` makes the release python-runtime-<python>-c<build>
 #   (from the lock) with the four archives and SHA256SUMS. A release is never replaced: when the
-#   tag or the release is already there, `publish` fails and changes nothing.
+#   tag or the release is already there, `publish` fails and changes nothing. The release is made
+#   with --latest=false: the app's updater reads releases/latest/download/latest.json (decision
+#   0037), so a runtime release must never become the repository's latest release.
 # - schedule (nightly): `audit` re-checks every pinned hash against PyPI, PBS and pandoc's GitHub
 #   release, asks OSV for advisories, and `report` opens an issue (once per title) when anything
 #   is found.
@@ -267,7 +269,7 @@ jobs:
             echo '```'
           } > notes.md
           gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "$TAG" --notes-file notes.md
+            --verify-tag --latest=false --title "$TAG" --notes-file notes.md
 
   audit:
     name: audit
