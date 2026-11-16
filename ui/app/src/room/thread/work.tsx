@@ -181,13 +181,17 @@ export function Work({
     plan: agentPlan,
   });
   // UD2: the question held for the plan's sign-in (queue_held_reason "sign_in"; from an older host that says no why, a held queue
-  // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line
+  // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line, and so does a last
+  // turn that failed for another reason (a launch that didn't start, a key or a secret that couldn't be read, a code this
+  // version doesn't know): its own line (errorWords by its code), never the sign-in card
   const held = useStreamPart(store, stream, heldPick);
   const heldAgent = useStreamPart(store, stream, agentPick);
+  const signInBreak = brk === null || brk.code === "agent.auth_required";
   const expired =
     hasSetup(transport) &&
     held != null &&
     heldAgent != null &&
+    signInBreak &&
     (held === "sign_in" || (held === "" && brk?.code === "agent.auth_required"))
       ? { agent: heldAgent, failedAt: brk?.step.ts ?? 0 }
       : null;

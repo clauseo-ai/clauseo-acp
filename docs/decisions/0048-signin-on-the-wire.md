@@ -487,7 +487,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     `agent.key_unreadable`, and one it does not mark launches without a key: Clauseo never
     stored one for it. No marker file (a fresh install) marks no agent; a file that cannot be
     read or does not parse marks every agent (fail closed), logged by the error's kind only.
-    A read that fails with the keychain's error still refuses the agent, marked or not.
+    An unmarked read still waiting at the bound counts as a failed one: under a firm plan it is
+    refused with `agent.key_unreadable` until it answers, as a failed read is.
   - *The residual.* A key stored by a build without the marker, or removed outside Clauseo,
     leaves the marker stale until a read answers. A stale "on" only refuses the agent, so it
     fails closed; "off" with a key stored can only happen for a key Clauseo never stored, or
@@ -498,15 +499,25 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     a fresh plan-only install on a slow keychain. A marker's folder that will not sync after
     its rename (rare, an I/O error) is logged, not refused: the rename has already landed.
   - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
-    agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
-    with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read
-    succeeds. The launches, the restart after a leave and a key's overwrite still count an
-    unreadable key as stored.
+    agent.key_unreadable }`, never "signed in with an API key" and never Sign in, with the
+    code's own words ("Clauseo couldn't check for a saved API key in time. If this computer
+    asks for permission, allow it, then try again.") and Try again, on the first run's gate,
+    the expired sign-in card and Plans; the log's state word is `key_unreadable`, not
+    `failed`. A sign-in press for it is refused with `agent.key_unreadable` (`SignInBar::
+    KeyUnreadable`, ahead of the firm's and the key's bars) and reads the key again: a stored
+    key bars a plan sign-in whether it reads or not, so an unanswered or denied keychain prompt
+    never sends a lawyer on a firm's key to a personal login. (Amended 2026-11-16, the
+    orchestrator's ruling on VM rows D7, A-K6 and K11: the card said "Sign-in didn't finish."
+    and its Try again started a plan sign-in.) The launches, the restart after a leave and a
+    key's overwrite still count an unreadable key as stored. A thread whose last turn failed
+    for any reason but `agent.auth_required` shows that failure's own line, never the expired
+    sign-in card, even while its queue is held for a sign-in.
   - *The retry.* A read that had not answered goes on, and when it answers it is taken in: a key
     or no item lifts the refusal. A launch meeting `agent.key_unreadable` also asks desktop to
     read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
-    before its 2 s wait, unless a read of it is still running. A read again that succeeds lifts
-    the refusal, so that launch, or the lawyer's next try, goes on. A read that fails again
+    before its 2 s wait, unless a read of it is still running, and so does a sign-in press (the
+    card's Try again). A read again that succeeds lifts the refusal, so that launch, or the
+    lawyer's next try, goes on. A read that fails again
     leaves it. A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
     force per agent (`setup/refusal.rs`): the policy's, else the unreadable key's, else none.
   - *A setup thread that never loads the keys.* The host bounds `agent.keys_loading` itself: from

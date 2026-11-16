@@ -18,8 +18,10 @@
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
 //! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`; for a read
 //!    that failed with no "key stored" mark, only under a firm plan), `Failed { code:
-//!    agent.key_unreadable }`: its launches are refused until a read succeeds. It bars no
-//!    sign-in: a key that may be there is no key in use (the desktop review's item 1).
+//!    agent.key_unreadable }`: its launches are refused until a read succeeds. It bars a
+//!    sign-in with that code, and the press reads the key again (`AgentsBackend::barred`): an
+//!    unanswered or denied keychain prompt never sends a lawyer on a firm key to a plan login
+//!    (VM rows D7, A-K6, K11; the desktop review's item 1 had it bar none).
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored), with
@@ -101,8 +103,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
             at: timestamp(since),
         });
     }
-    let firm = facts.managed.or(facts.firm).is_some();
-    if let Some(since) = facts.unreadable.or(facts.read_failed.filter(|_| firm)) {
+    if let Some(since) = unreadable_since(&facts) {
         return Some(SignIn::Failed {
             code: ErrorCode::AgentKeyUnreadable,
             at: timestamp(since),
@@ -121,9 +122,26 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     s18.and_then(|state| wire(agent, state))
 }
 
+/// Since when rule 3 holds: the stored key could not be read, or (only under a firm plan) its
+/// read failed with no "key stored" mark.
+fn unreadable_since(facts: &Facts) -> Option<SystemTime> {
+    let firm = facts.managed.or(facts.firm).is_some();
+    facts.unreadable.or(facts.read_failed.filter(|_| firm))
+}
+
+/// Whether rule 3 holds for `facts`: what bars a sign-in first (`admit::sign_in_bar`).
+pub(crate) fn key_unreadable(facts: &Facts) -> bool {
+    unreadable_since(facts).is_some()
+}
+
 /// A fixed word for `state`'s kind, for the log: never an email, a plan, a code or an address.
+/// An unreadable key is its own word, never "failed": it is no sign-in that failed.
 fn state_word(state: &SignIn) -> &'static str {
     match state {
+        SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        } => "key_unreadable",
         SignIn::SignedOut { .. } => "signed_out",
         SignIn::Checking => "checking",
         SignIn::Queued => "queued",
@@ -349,13 +367,17 @@ impl Compose {
         });
     }
 
-    /// What bars `agent`'s sign-in now, if anything (`admit::sign_in_bar`).
+    /// What bars `agent`'s sign-in now, if anything (`admit::sign_in_bar`): its key unreadable
+    /// as rule 3 reads it, a firm plan, a key, an endpoint.
     pub(crate) fn sign_in_bar(&self, agent: &AgentId) -> Option<SignInBar> {
         let agents = lock(&self.agents);
         let facts = agents
             .get(agent)
             .map(|known| known.facts)
             .unwrap_or_default();
+        if key_unreadable(&facts) {
+            return Some(SignInBar::KeyUnreadable);
+        }
         sign_in_bar(
             facts.managed.is_some(),
             facts.key.is_some(),

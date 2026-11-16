@@ -133,7 +133,12 @@ export function ExpiredCard({
       : refusal.switching && refusal.code === "command.conflict"
         ? fl(lang, "Clauseo is still switching accounts. Try again in a moment.")
         : errorWords(lang, refusal.code, { kind: plan === "chatgpt" ? "codex" : "claude", name });
-  const label = sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
+  // a saved API key the keychain didn't give is no sign-in that expired: the card is named by the key's words
+  const keyUnreadable =
+    typeof setup?.signIn === "object" && setup.signIn.failed?.code === "agent.key_unreadable";
+  const label = keyUnreadable
+    ? `${errorWords(lang, "agent.key_unreadable")} ${kept}`
+    : sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
   let card;
   switch (e.kind) {
     case "expired":

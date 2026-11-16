@@ -1,13 +1,14 @@
 //! A stored key that cannot be read, as the windows see it and as the refusal follows it (the
 //! final security review's L4, the desktop review's item 1 and its added tests): it shows
-//! `Failed { agent.key_unreadable }`, never an API key line, and bars no sign-in; a restart sets
+//! `Failed { agent.key_unreadable }`, never an API key line, and bars a sign-in with that code,
+//! reading the key again (VM rows D7, A-K6, K11; it barred none before); a restart sets
 //! the refusal before anything launches; a late read loses to a newer key; clearing the key
 //! lifts the refusal; `follow_keys` sets the refusal from each note and reads the key again on
 //! a launch's retry.
 
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
-use clauseo_agents::{SigninState, Source};
+use clauseo_agents::SigninState;
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{CommandOutcome, ErrorCode, Secret, SignIn, SignInMethod};
 use futures::future::{Either, select};
@@ -67,40 +68,41 @@ fn key_of(keys: &KeyCache) -> Option<String> {
 }
 
 #[test]
-fn an_unreadable_key_shows_key_unreadable_never_an_api_key_and_bars_no_sign_in() {
+fn an_unreadable_key_shows_key_unreadable_never_an_api_key_and_a_sign_in_press_reads_it_again() {
     let rig = unreadable();
     let line = shown(&rig, &claude());
     assert!(key_unreadable(line.as_ref()), "{line:?}");
     // Codex has no key stored, but a read that failed cannot tell: refused all the same.
     assert!(key_unreadable(shown(&rig, &codex()).as_ref()));
-    assert_eq!(rig.backend.compose.sign_in_bar(&claude()), None);
-    let start = command("start_sign_in", &claude(), &json!({}));
+    // A stored key bars a plan sign-in, readable or not (VM rows D7, A-K6, K11): the card's Try
+    // again is refused with the key's own code, never a sign-in, and reads the key again.
     assert_eq!(
-        block_on(rig.setup().run(MAIN, start)),
-        Ok(CommandOutcome::Done),
-        "never signin.key_in_use"
+        rig.backend.compose.sign_in_bar(&claude()),
+        Some(crate::setup::admit::SignInBar::KeyUnreadable)
     );
-    assert_eq!(rig.calls(), [("sign_in", claude())], "the sign-in runs");
-    // Signed in with the plan: launches stay refused until a read succeeds, and the line says so.
-    let plan = SigninState::SignedIn {
-        email: None,
-        plan: Some("max".to_owned()),
-        source: Source::Own,
-        at: UNIX_EPOCH,
-    };
-    rig.s18_was(&claude(), plan);
-    assert!(key_unreadable(shown(&rig, &claude()).as_ref()));
-    assert!(
-        rig.backend.keys.has(&claude()),
-        "still stored, for the launches"
-    );
+    let start = || command("start_sign_in", &claude(), &json!({}));
+    let refused = block_on(rig.setup().run(MAIN, start())).unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::AgentKeyUnreadable);
+    assert_eq!(rig.calls(), [], "no sign-in runs");
+    // The prompt is answered. The press's own read (failed) may still be running, when a read
+    // again starts none: ask until one runs and lands the key.
     rig.keychain.fail_reads(false);
-    block_on(rig.backend.keys.read_again(&claude())).unwrap();
+    let began = crate::open::now();
+    while !rig.backend.keys.in_memory(&claude()) {
+        assert!(
+            began.elapsed() < crate::test_support::STEP_WAIT,
+            "no read landed the key"
+        );
+        let _answered = block_on(rig.backend.keys.read_again(&claude()));
+        std::thread::yield_now();
+    }
     rig.backend.compose.show_key(&claude(), &rig.backend.keys);
     assert!(
         api_key(shown(&rig, &claude()).as_ref()),
         "read: the key's line"
     );
+    let refused = block_on(rig.setup().run(MAIN, start())).unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::SigninKeyInUse);
 }
 
 #[test]
