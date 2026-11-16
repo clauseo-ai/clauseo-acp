@@ -236,6 +236,7 @@ fn send_undo(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {
 }
 
 fn give_up(actor: &mut Actor, thread: ThreadId, ask: &UndoAsk, error: Error) {
+    tracing::warn!(%thread, error = %Cause(&error), "an undo failed");
     release(actor, ask.matter, thread);
     actor.finish_command(ask.ctx.id, Err(error));
 }
@@ -252,6 +253,8 @@ pub(super) fn on_undone(
     match result {
         Ok(undone) => {
             log_undone(thread, &undone);
+            let of = undone.restored.len() + undone.refused.len();
+            super::restore::answer_refused(actor, ask.ctx, &undone.refused, of, "an undo");
             match undo_log(thread, &ask, undone) {
                 Ok(log) => send_log(actor, thread, log),
                 Err(error) => give_up(actor, thread, &ask, error),

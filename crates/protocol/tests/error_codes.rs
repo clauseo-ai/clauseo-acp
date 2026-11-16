@@ -10,7 +10,9 @@ pub mod markdown;
 
 use std::collections::BTreeSet;
 
-use clauseo_protocol::{ErrorCode, HostError, MatterPath};
+use clauseo_protocol::{
+    ErrorCode, FileRefusal, HostError, MAX_ERROR_FILES, MatterPath, RefusedBecause, WriteFailure,
+};
 use serde_json::json;
 
 /// The record, read at build time.
@@ -198,4 +200,106 @@ fn a_host_error_names_files_only_when_given_some() {
     let mut bad = json;
     bad["files"] = json!(["../outside.docx"]);
     assert!(serde_json::from_value::<HostError>(bad).is_err());
+}
+
+/// `HostError.refusal` (decision record 0003): left out when unset; for `matter.file_refused`, the
+/// cause the refused files share (left out when they differ), how many were refused and how many
+/// files the action wrote, deleted or meant to, round-tripping with a code this version does not
+/// know too. A cause from a newer Clauseo reads as `Unknown` and does not lose the error.
+#[test]
+fn a_host_error_carries_its_refusal_only_when_given_one() {
+    let files = vec![
+        MatterPath::new("Brief.docx").unwrap(),
+        MatterPath::new("sub/Memo.docx").unwrap(),
+    ];
+    let plain = HostError::new(ErrorCode::MatterFileRefused, "matter: 2 of 3 files refused")
+        .with_files(files.clone());
+    assert!(plain.retryable());
+    assert_eq!(plain.refusal(), None);
+    let json = serde_json::to_value(&plain).unwrap();
+    assert_eq!(json.get("refusal"), None, "{json}");
+
+    let refusal = FileRefusal {
+        because: Some(RefusedBecause::SecondName),
+        refused: 2,
+        of: 3,
+    };
+    let refused = plain.clone().with_refusal(refusal);
+    let json = serde_json::to_value(&refused).unwrap();
+    assert_eq!(
+        json["refusal"],
+        json!({"because": "second_name", "refused": 2, "of": 3}),
+        "{json}"
+    );
+    let back: HostError = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(back, refused);
+    assert_eq!(back.refusal(), Some(refusal));
+
+    let mixed = FileRefusal {
+        because: None,
+        ..refusal
+    };
+    let json_mixed = serde_json::to_value(plain.with_refusal(mixed)).unwrap();
+    assert_eq!(json_mixed["refusal"], json!({"refused": 2, "of": 3}));
+    let back: HostError = serde_json::from_value(json_mixed).unwrap();
+    assert_eq!(back.refusal(), Some(mixed));
+
+    for (because, text) in [
+        (RefusedBecause::Permissions, "permissions"),
+        (
+            RefusedBecause::SavedCopyUnconfirmed,
+            "saved_copy_unconfirmed",
+        ),
+    ] {
+        let mut other = json.clone();
+        other["refusal"]["because"] = json!(text);
+        let back: HostError = serde_json::from_value(other).unwrap();
+        assert_eq!(back.refusal().and_then(|r| r.because), Some(because));
+    }
+
+    let mut unknown = json.clone();
+    unknown["code"] = json!("matter.from_the_future");
+    let back: HostError = serde_json::from_value(unknown).unwrap();
+    assert_eq!(back.code(), ErrorCode::Unknown);
+    assert_eq!(back.refusal(), Some(refusal));
+
+    let mut later = json;
+    later["refusal"]["because"] = json!("a_later_cause");
+    let back: HostError = serde_json::from_value(later).unwrap();
+    assert_eq!(
+        back.refusal().and_then(|r| r.because),
+        Some(RefusedBecause::Unknown)
+    );
+    assert_eq!(back.files(), files.as_slice());
+}
+
+/// `HostError.write_failure` (decision record 0003): left out when unset; for
+/// `matter.file_write_failed`, whether the file was put back and the action's file count,
+/// round-tripping. `files` keeps at most `MAX_ERROR_FILES`.
+#[test]
+fn a_host_error_carries_its_write_failure_and_at_most_the_cap_of_files() {
+    let lease = MatterPath::new("Lease.docx").unwrap();
+    let plain = HostError::new(ErrorCode::MatterFileWriteFailed, "matter: put back")
+        .with_files(vec![lease.clone()]);
+    assert!(plain.retryable());
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap().get("write_failure"),
+        None
+    );
+    let failure = WriteFailure {
+        put_back: false,
+        of: 2,
+    };
+    let failed = plain.with_write_failure(failure);
+    let json = serde_json::to_value(&failed).unwrap();
+    assert_eq!(json["write_failure"], json!({"put_back": false, "of": 2}));
+    let back: HostError = serde_json::from_value(json).unwrap();
+    assert_eq!(back.write_failure(), Some(failure));
+    assert_eq!(back.files(), [lease]);
+
+    let many: Vec<MatterPath> = (0..MAX_ERROR_FILES + 3)
+        .map(|n| MatterPath::new(&format!("f{n}.docx")).unwrap())
+        .collect();
+    let capped = HostError::new(ErrorCode::MatterFileLocked, "x").with_files(many.clone());
+    assert_eq!(capped.files(), &many[..MAX_ERROR_FILES]);
 }

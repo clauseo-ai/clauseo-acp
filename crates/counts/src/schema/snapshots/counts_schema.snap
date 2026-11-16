@@ -1565,7 +1565,9 @@ expression: counts_schema()
         "skill.no_skill_md",
         "skill.invalid",
         "matter.file_folder_clash",
-        "agent.home_failed"
+        "agent.home_failed",
+        "matter.file_refused",
+        "matter.file_write_failed"
       ],
       "type": "string"
     },

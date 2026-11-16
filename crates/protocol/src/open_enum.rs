@@ -42,10 +42,12 @@ pub(crate) use unit::deserialize_unit;
 pub use unknown_kind::UnknownKind;
 pub(crate) use with_names::enum_with_names;
 
-/// Counts identifiers, for the length of an `ALL` or `VARIANT_NAMES` array.
+/// Counts identifiers, for the length of an `ALL` or `VARIANT_NAMES` array: the length of a
+/// slice with a `()` for each, so no recursion and no limit on the count (one expansion per
+/// identifier hit the recursion limit at 128).
 macro_rules! count_idents {
-    () => { 0usize };
-    ($head:ident $($tail:ident)*) => { 1usize + $crate::open_enum::count_idents!($($tail)*) };
+    (@unit $ident:ident) => { () };
+    ($($ident:ident)*) => { <[()]>::len(&[$($crate::open_enum::count_idents!(@unit $ident)),*]) };
 }
 pub(crate) use count_idents;
 

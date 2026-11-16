@@ -36,6 +36,9 @@ pub(crate) struct PendingCommand {
     command: Option<ValidatedCommand>,
     /// A matter being created or imported for it.
     pub(super) matter: Option<Box<PendingMatter>>,
+    /// The answer instead of its outcome once its commit is durable: a restore or an undo done
+    /// but for files the folder refused (`matter.file_refused`, `turn/restore.rs`).
+    pub(super) refused: Option<clauseo_protocol::HostError>,
 }
 
 /// Whether a command for `thread` that gives its agent work (a prompt, a config option, a mode)
@@ -145,6 +148,7 @@ pub(super) fn dispatch(actor: &mut Actor, envelope: CommandEnvelope, reply: Repl
             waiters: vec![reply],
             command: Some(command),
             matter: None,
+            refused: None,
         },
     );
     actor.work.receipts += 1;
@@ -206,6 +210,10 @@ pub(crate) fn finish_command(
     let mut waiters = pending.waiters.into_iter();
     let Some(first) = waiters.next() else {
         return;
+    };
+    let result = match (result, pending.refused) {
+        (Ok(_), Some(refused)) => Err(Error::Refused(refused)),
+        (result, _) => result,
     };
     // A refusal keeps all it carries, `HostError::matter` included, and a matter's
     // `file_locked` its files.

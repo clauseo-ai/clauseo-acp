@@ -63,7 +63,9 @@ impl Error {
     /// The wire form ([`HostError`]'s `From`), without taking the error: a refusal as it was
     /// made; a matter's `FileLocked` with its files in `HostError::files` and their count, not
     /// their paths, in the message; a matter's `FileFolderClash` with the entry in the way, then
-    /// the file restored, in `HostError::files`; anything else with its `Display` text as the
+    /// the file restored, in `HostError::files`; `FilesRefused` like `FileLocked`, with their
+    /// causes and counts in `HostError::refusal`; `PartlyWritten` likewise, with whether the file
+    /// was put back in `HostError::write_failure`; anything else with its `Display` text as the
     /// message.
     pub(crate) fn to_wire(&self) -> HostError {
         match self {
@@ -80,6 +82,24 @@ impl Error {
                 HostError::new(self.code(), self.to_string())
                     .with_files(vec![in_way.clone(), path.clone()])
             }
+            Self::Matters(clauseo_matters::Error::FilesRefused { files, of }) => {
+                files_refused(files, *of)
+            }
+            Self::Matters(clauseo_matters::Error::PartlyWritten {
+                path, put_back, of, ..
+            }) => HostError::new(
+                ErrorCode::MatterFileWriteFailed,
+                if *put_back {
+                    "matter: a write in place failed; the file was put back"
+                } else {
+                    "matter: a write in place failed; the file may be torn"
+                },
+            )
+            .with_files(vec![path.clone()])
+            .with_write_failure(clauseo_protocol::WriteFailure {
+                put_back: *put_back,
+                of: u32::try_from(*of).unwrap_or(u32::MAX),
+            }),
             Self::Invalid(_)
             | Self::Reducer(_)
             | Self::Store(_)
@@ -93,17 +113,20 @@ impl Error {
     }
 
     /// The text a failure's `detail` shows (`turn_failed`): the `Display` text, except a matter's
-    /// `FolderMissing`, which gives its reason and not its folder, and `FileLocked`, which gives
-    /// its wire message (the count of files), so no path of the matter's reaches the lawyer's
-    /// screen. The wire message of a command's refusal (an import's) still names the folder.
+    /// `FolderMissing`, which gives its reason and not its folder, and `FileLocked`,
+    /// `FilesRefused` and `PartlyWritten`, which give their wire message (counts of files, or
+    /// what happened to the file), so no path of the matter's reaches the lawyer's screen. The
+    /// wire message of a command's refusal (an import's) still names the folder.
     pub(crate) fn detail(&self) -> String {
         match self {
             Self::Matters(clauseo_matters::Error::FolderMissing { reason, .. }) => {
                 format!("matter: the matter's folder: {reason}")
             }
-            Self::Matters(clauseo_matters::Error::FileLocked { .. }) => {
-                self.to_wire().message().to_owned()
-            }
+            Self::Matters(
+                clauseo_matters::Error::FileLocked { .. }
+                | clauseo_matters::Error::FilesRefused { .. }
+                | clauseo_matters::Error::PartlyWritten { .. },
+            ) => self.to_wire().message().to_owned(),
             Self::Invalid(_)
             | Self::Refused(_)
             | Self::Reducer(_)
@@ -156,6 +179,43 @@ impl From<Error> for HostError {
             | Error::Internal(_) => error.to_wire(),
         }
     }
+}
+
+/// A matter's `FilesRefused` on the wire: `matter.file_refused`, counts only in the message
+/// ("matter: 1 of 3 files refused", or "matter: 1 file refused" for an action on it alone), the
+/// refused paths in `files` (sorted, so the one the UI names is first; the first
+/// `MAX_ERROR_FILES`), and in `refusal` the cause they share (none when they differ, so no
+/// file's cause is given for another's), how many were refused, and `of`.
+pub(crate) fn files_refused(
+    files: &[(
+        clauseo_protocol::MatterPath,
+        clauseo_matters::RefusedBecause,
+    )],
+    of: usize,
+) -> HostError {
+    use clauseo_matters::RefusedBecause as Matters;
+    use clauseo_protocol::RefusedBecause as Wire;
+    let error = HostError::new(
+        ErrorCode::MatterFileRefused,
+        match (files.len(), of) {
+            (1, 1) => "matter: 1 file refused".to_owned(),
+            (refused, of) => format!("matter: {refused} of {of} files refused"),
+        },
+    )
+    .with_files(files.iter().map(|(path, _)| path.clone()).collect());
+    let Some((_, first)) = files.first() else {
+        return error;
+    };
+    let shared = files.iter().all(|(_, because)| because == first);
+    error.with_refusal(clauseo_protocol::FileRefusal {
+        because: shared.then_some(match first {
+            Matters::Permissions => Wire::Permissions,
+            Matters::SecondName => Wire::SecondName,
+            Matters::SavedCopyUnconfirmed => Wire::SavedCopyUnconfirmed,
+        }),
+        refused: u32::try_from(files.len()).unwrap_or(u32::MAX),
+        of: u32::try_from(of).unwrap_or(u32::MAX),
+    })
 }
 
 /// The code of a refusal of the lawyer's MCP servers (`HostCommand::Mcp`).

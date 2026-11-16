@@ -478,7 +478,23 @@ fn cause_shows_codes_and_io_kinds_never_the_error_text() {
         "the fixture holds a path"
     );
     let shown = Cause(&error).to_string();
-    assert_eq!(shown, "matter.checkpoint_failed io:NotFound/os:2");
+    assert_eq!(shown, "matter.checkpoint_failed op:read io:NotFound/os:2");
+    // Permission denied: ERROR_ACCESS_DENIED on Windows, EACCES elsewhere.
+    #[cfg(windows)]
+    let denied = 5;
+    #[cfg(not(windows))]
+    let denied = 13;
+    let in_place = clauseo_matters::Error::Io {
+        op: "write in place",
+        path: std::path::PathBuf::from("/Matters/Acme v Beta/Secret Memo.docx"),
+        source: io::Error::from_raw_os_error(denied),
+    };
+    let shown = Cause(&in_place).to_string();
+    assert_eq!(
+        shown,
+        format!("matter.checkpoint_failed op:write_in_place io:PermissionDenied/os:{denied}")
+    );
+    assert!(!shown.contains("Secret"), "{shown}");
     let plain = io::Error::other("Secret Memo.docx");
     assert_eq!(Cause(&plain).to_string(), "io:Other");
     let unknown = std::fmt::Error;

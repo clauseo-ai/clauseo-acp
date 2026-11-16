@@ -37,6 +37,19 @@ must therefore stay stable across versions.
   matter paths: for `matter.file_locked`, the files held open, so the UI can name the document to
   close without reading `message` (an undo has no preview that lists them). For
   `matter.file_locked` the files are in `files`, not in `message`. A peer that predates it reads such an error as before, without the files.
+  For `matter.file_refused`, the refused files, sorted; for `matter.file_write_failed`, the file.
+  At most 50 (`MAX_ERROR_FILES`); the counts below give the real number.
+- `HostError.refusal` (optional, left out when empty), for `matter.file_refused`: `because`, the
+  cause every refused file shares (`RefusedBecause`: `permissions`, `second_name`,
+  `saved_copy_unconfirmed`; a cause from a newer Clauseo reads as `unknown`), left out when the
+  files were refused for different reasons; `refused`, how many files were refused; and `of`, how
+  many files the action wrote, deleted or meant to, the refused ones included (1: the action was
+  on that file alone, so nothing was done; more: everything else was done). The message gives
+  counts only, never a path.
+- `HostError.write_failure` (optional, left out when empty), for `matter.file_write_failed`:
+  `put_back`, whether the file was written back as it was after its write in place failed
+  partway (otherwise it may be damaged), and `of`, counted as for `refusal`. The message gives no
+  path.
 - `matter.folder_refused` stays, with its meaning: since 0022 the host answers `CreateMatter` with
   one of the six `matter.folder_*` codes after it instead, one per reason.
 
@@ -170,6 +183,8 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `skill.invalid` | The skill to add could not be made a skill pack: it could not be read, it is over 5,000,000 bytes or 200 files, or it breaks a skill pack rule (no name or description in its `SKILL.md`, a script while scripts are off, and the like); nothing was added. | no | host (`AddSkill`; the log line holds the rule's code) |
 | `matter.file_folder_clash` | A restore of chosen files names a file whose name is now a folder, or one of whose folders is now a file, so nothing was restored or written. | no | matters (a `RestoreVersion` or `PreviewRestore` with a `files` scope, naming the entry in the way, then the file, in `HostError::files`; a whole-matter restore keeps such a file instead, and is refused only for one that clashes after its plan) |
 | `agent.home_failed` | Clauseo could not prepare the agent's own folder under its data folder (its home, or a folder of its session), so the agent was not started. Asking again can work. | yes | host (a Codex or Claude home under `<data>/agents/<id>/home` that can't be made, made private, or cleared of Codex's `rules`, or whose `config.toml` can't be written, `agent/codex.rs` `agent_home_failed`; a session's `run`, temporary or notes folder that can't be made, or a work or notes folder that can't be readied, `actor/turn/launch_checks/folders.rs` `make` and `ready_own`). Before, it read as `agent.launch_failed`; a process that does not spawn stays that code |
+| `matter.file_refused` | Files the operation would change refused it (their permissions, a second name, or a saved copy that could not be checked); everything else was done. | yes | matters, host |
+| `matter.file_write_failed` | Writing a file in place failed partway, so the operation stopped there; the file was put back as it was, or may be damaged, and the version before the operation holds it. | yes | matters, host |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

@@ -11,10 +11,11 @@
 //! drains, as an undo's is.
 
 use clauseo_counts::schema::Feature;
-use clauseo_matters::{CheckpointOutcome, Restored};
+use clauseo_matters::{CheckpointOutcome, RefusedBecause, Restored};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
-    HostCommand, InterruptedKind, MatterId, RestoreRequest, StreamId, ThreadId, VersionRestored,
+    HostCommand, InterruptedKind, MatterId, MatterPath, RestoreRequest, StreamId, ThreadId,
+    VersionRestored,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -185,6 +186,7 @@ fn send_restore(actor: &mut Actor, ask: RestoreAsk) -> Result<(), Error> {
 
 /// Lets the writer go and answers the command with `error`.
 fn give_up(actor: &mut Actor, matter: MatterId, ctx: CommandCtx, error: Error) {
+    tracing::warn!(%matter, error = %Cause(&error), "a restore or a revisions decision failed");
     end::pass_writer(actor, matter);
     actor.finish_command(ctx.id, Err(error));
 }
@@ -213,9 +215,37 @@ pub(crate) struct RestoreLog {
 /// R8 answered.
 pub(crate) fn on_restored(actor: &mut Actor, ask: &RestoreAsk, result: Result<RestoreDone, Error>) {
     let (ctx, matter) = (ask.ctx, ask.matter);
+    if let Ok(done) = &result {
+        let restored = &done.restored;
+        // Counted as an undo counts: every file written, deleted or refused.
+        let of = restored.written.len() + restored.removed.len() + restored.refused.len();
+        answer_refused(actor, ctx, &restored.refused, of, "a restore");
+    }
     match result.and_then(|done| restore_log(actor, ask, done)) {
         Ok(log) => send_log(actor, matter, log),
         Err(error) => give_up(actor, matter, ctx, error),
+    }
+}
+
+/// A restore or an undo done but for the files the folder `refused` (of the `of` it wrote or
+/// meant to): everything is logged as for one with none, and once that commit is durable the
+/// command is answered `matter.file_refused` instead of its outcome, so the lawyer is told
+/// (`commands::finish_command`). Its receipt keeps the outcome: the same command sent again is
+/// answered with it, the restore being done. Counts only in the log, never a path.
+pub(super) fn answer_refused(
+    actor: &mut Actor,
+    ctx: CommandCtx,
+    refused: &[(MatterPath, RefusedBecause)],
+    of: usize,
+    what: &'static str,
+) {
+    if refused.is_empty() {
+        return;
+    }
+    let error = crate::error::files_refused(refused, of);
+    tracing::warn!(refused = refused.len(), of, error = %Cause(&error), what, "files refused");
+    if let Some(pending) = actor.commands.get_mut(&ctx.id) {
+        pending.refused = Some(error);
     }
 }
 
