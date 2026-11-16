@@ -97,8 +97,10 @@ const OWN = {
   "Some numbers here may not match the ones Word shows.":
     "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
   "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
-  "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.":
-    "कुछ बदलाव मुख्य पाठ के बाहर हैं, जैसे हेडर या फ़ुटनोट में। वे यहाँ नहीं दिखाए गए हैं।",
+  "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.":
+    "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे टिप्पणियों में। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
+  "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.":
+    "एक हेडर या फ़ुटर की तुलना नहीं की जा सकी, इसलिए उसके बदलाव यहाँ नहीं दिखाए गए हैं। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
   // what changed that the marked-up document doesn't mark: a link's web address, a comment's or a text box's text,
   // some cells' formatting; provisional
   "The web address behind '{text}' changed.": "'{text}' के पीछे का वेब पता बदल गया है।",
@@ -106,7 +108,34 @@ const OWN = {
     "एक टिप्पणी का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
   "Text in a text box changed. Open both versions in Word to see it.":
     "एक टेक्स्ट बॉक्स का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
-  "The formatting of some table cells changed.": "तालिका के कुछ सेल की फ़ॉर्मैटिंग बदल गई है।",
+  "The formatting of some tables, rows or cells changed.":
+    "कुछ तालिकाओं, पंक्तियों या सेल की फ़ॉर्मैटिंग बदल गई है।",
+  // which tables' formatting changed, and how (UC-452 to UC-464); {tables} lists them, each with its groups after it
+  // in brackets; provisional
+  "Formatting changed in {tables}.": "{tables} में फ़ॉर्मैटिंग बदल गई है।",
+  "Formatting changed in {tables} and {n} more.": "{tables} और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+  "table {n}": "तालिका {n}",
+  "{part}, table {n}": "{part}, तालिका {n}",
+  "table {n} in the footnotes": "फ़ुटनोट में तालिका {n}",
+  "table {n} in the endnotes": "एंडनोट में तालिका {n}",
+  borders: "बॉर्डर",
+  shading: "शेडिंग",
+  widths: "चौड़ाई",
+  alignment: "संरेखण",
+  "merged cells": "मर्ज किए गए सेल",
+  "row height": "पंक्ति की ऊँचाई",
+  "other formatting": "अन्य फ़ॉर्मैटिंग",
+  // the heading over each footnote, endnote, header or footer that changed, after the body (UC-392 to UC-399,
+  // UC-450); provisional
+  "Footnote {n}": "फ़ुटनोट {n}",
+  "Endnote {n}": "एंडनोट {n}",
+  Header: "हेडर",
+  "Header (first page)": "हेडर (पहला पृष्ठ)",
+  "Header (even pages)": "हेडर (सम पृष्ठ)",
+  Footer: "फ़ुटर",
+  "Footer (first page)": "फ़ुटर (पहला पृष्ठ)",
+  "Footer (even pages)": "फ़ुटर (सम पृष्ठ)",
+  "{part}, section {n}": "{part}, अनुभाग {n}",
   // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
   "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",
   "Hidden in Word": "Word में छिपा हुआ",

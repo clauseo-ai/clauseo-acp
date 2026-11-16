@@ -201,6 +201,18 @@
     white-space: pre-wrap;
     tab-size: 4;
   }
+  /* a footnote, endnote, header or footer that changed, after the body: a rule over it, then its heading */
+  .ver-part {
+    margin-top: var(--s8);
+    padding-top: var(--s4);
+    border-top: var(--hairline) solid var(--well);
+  }
+  .ver-part-title {
+    @apply text-small font-chip text-muted;
+  }
+  .ver-part .page-paras {
+    margin-top: var(--s3);
+  }
   /* above a blackline paragraph's words: only its formatting changed, or it holds text Word hides */
   .ver-para-note {
     @apply text-small font-chip text-quiet;

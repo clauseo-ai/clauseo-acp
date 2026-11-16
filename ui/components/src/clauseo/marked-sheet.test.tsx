@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A Word document's blackline as the host's Word tool marks it up: its paragraphs set on the sheet with words in and
-// out marked, each paragraph that changed barred, none in the lawyer's weight, under the two times.
+// out marked, each paragraph that changed barred, none in the lawyer's weight, under the two times; then each part that
+// changed (a footnote, a header) under its heading, its paragraphs set as the body's.
 import { act, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
@@ -117,4 +118,51 @@ test("a run that stands for an object keeps it; a text run has none", () => {
       ],
     },
   ]);
+});
+
+test("a part after the body stands under its heading, its words in and out marked and its changed paragraph barred as the body's", async () => {
+  const body = markedDiffs([
+    { change: "same", runs: [{ kind: "same", text: "The parties agree." }] },
+  ]);
+  const note = markedDiffs([
+    {
+      change: "changed",
+      runs: [
+        { kind: "same", text: "See the statement of " },
+        { kind: "del", text: "3 March" },
+        { kind: "ins", text: "5 March" },
+      ],
+    },
+  ]);
+  const header = markedDiffs([
+    { change: "added", runs: [{ kind: "ins", text: "Without prejudice" }] },
+  ]);
+  await show(
+    <MarkedSheet
+      title="Lease.docx"
+      diffs={body}
+      parts={[
+        { heading: "Footnote 3", diffs: note },
+        { heading: "Header (first page)", diffs: header },
+        { heading: null, diffs: header },
+      ]}
+    />,
+  );
+  const parts = [...document.querySelectorAll<HTMLElement>(".page .ver-part")];
+  expect(parts.map((p) => p.querySelector(".ver-part-title")?.textContent ?? null)).toEqual([
+    "Footnote 3",
+    "Header (first page)",
+    null,
+  ]);
+  expect(parts[0]?.querySelector("h3")?.textContent).toBe("Footnote 3");
+  expect([...(parts[0]?.querySelectorAll(".ver-del") ?? [])].map((e) => e.textContent)).toEqual([
+    "3 March",
+  ]);
+  expect([...(parts[0]?.querySelectorAll(".ver-ins") ?? [])].map((e) => e.textContent)).toEqual([
+    "5 March",
+  ]);
+  expect(parts[0]?.querySelector<HTMLElement>(".page-paras p")?.dataset["change"]).toBe("changed");
+  expect(parts[1]?.querySelector<HTMLElement>(".page-paras p")?.dataset["change"]).toBe("added");
+  // the body stands first, outside every part
+  expect(one(".page > .page-paras").textContent).toBe("The parties agree.");
 });

@@ -1,5 +1,6 @@
 // UC's copy review entries for a Word document's marked-up changes in Versions (UC-113 to UC-116, and its notices and
-// the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391), apart from
+// the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391; its parts'
+// headings and the tables whose formatting changed, UC-392 to UC-399 and UC-450 to UC-464), apart from
 // registry-uc.tsx to keep that file under the size limit: the notice compared with now, over registry-u8.tsx's host,
 // whose word_blackline runs, fails or cuts the document short as each entry asks. UC_ALL is registry-uc.tsx's UC
 // entries, then registry-uc-blocks.tsx's UC_BLOCKS, then these, so registry.tsx lists UC in one place.
@@ -9,7 +10,12 @@ import { UC_BLOCKS } from "./registry-uc-blocks.tsx";
 import { UC } from "./registry-uc.tsx";
 import { versionWords } from "./words.ts";
 import type { VersionKey } from "@clauseo/components/lib/words-versions.ts";
-import type { BlacklineNotice, BlacklineParagraph } from "../transport/protocol.ts";
+import type {
+  BlacklineNotice,
+  BlacklinePart,
+  BlacklineParagraph,
+  ChangedTable,
+} from "../transport/protocol.ts";
 
 const NOTICE = "Notice to the bank.docx";
 const COMPARED = {
@@ -23,7 +29,7 @@ const COMPARED = {
   ],
 };
 
-/** The host's notices over a marked-up document, each with its line (UC-307 to UC-310, UC-368, UC-389 to UC-391). */
+/** The host's notices over a marked-up document, each with its line (UC-307 to UC-310, UC-368, UC-389 to UC-391, UC-451). */
 const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   ["UC-307", "part_not_shown", "Part of this document couldn't be marked up. The rest is below."],
   [
@@ -36,7 +42,12 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   [
     "UC-368",
     "changes_outside_text",
-    "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+    "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.",
+  ],
+  [
+    "UC-451",
+    "header_or_footer_not_compared",
+    "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.",
   ],
   ["UC-389", "comment_changed", "A comment's text changed. Open both versions in Word to see it."],
   [
@@ -44,7 +55,108 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
     "text_box_changed",
     "Text in a text box changed. Open both versions in Word to see it.",
   ],
-  ["UC-391", "cell_format_changed", "The formatting of some table cells changed."],
+  ["UC-391", "cell_format_changed", "The formatting of some tables, rows or cells changed."],
+];
+
+/** A part's one changed paragraph: a word out and a word in. */
+const changedPara = (
+  before: string,
+  out: string,
+  into: string,
+  after: string,
+): BlacklineParagraph => ({
+  change: "changed",
+  runs: [
+    { kind: "same", text: before },
+    { kind: "del", text: out },
+    { kind: "ins", text: into },
+    { kind: "same", text: after },
+  ],
+});
+
+/** A notice whose footnote, endnote, and each kind of header and footer changed, in one section (UC-392 to
+ * UC-399). */
+const PARTS: BlacklinePart[] = [
+  {
+    kind: { footnote: { number: 3 } },
+    paragraphs: [changedPara("See the statement of ", "3 March", "5 March", ".")],
+  },
+  {
+    kind: { endnote: { number: 1 } },
+    paragraphs: [changedPara("Account no. ", "1102", "1120", ".")],
+  },
+  ...(["header", "footer"] as const).flatMap((side) =>
+    (["default", "first_page", "even_pages"] as const).map((slot): BlacklinePart => ({
+      kind:
+        side === "header"
+          ? { header: { uses: [{ slot, sections: [1] }] } }
+          : { footer: { uses: [{ slot, sections: [1] }] } },
+      paragraphs: [changedPara("Notice dated ", "1 April", "4 April", "")],
+    })),
+  ),
+];
+
+/** Two sections' headers, each on its own section's pages: their headings say which section (UC-450). */
+const SECTIONS: BlacklinePart[] = [1, 2].map((n) => ({
+  kind: { header: { uses: [{ slot: "default", sections: [n] }] } },
+  paragraphs: [changedPara("Without prejudice ", "(draft)", "(copy)", "")],
+}));
+
+/** One table whose formatting changed (UC-454, UC-458, UC-459). */
+const ONE_TABLE: ChangedTable[] = [{ place: "body", number: 2, formats: ["borders", "shading"] }];
+
+/** Four tables, each named: one in the body, one in the first page's header, one in the footnotes and one in the
+ * endnotes (UC-452, UC-455 to UC-457, UC-460 to UC-464). */
+const FOUR_TABLES: ChangedTable[] = [
+  { place: "body", number: 1, formats: ["widths", "alignment"] },
+  {
+    place: { header: { uses: [{ slot: "first_page", sections: [1] }] } },
+    number: 1,
+    formats: ["merged_cells"],
+  },
+  { place: "footnotes", number: 1, formats: ["row_height"] },
+  { place: "endnotes", number: 2, formats: ["other"] },
+];
+
+/** Six tables: the first three named, then how many more (UC-453). */
+const SIX_TABLES: ChangedTable[] = [
+  ...ONE_TABLE,
+  ...FOUR_TABLES,
+  {
+    place: { footer: { uses: [{ slot: "default", sections: [1] }] } },
+    number: 1,
+    formats: ["shading"],
+  },
+];
+
+/** Each part's heading, with its id and the parts that show it. */
+const HEADINGS: [string, VersionKey, BlacklinePart[]][] = [
+  ["UC-392", "Footnote {n}", PARTS],
+  ["UC-393", "Endnote {n}", PARTS],
+  ["UC-394", "Header", PARTS],
+  ["UC-395", "Header (first page)", PARTS],
+  ["UC-396", "Header (even pages)", PARTS],
+  ["UC-397", "Footer", PARTS],
+  ["UC-398", "Footer (first page)", PARTS],
+  ["UC-399", "Footer (even pages)", PARTS],
+  ["UC-450", "{part}, section {n}", SECTIONS],
+];
+
+/** The table line's words, with their ids and the tables that show them. */
+const TABLES: [string, VersionKey, ChangedTable[]][] = [
+  ["UC-452", "Formatting changed in {tables}.", FOUR_TABLES],
+  ["UC-453", "Formatting changed in {tables} and {n} more.", SIX_TABLES],
+  ["UC-454", "table {n}", ONE_TABLE],
+  ["UC-455", "{part}, table {n}", FOUR_TABLES],
+  ["UC-456", "table {n} in the footnotes", FOUR_TABLES],
+  ["UC-457", "table {n} in the endnotes", FOUR_TABLES],
+  ["UC-458", "borders", ONE_TABLE],
+  ["UC-459", "shading", ONE_TABLE],
+  ["UC-460", "widths", FOUR_TABLES],
+  ["UC-461", "alignment", FOUR_TABLES],
+  ["UC-462", "merged cells", FOUR_TABLES],
+  ["UC-463", "row height", FOUR_TABLES],
+  ["UC-464", "other formatting", FOUR_TABLES],
 ];
 
 /** A marked-up notice whose second paragraph couldn't be shown, and whose third holds text Word hides, its formatting
@@ -136,6 +248,15 @@ export const UC_BLACKLINE: Entry[] = [
   ...NOTICES.map(([id, notice, words]) =>
     compared(id, versionWords(words), { ...COMPARED, mark: { notices: [notice] } }),
   ),
+  ...HEADINGS.map(([id, words, parts]) =>
+    compared(id, versionWords(words), { ...COMPARED, mark: { parts } }),
+  ),
+  ...TABLES.map(([id, words, changed_tables]) =>
+    compared(id, versionWords(words), {
+      ...COMPARED,
+      mark: { notices: ["cell_format_changed"], changed_tables },
+    }),
+  ),
   compared("UC-388", versionWords("The web address behind '{text}' changed."), {
     ...COMPARED,
     mark: { changed_links: ["the account"] },
@@ -158,6 +279,7 @@ export const UC_BLACKLINE: Entry[] = [
 
 /**
  * UC's entries: registry-uc.tsx's (UC-01 to UC-78), registry-uc-blocks.tsx's (UC-80 to UC-106), then
- * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391).
+ * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-399,
+ * UC-450 to UC-464).
  */
 export const UC_ALL: Entry[] = [...UC, ...UC_BLOCKS, ...UC_BLACKLINE];

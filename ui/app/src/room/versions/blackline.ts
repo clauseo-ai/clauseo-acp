@@ -8,7 +8,9 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import type {
   BlacklineNotice,
+  BlacklinePart,
   BlacklineParagraph,
+  ChangedTable,
   CheckpointId,
   FileChange,
   MatterId,
@@ -18,9 +20,10 @@ import type {
  * folder now, its content (now: the compare answer's `after`, else its size), so a change to the file asks again. */
 export type MarkAsk = { path: string; from: CheckpointId; to?: CheckpointId; now: string };
 
-/** How a marking up stands: running, done (its paragraphs, whether the host cut the document short, and what the
- * lawyer should know: a part not shown, hidden text, the links whose web address changed), or failed with the host's
- * code and whether another try may mend it. */
+/** How a marking up stands: running, done (its paragraphs, the footnotes, endnotes, headers and footers that changed,
+ * whether the host cut the document short, and what the lawyer should know: a part not shown, hidden text, the links
+ * whose web address changed, the tables whose formatting changed), or failed with the host's code and whether another
+ * try may mend it. */
 export type Mark =
   | { kind: "running" }
   | {
@@ -30,6 +33,10 @@ export type Mark =
       notices: readonly BlacklineNotice[];
       /** The text of each link whose web address changed while its text stayed. */
       changedLinks: readonly string[];
+      /** The footnotes, endnotes, headers and footers that hold a change, in the host's order, shown after the body. */
+      parts: readonly BlacklinePart[];
+      /** The tables whose formatting changed, which the table notice names. */
+      changedTables: readonly ChangedTable[];
     }
   | { kind: "failed"; code: string; retryable: boolean };
 
@@ -103,13 +110,22 @@ export class Blacklines {
         },
       });
       if ("word_blackline" in r) {
-        const { paragraphs, truncated, notices = [], changed_links = [] } = r.word_blackline;
+        const {
+          paragraphs,
+          truncated,
+          notices = [],
+          changed_links = [],
+          parts = [],
+          changed_tables = [],
+        } = r.word_blackline;
         this.#set(key, {
           kind: "shown",
           paragraphs,
           truncated,
           notices,
           changedLinks: changed_links,
+          parts,
+          changedTables: changed_tables,
         });
       } else this.#failed(key, "internal", false);
     } catch (e) {

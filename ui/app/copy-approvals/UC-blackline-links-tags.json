@@ -33,14 +33,14 @@
     "note": "over the blackline sheet when a text box's text differs between the versions; the sheet shows the new box text but not the old (BlacklineNotice text_box_changed)"
   },
   "UC-391": {
-    "en": "The formatting of some table cells changed.",
-    "hi": "तालिका के कुछ सेल की फ़ॉर्मैटिंग बदल गई है।",
+    "en": "The formatting of some tables, rows or cells changed.",
+    "hi": "कुछ तालिकाओं, पंक्तियों या सेल की फ़ॉर्मैटिंग बदल गई है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-15",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-16",
+    "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-links-tags (en provisional, for the orchestrator)",
-    "note": "over the blackline sheet when stetdoc lists a tracked cell format change the sheet has no mark for (BlacklineNotice cell_format_changed)"
+    "at": "2026-11-16",
+    "by": "blackline-notes-tables (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when a table's, a row's or a cell's formatting changed and the host names no table (only stetdoc's check listed a tracked cell format change; changed_tables empty). Reworded by blackline PR 2 (was 'The formatting of some table cells changed.'), since the notice now covers a table's own and a row's formatting too; when tables are named, UC-452 or UC-453 stands instead (BlacklineNotice cell_format_changed)"
   }
 }
