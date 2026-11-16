@@ -1987,6 +1987,8 @@ export type ErrorCode =
 "blackline.format_unknown" | 
 /** The agent could not get through to its service while answering, and the computer did not seem offline: the service, or a proxy or firewall in front of it, refused, timed out or blocked the connection, or its name did not resolve. The answer so far is kept; asking again can work. */
 "agent.unreachable" | 
+/** The Word file is over the matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: the package's size, entry count or compression ratio, an XML part's size, depth or node count), so its tracked changes were not read or decided. */
+"word.too_large" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -3185,7 +3187,8 @@ export type HostQuery =
 /**
  *  The tracked changes of one Word file of a matter, read with stetdoc from a private copy
  *  (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
- *  a `.docx` or does not read as one is `word.not_docx`; no stetdoc, `word.stetdoc_missing`.
+ *  a `.docx` or does not read as one is `word.not_docx`; one over stetdoc's limits,
+ *  `word.too_large`; no stetdoc, `word.stetdoc_missing`.
  */
 ({ list_revisions: {
 	/**  The matter. */
