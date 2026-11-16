@@ -72,7 +72,7 @@ fn the_fixtures_lists_are_read() {
 }
 
 /// An error result is told to the host as failed, with no links and the charge it carried; a
-/// result that is not an object is not told at all.
+/// non-boolean `isError` is no error; a result that is not an object is not told at all.
 #[test]
 fn an_error_result_is_failed_with_no_links() {
     let search = join("search_law", &json!({}));
@@ -84,8 +84,16 @@ fn an_error_result_is_failed_with_no_links() {
     .unwrap();
     assert!(out.failed);
     assert_eq!((out.links.len(), out.charged), (0, Some(0)));
-    let odd = found(&search, &raw(&json!({"isError": "yes"})), None).unwrap();
-    assert!(odd.failed);
+    // Only `true` is an error, as the relay's outcome reads it: `null` or a string is a success,
+    // so a charge of 0 on it shows nothing rather than "nothing charged".
+    for odd in [
+        json!({"isError": "yes"}),
+        json!({"isError": null}),
+        json!({}),
+    ] {
+        let read = found(&search, &raw(&odd), Some(0)).unwrap();
+        assert!(!read.failed, "{odd}");
+    }
     assert!(found(&search, &raw(&json!([1, 2])), None).is_none());
 }
 

@@ -278,6 +278,10 @@ fn read_result(conn: &Conn, call: &Call, result: &RawValue, balance: Option<i64>
     };
     let hub = &session.hub;
     if let Some(balance_credits) = balance {
+        // The connectors crate's account copy is from before this call's charge: dropped first,
+        // so the read the paid result starts (after the event) asks the connector, never the
+        // copy, which would bring back the higher balance this one replaces.
+        hub.connector.forget_account();
         hub.events.event(RelayEvent::BalanceReported {
             session: session.key,
             balance_credits,

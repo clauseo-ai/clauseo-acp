@@ -12,11 +12,14 @@ use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 use clauseo_connectors::fake::Fixture;
-use clauseo_protocol::{DomainEvent, StopReason, StreamId, ToolCallCharged, ToolCallId};
+use clauseo_protocol::{
+    ConnectorsState, DomainEvent, HostEvent, StopReason, StreamId, ToolCallCharged, ToolCallId,
+};
 use serde_json::{Value, json};
 
 use crate::connector_rig::{Rig, Start, signed_in};
 use crate::observe::Events;
+use crate::support::wait;
 use crate::support::{Dir, Scenario, matter_with_thread};
 
 const CLAUDE: &str = "claude-acp";
@@ -232,6 +235,84 @@ fn the_fakes_own_report_shows_the_balance() {
     rig.state_until("the reported balance", |state| {
         signed_in(state).map(i64::from) == Some(balance)
     });
+    drop(reader);
+    session.end();
+    drop(session);
+    rig.finish();
+}
+
+const ACCOUNT: &str = "/v1/case-law/account";
+
+/// Waits until the fake has had `count` account reads.
+fn reads_reach(rig: &Rig, count: usize) {
+    wait("the account read", async {
+        while rig.account_reads() < count {
+            async_io::Timer::after(Duration::from_millis(5)).await;
+        }
+    });
+}
+
+/// The connectors' state as the host holds it now: a fresh subscription's first frames.
+fn current(rig: &Rig) -> ConnectorsState {
+    let (_sub, first) = crate::settings::subscribe_app(&rig.host);
+    first
+        .into_iter()
+        .find_map(|event| match event {
+            HostEvent::ConnectorsChanged(state) => Some(state),
+            _ => None,
+        })
+        .expect("no connectors state in the catch-up")
+}
+
+/// The connectors crate holds the account from the sign-in (1000). A paid result reports 960:
+/// the relay drops that copy, so the read the paid result starts asks the connector (960) and
+/// never brings the older, higher copy back.
+#[test]
+fn the_read_after_a_reported_balance_never_answers_from_the_older_copy() {
+    let dir = Dir::new("case_law_cost_copy", &[]);
+    let mut rig = Rig::start(&dir, Start { signed_in: true });
+    let (session, token) = rig.relay(1);
+    let mut reader = agent(session.addr(), &token);
+    rig.fake.set_balance(960);
+    rig.fake
+        .push_tool_result("search_law", result(false, credits(40, 960)));
+    let reads = rig.account_reads();
+    call(&mut reader, 1, "search_law", &json!({"query": "x"}));
+    rig.state_until("the reported balance", |state| {
+        signed_in(state) == Some(960)
+    });
+    // The read went to the connector, not to the copy.
+    reads_reach(&rig, reads + 1);
+    rig.host.settle();
+    assert_eq!(signed_in(&current(&rig)), Some(960));
+    drop(reader);
+    session.end();
+    drop(session);
+    rig.finish();
+}
+
+/// A paid result lowers the balance to 900 and starts a read, which the connector answers at
+/// 850 (a charge the relay didn't see) and holds. A free call then reports 900 again: it lowers
+/// nothing, so the read in flight still counts, and 850 shows once it lands.
+#[test]
+fn a_balance_that_lowers_nothing_keeps_the_read_in_flight() {
+    let dir = Dir::new("case_law_cost_inflight", &[]);
+    let mut rig = Rig::start(&dir, Start { signed_in: true });
+    let (session, token) = rig.relay(1);
+    let mut reader = agent(session.addr(), &token);
+    rig.fake.set_balance(850);
+    let release = rig.fake.hold_next(ACCOUNT);
+    rig.fake
+        .push_tool_result("search_law", result(false, credits(100, 900)));
+    let reads = rig.account_reads();
+    call(&mut reader, 1, "search_law", &json!({"query": "paid"}));
+    rig.state_until("the paid balance", |state| signed_in(state) == Some(900));
+    reads_reach(&rig, reads + 1);
+    rig.fake
+        .push_tool_result("search_law", result(false, credits(0, 900)));
+    call(&mut reader, 2, "search_law", &json!({"query": "paid"}));
+    release.cancel();
+    rig.state_until("the read's balance", |state| signed_in(state) == Some(850));
     drop(reader);
     session.end();
     drop(session);

@@ -445,3 +445,80 @@ fn identical_calls_with_different_charges_show_none() {
         [(25, false)]
     );
 }
+
+/// Starts `title` in progress with `input`, then ends it `status` with no output.
+fn end(
+    case_law: &mut CaseLaw,
+    title: &str,
+    input: &Value,
+    status: ToolCallStatus,
+) -> Vec<DomainEvent> {
+    let started = call(
+        title,
+        ToolKind::Other,
+        None,
+        ToolCallStatus::InProgress,
+        Some(input),
+    );
+    case_law.started(at(0), turn(), tool_id(), &claude(), &started);
+    let patch = ToolCallPatch {
+        status: Some(status),
+        ..ToolCallPatch::default()
+    };
+    case_law
+        .updated(at(0), turn(), "tc-1", &claude(), &patch)
+        .expect("a case-law call")
+}
+
+/// A call cancelled, or failed with no result waiting, leaves its result behind or gets it
+/// late: a later identical call never shows that charge; another key is untouched.
+#[test]
+fn a_result_no_call_took_never_lends_its_charge() {
+    let read = "mcp__case-law__read_document";
+    let args = json!({"doc_id": "7"});
+    let other = json!({"doc_id": "8"});
+    // Cancelled with its result already waiting.
+    let mut case_law = CaseLaw::default();
+    case_law.found(
+        at(0),
+        charged(CaseLawTool::ReadDocument, &args, false, Some(30)),
+    );
+    assert_eq!(
+        end(&mut case_law, read, &args, ToolCallStatus::Cancelled),
+        []
+    );
+    assert_eq!(charges(&run(&mut case_law, at(1), read, &args, None)), []);
+    // Cancelled before its result came back.
+    let mut case_law = CaseLaw::default();
+    end(&mut case_law, read, &args, ToolCallStatus::Cancelled);
+    case_law.found(
+        at(1),
+        charged(CaseLawTool::ReadDocument, &args, false, Some(30)),
+    );
+    case_law.found(
+        at(1),
+        charged(CaseLawTool::ReadDocument, &other, false, Some(30)),
+    );
+    assert_eq!(charges(&run(&mut case_law, at(2), read, &args, None)), []);
+    assert_eq!(
+        charges(&run(&mut case_law, at(2), read, &other, None)),
+        [(30, false)]
+    );
+    // Failed with nothing waiting, its result then late.
+    let mut case_law = CaseLaw::default();
+    assert_eq!(end(&mut case_law, read, &args, ToolCallStatus::Failed), []);
+    case_law.found(
+        at(1),
+        charged(CaseLawTool::ReadDocument, &args, false, Some(30)),
+    );
+    assert_eq!(charges(&run(&mut case_law, at(2), read, &args, None)), []);
+    // The one after that is its own again.
+    case_law.found(
+        at(3),
+        charged(CaseLawTool::ReadDocument, &args, false, Some(2)),
+    );
+    assert_eq!(
+        charges(&run(&mut case_law, at(3), read, &args, None)),
+        [(2, false)]
+    );
+}

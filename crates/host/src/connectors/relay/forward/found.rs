@@ -99,14 +99,15 @@ struct Item<'a> {
 }
 
 /// What the call found and cost, `charged` being the result's `_meta` charge. An error result
-/// (`isError` anything but `false`) has no links. A result with no readable list still counts
+/// (`isError: true`; anything else, `null` included, is no error, as `reply.rs`'s outcome reads
+/// it) has no links. A result with no readable list still counts
 /// (no links): the call ran, and its record names the query. The structured lists win when they
 /// give a link; otherwise the text content is read. `None` when the result is not an object.
 pub(super) fn found(join: &Join, result: &RawValue, charged: Option<u32>) -> Option<CaseLawFound> {
     let read = object::<CaseLawResult<'_>>(result)?;
     let is_error = read
         .is_error
-        .is_some_and(|raw| serde_json::from_str::<bool>(raw.get()).unwrap_or(true));
+        .is_some_and(|raw| serde_json::from_str::<bool>(raw.get()).is_ok_and(|yes| yes));
     if is_error {
         return Some(CaseLawFound {
             tool: join.tool,

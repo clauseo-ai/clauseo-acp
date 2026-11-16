@@ -85,9 +85,12 @@ pub(super) fn recharged(
 /// A case-law result's `_meta` reported `balance`, the balance after that call. Results come
 /// back out of order (up to 16 calls in flight per session), so the rule is:
 ///
-/// - the balance epoch moves first, so an account read begun before this result (from before
-///   its charge) is not applied;
-/// - the balance shows only when it is no higher than the one shown. Between recharges a
+/// - the balance shows only when it is no higher than the one shown;
+/// - only a balance lower than the one shown moves the balance epoch, first, so an account read
+///   begun before this result (from before its charge) is not applied. One no lower (an older
+///   result, or a free or refused call that changed nothing) leaves a read in flight alone:
+///   whatever that read finds is at least as new as the balance shown, and nothing would start
+///   it again (the relay dropped the connectors crate's copy, so the read asks the connector). Between recharges a
 ///   balance only falls, so a higher one reported later is from a call the connector booked
 ///   earlier, and showing it would undo a newer charge. A rise (a recharge) comes only from a
 ///   recharge's answer or an account read, which apply as before; the paced read after each paid
@@ -97,20 +100,20 @@ pub(super) fn recharged(
 /// Shown, it drives `low` and, above nothing, ends the out-of-credit state; an out-of-credits
 /// result's `OutOfCredit` comes after it and sets that state again.
 pub(super) fn reported(actor: &mut Actor, balance: i64) {
-    actor
-        .connectors
-        .recharged
-        .epoch
-        .fetch_add(1, Ordering::SeqCst);
     let now = actor.now();
-    let state = &mut actor.connectors.state;
-    let shown = state
+    let connectors = &mut actor.connectors;
+    let shown = connectors
+        .state
         .account
         .as_ref()
         .map(|account| account.balance_credits);
-    if shown.is_some_and(|shown| balance <= shown) {
-        state.set_balance(balance, now.wall);
+    let Some(shown) = shown.filter(|shown| balance <= *shown) else {
+        return;
+    };
+    if balance < shown {
+        connectors.recharged.epoch.fetch_add(1, Ordering::SeqCst);
     }
+    connectors.state.set_balance(balance, now.wall);
 }
 
 /// Starts the read after the paid result `wants`.

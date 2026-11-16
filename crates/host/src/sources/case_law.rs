@@ -29,7 +29,9 @@
 //! does an entry with no charge (an older connector, a malformed one) and a call with no entry.
 //! A call still running never gets one. Two results waiting under one key (the same tool with
 //! the same arguments, in flight together) whose charges differ cannot be told apart: neither
-//! call gets a charge ([`CaseLaw::take`]).
+//! call gets a charge ([`CaseLaw::take`]). A call cancelled, or failed with no result waiting,
+//! may leave its result behind (or have it come back later): the results under its key then show
+//! no charge either ([`CaseLaw::let_go`]), so a later identical call never takes its number.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
@@ -111,6 +113,17 @@ pub(crate) fn canonical(value: &Value, out: &mut String) {
 pub(crate) struct CaseLaw {
     entries: VecDeque<Entry>,
     calls: BTreeMap<CompactString, Pending>,
+    /// Calls that ended with no result taken (cancelled, or failed before theirs came back):
+    /// the next result under their key may be theirs, so it shows no charge.
+    orphans: VecDeque<Orphan>,
+}
+
+/// A call that ended with no result taken, by its key.
+#[derive(Debug)]
+struct Orphan {
+    at: Duration,
+    tool: CaseLawTool,
+    key: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -140,10 +153,19 @@ impl CaseLaw {
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.pop_front();
         }
+        // A call of this key ended with nothing taken: this result may be its, come back late.
+        let orphan = self
+            .orphans
+            .iter()
+            .position(|orphan| orphan.tool == found.tool && orphan.key == found.key);
+        let ambiguous = orphan.is_some();
+        if let Some(index) = orphan {
+            self.orphans.remove(index);
+        }
         self.entries.push_back(Entry {
             at: now,
             found,
-            ambiguous: false,
+            ambiguous,
         });
     }
 
@@ -171,7 +193,10 @@ impl CaseLaw {
         Some(match call.status {
             ToolCallStatus::Completed => self.finished(now, agent, &pending),
             ToolCallStatus::Failed => self.failed(now, &pending),
-            ToolCallStatus::Cancelled => Vec::new(),
+            ToolCallStatus::Cancelled => {
+                self.let_go(now, &pending);
+                Vec::new()
+            }
             ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
                 if self.calls.len() >= MAX_CALLS {
                     // Calls an agent never finished are let go.
@@ -214,7 +239,9 @@ impl CaseLaw {
                 None => Vec::new(),
             },
             Some(ToolCallStatus::Cancelled) => {
-                self.calls.remove(acp_id);
+                if let Some(pending) = self.calls.remove(acp_id) {
+                    self.let_go(now, &pending);
+                }
                 Vec::new()
             }
             Some(
@@ -228,12 +255,42 @@ impl CaseLaw {
     /// later turn's call is another call, even with the same arguments.
     pub(crate) fn turn_ended(&mut self) {
         self.entries.clear();
+        self.orphans.clear();
     }
 
     /// Drops the results older than [`ENTRY_LIFE`].
     fn expire(&mut self, now: Duration) {
         self.entries
             .retain(|entry| now.saturating_sub(entry.at) <= ENTRY_LIFE);
+        self.orphans
+            .retain(|orphan| now.saturating_sub(orphan.at) <= ENTRY_LIFE);
+    }
+
+    /// A call ended with no result taken (cancelled, or failed with none waiting): a result
+    /// waiting under its key may be its, and so may the next to come, so neither shows a
+    /// charge. Each later call still takes the oldest result under the key, and the charge
+    /// check in [`CaseLaw::take`] blanks any that could be another's.
+    fn let_go(&mut self, now: Duration, call: &Pending) {
+        self.expire(now);
+        let key = join_key(call.tool, &arguments_of(call));
+        let mut waiting = false;
+        for entry in &mut self.entries {
+            if entry.found.tool == call.tool && entry.found.key == key {
+                entry.ambiguous = true;
+                waiting = true;
+            }
+        }
+        if waiting {
+            return;
+        }
+        if self.orphans.len() >= MAX_ENTRIES {
+            self.orphans.pop_front();
+        }
+        self.orphans.push_back(Orphan {
+            at: now,
+            tool: call.tool,
+            key,
+        });
     }
 
     /// Takes the entry for `tool` with `key`, if one is young enough. When another entry waits
@@ -268,11 +325,11 @@ impl CaseLaw {
     /// The record a call whose agent said it failed adds: its charge only.
     fn failed(&mut self, now: Duration, call: &Pending) -> Vec<DomainEvent> {
         let arguments = arguments_of(call);
-        let entry = self.take(now, call.tool, &join_key(call.tool, &arguments));
-        entry
-            .and_then(|found| charge_of(call, &found))
-            .into_iter()
-            .collect()
+        let Some(found) = self.take(now, call.tool, &join_key(call.tool, &arguments)) else {
+            self.let_go(now, call);
+            return Vec::new();
+        };
+        charge_of(call, &found).into_iter().collect()
     }
 
     /// The records a completed call adds: its sources, then its charge.
