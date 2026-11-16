@@ -2,21 +2,24 @@
 //! file before the rename. The permission bits (`0o777`; never setuid, setgid or sticky). On macOS
 //! and Linux every extended attribute the owner may set: Finder tags
 //! (`com.apple.metadata:_kMDItemUserTags`), `com.apple.FinderInfo`, the quarantine flag, Linux
-//! `user.*`, and the Linux ACL (`system.posix_acl_access`); on macOS the ACL through `copyfile`.
+//! `user.*`, and the Linux ACL (`system.posix_acl_access`). On macOS the birth time (Finder's
+//! "Created"; Linux has no settable one), and the ACL, after the rename ([`After`]). No file
+//! flags (`uchg`, `schg`): they are not copied, so a temp file never has one.
 //! Ownership is not copied: only root may give a file away, and the temp file is the writer's.
 //!
-//! `com.apple.quarantine` is copied like the rest: the rewritten file is the same downloaded
-//! document, so Word's Protected View and Gatekeeper treat it as they treated the original.
-//! Dropping the flag would launder a downloaded file through Clauseo.
+//! `com.apple.quarantine` is copied like the rest, byte for byte: the rewritten file is the same
+//! downloaded document, so Word's Protected View and Gatekeeper treat it as they treated the
+//! original. Dropping the flag would launder a downloaded file through Clauseo.
 //!
 //! The order lets a read-only original (`0o444`) keep everything: setting an attribute needs a
-//! writable file, so the mode comes after the attributes. macOS: the attributes, then the ACL,
-//! then the quarantine flag, then the mode. `fcopyfile` with `COPYFILE_ACL` (`macos::copy_acl`)
-//! also hands the source's quarantine to libquarantine, which writes a fresh stamp (the time of
-//! the call, no agent) over the one copied before it; the flag goes after it, byte for byte, and
-//! a temp file that got one from an original without it has it removed.
-//! Linux: the attributes but the ACL, then the mode, then the ACL attribute (setting it rewrites
-//! the group bits to the ACL's mask, as the original has them).
+//! writable file, so the mode comes after the attributes. Linux: the attributes but the ACL, then
+//! the mode, then the ACL attribute (setting it rewrites the group bits to the ACL's mask, as the
+//! original has them); a Linux ACL cannot keep a file from being removed (that is the folder's
+//! write permission), so it goes on the temp file. macOS: the attributes, then the mode, and the
+//! ACL only once the temp file is the target: a macOS ACL can deny `delete`, and on the temp file
+//! that would refuse its removal after a failed rename. The cost: from the rename to the ACL, the
+//! file has the folder's inherited ACL, and a crash between them leaves it so (the content is
+//! the new one; only the ACL is lost).
 //!
 //! Nothing here fails the write: each attribute that could not be read or set counts as one lost,
 //! with its errno, and the caller logs the total once.
@@ -36,40 +39,76 @@ const MAX_VALUE: usize = 64 << 20;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const ACL_ACCESS: &[u8] = b"system.posix_acl_access";
 
-/// macOS's quarantine flag: copied after the ACL, which would stamp over it.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-const QUARANTINE: &[u8] = b"com.apple.quarantine";
+/// What is copied once the temp file is the target: on macOS the original's ACL, from the
+/// original, still open, to the temp file. Nothing elsewhere.
+#[derive(Debug)]
+pub(super) struct After {
+    #[cfg(target_os = "macos")]
+    acl: Option<(File, File)>,
+}
 
-/// Copies what the file `original` has to the open temp file `temp`; what could not be copied.
-/// A missing `original` (a new file, or a restore of a deleted one: checkpoints record no
-/// metadata) or one that is not a plain file leaves the temp file with the defaults, and is no
-/// loss.
-pub(super) fn copy(original: &Path, temp: &File) -> Lost {
+impl After {
+    /// Copies what waited for the rename; what could not be copied. The file is synced again,
+    /// so the sync covers it.
+    pub(super) fn apply(self) -> Lost {
+        #[cfg(not(target_os = "macos"))]
+        let Self {} = self;
+        #[cfg(target_os = "macos")]
+        if let Some((original, temp)) = self.acl {
+            let copied = super::macos::copy_acl(&original, &temp)
+                .and_then(|()| crate::fsync::sync_file(&temp));
+            if let Err(err) = copied {
+                return Lost::one(err.raw_os_error());
+            }
+        }
+        Lost::default()
+    }
+}
+
+/// Copies what the file `original` has to the open temp file `temp`; what could not be copied,
+/// and what waits for the rename. A missing `original` (a new file, or a restore of a deleted
+/// one: checkpoints record no metadata) or one that is not a plain file leaves the temp file
+/// with the defaults, and is no loss.
+pub(super) fn copy(original: &Path, temp: &File) -> (Lost, After) {
+    let none = After {
+        #[cfg(target_os = "macos")]
+        acl: None,
+    };
     let metadata = match std::fs::symlink_metadata(original) {
         Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => return Lost::default(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Lost::default(),
-        Err(err) => return Lost::one(err.raw_os_error()),
+        Ok(_) => return (Lost::default(), none),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (Lost::default(), none),
+        Err(err) => return (Lost::one(err.raw_os_error()), none),
     };
     let mut lost = Lost::default();
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    lost.add(xattrs::copy(original, temp, |name| {
-        name != ACL_ACCESS && name != QUARANTINE
-    }));
-    #[cfg(target_os = "macos")]
-    if let Err(err) = super::macos::copy_acl(original, temp) {
-        lost.add(Lost::one(err.raw_os_error()));
-    }
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    lost.add(xattrs::copy(original, temp, |name| name == QUARANTINE));
-    #[cfg(target_os = "macos")]
-    lost.add(xattrs::remove_unless_on(original, temp, QUARANTINE));
+    lost.add(xattrs::copy(original, temp, |name| name != ACL_ACCESS));
     if let Err(err) = temp.set_permissions(Permissions::from_mode(metadata.mode() & 0o777)) {
         lost.add(Lost::one(err.raw_os_error()));
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     lost.add(xattrs::copy(original, temp, |name| name == ACL_ACCESS));
-    lost
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt as _;
+        let (secs, nanos) = (metadata.st_birthtime(), metadata.st_birthtime_nsec());
+        if let Err(err) = super::macos::set_birth_time(temp, secs, nanos) {
+            lost.add(Lost::one(err.raw_os_error()));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let none = {
+        let files =
+            super::open_read_nofollow(original).and_then(|from| Ok((from, temp.try_clone()?)));
+        match files {
+            Ok(files) => After { acl: Some(files) },
+            Err(err) => {
+                lost.add(Lost::one(err.raw_os_error()));
+                none
+            }
+        }
+    };
+    (lost, none)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -110,20 +149,6 @@ mod xattrs {
             }
         }
         lost
-    }
-
-    /// macOS: removes the attribute `name` from `temp` when `original` has none (`copy_acl`
-    /// may have stamped one); what was not removed. An original whose attribute could not be read
-    /// leaves `temp` as it is (the copy counted that loss).
-    #[cfg(target_os = "macos")]
-    pub(super) fn remove_unless_on(original: &Path, temp: &File, name: &[u8]) -> Lost {
-        if !matches!(value(original, name), Ok(None)) {
-            return Lost::default();
-        }
-        match rustix::fs::fremovexattr(temp, name) {
-            Err(err) if !absent(err) => Lost::one(Some(err.raw_os_error())),
-            _ => Lost::default(),
-        }
     }
 
     /// The NUL-separated names of `path`'s extended attributes.

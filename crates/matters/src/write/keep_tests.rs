@@ -149,8 +149,26 @@ fn a_rewrite_keeps_finder_tags_on_macos() {
     assert_eq!(xattr(&target, "com.apple.quarantine"), quarantine);
 }
 
-/// macOS: an original without the quarantine flag gives a rewrite without one (the ACL copy's
-/// `fcopyfile` may stamp one; it is removed).
+/// macOS: the rewritten file keeps the original's birth time (Finder's "Created").
+#[cfg(target_os = "macos")]
+#[test]
+fn a_rewrite_keeps_the_birth_time_on_macos() {
+    use std::os::macos::fs::MetadataExt as _;
+    let dir = TestDir::new("keep-birth-time");
+    let target = dir.path().join("Lease.docx");
+    let mut file = super::create_new(&target).unwrap();
+    file.write_all(b"old").unwrap();
+    super::macos::set_birth_time(&file, 1_600_000_000, 123_000_000).unwrap();
+    drop(file);
+    assert_eq!(rewrite(&target), 0);
+    let metadata = std::fs::metadata(&target).unwrap();
+    assert_eq!(
+        (metadata.st_birthtime(), metadata.st_birthtime_nsec()),
+        (1_600_000_000, 123_000_000)
+    );
+}
+
+/// macOS: an original without the quarantine flag gives a rewrite without one.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_rewrite_of_an_unquarantined_file_stays_unquarantined_on_macos() {

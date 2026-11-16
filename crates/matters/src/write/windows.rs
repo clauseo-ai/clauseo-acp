@@ -1,10 +1,22 @@
-//! Windows: `SetFileAttributesW` for [`super::hide_dir`], and `ReplaceFileW` for a rewrite of a
-//! lawyer's file ([`super::Staged::rename`]): the two Win32 calls that change a file here.
-#![expect(unsafe_code, reason = "FFI to SetFileAttributesW and ReplaceFileW")]
+//! Windows: `SetFileAttributesW` for [`super::hide_dir`], `ReplaceFileW` for a rewrite of a
+//! lawyer's file ([`super::Staged::rename`]), and `SetFileSecurityW` for a temp file whose ACL
+//! refuses its removal ([`allow_delete`]): the Win32 calls that change a file here.
+#![expect(
+    unsafe_code,
+    reason = "FFI to SetFileAttributesW, ReplaceFileW and SetFileSecurityW"
+)]
 
 use std::io;
 use std::path::Path;
 
+use windows::Win32::Foundation::{HLOCAL, LocalFree};
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+use windows::Win32::Security::{
+    DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    SetFileSecurityW,
+};
 use windows::Win32::Storage::FileSystem::{
     FILE_FLAGS_AND_ATTRIBUTES, REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_IGNORE_MERGE_ERRORS,
     ReplaceFileW, SetFileAttributesW,
@@ -40,6 +52,42 @@ pub(super) fn replace_file(replaced: &Path, replacement: &Path, backup: &Path) -
     // reserved pointers are null, as the call requires; it keeps no pointer.
     unsafe { ReplaceFileW(&replaced, &replacement, &backup, flags, None, None) }
         .map_err(win32_io_error)
+}
+
+/// `FILE_ATTRIBUTE_NORMAL`: no attribute, read-only off.
+const NORMAL: u32 = 0x80;
+
+/// Lets the temp file `path` be removed: its ACL becomes one entry, its owner allowed
+/// everything, not inherited (a deny-delete entry it inherited, or a folder that denies
+/// deleting its files, refused it), and the read-only attribute goes.
+pub(super) fn allow_delete(path: &Path) -> io::Result<()> {
+    set_dacl(path, "D:P(A;;FA;;;OW)")?;
+    set_attributes(path, NORMAL)
+}
+
+/// Sets the DACL of `path` to the one the SDDL string `sddl` gives, protected from inheritance.
+pub(super) fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
+    let sddl = HSTRING::from(sddl);
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `sddl` is a NUL-terminated UTF-16 string that outlives the call, which writes a
+    // descriptor it allocated to `descriptor`; the size pointer may be absent.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &sddl,
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+    }
+    .map_err(win32_io_error)?;
+    let wide = HSTRING::from(long_path(path).as_path());
+    let what = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    // SAFETY: `wide` is NUL-terminated and `descriptor` valid for the whole call, which keeps
+    // no pointer to either.
+    let set = unsafe { SetFileSecurityW(&wide, what, descriptor) }.ok();
+    // SAFETY: `descriptor` was allocated by the conversion with `LocalAlloc` and is freed once.
+    unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    set.map_err(win32_io_error)
 }
 
 /// `error` as an `io::Error` whose raw code is the Win32 code when the HRESULT wraps one
