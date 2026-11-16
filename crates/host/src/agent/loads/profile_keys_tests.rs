@@ -135,10 +135,13 @@ fn skill_shell_is_off_and_the_folders_come_after_the_hooks() {
             "/data/agent-state/m/notes"
         ]
     );
-    assert_eq!(
-        options["settings"],
-        json!({"disableSkillShellExecution": true, "keepMe": 1, "skipWebFetchPreflight": true})
-    );
+    let mut expected =
+        json!({"disableSkillShellExecution": true, "keepMe": 1, "skipWebFetchPreflight": true});
+    if cfg!(windows) {
+        // The whole Bash tool, Windows only (`agent/one_shell.rs`).
+        expected["permissions"] = json!({"deny": ["Bash"]});
+    }
+    assert_eq!(options["settings"], expected);
 }
 
 /// The guard's entry, `disableAllHooks: false` and the forced MCP keys survive the profile's keys.

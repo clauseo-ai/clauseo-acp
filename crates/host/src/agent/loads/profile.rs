@@ -13,7 +13,8 @@
 //!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`
 //!   always, and `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
-//!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
+//!   (`agent/data_fence.rs`), after any the hook put there, and on Windows the whole `Bash` tool
+//!   (`agent/one_shell.rs`); in forced ask it also gains the
 //!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`, over Claude Code's
 //!   own sandbox, which the settings gain before it on macOS and Linux (`agent/loads/sandbox.rs`;
 //!   none on Windows). These are flag
@@ -251,6 +252,8 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
     deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
+    // Windows: no Bash tool, with Clauseo's PowerShell switch on (`agent/one_shell.rs`).
+    crate::agent::one_shell::deny_bash(&mut settings, cfg!(windows));
     if keys.browser {
         browser_ask_settings(&mut settings);
     }
