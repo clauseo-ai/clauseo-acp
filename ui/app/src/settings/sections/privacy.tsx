@@ -26,8 +26,7 @@
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
-import { lazy, Suspense, type ReactNode } from "react";
-import { late } from "@clauseo/components/lib/late.ts";
+import type { ReactNode } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -38,13 +37,9 @@ import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { AgentKind, ToolsSettingsView } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { AllowedSites } from "./allowed-sites.tsx";
+import { PrivacyWindowsLine } from "./privacy-windows-line.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
-
-/** On Windows, the line on what Clauseo can't keep apart there, in its own chunk. */
-const PrivacyWindowsLine = lazy(() =>
-  late(import("./privacy-windows-line.tsx")).then((m) => ({ default: m.PrivacyWindowsLine })),
-);
 
 /** The plans this window knows of, in the design's order: those in the limits view, or both while it has none. */
 function plansOf(ctx: SectionContext): readonly AgentKind[] {
@@ -169,11 +164,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
         {!webOff && <WebsitesDest />}
       </Group>
       {/* on Windows, what Clauseo can't keep apart there (UC-820, UC-850): the room's notice's words, for good */}
-      {platform === "windows" && (
-        <Suspense fallback={null}>
-          <PrivacyWindowsLine />
-        </Suspense>
-      )}
+      {platform === "windows" && <PrivacyWindowsLine />}
       {tools !== undefined && (
         <Group title={w.s("On the web")} note={tw(w.lang, "Changes apply to new conversations.")}>
           <ToolRow
