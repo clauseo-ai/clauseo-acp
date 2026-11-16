@@ -64,7 +64,7 @@ fn the_kept_rules_are_listed_in_plain_kinds() {
     let outside = std::env::temp_dir().join("elsewhere.txt");
     let read = format!("Read({})", rule_form(&outside));
     let rules = [
-        "Bash(npm test)",
+        "Bash(wc -l notes.txt)",
         "WebFetch(domain:example.com)",
         "mcp__court__find_case",
         edit.as_str(),
@@ -86,7 +86,12 @@ fn the_kept_rules_are_listed_in_plain_kinds() {
     assert_eq!(
         shown[..4],
         [
-            ("Bash(npm test)", KeptKind::Run, "npm test", None),
+            (
+                "Bash(wc -l notes.txt)",
+                KeptKind::Run,
+                "wc -l notes.txt",
+                None
+            ),
             (
                 "WebFetch(domain:example.com)",
                 KeptKind::Site,
@@ -123,9 +128,13 @@ fn a_removed_rule_leaves_the_file_and_the_running_agent() {
     );
     let host = dir.start(0);
     let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
-    keep(&dir, matter, &["Bash(npm test)", "Bash(npm run lint)"]);
+    keep(
+        &dir,
+        matter,
+        &["Bash(wc -l notes.txt)", "Bash(wc -c notes.txt)"],
+    );
     let mut events = host.events(StreamId::Thread(thread));
-    // The first npm test is the host's to allow, from the kept rule.
+    // The first wc -l notes.txt is the host's to allow, from the kept rule.
     let (turn, _) = host.prompt(thread, "Run the tests.");
     let ended = events.until_turn_ended(turn);
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
@@ -135,11 +144,11 @@ fn a_removed_rule_leaves_the_file_and_the_running_agent() {
             rule: rule.to_owned(),
         })
     };
-    assert_eq!(remove("Bash(npm test)"), CommandOutcome::Done);
+    assert_eq!(remove("Bash(wc -l notes.txt)"), CommandOutcome::Done);
     // Removing a rule that isn't there does nothing.
-    assert_eq!(remove("Bash(npm test)"), CommandOutcome::Done);
+    assert_eq!(remove("Bash(wc -l notes.txt)"), CommandOutcome::Done);
     let left: Vec<String> = kept(&host, matter).into_iter().map(|k| k.rule).collect();
-    assert_eq!(left, ["Bash(npm run lint)"]);
+    assert_eq!(left, ["Bash(wc -c notes.txt)"]);
     // The same session asks the lawyer again; the scenario expects the lawyer's reject.
     let (turn, _) = host.prompt(thread, "Run them again.");
     answer_from(&host, &mut events, thread, 1, &["reject"]);
@@ -159,13 +168,13 @@ fn a_rule_removed_while_a_launch_read_it_is_not_applied() {
     );
     let host = dir.start(0);
     let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
-    keep(&dir, matter, &["Bash(npm test)"]);
+    keep(&dir, matter, &["Bash(wc -l notes.txt)"]);
     let remove = HostCommand::RemoveKeptPermission {
         matter,
-        rule: "Bash(npm test)".to_owned(),
+        rule: "Bash(wc -l notes.txt)".to_owned(),
     };
     assert_eq!(host.ok(remove), CommandOutcome::Done);
-    keep(&dir, matter, &["Bash(npm test)"]);
+    keep(&dir, matter, &["Bash(wc -l notes.txt)"]);
     // The lawyer is asked both times: allow once, then reject.
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Run the tests.");
@@ -198,7 +207,8 @@ fn a_removed_rule_the_file_lost_leaves_the_running_agent() {
         .join("agent-state")
         .join(matter.to_string())
         .join("claude-allow.json");
-    let stored = || std::fs::read_to_string(&file).is_ok_and(|text| text.contains("npm test"));
+    let stored =
+        || std::fs::read_to_string(&file).is_ok_and(|text| text.contains("wc -l notes.txt"));
     crate::support::wait("the kept rule", async {
         while !stored() {
             async_io::Timer::after(std::time::Duration::from_millis(20)).await;
@@ -207,7 +217,7 @@ fn a_removed_rule_the_file_lost_leaves_the_running_agent() {
     keep(&dir, matter, &[]);
     let remove = HostCommand::RemoveKeptPermission {
         matter,
-        rule: "Bash(npm test)".to_owned(),
+        rule: "Bash(wc -l notes.txt)".to_owned(),
     };
     assert_eq!(host.ok(remove), CommandOutcome::Done);
     let (turn, _) = host.prompt(thread, "Run them again.");
