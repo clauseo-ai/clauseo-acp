@@ -190,9 +190,10 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
         var(&seen, "AGENT_BROWSER_SESSION"),
         Some(PathBuf::from(&session))
     );
-    // The session's own config, profile and downloads, all in its run folder's
-    // `agent-browser` folder, the one place the data fences open to it: never `<data>/browser`
-    // (denied to the agents) nor the lawyer's own Chrome profile.
+    // The session's own config and profile in its run folder's `agent-browser` folder, and its
+    // downloads in the conversation's work folder, kept across relaunches: places the data
+    // fences open to it, never `<data>/browser` (denied to the agents) nor the lawyer's own
+    // Chrome profile.
     let own = run.join("agent-browser");
     // (The run folder is gone with the session: `launch_checks`' tests check what is made.)
     assert_eq!(
@@ -213,7 +214,7 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
     assert!(profile.starts_with(data));
     assert_eq!(
         var(&seen, "AGENT_BROWSER_DOWNLOAD_PATH"),
-        Some(own.join("downloads"))
+        Some(seen.work.clone().expect("a work folder").join("downloads"))
     );
     assert_eq!(var(&seen, "AGENT_BROWSER_EXECUTABLE_PATH"), Some(chrome));
     assert_eq!(

@@ -49,8 +49,8 @@ pub(super) fn wrote(actor: &Actor, thread: ThreadId) -> (PathBuf, PathBuf) {
 }
 
 /// `thread`'s launch after `before`'s: a run folder of its own, the same work folder, under
-/// `<data>/agent-state/<matter>/work/<thread>`, with the draft written there before; the fence
-/// lets the agent read it.
+/// `<data>/agent-state/<matter>/work/<thread>` with the shell browser's downloads in it, and the
+/// draft written there before; the fence lets the agent read it.
 pub(super) fn same_work(actor: &Actor, thread: ThreadId, before: &(PathBuf, PathBuf)) {
     let (root, work) = launch(actor, thread);
     assert_ne!(root, before.0, "a run folder per launch");
@@ -59,6 +59,12 @@ pub(super) fn same_work(actor: &Actor, thread: ThreadId, before: &(PathBuf, Path
     let matter = actor.threads[&thread].row.matter.to_string();
     let want = state.join(matter).join("work").join(thread.to_string());
     assert_eq!(work, want);
+    let run = actor.threads[&thread].turn.run.as_ref().expect("a launch");
+    assert_eq!(
+        run.downloads,
+        work.join("downloads"),
+        "the shell browser's downloads too"
+    );
     let draft = work.join("draft.md");
     assert_eq!(std::fs::read(&draft).unwrap(), b"draft");
     assert!(

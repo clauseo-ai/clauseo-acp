@@ -177,7 +177,7 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) tmp: &'a Path,
     /// Claude's short temp folder (`agent::temp::claude_tmp_dir`), if it was made.
     pub(crate) claude_tmp: Option<&'a Path>,
-    /// `<run>/agent-browser/downloads`, the browser's downloads.
+    /// `<work>/downloads`, the shell browser's downloads.
     pub(crate) downloads: &'a Path,
     /// `<run>/skill-packs`, the launch's skill packs.
     pub(crate) skill_packs: &'a Path,
