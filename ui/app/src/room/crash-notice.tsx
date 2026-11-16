@@ -4,7 +4,9 @@
 // unfinished (an undo, a restore, accepting or rejecting tracked changes, each recorded before it touched a file).
 // "Clauseo closed unexpectedly." with "Your conversations are kept.", then a line per unfinished action, by count and
 // by matter where the room knows its name, never a file name, and "Versions has the earlier copies." Got it hides it
-// for this run (crash-seen.ts). Nothing when the last run quit cleanly, or while the query is refused.
+// for this run (crash-seen.ts). After a clean quit with an action still running (an idle Quit, a logoff) only the
+// action lines and Versions' line, no title. Nothing when the last run quit cleanly with nothing left, or while the
+// query is refused.
 import { useEffect, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { RailNotice } from "@clauseo/components/clauseo/rail-notice.tsx";
@@ -42,22 +44,24 @@ export function CrashNotice({
       live = false;
     };
   }, [transport]);
-  if (last === null || !last.unclean) return null;
+  const interrupted = last?.interrupted ?? [];
+  // unclean is the desktop's word alone: after a clean quit (an idle Quit, a logoff) an action still
+  // running is named without saying Clauseo closed
+  if (last === null || (!last.unclean && interrupted.length === 0)) return null;
   const run = String(last.run_started);
   if (seen === run) return null;
-  const interrupted = last.interrupted ?? [];
   const lines = [
-    uw(lang, "Your conversations are kept."),
+    ...(last.unclean ? [uw(lang, "Your conversations are kept.")] : []),
     ...interrupted.map((action) => actionLine(lang, action, matters)),
     ...(interrupted.length > 0 ? [uw(lang, "Versions has the earlier copies.")] : []),
   ];
   return (
     <RailNotice
       label={uw(lang, "Last session")}
-      state="closed-unexpectedly"
+      state={last.unclean ? "closed-unexpectedly" : "unfinished"}
       className="crash-notice"
       live
-      title={<Say>{uw(lang, "Clauseo closed unexpectedly.")}</Say>}
+      {...(last.unclean ? { title: <Say>{uw(lang, "Clauseo closed unexpectedly.")}</Say> } : {})}
       line={<Say>{lines.join(" ")}</Say>}
       actions={
         <Button

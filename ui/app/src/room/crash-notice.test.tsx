@@ -2,7 +2,8 @@
 // The notice after Clauseo closed unexpectedly (crash-notice.tsx), over a transport that answers `last_exit`: the
 // general lines after an unclean exit with nothing recorded, a line per unfinished action by kind and count (with its
 // matter's name, never the Scratch matter's), nothing after a clean quit or a refused query, Got it once per run,
-// kept across a reload, with focus left in the place the card stood, and a restore's Hindi agreeing with बहाली.
+// kept across a reload, with focus left in the place the card stood, a restore's Hindi agreeing with बहाली, and after a
+// clean quit with an action still running the action alone, with no title.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -160,5 +161,29 @@ test("a restore's line in Hindi agrees with बहाली", () => {
   expect(actionLine("hi", restore, MATTERS)).toBe("Acme lease में 2 फ़ाइलों की बहाली शायद पूरी नहीं हुई।");
   expect(actionLine("hi", { ...restore, matter: SCRATCH }, MATTERS)).toBe(
     "2 फ़ाइलों की बहाली शायद पूरी नहीं हुई।",
+  );
+});
+
+test("after a clean quit with an action still running, the action is named with no title and no crash line", async () => {
+  await mount(exit({ unclean: false, interrupted: [{ kind: "undo", matter: MATTER, files: 2 }] }));
+  expect(card()?.getAttribute("data-state")).toBe("unfinished");
+  expect(card()?.querySelector(".rail-notice-title")).toBeNull();
+  const line = card()?.querySelector(".rail-notice-line")?.textContent ?? "";
+  expect(line).not.toContain("Your conversations are kept.");
+  expect(line).toContain("Acme lease");
+  expect(line).toContain("Versions has the earlier copies.");
+  expect(card()?.querySelector('[data-testid="crash-got-it"]')).not.toBeNull();
+});
+
+test("an unclean exit keeps its title with rows and without", async () => {
+  await mount(exit({ interrupted: [{ kind: "undo", matter: MATTER, files: 2 }] }));
+  expect(card()?.querySelector(".rail-notice-title")?.textContent).toBe(
+    "Clauseo closed unexpectedly.",
+  );
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(exit());
+  expect(card()?.querySelector(".rail-notice-title")?.textContent).toBe(
+    "Clauseo closed unexpectedly.",
   );
 });

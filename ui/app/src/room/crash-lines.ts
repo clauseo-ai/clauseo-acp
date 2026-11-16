@@ -52,19 +52,27 @@ export const carriesLastExit = (transport: HostTransport): boolean =>
 const FOCUSABLE =
   'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** Moves focus from `from`, inside a notice about to go, to the first control of the place the notice stands in (the
- * rail's foot, else the rail, else the wall) outside the notice; to that place itself when it has none. */
+// The places a notice stands in, nearest first: the rail's foot, then the rest of the rail; the work's
+// head, then the rest of the work (the welcome's buttons, the composer); the wall.
+const PLACES = ".room-rail-foot, .room-rail, .room-notices, .room-centre, .room-pane";
+
+/** Moves focus from `from`, inside a notice about to go, to the first control outside the notice in
+ * the nearest place it stands in that has one (PLACES, from the notice outward); to the nearest place
+ * itself when none has. */
 export function focusBeside(from: HTMLElement): void {
   const notice = from.closest(".rail-notice");
-  const place = from.closest<HTMLElement>(".room-rail-foot, .room-rail, .room-pane");
-  if (place === null) return;
-  const next = [...place.querySelectorAll<HTMLElement>(FOCUSABLE)].find(
-    (el) => notice === null || !notice.contains(el),
-  );
-  if (next !== undefined) {
-    next.focus();
-    return;
+  const outside = (el: HTMLElement) => notice === null || !notice.contains(el);
+  let nearest: HTMLElement | null = null;
+  for (let place = from.closest<HTMLElement>(PLACES); place !== null;) {
+    nearest ??= place;
+    const next = [...place.querySelectorAll<HTMLElement>(FOCUSABLE)].find(outside);
+    if (next !== undefined) {
+      next.focus();
+      return;
+    }
+    place = place.parentElement?.closest<HTMLElement>(PLACES) ?? null;
   }
-  if (!place.hasAttribute("tabindex")) place.tabIndex = -1;
-  place.focus();
+  if (nearest === null) return;
+  if (!nearest.hasAttribute("tabindex")) nearest.tabIndex = -1;
+  nearest.focus();
 }
