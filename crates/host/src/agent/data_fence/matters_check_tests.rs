@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde_json::json;
 
-use super::{named_in_words, other_matter_on, other_matter_on_in};
+#[cfg(unix)]
+use super::other_matter_on_in;
+use super::{named_in_words, other_matter_on};
 use crate::agent::data_fence::resolve::Disk;
 use crate::agent::data_fence::tests::{check, layout};
 use crate::network_paths::{FOLD_CASE, NetEnv};
