@@ -159,7 +159,10 @@ struct HeaderPairs<'a> {
 /// It is an approximation: stetdoc pairs the two last sections, and two others only when their
 /// ending paragraphs were paired in the body, so a section added at the end or in the middle
 /// pairs differently there. [`compare`] says the blackline may differ when the versions have
-/// different numbers of sections and a header or footer holds tables.
+/// different numbers of sections and a header or footer holds tables. As many sections on each
+/// side can still pair wrongly (one section added and another removed), and nothing says so;
+/// only the table formatting compared here is affected, since the header texts are checked
+/// against the parts shown whatever the pairing.
 fn pair_headers<'a>(old: &'a Package, new: &'a Package) -> HeaderPairs<'a> {
     let mut found = HeaderPairs::default();
     for (theirs, ours) in old.sections.iter().rev().zip(new.sections.iter().rev()) {
