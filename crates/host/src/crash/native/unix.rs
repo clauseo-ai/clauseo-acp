@@ -28,9 +28,6 @@ static PREVIOUS: [OnceLock<SigAction>; 5] = [const { OnceLock::new() }; 5];
 
 /// Linux's `si_code` of a signal another process sent with `kill`.
 const LINUX_SI_USER: libc::c_int = 0;
-/// The lowest `si_code` of a signal a process sent on macOS: `SI_USER`, `SI_QUEUE`, `SI_TIMER`,
-/// `SI_ASYNCIO` and `SI_MESGQ` are `0x10001` to `0x10005`.
-const APPLE_SENT_MIN: libc::c_int = 0x10000;
 
 /// Whose `si_code` values the handler reads: they differ between macOS and Linux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,31 +53,33 @@ struct Decision {
     raise_again: bool,
 }
 
-/// Whether `si_code` says a process sent the signal (`kill`, `sigqueue`, `raise`, a timer), not
-/// the kernel for a fault. Linux: `si_code <= 0` is sent (`SI_USER` 0, `SI_QUEUE` -1, `SI_TKILL`
-/// -6, …), a fault's codes are positive. macOS: the sent codes are `0x10001` and up, a fault's
-/// are small and positive, and `0` (which `kill` has given) is taken as sent too.
-const fn sent(si_code: libc::c_int, os: Os) -> bool {
-    match os {
-        Os::Linux => si_code <= 0,
-        Os::Apple => si_code <= 0 || si_code >= APPLE_SENT_MIN,
-    }
-}
-
 /// The decision for a signal on `os`: `abort` for SIGABRT, `si_code` none when the kernel gave
-/// no siginfo. A fault the kernel raised is recorded and returns into the previous action.
-/// SIGABRT is recorded however it came, except on Linux one another process sent (`SI_USER`).
-/// Anything sent is raised again.
+/// no siginfo.
+///
+/// Linux: `si_code <= 0` means a process sent it (`SI_USER` 0, `SI_QUEUE` -1, `SI_TKILL` -6, …);
+/// a fault's codes are positive. A fault is recorded and returns into the previous action; a
+/// sent signal is raised again, and recorded only if it is SIGABRT that was not another
+/// process's `kill` (`SI_USER`).
+///
+/// macOS cannot tell a sent SIGSEGV, SIGBUS or SIGILL from a fault: XNU's `sendsig` sets fixed
+/// codes on arm64 (SIGSEGV always `SEGV_ACCERR`, SIGBUS `BUS_ADRALN`, SIGILL `ILL_ILLTRP`), and
+/// on Intel a real general protection fault gets 0 (`bsd/dev/arm/unix_signal.c` and
+/// `bsd/dev/i386/unix_signal.c`). So every one is recorded and raised again under the previous
+/// action: a fault ends as it would have, and an outside `kill -SEGV` leaves one report.
 fn decide(abort: bool, si_code: Option<libc::c_int>, os: Os) -> Decision {
-    let sent = si_code.is_none_or(|code| sent(code, os));
-    let killed = match (os, si_code) {
-        (Os::Linux, Some(code)) => code == LINUX_SI_USER,
-        (Os::Linux, None) => true,
-        (Os::Apple, _) => false,
-    };
-    Decision {
-        record: !sent || (abort && !killed),
-        raise_again: sent,
+    match os {
+        Os::Apple => Decision {
+            record: true,
+            raise_again: true,
+        },
+        Os::Linux => {
+            let sent = si_code.is_none_or(|code| code <= 0);
+            let killed = si_code.is_none_or(|code| code == LINUX_SI_USER);
+            Decision {
+                record: !sent || (abort && !killed),
+                raise_again: sent,
+            }
+        }
     }
 }
 
@@ -105,8 +104,9 @@ pub(super) fn install() -> bool {
     all
 }
 
-/// The handler. Records a kernel fault, or SIGABRT unless (on Linux) another process sent it
-/// ([`decide`]), then puts the previous action back; a sent signal is raised again for it.
+/// The handler. Records what [`decide`] says (on Linux a kernel fault, or SIGABRT unless another
+/// process sent it; on macOS every one), then puts the previous action back and raises the
+/// signal again when [`decide`] says so.
 extern "C" fn handle(signum: libc::c_int, info: *mut libc::siginfo_t, _context: *mut libc::c_void) {
     let Some(index) = SIGNALS
         .iter()
@@ -145,7 +145,7 @@ mod tests {
         record: false,
         raise_again: true,
     };
-    const ABORTED: Decision = Decision {
+    const RECORDED_RAISED: Decision = Decision {
         record: true,
         raise_again: true,
     };
@@ -169,35 +169,33 @@ mod tests {
             assert_eq!(decide(false, code, Os::Linux), PASSED_ON, "{code:?}");
         }
         // abort() raises with SI_TKILL; another process's kill -ABRT is SI_USER.
-        assert_eq!(decide(true, Some(-6), Os::Linux), ABORTED);
+        assert_eq!(decide(true, Some(-6), Os::Linux), RECORDED_RAISED);
         assert_eq!(decide(true, Some(0), Os::Linux), PASSED_ON);
         assert_eq!(decide(true, None, Os::Linux), PASSED_ON);
     }
 
     #[test]
-    fn macos_takes_0x10001_and_up_as_sent() {
-        // SEGV_MAPERR, SEGV_ACCERR, BUS_ADRALN, ILL_ILLOPC: the kernel's.
-        for code in [1, 2, 3, 4] {
-            assert_eq!(decide(false, Some(code), Os::Apple), FAULT, "{code}");
-        }
-        // SI_USER (kill -SEGV from another process), SI_QUEUE, SI_TIMER, SI_ASYNCIO, SI_MESGQ,
-        // the 0 kill has given, and no siginfo.
+    fn macos_records_every_code_and_raises_it_again() {
+        // XNU gives a sent SIGSEGV SEGV_ACCERR (2) on arm64, and a real Intel general protection
+        // fault 0, so no code is taken as sent: faults, SI_USER and friends, and no siginfo.
         for code in [
-            Some(0x10001),
-            Some(0x10002),
-            Some(0x10003),
-            Some(0x10004),
-            Some(0x10005),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
             Some(0),
+            Some(-1),
+            Some(0x10001),
+            Some(0x10005),
             None,
         ] {
-            assert_eq!(decide(false, code, Os::Apple), PASSED_ON, "{code:?}");
-        }
-        // Linux's rule would have recorded the sent SI_USER as a fault.
-        assert_eq!(decide(false, Some(0x10001), Os::Linux), FAULT);
-        // SIGABRT is recorded however it came, and raised again.
-        for code in [Some(0x10001), Some(0), None] {
-            assert_eq!(decide(true, code, Os::Apple), ABORTED, "{code:?}");
+            for abort in [false, true] {
+                assert_eq!(
+                    decide(abort, code, Os::Apple),
+                    RECORDED_RAISED,
+                    "{code:?} {abort}"
+                );
+            }
         }
     }
 }
