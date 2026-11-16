@@ -245,15 +245,15 @@ pub(crate) fn compile(
 }
 
 /// Copies the built `program` and the models into `runtime`: `<bin_dir>/tesseract[.exe]` and
-/// `<bin_dir>/tessdata/<lang>.traineddata`. On macOS, signs and checks it. Fails when something
-/// is already there.
+/// `<bin_dir>/tessdata/<lang>.traineddata`. On macOS, signs and checks it; on Windows, checks its
+/// PE flags. Fails when something is already there. Returns where it went and `hardened_line`.
 pub(crate) fn install(
     t: &Tesseract,
     target: Target,
     program: &Path,
     downloads: &Path,
     runtime: &Path,
-) -> Result<PathBuf, Failure> {
+) -> Result<(PathBuf, String), Failure> {
     let bin = runtime.join(bin_dir(target));
     let tessdata = bin.join("tessdata");
     let dest = bin.join(exe(target));
@@ -289,7 +289,20 @@ pub(crate) fn install(
             ));
         }
     }
-    Ok(dest)
+    Ok((dest, hardened_line(target)))
+}
+
+/// The log line saying what the hardening checks found, once they have passed. macOS's compile
+/// flags leave no mark in the binary to check, so its line names the flags built with.
+pub(crate) fn hardened_line(target: Target) -> String {
+    match target {
+        Target::WinX64 => "tesseract.exe PE flags ok: ASLR(high-entropy) DEP CFG CET".to_owned(),
+        Target::WinArm64 => "tesseract.exe PE flags ok: ASLR(high-entropy) DEP CFG".to_owned(),
+        Target::MacArm64 | Target::MacX64 => format!(
+            "tesseract built with {}; signed with the hardened runtime, otool ok",
+            hardening_args(target).join(" ")
+        ),
+    }
 }
 
 /// `IMAGE_DLLCHARACTERISTICS_*` a Windows tesseract.exe must have: the setup exe's three

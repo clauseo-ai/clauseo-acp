@@ -377,8 +377,9 @@ fn tesseract<W: Write>(
 ) -> Result<(), Failure> {
     let t = &lock.tesseract;
     let built = super::tesseract_build::compile(t, target, inputs, out_dir)?;
-    let program = super::tesseract_build::install(t, target, &built, inputs, runtime)?;
+    let (program, hardened) = super::tesseract_build::install(t, target, &built, inputs, runtime)?;
     net::remove(out_dir, "tesseract-build")?;
+    out.note(format!("build: {hardened}"));
     out.note(format!(
         "build: tesseract {} is {} ({} bytes), with {}",
         t.version,
