@@ -429,22 +429,35 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
     }
 }
 
-/// The guard's record of its refusals (`<data>/browser/run/<id>/guard-blocks.jsonl`,
-/// `launch_checks/folders.rs` `make_guard_record`) is under Claude's `Read` and `Edit` deny of
-/// `browser/**`, which Claude Code applies to its Write and Edit tools and its sandbox's writes,
-/// and the host's auto-deny refuses a request naming it, by a file tool or in a command: no
-/// Claude session can plant a link there, though its own hook passes no record file.
+/// The guard's record of its refusals, at the path the host makes it
+/// (`pre_write_guard::record::folder` and `file`, `<data>/browser/guard/<id>/guard-blocks.jsonl`),
+/// is under a `Read` and an `Edit` deny rule of a folder holding it (`browser/**`), which Claude
+/// Code applies to its Write and Edit tools and its sandbox's writes, and the host's auto-deny
+/// refuses a request naming it, by a file tool or in a command: no Claude session can plant a
+/// link there, though its own hook passes no record file. The session is the layout's own, `s1`.
 #[test]
 fn the_guard_record_is_denied_to_claudes_tools_and_sandbox() {
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
-    for rule in ["Read(//d/browser/**)", "Edit(//d/browser/**)"] {
-        assert!(rules.iter().any(|r| r == rule), "{rule}");
+    use crate::pre_write_guard::record;
+    let data = std::path::PathBuf::from("/d");
+    let record = record::file(&record::folder(&data, "s1"));
+    for sandboxed in [true, false] {
+        let rules = claude_deny_rules(&LaunchDeny::fixed(vec![data.clone()]), sandboxed);
+        for tool in ["Read", "Edit"] {
+            let covers = |rule: &String| {
+                let folder = rule
+                    .strip_prefix(&format!("{tool}(/"))
+                    .and_then(|rest| rest.strip_suffix("/**)"));
+                folder.is_some_and(|folder| record.starts_with(folder))
+            };
+            assert!(
+                rules.iter().any(covers),
+                "{tool} of {record:?}, sandboxed {sandboxed}: {rules:?}"
+            );
+        }
     }
     let dir = layout("guard-record");
     let root = dir.path();
-    let record = root
-        .join("data/browser/run/s1")
-        .join(crate::pre_write_guard::record::FILE_NAME);
+    let record = record::file(&record::folder(&root.join("data"), "s1"));
     write::create_dir_all(record.parent().unwrap()).unwrap();
     write::write_file(&record, b"").unwrap();
     let path = text(&record);

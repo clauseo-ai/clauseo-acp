@@ -1,9 +1,9 @@
 //! Steps the pre-write guard stopped (`updates/guard_blocks.rs`): a refusal the guard recorded
 //! in the session's file becomes one `Notice` in the turn, read off the actor at the agent's
 //! next update or at the turn's end; the same paper refused again in the turn is told once; a
-//! paper the matter does not hold is told unnamed; past eight a turn the rest are one count at
-//! its end; a Claude session is never told, since Claude shows the blocked call as a failed step
-//! of its own.
+//! paper the matter does not hold is told unnamed; every step without a notice of its own (a
+//! repeat, named or not, or one past eight a turn) is in one count at the turn's end; a Claude
+//! session is never told, since Claude shows the blocked call as a failed step of its own.
 
 use clauseo_protocol::{AgentKind, DomainEvent, MatterPath, NoticeKind, ThreadId, Timestamp};
 
@@ -11,7 +11,6 @@ use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::offline_quiet::{chunk, script};
 use super::rig::Rig;
-use crate::actor::turn::updates::guard_blocks::file;
 use crate::pre_write_guard::record::{Agent, Reason, Record};
 use crate::write;
 
@@ -61,10 +60,11 @@ fn guard_writes(rig: &Rig, thread: ThreadId, papers: &[&str], text: &str) {
         write::write_file(&paper, b"docx").unwrap();
     }
     let run = state.run.as_ref().expect("a run folder");
-    let path = file(&run.browser);
-    let mut old = std::fs::read(&path).expect("the record file the launch made");
+    let (path, _) = run.guard.as_ref().expect("the record the launch made");
+    let mut old = std::fs::read(path).expect("the record file the launch made");
     old.extend_from_slice(text.as_bytes());
-    write::write_file(&path, &old).unwrap();
+    // Written in place, so the file keeps the identity the launch read.
+    write::write_file(path, &old).unwrap();
 }
 
 /// Until the turn has ended and the guard's reads have answered.
@@ -140,8 +140,10 @@ fn each_refusal_is_told_once_a_turn_by_its_name_alone() {
             ],
         ),
         vec![
-            // The second turn: once, named without its folder.
+            // The second turn: once, named without its folder; its repeat in the count at the
+            // turn's end.
             (lease(), 2),
+            (NoticeKind::GuardStepsMore { more: 1 }, 2),
             // The third turn, with no update of its own: at its end, the paper again (a new
             // turn) and the `.codex` folder.
             (lease(), 3),
@@ -160,26 +162,32 @@ fn a_paper_the_matter_does_not_hold_is_told_unnamed() {
             &[],
             [&format!("{forged}{forged}"), ""]
         ),
-        vec![(NoticeKind::GuardStepBlocked, 2)]
+        vec![
+            (NoticeKind::GuardStepBlocked, 2),
+            (NoticeKind::GuardStepsMore { more: 1 }, 2)
+        ]
     );
 }
 
+/// The one count at the turn's end is every step stopped that got no notice of its own: the
+/// unnamed step and seven of eight distinct papers are told (eight notices), and the eighth
+/// paper, two repeats of a named paper and two of the unnamed step make five.
 #[test]
-fn past_eight_a_turn_the_rest_are_one_count_at_its_end() {
-    let names: Vec<String> = (0..11).map(|n| format!("Paper {n}.docx")).collect();
+fn every_step_without_a_notice_of_its_own_is_in_the_one_count_at_the_turns_end() {
+    let names: Vec<String> = (0..8).map(|n| format!("Paper {n}.docx")).collect();
     let papers: Vec<&str> = names.iter().map(String::as_str).collect();
-    // Eleven papers, one twice: eight named, the other three counted once at the turn's end.
-    let mut lines: String = names.iter().map(|name| held(name)).collect();
-    lines.push_str(&held("Paper 0.docx"));
+    let forged = held("Drafts/Not here.docx");
+    let mut lines = forged.clone();
+    lines.extend(names.iter().map(|name| held(name)));
+    lines.push_str(&held("Paper 0.docx").repeat(2));
+    lines.push_str(&forged.repeat(2));
     let told = three_turns("turn-guard-blocks-cap", None, &papers, [&lines, ""]);
-    let mut expected: Vec<(NoticeKind, usize)> = names[..8]
-        .iter()
-        .map(|name| {
-            let file = MatterPath::new(name).unwrap();
-            (NoticeKind::HeldOpenBlocked { file }, 2)
-        })
-        .collect();
-    expected.push((NoticeKind::GuardStepsMore { more: 3 }, 2));
+    let mut expected = vec![(NoticeKind::GuardStepBlocked, 2)];
+    expected.extend(names[..7].iter().map(|name| {
+        let file = MatterPath::new(name).unwrap();
+        (NoticeKind::HeldOpenBlocked { file }, 2)
+    }));
+    expected.push((NoticeKind::GuardStepsMore { more: 5 }, 2));
     assert_eq!(told, expected);
 }
 

@@ -3,11 +3,11 @@
 //! tag, from its folder's listing (`FindFirstFileW`), never by opening it; and a local file's
 //! identity, opened without following a link and only once the walk has vouched for its path.
 //! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`),
-//! and its link count, for the guard's record (`write::open_append_record`).
+//! and its link count and identity, for the guard's record (`write::open_append_record`).
 #![expect(
     unsafe_code,
     reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity and an \
-              open file's attributes, reparse tag and link count"
+              open file's attributes, reparse tag, link count and record identity"
 )]
 
 use std::os::windows::ffi::OsStrExt as _;
@@ -15,10 +15,11 @@ use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo,
-    FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo,
+    FileRemoteProtocolInfo, FileStandardInfo, FindClose, FindFirstFileW,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetShortPathNameW,
     GetVolumeInformationByHandleW, OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
@@ -97,6 +98,31 @@ pub(crate) fn link_count(file: &std::fs::File) -> std::io::Result<u32> {
     unsafe { GetFileInformationByHandleEx(handle, FileStandardInfo, (&raw mut info).cast(), size) }
         .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
     Ok(info.NumberOfLinks)
+}
+
+/// The identity of the open `file` for the guard's record (`write::RecordId`): its volume's
+/// serial number and 128-bit file ID (`FileIdInfo`), or, where the file system does not answer
+/// that, `GetFileInformationByHandle`'s volume serial number and 64-bit file index. The host
+/// that made the file and the guard that opens it ask the same file system, so take the same way.
+pub(crate) fn record_identity(file: &std::fs::File) -> std::io::Result<(u64, u128)> {
+    use std::os::windows::io::AsRawHandle as _;
+    let handle = HANDLE(file.as_raw_handle());
+    let mut id = FILE_ID_INFO::default();
+    let size = u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0);
+    // SAFETY: `file` keeps `handle` open for the call, and closes it itself; `id` is a
+    // FILE_ID_INFO of `size` bytes written in place.
+    let queried =
+        unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&raw mut id).cast(), size) };
+    if queried.is_ok() {
+        let file = u128::from_le_bytes(id.FileId.Identifier);
+        return Ok((id.VolumeSerialNumber, file));
+    }
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: as above; `info` is a BY_HANDLE_FILE_INFORMATION written in place.
+    unsafe { GetFileInformationByHandle(handle, &raw mut info) }
+        .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+    Ok((u64::from(info.dwVolumeSerialNumber), u128::from(index)))
 }
 
 /// The identity of the local file or folder at `path`: its volume's serial number and its

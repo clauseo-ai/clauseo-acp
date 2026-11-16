@@ -209,6 +209,9 @@ mod forget;
 #[path = "host/guard_hook.rs"]
 mod guard_hook;
 #[cfg(test)]
+#[path = "host/guard_record.rs"]
+mod guard_record;
+#[cfg(test)]
 #[path = "host/hindi.rs"]
 mod hindi;
 #[cfg(test)]

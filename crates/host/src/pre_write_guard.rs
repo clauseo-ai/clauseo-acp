@@ -135,11 +135,12 @@
 //! it. Claude Code needs no such rule: its `settingSources` leave out project settings.
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
-//! block, and, with [`RECORD_FLAG`] and a file (Codex's hook), one line in that file for the
-//! host to show the lawyer (`record.rs`); stdout stays empty, so a login profile's output under
-//! Codex's `$SHELL -lc` cannot spoil it. Only Claude Code's entry in forced ask (`--ask-all`,
-//! `ask.rs`) writes stdout: its `ask` decision for every tool it does not refuse but the local
-//! reads. An unknown tool, or a known one with nothing held, is exit 0 with nothing written.
+//! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
+//! (Codex's hook), one line in that file for the host to show the lawyer (`record.rs`); stdout
+//! stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil it. Only Claude
+//! Code's entry in forced ask (`--ask-all`, `ask.rs`) writes stdout: its `ask` decision for every
+//! tool it does not refuse but the local reads. An unknown tool, or a known one with nothing held,
+//! is exit 0 with nothing written.
 //!
 //! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
 //! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
@@ -188,6 +189,18 @@ pub const MATTER_FLAG: &str = "--matter";
 /// (`record.rs`), followed by the file.
 pub const RECORD_FLAG: &str = record::FLAG;
 
+/// The argument after [`RECORD_FLAG`] and its file that gives the file's identity, followed by
+/// it: the guard writes only a file with that identity (`record.rs`).
+pub const RECORD_ID_FLAG: &str = record::ID_FLAG;
+
+/// Makes the session `session`'s record file under the data folder `data`, as the host's
+/// launch prep does (`record.rs`, [`record::make`]): its folder of its own, create-new, then
+/// the file with `O_EXCL`. The file and its identity, written for [`RECORD_ID_FLAG`]; an error
+/// when anything is already at the folder's place.
+pub fn make_record(data: &Path, session: &str) -> std::io::Result<(PathBuf, String)> {
+    record::make(data, session).map(|(file, id)| (file, id.hex()))
+}
+
 /// How many of a shell command's words are looked at.
 pub const MAX_WORDS: usize = 64;
 
@@ -199,7 +212,7 @@ pub const DENY: i32 = 2;
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
 
 /// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none, then
-/// [`RECORD_FLAG`] and its file, or none); one hook
+/// [`RECORD_FLAG`] and its file and [`RECORD_ID_FLAG`] and its identity, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
@@ -235,9 +248,10 @@ fn run_timed(
         Ok(None) => (None, 0),
         Ok(Some(refusal)) => {
             let claude = matter_arg(args).is_some();
-            let file = record::file_arg(args);
-            if let Some((file, record)) = file.zip(record::record_of(&refusal, &bytes, claude)) {
-                record::append(&file, &record);
+            let target = record::target(args);
+            let record = record::record_of(&refusal, &bytes, claude);
+            if let Some(((file, id), record)) = target.zip(record) {
+                record::append(&file, id, &record);
             }
             (Some(refusal.reason()), DENY)
         }

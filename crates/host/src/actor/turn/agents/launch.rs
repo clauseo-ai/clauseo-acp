@@ -57,9 +57,16 @@ pub(super) fn launch(
     redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
-    let record = super::super::updates::guard_blocks::file(&prepared.run.browser);
+    let record = prepared
+        .run
+        .guard
+        .as_ref()
+        .map(|(file, id)| (file.clone(), id.hex()));
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor, &record);
+        let record = record
+            .as_ref()
+            .map(|(file, id)| (file.as_path(), id.as_str()));
+        let hooks = codex_hooks(actor, record);
         let guard = hooks.is_some();
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
@@ -148,20 +155,21 @@ pub(super) fn launch(
 /// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
 /// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
 /// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
-/// group, the guard's, which records its refusals in the session's `record` file for the
-/// lawyer (`updates/guard_blocks.rs`). `None` with no guard program, or (with a warning) one that
+/// group, the guard's, which records its refusals in the session's `record` file, with that
+/// file's identity, for the lawyer (`updates/guard_blocks.rs`); none when the launch prep made
+/// no record (a Claude session). `None` with no guard program, or (with a warning) one that
 /// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
 /// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
 /// check.
 fn codex_hooks(
     actor: &Actor,
-    record: &std::path::Path,
+    record: Option<(&std::path::Path, &str)>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Some(hooks) = &actor.codex_hooks {
         return Some(hooks.clone());
     }
     let program = actor.pre_write_guard.as_deref()?;
-    let config = agent::loads::codex_hook_config(program, Some(record));
+    let config = agent::loads::codex_hook_config(program, record);
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::warn!(
             "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \

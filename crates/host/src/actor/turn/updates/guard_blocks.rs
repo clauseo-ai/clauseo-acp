@@ -2,27 +2,31 @@
 //! `PreToolUse` hook before each `apply_patch` and shell call, directly or inside Code Mode's
 //! `exec`; a call it blocks never starts, so codex-acp sends no `tool_call` for it (it ignores
 //! Codex's `hook/completed`), and the lawyer saw nothing. The guard appends each such refusal to
-//! the session's [`file`] (`pre_write_guard/record.rs`); at each live update and when the turn
-//! ends (`updates::flush_rate`) the host reads what is new off the actor, one read at a time,
-//! and commits one `Notice` per paper and reason when the read answers ([`on_read`]).
+//! the session's record file (`RunFolders::guard`, `pre_write_guard/record.rs`); at each live
+//! update and when the turn ends (`updates::flush_rate`) the host reads what is new off the actor,
+//! one read at a time, and commits one `Notice` per paper and reason when the read answers
+//! ([`on_read`]).
 //!
 //! Claude gets none: claude-agent-acp sends the blocked call as a `tool_call` and its result as
 //! a `failed` update carrying the hook's reason, which the room already shows as a refused step
 //! ("Tried to …"), so a notice would tell it twice. Claude Code's entry passes no record file,
 //! and a line in the file of a Claude session is never read.
 //!
-//! The file is in a folder no agent's shell or patch tool may write (`launch_checks/folders.rs`
-//! `make_guard_record`), but its lines are still read as untrusted: complete lines only,
-//! [`MAX_READ`] bytes a time, never through a link, from a pipe or a file with two links, a line
-//! that does not parse skipped (the next one still read), a file cut short read from its start.
+//! The file is in a folder of the session's own no agent's shell or patch tool may write
+//! (`launch_checks/folders.rs` `make_guard`), and is read only when the file opened has the
+//! identity the host read from the file it made, but its lines are still read as untrusted:
+//! complete lines only, [`MAX_READ`] bytes a time, never through a link, from a pipe or a file
+//! with two links, a line that does not parse skipped (the next one still read), a file cut short
+//! read from its start.
 //! A paper is named only when the matter holds it, by its name alone (the last part of its
 //! path, [`shown_name`], through #1122's `shown.rs`); any other refusal of a held paper, and a
 //! name with an invisible character, is `GuardStepBlocked`, unnamed. A
-//! turn names at most [`MAX_TOLD`] papers, reasons and unnamed steps, each once; the steps past
-//! that are counted and told in one `GuardStepsMore` line by the read the turn's end asks for.
+//! turn names at most [`MAX_TOLD`] papers, reasons and unnamed steps, each once; every other step
+//! it stopped (a repeat of one told, named or not, or one past the cap) is counted and told in one
+//! `GuardStepsMore` line by the read the turn's end asks for.
 
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use clauseo_protocol::{AgentKind, MatterPath, Notice, NoticeKind, NoticeLevel, ThreadId, TurnId};
@@ -34,6 +38,7 @@ use super::{agent, commit};
 use crate::agent::codex::prepare::{Job, off_actor};
 use crate::log_file::Cause;
 use crate::pre_write_guard::record::{Reason, Record};
+use crate::write::RecordId;
 
 /// The most bytes read from the file at a time.
 const MAX_READ: u64 = 64 * 1024;
@@ -53,12 +58,6 @@ const JOB: Job = Job {
     wait: std::time::Duration::from_secs(10),
 };
 
-/// The record file of the session whose browser folder is `browser`
-/// (`<data>/browser/run/<session>`), which Codex's hook command names (`agent/loads/codex.rs`).
-pub(in crate::actor::turn) fn file(browser: &Path) -> PathBuf {
-    browser.join(crate::pre_write_guard::record::FILE_NAME)
-}
-
 /// What the host has read of its agent's record file and told of it.
 #[derive(Debug, Default)]
 pub(in crate::actor::turn) struct Reads {
@@ -72,7 +71,7 @@ pub(in crate::actor::turn) struct Reads {
     turn: Option<TurnId>,
     /// The kinds that turn told.
     told: Vec<NoticeKind>,
-    /// The steps that turn refused past [`MAX_TOLD`], not told yet.
+    /// The steps that turn refused that got no notice of their own, not told yet.
     more: u32,
 }
 
@@ -106,9 +105,9 @@ pub(in crate::actor::turn) fn tell(actor: &mut Actor, thread: ThreadId, end: boo
     if claude(actor, thread) {
         return;
     }
-    let Some(path) = state(actor, thread)
+    let Some((path, record)) = state(actor, thread)
         .and_then(|state| state.run.as_ref())
-        .map(|run| file(&run.browser))
+        .and_then(|run| run.guard.clone())
     else {
         return;
     };
@@ -125,7 +124,10 @@ pub(in crate::actor::turn) fn tell(actor: &mut Actor, thread: ThreadId, end: boo
     reads.reading = true;
     let (offset, matter, id) = (reads.offset, agent.folder.clone(), agent.id);
     actor.spawn_post(async move {
-        let read = off_actor(clock, JOB, move || Ok(read_new(&path, offset, &matter))).await;
+        let read = off_actor(clock, JOB, move || {
+            Ok(read_new(&path, record, offset, &matter))
+        })
+        .await;
         let (offset, kinds) = read.unwrap_or((offset, Vec::new()));
         Input::Turn(TurnInput::GuardRead(Box::new(Answer {
             thread,
@@ -138,8 +140,9 @@ pub(in crate::actor::turn) fn tell(actor: &mut Actor, thread: ThreadId, end: boo
     });
 }
 
-/// A read answered: each kind its turn has not told is told, up to [`MAX_TOLD`], the rest
-/// counted, and the count told when the turn's end asked for the read. A read for an agent
+/// A read answered: each kind its turn has not told is told, up to [`MAX_TOLD`]; every other
+/// step (a repeat of a kind told, or one past the cap) is counted, and the count told when the
+/// turn's end asked for the read. A read for an agent
 /// since replaced is dropped.
 pub(in crate::actor::turn) fn on_read(actor: &mut Actor, answer: Answer) {
     let thread = answer.thread;
@@ -155,10 +158,7 @@ pub(in crate::actor::turn) fn on_read(actor: &mut Actor, answer: Answer) {
     }
     let mut notices = Vec::new();
     for kind in answer.kinds {
-        if reads.told.contains(&kind) {
-            continue;
-        }
-        if reads.told.len() >= MAX_TOLD {
+        if reads.told.contains(&kind) || reads.told.len() >= MAX_TOLD {
             reads.more = reads.more.saturating_add(1);
             continue;
         }
@@ -263,13 +263,15 @@ fn cut(text: &str) -> String {
 /// The kinds of the records `path` holds past `offset`, complete lines only, at most
 /// [`MAX_READ`] bytes, with where the next read starts; `matter` the matter folder. A line
 /// longer than that is passed over; a file shorter than `offset` is read from its start;
-/// anything but a regular file with one link reads as nothing. File system calls: off the actor.
+/// anything but a regular file with one link and the identity `id` the host read when it made
+/// the file reads as nothing. File system calls: off the actor.
 pub(in crate::actor::turn) fn read_new(
     path: &Path,
+    id: RecordId,
     offset: u64,
     matter: &Path,
 ) -> (u64, Vec<NoticeKind>) {
-    let Ok(mut opened) = crate::write::open_read_record(path) else {
+    let Ok(mut opened) = crate::write::open_read_record(path, id) else {
         return (offset, Vec::new());
     };
     let len = opened.metadata().map_or(offset, |meta| meta.len());
