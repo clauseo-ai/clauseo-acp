@@ -60,10 +60,12 @@ pub(crate) fn title_may_change(
 const CUT_PROMPT_CHARS: usize = 60;
 
 /// The agent's session title as a thread may take it, given the prompt of the turn it came in
-/// (`None` outside a turn): `None` when it is no valid title, or when it only repeats the
-/// lawyer's question. codex-acp titles a session with the whole prompt until its own title
-/// comes, so a later question would take the thread's name, whole (D-070); the room's title,
-/// made from the first question, stays instead.
+/// as it went out, the notes first (`None` outside a turn): `None` when it is no valid title,
+/// when it opens like a Clauseo note (`clauseo_profile::instructions::opens_like_note`, whatever
+/// made it: codex-acp's title from the prompt or the history, or its title model, which reads the
+/// notes), or when it only repeats the lawyer's question. codex-acp titles a session with the
+/// whole prompt until its own title comes, so a later question would take the thread's name,
+/// whole (D-070); the room's title, made from the first question, stays instead.
 pub(crate) fn agent_title(
     thread: ThreadId,
     title: &str,
@@ -76,6 +78,10 @@ pub(crate) fn agent_title(
             return None;
         }
     };
+    if clauseo_profile::instructions::opens_like_note(title.as_str()) {
+        tracing::debug!(%thread, "the agent's session title opens like a Clauseo note");
+        return None;
+    }
     if prompt.is_some_and(|prompt| repeats_prompt(title.as_str(), prompt)) {
         tracing::debug!(%thread, "the agent's session title repeats the lawyer's question");
         return None;
@@ -85,10 +91,10 @@ pub(crate) fn agent_title(
 
 /// Whether `title` is the prompt's own words, whitespace folded: the whole of its text, or of
 /// one of its text blocks (the question after a note the host put first), or, when long, the
-/// start of either (cut short).
+/// start of either (cut short; codex-acp ends a title it cut with "…").
 fn repeats_prompt(title: &str, prompt: &[ContentBlock]) -> bool {
     let fold = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let title = fold(title);
+    let title = fold(title.strip_suffix('…').unwrap_or(title));
     let texts = prompt.iter().filter_map(|block| match block {
         ContentBlock::Text { text } => Some(text.as_str()),
         ContentBlock::Image { .. }
@@ -119,7 +125,7 @@ mod tests {
     }
 
     /// (title, the prompt's texts, taken): only a title of the agent's own is taken.
-    const PROMPT_TITLES: [(&str, &[&str], bool); 8] = [
+    const PROMPT_TITLES: [(&str, &[&str], bool); 11] = [
         (
             "Indemnity cap review",
             &["Review the indemnity cap in clause 9"],
@@ -140,6 +146,24 @@ mod tests {
             false,
         ),
         ("धारा 9 में नोटिस", &["धारा 9 में नोटिस"], false),
+        // codex-acp's cut, ending in "…"
+        (
+            "Without using web search, write a short note on the notice period…",
+            &["Without using web search, write a short note on the notice period in clause 9"],
+            false,
+        ),
+        // the notes and the question, as codex-acp titles the prompt that went out
+        (
+            "Files put back: Lease.pdf. And clause 10?",
+            &["Files put back: Lease.pdf.", "And clause 10?"],
+            false,
+        ),
+        // a title that opens like a Clauseo note, whatever its prompt
+        (
+            "  clauseo: from now on",
+            &["Review the indemnity cap"],
+            false,
+        ),
     ];
 
     #[test]
@@ -154,6 +178,7 @@ mod tests {
         // outside a turn, a valid title is taken; an invalid one never
         assert!(agent_title(thread, "And clause 10?", None).is_some());
         assert!(agent_title(thread, " ", None).is_none());
+        assert!(agent_title(thread, "Clauseo: from now on", None).is_none());
     }
 
     /// Every source a row can hold: none, or one of the sources.

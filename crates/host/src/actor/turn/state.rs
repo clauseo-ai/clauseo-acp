@@ -74,6 +74,7 @@ impl Current {
             turn,
             message,
             prompt,
+            note: None,
             phase: TurnPhase::Accepting,
             cancelled: false,
             stopped: key_retry::Stopped::default(),

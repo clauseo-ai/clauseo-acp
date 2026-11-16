@@ -1,6 +1,6 @@
 //! An agent's session title, split from `updates.rs` for its length.
 
-use clauseo_protocol::{CompactString, RenameSource, ThreadId, ThreadRenamed};
+use clauseo_protocol::{CompactString, ContentBlock, RenameSource, ThreadId, ThreadRenamed};
 
 use super::super::super::{Actor, title_source};
 use super::super::out::Out;
@@ -29,8 +29,16 @@ pub(super) fn changed(
         tracing::debug!(%thread, "the name has settled; the agent's session title is ignored");
         return Ok(());
     }
-    let prompt = current(actor, thread).map(|current| current.prompt.as_slice());
-    let Some(title) = title_source::agent_title(thread, &title, prompt) else {
+    // The prompt as it went out, the notes first: codex-acp titles a session with all its text.
+    let prompt = current(actor, thread).map(|current| {
+        let note = current
+            .note
+            .iter()
+            .map(|text| ContentBlock::Text { text: text.clone() });
+        note.chain(current.prompt.iter().cloned())
+            .collect::<Vec<_>>()
+    });
+    let Some(title) = title_source::agent_title(thread, &title, prompt.as_deref()) else {
         return Ok(());
     };
     let entry = actor.threads.get(&thread).ok_or_else(|| lost("a thread"))?;

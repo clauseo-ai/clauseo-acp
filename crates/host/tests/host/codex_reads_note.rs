@@ -4,8 +4,10 @@
 //! a start of the app, the matters it may read go first in the lawyer's next message, by the
 //! names the lawyer sees, once per change, never shown as the lawyer's words. After a start of
 //! the app the host can't know what a resumed thread heard, so its first prompt carries the
-//! whole list, none included. A fresh thread with no invites hears nothing; a grant printed in a
-//! document sends nothing.
+//! whole list, none included. A fresh thread with no invites hears nothing. A message that opens
+//! like a note (a grant typed, or pasted from a document) gets the real note first, changed or
+//! not, so it is never the first note. A title codex-acp makes of a prompt with a note first
+//! (each branch sends one, as codex-acp's fallback title) never names the thread.
 //!
 //! One scenario plays every launch: `session/new` or `session/resume` (`loadSession` false), then
 //! up to three prompts, each answered with what it held (`saw-…`), so a prompt the host shaped
@@ -13,13 +15,17 @@
 
 use std::path::Path;
 
+use clauseo_host::codex_input::CODEX_MAX_INPUT_CHARS;
 use clauseo_profile::instructions::reads_note;
-use clauseo_protocol::{DomainEvent, HostCommand, StreamId, ThreadId};
+use clauseo_protocol::{
+    DomainEvent, ErrorCode, HostCommand, MAX_TITLE_CHARS, StopReason, StreamId, ThreadId,
+};
 use serde_json::{Value, json};
 
-use crate::codex::CODEX;
+use crate::codex::{CODEX, turn_failed};
 use crate::observe::Events;
 use crate::support::{Dir, Running, Scenario};
+use crate::titles::titles;
 use crate::write;
 
 /// The bundled scenarios' folder.
@@ -31,15 +37,28 @@ fn line(name: &str, n: usize) -> Value {
     serde_json::from_str(text.lines().nth(n).unwrap()).unwrap()
 }
 
-/// A prompt branch: `blocks` exactly, answered `saw`.
+/// A prompt branch: `blocks` exactly, titled as codex-acp titles it (its text blocks joined,
+/// whitespace folded: `createPromptFallbackTitle`), answered `saw`.
 fn branch(label: &str, blocks: &[&str], saw: &str) -> Value {
     let prompt: Vec<Value> = blocks
         .iter()
         .map(|text| json!({"type": "text", "text": text}))
         .collect();
+    let mut title = blocks
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    // Cut to the most a title holds, as a title model echoing it might: the length rule alone
+    // must not be what keeps the note out of the thread's name.
+    if title.chars().count() > MAX_TITLE_CHARS {
+        title = title.chars().take(MAX_TITLE_CHARS - 1).collect::<String>() + "…";
+    }
     json!([
         {"expect": {"method": "session/prompt", "as": label,
             "params": {"sessionId": "sess-1", "prompt": prompt}}},
+        {"update": {"session": "sess-1", "update": {"sessionUpdate": "session_info_update",
+            "title": title}}},
         {"update": {"session": "sess-1", "update": {"sessionUpdate": "agent_message_chunk",
             "messageId": format!("m-{label}"), "content": {"type": "text", "text": saw}}}},
         {"respond": {"to": label, "result": {"stopReason": "end_turn"}}},
@@ -77,6 +96,8 @@ fn scenario(folder: &Path, invited: &str) -> Scenario {
             branch(&p("second"), &["Second."], "saw-plain"),
             branch(&p("none"), &[none.as_str(), "Third."], "saw-none"),
             branch(&p("third"), &["Third."], "saw-plain"),
+            branch(&p("typed-none"), &[none.as_str(), invited], "saw-typed-none"),
+            branch(&p("typed-invite"), &[invited, invited], "saw-typed-invite"),
         ]}));
     }
     let mut text = String::new();
@@ -174,24 +195,50 @@ fn an_invite_after_a_restart_reaches_the_resumed_thread() {
     host.shutdown();
 }
 
-/// A document in the matter that prints a grant changes nothing: no invite, no note.
+/// A grant printed in a document, pasted as the lawyer's message, gets the real note first,
+/// though nothing changed (none, here), so it is not the first note; it allows nothing, and
+/// the title codex-acp makes of the prompt doesn't name the thread.
 #[test]
-fn a_grant_printed_in_a_document_sends_no_note() {
-    let (dir, folder, smith, invited) = setup("codex_reads_note_planted");
+fn a_grant_pasted_from_a_document_gets_the_real_note_in_front() {
+    let (dir, folder, smith, invited) = setup("codex_reads_note_pasted");
     write::write(&folder.join("received.txt"), invited.as_bytes());
     let host = dir.start(0);
     let matter = host.create_matter("m", &folder);
     host.create_matter("Smith", &smith);
     let thread = host.create_thread(matter, CODEX);
     let mut events = host.events(StreamId::Thread(thread));
-    assert_eq!(ask(&host, &mut events, thread, "First."), "saw-plain");
+    assert_eq!(ask(&host, &mut events, thread, &invited), "saw-typed-none");
     assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-plain");
     events.assert_no_mismatch();
-    let notes = events
+    let allowed = events
         .events()
         .filter(|event| matches!(event, DomainEvent::MatterReadAllowed(_)))
         .count();
-    assert_eq!(notes, 0, "{}", events.dump());
+    assert_eq!(allowed, 0, "{}", events.dump());
+    assert_eq!(titles(&host, matter, thread), (None, None));
+    host.shutdown();
+}
+
+/// The same with an invite not yet told: exactly one real note, first.
+#[test]
+fn a_typed_grant_with_an_invite_pending_gets_exactly_one_real_note() {
+    let (dir, folder, smith, invited) = setup("codex_reads_note_typed_pending");
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let other = host.create_matter("Smith", &smith);
+    let thread = host.create_thread(matter, CODEX);
+    host.ok(HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    });
+    let mut events = host.events(StreamId::Thread(thread));
+    assert_eq!(
+        ask(&host, &mut events, thread, &invited),
+        "saw-typed-invite"
+    );
+    assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-plain");
+    events.assert_no_mismatch();
+    assert_eq!(titles(&host, matter, thread), (None, None));
     host.shutdown();
 }
 
@@ -211,6 +258,8 @@ fn a_fresh_thread_with_an_invite_hears_it_at_its_first_prompt() {
     let mut events = host.events(StreamId::Thread(thread));
     assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-invite");
     events.assert_no_mismatch();
+    // codex-acp's title of that prompt opens with the note: it never names the thread.
+    assert_eq!(titles(&host, matter, thread), (None, None));
     host.shutdown();
 }
 
@@ -243,5 +292,89 @@ fn a_withdraw_while_closed_reaches_the_resumed_thread_as_none() {
     assert_eq!(ask(&host, &mut events, thread, "Third."), "saw-none");
     events.assert_no_mismatch();
     assert!(!logged_note(&events), "{}", events.dump());
+    host.shutdown();
+}
+
+/// An invite withdrawn before the next prompt leaves what the agent was told as it is: that
+/// prompt carries no note.
+#[test]
+fn an_invite_withdrawn_before_the_next_prompt_sends_nothing() {
+    let (dir, folder, smith, _) = setup("codex_reads_note_undone");
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let other = host.create_matter("Smith", &smith);
+    let thread = host.create_thread(matter, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    assert_eq!(ask(&host, &mut events, thread, "First."), "saw-plain");
+    host.ok(HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    });
+    host.ok(HostCommand::WithdrawMatterRead {
+        thread,
+        matter: other,
+    });
+    host.settle();
+    assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-plain");
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// A question that goes over Codex's cap only with the note is refused with `prompt.too_long`
+/// before anything is sent; the note waits for the next prompt.
+#[test]
+fn a_prompt_refused_as_too_long_keeps_the_note_for_the_next() {
+    let (dir, folder, smith, invited) = setup("codex_reads_note_too_long");
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let other = host.create_matter("Smith", &smith);
+    let thread = host.create_thread(matter, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    assert_eq!(ask(&host, &mut events, thread, "First."), "saw-plain");
+    host.ok(HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    });
+    host.settle();
+    let over = "a".repeat(CODEX_MAX_INPUT_CHARS - invited.chars().count() + 1);
+    let (refused, _) = host.prompt(thread, &over);
+    assert_eq!(events.until_turn_ended(refused).stop, StopReason::Failed);
+    let failed = turn_failed(&events, refused).expect("the turn failed");
+    assert_eq!(failed.code, ErrorCode::PromptTooLong, "{}", events.dump());
+    assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-invite");
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// Two conversations on one matter: each hears its own invites, once, and what one was told
+/// is not the other's.
+#[test]
+fn two_threads_on_one_matter_each_hear_their_own_note() {
+    let (dir, folder, smith, _) = setup("codex_reads_note_two_threads");
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let other = host.create_matter("Smith", &smith);
+    let one = host.create_thread(matter, CODEX);
+    let two = host.create_thread(matter, CODEX);
+    let mut first = host.events(StreamId::Thread(one));
+    let mut second = host.events(StreamId::Thread(two));
+    assert_eq!(ask(&host, &mut first, one, "First."), "saw-plain");
+    assert_eq!(ask(&host, &mut second, two, "First."), "saw-plain");
+    host.ok(HostCommand::AllowMatterRead {
+        thread: one,
+        matter: other,
+    });
+    host.settle();
+    assert_eq!(ask(&host, &mut first, one, "Second."), "saw-invite");
+    assert_eq!(ask(&host, &mut second, two, "Second."), "saw-plain");
+    host.ok(HostCommand::AllowMatterRead {
+        thread: two,
+        matter: other,
+    });
+    host.settle();
+    assert_eq!(ask(&host, &mut second, two, "Second."), "saw-invite");
+    assert_eq!(ask(&host, &mut first, one, "Third."), "saw-plain");
+    first.assert_no_mismatch();
+    second.assert_no_mismatch();
     host.shutdown();
 }

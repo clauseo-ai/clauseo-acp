@@ -8,10 +8,13 @@
 //! matters, none, as Codex's instructions name no matter; so a new session with invites hears
 //! them at its first prompt and a fresh thread with none hears nothing. After a start of the app
 //! nothing is known of what a resumed thread was told, so each part goes once more on its first
-//! prompt. One part for now, the other matters this conversation may read ([`MATTERS`]); another
-//! part is one more line in [`current`] and [`baseline`].
+//! prompt. A prompt whose text opens like a Clauseo note (typed or pasted,
+//! `clauseo_profile::instructions::opens_like_note`) gets every part, changed or not, so the real
+//! note is always the first: Codex's Windows rule counts only the first. One part for now, the
+//! other matters this conversation may read ([`MATTERS`]); another part is one more line in
+//! [`current`] and [`baseline`].
 
-use clauseo_protocol::ThreadId;
+use clauseo_protocol::{ContentBlock, ThreadId};
 
 use super::super::super::Actor;
 use super::super::state;
@@ -43,15 +46,36 @@ fn baseline(key: &'static str) -> String {
     }
 }
 
-/// The parts that changed since the agent was last told them, by key, in order.
+/// The parts that changed since the agent was last told them, by key, in order; all of them
+/// when the current turn's prompt opens like a note ([`typed_note`]).
 pub(super) fn changed(actor: &mut Actor, thread: ThreadId) -> Vec<(&'static str, String)> {
     let now = current(actor, thread);
     let Some(turns) = state(actor, thread) else {
         return Vec::new();
     };
+    let typed = turns
+        .current
+        .as_ref()
+        .is_some_and(|current| typed_note(&current.prompt));
     now.into_iter()
-        .filter(|(key, text)| turns.told_once.parts.get(key) != Some(text))
+        .filter(|(key, text)| typed || turns.told_once.parts.get(key) != Some(text))
         .collect()
+}
+
+/// Whether the lawyer's text, its text blocks joined in order, opens like a Clauseo note.
+fn typed_note(prompt: &[ContentBlock]) -> bool {
+    let text: String = prompt
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            ContentBlock::Image { .. }
+            | ContentBlock::Audio { .. }
+            | ContentBlock::ResourceLink { .. }
+            | ContentBlock::Resource { .. }
+            | ContentBlock::Unsupported { .. } => None,
+        })
+        .collect();
+    clauseo_profile::instructions::opens_like_note(&text)
 }
 
 /// A session is up: a new one (not `loaded`) knows each part as its instructions give it
