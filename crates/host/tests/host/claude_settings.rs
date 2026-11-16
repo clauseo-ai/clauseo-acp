@@ -6,7 +6,7 @@
 //! check is tested with its own seam (`profile_loads/policy.rs`).
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use clauseo_protocol::{DomainEvent, ErrorCode, StopReason, StreamId, ThreadId, TurnId};
 
@@ -76,7 +76,7 @@ fn a_settings_file_changed_between_prompts_stops_the_next_and_the_relaunch_rewri
         serde_json::from_str::<serde_json::Value>(WRITTEN).unwrap()
     );
 
-    std::fs::write(settings_file(&dir), PLANTED).unwrap();
+    crate::write::write(&settings_file(&dir), PLANTED);
     let (events, refused, stop) = turn(&host, thread, "And clause 5?");
     assert_ne!(stop, StopReason::EndTurn, "{}", events.dump());
     assert_eq!(failed(&events, refused), ErrorCode::AgentSettingsChanged);
@@ -105,8 +105,8 @@ fn a_settings_file_changed_while_a_prompt_runs_stops_the_turn() {
     events.until("the agent working", |e| {
         e.turn_text(turn).contains("Working.")
     });
-    let changed = Instant::now();
-    std::fs::write(settings_file(&dir), PLANTED).unwrap();
+    let changed = crate::packs_timing::now();
+    crate::write::write(&settings_file(&dir), PLANTED);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_ne!(ended.stop, StopReason::EndTurn, "{}", events.dump());

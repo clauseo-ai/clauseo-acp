@@ -106,11 +106,9 @@ impl UserTier {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(clippy::unused_self, reason = "only a unit test's reader has state")
-    )]
     fn read(&self) -> Doc {
+        #[cfg(not(test))]
+        let Self {} = self;
         #[cfg(test)]
         {
             self.played.as_ref().map_or(Doc::Absent, |read| {

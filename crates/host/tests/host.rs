@@ -73,6 +73,7 @@ mod claude_mode;
 #[cfg(test)]
 #[path = "host/claude_sandbox.rs"]
 mod claude_sandbox;
+#[cfg(test)]
 #[path = "host/claude_settings.rs"]
 mod claude_settings;
 #[cfg(test)]

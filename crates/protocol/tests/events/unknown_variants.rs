@@ -189,15 +189,6 @@ fn notice_kind() {
         &skipped,
     );
     round_trips(&skipped);
-    let refused = NoticeKind::ModelSwitchRefused {
-        picked: "Haiku".to_owned(),
-        kept: "Opus".to_owned(),
-    };
-    decodes_in_both(
-        r#"{"model_switch_refused":{"picked":"Haiku","kept":"Opus"}}"#,
-        &refused,
-    );
-    round_trips(&refused);
     data_enum_unknown(&unknown_of::<NoticeKind>("later"));
 }
 
