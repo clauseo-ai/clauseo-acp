@@ -1979,6 +1979,12 @@ export type ErrorCode =
 "blackline.format_unknown" | 
 /** The agent could not get through to its service while answering, and the computer did not seem offline: the service, or a proxy or firewall in front of it, refused, timed out or blocked the connection, or its name did not resolve. The answer so far is kept; asking again can work. */
 "agent.unreachable" | 
+/** The matter folder's path has `*` or `?` in a folder's name, on macOS or Linux, where Claude's sandbox cannot name it (Claude Code reads a sandbox path as a pattern with no escape for those characters), so the host did not start Claude rather than start it without the sandbox. Renaming the folder fixes it. */
+"matter.folder_wildcard" | 
+/** A path Claude's sandbox must name outside the matter folder's own path (Clauseo's data, work, temp or notes folder, or another matter's folder) has `*` or `?`, on macOS or Linux, where Claude's sandbox cannot name it, so the host did not start Claude rather than start it without the sandbox. */
+"agent.sandbox_wildcard" | 
+/** Claude's sandbox could not be set up for the launch on macOS or Linux (Claude's short temp folder could not be made, a folder to deny is not UTF-8, or Claude Code exited at start because its sandbox could not start), so Claude was not started without the sandbox. */
+"agent.sandbox_unavailable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

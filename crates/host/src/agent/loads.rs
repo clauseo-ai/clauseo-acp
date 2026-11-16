@@ -30,6 +30,8 @@ mod profile_keys_tests;
 mod profile_tests;
 pub(crate) mod sandbox;
 #[cfg(test)]
+mod sandbox_launch_tests;
+#[cfg(test)]
 mod sandbox_tests;
 pub(crate) mod subagents;
 #[cfg(test)]

@@ -283,8 +283,11 @@ test("an agent's name fills no other code", () => {
 });
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
-  const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter((c) =>
-    ERROR_WORDS[c].includes("Claude"),
+  // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux), so no other
+  // plan's thread ever shows their line (UC-472)
+  const claudeOnly: readonly WordedCode[] = ["agent.sandbox_unavailable", "matter.folder_wildcard"];
+  const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
+    (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
   );
   expect([...PLANNED_CODES].sort()).toEqual(naming.sort());
 });
@@ -364,4 +367,39 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
   expect(errorWords("en", "matter.folder_backslash")).toBe(
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
   );
+});
+
+// Claude's protection (its sandbox) couldn't be set up, so the host didn't start it (provisional; hi: later, so the
+// Hindi display shows the English): matter.folder_wildcard names the folder with the * or ? (UC-470), isolated, in its
+// own {name} slot whatever the agent; with no folder to name it says UC-472, as agent.sandbox_unavailable does
+const UC470 = (name: string) =>
+  `Rename the folder '\u2068${name}\u2069' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.`;
+const UC471 =
+  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.";
+const UC472 =
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.";
+
+test("the sandbox refusals' lines, in English in both languages until their Hindi comes", () => {
+  for (const lang of ["en", "hi"] as const) {
+    expect(errorWords(lang, "agent.sandbox_wildcard")).toBe(UC471);
+    expect(errorWords(lang, "agent.sandbox_unavailable")).toBe(UC472);
+    expect(errorWords(lang, "matter.folder_wildcard")).toBe(UC472);
+  }
+  for (const en of [UC470("Test*"), UC471, UC472]) expect(en).not.toMatch(BANNED_EN);
+});
+
+test.each([
+  ["Test*", UC470("Test*")],
+  ["Clients?", UC470("Clients?")],
+  [null, UC472],
+  ["", UC472],
+] as const)("matter.folder_wildcard with the folder %j: %s", (wildcard, said) => {
+  const place = { platform: "mac", parent: null, wildcard } as const;
+  for (const agent of [CLAUDE, undefined, CODEX, named("gemini"), named(null)]) {
+    expect(errorWords("en", "matter.folder_wildcard", agent, place)).toBe(said);
+    expect(errorWords("hi", "matter.folder_wildcard", agent, place)).toBe(said);
+  }
+  // the folder reaches no other code's line
+  expect(errorWords("en", "agent.sandbox_wildcard", CLAUDE, place)).toBe(UC471);
+  expect(errorWords("en", "matter.folder_backslash", CLAUDE, place)).not.toContain("Test*");
 });

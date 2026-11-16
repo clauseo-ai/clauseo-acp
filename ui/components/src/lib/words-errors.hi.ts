@@ -260,6 +260,15 @@ export const HI = {
     "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
     "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  // matter.folder_wildcard (UC-470), agent.sandbox_wildcard (UC-471), agent.sandbox_unavailable and
+  // matter.folder_wildcard with no folder to name (UC-472): Claude's protection couldn't be set up, so it didn't start.
+  // Provisional English; hi: later
+  "Rename the folder '{name}' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.":
+    null,
+  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.":
+    null,
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

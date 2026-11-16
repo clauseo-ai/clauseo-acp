@@ -112,8 +112,17 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
         key !== "The answer stopped. Your question and the answer so far are kept." &&
         !(MARK_KEYS as readonly string[]).includes(key),
     )
-    // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx)
-    .filter(([code]) => code !== "agent.unreachable")
+    // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx); the sandbox
+    // refusals' are UC-470 to UC-472 (registry-sandbox-off.tsx)
+    .filter(
+      ([code]) =>
+        ![
+          "agent.unreachable",
+          "matter.folder_wildcard",
+          "agent.sandbox_wildcard",
+          "agent.sandbox_unavailable",
+        ].includes(code),
+    )
     .map(([code]) => `U3-err-${code}`);
   expect(ids.filter((id) => id.startsWith("U3-err-"))).toEqual(codes);
   expect(ids.filter((id) => !id.startsWith("U3-err-"))).toEqual([

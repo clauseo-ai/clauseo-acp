@@ -29,7 +29,9 @@
 //! with -32603 "Internal error", its `data.details` holding Claude Code's stderr ("Can't access
 //! working directory …"; 2.1.293 says it of a path with a backslash in it, which a launch now
 //! refuses first, `agent/folder_name.rs`). Any startup request's answer whose message or `data`
-//! says so gets the code: never `agent.protocol_error`'s "can't read".
+//! says so gets the code: never `agent.protocol_error`'s "can't read". Claude Code's exit at start
+//! when its sandbox can't start (`failIfUnavailable`, [`SANDBOX_UNAVAILABLE`]) gets
+//! `agent.sandbox_unavailable` the same way.
 //!
 //! Neither the refusal nor the log names the folder: the agent's message holds the path, so it
 //! is never logged or passed on.
@@ -68,6 +70,14 @@ const CWD_MISSING: &str = "`cwd` does not exist";
 /// What Claude Code prints when it can't start in its working folder, before the path; the
 /// adapter passes it on in the answer's `data.details`.
 const ACCESS_REFUSED: &str = "Can't access working directory";
+
+/// What Claude Code 2.1.293 prints when its sandbox can't start and the settings say
+/// `failIfUnavailable` (Clauseo's always do, `agent/loads/sandbox.rs`): it exits at start rather
+/// than run commands unsandboxed ("Error: sandbox required but unavailable: …").
+const SANDBOX_UNAVAILABLE: &str = "sandbox required but unavailable";
+
+/// The failure for a Claude whose sandbox could not start ([`SANDBOX_UNAVAILABLE`]).
+const SANDBOX_DETAIL: &str = "Claude Code's sandbox could not start, so it exited at start";
 
 /// The failure for a working folder the agent could not access ([`ACCESS_REFUSED`]).
 const ACCESS_DETAIL: &str = "the agent could not open the matter folder as its working folder";
@@ -119,8 +129,9 @@ pub(crate) fn open_folder(folder: &Path) -> io::Result<()> {
 /// The refusal for a launch that failed with `error`, when it is Claude's "`cwd` does not
 /// exist" answer to `session/new` (-32602, `data` holding `cwd`): `matter.folder_permission`;
 /// when the answer's message or `data` says Claude Code can't access its working folder
-/// ([`ACCESS_REFUSED`]): `agent.folder_inaccessible`. Neither has a path. `None` for any other
-/// failure, which keeps its own code.
+/// ([`ACCESS_REFUSED`]): `agent.folder_inaccessible`; when it says Claude Code's sandbox could
+/// not start ([`SANDBOX_UNAVAILABLE`]): `agent.sandbox_unavailable`. None has a path. `None`
+/// for any other failure, which keeps its own code.
 pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
     let Error::Acp(
         acp @ clauseo_acp::Error::Rpc {
@@ -134,11 +145,17 @@ pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
     else {
         return None;
     };
-    let access_refused = message.contains(ACCESS_REFUSED)
-        || acp
-            .rpc_data()
-            .is_some_and(|text| text.contains(ACCESS_REFUSED));
-    if access_refused {
+    let says = |words: &str| {
+        message.contains(words) || acp.rpc_data().is_some_and(|text| text.contains(words))
+    };
+    if says(SANDBOX_UNAVAILABLE) {
+        tracing::warn!("Claude Code's sandbox could not start, so it exited at start");
+        return Some(Error::refused(
+            ErrorCode::AgentSandboxUnavailable,
+            SANDBOX_DETAIL,
+        ));
+    }
+    if says(ACCESS_REFUSED) {
         tracing::warn!("the agent could not open the matter folder as its working folder at start");
         return Some(Error::refused(
             ErrorCode::AgentFolderInaccessible,

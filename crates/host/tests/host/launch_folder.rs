@@ -2,7 +2,8 @@
 //! open: the turn fails with `matter.folder_missing`, `matter.folder_not_a_matter`,
 //! `matter.folder_permission` or `agent.folder_inaccessible`, not `agent.launch_failed` or
 //! `agent.protocol_error`, and no path is in the failure's detail. A Claude turn in a folder whose
-//! path holds a backslash (macOS, Linux) fails as `matter.folder_backslash`, unstarted.
+//! path holds a backslash (macOS, Linux) fails as `matter.folder_backslash`, unstarted; one whose
+//! name holds `*` or `?` fails as `matter.folder_wildcard` rather than run without its sandbox.
 
 use clauseo_protocol::{ErrorCode, StopReason, StreamId, TurnFailed};
 
@@ -169,4 +170,28 @@ fn the_same_name_without_a_backslash_starts_claude() {
     let ended = events.until_turn_ended(turn);
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     host.shutdown();
+}
+
+/// macOS and Linux: a Claude turn in a matter whose folder's name holds `*` or `?` (stage C's
+/// `Test*`), which Claude's sandbox can't name, fails as `matter.folder_wildcard` with no path in
+/// the detail and no answer: never a session without its sandbox.
+#[cfg(unix)]
+#[test]
+fn a_wildcard_in_the_folder_name_refuses_claude_rather_than_run_it_unsandboxed() {
+    for (case, name) in [("star", "Test*"), ("question", "Test?")] {
+        let dir = Dir::new(
+            &format!("launch_folder_wildcard_{case}"),
+            &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+        );
+        let host = dir.start(0);
+        let (_, thread, _) = matter_with_thread(&dir, &host, name, &[("brief.txt", "x\n")], CLAUDE);
+        let failed = failed_turn(&host, thread);
+        assert_eq!(
+            failed.code,
+            ErrorCode::MatterFolderWildcard,
+            "{name}: {failed:?}"
+        );
+        assert_no_path(&dir, &failed);
+        host.shutdown();
+    }
 }
