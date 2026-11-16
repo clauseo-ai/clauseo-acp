@@ -1,5 +1,5 @@
 // The copy review entries for a Claude launch the host refused, or a Claude it stopped, over Claude's own settings
-// (UC-474, UC-756 and UC-757, #launch-never-weaker): the firm's managed settings turn hooks off (agent.firm_hooks_off), a policy
+// (U3-err-agent.firm_hooks_off, user_policy and settings_changed, #launch-never-weaker): the firm's managed settings turn hooks off (agent.firm_hooks_off), a policy
 // any program can write changed its security settings (agent.user_policy), or its settings file changed while it ran
 // (agent.settings_changed). Each is the question and its stop line, never a send's refusal, in place of the
 // "U3-err-<code>" entry (registry-offline.tsx's ownEntry).
@@ -29,9 +29,9 @@ const stopped = (code: ErrorCode) => () => (
 export const CLAUDE_SETTINGS: Partial<Record<ErrorCode, Entry[]>> = {
   "agent.firm_hooks_off": [
     {
-      id: "UC-474",
+      id: "U3-err-agent.firm_hooks_off",
       words: errorWords(
-        "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.",
+        "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.",
       ),
       screen: "room/thread",
       render: stopped("agent.firm_hooks_off"),
@@ -39,9 +39,9 @@ export const CLAUDE_SETTINGS: Partial<Record<ErrorCode, Entry[]>> = {
   ],
   "agent.user_policy": [
     {
-      id: "UC-756",
+      id: "U3-err-agent.user_policy",
       words: errorWords(
-        "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.",
+        "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.",
       ),
       screen: "room/thread",
       render: stopped("agent.user_policy"),
@@ -49,7 +49,7 @@ export const CLAUDE_SETTINGS: Partial<Record<ErrorCode, Entry[]>> = {
   ],
   "agent.settings_changed": [
     {
-      id: "UC-757",
+      id: "U3-err-agent.settings_changed",
       words: errorWords(
         "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.",
       ),

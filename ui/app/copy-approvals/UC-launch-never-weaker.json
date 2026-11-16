@@ -8,32 +8,32 @@
     "by": "launch-never-weaker (provisional; Rohan batch review)",
     "note": "UC-TBD-model-switch. Host notice NoticeKind::ModelSwitchRefused: the lawyer picked a model that can't run Claude Code's auto permission mode, so Clauseo switched the session back to the model it had, and to auto; {picked} and {kept} are the models' display names, isolated (notice-words.ts)"
   },
-  "UC-474": {
-    "en": "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.",
+  "U3-err-agent.firm_hooks_off": {
+    "en": "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "launch-never-weaker (provisional; Rohan batch review)",
-    "note": "UC-TBD-firm-hooks-off. agent.firm_hooks_off: the firm's managed Claude Code settings turn hooks off (disableAllHooks or allowManagedHooksOnly) and the launch rests on Clauseo's guard hook (forced ask, or Windows), so the host didn't start Claude; Claude-only; not retryable"
+    "note": "agent.firm_hooks_off: the firm's managed Claude Code settings turn hooks off (disableAllHooks or allowManagedHooksOnly) and the launch rests on Clauseo's guard hook (forced ask, or Windows), so the host didn't start Claude; Claude-only; not retryable"
   },
-  "UC-756": {
-    "en": "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.",
+  "U3-err-agent.user_policy": {
+    "en": "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "launch-never-weaker (provisional; Rohan batch review)",
-    "note": "UC-TBD-hkcu-policy. agent.user_policy: a Claude Code policy any program run by the user can write (Windows, HKCU\\SOFTWARE\\Policies\\ClaudeCode) sets permissions, sandbox or hooks with no administrator's policy outranking it, so the host didn't start Claude, or stopped it; Claude-only; not retryable"
+    "note": "agent.user_policy: a Claude Code policy any program run by the user can write (Windows, HKCU\\SOFTWARE\\Policies\\ClaudeCode) sets permissions, sandbox or hooks with no administrator's policy outranking it, so the host didn't start Claude, or stopped it; Claude-only; not retryable"
   },
-  "UC-757": {
+  "U3-err-agent.settings_changed": {
     "en": "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "launch-never-weaker (provisional; Rohan batch review)",
-    "note": "UC-TBD-settings-changed. agent.settings_changed: the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings; Claude-only; retryable"
+    "note": "agent.settings_changed: the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings; Claude-only; retryable"
   },
   "U3-err-agent.mode_not_set": {
     "en": "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.",

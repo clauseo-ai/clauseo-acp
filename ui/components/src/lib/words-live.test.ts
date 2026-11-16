@@ -284,7 +284,7 @@ test("an agent's name fills no other code", () => {
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
   // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux; its settings
-  // and hooks), so no other plan's thread ever shows their line (UC-472, UC-474, UC-756 and UC-757)
+  // and hooks), so no other plan's thread ever shows their line (UC-472, U3-err-agent.firm_hooks_off, user_policy and settings_changed)
   const claudeOnly: readonly WordedCode[] = [
     "agent.sandbox_unavailable",
     "matter.folder_wildcard",
@@ -412,12 +412,12 @@ test.each([
 });
 
 // Claude refused or stopped over its settings or its mode (provisional; hi: later, so the Hindi display shows the English): the
-// firm's managed settings turn hooks off (UC-474), a policy any program can write (UC-756), the settings file changed
-// while Claude ran (UC-757), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them
+// firm's managed settings turn hooks off (U3-err-agent.firm_hooks_off), a policy any program can write (U3-err-agent.user_policy), the settings file changed
+// while Claude ran (U3-err-agent.settings_changed), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them
 const UC474 =
-  "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.";
+  "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.";
 const UC475 =
-  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.";
+  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.";
 const UC476 =
   "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.";
 const MODE_NOT_SET =

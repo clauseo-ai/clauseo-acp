@@ -167,7 +167,7 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   ),
   // Claude's protection couldn't be set up (UC-470 to UC-472)
   ...SANDBOX_OFF,
-  // Claude refused or stopped over its settings (UC-474, UC-756 and UC-757)
+  // Claude refused or stopped over its settings (U3-err-agent.firm_hooks_off, user_policy and settings_changed)
   ...CLAUDE_SETTINGS,
 };
 

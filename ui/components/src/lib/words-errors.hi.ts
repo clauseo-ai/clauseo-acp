@@ -269,11 +269,11 @@ export const HI = {
     null,
   "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.":
     null,
-  // agent.firm_hooks_off (UC-474), agent.user_policy (UC-756), agent.settings_changed (UC-757), agent.mode_not_set
+  // agent.firm_hooks_off (U3-err-agent.firm_hooks_off), agent.user_policy (U3-err-agent.user_policy), agent.settings_changed (U3-err-agent.settings_changed), agent.mode_not_set
   // (U3-err-agent.mode_not_set): Claude refused or stopped over its settings or its mode. Provisional English; hi: later
-  "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.":
+  "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.":
     null,
-  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.":
+  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.":
     null,
   "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.":
     null,
