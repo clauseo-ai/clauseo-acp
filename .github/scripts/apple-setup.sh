@@ -6,28 +6,47 @@
 #
 # The real mode, after the Developer ID Application certificate exists (apple-rohan-steps.md):
 #   1. finds the Developer ID Application identity in your login keychain;
-#   2. checks the .p12 you export from Xcode opens with its password and holds that identity;
+#   2. checks the .p12 you export from Xcode, into a folder of its own outside Desktop and
+#      Documents (which iCloud may sync), opens with its password and holds that identity;
 #   3. asks for one notary set: the Apple ID with an app-specific password (recommended first),
 #      or the App Store Connect team API key (.p8, Key ID, Issuer ID);
-#   4. checks it with `xcrun notarytool history` (the app-specific password goes to notarytool's
-#      own prompt, never a command line), and the identity with a timestamped codesign of a
-#      scratch file;
+#   4. checks it with `xcrun notarytool`: the app-specific password is pasted once, and that
+#      same value is the one notarytool checks and the one GitHub gets (notarytool takes it on
+#      its command line for that one check, on your Mac only: it has no stdin option); and the
+#      identity with a timestamped codesign of a scratch file;
 #   5. sets the six secrets (the certificate trio and the chosen set) in clauseo-ai/clauseo-acp's
 #      `release` environment with `gh secret set`, each value from stdin or a file, deletes the
 #      other set's if present (release.yml refuses both), then lists the names;
-#   6. copies the .p12, its password (and the .p8) to the USB that holds the updater key, checks
-#      the copies and deletes the local ones.
+#   6. copies the .p12 (and the .p8) to the USB that holds the updater key, checks the copies and
+#      deletes the local ones. The .p12's password goes in your password manager only, never on
+#      the USB beside the file it opens.
+# The Team ID must also be committed in crates/desktop/release/apple-team-id (release.yml
+# refuses to sign without it); the script says so, and stops if that file pins another team.
 # It never prints a secret: passwords are read without echo, files go straight to gh's stdin.
 # Nothing is set until you say yes. Safe to stop with Ctrl-C at any point; the temporary
-# keychain and folder are removed on exit.
+# keychain and folder are removed on exit, and the clipboard is cleared. It runs only by hand,
+# in a terminal: never under CI.
 
 set -euo pipefail
+
+# By hand only: never in CI, never without a terminal to type into.
+if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+  printf 'Stopped: apple-setup.sh runs by hand on your Mac, never under CI\n' >&2
+  exit 1
+fi
+if ! [ -t 0 ] || ! [ -t 1 ]; then
+  printf 'Stopped: apple-setup.sh needs a terminal (run it in Terminal, not through a pipe)\n' >&2
+  exit 1
+fi
 
 REPO=clauseo-ai/clauseo-acp
 ENVIRONMENT=release
 CERTIFICATE=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY)
 APPLE_ID_SET=(APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
 API_KEY_SET=(APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8)
+# The committed Team ID release.yml signs with (decision 0035): empty until the enrolment.
+PIN_FILE=$(cd "$(dirname "$0")/../.." && pwd)/crates/desktop/release/apple-team-id
+pinned_team() { if [ -f "$PIN_FILE" ]; then sed 's/#.*//' "$PIN_FILE" | tr -d '[:space:]'; fi; }
 
 say() { printf '\n== %s\n' "$*"; }
 ok() { printf '  ok: %s\n' "$*"; }
@@ -98,6 +117,16 @@ check() {
     failed=1
   fi
 
+  say "The committed Team ID"
+  if [ ! -f "$PIN_FILE" ]; then
+    bad "no $PIN_FILE: run this from a checkout of $REPO"
+    failed=1
+  elif [ -z "$(pinned_team)" ]; then
+    ok "crates/desktop/release/apple-team-id is empty: after the real mode, a one-line PR sets it"
+  else
+    ok "crates/desktop/release/apple-team-id pins $(pinned_team)"
+  fi
+
   say "Result"
   if [ "$failed" = 0 ]; then echo "  Everything the real mode needs is here."; else echo "  Fix the NOT OK lines first."; fi
   return "$failed"
@@ -113,13 +142,17 @@ fi
 [ "$(uname -s)" = Darwin ] || die "run this on your MacBook"
 check || die "the checks above must pass first (bash apple-setup.sh --check)"
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/apple-setup.XXXXXX")
+# A folder of its own in your home folder, which iCloud does not sync (Desktop and Documents
+# may be); the .p12 is exported into it, and the whole folder goes when the script ends.
+work=$(mktemp -d "$HOME/clauseo-apple-setup.XXXXXX")
 chmod 700 "$work"
 probe_keychain=$work/probe.keychain-db
 cleanup() {
   security delete-keychain "$probe_keychain" 2> /dev/null || true
   rm -rf "$work"
-  unset p12_password
+  unset p12_password asp
+  # The app-specific password was pasted from the clipboard.
+  pbcopy < /dev/null 2> /dev/null && printf '\n  The clipboard is cleared; %s is deleted.\n' "$work"
 }
 trap cleanup EXIT
 
@@ -135,23 +168,34 @@ case "${#identities[@]}" in
     echo "  More than one:"
     for i in "${!identities[@]}"; do echo "    $((i + 1))) ${identities[$i]}"; done
     pick=$(ask "  Which one" 1)
-    identity=${identities[$((pick - 1))]:-}
-    [ -n "$identity" ] || die "no such number"
+    [[ "$pick" =~ ^[0-9]{1,3}$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "${#identities[@]}" ] ||
+      die "answer a number from 1 to ${#identities[@]}"
+    identity=${identities[$((pick - 1))]}
     ;;
 esac
 team=$(sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p' <<< "$identity")
 ok "found \"$identity\" (Team ID $team)"
+pinned=$(pinned_team)
+[ -z "$pinned" ] || [ "$pinned" = "$team" ] ||
+  die "this identity's Team ID is $team, but crates/desktop/release/apple-team-id pins $pinned: release.yml would refuse it"
 yes_or_stop "  Is this your Developer ID, the one releases should be signed with?"
 
 say "2. Export it as a .p12 (Xcode does it with the private key)"
 cat << EOF
   In Xcode: Xcode > Settings… > Accounts, select your team, click Manage Certificates….
   Control-click the "Developer ID Application" certificate (the one ending ($team)),
-  choose Export Certificate, save it as DeveloperID.p12 on your Desktop, and type a new,
-  strong password twice (from your password manager). Then come back here.
+  choose Export Certificate, and save it as DeveloperID.p12 in this folder (in the save
+  dialog press Command-Shift-G and paste it), not on the Desktop, which iCloud may sync:
+    $work
+  Type a new, strong password twice, and keep it in your password manager: it is not
+  backed up anywhere else. Then come back here.
 EOF
-p12=$(ask "  Path of the .p12" "$HOME/Desktop/DeveloperID.p12")
+p12=$(ask "  Path of the .p12" "$work/DeveloperID.p12")
 [ -f "$p12" ] || die "no file at $p12"
+case "$p12" in
+  "$work"/*) ;;
+  *) echo "  Note: $p12 is outside $work; Desktop and Documents may sync to iCloud." ;;
+esac
 read -r -s -p "  The .p12's password (not shown): " p12_password; echo
 read -r -s -p "  Again: " again; echo
 [ "$p12_password" = "$again" ] || die "the two passwords differ"
@@ -189,7 +233,8 @@ if [ "$notary" = apple_id ]; then
   Make an app-specific password for it:
     account.apple.com > sign in > Sign-In and Security > App-Specific Passwords >
     Generate an app-specific password (or +), name it "Clauseo notarytool", Create.
-  Apple shows it once, as xxxx-xxxx-xxxx-xxxx. Copy it, then paste it here (not shown).
+  Apple shows it once, as xxxx-xxxx-xxxx-xxxx. Copy it, then paste it here (not shown). This
+  one paste is what notarytool checks and what GitHub gets.
 EOF
   read -r -s -p "  App-specific password: " asp; echo
   [[ "$asp" =~ ^[a-z]{4}-[a-z]{4}-[a-z]{4}-[a-z]{4}$ ]] ||
@@ -208,11 +253,11 @@ fi
 
 say "4. Proof on your own Mac"
 if [ "$notary" = apple_id ]; then
-  # notarytool reads the password itself: store-credentials asks for it (paste it once more),
-  # so it is never on a command line, then checks it with Apple and keeps it in your login
-  # keychain as the profile "clauseo-notary" (handy for notarytool by hand later).
-  echo "  notarytool now asks for the app-specific password: paste it again."
-  xcrun notarytool store-credentials clauseo-notary --apple-id "$apple_id" --team-id "$team" ||
+  # The one value pasted above, so what GitHub gets is what notarytool checked. notarytool has
+  # no stdin option, so it takes it on its command line, for this one call on your own Mac.
+  # store-credentials checks it with Apple and keeps it in your login keychain as the profile
+  # "clauseo-notary" (handy for notarytool by hand later).
+  xcrun notarytool store-credentials clauseo-notary --apple-id "$apple_id" --team-id "$team" --password "$asp" ||
     die "notarytool refused the Apple ID, the password or the Team ID $team"
   xcrun notarytool history --keychain-profile clauseo-notary > /dev/null 2> "$work/notary.err" ||
     { sed 's/^/    /' "$work/notary.err"; die "notarytool history refused the stored credentials"; }
@@ -268,11 +313,14 @@ gh secret list --env "$ENVIRONMENT" -R "$REPO" --json name,updatedAt --jq '.[] |
 
 say "6. Back up to the USB with the updater key, then delete the local copies"
 usb=$(ask "  The USB's folder (for example /Volumes/KEYS)" "")
-[ -d "$usb" ] || die "no folder at $usb; plug it in and run again from step 1"
+while [ ! -d "$usb" ]; do
+  usb=$(ask "  No folder at \"$usb\". Plug the USB in and type its folder (empty: stop; the .p12 is then deleted, export it again later)" "")
+  [ -n "$usb" ] || die "stopped before the backup; the secrets are set on GitHub"
+done
 dest=$usb/clauseo-apple-$(date +%Y-%m-%d)
 mkdir -p "$dest"
+# The .p12 only: its password stays in your password manager, never beside the file it opens.
 cp "$p12" "$dest/DeveloperID.p12"
-(umask 077 && printf '%s\n' "$p12_password" > "$dest/DeveloperID.p12.password.txt")
 cmp -s "$p12" "$dest/DeveloperID.p12" || die "the copy on the USB differs from the .p12; nothing deleted"
 if [ -n "$p8" ]; then
   cp "$p8" "$dest/$(basename "$p8")"
@@ -285,19 +333,25 @@ else
 fi
 cat > "$dest/README.txt" << EOF
 Clauseo's Apple Developer ID, backed up $(date +%Y-%m-%d) by apple-setup.sh.
-DeveloperID.p12: "$identity", valid until $end. Its password: DeveloperID.p12.password.txt.
+DeveloperID.p12: "$identity", valid until $end. Its password: in the password manager only.
 $notary_line
 GitHub: the APPLE_* secrets of $REPO's \`$ENVIRONMENT\` environment.
 EOF
 ok "copied to $dest and checked"
-if [ -n "$p8" ]; then
-  yes_or_stop "  Delete the local .p12 ($p12) and .p8 ($p8)?"
-  rm -f "$p12" "$p8"
-else
-  yes_or_stop "  Delete the local .p12 ($p12)?"
-  rm -f "$p12"
+# The .p12 in the set-up folder goes with it on exit; one saved elsewhere, and the .p8, on a yes.
+local_copies=()
+case "$p12" in "$work"/*) ;; *) local_copies+=("$p12") ;; esac
+[ -z "$p8" ] || local_copies+=("$p8")
+if [ "${#local_copies[@]}" -gt 0 ]; then
+  yes_or_stop "  Delete the local ${local_copies[*]}?"
+  rm -f "${local_copies[@]}"
 fi
+rm -f "$p12"
 ok "deleted. Empty the Bin if Finder moved anything there; eject the USB"
 echo
+if [ "$(pinned_team)" != "$team" ]; then
+  echo "Last: open a one-line PR setting crates/desktop/release/apple-team-id to $team."
+  echo "release.yml refuses to sign with the Developer ID until that file holds it."
+fi
 echo "Done. The next v* release's macOS legs sign with the Developer ID and notarise."
 echo "Delete the repository variable CLAUSEO_UNSIGNED_BETA once that release is out."

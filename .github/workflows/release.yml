@@ -433,7 +433,8 @@ jobs:
       # or the Apple ID's, never both and never part of one; it names what is wrong (names only).
       # Then, on Linux with openssl and node, no macOS needed: APPLE_CERTIFICATE opens with its
       # password and holds one certificate and its key; the certificate is
-      # APPLE_SIGNING_IDENTITY's, of the Team ID in its "(TEAMID)", issued by Developer ID
+      # APPLE_SIGNING_IDENTITY's, of the Team ID in its "(TEAMID)", which must be the one
+      # committed in crates/desktop/release/apple-team-id (empty: refused), issued by Developer ID
       # Certification Authority and not expired. The API key: the notary service accepts it
       # (apple-notary.mjs, what `notarytool history` asks). The Apple ID: APPLE_TEAM_ID is that
       # Team ID and the password has an app-specific password's shape; the sign-in itself can't be
@@ -508,6 +509,18 @@ jobs:
             fail "APPLE_CERTIFICATE's certificate is not APPLE_SIGNING_IDENTITY's"
           [ "$(field -subject organizationalUnitName)" = "$team" ] ||
             fail "APPLE_CERTIFICATE's certificate is not of the Team ID in APPLE_SIGNING_IDENTITY"
+          # The team is the committed one, never only the secrets' own: a valid Developer ID of
+          # another team is refused here. Empty until the enrolment gives the Team ID.
+          pinned=$(sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]') ||
+            fail "crates/desktop/release/apple-team-id cannot be read"
+          [[ "$pinned" =~ ^([A-Z0-9]{10})?$ ]] ||
+            fail "crates/desktop/release/apple-team-id holds \"$pinned\", not a Team ID (10 capital letters and digits)"
+          [ -n "$pinned" ] ||
+            fail "crates/desktop/release/apple-team-id is empty, and the certificate's Team ID is $team: commit the team that signs releases there first (decision 0035)"
+          [ "$team" = "$pinned" ] ||
+            fail "the certificate's Team ID is $team, but crates/desktop/release/apple-team-id pins $pinned"
+          # A first gate, by the issuer's name only: a self-made certificate with that name passes
+          # here, and codesign's chain, notarisation and spctl refuse it later in the run.
           [ "$(field -issuer commonName)" = "Developer ID Certification Authority" ] ||
             fail "APPLE_CERTIFICATE's certificate is not issued by Developer ID Certification Authority"
           cmp -s <(openssl x509 -in "$dir/cert.pem" -noout -pubkey) <(openssl pkey -in "$dir/key.pem" -pubout) ||
@@ -520,8 +533,8 @@ jobs:
             node .github/scripts/apple-notary.mjs --check
             said="the notary service accepts the API key"
           else
-            [ "$APPLE_TEAM_ID" = "$team" ] ||
-              fail "APPLE_TEAM_ID is not the Team ID of APPLE_SIGNING_IDENTITY and its certificate"
+            [ "$APPLE_TEAM_ID" = "$pinned" ] ||
+              fail "APPLE_TEAM_ID is not the Team ID crates/desktop/release/apple-team-id pins ($pinned), which is the certificate's"
             [[ "$APPLE_ID" == ?*@?*.?* ]] || fail "APPLE_ID is not an email address (the Apple Account's)"
             [[ "$APPLE_PASSWORD" =~ ^[a-z]{4}-[a-z]{4}-[a-z]{4}-[a-z]{4}$ ]] ||
               fail "APPLE_PASSWORD is not an app-specific password (xxxx-xxxx-xxxx-xxxx, from account.apple.com)"
@@ -1266,13 +1279,13 @@ jobs:
       # Mach-O file in the .app is exactly the main binary, the externalBin sidecars and the five
       # helpers (`file` finds them, so one the layout gains is named here), and each, and the .app,
       # verifies strictly and shows in `codesign -dvvv` APPLE_SIGNING_IDENTITY as its authority,
-      # its Team ID (the identity's "(TEAMID)", which custody checked against the certificate), the
-      # hardened runtime alone (flags=0x10000(runtime)) and a secure timestamp, with none of the
-      # entitlements decision 0035 leaves out (get-task-allow first). The .app is "Notarized
-      # Developer ID" to Gatekeeper (spctl, as a downloaded app is assessed) and its ticket
-      # validates; so are the DMG's (spctl --context context:primary-signature) and the .app inside
-      # the DMG and inside the updater archive, which are what lawyers install. The step holds
-      # only the identity.
+      # its Team ID (the one crates/desktop/release/apple-team-id commits, which must also be the
+      # identity's "(TEAMID)"), the hardened runtime alone (flags=0x10000(runtime)) and a secure
+      # timestamp, with none of the entitlements decision 0035 leaves out (get-task-allow first).
+      # The .app is "Notarized Developer ID" to Gatekeeper (spctl, as a downloaded app is
+      # assessed) and its ticket validates; so are the DMG's (spctl --context
+      # context:primary-signature) and the .app inside the DMG and inside the updater archive,
+      # which are what lawyers install. The step holds only the identity.
       - name: Every Mach-O is signed with the Developer ID, and the .app and the DMG are notarised and stapled
         if: env.DEVELOPER_ID == 'true'
         env:
@@ -1282,7 +1295,12 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
           [[ "$APPLE_SIGNING_IDENTITY" =~ ^Developer\ ID\ Application:\ .+\ \(([A-Z0-9]{10})\)$ ]] ||
             fail "APPLE_SIGNING_IDENTITY is not \"Developer ID Application: <name> (<TEAMID>)\""
-          team=${BASH_REMATCH[1]}
+          identity_team=${BASH_REMATCH[1]}
+          # Every signature's team is the committed one, as custody required.
+          team=$(sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]')
+          [[ "$team" =~ ^[A-Z0-9]{10}$ ]] || fail "crates/desktop/release/apple-team-id holds no Team ID"
+          [ "$identity_team" = "$team" ] ||
+            fail "APPLE_SIGNING_IDENTITY's Team ID is $identity_team, but crates/desktop/release/apple-team-id pins $team"
           app=$RELEASE_DIR/bundle/macos/Clauseo.app
           dmg=$RELEASE_DIR/bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg
           archive=$RELEASE_DIR/bundle/macos/Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
@@ -2300,8 +2318,10 @@ jobs:
       # secret custody saw, the `release` environment's included (see custody). The safe rule:
       # an Apple secret, or a DMG signed with a real identity, always means notarisation is
       # required, so the variable never weakens a signed set-up, and the ad hoc check below
-      # refuses a DMG signed with a real identity. Unless custody decided a beta, the check is
-      # today's, word for word. A variable flipped after custody changes nothing in this run.
+      # refuses a DMG signed with a real identity. Unless custody decided a beta, each DMG must
+      # staple-validate as before, and now also be signed, with its .app, by the team
+      # crates/desktop/release/apple-team-id commits. A variable flipped after custody changes
+      # nothing in this run.
       - name: Every DMG is notarised and stapled, or this is an unsigned beta on purpose
         env:
           GH_TOKEN: ${{ github.token }}
@@ -2313,10 +2333,21 @@ jobs:
           [ -f "$RUNNER_TEMP/dmg/Clauseo_${VERSION}_aarch64.dmg" ] ||
             { echo "::error::the draft has no Clauseo_${VERSION}_aarch64.dmg"; exit 1; }
           if [ "$UNSIGNED_BETA" != true ] || [ "$HAS_APPLE" = true ]; then
+            # Notarised and stapled, then signed by the committed team (the DMG and its .app), as
+            # custody and build's Developer ID check required.
+            team=$(sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]')
             for dmg in "$RUNNER_TEMP"/dmg/*.dmg; do
               xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
+              [[ "$team" =~ ^[A-Z0-9]{10}$ ]] ||
+                { echo "::error::crates/desktop/release/apple-team-id holds no Team ID to check $(basename "$dmg") against"; exit 1; }
+              mnt=$(mktemp -d "$RUNNER_TEMP/mnt.XXXXXX")
+              hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
+              signers=$({ codesign -dv "$dmg" 2>&1 || true; codesign -dv "$mnt/Clauseo.app" 2>&1 || true; } | grep -c "^TeamIdentifier=$team\$" || true)
+              hdiutil detach "$mnt" > /dev/null
+              [ "$signers" = 2 ] ||
+                { echo "::error::$(basename "$dmg") or the Clauseo.app in it is not signed by team $team (crates/desktop/release/apple-team-id)"; exit 1; }
             done
-            echo "Every DMG of Clauseo $VERSION is notarised and stapled." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Every DMG of Clauseo $VERSION is notarised and stapled, signed by team $team." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           # The unsigned beta. Apple silicon runs no unsigned arm64 code, so the .app each DMG
