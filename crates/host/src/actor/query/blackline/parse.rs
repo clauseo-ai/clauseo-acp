@@ -135,6 +135,9 @@ pub(crate) struct Read {
     pub(crate) ids: BTreeSet<u64>,
     /// How many tracked changes stetdoc's summary counts, in every story.
     pub(crate) counted: usize,
+    /// The older and the newer text of each header and footer the blackline shows, each without
+    /// white space and without the list numbers the view writes (`story.rs`, `part_texts`).
+    pub(crate) header_texts: Vec<String>,
 }
 
 /// The fields of the view's JSON the read needs; the others are ignored.
@@ -223,6 +226,7 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
         warnings,
         ids: text.ids,
         counted: text.counted,
+        header_texts: Vec::new(),
     })
 }
 

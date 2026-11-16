@@ -27,16 +27,14 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
-use clauseo_protocol::{
-    BlacklineNotice, BlacklinePartKind, ErrorCode, ParagraphChange, RunKind, WordBlackline,
-};
+use clauseo_protocol::{BlacklineNotice, ErrorCode, ParagraphChange, WordBlackline};
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
 
 use super::parse::receipt::read_compare;
 use super::parse::story::add_parts;
 use super::parse::{Read, ViewFailure, order, read_view};
-use super::tables::{self, TablesCompared, squeezed};
+use super::tables::{self, TablesCompared};
 use crate::config::Stetdoc;
 use crate::matter_worker::{NEW, OLD};
 
@@ -145,7 +143,7 @@ pub(crate) async fn blackline<T: Timer>(
                 ..TablesCompared::default()
             },
         };
-        note_tables(&mut read.blackline, compared);
+        note_tables(&mut read.blackline, compared, &read.header_texts);
     }
     note_a_silent_difference(&mut read.blackline, differ);
     Ok(read)
@@ -159,11 +157,15 @@ pub(crate) const TABLES_MAX: usize = 50;
 /// changed, with [`BlacklineNotice::CellFormatChanged`], the first [`TABLES_MAX`] named and all
 /// counted; that it may differ where it could not tell, or past the cap; and
 /// [`BlacklineNotice::HeaderOrFooterNotCompared`] for a header's or footer's text one version
-/// only has that no part the blackline shows holds, in its older or newer text. When the
-/// headers' view failed, no part is shown and the notice is said for every such text: stetdoc's
-/// list of changes names only a header's marked changes, and the header of a section the other
-/// version lacks has none.
-pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompared) {
+/// only has that is not in `shown`, the older and newer texts of the headers and footers the
+/// blackline shows (`Read::header_texts`). When the headers' view failed, no part is shown and
+/// the notice is said for every such text: stetdoc's list of changes names only a header's
+/// marked changes, and the header of a section the other version lacks has none.
+pub(crate) fn note_tables(
+    blackline: &mut WordBlackline,
+    compared: TablesCompared,
+    shown: &[String],
+) {
     if !compared.changed.is_empty() {
         blackline.notices.push(BlacklineNotice::CellFormatChanged);
     }
@@ -173,7 +175,6 @@ pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompare
         blackline.notices.push(BlacklineNotice::MayDiffer);
     }
     changed.truncate(TABLES_MAX);
-    let shown = shown_header_texts(blackline);
     if compared
         .lone_header_texts
         .iter()
@@ -185,41 +186,6 @@ pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompare
     }
     blackline.changed_tables = changed;
     order(&mut blackline.notices);
-}
-
-/// The older and the newer text of each header and footer the blackline shows, white space
-/// taken out; each also with every paragraph's first word taken out, since the view writes a
-/// list number into the runs (`{§"1."}`) that the part's `w:t` does not hold.
-fn shown_header_texts(blackline: &WordBlackline) -> Vec<String> {
-    let mut texts = Vec::new();
-    for part in &blackline.parts {
-        if !matches!(
-            part.kind,
-            BlacklinePartKind::Header { .. } | BlacklinePartKind::Footer { .. }
-        ) {
-            continue;
-        }
-        for side in [RunKind::Del, RunKind::Ins] {
-            let (mut whole, mut numbered) = (String::new(), String::new());
-            for paragraph in &part.paragraphs {
-                let text: String = paragraph
-                    .runs
-                    .iter()
-                    .filter(|run| run.kind == RunKind::Same || run.kind == side)
-                    .map(|run| run.text.as_str())
-                    .collect();
-                let trimmed = text.trim_start();
-                let rest = trimmed
-                    .find(char::is_whitespace)
-                    .map_or("", |space| trimmed.get(space..).unwrap_or_default());
-                whole.push_str(&text);
-                numbered.push_str(rest);
-            }
-            texts.push(squeezed(&whole));
-            texts.push(squeezed(&numbered));
-        }
-    }
-    texts
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
