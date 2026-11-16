@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options, fill_meta, web_search_state};
 use super::profile_tests::{LOCKED_OFF, OFF, ON, reason};
+use super::tools::NOT_OFFERED;
 use super::{CLAUDE_SHELL_FOLDER_VAR, GuardHook, McpControl, session_meta};
 use crate::browser::seed_sites::WEB_FETCH_SITES;
 
@@ -88,7 +89,7 @@ fn the_allow_list_is_exactly_the_permissions_list() {
     );
     assert_eq!(strings(&options["allowedTools"]), expected);
     assert!(!strings(&options["allowedTools"]).contains(&"WebFetch"));
-    assert_eq!(options.get("disallowedTools"), None);
+    assert_eq!(strings(&options["disallowedTools"]), NOT_OFFERED);
 }
 
 /// A hook's bare `WebFetch`, any form Claude Code reads as one, or a `WebFetch` rule holding `*`,
@@ -253,10 +254,9 @@ fn web_search_off_disallows_both_tools_whatever_the_hook_sent() {
         "disallowedTools": ["Task"],
     });
     let options = options(&hook, &keys(LOCKED_OFF, Login::FirstParty));
-    assert_eq!(
-        strings(&options["disallowedTools"]),
-        ["Task", "WebSearch", "WebFetch"]
-    );
+    let mut denied = vec!["Task", "WebSearch", "WebFetch"];
+    denied.extend(NOT_OFFERED);
+    assert_eq!(strings(&options["disallowedTools"]), denied);
     assert_eq!(strings(&options["allowedTools"]), ["mcp__docs"]);
 }
 
@@ -267,7 +267,7 @@ fn a_bedrock_login_keeps_webfetch_and_skips_the_preflight() {
     assert!(!allowed.contains(&"WebSearch"));
     assert!(!allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options["settings"]["skipWebFetchPreflight"], json!(true));
-    assert_eq!(options.get("disallowedTools"), None);
+    assert_eq!(strings(&options["disallowedTools"]), NOT_OFFERED);
     let other = self::options(&json!({}), &keys(ON, Login::OtherCloud));
     assert_eq!(other["settings"]["skipWebFetchPreflight"], json!(true));
     assert!(strings(&other["allowedTools"]).contains(&"WebSearch"));

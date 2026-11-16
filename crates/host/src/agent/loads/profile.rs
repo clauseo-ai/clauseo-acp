@@ -1,14 +1,15 @@
 //! The host's half of the launch profile (R21, R22; decision record 0030): what it adds after
 //! the profile hook, per agent kind, from the settings and the session.
 //!
-//! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
-//!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
-//!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site, and no bare `WebFetch` (a hook's `WebFetch` rule stays only as a plain
-//!   `WebFetch(domain:<host>)`, and a hook entry Claude Code would split in two is dropped), so
-//!   a fetch from any other host goes to the permission mode (decision record 0030), and
-//!   `mcp__case-law__<tool>` per search and read tool (`case_law::UNASKED_TOOLS`) only in a
-//!   session that got the `case-law` entry (any hook rule for that server is dropped
+//! - Claude ([`claude_options`]): `tools` is the explicit list of built-in tools and
+//!   `disallowedTools` always holds the ones left out (`agent/loads/tools.rs`); it also holds
+//!   `WebSearch` and `WebFetch` when `tools.web_search` is off, whatever the hook sent; when it
+//!   is on, `allowedTools` gains `WebSearch` (not on a Bedrock login, which has none) and one
+//!   `WebFetch(domain:…)` per seed site, and no bare `WebFetch` (a hook's `WebFetch` rule stays
+//!   only as a plain `WebFetch(domain:<host>)`, and a hook entry Claude Code would split in two
+//!   is dropped), so a fetch from any other host goes to the permission mode (decision record
+//!   0030), and `mcp__case-law__<tool>` per search and read tool (`case_law::UNASKED_TOOLS`)
+//!   only in a session that got the `case-law` entry (any hook rule for that server is dropped
 //!   otherwise), and before it `mcp__<name>` for each of the lawyer's servers that runs
 //!   without asking (`agent/mcp_trust.rs`), and `mcp__browser` in a session that got the
 //!   guarded `browser` entry (any hook rule for that server is dropped otherwise); in forced
@@ -246,9 +247,8 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
-    if !disallowed.is_empty() {
-        options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
-    }
+    super::tools::offer(options, &mut disallowed, keys.web_search.on);
+    options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     if !keys.forced_ask {
         options.insert("allowedTools".to_owned(), Value::Array(allowed));
     }
