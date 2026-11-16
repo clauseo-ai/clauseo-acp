@@ -285,6 +285,22 @@ anything the agent starts.
   in it stays too. Seatbelt and the host's auto-deny resolve links, and a launch replaces a link
   or file in the work folder's place with a new folder and removes a `.claude` in the work and
   notes folders
+- `built` (macOS, Windows): ChatGPT's commands run as the lawyer. On a Mac, Clauseo denies them
+  its own data folder; on Windows, see the tier C bullet above (S15).
+- `built` (Windows): Codex's sandbox puts an explicit `(OI)(CI)(M)` entry with a SID of its own on
+  each work and notes folder it is given, one SID per folder. Clauseo never removes it: it stays
+  until the folder is deleted by hand, and deleting the folder removes it. Checked on Windows 11
+  with codex-cli 0.162.1: another conversation's sandboxed command can't write into this work
+  folder.
+- `built` (Windows): Write isolation between conversations for Codex rests on three things: the
+  writable roots, which a test pins to the conversation's own work folder and the matter's notes
+  and never a folder above them; Codex's restricted token, which carries only the SIDs of the
+  session's own roots, so a sandboxed command's write into another conversation's work folder is
+  refused; and the host's path check, which sees escalation requests only
+- `built` (Windows): Claude has no wall Windows enforces: no sandbox, only its deny rules and the
+  host's path check
+- `designed` (all): Each Codex pin bump reads the sandbox's permission model again
+  ([0033](decisions/0033-agents-installs.md))
 
 ## Egress proxy
 
