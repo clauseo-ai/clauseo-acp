@@ -66,7 +66,9 @@
 //!   (stage C on a Mac) ([`DENIED_DOMAINS`]).
 //! - `filesystem.allowWrite`: the matter folder, the work folder, the session's temp folder, the
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
-//!   commands' `TMPDIR` is made).
+//!   commands' `TMPDIR` is made). Under a linked data folder the work, temp and notes folders
+//!   go in under its real spelling too, and so do the `PATH` file and the Python runtime in
+//!   `allowRead` ([`data_twins`]): the runtime keeps a link spelling that leads elsewhere.
 //! - `filesystem.denyWrite`: the matter's `.clauseo` folder, which holds `matter.json`, the
 //!   marker that finds a moved matter folder again.
 //! - `filesystem.denyRead`: the lawyer's home (other clients' files, `~/.ssh`), each spelling of
@@ -295,8 +297,10 @@ impl ClaudeSandbox {
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
         let marker = paths.matter.join(MATTER_MARKER);
+        let own = [paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp];
+        let twins = data_twins([paths.work, paths.tmp, paths.notes], paths.data);
         let mut sandbox = Self {
-            allow_write: texts([paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp]),
+            allow_write: texts(own.into_iter().chain(twins.iter().map(PathBuf::as_path))),
             deny_write: texts([marker.as_path()]),
             deny_read,
             allow_read: Self::allow_read(paths, claude_tmp),
@@ -386,6 +390,9 @@ impl ClaudeSandbox {
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
         folders.extend(paths.ca_file.map(Path::to_path_buf));
+        // Under a linked data folder, these also under its other spelling.
+        let mut twins = vec![paths.work, paths.tmp, paths.notes];
+        twins.extend(paths.env_file);
         for folder in paths.path {
             let runtime = folder.parent().filter(|parent| {
                 parent
@@ -393,8 +400,10 @@ impl ClaudeSandbox {
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.starts_with(RUNTIME_PREFIX))
             });
+            twins.extend(runtime);
             folders.push(runtime.unwrap_or(folder).to_path_buf());
         }
+        folders.extend(data_twins(twins, paths.data));
         texts(folders.iter().map(PathBuf::as_path))
     }
 
@@ -468,6 +477,26 @@ fn allowed_entries(path: String) -> Vec<String> {
     } else {
         vec![path]
     }
+}
+
+/// For each of `paths` under one spelling of `<data>` (`data`), the same path under each other
+/// spelling. Claude Code resolves a link in an allowed path only when it stays under the path,
+/// and Seatbelt matches the real one, so under a linked data folder (`CLAUSEO_DATA_DIR` may
+/// name one) the configured spelling alone opens nothing. Only what `paths` names: never
+/// `<data>` itself or another run's folders.
+fn data_twins<'a>(paths: impl IntoIterator<Item = &'a Path>, data: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        for spelling in data {
+            let rest = path.strip_prefix(spelling).ok();
+            let Some(rest) = rest.filter(|rest| !rest.as_os_str().is_empty()) else {
+                continue;
+            };
+            let others = data.iter().filter(|other| *other != spelling);
+            out.extend(others.map(|other| other.join(rest)));
+        }
+    }
+    out
 }
 
 /// The paths as UTF-8 text, in order, each once; one that is not UTF-8 is left out.

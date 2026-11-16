@@ -518,5 +518,67 @@ fn only_the_trust_roots_file_opens() {
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
 
+/// A data folder reached through a link (`CLAUSEO_DATA_DIR` naming one): Claude Code keeps an
+/// allowed path's link spelling when the link leads elsewhere, so the session's work, temp and
+/// notes folders, its `PATH` file and the Python runtime go in under the real spelling too.
+/// Nothing wider: never `<data>` itself, and another run's folders stay shut under both.
+#[test]
+fn a_linked_data_folder_opens_its_folders_under_both_spellings() {
+    const REAL: &str = "/Volumes/Data/Clauseo";
+    let plain = mac(&Session::new("s-1").paths()).unwrap();
+    let mut session = Session::new("s-1");
+    session.data = vec![PathBuf::from(REAL), PathBuf::from(DATA)];
+    let linked = mac(&session.paths()).unwrap();
+    let real = |path: &Path| Path::new(REAL).join(path.strip_prefix(DATA).unwrap());
+    let text = |path: PathBuf| path.to_str().unwrap().to_owned();
+    let runtime = session.path[1].parent().unwrap().to_path_buf();
+    for path in [&session.work, &session.tmp, &session.notes] {
+        assert!(linked.allow_write.contains(&text(real(path))), "{path:?}");
+        assert!(linked.allow_read.contains(&text(real(path))), "{path:?}");
+        assert!(linked.allow_read.contains(&text(path.clone())), "{path:?}");
+    }
+    for path in [&session.env_file, &runtime] {
+        assert!(linked.allow_read.contains(&text(real(path))), "{path:?}");
+        assert!(linked.allow_read.contains(&text(path.clone())), "{path:?}");
+    }
+    // What was added is exactly those five, under the real spelling.
+    let mut expected: Vec<String> = [&session.work, &session.tmp, &session.notes]
+        .into_iter()
+        .chain([&session.env_file, &runtime])
+        .map(|path| text(real(path)))
+        .collect();
+    let lists = [
+        (&plain.allow_write, &linked.allow_write),
+        (&plain.allow_read, &linked.allow_read),
+    ];
+    for (before, after) in lists {
+        assert!(before.iter().all(|path| after.contains(path)));
+        let mut added: Vec<String> = after
+            .iter()
+            .filter(|path| !before.contains(path))
+            .cloned()
+            .collect();
+        added.sort();
+        expected.sort();
+        assert!(
+            added.iter().all(|path| expected.contains(path)),
+            "{added:?}"
+        );
+    }
+    // Another run's folders, and <data> itself, are under no allowed path in either spelling.
+    for data in [REAL, DATA] {
+        let other_run = Path::new(data).join("run/s-2");
+        for shut in [
+            Path::new(data).to_path_buf(),
+            other_run.join("work"),
+            other_run.join("tmp"),
+        ] {
+            for open in linked.allow_read.iter().chain(&linked.allow_write) {
+                assert!(!shut.starts_with(open), "{open} opens {shut:?}");
+            }
+        }
+    }
+}
+
 #[path = "sandbox_wild_tests.rs"]
 mod wild;
