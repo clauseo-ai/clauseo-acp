@@ -8,6 +8,7 @@ import { configDefaults } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
 import { appVersion } from "./src/settings/app-version.ts";
+import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/testing/timeouts.ts";
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
 function devAdditions(port: number): Record<string, string> {
@@ -405,6 +406,10 @@ export default defineConfig(({ mode }) => {
     worker: { format: "es" },
     test: {
       sequence: { sequencer: SlowFirst },
+      // every project's default bounds (src/testing/timeouts.ts): a hang's, not a speed's; a test that proves
+      // something fast sets its own
+      testTimeout: TEST_TIMEOUT_MS,
+      hookTimeout: HOOK_TIMEOUT_MS,
       // One zone for every project and worker, whatever the shell's TZ, so local runs, CI and a machine in
       // Kolkata agree. Checked by src/testing-zone.test.ts (app) and components' src/testing/zone.test.ts, which
       // fail under a shell TZ=Asia/Kolkata without this line. clock.test.ts sets another zone inside one test, on purpose.
