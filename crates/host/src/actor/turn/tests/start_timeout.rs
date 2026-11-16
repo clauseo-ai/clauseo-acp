@@ -29,9 +29,9 @@ const SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"
 /// `session/new`.
 const PACED_SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
-{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}
-{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}
-{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}
+{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]},"session":"sess-1"}}
+{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]},"session":"sess-1"}}
+{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]},"session":"sess-1"}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 "#;
 
