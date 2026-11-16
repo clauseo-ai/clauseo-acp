@@ -239,14 +239,35 @@ fn launch_config_turns_memories_off_over_every_source() {
         json!(false),
         "{parsed}"
     );
-    let config = home_config();
-    for line in [
-        "features.memories = false",
-        "memories.generate_memories = false",
-        "memories.use_memories = false",
-    ] {
-        assert!(config.lines().any(|held| held == line), "{config}");
-    }
+}
+
+/// codex-acp 2.2.2 starts its title thread with no session config (`threadStart({cwd,
+/// ephemeral: true})`, `dist/index.js:40057-40060`), so `CODEX_CONFIG` never reaches it: the
+/// home's `config.toml`, which app-server reads for every thread, must turn memories off too.
+#[test]
+fn written_home_config_turns_memories_off_for_the_title_thread() {
+    let root = scratch("home-config-memories");
+    let home = home_in(&root);
+    make_home(&root, &home).unwrap();
+    write_home_config(&home).unwrap();
+    let text = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    let parsed: toml::Table = text.parse().unwrap();
+    assert_eq!(
+        parsed["features"]["memories"].as_bool(),
+        Some(false),
+        "{text}"
+    );
+    assert_eq!(
+        parsed["memories"]["use_memories"].as_bool(),
+        Some(false),
+        "{text}"
+    );
+    assert_eq!(
+        parsed["memories"]["generate_memories"].as_bool(),
+        Some(false),
+        "{text}"
+    );
+    write::remove_dir_all(&root).unwrap();
 }
 
 #[test]
