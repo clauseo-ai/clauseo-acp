@@ -7,7 +7,7 @@
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-search","title":"mcp__case-law__search_law","name":"mcp__case-law__search_law","kind":"other","status":"pending","rawInput":{}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search","status":"in_progress","rawInput":{"page":1,"query":"basic structure doctrine"}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search","status":"completed","content":[{"type":"content","content":{"type":"text","text":"2 results for \"basic structure doctrine\"."}}]}}}
-{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read","title":"mcp.case-law.read_document","kind":"other","status":"in_progress","rawInput":{"server":"case-law","tool":"read_document","arguments":{"doc_id":"1939993"}}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read","title":"mcp.case-law.read_document","kind":"execute","status":"in_progress","rawInput":{"server":"case-law","tool":"read_document","arguments":{"doc_id":"1939993"}}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read","status":"completed","rawOutput":{"result":{"content":[{"type":"text","text":"The judgment's text."}]},"error":null}}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-unseen","title":"mcp__case-law__search_law","name":"mcp__case-law__search_law","kind":"other","status":"in_progress","rawInput":{"query":"section 138 NI Act"}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-unseen","status":"completed"}}}
