@@ -389,11 +389,14 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         .and_then(Value::as_str)
         .ok_or(Ignored::NoTool)?;
     let input = hook.get("tool_input").ok_or(Ignored::NoTool)?;
+    // The matter's held files, listed once for every reading, when a shell command needs them.
+    let held = std::cell::OnceCell::new();
     let place = Place {
         folder: &folder,
         base: &base,
         reach: &reach,
         codex_bash: matter.is_none() && tool == "Bash",
+        held: &held,
     };
     // Under Codex's hook on Windows a `Bash` command is read as PowerShell and as Bash: a
     // refusal by either refuses.
@@ -416,12 +419,14 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
 }
 
 /// Where a tool's targets are judged: the matter `folder`, the `base` its relative paths start
-/// from, the walk that resolves them, and whether it is a `Bash` call under Codex's hook.
+/// from, the walk that resolves them, whether it is a `Bash` call under Codex's hook, and the
+/// matter's held files ([`names::held_files`]), listed on first need.
 struct Place<'a> {
     folder: &'a Path,
     base: &'a Path,
     reach: &'a Reach,
     codex_bash: bool,
+    held: &'a std::cell::OnceCell<Vec<names::Held>>,
 }
 
 /// Why `targets` are refused at `place`, if they are ([`refusal`]).
@@ -431,6 +436,7 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
         base,
         reach,
         codex_bash,
+        held,
     } = *place;
     let into_codex = match targets {
         Targets::Named(_) => false,
@@ -484,7 +490,8 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
                 }
             }
             timings::mark("resolve");
-            names::shell_refusal(text, line, *escape, folder, found, &hits, reach)
+            let held = held.get_or_init(|| names::held_files(folder)).clone();
+            names::shell_refusal(text, line, *escape, folder, found, &hits, reach, held)
         }
     }
 }

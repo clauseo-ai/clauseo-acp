@@ -57,8 +57,8 @@ fn a_lone_cr_ends_a_comment_and_the_path_after_it_is_read() {
     assert!(has(&paths, r"C:\Data\secret.txt"), "{paths:?}");
 }
 
-/// A here-string's body is one value, but a path written inside a body of more than one line is
-/// still read, as the fence's own reader read it before (a one-line body is one word, as then).
+/// A here-string's body is one value, but a path written inside it, on one line or more, is
+/// still read, as the fence's own reader read it before.
 #[test]
 fn a_path_inside_a_here_string_is_read() {
     let line = "$s = @'\nType C:\\Data\\secret.txt\nnow, O'Brien\n'@; Invoke-Expression $s";
