@@ -22,7 +22,7 @@ mod on_disk {
     use super::{GuardFence, fence};
     use crate::network_paths::resolve::Disk;
     use crate::network_paths::resolve::tests::{Fake, FakeFs};
-    use crate::network_paths::tests::plain_net;
+    use crate::network_paths::tests::{mac_net, plain_net};
     use crate::pre_write_guard::words::Escape;
 
     const BASH: Escape = Escape::Backslash;
@@ -80,6 +80,44 @@ mod on_disk {
 
     fn matter_b(got: Option<Fenced>) -> bool {
         matches!(got, Some(Fenced::Matter(_, folder)) if folder == Path::new("/w/b"))
+    }
+
+    /// No short names on the Mac.
+    fn no_long_name(_: &Path) -> Option<PathBuf> {
+        None
+    }
+
+    /// On the Mac the data folder spelled on the data volume (`/System/Volumes/Data/Users/…`)
+    /// is its firmlinked spelling (`/Users/…`), whichever way round the fence and the read are.
+    #[test]
+    fn the_data_volume_spelling_of_the_data_folder_is_refused() {
+        let fs = FakeFs::with(&[("/Users/a/d/logs/x.docx", Fake::File)]);
+        let net = mac_net(&[]);
+        let disk = Disk {
+            fs: &fs,
+            real: &no_long_name,
+            net: &net,
+        };
+        let matter = Path::new("/Users/a/m");
+        for (data, read) in [
+            ("/Users/a/d", "/System/Volumes/Data/Users/a/d/logs/x.docx"),
+            ("/System/Volumes/Data/Users/a/d", "/Users/a/d/logs/x.docx"),
+            (
+                "/System/Volumes/Data/Users/a/d",
+                "/system/volumes/data/users/a/d/logs/x.docx",
+            ),
+        ] {
+            let fence = GuardFence {
+                data: vec![data.into()],
+                ..GuardFence::default()
+            };
+            let command = format!("stetdoc view {read}");
+            let got = fenced_read(&command, BASH, (matter, matter), &fence, &disk);
+            assert!(
+                matches!(got, Some(Fenced::Data(_))),
+                "{data} {read}: {got:?}"
+            );
+        }
     }
 
     /// Another matter's document is refused through a link in this matter, under its short name,

@@ -125,6 +125,19 @@ impl NetEnv {
             _ => path.to_path_buf(),
         }
     }
+
+    /// `path` in its firmlinked form under macOS's rules (`/System/Volumes/Data/Users/a` is
+    /// `/Users/a`), so a data volume spelling compares with the root one; as it is otherwise,
+    /// or when the firmlinks are unknown or none covers it.
+    pub(crate) fn root_form(&self, path: &Path) -> PathBuf {
+        if !self.macos {
+            return path.to_path_buf();
+        }
+        match macos_rules::firmlinked(&path.to_string_lossy(), self) {
+            macos_rules::Mac::Rewritten(form) => PathBuf::from(form),
+            macos_rules::Mac::Refused | macos_rules::Mac::AsIs => path.to_path_buf(),
+        }
+    }
 }
 
 /// Whether `path` names a network location under `net`'s rules. Pure text: it never touches

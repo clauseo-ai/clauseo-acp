@@ -333,7 +333,8 @@ impl Spot<'_, '_> {
             self.base.join(path)
         };
         match walk(&path, self.disk) {
-            Walked::Local(real) => Some(real),
+            // In its firmlinked form, as the fenced places are ([`Places::new`]).
+            Walked::Local(real) => Some(self.disk.net.root_form(&real)),
             Walked::Refused => None,
         }
     }
@@ -369,10 +370,12 @@ type Key = Vec<OsString>;
 impl Places {
     fn new(fence: &GuardFence, matter: &Path, disk: &Disk<'_>) -> Self {
         let fold = disk.net.fold_case;
+        // Each as spelled and as walked, on the Mac in its firmlinked form: a data folder spelled
+        // `/System/Volumes/Data/Users/a/x` is `/Users/a/x` (`NetEnv::root_form`).
         let keys = |path: &Path| -> Vec<Key> {
-            let mut keys = vec![key(path, fold)];
+            let mut keys = vec![key(&disk.net.root_form(path), fold)];
             if let Walked::Local(real) = walk(path, disk) {
-                let real = key(&real, fold);
+                let real = key(&disk.net.root_form(&real), fold);
                 if !keys.contains(&real) {
                     keys.push(real);
                 }
