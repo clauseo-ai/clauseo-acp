@@ -84,7 +84,7 @@ const COMMON: [&str; 23] = [
     "agents/claude-acp/home/todos/t.json",
     "agents/claude-acp/home/statsig/s",
     "agents/runtime/node-v24.1.0/bin/node",
-    "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe",
+    "agents/runtime/clauseo-python-3.13.18-c4-windows-x64/python.exe",
     "agents/signin/shim.js",
     "launch-settings/other-run.json",
 ];

@@ -74,7 +74,7 @@ pub(crate) fn runtime() -> PathBuf {
     data().join("agents").join("runtime")
 }
 
-pub(crate) const PYTHON: &str = "clauseo-python-3.13.18-c2-macos-arm64";
+pub(crate) const PYTHON: &str = "clauseo-python-3.13.18-c4-macos-arm64";
 pub(crate) const NODE: &str = "node-v24.22.0-darwin-arm64";
 
 /// What a launch of session `s1` for matter `m1` lists: sessions `s2` and `s3`, matter `m2`

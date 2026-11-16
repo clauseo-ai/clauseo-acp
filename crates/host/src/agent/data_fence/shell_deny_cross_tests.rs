@@ -108,7 +108,7 @@ fn protected() -> Vec<Vec<String>> {
         names(r"agents\claude-acp\home\.credentials.json"),
         names(r"agents\codex-acp\home\auth.json"),
         names(r"tools\x"),
-        names(r"agents\runtime\clauseo-python-3.13.18-c2-windows-x64\python.exe"),
+        names(r"agents\runtime\clauseo-python-3.13.18-c4-windows-x64\python.exe"),
         names(r"profile\claude-plugin\skills\x\SKILL.md"),
         names(&format!(r"agent-state\{}\notes\x", matter_id(7))),
         names(&format!(r"run\{PREFIX_RUN}\work\x")),

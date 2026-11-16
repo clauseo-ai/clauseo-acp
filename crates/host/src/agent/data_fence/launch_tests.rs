@@ -305,7 +305,7 @@ fn covers(target: &str, file: &str) -> bool {
             .all(|(part, name)| fits(part, name))
 }
 
-const PYTHON: &str = "clauseo-python-3.13.18-c2-macos-arm64";
+const PYTHON: &str = "clauseo-python-3.13.18-c4-macos-arm64";
 const NODE: &str = "node-v24.22.0-darwin-arm64";
 
 /// Clauseo's Python runtime and `<data>/tools` are in no `Read` deny and are allowed `Read`,

@@ -214,7 +214,7 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         format!("agents/claude-acp/home/projects/{key7}"),
         "tools/agent-browser/agent-browser".to_owned(),
         "tools".to_owned(),
-        "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe".to_owned(),
+        "agents/runtime/clauseo-python-3.13.18-c4-windows-x64/python.exe".to_owned(),
         "profile/claude-plugin/skills/legal-drafting/SKILL.md".to_owned(),
         "profile".to_owned(),
         String::new(),
@@ -429,7 +429,7 @@ fn the_shared_places_are_denied_to_the_shell_and_still_readable() {
     let big = big_folder::big(dir.path());
     let deny = on_windows(big.deny, VM_DATA);
     let rules = windows_shell_deny_rules(&deny, &vm_env);
-    let python = r"agents\runtime\clauseo-python-3.13.18-c2-windows-x64\python.exe";
+    let python = r"agents\runtime\clauseo-python-3.13.18-c4-windows-x64\python.exe";
     for (data, sep) in spellings() {
         let at = |place: &str| format!("{data}{sep}{}", place.replace('\\', sep));
         let mixed = |place: &str| {
