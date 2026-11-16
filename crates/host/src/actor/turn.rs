@@ -536,23 +536,9 @@ pub(crate) fn unblocked(actor: &mut Actor, stream: StreamId) {
     }
 }
 
-/// Start-up reconciliation of `thread`, called once its stream is loaded and before the host
-/// serves. Marks the work in progress so that [`busy`] holds start-up until it is done.
-pub(crate) fn reconcile(actor: &mut Actor, thread: ThreadId) {
-    reconcile::reconcile(actor, thread);
-}
-
-/// Start-up will reconcile `thread`: its matter's repairs wait for it (see
-/// [`reconcile::Repairs`]). Called for every thread before any is loaded.
-pub(crate) fn expect_reconcile(actor: &mut Actor, thread: ThreadId) {
-    reconcile::expect(actor, thread);
-}
-
-/// `thread` could not be loaded at start-up, so it will not be reconciled; its matter's
-/// repairs no longer know which open turn started last.
-pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
-    reconcile::skipped(actor, thread);
-}
+// Start-up reconciliation (`reconcile.rs`): each thread expected before any loads, each looked
+// at once its stream is loaded and before the host serves, or skipped when it could not load.
+pub(crate) use reconcile::{expect as expect_reconcile, reconcile, skipped as reconcile_skipped};
 
 /// Shutdown, after the host stopped taking commands: turns stop waiting for limits reads, every
 /// running turn is cancelled (the Cancel path), every agent stops, every pending stop at the

@@ -43,8 +43,8 @@
 //! and `Edit` denies, and a script, a built path or an uncommon program naming another matter's
 //! folder is caught only by Anthropic's classifier; a command that reads an invited matter
 //! passes, one that writes it is checked against the `Edit` denies. On macOS and Linux Claude
-//! reads an invited matter through its file tools only: an invited matter is in no `denyRead` of its
-//! own, but nothing re-opens it for the sandbox (its `allowRead` names only the session's
+//! reads an invited matter through its file tools only: an invited matter is in no `denyRead` of
+//! its own, but nothing re-opens it for the sandbox (its `allowRead` names only the session's
 //! folders, `agent::loads::sandbox`), so where the lawyer's home, `/Volumes` or
 //! `/Users/Shared` holds it, as matters are kept, a shell command (`cat ../B/f.txt`) is refused
 //! by the OS even after the lawyer allows its card (stage C on a Mac, sandbox on). An invited

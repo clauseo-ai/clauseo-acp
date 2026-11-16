@@ -1,8 +1,8 @@
 //! The ways a command writes the data folder (`super`'s module doc): its folder name alone when
 //! that holds Clauseo's name (`ai.clauseo.desktop`, a configured `Clauseo Data`, or the 8.3
-//! short form of either, `AICLAU~1.DES`), or a configured folder's path in each spelling and under each of the variables a
-//! command may write its parent with, each with the separators that may follow it and the
-//! shells that can write it.
+//! short form of either, `AICLAU~1.DES`), or a configured folder's path in each spelling and
+//! under each of the variables a command may write its parent with, each with the separators
+//! that may follow it and the shells that can write it.
 
 use std::ffi::OsString;
 

@@ -97,8 +97,10 @@ struct Pending {
 }
 
 /// Looks at the loaded thread; one with an open turn or a pending request has its whole log
-/// read (a snapshot keeps neither its session nor its queue events).
-pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
+/// read (a snapshot keeps neither its session nor its queue events). Called once its stream is
+/// loaded and before the host serves; marks the work in progress so that `turn::busy` holds
+/// start-up until it is done.
+pub(crate) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     let stream = StreamId::Thread(thread);
     let unstopped = actor
         .loaded(stream)
@@ -297,15 +299,17 @@ pub(super) fn on_log(
     looked_at(actor, thread);
 }
 
-/// Start-up will look at `thread`: its matter's repairs wait for it.
-pub(super) fn expect(actor: &mut Actor, thread: ThreadId) {
+/// Start-up will look at `thread`: its matter's repairs wait for it ([`Repairs`]). Called for
+/// every thread before any is loaded.
+pub(crate) fn expect(actor: &mut Actor, thread: ThreadId) {
     if let Some(repairs) = repairs(actor, thread) {
         repairs.left += 1;
     }
 }
 
-/// Start-up could not load `thread` or read its log: its matter's repairs are incomplete.
-pub(super) fn skipped(actor: &mut Actor, thread: ThreadId) {
+/// Start-up could not load `thread` or read its log: its matter's repairs are incomplete (they
+/// no longer know which open turn started last).
+pub(crate) fn skipped(actor: &mut Actor, thread: ThreadId) {
     if let Some(repairs) = repairs(actor, thread) {
         repairs.incomplete = true;
     }
