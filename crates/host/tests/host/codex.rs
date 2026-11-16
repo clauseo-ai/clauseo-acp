@@ -70,7 +70,7 @@ pub(crate) fn turn_failed(events: &Events, turn: TurnId) -> Option<TurnFailed> {
 }
 
 /// Opens a thread of `agent` in a fresh matter and runs one turn; returns its events and turn.
-fn one_turn(dir: &Dir, host: &Running, agent: &str) -> (ThreadId, Events, TurnId) {
+pub(crate) fn one_turn(dir: &Dir, host: &Running, agent: &str) -> (ThreadId, Events, TurnId) {
     let files = [
         ("brief.txt", "Clause 4 draft\n"),
         ("old.txt", "Old notes\n"),
@@ -146,7 +146,7 @@ fn set_env_on_every_agent(dir: &Dir, env: &Value) {
 }
 
 /// The value of `name` in `env`, as text.
-fn var(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<String> {
+pub(crate) fn var(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<String> {
     env.get(&OsString::from(name))
         .map(|value| value.to_string_lossy().into_owned())
 }
@@ -547,22 +547,28 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
-    // The guard records its refusals in the session's browser folder,
-    // `<data>/browser/run/<session>`, which no agent's shell may write, not in its run folder
-    // `<data>/run/<session>` beside its temp folder.
+    // The guard records its refusals in a folder of the session's own,
+    // `<data>/browser/guard/<session>`, which no agent's shell may write, and writes only the
+    // file whose identity follows `--record-id` (`guard_record.rs`).
     let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
-    let record = command
+    let (record, id) = command
         .strip_prefix(&format!("'{PROGRAM}' --pre-write-guard --record '"))
-        .and_then(|rest| rest.strip_suffix('\''))
-        .map_or_else(|| panic!("{command}"), std::path::PathBuf::from);
-    let tmp = std::path::PathBuf::from(var(codex, "TMPDIR").unwrap());
-    let run = tmp.parent().unwrap();
-    let data = run.parent().and_then(std::path::Path::parent).unwrap();
-    let session = run.file_name().unwrap();
-    let browser = data.join("browser").join("run").join(session);
-    assert_eq!(record, browser.join("guard-blocks.jsonl"), "{command}");
+        .and_then(|rest| rest.split_once("' --record-id "))
+        .unwrap_or_else(|| panic!("{command}"));
+    let record = std::path::PathBuf::from(record);
+    let below = crate::guard_record::below_data(&dir, &record);
+    let [browser, guard, session, file] = below.as_slice() else {
+        panic!("{below:?}");
+    };
+    assert_eq!(
+        [browser.as_str(), guard.as_str(), file.as_str()],
+        ["browser", "guard", "guard-blocks.jsonl"],
+        "{command}"
+    );
+    assert!(!session.is_empty(), "{command}");
+    assert_eq!(id.len(), 48, "{command}");
     let program = std::path::Path::new(PROGRAM);
-    let expected = clauseo_host::codex_hook_config(program, Some(&record)).unwrap();
+    let expected = clauseo_host::codex_hook_config(program, Some((&record, id))).unwrap();
     assert_eq!(config["hooks"], expected);
 }
 

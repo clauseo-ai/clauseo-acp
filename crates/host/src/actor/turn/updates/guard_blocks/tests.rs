@@ -1,6 +1,8 @@
 //! The host's read of the guard's record file: complete lines only, from where it stopped, a
 //! line that does not parse skipped and the next one read, a file cut short read from its start,
-//! a link or a second link never read; a paper named by its name alone, shown with nothing
+//! a link, a second link, a file moved in at its place or one reached through a link at its
+//! folder never read (the identity the host read when it made the file); a paper named by its
+//! name alone, shown with nothing
 //! invisible (#1122's `shown.rs`) and cut to a length, and only when the matter holds it.
 
 use std::path::{Path, PathBuf};
@@ -9,10 +11,11 @@ use clauseo_protocol::{MatterPath, NoticeKind, Timestamp};
 
 use super::{MAX_NAME, MAX_READ, read_new, shown_name};
 use crate::pre_write_guard::record::{Agent, Reason, Record};
-use crate::write;
+use crate::write::{self, RecordId};
 
-/// A folder for one test, removed on drop: the matter in `matter`, the record beside it.
-struct Folder(PathBuf);
+/// A folder for one test, removed on drop: the matter in `matter`, the record in `guard`
+/// beside it, made as the host makes it, with its identity.
+struct Folder(PathBuf, RecordId);
 
 impl Folder {
     fn new(test: &str) -> Self {
@@ -25,11 +28,13 @@ impl Folder {
         for paper in ["A.docx", "B.docx", "C.docx", "Drafts/B.docx"] {
             write::write_file(&path.join("matter").join(paper), b"docx").unwrap();
         }
-        Self(path)
+        write::create_dir_all(&path.join("guard")).unwrap();
+        let id = write::create_record(&crate::pre_write_guard::record::file(&path.join("guard")));
+        Self(path, id.unwrap())
     }
 
     fn file(&self) -> PathBuf {
-        self.0.join("guard-blocks.jsonl")
+        crate::pre_write_guard::record::file(&self.0.join("guard"))
     }
 
     fn matter(&self) -> PathBuf {
@@ -38,7 +43,7 @@ impl Folder {
 
     /// What is new in the record past `offset`, which moves on.
     fn read(&self, offset: &mut u64) -> Vec<NoticeKind> {
-        let (next, kinds) = read_new(&self.file(), *offset, &self.matter());
+        let (next, kinds) = read_new(&self.file(), self.1, *offset, &self.matter());
         *offset = next;
         kinds
     }
@@ -84,7 +89,7 @@ fn new_complete_lines_are_read_once_and_a_half_line_waits() {
     let folder = Folder::new("lines");
     let file = folder.file();
     let mut offset = 0;
-    assert_eq!(folder.read(&mut offset), Vec::new(), "no file yet");
+    assert_eq!(folder.read(&mut offset), Vec::new(), "nothing recorded yet");
     let first = line(&held("A.docx"));
     let second = line(&held("Drafts/B.docx"));
     let (head, tail) = second.split_at(10);
@@ -251,26 +256,60 @@ fn a_name_with_an_invisible_character_is_told_unnamed() {
     assert_eq!(folder.read(&mut 0), vec![NoticeKind::GuardStepBlocked]);
 }
 
-/// A hard link at the record's place (two links) reads as nothing: the file it names is
-/// never read as the record.
+/// A hard link at the record's place (two links, another file) reads as nothing: the file it
+/// names is never read as the record. Nor is the record itself once it has a second name.
 #[test]
 fn a_second_link_at_the_records_place_reads_as_nothing() {
     let folder = Folder::new("hard-link");
     let target = folder.0.join("elsewhere.jsonl");
     append(&target, &line(&held("A.docx")));
+    write::remove_file(&folder.file()).unwrap();
     write::hard_link(&target, &folder.file()).unwrap();
+    assert_eq!(folder.read(&mut 0), Vec::new());
+
+    let second = Folder::new("second-name");
+    append(&second.file(), &line(&held("A.docx")));
+    assert_eq!(second.read(&mut 0), vec![named("A.docx")], "read before");
+    write::hard_link(&second.file(), &second.0.join("second-name.jsonl")).unwrap();
+    assert_eq!(second.read(&mut 0), Vec::new());
+}
+
+/// A file moved in at the record's place, the record moved away (one link, a regular file, at
+/// the path the hook names), reads as nothing: it has another identity than the file the host
+/// made.
+#[test]
+fn a_file_moved_in_at_the_records_place_reads_as_nothing() {
+    let folder = Folder::new("moved-in");
+    let planted = folder.0.join("planted.jsonl");
+    append(&planted, &line(&held("A.docx")));
+    write::rename(&folder.file(), &folder.0.join("moved-away.jsonl")).unwrap();
+    write::rename(&planted, &folder.file()).unwrap();
     assert_eq!(folder.read(&mut 0), Vec::new());
 }
 
+/// A symlink or a folder at the record's place, and a symlink at its folder's place to a folder
+/// holding a file of the record's name, read as nothing. The last is opened (`O_NOFOLLOW` only
+/// looks at the last part of the path), and refused for its identity.
 #[cfg(unix)]
 #[test]
 fn a_link_or_a_folder_in_its_place_reads_as_nothing() {
     let folder = Folder::new("link");
     let target = folder.0.join("elsewhere.jsonl");
     append(&target, &line(&held("A.docx")));
+    write::remove_file(&folder.file()).unwrap();
     write::symlink(&target, &folder.file()).unwrap();
     assert_eq!(folder.read(&mut 0), Vec::new());
     let dir = Folder::new("dir");
+    write::remove_file(&dir.file()).unwrap();
     write::create_dir_all(&dir.file()).unwrap();
     assert_eq!(dir.read(&mut 0), Vec::new());
+
+    let linked = Folder::new("linked-folder");
+    let elsewhere = linked.0.join("elsewhere");
+    let planted = crate::pre_write_guard::record::file(&elsewhere);
+    write::create_dir_all(&elsewhere).unwrap();
+    append(&planted, &line(&held("A.docx")));
+    write::rename(&linked.0.join("guard"), &linked.0.join("guard.old")).unwrap();
+    write::symlink(&elsewhere, &linked.0.join("guard")).unwrap();
+    assert_eq!(linked.read(&mut 0), Vec::new());
 }

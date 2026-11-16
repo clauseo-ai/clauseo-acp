@@ -47,13 +47,14 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 
 /// The `hooks` value for Codex's config that runs the pre-write guard, `program` with
 /// [`FLAG`](crate::pre_write_guard::FLAG) and, with `record`, [`RECORD_FLAG`] and that file
-/// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`), before each
+/// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`) then
+/// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), before each
 /// `apply_patch` and `Bash`, trusted by its own `state` entry:
 ///
 /// ```json
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
-///   "command": "'<program>' --pre-write-guard --record '<record>'",
-///   "commandWindows": "\"<program>\" --pre-write-guard --record \"<record>\"",
+///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
+///   "commandWindows": "\"<program>\" --pre-write-guard --record \"<record>\" --record-id <hex>",
 ///   "timeout": 10}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
@@ -61,26 +62,32 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// The hash is for the OS this runs on, as Codex computes it on the same machine, so it changes
 /// with the record file, one per session. `None` when `program` is no UTF-8 string, or (Windows)
 /// holds a `"` or `%`, which `cmd.exe` cannot take inside quotes: no hook rather than one that
-/// runs something else. A record file like that goes out of the command alone: the guard still
-/// runs, and the lawyer is not told of its refusals. The codex hooks seam (`actor::turn::agents`,
+/// runs something else. A record file like that, or an identity of anything but hex digits,
+/// goes out of the command alone: the guard still runs, and the lawyer is not told of its
+/// refusals. The codex hooks seam (`actor::turn::agents`,
 /// `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
 ///
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
-pub fn codex_hook_config(program: &Path, record: Option<&Path>) -> Option<Value> {
+/// [`RECORD_ID_FLAG`]: crate::pre_write_guard::RECORD_ID_FLAG
+pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Option<Value> {
     let program = program.to_str()?;
-    let record = record.and_then(Path::to_str);
-    let flag = crate::pre_write_guard::RECORD_FLAG;
+    let hex = |id: &&str| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let record = record.and_then(|(file, id)| Some((file.to_str()?, Some(id).filter(hex)?)));
+    let (flag, id_flag) = (
+        crate::pre_write_guard::RECORD_FLAG,
+        crate::pre_write_guard::RECORD_ID_FLAG,
+    );
     let mut command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
     let mut command_windows = format!(
         "{} {}",
         windows_quoted(program)?,
         crate::pre_write_guard::FLAG
     );
-    if let Some(record) = record {
-        command = format!("{command} {flag} {}", posix_quoted(record));
+    if let Some((file, id)) = record {
+        command = format!("{command} {flag} {} {id_flag} {id}", posix_quoted(file));
     }
-    if let Some(record) = record.and_then(windows_quoted) {
-        command_windows = format!("{command_windows} {flag} {record}");
+    if let Some((file, id)) = record.and_then(|(file, id)| Some((windows_quoted(file)?, id))) {
+        command_windows = format!("{command_windows} {flag} {file} {id_flag} {id}");
     }
     let effective = if cfg!(windows) {
         &command_windows
@@ -246,22 +253,28 @@ mod tests {
         );
     }
 
-    /// The session's record file goes after the flag, quoted for each shell, and the trust hash
-    /// is the one Codex computes for that whole command. A record path `cmd.exe` cannot take
-    /// leaves the Windows command without it.
+    /// The session's record file goes after the flag, quoted for each shell, then its identity,
+    /// and the trust hash is the one Codex computes for that whole command. A record path
+    /// `cmd.exe` cannot take leaves the Windows command without either; an identity of anything
+    /// but hex digits leaves both commands without them.
     #[test]
-    fn the_record_file_goes_in_the_command_and_its_hash() {
+    fn the_record_file_and_its_identity_go_in_the_command_and_its_hash() {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
-        let record = Path::new("/data/run/s 1/guard-blocks.jsonl");
-        let config = codex_hook_config(program, Some(record)).unwrap();
+        let record = Path::new("/data/browser/guard/s 1/guard-blocks.jsonl");
+        let id = "00000000000001030000000000000000000000000045c2a9";
+        let config = codex_hook_config(program, Some((record, id))).unwrap();
         let hook = &config["PreToolUse"][0]["hooks"][0];
-        let posix = "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
-                     '/data/run/s 1/guard-blocks.jsonl'";
-        let windows = "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard --record \
-                       \"/data/run/s 1/guard-blocks.jsonl\"";
+        let posix = format!(
+            "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
+             '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id}"
+        );
+        let windows = format!(
+            "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard --record \
+             \"/data/browser/guard/s 1/guard-blocks.jsonl\" --record-id {id}"
+        );
         assert_eq!(hook["command"], posix);
         assert_eq!(hook["commandWindows"], windows);
-        let effective = if cfg!(windows) { windows } else { posix };
+        let effective = if cfg!(windows) { &windows } else { &posix };
         let state = config["state"].as_object().unwrap();
         let [(_, entry)] = state.iter().collect::<Vec<_>>()[..] else {
             panic!("one trust entry: {state:?}");
@@ -274,20 +287,26 @@ mod tests {
         if !cfg!(windows) {
             assert_eq!(
                 *trusted,
-                "sha256:f05de79e79c1c0b756d27ab2d971ef3a51a2925ba6f48a66d8ea7fcd131e7c56"
+                "sha256:3611c22a15d888b80c600a3c02b6a2cbeb34ed372be387554f335d2dee202548"
             );
         }
-        let odd = codex_hook_config(program, Some(Path::new("/data/100%/guard-blocks.jsonl")));
-        let odd = &odd.unwrap()["PreToolUse"][0]["hooks"][0];
+        let odd = Path::new("/data/100%/guard-blocks.jsonl");
+        let odd = codex_hook_config(program, Some((odd, id))).unwrap();
+        let odd = &odd["PreToolUse"][0]["hooks"][0];
         assert_eq!(
             odd["commandWindows"],
             "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard"
         );
-        assert!(
-            odd["command"]
-                .as_str()
-                .unwrap()
-                .ends_with("--record '/data/100%/guard-blocks.jsonl'")
-        );
+        assert!(odd["command"].as_str().unwrap().ends_with(&format!(
+            "--record '/data/100%/guard-blocks.jsonl' --record-id {id}"
+        )));
+        for bad in ["", "12 && calc", "'x'", "00g1"] {
+            let config = codex_hook_config(program, Some((record, bad))).unwrap();
+            let hook = &config["PreToolUse"][0]["hooks"][0];
+            assert_eq!(
+                hook["command"], "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
+                "{bad:?}"
+            );
+        }
     }
 }

@@ -61,8 +61,10 @@ fn no_codex_launch_carries_a_code_mode_override() {
     let Value::Object(profile) = turning_it_off() else {
         panic!("an object");
     };
+    let record = Path::new("/data/browser/guard/s1/guard-blocks.jsonl");
+    let record = Some((record, "00000000000001030000000000000000000000000045c2a9"));
     let Some(Value::Object(hooks)) =
-        crate::agent::loads::codex_hook_config(Path::new("/app/Clauseo"))
+        crate::agent::loads::codex_hook_config(Path::new("/app/Clauseo"), record)
     else {
         panic!("the guard's hooks");
     };

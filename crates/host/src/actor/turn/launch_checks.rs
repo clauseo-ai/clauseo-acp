@@ -112,10 +112,15 @@ pub(crate) struct RunFolders {
     /// `{browser_dir}`, the guard's `--cwd`: `<data>/browser/run/<session id>`, outside the
     /// run folder, since Codex's shell may write the run folder and the guard, unfenced, writes
     /// through this one (its downloads, screenshots, home, temporary files and Chrome's profile).
-    /// Made by the launch prep for a session the entry goes to (`browser::entry_folder`) and for
-    /// the guard's record (`folders::make_guard_record`), removed with the run folder
-    /// ([`Self::remove`]); an earlier run's are swept at start ([`RunSweep`]).
+    /// Made by the launch prep only for a session the entry goes to (`browser::entry_folder`),
+    /// removed with the run folder ([`Self::remove`]); an earlier run's are swept at start
+    /// ([`RunSweep`]).
     pub(crate) browser: PathBuf,
+    /// The pre-write guard's record of its refusals and its identity
+    /// (`pre_write_guard::record::make`, `<data>/browser/guard/<session id>/guard-blocks.jsonl`):
+    /// made by the launch prep for any agent but Claude (`folders.rs` `make_guard`), removed
+    /// with the run folder and swept at start like the browser folder.
+    pub(crate) guard: Option<(PathBuf, crate::write::RecordId)>,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
     /// agents, kept when a session ends.
     pub(crate) notes: PathBuf,
@@ -212,6 +217,7 @@ impl RunFolders {
             key,
             work: root.join("work"),
             browser: browser_run_dir(data).join(key.id()),
+            guard: None,
             browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
             downloads: agent_browser.join("downloads"),
             browser_profile: agent_browser.join("profile"),
@@ -243,34 +249,10 @@ impl RunFolders {
         }
     }
 
-    /// Makes them, each through no link below `data`. Before that, the host's first launch sets
-    /// aside the `run` folder an earlier run left ([`RunSweep`]). When one cannot be made, the
-    /// run folder is taken back. File system calls: off the actor.
+    /// Makes them, each through no link below `data`, after the start-up sweep ([`RunSweep`]);
+    /// one not made takes the run folder back ([`folders::make`]). Off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
-        sweep.once(data);
-        let tmp = crate::agent::temp::temp_dir(&self.root);
-        for folder in [&self.work, &tmp, &self.notes] {
-            if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
-                self.remove();
-                return Err(Error::refused(
-                    clauseo_protocol::ErrorCode::AgentLaunchFailed,
-                    format!("cannot make the folder {}: {error}", folder.display()),
-                ));
-            }
-        }
-        // The notes folder may be an earlier session's: it is set to 0700 whatever it was.
-        #[cfg(unix)]
-        if let Err(error) = crate::write::make_private_dir(&self.notes) {
-            self.remove();
-            return Err(Error::refused(
-                clauseo_protocol::ErrorCode::AgentLaunchFailed,
-                format!(
-                    "cannot make the folder {} private: {error}",
-                    self.notes.display()
-                ),
-            ));
-        }
-        Ok(())
+        folders::make(self, data, sweep)
     }
 
     /// Removes this launch's run folder, its browser folder and Claude's short temp folder,
@@ -337,8 +319,7 @@ pub(super) fn prepare(
         matter: Some(run.key.matter),
         source: actor.folder_check,
     };
-    let clock = std::sync::Arc::clone(&actor.clock);
-    let check_clock = std::sync::Arc::clone(&actor.clock);
+    let (clock, check_clock) = (Arc::clone(&actor.clock), Arc::clone(&actor.clock));
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
@@ -392,11 +373,12 @@ pub(super) fn prepare(
                     }
                 }
                 run.make(&data, &sweep)?;
+                make_guard(&mut run, &data, claude)?;
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
-                claim(&mut run, &data, claims, slot, claude);
+                claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
@@ -591,9 +573,11 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{browser_run_dir, launch_deny, notes_dir, remove_tree, run_dir};
+use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 
+#[cfg(test)]
+mod guard_tests;
 #[cfg(test)]
 mod tests;

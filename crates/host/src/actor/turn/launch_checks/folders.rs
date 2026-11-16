@@ -1,14 +1,73 @@
-//! The data-fence and folder-path helpers of a launch: the deny rules Claude's data folder gets
-//! (`agent/data_fence.rs`), the paths a session's folders sit at under the data folder, and the
-//! removal of a launch's run folder. Nothing here is made; the callers in `launch_checks` make and
-//! remove the folders, off the actor.
+//! The data-fence and folder helpers of a launch: the deny rules Claude's data folder gets
+//! (`agent/data_fence.rs`), the paths a session's folders sit at under the data folder, their
+//! making ([`make`], [`make_guard`]) and the removal of a launch's run
+//! folder. The callers in `launch_checks` call them off the actor.
 
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::MatterId;
+use clauseo_protocol::{ErrorCode, MatterId};
 
-use super::RunFolders;
+use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
+use crate::error::Error;
+
+/// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
+/// that, the host's first launch sets aside the `run` folder an earlier run left ([`RunSweep`]).
+/// When one cannot be made, the run folder is taken back. File system calls: off the actor.
+pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
+    sweep.once(data);
+    let tmp = crate::agent::temp::temp_dir(&run.root);
+    for folder in [&run.work, &tmp, &run.notes] {
+        if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
+            run.remove();
+            return Err(Error::refused(
+                ErrorCode::AgentLaunchFailed,
+                format!("cannot make the folder {}: {error}", folder.display()),
+            ));
+        }
+    }
+    // The notes folder may be an earlier session's: it is set to 0700 whatever it was.
+    #[cfg(unix)]
+    if let Err(error) = crate::write::make_private_dir(&run.notes) {
+        run.remove();
+        return Err(Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            format!(
+                "cannot make the folder {} private: {error}",
+                run.notes.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Makes the pre-write guard's record of its refusals for `run`, for any agent but Claude
+/// (`claude`), whose hook passes none (`updates/guard_blocks.rs`): the session's guard folder,
+/// create-new, then the file in it with `O_EXCL`
+/// ([`record::make`](crate::pre_write_guard::record::make)), and keeps the file and the identity
+/// it read from it in [`RunFolders::guard`]. It sits in `<data>/browser`, which no agent's shell
+/// or patch tool may write (Codex's fence denies it, `agent/codex_fence.rs` `DATA_DENIED`;
+/// Claude's deny rules, `Read` and `Edit` of `browser/**`), so only the host makes it. Anything
+/// already at the session's guard folder (a folder, a file, a symlink or a junction) refuses the
+/// launch, the run folder taken back, as [`make`] does. File system calls: off the actor.
+pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Result<(), Error> {
+    if claude {
+        return Ok(());
+    }
+    match crate::pre_write_guard::record::make(data, &run.key.id()) {
+        Ok(made) => {
+            run.guard = Some(made);
+            Ok(())
+        }
+        Err(error) => {
+            run.remove();
+            Err(Error::refused(
+                ErrorCode::AgentLaunchFailed,
+                format!("cannot make the guard's record file: {error}"),
+            ))
+        }
+    }
+}
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
 /// when it does not resolve (the data-folder refusal has refused that launch already).
@@ -69,29 +128,6 @@ pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
     data.join(crate::browser::CONFIG_DIR).join("run")
 }
 
-/// Makes the guard's record of its refusals (`updates/guard_blocks.rs`) empty, for an agent but
-/// Claude, whose hook passes none: `<data>/browser/run/<session>/guard-blocks.jsonl`, the
-/// session's browser folder made first through no link below `data`. Like the browser guard's
-/// `--cwd` it sits in `<data>/browser`, which no agent's shell or patch tool may write (Codex's
-/// fence denies it, `agent/codex_fence.rs` `DATA_DENIED`; Claude's, every entry of the data
-/// folder but its own, `data_fence::launch_deny`), so only the host makes it, with `O_EXCL`, and
-/// the unfenced guard writes only a regular file there with one link (`write::open_append_record`).
-/// One not made (anything already there, say) leaves the lawyer untold, with a warning.
-pub(super) fn make_guard_record(run: &RunFolders, data: &Path, claude: bool) {
-    if claude {
-        return;
-    }
-    let file = super::super::updates::guard_blocks::file(&run.browser);
-    let made = crate::write::create_private_dirs_under(data, &run.browser)
-        .and_then(|()| crate::write::create_record(&file));
-    if let Err(error) = made {
-        tracing::warn!(
-            error = %crate::log_file::Cause(&error),
-            "the guard's record file was not made; the lawyer is not told what it stops"
-        );
-    }
-}
-
 /// `<data>/agent-state/<matter>/notes`.
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
     data.join("agent-state")
@@ -106,14 +142,13 @@ pub(super) fn remove_tree(folder: &Path) {
     }
 }
 
-/// Removes this launch's run folder and its browser folder and all they hold, each when it
-/// is a real folder, with Claude's short temp folder the run folder names
-/// (`agent::claude_tmp`) and the run's Claude settings files (`agent::launch_settings`); the
-/// notes folder stays. Only the folders the host made: the paths as
-/// built (`<data>/run/<session id>`, `<data>/browser/run/<session id>`), never
-/// canonicalized, removed with `remove_dir_all`, which removes a link inside and never
-/// follows it. Called once the agent's process has exited, or when it never started. File
-/// system calls: off the actor.
+/// Removes this launch's run folder, its browser folder and its guard folder and all they hold,
+/// each when it is a real folder, with Claude's short temp folder the run folder names
+/// (`agent::claude_tmp`) and the run's Claude settings files (`agent::launch_settings`); the notes
+/// folder stays. Only the folders the host made: the paths as built (`<data>/run/<session id>`,
+/// `<data>/browser/run/<session id>`, `<data>/browser/guard/<session id>`), never canonicalized,
+/// removed with `remove_dir_all`, which removes a link inside and never follows it. Called once the
+/// agent's process has exited, or when it never started. File system calls: off the actor.
 pub(super) fn remove_folders(run: &RunFolders) {
     crate::agent::launch_settings::remove(&run.launch_settings);
     let id = run.key.id();
@@ -126,15 +161,27 @@ pub(super) fn remove_folders(run: &RunFolders) {
             this.and_then(Path::file_name) == Some(std::ffi::OsStr::new(name))
         })
     };
-    for (folder, parents) in [
-        (&run.root, &["run"][..]),
-        (&run.browser, &["run", crate::browser::CONFIG_DIR][..]),
-    ] {
+    let guard = run.guard.as_ref().and_then(|(file, _)| file.parent());
+    let guard_parents = [
+        crate::pre_write_guard::record::FOLDER,
+        crate::browser::CONFIG_DIR,
+    ];
+    let folders = [
+        (run.root.as_path(), &["run"][..]),
+        (
+            run.browser.as_path(),
+            &["run", crate::browser::CONFIG_DIR][..],
+        ),
+    ];
+    for (folder, parents) in folders
+        .into_iter()
+        .chain(guard.map(|guard| (guard, &guard_parents[..])))
+    {
         if !named(folder, parents) {
             tracing::warn!("not a session folder the host made; it stays");
             continue;
         }
-        if folder == &run.root {
+        if folder == run.root {
             crate::agent::claude_tmp::remove_claude_tmp(folder);
         }
         if crate::write::is_real_dir(folder) {

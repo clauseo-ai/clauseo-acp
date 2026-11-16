@@ -473,18 +473,17 @@ fn the_guard_folder_and_the_browser_socket_folder_are_denied() {
     assert_eq!(filesystem[socket_dir().to_str().unwrap()], json!("deny"));
 }
 
-/// The guard's record of its refusals (`<data>/browser/run/<id>/guard-blocks.jsonl`,
-/// `launch_checks/folders.rs` `make_guard_record`), which the unfenced guard appends to, is
-/// denied, read and write, to Codex's shell and to `apply_patch` (which Codex runs in the same
-/// sandbox, `codex-rs/arg0/src/lib.rs:329`), in an ordinary turn and an escalated one, so neither
-/// can plant a hard link or a symlink there.
+/// The guard's record of its refusals and its folder, at the path the host makes them
+/// (`pre_write_guard::record::folder` and `file`, `<data>/browser/guard/<id>/guard-blocks.jsonl`),
+/// which the unfenced guard appends to, are denied, read and write, to Codex's shell and to
+/// `apply_patch` (which Codex runs in the same sandbox, `codex-rs/arg0/src/lib.rs:329`), in an
+/// ordinary turn and an escalated one, so neither can plant a link or a file there. The session
+/// is the fence's own (`run_root`'s `s1`).
 #[test]
 fn the_guard_record_file_is_denied_to_the_shell_and_patches() {
-    let record = data()
-        .join("browser")
-        .join("run")
-        .join("s1")
-        .join(crate::pre_write_guard::record::FILE_NAME);
+    use crate::pre_write_guard::record;
+    let session = run_root().file_name().unwrap().to_str().unwrap().to_owned();
+    let record = record::file(&record::folder(&data(), &session));
     for keys in [fence(), fence_with(&listed())] {
         assert_eq!(access(&keys, &record), "deny");
         assert_eq!(escalated_access(&keys, &record), "deny");

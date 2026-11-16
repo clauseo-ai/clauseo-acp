@@ -84,27 +84,77 @@ pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
+/// The identity of the guard's record file (`pre_write_guard/record.rs`), read from the open
+/// file the host made ([`create_record`]): its device (`st_dev`) and inode (`st_ino`) on Unix,
+/// its volume's serial number and file ID on Windows (`network_paths::record_identity`). It goes
+/// in Codex's trust-hashed hook command beside the path, as [`Self::hex`], and the guard and the
+/// host's read write or read the file only when the file they opened has it: a file moved in at
+/// the record's place, or reached through a link at one of its folders, has another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecordId {
+    /// The device, or the volume's serial number.
+    volume: u64,
+    /// The inode, or the file ID (128 bits, or the 64-bit file index).
+    file: u128,
+}
+
+impl RecordId {
+    /// How many hex digits [`Self::hex`] has: 16 for the volume, 32 for the file.
+    pub(crate) const HEX_LEN: usize = 48;
+
+    /// The identity as [`Self::HEX_LEN`] lowercase hex digits, the volume's then the file's.
+    pub(crate) fn hex(self) -> String {
+        format!("{:016x}{:032x}", self.volume, self.file)
+    }
+
+    /// The identity [`Self::hex`] wrote; `None` for anything else.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        if text.len() != Self::HEX_LEN || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some(Self {
+            volume: u64::from_str_radix(text.get(..16)?, 16).ok()?,
+            file: u128::from_str_radix(text.get(16..)?, 16).ok()?,
+        })
+    }
+
+    /// The identity of the open `file`.
+    pub(crate) fn of(file: &std::fs::File) -> io::Result<Self> {
+        #[cfg(unix)]
+        let (volume, file) = {
+            use std::os::unix::fs::MetadataExt as _;
+            let meta = file.metadata()?;
+            (meta.dev(), u128::from(meta.ino()))
+        };
+        #[cfg(windows)]
+        let (volume, file) = crate::network_paths::record_identity(file)?;
+        Ok(Self { volume, file })
+    }
+}
+
 /// Opens the guard's record of its refusals (`pre_write_guard/record.rs`) for appending: the
 /// file the host made empty at the launch ([`create_record`]), never created here, never through
 /// a link at its last component and never waiting on a pipe (`O_NOFOLLOW | O_NONBLOCK` on Unix,
-/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows). Anything but a regular file with one link fails,
-/// so a hard link planted at its place (to a shell profile, say) is never written through.
-pub(crate) fn open_append_record(path: &Path) -> io::Result<std::fs::File> {
+/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows). Anything but a regular file with one link and the
+/// identity `id` fails ([`single`]), so a hard link planted at its place (to a shell profile,
+/// say), a file moved in there, or one reached through a link at its folder is never written.
+pub(crate) fn open_append_record(path: &Path, id: RecordId) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.append(true);
     no_follow_no_wait(&mut options);
-    single(options.open(path)?)
+    single(options.open(path)?, id)
 }
 
 /// Makes the guard's record file `path` empty (0600 on Unix), when nothing is there yet:
 /// anything already there, a link included, fails with `AlreadyExists` and is never followed.
-/// The launch prep's, in a folder only the host writes (`launch_checks/folders.rs`).
-pub(crate) fn create_record(path: &Path) -> io::Result<()> {
+/// Its identity, read from the file just made. The launch prep's, in a folder of the session's
+/// own that only the host makes (`pre_write_guard::make_record`).
+pub(crate) fn create_record(path: &Path) -> io::Result<RecordId> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path).map(drop)
+    RecordId::of(&options.open(path)?)
 }
 
 /// `O_NOFOLLOW | O_NONBLOCK` on Unix, `FILE_FLAG_OPEN_REPARSE_POINT` on Windows.
@@ -122,8 +172,8 @@ fn no_follow_no_wait(options: &mut std::fs::OpenOptions) {
 }
 
 /// `file` when it is a regular file with one link (`st_nlink`, or `NumberOfLinks` on
-/// Windows), else an error.
-fn single(file: std::fs::File) -> io::Result<std::fs::File> {
+/// Windows) and the identity `id`, all read from the open file, else an error.
+fn single(file: std::fs::File, id: RecordId) -> io::Result<std::fs::File> {
     if !file.metadata()?.is_file() {
         return Err(io::Error::other("not a regular file"));
     }
@@ -133,6 +183,9 @@ fn single(file: std::fs::File) -> io::Result<std::fs::File> {
     let links = u64::from(crate::network_paths::link_count(&file)?);
     if links != 1 {
         return Err(io::Error::other("a file with more than one link"));
+    }
+    if RecordId::of(&file)? != id {
+        return Err(io::Error::other("not the record file the host made"));
     }
     Ok(file)
 }
@@ -367,14 +420,14 @@ pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// [`open_read_nofollow`] for a regular file with one link only, never waiting on a pipe
-/// (`O_NONBLOCK` on Unix): the host's read of the guard's record
+/// [`open_read_nofollow`] for a regular file with one link and the identity `id` only, never
+/// waiting on a pipe (`O_NONBLOCK` on Unix): the host's read of the guard's record
 /// (`actor/turn/updates/guard_blocks.rs`).
-pub(crate) fn open_read_record(path: &Path) -> io::Result<std::fs::File> {
+pub(crate) fn open_read_record(path: &Path, id: RecordId) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     no_follow_no_wait(&mut options);
-    single(options.open(path)?)
+    single(options.open(path)?, id)
 }
 
 /// Opens `path` for reading with a share mode that lets others read but not write or delete

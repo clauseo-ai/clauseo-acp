@@ -10,7 +10,8 @@ use super::{browser_run_dir, remove_tree, run_dir};
 /// `run.old-<n>` in one call, so no live folder is taken and no launch waits on a delete; a
 /// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
 /// is left as it is, and the launches refuse it. `<data>/browser/run`, the sessions' browser
-/// folders (the guard's `--cwd`), is set aside and deleted the same way, within `<data>/browser`.
+/// folders (the guard's `--cwd`), is set aside and deleted the same way, within `<data>/browser`,
+/// and so is `<data>/browser/guard`, the sessions' guard records (`pre_write_guard/record.rs`).
 /// The files in `<data>/launch-settings`, earlier runs' Claude settings
 /// (`agent::launch_settings`), are removed there and then, before any launch writes one.
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,10 @@ impl RunSweep {
         let parents = [data.to_owned(), data.join(crate::browser::CONFIG_DIR)];
         set_aside(&run_dir(data), &parents[0]);
         set_aside(&browser_run_dir(data), &parents[1]);
+        set_aside(
+            &parents[1].join(crate::pre_write_guard::record::FOLDER),
+            &parents[1],
+        );
         crate::agent::launch_settings::sweep(&crate::agent::launch_settings::folder(data));
         let started = std::thread::Builder::new()
             .name("clauseo-run-sweep".to_owned())
@@ -71,8 +76,8 @@ impl RunSweep {
 /// The prefix of a `run` folder set aside.
 const SET_ASIDE: &str = "run.old-";
 
-/// Renames `run` (`<data>/run` or `<data>/browser/run`) to the first free `run.old-<n>` in
-/// `parent`, when it is a real folder.
+/// Renames `run` (`<data>/run`, `<data>/browser/run` or `<data>/browser/guard`) to the first
+/// free `run.old-<n>` in `parent`, when it is a real folder.
 fn set_aside(run: &Path, parent: &Path) {
     match std::fs::symlink_metadata(run) {
         Err(_) => return,
