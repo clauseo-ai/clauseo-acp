@@ -284,6 +284,9 @@ pub(super) fn end_unstarted(
     stop: StopReason,
     checkpoint: Option<(MatterId, TurnCheckpoint)>,
 ) {
+    if let Some(failed) = &failed {
+        super::own_turn::refused::unstarted_failed(actor, thread, failed.code);
+    }
     let mut close = TurnClose::new(turn, stop);
     close.failure = failed.map(|failed| (failed.code, failed.detail));
     close.detach = current(actor, thread).and_then(|current| current.detach.take());
@@ -365,6 +368,11 @@ pub(super) fn on_before_turn(
                 detail: Some(error.detail()),
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
+            // Nothing reached the agent, but it may still be working (a Codex helper, a background
+            // command): stopped, as a refused prompt's is (`end::on_prompt_refused`), whatever the
+            // refusal (the folder moved or gone, a failed checkpoint). The next prompt launches it
+            // again, if it can.
+            agents::stop(actor, thread);
             return;
         }
     };
@@ -430,9 +438,14 @@ pub(super) fn on_before_turn(
 /// The `TurnStarted` commit is durable: step 5, the prompt. A cancel or a failed commit that
 /// came meanwhile ends the turn through steps 6 to 8 instead.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let Some(current) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.phase == TurnPhase::Starting)
-    else {
+    let starting =
+        |current: &super::Current| current.turn == turn && current.phase == TurnPhase::Starting;
+    if !current(actor, thread).is_some_and(|current| starting(current)) {
+        return;
+    }
+    // A turn starts: a run of refused agent-started turns ends (`own_turn/refused.rs`).
+    super::own_turn::refused::started(actor, thread);
+    let Some(current) = current(actor, thread).filter(|current| starting(current)) else {
         return;
     };
     if current.cancelled {
