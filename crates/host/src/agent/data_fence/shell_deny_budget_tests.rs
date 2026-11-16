@@ -212,9 +212,10 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
 /// name alone (`autoctx`'s variant V4; one and two spellings), like for like: the rules the head
 /// gained since are left out, the own folders' glob denies (`own_shell_glob_deny_rules`, from
 /// main's 1e4b199ae, 187 a spelling); V4 had no other matters' shell rules, nor has the head
-/// (e7795a867). Within 10% of it either way. Not one-sided, because the flat 225 B a `Read` or
-/// `Edit` rule under-counts the data folder's long-path rules and over-counts the matters' shorter
-/// ones: the estimate runs up to about 4% under at a few matters and up to about 9% over at 200.
+/// (e7795a867). At most 10% under it and at most 15% over it. Not one-sided, because the flat
+/// 225 B a `Read` or `Edit` rule under-counts the data folder's long-path rules and over-counts
+/// the matters' shorter ones: the estimate runs up to about 4% under at a few matters and about
+/// 9% over at 200.
 /// Costing each rule by its own JSON (#1154's estimator, the budget notes' option F) makes it
 /// one-sided again.
 #[test]
@@ -244,10 +245,22 @@ fn the_estimate_is_pinned_to_the_measured_context() {
         );
         rows.push((matters, short, estimate, sent));
     }
+    // The measured figures are pinned at b0d68aad7; the estimate counts every rule on the head.
+    // Rules main adds later (#1093's guarded-browser block list, 14 a spelling, about 106 B
+    // each) raise the estimate, not the pinned figures, so the row drifts over: +8.8% on
+    // e1371d5cd, +9.2% on dbad4115d at 200 matters with two spellings. Under-counting is the
+    // unsafe direction for the bounds, so it stays at most 10%; over-counting errs safe, so the
+    // over side has 15%, about 47,000 B (some 450 rules) of room at that row. The budget
+    // follow-up (matter-fence-budget-cuts, right behind growth) re-measures on its head, costs
+    // each rule by its JSON, and makes the check one-sided again.
     for (matters, short, estimate, sent) in rows {
         assert!(
-            estimate.abs_diff(sent) <= sent / 10,
-            "{matters} {short}: {estimate} vs {sent}"
+            estimate >= sent - sent / 10,
+            "{matters} {short}: {estimate} more than 10% under {sent}"
+        );
+        assert!(
+            estimate <= sent + sent * 15 / 100,
+            "{matters} {short}: {estimate} more than 15% over {sent}"
         );
     }
 }
