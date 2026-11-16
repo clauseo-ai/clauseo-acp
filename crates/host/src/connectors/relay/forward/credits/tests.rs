@@ -15,24 +15,24 @@ fn with(credits: &Value) -> Value {
         "_meta": {CREDITS_KEY: credits}})
 }
 
-fn both(charged: u32, balance: i64) -> Option<Credits> {
-    Some(Credits {
+fn both(charged: u32, balance: i64) -> Credits {
+    Credits {
         charged: Some(charged),
         balance: Some(balance),
-    })
+    }
 }
 
 #[test]
 fn present_credits_are_read() {
     let value = with(&json!({"charged_credits": 40, "balance_credits": 1960}));
-    assert_eq!(read(&value), both(40, 1960));
+    assert_eq!(read(&value), Some(both(40, 1960)));
     // A free call: charged 0 and the balance.
     let free = with(&json!({"charged_credits": 0, "balance_credits": 1960}));
-    assert_eq!(read(&free), both(0, 1960));
+    assert_eq!(read(&free), Some(both(0, 1960)));
     // Other `_meta` keys and other members of the credits object are passed over.
     let more = json!({"isError": false, "_meta": {"other/key": [1, 2],
         CREDITS_KEY: {"charged_credits": 1, "balance_credits": 5, "note": "x"}}});
-    assert_eq!(read(&more), both(1, 5));
+    assert_eq!(read(&more), Some(both(1, 5)));
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn error_results_carry_credits_too() {
     let out = json!({"isError": true, "content": [{"type": "text", "text": "Out of credits"}],
         "structuredContent": {"error": "insufficient_credits"},
         "_meta": {CREDITS_KEY: {"charged_credits": 0, "balance_credits": 3}}});
-    assert_eq!(read(&out), both(0, 3));
+    assert_eq!(read(&out), Some(both(0, 3)));
     // Upstream failure: refused, nothing charged, no balance.
     let failed = json!({"isError": true, "content": [],
         "_meta": {CREDITS_KEY: {"charged_credits": 0}}});

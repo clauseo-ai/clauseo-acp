@@ -54,8 +54,8 @@ fn result(is_error: bool, credits: Option<Value>) -> Fixture {
     Fixture::Json(value)
 }
 
-fn credits(charged: i64, balance: i64) -> Option<Value> {
-    Some(json!({"charged_credits": charged, "balance_credits": balance}))
+fn credits(charged: i64, balance: i64) -> Value {
+    json!({"charged_credits": charged, "balance_credits": balance})
 }
 
 /// A `tools/call` of `tool` with `arguments` through the relay, answered by the next result
@@ -119,7 +119,7 @@ fn each_case_law_step_shows_what_its_own_result_said_it_cost() {
     // Paid: 40 credits, 960 left. The answer reaches the agent with its `_meta` unchanged.
     rig.fake.set_balance(960);
     rig.fake
-        .push_tool_result("search_law", result(false, credits(40, 960)));
+        .push_tool_result("search_law", result(false, Some(credits(40, 960))));
     let answer = call(&mut reader, 2, "search_law", &json!({"query": "paid"}));
     assert_eq!(
         answer["result"]["_meta"]["chat.clauseo/credits"],
@@ -134,7 +134,7 @@ fn each_case_law_step_shows_what_its_own_result_said_it_cost() {
     });
     // Free (a repeat open): charged 0, the balance.
     rig.fake
-        .push_tool_result("read_document", result(false, credits(0, 960)));
+        .push_tool_result("read_document", result(false, Some(credits(0, 960))));
     call(&mut reader, 3, "read_document", &json!({"doc_id": "1"}));
     // Refused (over max_credits, say): isError, charged 0, no balance.
     rig.fake
@@ -143,14 +143,14 @@ fn each_case_law_step_shows_what_its_own_result_said_it_cost() {
     // Two reads with the same arguments in flight together: one paid, one free.
     rig.fake.set_balance(930);
     rig.fake
-        .push_tool_result("read_document", result(false, credits(30, 930)));
+        .push_tool_result("read_document", result(false, Some(credits(30, 930))));
     rig.fake
-        .push_tool_result("read_document", result(false, credits(0, 930)));
+        .push_tool_result("read_document", result(false, Some(credits(0, 930))));
     call(&mut reader, 5, "read_document", &json!({"doc_id": "3"}));
     call(&mut reader, 6, "read_document", &json!({"doc_id": "3"}));
     // A check whose step is still running when the turn ends.
     rig.fake
-        .push_tool_result("check_citations", result(false, credits(0, 930)));
+        .push_tool_result("check_citations", result(false, Some(credits(0, 930))));
     let text = json!({"text": "AIR 1973 SC 1461"});
     call(&mut reader, 7, "check_citations", &text);
     rig.state_until("the twins' balance", |state| signed_in(state) == Some(930));
@@ -193,7 +193,7 @@ fn a_stale_balance_never_overwrites_a_newer_one() {
     rig.fake.set_balance(880);
     for balance in [900, 950, 880] {
         rig.fake
-            .push_tool_result("search_law", result(false, credits(50, balance)));
+            .push_tool_result("search_law", result(false, Some(credits(50, balance))));
     }
     for id in 1..=3 {
         call(
@@ -275,7 +275,7 @@ fn the_read_after_a_reported_balance_never_answers_from_the_older_copy() {
     let mut reader = agent(session.addr(), &token);
     rig.fake.set_balance(960);
     rig.fake
-        .push_tool_result("search_law", result(false, credits(40, 960)));
+        .push_tool_result("search_law", result(false, Some(credits(40, 960))));
     let reads = rig.account_reads();
     call(&mut reader, 1, "search_law", &json!({"query": "x"}));
     rig.state_until("the reported balance", |state| {
@@ -303,13 +303,13 @@ fn a_balance_that_lowers_nothing_keeps_the_read_in_flight() {
     rig.fake.set_balance(850);
     let release = rig.fake.hold_next(ACCOUNT);
     rig.fake
-        .push_tool_result("search_law", result(false, credits(100, 900)));
+        .push_tool_result("search_law", result(false, Some(credits(100, 900))));
     let reads = rig.account_reads();
     call(&mut reader, 1, "search_law", &json!({"query": "paid"}));
     rig.state_until("the paid balance", |state| signed_in(state) == Some(900));
     reads_reach(&rig, reads + 1);
     rig.fake
-        .push_tool_result("search_law", result(false, credits(0, 900)));
+        .push_tool_result("search_law", result(false, Some(credits(0, 900))));
     call(&mut reader, 2, "search_law", &json!({"query": "paid"}));
     release.cancel();
     rig.state_until("the read's balance", |state| signed_in(state) == Some(850));

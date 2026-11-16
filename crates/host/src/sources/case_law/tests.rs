@@ -57,11 +57,15 @@ fn charged(
 fn charges(records: &[DomainEvent]) -> Vec<(u32, bool)> {
     records
         .iter()
-        .filter_map(|record| match record {
-            DomainEvent::ToolCallCharged(ToolCallCharged {
+        .filter_map(|record| {
+            if let DomainEvent::ToolCallCharged(ToolCallCharged {
                 credits, refused, ..
-            }) => Some((*credits, *refused)),
-            _ => None,
+            }) = record
+            {
+                Some((*credits, *refused))
+            } else {
+                None
+            }
         })
         .collect()
 }
