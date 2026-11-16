@@ -44,7 +44,9 @@ use sha2::{Digest, Sha256};
 pub(crate) const CODEX_GUARD_MATCHER: &str = "apply_patch|Write|Edit|Bash";
 
 /// The seconds Codex waits for the guard (its default is 600), room for a cold PowerShell start
-/// and a first scan of a new program.
+/// and a first scan of a new program. Scope: when they pass, Codex stops the hook and runs the
+/// tool (codex-rs at rust-v0.162.1, `hooks/src/engine/command_runner.rs:276-318`); every other
+/// ending of the line is a refusal.
 const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 30;
 
 /// The key of the first handler of the first `PreToolUse` group from session flags.

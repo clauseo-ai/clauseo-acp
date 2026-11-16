@@ -221,7 +221,7 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// [`RECORD_FLAG`] and its file and [`RECORD_ID_FLAG`] and its identity, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
-/// read, but as Codex's hook (no `--matter`, a [`RECORD_FLAG`]) [`DENY`] with [`UNCHECKED`] when
+/// read, but as Codex's hook (no `--matter`) [`DENY`] with [`UNCHECKED`] when
 /// it is empty, unreadable or not JSON; else 0 with nothing written. With
 /// `CLAUSEO_GUARD_TIMINGS` set in the environment (not empty, not `0`), one more line follows,
 /// the phase timings (`timings.rs`).
@@ -291,7 +291,7 @@ fn run_timed(
 
 /// What the agent reads when the guard could not run, ended with neither of its codes, or (as
 /// Codex's hook) could not read its input.
-pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
+pub const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
 /// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).
 pub const IGNORED: &str = "Clauseo's pre-write guard ignored its input";
@@ -335,10 +335,11 @@ impl Ignored {
     }
 }
 
-/// Whether the guard runs as Codex's hook: no `--matter` and a [`RECORD_FLAG`]. There input that
+/// Whether the guard runs as Codex's hook: no `--matter` (Claude's hook always passes one,
+/// `agent/loads.rs`, `guard_entry`), with a record or without. There input that
 /// is empty, unreadable or not JSON refuses ([`UNCHECKED`], [`DENY`]).
 fn as_codex_hook(args: &[OsString]) -> bool {
-    matter_arg(args).is_none() && args.iter().any(|arg| arg == RECORD_FLAG)
+    matter_arg(args).is_none()
 }
 
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.

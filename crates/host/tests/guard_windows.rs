@@ -53,8 +53,8 @@ fn line_for(program: &Path) -> String {
 
 /// The shells to run the hook under, the one Codex 0.162.1 would pick on this machine first
 /// (`shell-command/src/shell_detect.rs:257-297`: `pwsh` on `PATH`, then PowerShell 7 at its
-/// install path, then `powershell` on `PATH`, then Windows PowerShell at its system path; a
-/// `WindowsApps` hit skipped), then every other one of those found. On CI both PowerShell 7 and
+/// install path, then `powershell` on `PATH`, then Windows PowerShell at its system path), then
+/// every other one of those found. On CI both PowerShell 7 and
 /// Windows PowerShell must be there; a local run takes what it finds.
 #[cfg(test)]
 fn shells() -> Vec<String> {
@@ -99,8 +99,10 @@ fn shells() -> Vec<String> {
     shells
 }
 
-/// The first `name` on `PATH` outside `WindowsApps`, as `where.exe` finds it; `None` when
-/// there is none.
+/// The first `name` on `PATH`, as `where.exe` finds it, a Store (`WindowsApps`) one included:
+/// Codex's discovery takes the first `which` hit (`shell_detect.rs:205`) and swaps a Store one
+/// only for its Windows sandbox's own runs (`fallback_powershell_shell_for_windows_sandbox`,
+/// `:288-292`). `None` when there is none.
 #[cfg(test)]
 #[expect(
     clippy::disallowed_methods,
@@ -112,7 +114,7 @@ fn on_path(name: &str) -> Option<String> {
     found
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty() && !line.to_ascii_lowercase().contains(r"\windowsapps\"))
+        .find(|line| !line.is_empty())
         .map(str::to_owned)
 }
 
