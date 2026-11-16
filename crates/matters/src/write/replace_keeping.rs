@@ -104,7 +104,8 @@ pub(super) fn replace_keeping(
     let backup_there = there(&backup);
     match next_step(result.is_err(), target_there, backup_there) {
         Step::Done => {
-            if backup_there && let Err(err) = super::remove_temp(&backup) {
+            // Removed, never unlocked: it is the lawyer's old file, which may have other links.
+            if backup_there && let Err(err) = super::remove_file(&backup) {
                 tracing::warn!(error = %err, "backup of a replaced file left behind");
             }
             Ok(Lost::default())

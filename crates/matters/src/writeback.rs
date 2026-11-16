@@ -269,6 +269,8 @@ pub(crate) struct Deleted {
     pub(crate) paths: Vec<MatterPath>,
     /// How many went to the trash and how many were deleted for good.
     pub(crate) removals: Removals,
+    /// What the write-back left for the lawyer to hear about, by name.
+    pub(crate) unfinished: Unfinished,
 }
 
 /// Why [`apply_or_partial`] failed, and whether the folder had changed by then.
@@ -277,26 +279,104 @@ pub(crate) struct Failed {
     pub(crate) error: Error,
     /// A delete or a rename was made before the failure: the folder is not as it was.
     pub(crate) changed: bool,
+    /// What the write-back left for the lawyer to hear about, by name, up to the failure.
+    pub(crate) unfinished: Unfinished,
+}
+
+/// The files a write-back, whether it went or failed, left otherwise than it should, by their
+/// paths in the matter, sorted: what the caller names to the lawyer. Never a failure itself.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Unfinished {
+    /// Files renamed into place whose step after the rename failed (macOS: the old file's ACL
+    /// and mode were not set): readable and writable by their owner alone.
+    pub(crate) owner_only: Vec<MatterPath>,
+    /// Temp files (`.clauseo-<n>.tmp`) still in a folder written to: ones that could not be
+    /// removed (a folder that denies deleting its files, a file a crash left that an agent
+    /// linked to another), or, on Windows, a temp file holding the new content of a file the
+    /// folder lost during the write.
+    pub(crate) left_behind: Vec<MatterPath>,
 }
 
 /// [`apply`], telling a failure that left the folder as it was from one after a delete or a
-/// rename (a failed rename after another, or a folder sync after the renames).
+/// rename (a failed rename after another, or a folder sync after the renames). Either way it
+/// names what it left [`Unfinished`]: the temp files still in the folders it wrote to, listed
+/// once every staged file is renamed or dropped, and the files whose step after the rename
+/// failed.
 pub(crate) fn apply_or_partial(
     core: &Core,
     folder: &Path,
     trash: &dyn Trash,
     ops: &[&Op],
 ) -> Result<Deleted, Failed> {
-    let unchanged = |error| Failed {
-        error,
-        changed: false,
+    let mut dirs = std::collections::BTreeSet::new();
+    let mut unfinished = Unfinished::default();
+    let result = write_all(
+        core,
+        folder,
+        trash,
+        ops,
+        &mut dirs,
+        &mut unfinished.owner_only,
+    );
+    // Every temp file is renamed or dropped by now: what is left could not go.
+    for dir in &dirs {
+        let rel = dir.strip_prefix(folder).unwrap_or(Path::new(""));
+        for name in write::temps_in(dir) {
+            if let Some(path) = rel.join(name).to_str() {
+                let path = path.replace('\\', "/");
+                unfinished.left_behind.extend(MatterPath::new(&path).ok());
+            }
+        }
+    }
+    unfinished.owner_only.sort();
+    unfinished.left_behind.sort();
+    let result = match result {
+        Ok((paths, removals)) => Ok(Deleted {
+            paths,
+            removals,
+            unfinished,
+        }),
+        Err((error, changed)) => Err(Failed {
+            error,
+            changed,
+            unfinished,
+        }),
     };
-    let changed = |error| Failed {
-        error,
-        changed: true,
-    };
+    match &result {
+        Ok(Deleted { unfinished, .. }) | Err(Failed { unfinished, .. }) => unfinished.log(),
+    }
+    result
+}
+
+impl Unfinished {
+    /// Logs how many files there are of each kind, if any: counts only, never a name.
+    fn log(&self) {
+        if !self.owner_only.is_empty() || !self.left_behind.is_empty() {
+            tracing::warn!(
+                owner_only = self.owner_only.len(),
+                left_behind = self.left_behind.len(),
+                "a write-back left files to name to the lawyer"
+            );
+        }
+    }
+}
+
+/// [`apply_or_partial`]'s steps: the deletions made and their count, or the error and whether
+/// the folder changed. `dirs` gets each folder a write stages into; `owner_only` each file
+/// renamed into place whose step after the rename failed. Every staged file is renamed or
+/// dropped (its temp file removed) when it returns.
+fn write_all(
+    core: &Core,
+    folder: &Path,
+    trash: &dyn Trash,
+    ops: &[&Op],
+    dirs: &mut std::collections::BTreeSet<PathBuf>,
+    owner_only: &mut Vec<MatterPath>,
+) -> Result<(Vec<MatterPath>, Removals), (Error, bool)> {
+    let unchanged = |error| (error, false);
+    let changed = |error| (error, true);
     let mut made = Vec::new();
-    let staged = match stage_all(core, folder, ops, &mut made) {
+    let staged = match stage_all(core, folder, ops, &mut made, dirs) {
         Ok(staged) => staged,
         Err(err) => {
             // The temp files went with `stage_all`; the folders it made are empty again.
@@ -340,14 +420,17 @@ pub(crate) fn apply_or_partial(
     }
     // Every rename, then each folder synced once: the renames are durable before the
     // checkpoint that follows records them.
-    let mut dirs = std::collections::BTreeSet::new();
+    let mut synced = std::collections::BTreeSet::new();
     let mut lost = Lost(write::Lost::default());
     for (path, file) in staged {
         match file.rename() {
             Ok(renamed) => {
                 any_change = true;
                 lost.0.add(renamed.lost);
-                dirs.insert(renamed.dir);
+                if renamed.owner_only {
+                    owner_only.push(path.clone());
+                }
+                synced.insert(renamed.dir);
             }
             Err(write::RenameFailed {
                 error: err,
@@ -355,7 +438,7 @@ pub(crate) fn apply_or_partial(
             }) => {
                 // The renames before it stay, made durable as far as the OS lets; the temp files
                 // after it, and its own, are removed as each `Staged` drops.
-                for dir in dirs {
+                for dir in synced {
                     if let Err(err) = fsync::sync_dir(&dir) {
                         tracing::warn!(error = %err, "a renamed file's folder not synced");
                     }
@@ -374,17 +457,14 @@ pub(crate) fn apply_or_partial(
             }
         }
     }
-    for dir in dirs {
+    for dir in synced {
         fsync::sync_dir(&dir).map_err(|err| changed(Error::io("sync", &dir, err)))?;
     }
     // macOS: the syncs above reach the drive but not past its cache, and the checkpoint's
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
     fsync::full_flush_dir(folder).map_err(|err| changed(Error::io("sync", folder, err)))?;
-    Ok(Deleted {
-        paths: deleted,
-        removals: removing.removals,
-    })
+    Ok((deleted, removing.removals))
 }
 
 /// How many attributes of the replaced files (permissions, extended attributes, ACLs, Windows
@@ -406,15 +486,15 @@ impl Drop for Lost {
 }
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;
-/// `made` gets each folder made on the way, outermost first.
+/// `made` gets each folder made on the way, outermost first, and `swept` each folder written to.
 fn stage_all<'a>(
     core: &Core,
     folder: &Path,
     ops: &[&'a Op],
     made: &mut Vec<PathBuf>,
+    swept: &mut std::collections::BTreeSet<PathBuf>,
 ) -> Result<Vec<(&'a MatterPath, write::Staged)>, Error> {
     let mut staged = Vec::new();
-    let mut swept = std::collections::BTreeSet::new();
     for &op in ops {
         if let Op::Write(path, blob) = op {
             let abs = make_parents(folder, path, made)?;
@@ -512,3 +592,5 @@ fn make_parents(
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod macos_tests;
+#[cfg(test)]
+mod outcome_tests;

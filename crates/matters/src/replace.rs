@@ -102,11 +102,13 @@ pub(crate) fn replace(
             Err(Failed {
                 error,
                 changed: true,
+                ..
             }) => break after_write(Err(error)),
             // The stat moved since the walk, or a program held the file at the rename.
             Err(Failed {
                 error: Error::FileLocked { .. },
                 changed: false,
+                ..
             }) => match held_again(core, folder, &op)? {
                 Again::Moved => return Err(changed(path)),
                 // Held at the rename, released by now and unchanged: write it again, once.
@@ -161,6 +163,7 @@ fn write_once(
         return Err(Failed {
             error: locked(op.path()),
             changed: false,
+            unfinished: writeback::Unfinished::default(),
         });
     }
     writeback::apply_or_partial(core, folder, trash, &[op])

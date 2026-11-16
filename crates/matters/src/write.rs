@@ -79,6 +79,16 @@ pub(crate) fn create_new(path: &Path) -> io::Result<File> {
     OpenOptions::new().write(true).create_new(true).open(path)
 }
 
+/// A new temp file opened for reading and writing (Windows reads its file id through the
+/// handle); fails if `path` exists.
+fn create_temp(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
 /// Opens an existing file for `fsync::sync_file`: read-only on Unix (loose objects are
 /// read-only there), with write access on Windows, where `FlushFileBuffers` needs it.
 pub(crate) fn open_to_sync(path: &Path) -> io::Result<File> {
@@ -211,6 +221,10 @@ mod macos;
 #[cfg(any(windows, test))]
 mod replace_keeping;
 
+mod temps;
+
+pub(crate) use temps::{sweep_temps, temps_in};
+
 /// Sets the modification time of the file `path`.
 #[cfg(test)]
 pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
@@ -256,13 +270,16 @@ pub(crate) fn replace(
 #[derive(Debug)]
 pub(crate) struct Staged {
     temp: Option<PathBuf>,
+    /// The temp file's identity, from the handle that made it: the one file its removal may
+    /// unlock ([`temps::remove_staged`]), and the one the step after the rename finds.
+    id: Option<temps::FileId>,
     target: PathBuf,
     /// Whether the target keeps its metadata: a lawyer's file, staged by [`stage`].
     keep: bool,
     /// The things of the target's metadata the temp file could not take ([`keep::copy`]).
     lost: Lost,
-    /// Unix: what is copied once the temp file is the target (macOS: the ACL).
-    #[cfg(unix)]
+    /// macOS: what is set once the temp file is the target: the ACL, then the mode.
+    #[cfg(target_os = "macos")]
     after: Option<keep::After>,
 }
 
@@ -306,13 +323,17 @@ pub(crate) struct Renamed {
     pub(crate) dir: PathBuf,
     /// What of the old file's metadata the new one did not keep; the caller logs the total once.
     pub(crate) lost: Lost,
+    /// The step after the rename failed (macOS: the old file's ACL and mode not set): the file
+    /// stays readable and writable by its owner alone, and the caller names it.
+    pub(crate) owner_only: bool,
 }
 
 /// Writes what `fill` writes to a new temp file in `target`'s folder, named `.clauseo-<n>.tmp`
 /// (excluded from every checkpoint), and syncs it. Never touches `target` itself; the temp file
 /// is removed if anything fails. A rewrite of a lawyer's file: the temp file takes the target's
-/// permissions and extended attributes (Unix, [`keep::copy`]), and the rename keeps the rest
-/// (Windows, `ReplaceFileW`). A missing target leaves the defaults.
+/// permissions and extended attributes (Unix, [`keep::copy`]; macOS: an owner-only mode, and the
+/// ACL and the mode once it is the target, [`finish`]), and the rename keeps the rest (Windows,
+/// `ReplaceFileW`). A missing target leaves the defaults. Nothing stays open once it returns.
 pub(crate) fn stage(
     target: &Path,
     fill: &mut dyn FnMut(&mut File) -> Result<(), Error>,
@@ -329,13 +350,14 @@ fn stage_as(
     let dir = target
         .parent()
         .ok_or_else(|| Error::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
-    let (temp, mut file) = new_temp(dir)?;
+    let (temp, mut file, id) = temps::new_temp(dir)?;
     let staged = Staged {
         temp: Some(temp),
+        id,
         target: target.to_owned(),
         keep,
         lost: Lost::default(),
-        #[cfg(unix)]
+        #[cfg(target_os = "macos")]
         after: None,
     };
     fill(&mut file)?;
@@ -344,9 +366,12 @@ fn stage_as(
     let staged = {
         let mut staged = staged;
         if keep {
-            let (lost, after) = keep::copy(target, &file);
-            staged.lost = lost;
-            staged.after = Some(after);
+            let copied = keep::copy(target, &file);
+            staged.lost = copied.lost;
+            #[cfg(target_os = "macos")]
+            {
+                staged.after = copied.after;
+            }
         }
         staged
     };
@@ -385,6 +410,7 @@ impl Staged {
             return Ok(Renamed {
                 dir,
                 lost: self.lost,
+                owner_only: false,
             });
         };
         #[cfg(test)]
@@ -411,13 +437,14 @@ impl Staged {
         match renamed {
             Ok(lost) => {
                 self.lost.add(lost);
-                #[cfg(unix)]
-                if let Some(after) = self.after.take() {
-                    self.lost.add(after.apply());
+                let unfinished = finish(&mut self);
+                if let Some(err) = &unfinished {
+                    self.lost.add(Lost::one(err.raw_os_error()));
                 }
                 Ok(Renamed {
                     dir,
                     lost: self.lost,
+                    owner_only: unfinished.is_some(),
                 })
             }
             #[cfg(any(windows, test))]
@@ -437,6 +464,23 @@ impl Staged {
             }
         }
     }
+}
+
+/// The step after the rename of `staged`'s temp file: on macOS the old file's ACL and then its
+/// mode, set on the target once it is that file ([`keep::After`]); until then the file is its
+/// owner's alone. Its failure, if any: never a failure of the write.
+fn finish(staged: &mut Staged) -> Option<io::Error> {
+    #[cfg(test)]
+    if let Err(err) = injected("after rename") {
+        return Some(err);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(after) = staged.after.take() {
+        return after.apply(&staged.target, staged.id).err();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = staged;
+    None
 }
 
 /// `ReplaceFileW`'s shape: `(replaced, replacement, backup)`.
@@ -474,7 +518,9 @@ thread_local! {
     static FAIL_AT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
 }
 
-/// Tests: makes the step `step` ("keep", "sync" or "rename") of this thread's writes fail.
+/// Tests: makes the step `step` of this thread's writes fail: "keep", "sync", "rename" (before
+/// it), "after rename" (the step after it, [`finish`]) or "sweep" (each removal of a crash's
+/// temp file, [`sweep_temps`]).
 #[cfg(test)]
 pub(crate) fn fail_at(step: Option<&'static str>) {
     FAIL_AT.with(|at| at.set(step));
@@ -489,93 +535,14 @@ fn injected(step: &'static str) -> io::Result<()> {
     Ok(())
 }
 
-/// Removes the temp file `temp`. When its own ACL refuses that (macOS: a deny-delete entry it
-/// inherited, or the folder's `delete_child` denied; Windows: the same, or the read-only
-/// attribute), it is first given one that allows it, and removed again.
-pub(crate) fn remove_temp(temp: &Path) -> io::Result<()> {
-    match remove_file(temp) {
-        Err(err) if err.kind() == io::ErrorKind::PermissionDenied && unlock(temp) => {
-            remove_file(temp)
-        }
-        removed => removed,
-    }
-}
-
-/// Lets the file `temp` be removed; whether that went.
-fn unlock(temp: &Path) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::allow_delete(temp).is_ok()
-    }
-    #[cfg(windows)]
-    {
-        windows::allow_delete(temp).is_ok()
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        // A Linux ACL or mode never refuses a removal: that is the folder's permission.
-        let _ = temp;
-        false
-    }
-}
-
-/// Removes the temp files a crash left in `dir` (every `.clauseo-<digits>.tmp`, at any number:
-/// a write whose first renames went leaves the later ones), before a write there: the matter's
-/// one writer has none in flight then. One listing of `dir`; links and anything not a regular
-/// file are skipped. A file that does not go is logged once.
-pub(crate) fn sweep_temps(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut left = 0_u32;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if !is_temp_name(&name) || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
-            continue;
-        }
-        match remove_temp(&entry.path()) {
-            Err(err) if err.kind() != io::ErrorKind::NotFound => left += 1,
-            _ => {}
-        }
-    }
-    if left > 0 {
-        tracing::warn!(left, "a crashed write's temp files left behind");
-    }
-}
-
-/// Whether `name` is exactly `.clauseo-<one or more ASCII digits>.tmp`, [`new_temp`]'s names.
-fn is_temp_name(name: &std::ffi::OsStr) -> bool {
-    name.to_str()
-        .and_then(|name| name.strip_prefix(".clauseo-"))
-        .and_then(|rest| rest.strip_suffix(".tmp"))
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()))
-}
-
 impl Drop for Staged {
     fn drop(&mut self) {
         if let Some(temp) = self.temp.take()
-            && let Err(err) = remove_temp(&temp)
+            && let Err(err) = temps::remove_staged(&temp, self.id)
         {
             tracing::warn!(error = %err, "temp file left behind");
         }
     }
-}
-
-/// A new temp file in `dir`, by the first free name `.clauseo-<n>.tmp`.
-fn new_temp(dir: &Path) -> Result<(PathBuf, File), Error> {
-    for n in 0..TEMP_TRIES {
-        let path = dir.join(format!(".clauseo-{n}.tmp"));
-        match create_new(&path) {
-            Ok(file) => return Ok((path, file)),
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(Error::io("create", path, err)),
-        }
-    }
-    Err(Error::io(
-        "create",
-        dir.join(".clauseo-0.tmp"),
-        io::ErrorKind::AlreadyExists.into(),
-    ))
 }
 
 #[cfg(test)]
