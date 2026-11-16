@@ -102,7 +102,8 @@ fn always_for_this_matter_is_kept_by_the_host_not_in_the_matter() {
     );
     // The rule is kept in Clauseo's data, written on its own thread.
     let file = rules_file(&dir, matter);
-    let kept = || std::fs::read_to_string(&file).is_ok_and(|text| text.contains("Bash(npm test)"));
+    let kept =
+        || std::fs::read_to_string(&file).is_ok_and(|text| text.contains("Bash(wc -l notes.txt)"));
     crate::support::wait("the kept rule", async {
         while !kept() {
             async_io::Timer::after(std::time::Duration::from_millis(20)).await;
@@ -150,7 +151,7 @@ fn forced_ask_keeps_and_applies_nothing() {
     let (matter, thread, folder) =
         matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
     let file = rules_file(&dir, matter);
-    let kept = "{\"version\": 1, \"allow\": [\"Bash(npm test)\"]}\n";
+    let kept = "{\"version\": 1, \"allow\": [\"Bash(wc -l notes.txt)\"]}\n";
     crate::write::write(&file, kept.as_bytes());
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Run the tests.");
@@ -199,8 +200,7 @@ fn a_rule_outside_the_matter_is_neither_kept_nor_applied() {
         format!("Edit(/{root}/.clauseo/matter.json)"),
     ];
     let file = rules_file(&dir, matter);
-    let kept =
-        serde_json::json!({"version": 1, "allow": ["Bash(npm test)", outside[0], outside[1]]});
+    let kept = serde_json::json!({"version": 1, "allow": ["Bash(wc -l notes.txt)", outside[0], outside[1]]});
     crate::write::write(&file, kept.to_string().as_bytes());
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Edit the files.");

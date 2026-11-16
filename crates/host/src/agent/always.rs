@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+pub(crate) mod plain;
 mod store;
 
 pub(crate) use store::{list, next_seq, read_beside, remove_now, store};
@@ -137,15 +138,34 @@ pub(crate) fn well_formed(rule: &str) -> bool {
 }
 
 /// A shell command as an exact `Bash(…)` rule's content: not empty, no space at either end,
-/// and none of `(`, `)` (they end the rule), `*` (a wildcard in Claude Code's Bash rules),
-/// `\` (an escape there) or a control character such as a line break.
+/// none of `(`, `)` (they end the rule), `*` (a wildcard in Claude Code's Bash rules),
+/// `\` (an escape there) or a control character such as a line break, and one plain command.
 fn command(command: &str) -> Option<&str> {
     let plain = !command.is_empty()
         && command.trim() == command
         && !command
             .chars()
-            .any(|c| matches!(c, '(' | ')' | '*' | '\\') || c.is_control());
+            .any(|c| matches!(c, '(' | ')' | '*' | '\\') || c.is_control())
+        && one_plain_command(command);
     plain.then_some(command)
+}
+
+/// Whether `command` is one plain command (`plain.rs`): no chain, pipe, redirection,
+/// substitution or wrapper. Read here without the matter folder (a rule read back has none), so
+/// an absolute path is not judged; the request's own check reads the folder too.
+fn one_plain_command(command: &str) -> bool {
+    let anywhere = plain::Place {
+        matter: "/",
+        cwd: "/",
+        windows: false,
+    };
+    plain::plain(
+        command,
+        plain::Grammar::Posix,
+        plain::Agent::Claude,
+        anywhere,
+    )
+    .is_ok()
 }
 
 /// The host of an `http` or `https` URL, lower case, for a `WebFetch(domain:…)` rule; none for

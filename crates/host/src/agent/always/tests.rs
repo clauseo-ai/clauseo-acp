@@ -17,15 +17,23 @@ fn of(tool: &str, input: &Value) -> Option<String> {
 #[test]
 fn bash_keeps_the_exact_command() {
     let cases = [
-        ("npm test", Some("Bash(npm test)")),
-        ("git status --short", Some("Bash(git status --short)")),
-        ("cat a.txt | wc -l", Some("Bash(cat a.txt | wc -l)")),
+        ("wc -l notes.txt", Some("Bash(wc -l notes.txt)")),
+        (
+            "mdls -name kMDItemTitle 'Brief.pdf'",
+            Some("Bash(mdls -name kMDItemTitle 'Brief.pdf')"),
+        ),
+        // One plain command only (`plain.rs`): no chain, pipe or wrapper.
+        ("git status --short", None),
+        ("cat a.txt | wc -l", None),
+        ("ls && rm a", None),
+        ("python3 x.py", None),
+        ("bash -c ls", None),
         ("echo $(date)", None),
         ("ls *.docx", None),
         ("npm run:*", None),
         ("printf 'a\\n'", None),
         ("echo a\nrm -rf x", None),
-        (" npm test", None),
+        (" wc -l notes.txt", None),
         ("", None),
     ];
     for (command, want) in cases {
@@ -35,7 +43,7 @@ fn bash_keeps_the_exact_command() {
             assert!(well_formed(rule), "{rule}");
         }
     }
-    assert_eq!(of("Bash", &json!({"cmd": "npm test"})), None);
+    assert_eq!(of("Bash", &json!({"cmd": "wc -l notes.txt"})), None);
     assert_eq!(of("Bash", &json!({"command": 1})), None);
     assert_eq!(rule("Bash", None, false), Err(NotKept::Refused));
     let long = "a".repeat(3_000);
@@ -127,7 +135,7 @@ fn windows_paths_become_posix_ones() {
 
 #[test]
 fn other_tools_keep_nothing() {
-    let input = json!({"command": "npm test", "file_path": "/m/a", "url": "https://a.b/"});
+    let input = json!({"command": "wc -l notes.txt", "file_path": "/m/a", "url": "https://a.b/"});
     for tool in [
         "PowerShell",
         "Skill",
@@ -146,7 +154,7 @@ fn only_rules_this_module_makes_are_well_formed() {
     for rule in [
         "Bash",
         "Bash(npm *)",
-        "Bash(npm test:*)",
+        "Bash(wc -l notes.txt:*)",
         "Edit(/m/a)",
         "Edit(//m/*.docx)",
         "Read(~/x)",
@@ -167,13 +175,13 @@ fn the_file_sits_beside_the_notes_and_keeps_each_rule_once() {
     let file = file_beside(&notes).unwrap();
     assert_eq!(file, dir.path().join("agent-state").join("m1").join(FILE));
     assert_eq!(read(&file), Vec::<String>::new());
-    store_now(&file, "Bash(npm test)".to_owned(), 1).unwrap();
-    store_now(&file, "Bash(npm test)".to_owned(), 2).unwrap();
+    store_now(&file, "Bash(wc -l notes.txt)".to_owned(), 1).unwrap();
+    store_now(&file, "Bash(wc -l notes.txt)".to_owned(), 2).unwrap();
     store_now(&file, "WebFetch(domain:sci.gov.in)".to_owned(), 3).unwrap();
     store_now(&file, "Bash(*)".to_owned(), 4).unwrap();
     assert_eq!(
         read(&file),
-        ["Bash(npm test)", "WebFetch(domain:sci.gov.in)"]
+        ["Bash(wc -l notes.txt)", "WebFetch(domain:sci.gov.in)"]
     );
     // Nothing but the file was made, and nothing in the notes.
     assert_eq!(std::fs::read_dir(&notes).unwrap().count(), 0);
@@ -220,7 +228,7 @@ fn a_path_rule_outside_the_matter_is_never_within() {
     let cases = [
         ("Edit(//cases/m/brief.txt)", true),
         ("Read(//cases/m/sub/a.pdf)", true),
-        ("Bash(npm test)", true),
+        ("Bash(wc -l notes.txt)", true),
         ("WebFetch(domain:example.com)", true),
         ("mcp__case_law__search", true),
         ("Edit(//cases/m)", false),
