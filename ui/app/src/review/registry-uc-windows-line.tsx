@@ -25,7 +25,11 @@ const twoMatters = (): FakeTransport => {
     platform: "windows",
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER, SECOND] };
-      throw new Error(`the review's host answers list_matters only, not ${JSON.stringify(query)}`);
+      // no conversations yet, so the room opens on the matter's empty work column
+      if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+      throw new Error(
+        `the review's host answers list_matters and list_threads only, not ${JSON.stringify(query)}`,
+      );
     },
   });
 };
