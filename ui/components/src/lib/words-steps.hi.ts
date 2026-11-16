@@ -112,6 +112,15 @@ export const HI = {
   "Tried to check your case-law credits.": null,
   "Got a payment link for case-law credits.": null,
   "Tried to get a payment link for case-law credits.": null,
+  // the folded line's sentences for the case-law connector's steps, counted by what each does (steps.ts, groupKindOf):
+  // case law searched (UC-493, UC-494); the credits read (UC-495, UC-496); payment links got (UC-497, UC-498).
+  // Provisional; hi: later
+  "Searched case law once.": null,
+  "Searched case law {n} times.": null,
+  "Checked your case-law credits once.": null,
+  "Checked your case-law credits {n} times.": null,
+  "Got a payment link for case-law credits once.": null,
+  "Got {n} payment links for case-law credits.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

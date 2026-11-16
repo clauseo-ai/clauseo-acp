@@ -154,7 +154,13 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   };
   const at = entry.locations.find((l) => typeof l === "object");
   const located = typeof at === "object" ? (at.inside?.path ?? at.outside?.display ?? null) : null;
-  const url = first(raw, ["url"]);
+  // ChatGPT's web search names its page in its action ({type: "openPage", url}; webSearchOf)
+  const action = raw?.["action"];
+  const url =
+    first(raw, ["url"]) ??
+    (typeof action === "object" && action !== null
+      ? first(action as Record<string, unknown>, ["url"])
+      : null);
   const site = url === null ? null : siteOf(url);
   const path = located ?? first(raw, PATH_KEYS);
   if (path !== null) {
@@ -180,6 +186,22 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   places.set(entry, place);
   return place;
 }
+
+/** ChatGPT's web search as codex-acp 2.2.2 sends it (`WebSearchReporter`): the kind search, raw input
+ * `{query, action}` (live, also `type: "webSearch"` and its id), titled "Web search", then "Web search: <query>",
+ * "Open page: <url>" or "Find in page …". A search of the papers never carries an `action` (Claude's Grep and Glob send
+ * a `pattern`), so it keeps its own words. */
+const WEB_TITLE = /^(?:Web search|Open page|Find in page)(?::|\s|$)/;
+export function webSearchOf(entry: ToolCallEntry): boolean {
+  if (entry.kind !== "search") return false;
+  const raw = rawOf(entry);
+  if (raw !== null) return raw["type"] === "webSearch" || ("action" in raw && !("pattern" in raw));
+  return WEB_TITLE.test(entry.title.trim());
+}
+
+/** The kind a step is told and counted as: its own, but ChatGPT's web search (webSearchOf) as fetch, the kind
+ * Claude's web search has, so both read "Searching online for '…'." and the like. */
+export const kindOf = (entry: ToolCallEntry): string => (webSearchOf(entry) ? "fetch" : entry.kind);
 
 /** A segment of Clauseo's data folder that holds only the agents' own state: each matter's notes and its brief. */
 const AGENT_STATE = /(?:^|[/\\])agent-state[/\\]/;
@@ -241,7 +263,7 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
   if (law !== null) return stepLive(lang, CASE_LAW_LIVE[law]);
   const p = placeOf(entry);
   const name = p.name;
-  switch (entry.kind) {
+  switch (kindOf(entry)) {
     case "read":
       return name === null
         ? titled(entry, stepLive(lang, "Reading the papers."), lang)
@@ -273,7 +295,10 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
         ? stepLive(lang, "Searching online for '{query}'.", { query: sq.query })
         : name !== null
           ? stepLive(lang, "Reading {name} online.", { name })
-          : titled(entry, stepLive(lang, "Looking online."), lang);
+          : // ChatGPT's "Web search" is codex-acp's label, not the agent's words
+            webSearchOf(entry)
+            ? stepLive(lang, "Looking online.")
+            : titled(entry, stepLive(lang, "Looking online."), lang);
     }
     case "execute": {
       const t = taskOf(entry);
