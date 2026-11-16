@@ -165,9 +165,10 @@ function tableWords(lang: Lang, t: ChangedTable, sides: (s: Side) => string): st
 const TABLES_NAMED = 4;
 
 /** The line for the table notice (cell_format_changed): each table the host names, with what changed in it, the
- * tables apart by semicolons, since each lists its groups with commas, up to four; past four, the first three and how many more, counted from total (the host's count of every changed table,
- * of which it names only the first ones; the tables named when it gives none). A table in a place this version
- * doesn't know counts among the more. With none named, the notice's own line, which names no table. */
+ * tables apart by semicolons, since each lists its groups with commas, up to four; past four, the first three and how
+ * many more, counted from total (the host's count of every changed table, of which it names only the first ones; the
+ * tables named when it gives none). A table in a place this version doesn't know counts among the more. With none
+ * named, the notice's own line, which names no table. */
 export function tablesLine(
   lang: Lang,
   tables: readonly ChangedTable[],
