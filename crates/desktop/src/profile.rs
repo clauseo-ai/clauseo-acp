@@ -74,7 +74,7 @@ pub(crate) struct DesktopProfile {
     browser_tool: Option<PathBuf>,
     /// The stetdoc [`stetdoc_program`] found, for the Word blackline; `None` when none was.
     stetdoc: Option<PathBuf>,
-    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`setup::pdf_tools::found`), if found.
+    /// The bundled PDF tools' folder (`setup::pdf_tools::found`), if found.
     pdf_tools: Option<PathBuf>,
 }
 

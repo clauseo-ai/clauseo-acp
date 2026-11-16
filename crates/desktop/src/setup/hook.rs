@@ -19,7 +19,7 @@
 //! And to Claude's and Codex's session `PATH` (`ProfileHook::agent_path`), Clauseo's Python
 //! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
 //! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
-//! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the
+//! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm`, `pdfinfo` and `pdftotext` run it); the
 //! host puts them after stetdoc's. On the same condition, Codex's instructions end with the line
 //! that tells it to render PDF pages with them (`clauseo_profile::instructions::codex_pdf`).
 //!
@@ -66,7 +66,7 @@ pub(crate) struct SetupHook {
     plans: Plans,
     network: NetworkSlot,
     python: PythonSlot,
-    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`setup::pdf_tools::found`), if found.
+    /// The bundled PDF tools' folder (`setup::pdf_tools::found`), if found.
     pdf_tools: Option<PathBuf>,
 }
 

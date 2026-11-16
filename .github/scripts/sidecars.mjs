@@ -23,7 +23,7 @@
 //     as stetdoc/stetdoc[.exe] (on Windows in the install folder, which is the resource folder,
 //     and signed with the other files of binaries/). The pin is crates/desktop/stetdoc.toml; a
 //     target it marks pending fails here, loudly;
-//   - places Clauseo's own pdftoppm and pdfinfo (crates/pdf, built here) together in a folder of
+//   - places Clauseo's own pdftoppm, pdfinfo and pdftotext (crates/pdf, built here) together in a folder of
 //     their own the same way (PDF_TOOLS below): Helpers/pdf/<tool> on macOS, pdf/<tool>[.exe] in
 //     bundle.resources on Windows. Linux has no Python runtime for them to run, so no copy.
 // The legs pass that file last with --config to every `tauri build` and `tauri bundle`. A JSON
@@ -185,10 +185,11 @@ export const SIDECARS = [
   // clauseo-sandbox-run comes later (S15 PR5), Windows targets only, with safeWorkspace: true.
   // stetdoc, in its own folder (STETDOC): never in externalBin, so never beside the app.
   { name: "clauseo-stetdoc", targets: RELEASE_TARGETS, ownFolder: true, place: pinnedStetdoc },
-  // Clauseo's pdftoppm and pdfinfo (PDF_TOOLS), together in the pdf/ folder, where the Python
+  // Clauseo's pdftoppm, pdfinfo and pdftotext (PDF_TOOLS), together in the pdf/ folder, where the Python
   // runtime they run exists: macOS and Windows.
   { name: "clauseo-pdftoppm", targets: PDF_TARGETS, ownFolder: true, place: cargoPackageBin("clauseo-pdf", "pdftoppm") },
   { name: "clauseo-pdfinfo", targets: PDF_TARGETS, ownFolder: true, place: cargoPackageBin("clauseo-pdf", "pdfinfo") },
+  { name: "clauseo-pdftotext", targets: PDF_TARGETS, ownFolder: true, place: cargoPackageBin("clauseo-pdf", "pdftotext") },
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
@@ -210,19 +211,21 @@ export const MACOS_HELPER = "clauseo-agent-browser";
 export const STETDOC = "clauseo-stetdoc";
 
 /**
- * Clauseo's own pdftoppm and pdfinfo (crates/pdf: launchers that run the Python runtime's
- * pypdfium2, no poppler), staged as binaries/clauseo-pdftoppm-<triple>[.exe] and
- * binaries/clauseo-pdfinfo-<triple>[.exe] and bundled together in a folder of their own:
+ * Clauseo's own pdftoppm, pdfinfo and pdftotext (crates/pdf: launchers that run the Python
+ * runtime's pypdfium2 and tesseract, no poppler), staged as binaries/clauseo-pdftoppm-<triple>[.exe],
+ * binaries/clauseo-pdfinfo-<triple>[.exe] and binaries/clauseo-pdftotext-<triple>[.exe] and bundled
+ * together in a folder of their own:
  * Contents/Helpers/pdf/<tool> on macOS (signed with the browser helper and stetdoc), <resources>/pdf/
  * <tool>.exe on Windows. crates/desktop/src/pdf_tools.rs looks for them at the same paths.
  */
-export const PDF_TOOLS = ["clauseo-pdftoppm", "clauseo-pdfinfo"];
+export const PDF_TOOLS = ["clauseo-pdftoppm", "clauseo-pdfinfo", "clauseo-pdftotext"];
 
 /** Each sidecar with a folder of its own: its folder and its file name there (without .exe). */
 export const OWN_FOLDERS = {
   [STETDOC]: ["stetdoc", "stetdoc"],
   "clauseo-pdftoppm": ["pdf", "pdftoppm"],
   "clauseo-pdfinfo": ["pdf", "pdfinfo"],
+  "clauseo-pdftotext": ["pdf", "pdftotext"],
 };
 const ownHelper = (name) => `Helpers/${OWN_FOLDERS[name].join("/")}`;
 const ownResource = (name, triple) => `${OWN_FOLDERS[name].join("/")}${exe(triple)}`;
