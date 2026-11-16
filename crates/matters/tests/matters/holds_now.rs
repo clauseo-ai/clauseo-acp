@@ -85,3 +85,23 @@ fn a_folder_is_not_a_file() {
     assert!(!holds_now(&matter, &path("pleadings")).unwrap());
     assert!(!holds_now(&matter, &path("pleadings/claim.docx/x")).unwrap());
 }
+
+#[cfg(windows)]
+#[test]
+fn parts_windows_reads_otherwise_are_never_held_on_windows() {
+    let fx = Fixture::new("holds-now-windows");
+    fx.write("brief.txt", "b");
+    fx.write("sub/brief.txt", "b");
+    let matter = fx.import();
+    assert!(holds_now(&matter, &path("brief.txt")).unwrap());
+    for asked in [
+        "brief.txt.",
+        "brief.txt ",
+        "brief.txt:stream",
+        "sub/C:brief.txt",
+        "CON",
+        "sub/NUL.txt",
+    ] {
+        assert!(!holds_now(&matter, &path(asked)).unwrap(), "{asked}");
+    }
+}

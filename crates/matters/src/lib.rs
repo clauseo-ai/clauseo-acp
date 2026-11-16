@@ -40,7 +40,8 @@
 //!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
 //!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules;
 //!   [`is_excluded_path`] says whether that walk passes a path over, and [`holds_now`] whether
-//!   that walk would find one file now, by its exact name.
+//!   that walk would find one file now, by its exact name; [`version_file`] and [`in_version`]
+//!   look one path up in a version's tree without listing it.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`], and
@@ -173,8 +174,8 @@ pub use locks::{
     matter_path_in, matter_path_of_resolved,
 };
 pub use matter::{
-    Matter, check_marker, history_exists, holds_now, read_marker, remove_marker_of,
-    set_aside_marker,
+    Matter, check_marker, history_exists, holds_now, in_version, read_marker, remove_marker_of,
+    set_aside_marker, version_file,
 };
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
