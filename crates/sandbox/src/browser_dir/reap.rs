@@ -196,13 +196,15 @@ pub(super) fn reap_socket(path: &Path, reap: &Reap<'_>) -> Outcome {
         Ok(Some(stream)) => stream,
         // A socket nobody listens on: nothing to end.
         Ok(None) => return Outcome::Nobody,
+        // A listener that would make the connect wait (its backlog full: a wedged daemon), or a
+        // connect that failed otherwise: left, so a sweep keeps its folder for the next start.
         Err(error) => {
             tracing::warn!(
                 socket = %path.display(),
                 %error,
                 "browser daemon reap: a socket's listener does not take connections; it is left"
             );
-            return Outcome::Refused;
+            return Outcome::Left;
         }
     };
     if !peer_is(&stream, path) {
@@ -218,8 +220,9 @@ pub(super) fn reap_socket(path: &Path, reap: &Reap<'_>) -> Outcome {
 }
 
 /// A non-blocking, close-on-exec connection to the socket `path`: `Ok(None)` when nobody
-/// listens (refused, gone, not a socket, a path too long), an error when the listener would
-/// make the connect wait (its backlog is full: `EAGAIN`, `EINPROGRESS`).
+/// listens (`ECONNREFUSED`, `ENOENT`, `ENOTSOCK`, `EPROTOTYPE`: refused, gone, not a stream
+/// socket; or a path too long for a socket address), an error for anything else, among them a
+/// listener that would make the connect wait (its backlog is full: `EAGAIN`, `EINPROGRESS`).
 fn connect(path: &Path) -> io::Result<Option<UnixStream>> {
     let Ok(address) = SocketAddrUnix::new(path) else {
         return Ok(None);
@@ -227,8 +230,8 @@ fn connect(path: &Path) -> io::Result<Option<UnixStream>> {
     let socket = new_socket()?;
     match rustix::net::connect(&socket, &address) {
         Ok(()) => Ok(Some(UnixStream::from(socket))),
-        Err(error @ (Errno::AGAIN | Errno::INPROGRESS)) => Err(error.into()),
-        Err(_) => Ok(None),
+        Err(Errno::CONNREFUSED | Errno::NOENT | Errno::NOTSOCK | Errno::PROTOTYPE) => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -284,6 +287,11 @@ fn peer_is(stream: &UnixStream, path: &Path) -> bool {
 fn end_listener(stream: &UnixStream, path: &Path, reap: &Reap<'_>) -> Outcome {
     let process = match os::Process::listening_on(stream) {
         Ok(process) => process,
+        // The listener exited between the connect and the lookup (`SO_PEERPIDFD` or
+        // `pidfd_open` answers `ESRCH`): nobody to end.
+        Err(error) if error.raw_os_error() == Some(Errno::SRCH.raw_os_error()) => {
+            return Outcome::Nobody;
+        }
         Err(error) => {
             tracing::warn!(
                 socket = %path.display(),
@@ -347,15 +355,29 @@ fn failed_signal(error: Errno, process: &os::Process) -> Outcome {
 
 /// The identity checks (see the module's documentation): `Err` says which failed.
 fn check(process: &os::Process, program: &DaemonProgram) -> Result<(), String> {
-    let pid = process.pid();
+    check_identity(
+        process.pid(),
+        process.uid(),
+        || process.executable(),
+        program,
+    )
+}
+
+/// [`check`] on a listener's pid, user id and executable (read only once the first two pass).
+fn check_identity(
+    pid: i32,
+    uid: u32,
+    executable: impl FnOnce() -> io::Result<PathBuf>,
+    program: &DaemonProgram,
+) -> Result<(), String> {
     if pid <= 1 || u32::try_from(pid).ok() == Some(std::process::id()) {
         return Err(format!("pid {pid}"));
     }
     let ours = rustix::process::geteuid().as_raw();
-    if process.uid() != ours {
-        return Err(format!("user id {}, not {ours}", process.uid()));
+    if uid != ours {
+        return Err(format!("user id {uid}, not {ours}"));
     }
-    match process.executable() {
+    match executable() {
         Ok(exe) if exe == program.path() => Ok(()),
         Ok(exe) => Err(format!("executable {}", exe.display())),
         Err(error) => Err(format!("executable not read: {error}")),

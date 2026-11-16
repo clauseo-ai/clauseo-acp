@@ -8,7 +8,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use super::super::{BrowserSocketDir, LOCK_SUFFIX, PREFIX};
-use super::{DaemonProgram, Outcome, Reap, Reaped, connect, reap_folder, reap_socket};
+use super::{
+    DaemonProgram, Outcome, Reap, Reaped, check_identity, connect, reap_folder, reap_socket,
+};
 use crate::browser_dir::{Monotonic, Swept};
 use crate::test_support::{TempDir, bind, bind_with_backlog, set_mode, spawn};
 
@@ -304,7 +306,8 @@ fn a_fifo_named_like_a_socket_is_passed_over() {
 }
 
 /// A listener that never accepts, its backlog full, does not hold the sweep: the connect does not
-/// wait, and the listener is refused (Linux) or met as nobody (macOS refuses the connection).
+/// wait. On Linux the listener is left (a wedged daemon) and its folder kept for the next start;
+/// macOS refuses the connection, so there it is met as nobody and the folder goes.
 #[test]
 fn a_listener_that_never_accepts_with_a_full_backlog_does_not_hold_the_sweep() {
     let tmp = TempDir::short("rp-full");
@@ -328,9 +331,35 @@ fn a_listener_that_never_accepts_with_a_full_backlog_does_not_hold_the_sweep() {
     )
     .unwrap();
     assert_eq!(swept.daemons.ended, 0);
-    assert_eq!(swept.daemons.left, 0);
+    assert_eq!(swept.daemons.refused, 0);
     if cfg!(target_os = "linux") {
-        assert_eq!(swept.daemons.refused, 1);
+        assert_eq!(swept.daemons.left, 1);
+        assert_eq!(swept.folders, 0);
+        assert!(
+            std::fs::symlink_metadata(&folder).is_ok(),
+            "the folder was kept"
+        );
     }
-    assert_eq!(swept.folders, 1);
+}
+
+/// The identity checks refuse a pid of 0 or 1, this process's own pid, and another user's
+/// listener, before the executable is read; the right pid, user and program pass.
+#[test]
+fn the_identity_checks_refuse_low_pids_our_own_pid_and_another_user() {
+    let program = this_program();
+    let exe = || Ok(program.path().to_owned());
+    let ours = rustix::process::geteuid().as_raw();
+    let own = i32::try_from(std::process::id()).unwrap();
+    let unread = || -> std::io::Result<std::path::PathBuf> { panic!("the executable was read") };
+    for pid in [0, 1, own] {
+        assert!(
+            check_identity(pid, ours, unread, &program).is_err(),
+            "{pid}"
+        );
+    }
+    let other = check_identity(4242, ours.wrapping_add(1), unread, &program).unwrap_err();
+    assert!(other.starts_with("user id"), "{other}");
+    assert_eq!(check_identity(4242, ours, exe, &program), Ok(()));
+    let foreign = check_identity(4242, ours, || Ok("/bin/elsewhere".into()), &program);
+    assert!(foreign.is_err());
 }
