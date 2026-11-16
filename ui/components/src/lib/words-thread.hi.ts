@@ -194,6 +194,11 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder.":
     "Clauseo ने एक काम रोक दिया: AI ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
+  // the guard stopped a step whose paper the matter doesn't hold, so the line names none; and, once at a turn's end,
+  // how many more it stopped past the eight a turn names (provisional, UC-704 to UC-706)
+  "Clauseo stopped a step.": "Clauseo ने एक काम रोक दिया।",
+  "Clauseo stopped one more step.": "Clauseo ने एक और काम रोका।",
+  "Clauseo stopped {n} more steps.": "Clauseo ने {n} और काम रोके।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

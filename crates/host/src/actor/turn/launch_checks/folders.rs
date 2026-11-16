@@ -69,6 +69,29 @@ pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
     data.join(crate::browser::CONFIG_DIR).join("run")
 }
 
+/// Makes the guard's record of its refusals (`updates/guard_blocks.rs`) empty, for an agent but
+/// Claude, whose hook passes none: `<data>/browser/run/<session>/guard-blocks.jsonl`, the
+/// session's browser folder made first through no link below `data`. Like the browser guard's
+/// `--cwd` it sits in `<data>/browser`, which no agent's shell or patch tool may write (Codex's
+/// fence denies it, `agent/codex_fence.rs` `DATA_DENIED`; Claude's, every entry of the data
+/// folder but its own, `data_fence::launch_deny`), so only the host makes it, with `O_EXCL`, and
+/// the unfenced guard writes only a regular file there with one link (`write::open_append_record`).
+/// One not made (anything already there, say) leaves the lawyer untold, with a warning.
+pub(super) fn make_guard_record(run: &RunFolders, data: &Path, claude: bool) {
+    if claude {
+        return;
+    }
+    let file = super::super::updates::guard_blocks::file(&run.browser);
+    let made = crate::write::create_private_dirs_under(data, &run.browser)
+        .and_then(|()| crate::write::create_record(&file));
+    if let Err(error) = made {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "the guard's record file was not made; the lawyer is not told what it stops"
+        );
+    }
+}
+
 /// `<data>/agent-state/<matter>/notes`.
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
     data.join("agent-state")

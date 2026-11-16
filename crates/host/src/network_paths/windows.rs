@@ -2,11 +2,12 @@
 //! `GetDriveTypeW`, which can open a disconnected mapped drive and wait on it); a reparse point's
 //! tag, from its folder's listing (`FindFirstFileW`), never by opening it; and a local file's
 //! identity, opened without following a link and only once the walk has vouched for its path.
-//! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`).
+//! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`),
+//! and its link count, for the guard's record (`write::open_append_record`).
 #![expect(
     unsafe_code,
     reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity and an \
-              open file's attributes and reparse tag"
+              open file's attributes, reparse tag and link count"
 )]
 
 use std::os::windows::ffi::OsStrExt as _;
@@ -16,9 +17,9 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FindClose, FindFirstFileW,
-    GetFileInformationByHandleEx, GetShortPathNameW, GetVolumeInformationByHandleW, OPEN_EXISTING,
-    QueryDosDeviceW, WIN32_FIND_DATAW,
+    FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo,
+    FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
+    GetVolumeInformationByHandleW, OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -82,6 +83,20 @@ pub(crate) fn attribute_tag(file: &std::fs::File) -> std::io::Result<(u32, u32)>
     }
     .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
     Ok((info.FileAttributes, info.ReparseTag))
+}
+
+/// How many links (names) the open `file` has (`FileStandardInfo`'s `NumberOfLinks`): a hard
+/// link planted at the guard's record makes two.
+pub(crate) fn link_count(file: &std::fs::File) -> std::io::Result<u32> {
+    use std::os::windows::io::AsRawHandle as _;
+    let handle = HANDLE(file.as_raw_handle());
+    let mut info = FILE_STANDARD_INFO::default();
+    let size = u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0);
+    // SAFETY: `file` keeps `handle` open for the call, and closes it itself; `info` is a
+    // FILE_STANDARD_INFO of `size` bytes written in place.
+    unsafe { GetFileInformationByHandleEx(handle, FileStandardInfo, (&raw mut info).cast(), size) }
+        .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    Ok(info.NumberOfLinks)
 }
 
 /// The identity of the local file or folder at `path`: its volume's serial number and its

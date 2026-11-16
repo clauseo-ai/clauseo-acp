@@ -8,7 +8,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "guard-block-step (provisional; orchestrator to approve)",
-    "note": "Host notice NoticeKind::HeldOpenBlocked: Clauseo's pre-write guard refused a step of the agent's that would change a paper open in Word (actor/turn/updates/guard_blocks.rs), once a paper a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step, so it gets no notice. {name} is the agent as TN-11 names it; {file} the paper as Versions names it (namesOf)"
+    "note": "Host notice NoticeKind::HeldOpenBlocked: Clauseo's pre-write guard refused a step of the agent's that would change a paper open in Word (actor/turn/updates/guard_blocks.rs), once a paper a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step, so it gets no notice. {name} is the agent as TN-11 names it; {file} the paper's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf)"
   },
   "UC-701": {
     "en": "Clauseo stopped a step: the AI tried to change {file}, which is open in Word. Close it in Word, then ask again.",
@@ -19,7 +19,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "guard-block-step (provisional; orchestrator to approve)",
-    "note": "UC-700 where the room knows no agent name (notice-words.ts), as TN-12; rendered alone. The host's own notice text is this English with the paper's path, for a view that does not know the kind"
+    "note": "UC-700 where the room knows no agent name (notice-words.ts), as TN-12; rendered alone. The host's own notice text is this English with the paper's name alone (never its path), for a view that does not know the kind"
   },
   "UC-702": {
     "en": "Clauseo stopped a step: {name} tried to change its own settings in this matter's folder.",
@@ -42,5 +42,38 @@
     "at": "2026-11-15",
     "by": "guard-block-step (provisional; orchestrator to approve)",
     "note": "UC-702 where the room knows no agent name, as TN-12; rendered alone. The host's own notice text is this English"
+  },
+  "UC-704": {
+    "en": "Clauseo stopped a step.",
+    "hi": "Clauseo ने एक काम रोक दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::GuardStepBlocked: the guard refused a step on a paper open in Word, but the paper its record names is not one the matter holds, so the line names none (the record is the agent's to forge); once a turn. Also the host's English fallback"
+  },
+  "UC-705": {
+    "en": "Clauseo stopped one more step.",
+    "hi": "Clauseo ने एक और काम रोका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::GuardStepsMore with more = 1: once at a turn's end, the steps the guard stopped past the eight lines a turn names (UC-700 to UC-704). Also the host's English fallback"
+  },
+  "UC-706": {
+    "en": "Clauseo stopped {n} more steps.",
+    "hi": "Clauseo ने {n} और काम रोके।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "note": "UC-705 with more ≥ 2; {n} the count. Also the host's English fallback"
   }
 }

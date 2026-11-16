@@ -147,8 +147,8 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
-    /// How far its guard's record file is read (`updates/guard_blocks.rs`).
-    pub(super) guard_blocks: super::updates::guard_blocks::Offset,
+    /// What of its guard's record file is read and told (`updates/guard_blocks.rs`).
+    pub(super) guard_blocks: super::updates::guard_blocks::Reads,
 }
 
 impl Agent {
@@ -305,7 +305,7 @@ pub(super) fn launch_now(
         start_failure: None,
         matter_spellings,
         idle: super::idle::Mark::default(),
-        guard_blocks: super::updates::guard_blocks::Offset::default(),
+        guard_blocks: super::updates::guard_blocks::Reads::default(),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

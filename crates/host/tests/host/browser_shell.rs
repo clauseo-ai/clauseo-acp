@@ -151,6 +151,24 @@ fn no_browser_here(
     true
 }
 
+/// Every file under `dir`, through its folders; none when it is not there.
+fn files_under(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .flat_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                files_under(&path)
+            } else {
+                vec![path]
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn a_session_with_a_chrome_gets_the_shell_browser() {
     let chrome = PathBuf::from("/opt/chrome/chrome");
@@ -180,7 +198,15 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
         var(&seen, "AGENT_BROWSER_CONFIG"),
         Some(own.join("config.json"))
     );
-    assert!(!data.join("browser").exists());
+    // `<data>/browser` holds at most the guard's record of its refusals (made for every agent
+    // but Claude, `launch_checks/folders.rs`), never a file of the shell browser's.
+    let files = files_under(&data.join("browser"));
+    assert!(
+        files
+            .iter()
+            .all(|file| file.ends_with("guard-blocks.jsonl")),
+        "{files:?}"
+    );
     let profile = var(&seen, "AGENT_BROWSER_PROFILE").unwrap();
     assert_eq!(profile, own.join("profile"));
     assert!(profile.starts_with(data));

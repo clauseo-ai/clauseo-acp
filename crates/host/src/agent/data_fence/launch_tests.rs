@@ -429,6 +429,30 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
     }
 }
 
+/// The guard's record of its refusals (`<data>/browser/run/<id>/guard-blocks.jsonl`,
+/// `launch_checks/folders.rs` `make_guard_record`) is under Claude's `Read` and `Edit` deny of
+/// `browser/**`, which Claude Code applies to its Write and Edit tools and its sandbox's writes,
+/// and the host's auto-deny refuses a request naming it, by a file tool or in a command: no
+/// Claude session can plant a link there, though its own hook passes no record file.
+#[test]
+fn the_guard_record_is_denied_to_claudes_tools_and_sandbox() {
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    for rule in ["Read(//d/browser/**)", "Edit(//d/browser/**)"] {
+        assert!(rules.iter().any(|r| r == rule), "{rule}");
+    }
+    let dir = layout("guard-record");
+    let root = dir.path();
+    let record = root
+        .join("data/browser/run/s1")
+        .join(crate::pre_write_guard::record::FILE_NAME);
+    write::create_dir_all(record.parent().unwrap()).unwrap();
+    write::write_file(&record, b"").unwrap();
+    let path = text(&record);
+    assert!(check(root, &[&path], None).touches_data(), "Write {path}");
+    let link = json!({"command": format!("ln profile.txt {path}")});
+    assert!(check(root, &[], Some(&link)).touches_data(), "ln {path}");
+}
+
 /// The own run folder's `agent-browser` folder (its profile and downloads) is in no launch
 /// rule; another session's is, with its whole run folder.
 #[test]

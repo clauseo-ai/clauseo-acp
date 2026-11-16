@@ -324,12 +324,22 @@ open_data_enum! {
         /// Clauseo's pre-write guard refused a step of the agent's that would change a paper
         /// Word (or another program) has open. Codex sends no event of its own for it.
         HeldOpenBlocked = "held_open_blocked" {
-            /// The paper, as the matter lists it.
+            /// The paper's name, the last part of its path in the matter, cut to a length the
+            /// line can show. A newer host sends no folder, an older one the whole path.
             file: MatterPath,
         },
         /// Clauseo's pre-write guard refused a step of the agent's that would change the
         /// matter's `.codex` folder, the agent's own settings there.
         CodexFolderBlocked = "codex_folder_blocked",
+        /// Clauseo's pre-write guard refused a step of the agent's, the paper not named: the
+        /// guard's record named none the matter holds.
+        GuardStepBlocked = "guard_step_blocked",
+        /// Clauseo's pre-write guard refused `more` steps of the agent's in the turn beyond the
+        /// ones already told, told once at the turn's end.
+        GuardStepsMore = "guard_steps_more" {
+            /// How many.
+            more: u32,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -343,6 +353,8 @@ open_data_enum! {
             file: MatterPath::new("Drafts/Lease.docx").unwrap(),
         },
         NoticeKind::CodexFolderBlocked,
+        NoticeKind::GuardStepBlocked,
+        NoticeKind::GuardStepsMore { more: 3 },
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

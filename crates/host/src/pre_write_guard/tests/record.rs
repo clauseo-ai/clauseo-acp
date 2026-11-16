@@ -1,6 +1,7 @@
 //! The guard's record of its refusals (`record.rs`): a refusal the lawyer is told about adds one
-//! line to the `--record` file, a tool it lets go adds none, and a file it cannot write never
-//! changes the refusal.
+//! line to the `--record` file the host made, a tool it lets go adds none, and a file it cannot
+//! write never changes the refusal. A hard link or a symlink at the record's place (standing for
+//! a shell profile, here a temp file) is never written through, and no file is ever created.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +11,6 @@ use super::{Fixture, deny, guard_with};
 use clauseo_protocol::MatterPath;
 
 use crate::pre_write_guard::record::{Agent, Reason, Record};
-#[cfg(unix)]
 use crate::write;
 
 /// The lines of the record file `file`, parsed; none when it is not there.
@@ -19,13 +19,16 @@ fn records(file: &Path) -> Vec<Record> {
         return Vec::new();
     };
     text.lines()
+        .filter(|line| !line.is_empty())
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
 
-/// The record file in the fixture's root, beside the matter.
+/// The record file in the fixture's root, beside the matter, made empty as the host makes it.
 fn record_file(fx: &Fixture) -> PathBuf {
-    PathBuf::from(fx.path("guard-blocks.jsonl"))
+    let file = PathBuf::from(fx.path("guard-blocks.jsonl"));
+    write::create_record(&file).unwrap();
+    file
 }
 
 /// A Codex patch updating `file`.
@@ -113,7 +116,7 @@ fn a_tool_let_through_or_a_refusal_the_lawyer_is_not_told_adds_nothing() {
         guard_with(&["--record", path], serve.to_string().as_bytes()),
         ""
     );
-    assert!(!file.exists(), "nothing was recorded");
+    assert_eq!(std::fs::read(&file).unwrap(), b"", "nothing was recorded");
 }
 
 #[test]
@@ -121,20 +124,10 @@ fn a_record_file_it_cannot_write_never_changes_the_refusal() {
     let fx = Fixture::new("record-unwritable");
     let hook = fx.hook("apply_patch", &patch("Contract.docx")).to_string();
     let missing = PathBuf::from(fx.path("no-such-folder")).join("blocks.jsonl");
+    // No file there: the guard never makes one, the host does.
+    let unmade = PathBuf::from(fx.path("unmade.jsonl"));
     let folder = PathBuf::from(fx.path("out"));
-    let files = vec![missing.clone(), folder];
-    #[cfg(unix)]
-    let files = {
-        // A link at the record's place is never followed, and the file it names stays empty.
-        let mut files = files;
-        let target = PathBuf::from(fx.path("target.jsonl"));
-        write::write_file(&target, b"").unwrap();
-        let link = PathBuf::from(fx.path("link.jsonl"));
-        write::symlink(&target, &link).unwrap();
-        files.push(link);
-        files
-    };
-    for file in &files {
+    for file in [&missing, &unmade, &folder] {
         let args = ["--record", file.to_str().unwrap()];
         assert_eq!(
             guard_with(&args, hook.as_bytes()),
@@ -143,11 +136,69 @@ fn a_record_file_it_cannot_write_never_changes_the_refusal() {
         );
     }
     assert!(!missing.exists());
-    #[cfg(unix)]
-    assert_eq!(std::fs::read(fx.path("target.jsonl")).unwrap(), b"");
+    assert!(!unmade.exists(), "the guard made no file");
     // A relative file is no record file at all.
     assert_eq!(
         guard_with(&["--record", "blocks.jsonl"], hook.as_bytes()),
         deny("Contract.docx")
     );
+}
+
+/// A file outside the record's place with `text` in it: a shell profile, say.
+fn elsewhere(fx: &Fixture, text: &[u8]) -> PathBuf {
+    let target = PathBuf::from(fx.path("profile.txt"));
+    write::write_file(&target, text).unwrap();
+    target
+}
+
+/// The guard refuses the held file with `record` as its record file, and `target` keeps
+/// `text`, untouched.
+fn refused_and_untouched(fx: &Fixture, record: &Path, target: &Path, text: &[u8]) {
+    let hook = fx.hook("apply_patch", &patch("Contract.docx")).to_string();
+    let args = ["--record", record.to_str().unwrap()];
+    assert_eq!(guard_with(&args, hook.as_bytes()), deny("Contract.docx"));
+    assert_eq!(
+        std::fs::read(target).unwrap(),
+        text,
+        "written through {record:?}"
+    );
+}
+
+#[test]
+fn a_hard_link_at_the_records_place_is_never_written_through() {
+    let fx = Fixture::new("record-hard-link");
+    let text = b"export PATH=/usr/bin\n";
+    let target = elsewhere(&fx, text);
+    let record = PathBuf::from(fx.path("guard-blocks.jsonl"));
+    write::hard_link(&target, &record).unwrap();
+    refused_and_untouched(&fx, &record, &target, text);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_records_place_is_never_written_through() {
+    let fx = Fixture::new("record-symlink");
+    let text = b"export PATH=/usr/bin\n";
+    let target = elsewhere(&fx, text);
+    let record = PathBuf::from(fx.path("guard-blocks.jsonl"));
+    write::symlink(&target, &record).unwrap();
+    refused_and_untouched(&fx, &record, &target, text);
+}
+
+/// Windows: a file symlink at the record's place. Making one needs Developer Mode or an
+/// elevated token; without either the test says so and passes, the hard link test above still
+/// covering the link count. A junction links folders only, so the record's place cannot be one
+/// that opens as a file.
+#[cfg(windows)]
+#[test]
+fn a_symlink_at_the_records_place_is_never_written_through() {
+    let fx = Fixture::new("record-symlink");
+    let text = b"export PATH=/usr/bin\n";
+    let target = elsewhere(&fx, text);
+    let record = PathBuf::from(fx.path("guard-blocks.jsonl"));
+    if let Err(error) = write::symlink_file(&target, &record) {
+        eprintln!("skipped: no right to make a symlink here ({error})");
+        return;
+    }
+    refused_and_untouched(&fx, &record, &target, text);
 }

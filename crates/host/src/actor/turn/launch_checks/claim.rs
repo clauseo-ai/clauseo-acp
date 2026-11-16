@@ -1,5 +1,6 @@
 //! The launch-prep thread's claims for a session ([`claim`]): its browser, egress proxy and
-//! case-law relay, and the `PATH` its shells get, which needs the browser's answer.
+//! case-law relay, the `PATH` its shells get, which needs the browser's answer, and the guard's
+//! record file.
 
 use std::path::Path;
 
@@ -7,7 +8,8 @@ use super::{Claims, RunFolders, straggler};
 
 /// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
 /// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
-pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
+/// Then the guard's record file, for an agent but Claude (`folders::make_guard_record`).
+pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool, claude: bool) {
     let Claims {
         browser,
         case_law,
@@ -41,4 +43,5 @@ pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: boo
     run.lease.keep(held, parts);
     // Last: the tools folder goes on `PATH` only once the browser is known.
     run.path = path.resolve(run);
+    super::folders::make_guard_record(run, data, claude);
 }

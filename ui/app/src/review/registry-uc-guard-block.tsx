@@ -1,4 +1,4 @@
-// UC's entries for the steps Clauseo's pre-write guard stopped (UC-700 to UC-703): a host notice in the room's thread,
+// UC's entries for the steps Clauseo's pre-write guard stopped (UC-700 to UC-706): a host notice in the room's thread,
 // in the app's words (room/thread/notice-words.ts), for a ChatGPT step that would change a paper open in Word or the
 // matter's .codex folder. Codex shows no step of its own for a call its hook blocked; the notice is the lawyer's sign.
 import type { ReactNode } from "react";
@@ -19,6 +19,9 @@ const CODEX: ThreadKey =
   "Clauseo stopped a step: {name} tried to change its own settings in this matter's folder.";
 const CODEX_ALONE: ThreadKey =
   "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder.";
+const UNNAMED: ThreadKey = "Clauseo stopped a step.";
+const ONE_MORE: ThreadKey = "Clauseo stopped one more step.";
+const MORE: ThreadKey = "Clauseo stopped {n} more steps.";
 
 /** The host's notice of `kind`, its English fallback as the host writes it. */
 const notice = (kind: NoticeKind, text: string): ViewEntry => ({
@@ -55,8 +58,8 @@ export const UC_GUARD_BLOCK: Entry[] = [
     screen: "room/thread",
     render: thread(
       notice(
-        { held_open_blocked: { file: "Drafts/Lease.docx" } },
-        "Clauseo stopped a step: the AI tried to change Drafts/Lease.docx, which is open in Word. Close it in Word, then ask again.",
+        { held_open_blocked: { file: "Lease.docx" } },
+        "Clauseo stopped a step: the AI tried to change Lease.docx, which is open in Word. Close it in Word, then ask again.",
       ),
     ),
   },
@@ -77,5 +80,23 @@ export const UC_GUARD_BLOCK: Entry[] = [
     words: threadWords(CODEX_ALONE),
     screen: "room/thread",
     render: alone(CODEX_ALONE),
+  },
+  {
+    id: "UC-704",
+    words: threadWords(UNNAMED),
+    screen: "room/thread",
+    render: thread(notice("guard_step_blocked", UNNAMED)),
+  },
+  {
+    id: "UC-705",
+    words: threadWords(ONE_MORE),
+    screen: "room/thread",
+    render: thread(notice({ guard_steps_more: { more: 1 } }, ONE_MORE)),
+  },
+  {
+    id: "UC-706",
+    words: threadWords(MORE),
+    screen: "room/thread",
+    render: thread(notice({ guard_steps_more: { more: 3 } }, "Clauseo stopped 3 more steps.")),
   },
 ];
