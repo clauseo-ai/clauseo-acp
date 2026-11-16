@@ -13,6 +13,9 @@
 //!   "go ahead" in the mode the matter runs in; "use auto mode" lands in `auto` and stays; and
 //!   `bypassPermissions`, `dontAsk` or an unknown mode, which claude-agent-acp 0.89.1 never
 //!   offers, go back too (decision record 0030, "Claude's permission mode").
+//!
+//! The switch back must be read back ([`read_back`]): a failed switch, or an agent that then
+//! reports another mode, stops the conversation with `agent.mode_not_set`.
 
 use clauseo_protocol::{AgentChoiceId, AgentKind, CompactString, ModeChanged, ThreadId};
 
@@ -20,6 +23,8 @@ use super::super::Actor;
 use super::agents::call;
 use super::inputs::AgentReply;
 use super::updates::{agent, commit};
+
+pub(super) mod read_back;
 
 /// The modes a Claude session outside forced ask is kept in when it moves there itself: `auto`,
 /// Clauseo's mode, `acceptEdits`, its fallback (and the mode claude-agent-acp itself falls back
@@ -68,6 +73,7 @@ pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) 
         return;
     };
     let (id, client, forced_ask) = (agent.id, agent.link.client.clone(), agent.forced_ask);
+    let (mark, fence) = (agent.modes.mark(), agent.link.fence());
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     tracing::warn!(
         matter = ?matter,
@@ -77,25 +83,39 @@ pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) 
         "a Claude session moved to a mode Clauseo doesn't run it in; switching it back"
     );
     call(actor, thread, id, async move {
-        AgentReply::ModeReset(target, client.set_mode(&session, back).await)
+        let result = client.set_mode(&session, back).await;
+        fence.await;
+        AgentReply::ModeReset((target, mark), result)
     });
 }
 
-/// The switch back answered: `mode` is logged; a failure is a warning.
+/// The switch back to `mode`, sent at `mark`, answered: once the agent reported `mode` it is
+/// logged (a failed commit is a warning); a failed switch, or another mode reported, stops the
+/// conversation with `agent.mode_not_set` ([`read_back::stop`]).
 pub(super) fn on_mode_reset(
     actor: &mut Actor,
     thread: ThreadId,
     same: bool,
-    mode: &'static str,
+    (mode, mark): (&'static str, read_back::Mark),
     result: Result<(), clauseo_acp::Error>,
 ) {
     if !same {
         return;
     }
-    let logged = result.map_err(crate::error::Error::Acp).and_then(|()| {
-        let mode_id = CompactString::from(mode);
-        commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new())
-    });
+    let checked = match result {
+        Ok(()) => read_back::check(actor, thread, mode, mark),
+        Err(error) => {
+            let cause = crate::log_file::Cause(&error).to_string();
+            tracing::warn!(%thread, mode, error = cause, "a Claude session refused its switch back");
+            Err(read_back::not_set(thread, mode, None))
+        }
+    };
+    if let Err(error) = checked {
+        read_back::stop(actor, thread, &error);
+        return;
+    }
+    let mode_id = CompactString::from(mode);
+    let logged = commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new());
     if let Err(error) = logged {
         tracing::warn!(
             %thread,

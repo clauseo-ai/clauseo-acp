@@ -13,9 +13,8 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionAttached, CompactString, ConfigOptionsReplaced, Envelope,
-    ErrorCode, MatterId, ModeChanged, Notice, NoticeKind, NoticeLevel, StreamId, ThreadId,
-    ViewEntry,
+    AgentChoiceId, AgentKind, AgentSessionAttached, ConfigOptionsReplaced, Envelope, ErrorCode,
+    MatterId, ModeChanged, Notice, NoticeKind, NoticeLevel, StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -33,8 +32,8 @@ use crate::sent::SentView;
 mod claude_mode;
 mod named;
 
-use claude_mode::claude_start;
-pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto};
+pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto, Switched};
+use claude_mode::{Switch, claude_start};
 
 /// The fallback words of the notice a thread gets when its agent starts a new session after
 /// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
@@ -355,6 +354,7 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     let ask = switch.then_some(Switch {
         mode: ask,
         fallback: None,
+        held: None,
     });
     before_attach(actor, thread, (start, loaded), (ask, guard, picks));
 }
@@ -372,13 +372,13 @@ fn before_attach(
     agent.preparing = true;
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     call(actor, thread, id, async move {
-        let (result, picked, fell_back) = prepare(&client, start, (mode, guard), picks).await;
+        let (result, picked, switched) = prepare(&client, start, (mode, guard), picks).await;
         fence.await;
         AgentReply::Prepared {
             loaded,
             result,
             picked,
-            fell_back,
+            switched,
         }
     });
 }
@@ -390,79 +390,54 @@ fn before_attach(
 /// for Codex, when a hooks object went into `CODEX_CONFIG` (`guard` is the session's folder),
 /// `_codex/hooks/list` once, which must show the guard trusted; then
 /// the model and effort `picks` (`picks::apply`), whose failures fail nothing. The start comes
-/// back with the mode and options it now has, and whether the mode switch fell back.
+/// back with the mode and options it now has, and what a Claude mode switch did, for its
+/// read-back (`claude_mode::prepared`). No prompt goes out before the attach that follows.
 async fn prepare(
     client: &AcpClient,
     mut start: SessionStart,
     (mode, guard): (Option<Switch>, Option<PathBuf>),
     picks: Vec<Pick>,
-) -> (Result<SessionStart, Error>, Picked, bool) {
-    let fell_back = match checks(client, &mut start, (mode, guard)).await {
-        Ok(fell_back) => fell_back,
-        Err(error) => return (Err(error), Picked::default(), false),
+) -> (Result<SessionStart, Error>, Picked, Option<Switched>) {
+    let switched = match checks(client, &mut start, (mode, guard)).await {
+        Ok(switched) => switched,
+        Err(error) => return (Err(error), Picked::default(), None),
     };
     let picked = super::picks::apply(client, &mut start, picks).await;
-    (Ok(start), picked, fell_back)
+    (Ok(start), picked, switched)
 }
 
-/// A `session/set_mode` before the attach: to `mode`, and, should the agent refuse it, to
-/// `fallback` when there is one (Claude's `acceptEdits` for `auto`), else the launch fails.
-#[derive(Debug)]
-pub(super) struct Switch {
-    pub(super) mode: AgentChoiceId,
-    pub(super) fallback: Option<AgentChoiceId>,
-}
-
-/// [`prepare`]'s mode switch and guard check; `true` when the switch fell back.
+/// [`prepare`]'s mode switch (`claude_mode::switch`) and guard check.
 async fn checks(
     client: &AcpClient,
     start: &mut SessionStart,
     (mode, guard): (Option<Switch>, Option<PathBuf>),
-) -> Result<bool, Error> {
-    let mut fell_back = false;
-    if let Some(Switch { mode, fallback }) = mode {
-        let mode = match (
-            client.set_mode(&start.session, mode.clone()).await,
-            fallback,
-        ) {
-            (Ok(()), _) => Some(mode),
-            (Err(error), None) => return Err(error.into()),
-            (Err(error), Some(fallback)) => {
-                tracing::warn!(error = %Cause(&error), to = %fallback.as_str(), "the agent refused its mode; falling back");
-                fell_back = true;
-                let current = start.modes.as_ref().map(|modes| modes.current.as_str());
-                if current == Some(fallback.as_str()) {
-                    None
-                } else {
-                    client.set_mode(&start.session, fallback.clone()).await?;
-                    Some(fallback)
-                }
-            }
-        };
-        if let (Some(mode), Some(modes)) = (mode, &mut start.modes) {
-            modes.current = CompactString::from(mode.as_str());
-        }
-    }
+) -> Result<Option<Switched>, Error> {
+    let switched = match mode {
+        Some(mode) => claude_mode::switch(client, start, mode).await?,
+        None => None,
+    };
     if let Some(cwd) = guard {
         let answer = client.codex_hooks_list(&cwd).await?;
         if !codex::guard_trusted(&answer) {
             return Err(codex::guard_untrusted(&answer));
         }
     }
-    Ok(fell_back)
+    Ok(switched)
 }
 
-/// [`prepare`] ended well: a Claude switch to `auto` is judged (`claude_mode::prepared`,
-/// before the picks may drop held updates), the picks' outcome (`picks::after`), then the
-/// attach.
+/// [`prepare`] ended well: a Claude mode switch is read back (`claude_mode::prepared`, before
+/// the picks may drop held updates; a refused one ends the launch here), the picks' outcome
+/// (`picks::after`), then the attach.
 pub(super) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,
-    start: SessionStart,
-    (loaded, fell_back): (bool, bool),
+    mut start: SessionStart,
+    (loaded, switched): (bool, Option<Switched>),
     picked: &Picked,
 ) {
-    claude_mode::prepared(actor, thread, fell_back);
+    if !claude_mode::prepared(actor, thread, switched, &mut start) {
+        return;
+    }
     super::picks::after(actor, thread, picked);
     attach(actor, thread, start, loaded);
 }

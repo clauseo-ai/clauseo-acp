@@ -291,6 +291,7 @@ test("only the agent.* codes that name Claude have a sentence per plan", () => {
     "agent.firm_hooks_off",
     "agent.user_policy",
     "agent.settings_changed",
+    "agent.mode_not_set",
   ];
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
     (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
@@ -410,20 +411,23 @@ test.each([
   expect(errorWords("en", "matter.folder_backslash", CLAUDE, place)).not.toContain("Test*");
 });
 
-// Claude refused or stopped over its settings (provisional; hi: later, so the Hindi display shows the English): the
+// Claude refused or stopped over its settings or its mode (provisional; hi: later, so the Hindi display shows the English): the
 // firm's managed settings turn hooks off (UC-474), a policy any program can write (UC-475), the settings file changed
-// while Claude ran (UC-476). Claude-only, so no agent's name changes them
+// while Claude ran (UC-476), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them
 const UC474 =
   "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.";
 const UC475 =
   "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.";
 const UC476 =
   "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.";
+const MODE_NOT_SET =
+  "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.";
 
 test.each([
   ["agent.firm_hooks_off", UC474],
   ["agent.user_policy", UC475],
   ["agent.settings_changed", UC476],
+  ["agent.mode_not_set", MODE_NOT_SET],
 ] as const)("%s's line, in English in both languages until its Hindi comes", (code, said) => {
   for (const agent of [CLAUDE, undefined]) {
     expect(errorWords("en", code, agent)).toBe(said);

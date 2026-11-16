@@ -10,6 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::Error;
+use crate::serde_util::BorrowedStr;
 
 mod host_error;
 pub use host_error::HostError;
@@ -414,6 +415,10 @@ error_codes! {
     AgentSettingsChanged = "agent.settings_changed", retryable: true, meaning: "The Claude \
         settings file Clauseo writes at each launch changed while Claude ran, so Clauseo \
         stopped Claude; the next message starts it again with Clauseo's settings.";
+    AgentModeNotSet = "agent.mode_not_set", retryable: false, meaning: "Claude Code did not \
+        confirm the mode Clauseo set it to (`auto`; `default` in forced ask; `acceptEdits` when \
+        auto is not available), as the session started or after a mode change during the \
+        conversation, so Clauseo sent no message in another mode and stopped the conversation.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

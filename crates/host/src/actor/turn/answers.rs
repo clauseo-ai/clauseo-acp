@@ -355,15 +355,63 @@ pub(super) fn on_config(
     }
 }
 
-/// `SetMode` returned: log the mode.
+/// `SetMode` to the attached agent of `thread`: refused in forced ask for a mode that approves
+/// changes unasked, else `session/set_mode`, whose answer waits for the link's fence so the
+/// agent's reports of its mode come first (`forced_mode/read_back.rs`).
+pub(super) fn send_mode(actor: &mut Actor, thread: ThreadId, ctx: CommandCtx, mode: AgentChoiceId) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+        actor.finish_command(ctx.id, Err(super::lost("the agent")));
+        return;
+    };
+    if agent.forced_ask && !crate::agent::forced_ask::mode_allowed(mode.as_str()) {
+        let error = Error::refused(
+            ErrorCode::CommandInvalid,
+            format!(
+                "mode {mode} would approve changes without asking, and this matter's folder is \
+                 unprotected: only \"default\" and \"plan\" may be set"
+            ),
+        );
+        actor.finish_command(ctx.id, Err(error));
+        return;
+    }
+    let (id, client, session) = (agent.id, agent.link.client.clone(), agent.session.clone());
+    let (mark, fence) = (agent.modes.mark(), agent.link.fence());
+    let Some(session) = session else {
+        actor.finish_command(ctx.id, Err(super::lost("the agent's session")));
+        return;
+    };
+    super::idle::call_started(actor, thread);
+    super::agents::call(actor, thread, id, async move {
+        let result = client.set_mode(&session, mode.clone()).await;
+        fence.await;
+        super::AgentReply::Mode {
+            ctx,
+            mode,
+            mark,
+            result,
+        }
+    });
+}
+
+/// `SetMode` returned: once a Claude agent reported the mode (`forced_mode/read_back.rs`), log
+/// it; another mode reported fails the command with `agent.mode_not_set` and stops the
+/// conversation.
 pub(super) fn on_mode(
     actor: &mut Actor,
     thread: ThreadId,
-    ctx: CommandCtx,
-    same: bool,
-    mode: &AgentChoiceId,
+    (ctx, same): (CommandCtx, bool),
+    (mode, mark): (&AgentChoiceId, super::forced_mode::read_back::Mark),
     result: Result<(), clauseo_acp::Error>,
 ) {
+    use super::forced_mode::read_back;
+    if result.is_ok()
+        && same
+        && let Err(error) = read_back::check(actor, thread, mode.as_str(), mark)
+    {
+        read_back::stop(actor, thread, &error);
+        actor.finish_command(ctx.id, Err(error));
+        return;
+    }
     let done = answered(same, result).and_then(|()| {
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         let mode_id = CompactString::from(mode.as_str());

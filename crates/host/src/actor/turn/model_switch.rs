@@ -18,6 +18,9 @@
 //!   and follows the options (`ui/app/src/room/config-menus.ts`).
 //! - If either call fails, the session stays in `acceptEdits` with auto unavailable, and the
 //!   thread gets the `AutoModeUnavailable` notice, with a warn line: never silently weaker.
+//! - Both answered well, `auto` must be read back (`forced_mode/read_back.rs`): any other mode
+//!   the agent reported last, or none, fails the command with `agent.mode_not_set` and stops
+//!   the conversation.
 //!
 //! The lawyer can still pick any other model. A move to `acceptEdits` with no switch of
 //! Clauseo's out (an "always allow" answer that sets the mode, or a model switch the CLI made
@@ -53,6 +56,8 @@ pub(crate) struct Kept {
     back: Result<Vec<ConfigOption>, clauseo_acp::Error>,
     /// The answer to `session/set_mode auto`, sent once the old model is set.
     mode: Option<Result<(), clauseo_acp::Error>>,
+    /// Where the agent's reports of its mode stood as the calls went out, for the read-back.
+    mark: super::forced_mode::read_back::Mark,
 }
 
 /// The host English of the notice, for a view that does not know the kind.
@@ -153,7 +158,7 @@ pub(super) fn moved(actor: &mut Actor, thread: ThreadId, mode: &str) {
             "a Claude session moved itself from auto to acceptEdits with no model switch of \
              Clauseo's out; it stays there"
         ),
-        Auto::Wanted | Auto::Set { .. } | Auto::Unavailable => {}
+        Auto::Wanted | Auto::Set | Auto::Unavailable => {}
     }
 }
 
@@ -192,9 +197,18 @@ pub(super) fn put_back(
         "a model switch moved Claude off auto mode; switching the model back"
     );
     let agent = state(actor, thread).and_then(|state| state.agent.as_deref());
-    let found =
-        agent.and_then(|agent| Some((agent.id, agent.link.client.clone(), agent.session.clone()?)));
-    let (Some((id, client, session)), Ok(auto)) = (found, AgentChoiceId::new(CLAUDE_MODE)) else {
+    let found = agent.and_then(|agent| {
+        let fenced = (agent.modes.mark(), agent.link.fence());
+        Some((
+            agent.id,
+            agent.link.client.clone(),
+            agent.session.clone()?,
+            fenced,
+        ))
+    });
+    let (Some((id, client, session, (mark, fence))), Ok(auto)) =
+        (found, AgentChoiceId::new(CLAUDE_MODE))
+    else {
         let error = Error::refused(ErrorCode::AgentExited, "the agent's session is gone");
         actor.finish_command(ctx.id, Err(error));
         return;
@@ -209,12 +223,14 @@ pub(super) fn put_back(
             Ok(_) => Some(client.set_mode(&session, auto).await),
             Err(_) => None,
         };
+        fence.await;
         let kept = Kept {
             ctx,
             names,
             moved: options,
             back,
             mode,
+            mark,
         };
         AgentReply::ModelKept(Box::new(kept))
     });
@@ -229,12 +245,20 @@ pub(super) fn on_kept(actor: &mut Actor, thread: ThreadId, same: bool, kept: Kep
         moved,
         back,
         mode,
+        mark,
     } = kept;
     if !same {
         let error = Error::refused(
             ErrorCode::AgentExited,
             "the agent stopped before it answered",
         );
+        actor.finish_command(ctx.id, Err(error));
+        return;
+    }
+    if let (Ok(_), Some(Ok(()))) = (&back, &mode)
+        && let Err(error) = read_back(actor, thread, mark)
+    {
+        super::forced_mode::read_back::stop(actor, thread, &error);
         actor.finish_command(ctx.id, Err(error));
         return;
     }
@@ -284,6 +308,15 @@ pub(super) fn on_kept(actor: &mut Actor, thread: ThreadId, same: bool, kept: Kep
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));
     }
+}
+
+/// The revert's `auto`, read back from the agent's reports since `mark`.
+fn read_back(
+    actor: &mut Actor,
+    thread: ThreadId,
+    mark: super::forced_mode::read_back::Mark,
+) -> Result<(), Error> {
+    super::forced_mode::read_back::check(actor, thread, CLAUDE_MODE, mark)
 }
 
 /// Marks `thread`'s agent's auto unavailable, and gives the notice that says so (told again,

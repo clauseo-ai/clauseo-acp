@@ -1991,6 +1991,8 @@ export type ErrorCode =
 "agent.user_policy" | 
 /** The Claude settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings. */
 "agent.settings_changed" | 
+/** Claude Code did not confirm the mode Clauseo set it to (`auto`; `default` in forced ask; `acceptEdits` when auto is not available), as the session started or after a mode change during the conversation, so Clauseo sent no message in another mode and stopped the conversation. */
+"agent.mode_not_set" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

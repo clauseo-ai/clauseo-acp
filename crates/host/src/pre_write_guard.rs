@@ -105,6 +105,11 @@
 //!   list (a shape Codex used before) is judged read-only as its parts quoted and joined into one
 //!   line.
 //!
+//! Whatever the targets, every tool it checks is refused while the input's `permission_mode`
+//! is `bypassPermissions` or `dontAsk` (`UNASKED_MODES`): Clauseo never offers either mode and
+//! switches a session back from one, and this belt holds meanwhile. `acceptEdits`, `auto`,
+//! `plan` and `default` go on as above.
+//!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
 //! `cwd` (Codex's hook: its `cwd` is the turn's working folder, which a command's `cd` does not
@@ -335,7 +340,15 @@ enum Refusal {
     CodexFolder,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
+    /// The hook input's `permission_mode` is one of [`UNASKED_MODES`].
+    UnaskedMode,
 }
+
+/// The permission modes in which Claude Code runs every tool unasked (`bypassPermissions`) or
+/// refuses every ask unseen (`dontAsk`): Clauseo never offers either and switches a session back
+/// from them (`actor/turn/forced_mode.rs`), and meanwhile the guard refuses every tool it checks.
+/// `acceptEdits` and `plan` are Clauseo's own and go on.
+const UNASKED_MODES: [&str; 2] = ["bypassPermissions", "dontAsk"];
 
 impl Refusal {
     /// What the agent is told.
@@ -351,6 +364,10 @@ impl Refusal {
                 .to_owned(),
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
+                .to_owned(),
+            Self::UnaskedMode => "Clauseo doesn't let the agent change files in a permission mode \
+                                  that skips the lawyer's approval. Wait until Clauseo has put \
+                                  the session back in its own mode."
                 .to_owned(),
         }
     }
@@ -387,6 +404,10 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         return Ok(None);
     };
     timings::mark("targets");
+    let mode = hook.get("permission_mode").and_then(Value::as_str);
+    if mode.is_some_and(|mode| UNASKED_MODES.contains(&mode)) {
+        return Ok(Some(Refusal::UnaskedMode));
+    }
     let into_codex = match &targets {
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths

@@ -122,6 +122,8 @@ pub(super) struct Agent {
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
     /// (`session/claude_mode.rs`).
     pub(super) auto: session::Auto,
+    /// The modes it reported during its session, for a mode switch's read-back.
+    pub(super) modes: super::forced_mode::read_back::Reports,
     /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
     /// (`queue/confirm.rs`); `None` for any other agent.
     pub(super) claude_home: Option<PathBuf>,
@@ -300,6 +302,7 @@ pub(super) fn launch_now(
         forced_ask,
         folder_check: prepared_folder,
         auto: session::Auto::default(),
+        modes: Default::default(),
         claude_home,
         admin_tier: super::profile_loads::policy::AdminTier::Present,
         mcp_sent: (!unprotected).then(Vec::new),
@@ -471,9 +474,12 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Config { ctx, pick, result } => {
             super::answers::on_config(actor, thread, (ctx, pick), same, result);
         }
-        AgentReply::Mode { ctx, mode, result } => {
-            super::answers::on_mode(actor, thread, ctx, same, &mode, result);
-        }
+        AgentReply::Mode {
+            ctx,
+            mode,
+            mark,
+            result,
+        } => super::answers::on_mode(actor, thread, (ctx, same), (&mode, mark), result),
         AgentReply::PromptRefused { turn, error } => {
             end::on_prompt_refused(actor, thread, turn, &error);
         }
@@ -501,8 +507,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             result: Ok(start),
             loaded,
             picked,
-            fell_back,
-        } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
+            switched,
+        } => session::on_prepared(actor, thread, start, (loaded, switched), &picked),
         // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
@@ -564,23 +570,7 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
                 AgentReply::Config { ctx, pick, result }
             });
         }
-        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "mode {mode} would approve changes without asking, and this matter's folder \
-                     is unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
-        Waiting::Mode(ctx, mode) => {
-            super::idle::call_started(actor, thread);
-            call(actor, thread, id, async move {
-                let result = client.set_mode(&session, mode.clone()).await;
-                AgentReply::Mode { ctx, mode, result }
-            });
-        }
+        Waiting::Mode(ctx, mode) => super::answers::send_mode(actor, thread, ctx, mode),
     }
 }
 

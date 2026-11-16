@@ -74,6 +74,8 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
         agent.replayed.push(*event);
         return;
     }
+    // Before the rate cap, which may hold it past a mode switch's answer (`read_back.rs`).
+    agent.modes.note(&event);
     match agent.rate.admit(now, RatedUpdate(event)) {
         Admitted::Pass(item) => handle(actor, thread, *item.0),
         Admitted::Flush(items) => {

@@ -70,8 +70,8 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, crate::error::Error>,
         picked: super::picks::Picked,
-        /// A Claude switch to `auto` was refused and fell back to `acceptEdits`.
-        fell_back: bool,
+        /// What a Claude agent's mode switch did, for its read-back (`session.rs` `checks`).
+        switched: Option<super::session::Switched>,
     },
     Prompt {
         turn: TurnId,
@@ -90,14 +90,20 @@ pub(crate) enum AgentReply {
         pick: (AgentChoiceId, ConfigValue),
         result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
     },
+    /// A `SetMode` answered; the mode is read back from the reports since `mark`.
     Mode {
         ctx: CommandCtx,
         mode: AgentChoiceId,
+        mark: super::forced_mode::read_back::Mark,
         result: Result<(), clauseo_acp::Error>,
     },
     /// The switch back after a Claude agent moved itself to a mode Clauseo doesn't run it in
     /// (`forced_mode.rs`) answered: the mode it was switched to, and the answer.
-    ModeReset(&'static str, Result<(), clauseo_acp::Error>),
+    /// The mode is read back from the reports since the mark (`forced_mode/read_back.rs`).
+    ModeReset(
+        (&'static str, super::forced_mode::read_back::Mark),
+        Result<(), clauseo_acp::Error>,
+    ),
     /// A refused model switch was put back (`model_switch.rs`).
     ModelKept(Box<super::model_switch::Kept>),
     /// A steer into the running turn answered (`queue/steer.rs`).
