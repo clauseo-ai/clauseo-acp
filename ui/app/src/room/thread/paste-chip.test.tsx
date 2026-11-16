@@ -305,3 +305,16 @@ test("an edit lost as its message went comes back after the field's chips as a c
   await h.key({ key: "Enter", keyCode: 13 });
   expect(sentText()[0] === `${one}\n\n${edited}\n\nMy own words.`).toBe(true);
 });
+
+test("after an accepted send, Cmd+Z never brings the sent question's chips back", async () => {
+  h = await mountRoom();
+  h.deliver([reset([])]);
+  await paste(brief(PASTE_CHIP_MIN, "a"));
+  await paste(brief(PASTE_CHIP_MIN, "b"));
+  await type("Which is stronger?");
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(sentText()).toHaveLength(1);
+  expect(chips()).toBe(0);
+  for (let i = 0; i < 3; i++) await h.key({ key: "z", metaKey: true });
+  expect(chips()).toBe(0);
+});

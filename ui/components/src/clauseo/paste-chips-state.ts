@@ -62,6 +62,10 @@ export function usePasteChips(initial: readonly PasteChip[]) {
       if (next.length === 0 && now.current.length === 0) return null;
       return push({ before: now.current, after: next, box, engine: false });
     },
+    /** Drops every step: after an accepted send, so Cmd/Ctrl+Z never brings the sent question's chips back. */
+    forget: () => {
+      steps.current = [];
+    },
     /** Cmd/Ctrl+Z, on the field (`inField`) or on a chip's button, the field holding `box`: when the next undo is
      * of a step that changed the chips, their change is taken back too. True when the field's part was not the
      * engine's to undo, so the key must do nothing more. Off the field, a step whose words the engine holds is left
