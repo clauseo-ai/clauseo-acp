@@ -104,6 +104,16 @@ pub fn codex_shell_offline(web_search: bool) -> &'static str {
 /// its refused steps reach the window as steps.
 pub const CODEX_REFUSAL: &str = include_str!("../assets/instructions/codex-refusal.txt");
 
+/// The line every Codex session gets after [`CODEX_REFUSAL`]: Codex's base prompt tells it that
+/// `AGENTS.md` files "can appear anywhere" and that it must obey them for the files it touches
+/// (codex 0.162.1, `protocol/src/prompts/base_instructions/default.md:17-28`), so a planted file
+/// in a matter subfolder could steer it. The host already keeps Codex from loading them itself
+/// (`project_doc_max_bytes = 0` in its home); this line covers what it reads on its own.
+/// Its exception, "the skills listed below", is the Skills index, which every variant puts
+/// after it (`ClauseoProfile::codex_keys_with_packs`); a launch with no index lists none, so
+/// nothing is excepted. Claude never gets it.
+pub const CODEX_MATTER_FILES: &str = include_str!("../assets/instructions/codex-matter-files.txt");
+
 /// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
 /// the commands it names are macOS's own.
 pub fn codex_shell(macos: bool) -> Option<&'static str> {

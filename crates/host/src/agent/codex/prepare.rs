@@ -155,10 +155,11 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
     }
 }
 
-/// The `.codex` re-check of a Codex agent's matter folder before a prompt or a session call, off
-/// the actor: `stored`, the folder the agent runs in, is resolved through links again each
-/// time, so a link pointed elsewhere since the launch is checked where it now points. `None`
-/// (any other agent) passes at once, with no thread. `matter` is for the log.
+/// The `.codex` and `.agents` re-check ([`super::refuse_project_folders`]) of a Codex agent's
+/// matter folder before a prompt or a session call, off the actor: `stored`, the folder the
+/// agent runs in, is resolved through links again each time, so a link pointed elsewhere since
+/// the launch is checked where it now points. `None` (any other agent) passes at once, with no
+/// thread. `matter` is for the log.
 pub(crate) async fn recheck(
     clock: Arc<dyn Clock>,
     matter: Option<MatterId>,
@@ -168,8 +169,8 @@ pub(crate) async fn recheck(
         Some(stored) => {
             off_actor(
                 clock,
-                Job::short("the .codex re-check", matter),
-                move || super::refuse_codex_folder(&crate::agent::session_folder(&stored)),
+                Job::short("the .codex and .agents re-check", matter),
+                move || super::refuse_project_folders(&crate::agent::session_folder(&stored)),
             )
             .await
         }

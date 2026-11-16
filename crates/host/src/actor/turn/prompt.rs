@@ -104,9 +104,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let list_clock = std::sync::Arc::clone(&actor.clock);
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
-            // descendants are listed, both off the actor, before the prompt goes out: a
-            // cancelled turn ends what is new since this listing.
+            // A Codex agent's matter folder is checked for `.codex` and `.agents` again first,
+            // and the agent's descendants are listed, both off the actor, before the prompt goes
+            // out: a cancelled turn ends what is new since this listing.
             let (checked, listed) = join(
                 codex::prepare::recheck(clock, matter, check),
                 leftovers::snapshot(descendants, list_clock),

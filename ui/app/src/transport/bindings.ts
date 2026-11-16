@@ -1807,6 +1807,8 @@ export type ErrorCode =
 "matter.folder_refused" | 
 /** The matter folder holds a `.codex` folder, whose settings Codex would load. */
 "matter.codex_folder" | 
+/** The matter folder holds a `.agents` folder, whose skills Codex would offer as its own. */
+"matter.agents_folder" | 
 /** A file the operation needs is locked by another program, such as an open document. */
 "matter.file_locked" | 
 /** A turn is running in the matter, so undo or restore waits. */

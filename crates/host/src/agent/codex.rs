@@ -1,5 +1,6 @@
 //! What the host forces on a Codex agent (codex-acp 2.2.2 over `@openai/codex` 0.162.1): its
-//! launch variables, its home, the `.codex` refusal (#184) and the guard's trust check.
+//! launch variables, its home, the `.codex` and `.agents` refusal (#184) and the guard's trust
+//! check.
 //!
 //! codex-acp reads `CODEX_CONFIG` with `JSON.parse` (`dist/index.js:45657-45660`) and sends it,
 //! less `hooks`, as the `config` object of each `thread/start`, `thread/resume` and `thread/fork`
@@ -252,14 +253,43 @@ fn toml_value(text: &str) -> Value {
 /// The header of the `config.toml` the host writes in a Codex agent's home.
 const HOME_CONFIG_HEADER: &str = "# Clauseo manages this file. It is written again each time \
      Clauseo starts Codex, and any edit is replaced.\n# The switches Clauseo turns off for Codex's \
-     app-server at start-up (clauseo_limits::CODEX_OVERRIDES).\n";
+     app-server at start-up (clauseo_limits::CODEX_OVERRIDES), then the matter folder's project \
+     files (codex::PROJECT_FILE_OVERRIDES).\n";
+
+/// The keys that keep a matter's project files from steering Codex, in the home's `config.toml`
+/// after `clauseo_limits::CODEX_OVERRIDES` (Clauseo's own: the limits reader's app-server has no
+/// matter folder to protect). At `rust-v0.162.1`:
+/// - `project_doc_max_bytes = 0`: no `AGENTS.md`, `AGENTS.override.md` or fallback name, in the
+///   matter folder or a parent, reaches the model as instructions (`core/src/agents_md.rs:68,
+///   133-135`; codex-acp trusts the cwd, so nothing else skips them).
+/// - `project_root_markers = []`: nothing loads from a parent. Any `.git` in a parent (even a
+///   one-line file naming no repository) made that parent the project root, and Codex then read
+///   every `AGENTS.md` from it down (`agents_md.rs:12-14, 199-240`), listed its `.agents/skills`
+///   and its `.codex/skills` as skills with no trust (`ext/skills/src/host_roots.rs:79-92,
+///   211-213`), and loaded its `.codex` config layer (`config/src/loader/mod.rs:1505-1540`).
+///   With the list empty the project root is the matter folder. Codex still stats a parent's
+///   `.git` for its trust key and a linked worktree's hooks (`loader/mod.rs:1113-1123,
+///   1280-1296`); neither loads anything here, since the hooks need `<matter>/.codex`, which
+///   [`refuse_project_folders`] refuses.
+///
+/// They go in the home file, not only in `CODEX_CONFIG`: codex-acp's title thread starts with no
+/// session config (`dist/index.js:40055-40060`) and the command list (`skills/list`) follows
+/// the home, so with these keys in `CODEX_CONFIG` alone a parent's `AGENTS.md` still reached the
+/// title request and a parent's skills stayed listed (the injection inventory's `gitdiroff`
+/// row). `sandbox_mode` never goes in this file: with it there Codex would write
+/// `[projects.<git root>] trust_level = "trusted"` into it.
+pub(crate) const PROJECT_FILE_OVERRIDES: [&str; 2] =
+    ["project_doc_max_bytes=0", "project_root_markers=[]"];
 
 /// The `config.toml` text for a Codex agent's home: [`HOME_CONFIG_HEADER`], then each of
-/// `clauseo_limits::CODEX_OVERRIDES` as a TOML dotted key (each override is already TOML:
-/// `key=value` as Codex's `-c` takes it).
+/// `clauseo_limits::CODEX_OVERRIDES` and of [`PROJECT_FILE_OVERRIDES`] as a TOML dotted key
+/// (each override is already TOML: `key=value` as Codex's `-c` takes it).
 pub(crate) fn home_config() -> String {
     let mut text = HOME_CONFIG_HEADER.to_owned();
-    for set in clauseo_limits::CODEX_OVERRIDES {
+    for set in clauseo_limits::CODEX_OVERRIDES
+        .iter()
+        .chain(&PROJECT_FILE_OVERRIDES)
+    {
         if let Some((key, value)) = set.split_once('=') {
             text.push_str(key);
             text.push_str(" = ");
@@ -336,47 +366,82 @@ fn agent_home_failed(who: &str, error: &dyn std::fmt::Display) -> Error {
     )
 }
 
-/// #184: codex-acp marks every session root `trusted` (`dist/index.js:35450-35455`), so a
-/// `.codex/` in the matter folder would load as project config (its MCP servers, hooks, model
-/// and sandbox switches). A Codex agent is refused in a folder holding a `.codex` entry of any
-/// kind, before it starts, and before each of its prompts and session calls (the entry may
-/// appear later: codex-acp restarts a crashed app-server and resumes the session itself,
-/// `dist/index.js:37755-37772`). `folder` is the matter folder as resolved through links. A
-/// stat that fails for any reason but not-found fails closed too, as `matter.folder_missing`
-/// (the folder may be a share that does not answer), not as a `.codex` to rename. A `.codex`
-/// that is not found passes only when `folder` itself is a folder: a matter folder that is gone
-/// is `matter.folder_missing` too, not a pass.
+/// An entry the matter folder may not hold while a Codex agent works there
+/// ([`refuse_project_folders`]): its name, the code of the refusal and its words (for the log
+/// and the turn's detail; the lawyer's words come from the code, `ui/components/src/lib/
+/// words-errors.ts`).
+pub(crate) struct RefusedEntry {
+    pub(crate) name: &'static str,
+    pub(crate) code: ErrorCode,
+    words: &'static str,
+}
+
+/// The entries [`refuse_project_folders`] refuses, checked in this order:
+/// - `.codex` (#184): codex-acp marks every session root `trusted` (`dist/index.js:
+///   35450-35455`), so a `.codex/` in the matter folder would load as project config (its MCP
+///   servers, hooks, model and sandbox switches). Lift this once codex-acp has an option to not
+///   trust the session root (agentclientprotocol/codex-acp#690), or once the direct Codex driver
+///   exists.
+/// - `.agents`: Codex lists every skill in `<cwd>/.agents/skills` as a `$` command, trusted or
+///   not, and no config key turns that off (`ext/skills/src/host_roots.rs:68, 137-185` at
+///   `rust-v0.162.1`; `skills.config` disables only by exact path or name).
 ///
-/// Lift this once codex-acp has an option to not trust the session root
-/// (agentclientprotocol/codex-acp#690), or once the direct Codex driver exists. The guard
+/// The parents' `.codex`, `.agents/skills` and `AGENTS.md` need no check: with
+/// `project_root_markers = []` in [`home_config`] nothing loads from above the matter folder.
+pub(crate) const REFUSED_ENTRIES: [RefusedEntry; 2] = [
+    RefusedEntry {
+        name: ".codex",
+        code: ErrorCode::MatterCodexFolder,
+        words: "Codex can't work in this matter while its folder holds a \".codex\" folder: \
+                Codex would load the settings inside it. Rename or remove that \".codex\" \
+                folder, then try again.",
+    },
+    RefusedEntry {
+        name: ".agents",
+        code: ErrorCode::MatterAgentsFolder,
+        words: "Codex can't work in this matter while its folder holds a \".agents\" folder: \
+                Codex would offer the skills inside it as its own. Rename or remove that \
+                \".agents\" folder, then try again.",
+    },
+];
+
+/// A Codex agent is refused in a matter folder holding any of [`REFUSED_ENTRIES`], of any kind
+/// (a folder, a file, a link wherever it points), before it starts, and before each of its
+/// prompts and session calls (the entry may appear later: codex-acp restarts a crashed
+/// app-server and resumes the session itself, `dist/index.js:37755-37772`). `folder` is the
+/// matter folder as resolved through links. A stat that fails for any reason but not-found fails
+/// closed too, as `matter.folder_missing` (the folder may be a share that does not answer), not
+/// as an entry to rename. When none is found, it passes only when `folder` itself is a folder:
+/// a matter folder that is gone is `matter.folder_missing` too, not a pass. The guard
 /// separately refuses an agent's writes to `.codex/**`.
-pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
-    let entry = folder.join(".codex");
-    // `symlink_metadata`: a link named `.codex` counts too, wherever it points.
-    match std::fs::symlink_metadata(&entry) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match std::fs::metadata(folder) {
-                Ok(meta) if meta.is_dir() => Ok(()),
-                Ok(_) => Err(folder_failed(None, "the matter folder is not a folder")),
-                Err(error) => Err(folder_failed(
+pub(crate) fn refuse_project_folders(folder: &Path) -> Result<(), Error> {
+    for refused in &REFUSED_ENTRIES {
+        // `symlink_metadata`: a link counts too, wherever it points.
+        match std::fs::symlink_metadata(folder.join(refused.name)) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                tracing::warn!(entry = refused.name, "the stat of an entry failed");
+                return Err(folder_failed(
                     Some(error.kind()),
-                    "the matter folder's stat failed",
-                )),
+                    "the matter folder's entry stat failed",
+                ));
+            }
+            Ok(_) => {
+                tracing::warn!(
+                    entry = refused.name,
+                    "a Codex session was refused: the matter folder holds a refused entry"
+                );
+                return Err(Error::refused(refused.code, refused.words));
             }
         }
+    }
+    match std::fs::metadata(folder) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(folder_failed(None, "the matter folder is not a folder")),
         Err(error) => Err(folder_failed(
             Some(error.kind()),
-            "the matter folder's .codex stat failed",
+            "the matter folder's stat failed",
         )),
-        Ok(_) => {
-            tracing::warn!("a Codex session was refused: the matter folder holds a .codex entry");
-            Err(Error::refused(
-                ErrorCode::MatterCodexFolder,
-                "Codex can't work in this matter while its folder holds a \".codex\" folder: \
-                 Codex would load the settings inside it. Rename or remove that \".codex\" \
-                 folder, then try again.",
-            ))
-        }
     }
 }
 
@@ -481,10 +546,10 @@ pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(),
 /// ([`prepare::off_actor`]), after every agent's data-folder refusal
 /// (`agent/data_folder.rs`, which covers every agent's home): the matter folder `stored`
 /// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
-/// the `.codex` refusal, the matter's folder check `check` (`agent/folder_support.rs`: Codex is
-/// refused on a network drive or a drive without permissions), the home made under `data`,
-/// its `rules` removed ([`rules::remove_rules`]), then `config.toml`. The resolved folder
-/// comes back, with the folder check's answer.
+/// the `.codex` and `.agents` refusal ([`refuse_project_folders`]), the matter's folder check
+/// `check` (`agent/folder_support.rs`: Codex is refused on a network drive or a drive without
+/// permissions), the home made under `data`, its `rules` removed ([`rules::remove_rules`]),
+/// then `config.toml`. The resolved folder comes back, with the folder check's answer.
 pub(crate) fn prepare_launch(
     check: &FolderCheck,
     stored: &Path,
@@ -492,7 +557,7 @@ pub(crate) fn prepare_launch(
     home: &Path,
 ) -> Result<(PathBuf, Answer), Error> {
     let folder = crate::agent::session_folder(stored);
-    refuse_codex_folder(&folder)?;
+    refuse_project_folders(&folder)?;
     let support = check.refuse_unsupported(&folder)?;
     make_home(data, home)?;
     rules::remove_rules(home)?;
@@ -505,5 +570,7 @@ pub(crate) mod rules;
 
 #[cfg(test)]
 mod code_mode_tests;
+#[cfg(test)]
+mod project_files_tests;
 #[cfg(test)]
 mod tests;

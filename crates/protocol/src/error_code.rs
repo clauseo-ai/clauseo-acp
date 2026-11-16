@@ -131,6 +131,8 @@ error_codes! {
         be a matter: a drive root, the home folder or a system folder.";
     MatterCodexFolder = "matter.codex_folder", retryable: false, meaning: "The matter folder \
         holds a `.codex` folder, whose settings Codex would load.";
+    MatterAgentsFolder = "matter.agents_folder", retryable: false, meaning: "The matter folder \
+        holds a `.agents` folder, whose skills Codex would offer as its own.";
     MatterFileLocked = "matter.file_locked", retryable: true, meaning: "A file the operation \
         needs is locked by another program, such as an open document.";
     MatterTurnRunning = "matter.turn_running", retryable: true, meaning: "A turn is running in \

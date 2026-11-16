@@ -42,6 +42,7 @@ export type ErrorCode =
   | "matter.folder_permission"
   | "matter.folder_refused"
   | "matter.codex_folder"
+  | "matter.agents_folder"
   | "matter.file_locked"
   | "matter.turn_running"
   | "matter.folder_is_drive"
@@ -199,6 +200,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
     "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
+  // provisional (U3-err-matter.agents_folder): Codex would offer the skills in a matter's .agents folder as its own
+  "matter.agents_folder":
+    'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here.',
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
   // folder PR 2 (approved 2026-11-11): each folder refusal says its reason; a folder nested with a matter, here where

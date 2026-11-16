@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL, SCALE_CLAUDE,
-    STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part, word_count,
+    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_MATTER_FILES, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
+    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part,
+    word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
@@ -26,9 +27,11 @@ const SHARED_MAX: usize = 1800;
 /// legal part, the shell line and "Working at scale".
 const CLAUDE_MAX: usize = 2250;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
-/// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
-/// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-const CODEX_MAX: usize = 2000;
+/// legal part, the offline line, the refusal line, the matter-files line, the shell line and the
+/// built-in skills index. A launch's pack lines come on top, capped by their own budget (decision
+/// record 0040). 2000 until the matter-files line (17 words, 2026-11-16) took the text to 2013;
+/// provisional, for stage E to confirm or cut elsewhere.
+const CODEX_MAX: usize = 2015;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -129,6 +132,7 @@ fn codex_standing_text_budget() {
     for line in [
         CODEX_SHELL_OFFLINE,
         CODEX_REFUSAL,
+        CODEX_MATTER_FILES,
         codex_shell(true).unwrap(),
     ] {
         assert!(text.contains(line.trim()), "{line}");

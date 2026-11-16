@@ -104,6 +104,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxCleaningUp,
             "the sandbox's clean-up after an earlier session isn't finished",
         ),
+        failed(
+            ErrorCode::MatterAgentsFolder,
+            "the matter folder holds a .agents folder",
+        ),
         failed(ErrorCode::BlacklineNoWordTool, "stetdoc is not configured"),
         failed(ErrorCode::BlacklineNotWord, "the path is not a .docx"),
         failed(ErrorCode::BlacklineFailed, "stetdoc compare exited 1"),

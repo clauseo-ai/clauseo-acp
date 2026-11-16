@@ -308,3 +308,31 @@ fn the_claude_meta_names_the_pack_plugin_second() {
         true
     );
 }
+
+/// The line that makes a matter's `SKILL.md` a document excepts "the skills listed below": in
+/// every variant (built-ins, packs, both, neither) it is there, and any Skills index comes
+/// after it.
+#[test]
+fn the_matter_files_line_comes_before_every_skills_index() {
+    use clauseo_profile::instructions::CODEX_MATTER_FILES;
+    let scratch = Scratch::new("index-matter-files");
+    let profile = launch_profile(&scratch);
+    let written = builtin_written(&profile);
+    let packs = packs_written(&scratch, &[2], "Reviews NDAs.");
+    let line = CODEX_MATTER_FILES.trim();
+    assert!(line.ends_with("except the skills listed below."), "{line}");
+    let variants = [
+        (Some(&written), None, true),
+        (None, Some(&packs), true),
+        (Some(&written), Some(&packs), true),
+        (None, None, false),
+    ];
+    for (built, pack, indexed) in variants {
+        let text = codex_text(&profile, built, pack);
+        let at = text.find(line).unwrap_or_else(|| panic!("no line: {text}"));
+        match text.find("## Skills") {
+            Some(skills) => assert!(indexed && at < skills, "{text}"),
+            None => assert!(!indexed, "{text}"),
+        }
+    }
+}

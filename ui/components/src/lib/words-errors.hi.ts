@@ -77,6 +77,9 @@ export const HI = {
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
   "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.":
     "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
+  // provisional (U3-err-matter.agents_folder): Hindi review is the app's
+  'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here.':
+    'इस मामले के फ़ोल्डर में ".agents" नाम का एक फ़ोल्डर है, जिसमें AI टूल के लिए निर्देश हैं। Clauseo, ChatGPT को किसी मामले की फ़ाइलों में रखे निर्देशों का पालन नहीं करने देता। ".agents" फ़ोल्डर का नाम बदलें या उसे हटाएँ, और ChatGPT यहाँ काम कर सकता है।',
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",

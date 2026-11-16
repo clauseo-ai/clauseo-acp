@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     config, config_on, guard_trusted, home_config, launch_env, make_home, merge_add_only,
-    prepare_launch, refuse_codex_folder, write_home_config,
+    prepare_launch, refuse_project_folders, write_home_config,
 };
 use crate::write;
 
@@ -228,11 +228,11 @@ fn a_codex_entry_of_any_kind_refuses_the_folder() {
     let root = scratch("refuse");
     let clean = root.join("clean");
     write::create_dir_all(&clean).unwrap();
-    assert!(refuse_codex_folder(&clean).is_ok());
+    assert!(refuse_project_folders(&clean).is_ok());
 
     let with_folder = root.join("folder");
     write::create_dir_all(&with_folder.join(".codex")).unwrap();
-    let error = refuse_codex_folder(&with_folder).unwrap_err();
+    let error = refuse_project_folders(&with_folder).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
     assert!(error.to_string().contains("Rename or remove"), "{error}");
     // No path in the words the lawyer may see.
@@ -244,7 +244,7 @@ fn a_codex_entry_of_any_kind_refuses_the_folder() {
     let with_file = root.join("file");
     write::create_dir_all(&with_file).unwrap();
     write::write_file(&with_file.join(".codex"), b"").unwrap();
-    assert!(refuse_codex_folder(&with_file).is_err());
+    assert!(refuse_project_folders(&with_file).is_err());
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -259,7 +259,7 @@ fn a_stat_that_fails_fails_closed_as_folder_missing() {
     write::create_dir_all(&locked).unwrap();
     write::set_mode(&locked, 0o000).unwrap();
     let as_root = std::fs::read_dir(&locked).is_ok();
-    let refused = refuse_codex_folder(&locked);
+    let refused = refuse_project_folders(&locked);
     write::set_mode(&locked, 0o700).unwrap();
     write::remove_dir_all(&root).unwrap();
     if as_root {
@@ -279,7 +279,7 @@ fn a_linked_matter_is_checked_where_it_points() {
     write::symlink(&real, &link).unwrap();
     let resolved = crate::agent::session_folder(&link);
     assert_eq!(resolved, dunce::canonicalize(&real).unwrap());
-    assert!(refuse_codex_folder(&resolved).is_err());
+    assert!(refuse_project_folders(&resolved).is_err());
     // A path that does not resolve stays as stored.
     let gone = root.join("gone");
     assert_eq!(crate::agent::session_folder(&gone), gone);
@@ -421,8 +421,9 @@ fn prepare_launch_checks_then_makes_the_home() {
     write::remove_dir_all(&root).unwrap();
 }
 
-/// The home's `config.toml`: the header, then each override as a TOML dotted key, and nothing
-/// else (no hooks table, whatever the seam gives: hooks go only through `CODEX_CONFIG`).
+/// The home's `config.toml`: the header, then each override as a TOML dotted key, the project
+/// files' two last, and nothing else (no hooks table, whatever the seam gives: hooks go only
+/// through `CODEX_CONFIG`).
 #[test]
 fn home_config_holds_only_the_switches() {
     let text = home_config();
@@ -443,6 +444,8 @@ fn home_config_holds_only_the_switches() {
             "skills.include_instructions = false",
             "cli_auth_credentials_store = \"file\"",
             "shell_environment_policy.ignore_default_excludes = false",
+            "project_doc_max_bytes = 0",
+            "project_root_markers = []",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");

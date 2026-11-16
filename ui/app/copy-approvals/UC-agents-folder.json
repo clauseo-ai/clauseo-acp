@@ -1,0 +1,13 @@
+{
+  "U3-err-matter.agents_folder": {
+    "en": "This matter's folder holds a folder named \".agents\", with instructions for AI tools. Clauseo doesn't let ChatGPT follow instructions kept in a matter's files. Rename or remove the \".agents\" folder, and ChatGPT can work here.",
+    "hi": "इस मामले के फ़ोल्डर में \".agents\" नाम का एक फ़ोल्डर है, जिसमें AI टूल के लिए निर्देश हैं। Clauseo, ChatGPT को किसी मामले की फ़ाइलों में रखे निर्देशों का पालन नहीं करने देता। \".agents\" फ़ोल्डर का नाम बदलें या उसे हटाएँ, और ChatGPT यहाँ काम कर सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host (agents-fix PR; provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (words for #1159, via stage B; provisional)",
+    "note": "Refusal of a ChatGPT (Codex) send in a matter whose folder holds a .agents folder (matter.agents_folder, crates/host/src/agent/codex.rs REFUSED_ENTRIES)."
+  }
+}
