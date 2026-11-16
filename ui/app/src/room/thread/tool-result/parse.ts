@@ -3,6 +3,8 @@
 // face and whether it is an error, the pictures it draws; and the caps the block draws it by. Nothing here runs before the lawyer presses
 // "Show the result": the module rides in the result's lazy chunk.
 
+import { drawable } from "./picture-size.ts";
+
 /** The most text read or shown: 64 KB (an inline output is at most 4 KB, a blob is read up to this). */
 export const MAX_TEXT = 65_536;
 /** The most lines shown. */
@@ -58,14 +60,14 @@ function parsed(text: string): Json | undefined {
   }
 }
 
-/** An image block's picture when it is drawn: a raster type and base64 data. */
+/** An image block's picture when it is drawn: a raster type, base64 data, and a header of that type whose pixel size
+ * is within the caps (picture-size.ts), so a small file that decodes to a huge bitmap is counted, not drawn. */
 function pictureOf(block: { [key: string]: Json }): Picture | null {
   const mime = block["mimeType"];
   const data = block["data"];
   if (typeof mime !== "string" || typeof data !== "string") return null;
-  return DRAWN.has(mime.toLowerCase()) && BASE64.test(data)
-    ? { mime: mime.toLowerCase(), data }
-    : null;
+  const type = mime.toLowerCase();
+  return DRAWN.has(type) && BASE64.test(data) && drawable(type, data) ? { mime: type, data } : null;
 }
 
 /** An MCP CallToolResult's text blocks, in order, a blank line between them, its raster pictures drawn, and the other

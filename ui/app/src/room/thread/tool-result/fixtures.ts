@@ -66,6 +66,9 @@ export const MCP_MIXED = opaque({
 /** A one-pixel PNG, as a screenshot's base64 comes. */
 export const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+/** Base64 that reads as a 1×1 PNG's header (its signature and IHDR, the first 24 bytes), padded to `n` characters:
+ * not a real picture past its header. */
+export const pngOf = (n: number) => PNG.slice(0, 32) + "A".repeat(n - 32);
 /** MCP text and a screenshot, small enough to come inline. */
 export const MCP_SHOT = opaque({
   content: [text("Took a screenshot."), { type: "image", data: PNG, mimeType: "image/png" }],
@@ -101,9 +104,9 @@ export const BLOB_REFUSED = blobOf("b3".repeat(32), 20_000);
 export const BLOB_TEXT = JSON.stringify({ result: { content: [text(JUDGMENTS)] }, error: null });
 
 /** A full-page screenshot's result, as agent-browser's comes through codex-acp: 1.5 MB, past 64 KB and past one 1 MB
- * read, its image block in the preview. Its base64 is padding, not a real picture. */
+ * read, its image block in the preview. Its base64 is a PNG header and padding, not a real picture. */
 export const BLOB_SHOT_TEXT = JSON.stringify({
-  result: { content: [{ type: "image", data: "A".repeat(1_500_000), mimeType: "image/png" }] },
+  result: { content: [{ type: "image", data: pngOf(1_500_000), mimeType: "image/png" }] },
   error: null,
 });
 export const BLOB_SHOT: BlobRef = {
@@ -112,8 +115,6 @@ export const BLOB_SHOT: BlobRef = {
   preview: BLOB_SHOT_TEXT.slice(0, 512),
 };
 
-/** Base64 that reads as a PNG's (its signature), padded to `n` characters: not a real picture. */
-const pngOf = (n: number) => PNG.slice(0, 12) + "A".repeat(n - 12);
 const blobFor = (hash: string, text: string): BlobRef => ({
   hash,
   size_bytes: text.length,

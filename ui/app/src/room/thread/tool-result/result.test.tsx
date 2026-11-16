@@ -349,7 +349,7 @@ test("a screenshot is drawn as a picture scaled to the column, inline or from a 
   ]);
   const big = m.block(1)!.querySelectorAll<HTMLImageElement>('[data-testid="tool-result-image"]');
   expect(big).toHaveLength(1);
-  expect(big[0]!.getAttribute("src")).toBe(`data:image/png;base64,${"A".repeat(1_500_000)}`);
+  expect(big[0]!.getAttribute("src")).toBe(`data:image/png;base64,${F.pngOf(1_500_000)}`);
   expect(big[0]!.className).toBe("step-row-result-image");
   // no words: neither the too-large line nor a picture counted as not shown
   expect(m.block(1)!.textContent).toBe("");

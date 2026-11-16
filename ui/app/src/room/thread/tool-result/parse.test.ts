@@ -14,6 +14,7 @@ import {
   NULL,
   OPAQUE_ERROR,
   PNG,
+  pngOf,
   QUOTED,
   QUOTED_OBJECT,
 } from "./fixtures.ts";
@@ -49,11 +50,16 @@ test("a raster picture (a screenshot) is drawn; one of another type or with data
   });
   const of = (block: object) =>
     readOutput(JSON.stringify({ result: { content: [block] }, error: null }));
-  for (const mime of ["image/png", "IMAGE/JPEG", "image/gif", "image/webp"])
+  // the type is read case-blind; each format's header is picture-size.test.ts's
+  for (const mime of ["image/png", "IMAGE/PNG"])
     expect(of({ type: "image", data: PNG, mimeType: mime })!.images).toEqual([
-      { mime: mime.toLowerCase(), data: PNG },
+      { mime: "image/png", data: PNG },
     ]);
   for (const bad of [
+    // a PNG declared as a JPEG, GIF or WebP: its header isn't the declared type's
+    { type: "image", data: PNG, mimeType: "image/jpeg" },
+    { type: "image", data: PNG, mimeType: "image/gif" },
+    { type: "image", data: PNG, mimeType: "image/webp" },
     { type: "image", data: PNG, mimeType: "image/svg+xml" },
     { type: "image", data: '"><script>', mimeType: "image/png" },
     { type: "image", data: "", mimeType: "image/png" },
@@ -63,7 +69,7 @@ test("a raster picture (a screenshot) is drawn; one of another type or with data
     expect(of(bad)).toMatchObject({ images: [], pictures: 1 });
   // a blob read whole for its picture is read past MAX_TEXT
   const whole = JSON.stringify({
-    content: [{ type: "image", data: "A".repeat(MAX_TEXT * 2), mimeType: "image/png" }],
+    content: [{ type: "image", data: pngOf(MAX_TEXT * 2), mimeType: "image/png" }],
   });
   expect(readOutput(whole)).toEqual(plain("code", whole.slice(0, MAX_TEXT)));
   expect(readOutput(whole, whole.length)!.images[0]!.data).toHaveLength(MAX_TEXT * 2);
