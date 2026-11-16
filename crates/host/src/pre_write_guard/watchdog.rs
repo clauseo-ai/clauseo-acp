@@ -19,8 +19,13 @@
 //! The watchdog takes no clock reading of its own (the core bans `Instant::now`): it waits on a
 //! channel no one sends on, with `recv_timeout`. The guard ending first ends the thread with
 //! the process. When the thread cannot start, the guard refuses at once: nothing would enforce
-//! the deadline. Not covered: a stderr pipe the agent never drains (the line's write would
-//! block), and a guard killed from outside.
+//! the deadline. Every one of these lines starts with [`UNCHECKED`]; the exit is 2 for both
+//! agents. Not covered: a stderr pipe the agent never drains (the line's write would block); a
+//! guard killed from outside; and a guard that passed the launch's self-test
+//! (`guard_selftest.rs`) but later cannot start within the agents' hook timeout of 600 s
+//! (`agent::loads::GUARD_TIMEOUT_SECONDS`, Codex's `CODEX_GUARD_TIMEOUT_SECONDS`), as the
+//! watchdog runs only once the guard runs: bounded by that timeout and the self-test at each
+//! launch.
 //!
 //! Merging with the file-write guard (branch `file-write-guard`, `file_fence::guard::arm`, which
 //! sets the same kind of panic hook and its fence's own 2 s watch): keep one panic hook, this
@@ -34,19 +39,21 @@ use std::time::Duration;
 /// slow laptop); 30 s for now (the module doc says why that is safe on both sides).
 pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 
-/// The stderr line when the watchdog fires.
-pub(crate) const LATE: &str = "Clauseo's pre-write guard did not finish checking this tool \
-     within 30 seconds, so the tool was refused. Try it again; if it is refused again, tell the \
-     lawyer that Clauseo's guard is not answering.";
+/// The first sentence of every refusal the guard makes without an answer of its own, for both
+/// agents (ps-quote's unchecked refusals use the same; whichever merges second keeps one).
+pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
-/// The stderr line when the guard panics.
-pub(crate) const BROKEN: &str = "Clauseo's pre-write guard failed while checking this tool, so \
-     the tool was refused. Try it again; if it is refused again, tell the lawyer that Clauseo's \
-     guard is failing.";
+/// The stderr line when the watchdog fires: [`UNCHECKED`], then why.
+pub(crate) const LATE: &str =
+    "Clauseo could not check this step, so it did not run. The check took over 30 seconds.";
 
-/// The stderr line when the watchdog's thread cannot start.
-pub(crate) const NO_WATCHDOG: &str = "Clauseo's pre-write guard could not start its time \
-     limit, so the tool was refused. Try it again.";
+/// The stderr line when the guard panics: [`UNCHECKED`], then why.
+pub(crate) const BROKEN: &str =
+    "Clauseo could not check this step, so it did not run. The check failed.";
+
+/// The stderr line when the watchdog's thread cannot start: [`UNCHECKED`], then why.
+pub(crate) const NO_WATCHDOG: &str =
+    "Clauseo could not check this step, so it did not run. The check's time limit did not start.";
 
 /// Arms the panic hook and the watchdog (the module doc). Called once, first, by the real entry.
 pub(super) fn arm() {

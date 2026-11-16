@@ -1591,7 +1591,10 @@ Limits of this head, stated:
   `.claude/settings*.json` (ignored under `["user"]`, above), nor in-memory grants: a skill's
   `allowed-tools` and approvals given during the session.
 - **The guard proves itself.** The guard's own watchdog and panic hook refuse with exit 2 and
-  a reason (both agents), and each Claude launch runs the guard's self-test first (above).
+  a line starting "Clauseo could not check this step, so it did not run." (both agents), and
+  each Claude launch runs the guard's self-test first (above). Not covered: a guard that passed
+  the self-test but later cannot start within the agents' 600 s hook timeout
+  (`GUARD_TIMEOUT_SECONDS`); bounded by that timeout and the self-test at each launch.
 - **The flag settings' schema.** The schema test checks the flag settings Clauseo emits against
   the pinned SDK's schema, and the `SessionStart` canary (above) confirms that each session
   loaded them.

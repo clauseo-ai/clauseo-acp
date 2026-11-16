@@ -143,8 +143,7 @@ pub(super) struct Agent {
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
-    /// Its launch variables that later checks read (`launch::LaunchVars`): those holding a path,
-    /// for the data fence, and its own values a policy's `env` must leave as they are.
+    /// Its launch variables that later checks read (`launch::LaunchVars`).
     pub(super) vars: launch::LaunchVars,
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.

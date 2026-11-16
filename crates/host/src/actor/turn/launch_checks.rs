@@ -295,7 +295,6 @@ pub(super) fn prepare(
 ) {
     tracing::info!(target: LIFECYCLE, %thread, "launch prep started");
     let id = agents::next_agent_id();
-    let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
     let LaunchPaths {
@@ -307,7 +306,7 @@ pub(super) fn prepare(
         skills,
         packs,
         claims,
-    } = match paths {
+    } = match launch_paths(actor, thread, id) {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);

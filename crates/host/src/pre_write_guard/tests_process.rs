@@ -15,7 +15,7 @@ use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, Spawn
 use futures::future::{Either, select};
 use futures::{AsyncReadExt as _, AsyncWriteExt as _};
 
-use super::watchdog::{BROKEN, LATE, PLANTED, TEST_DEADLINE_MS};
+use super::watchdog::{BROKEN, LATE, NO_WATCHDOG, PLANTED, TEST_DEADLINE_MS, UNCHECKED};
 use crate::clock::{Clock, ProcessTimer, SystemClock};
 
 /// The variable that makes [`guard_child`] run the guard.
@@ -112,4 +112,14 @@ fn the_guard_process_past_its_deadline_exits_2_with_a_reason() {
     let (code, errors) = child(&refused_input(), Some("hang"));
     assert_eq!(code, Some(super::DENY), "{errors}");
     assert!(errors.contains(LATE), "{errors}");
+}
+
+#[test]
+fn every_refusal_without_an_answer_starts_with_the_shared_sentence() {
+    for line in [LATE, BROKEN, NO_WATCHDOG] {
+        let reason = line
+            .strip_prefix(UNCHECKED)
+            .unwrap_or_else(|| panic!("{line}"));
+        assert!(reason.starts_with(' ') && reason.len() < 80, "{line}");
+    }
 }
