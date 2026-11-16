@@ -282,10 +282,6 @@ mod stetdoc_args;
 mod testing;
 mod undo_note;
 mod update;
-#[expect(
-    dead_code,
-    reason = "the backend is wired to its listener and launches by the transport, the next change"
-)]
 mod versions;
 mod view;
 mod window;

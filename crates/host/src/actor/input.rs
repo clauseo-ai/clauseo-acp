@@ -227,10 +227,6 @@ pub(crate) enum Input {
         result: Result<bool, clauseo_store::Error>,
     },
     /// A version-history read for `matter`'s thread, from a session's tool (`versions.rs`).
-    #[expect(
-        dead_code,
-        reason = "the transport that builds `versions::HostSource` comes in the next change"
-    )]
     MatterRead {
         matter: MatterId,
         read: crate::versions::MatterRead,
