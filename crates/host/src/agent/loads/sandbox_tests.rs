@@ -155,10 +155,11 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "failIfUnavailable": true,
             "allowAppleEvents": false,
             "network": {
-                "allowedDomains": ["*"],
+                "allowedDomains": super::sandbox_network::allowed_domains(&[]),
                 "deniedDomains": [
                     "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]",
                 ],
+                "strictAllowlist": true,
             },
             "filesystem": {
                 "allowWrite": [
@@ -409,6 +410,14 @@ fn forced_ask_still_asks_inside_the_sandbox() {
     assert_eq!(object["enabled"], true);
     assert_eq!(object["allowUnsandboxedCommands"], false);
     assert_eq!(object["filesystem"]["denyRead"][0], "~/");
+    // An unlisted host is a card, not a refusal (decision record 0065).
+    assert_eq!(
+        object["network"],
+        json!({
+            "allowedDomains": super::sandbox_network::allowed_domains(&[]),
+            "deniedDomains": ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]"],
+        })
+    );
 }
 
 /// No command breaks out: the model's `dangerouslyDisableSandbox` is ignored, a sandbox that

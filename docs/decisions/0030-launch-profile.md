@@ -1278,9 +1278,8 @@ this record and firm-it §8.
     the key Claude Code's own (`claude_project_key`, cut and hashed past 200 characters):
     `WebFetch` keeps the files it fetches there. The transcripts and the memory beside them
     stay denied.
-  - **Network:** `allowedDomains: ["*"]` (2026-11-11), so a sandboxed command (`curl` of a
-    court PDF) never asks for a host; stage C downloaded a real judgment PDF that way in auto
-    mode. `deniedDomains` holds `localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` and
+  - **Network:** the seeded sites, strict in auto mode (decision record 0065, which replaced
+    the `allowedDomains: ["*"]` of 2026-11-11). `deniedDomains` holds `localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` and
     `[::]`: the browser's debugging port and agent-browser's daemon listen on loopback, and
     Claude Code's proxy, which runs outside the sandbox, would otherwise reach them for a
     sandboxed command. The any-address forms land on loopback too. A direct loopback connect is
@@ -1394,10 +1393,9 @@ this record and firm-it §8.
     can read the logs of.
   - **Scope.** Text the agent puts in a URL to a seeded site reaches that site's operator (up to
     2,000 characters per fetch, any number of fetches); this layer limits where fetches go, not
-    what they carry. It covers `WebFetch` only: on macOS today the sandboxed shell reaches
-    every host without asking (`allowedDomains: ["*"]` with auto-allow, "Claude's sandbox
-    (macOS)" above); the shell's reach is the subject of the shell-network change, decided for
-    launch on 16 Nov: a strict allowlist in auto mode, plus the Windows belt in the shell scan.
+    what they carry. It covers `WebFetch` only: the sandboxed shell is held to the same seeded
+    sites by its own allowlist, strict in auto mode, plus the Windows belt in the shell scan
+    (decision record 0065).
     Claude Code also
     fetches its own short list of developer-documentation hosts without asking ("Preapproved
     host", about 100 hosts such as docs.python.org); Clauseo doesn't set

@@ -50,9 +50,9 @@
 //!   program Claude wrote unsandboxed, and quoting (`-q "upload"`, `e"v"al`, a tab) would run
 //!   unsandboxed past the ask rules. Clauseo's own shim, named by its absolute path, is the
 //!   after-launch way back (decision record 0030).
-//! - `network.allowedDomains: ["*"]`: every host, so a sandboxed command (`curl` of a court PDF)
-//!   never asks for a domain; Claude Code 2.1.293 accepts it (stage C, 2026-11-11: a real
-//!   judgment PDF downloaded with no prompt and no certificate error in auto mode).
+//! - `network` ([`super::sandbox_network`], decision record 0065): the seeded legal sites and
+//!   the hosts the shell needs, here without `strictAllowlist` or kept sites; the launch then
+//!   puts in the object for its mode (`profile::claude_options`).
 //!   `network.deniedDomains` keeps loopback out even through Claude Code's own proxy, which runs
 //!   outside the sandbox: the browser's debugging port and agent-browser's daemon listen there.
 //!   A direct loopback connect is refused by the sandbox already (stage C, the same day).
@@ -323,10 +323,7 @@ impl ClaudeSandbox {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": true,
             "allowAppleEvents": false,
-            "network": {
-                "allowedDomains": ["*"],
-                "deniedDomains": DENIED_DOMAINS,
-            },
+            "network": super::sandbox_network::network(super::sandbox_network::Strict::Off, &[]),
             "filesystem": {
                 "allowWrite": self.allow_write,
                 "denyWrite": self.deny_write,

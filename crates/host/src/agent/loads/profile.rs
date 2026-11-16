@@ -268,6 +268,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
     if let Some(sandbox) = keys.sandbox {
         super::sandbox::sandbox_settings(&mut settings, sandbox);
+        super::sandbox_network::launch_network(&mut settings, keys.forced_ask, &[]);
     }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);

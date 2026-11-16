@@ -153,10 +153,9 @@ any ACP message, including permission requests with misleading text.
   until stage B's per-matter store remembers it). Limits: this layer covers `WebFetch` only. The
   fetch runs in the Claude process, outside the Bash sandbox and the guard hook, so in auto mode
   that check is the only thing between a poisoned document and a `WebFetch` that carries matter
-  text in its URL. The sandboxed shell is a separate path: on macOS today it reaches every host
-  without asking (`allowedDomains: ["*"]` with auto-allow); its reach is the subject of the
-  shell-network change, decided for launch on 16 Nov (a strict allowlist in auto mode, plus the
-  Windows belt in the shell scan). Claude Code also fetches its own short list of
+  text in its URL. The sandboxed shell is a separate path, held to the seeded sites with a strict
+  allowlist in auto mode, plus the Windows belt in the shell scan ("Claude's shell network"
+  below, [0065](decisions/0065-claude-shell-network.md)). Claude Code also fetches its own short list of
   developer-documentation hosts without asking ("Preapproved host", about 100 hosts such as
   docs.python.org; Clauseo doesn't set `CLAUDE_CODE_EVAL_CONFINED`). The drop of open fetch rules
   covers the hook's rules only, not other settings sources (managed settings can allow anything
