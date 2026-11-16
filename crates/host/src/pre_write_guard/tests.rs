@@ -280,7 +280,7 @@ fn codex_patches_that_change_a_held_file_are_refused_and_adding_a_new_one_is_not
 /// clauseo-acp-private#162: input it cannot read fails open (exit 0, stdout untouched: `run` has
 /// no stdout), with one stderr line naming why and no input content.
 #[test]
-fn input_it_cannot_read_lets_the_tool_go_with_one_line_saying_why() {
+fn input_it_cannot_read_lets_claudes_tool_go_and_refuses_codexs() {
     let fx = Fixture::new("malformed");
     let contract = fx.path("m/Contract.docx");
     let held = fx
@@ -293,6 +293,10 @@ fn input_it_cannot_read_lets_the_tool_go_with_one_line_saying_why() {
     let no_folder = ignored("it has no absolute cwd and no --matter was given");
     let no_path = ignored("its tool_input has no file_path, notebook_path or command string");
     let no_command = ignored("its tool_input has no command string or list");
+    // Input not read as a hook object at all: Claude's hook (`--matter`) lets the tool go with
+    // the line; Codex's (no `--matter`), with a record or without, refuses with the shared line.
+    let matter = fx.path("m");
+    let unchecked = format!("{}\n", super::UNCHECKED);
     for (input, line) in [
         (b"".to_vec(), ignored("stdin was empty")),
         (b" \n\t".to_vec(), ignored("stdin was empty")),
@@ -300,6 +304,16 @@ fn input_it_cannot_read_lets_the_tool_go_with_one_line_saying_why() {
         (b"not json".to_vec(), not_json.clone()),
         (b"{\"tool_name\": \"Write\"".to_vec(), not_json.clone()),
         (vec![0xff, 0xfe, b'{'], not_json),
+    ] {
+        let shown = String::from_utf8_lossy(&input).into_owned();
+        assert_eq!(
+            guard_with(&["--matter", matter.as_str()], &input),
+            line,
+            "{shown}"
+        );
+        assert_eq!(guard(&input), unchecked, "{shown}");
+    }
+    for (input, line) in [
         (b"[]".to_vec(), no_folder.clone()),
         (bytes(json!({})), no_folder.clone()),
         // No cwd, a relative cwd, a cwd that is not a string.
@@ -345,20 +359,34 @@ fn input_it_cannot_read_lets_the_tool_go_with_one_line_saying_why() {
     );
 }
 
-/// Stdin that fails to read is ignored the same way.
+/// Stdin that fails to read: Claude's hook lets the tool go with the line, Codex's refuses.
 #[test]
-fn stdin_that_fails_to_read_lets_the_tool_go_with_one_line() {
+fn stdin_that_fails_to_read_lets_claudes_tool_go_and_refuses_codexs() {
     struct Broken;
     impl std::io::Read for Broken {
         fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
             Err(std::io::Error::other("pipe closed"))
         }
     }
+    let matter: Vec<OsString> = vec!["--matter".into(), std::env::temp_dir().into()];
     let mut errors = Vec::new();
-    assert_eq!(run_timed(&[], Broken, (Vec::new(), &mut errors), false), 0);
+    assert_eq!(
+        run_timed(&matter, Broken, (Vec::new(), &mut errors), false),
+        0
+    );
     assert_eq!(
         String::from_utf8(errors).unwrap(),
         ignored("stdin could not be read")
+    );
+    // As Codex's hook (no `--matter`), the same stdin refuses with the shared line.
+    let mut errors = Vec::new();
+    assert_eq!(
+        run_timed(&[], Broken, (Vec::new(), &mut errors), false),
+        DENY
+    );
+    assert_eq!(
+        String::from_utf8(errors).unwrap(),
+        format!("{}\n", super::UNCHECKED)
     );
 }
 

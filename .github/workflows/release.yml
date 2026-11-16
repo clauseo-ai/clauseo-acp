@@ -1009,6 +1009,21 @@ jobs:
           node .github/scripts/pe-crt-imports.mjs "$RELEASE_DIR/Clauseo.exe" \
             crates/desktop/binaries/*-"$TARGET".exe ${dlls[@]+"${dlls[@]}"}
 
+      # Codex's hook line runs clauseo-guard under PowerShell, which waits only for a console
+      # program (crates/host/src/bin/clauseo-guard.rs): the built sidecar, as sidecars.mjs placed it,
+      # must have PE Subsystem 3, and the overlay must list it for the installers.
+      - name: Check that clauseo-guard is a console program the installers take
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          node .github/scripts/pe-subsystem.mjs --console "crates/desktop/binaries/clauseo-guard-$TARGET.exe"
+          node -e '
+            const overlay = require("./crates/desktop/release/sidecars.generated.json");
+            if (!overlay.bundle.externalBin.includes("binaries/clauseo-guard")) {
+              console.log("::error::the overlay lists no binaries/clauseo-guard in externalBin");
+              process.exit(1);
+            }'
+
       # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
       # sign-windows to sign and bundle. Paths are kept from the repo root, so the download puts
       # each back where it was.
@@ -1317,6 +1332,8 @@ jobs:
             rm -rf "$dir"
             "$sevenzip" x -y "-o$dir" "$installer" > /dev/null
             node .github/scripts/pe-crt-imports.mjs "$installer" "$dir"
+            # The installer carries clauseo-guard.exe, a console program (pe-subsystem.mjs).
+            node .github/scripts/pe-subsystem.mjs --holds "$dir" clauseo-guard.exe
           done
 
       - name: SignPath, the installers (S20a)
