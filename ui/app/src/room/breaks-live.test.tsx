@@ -4,7 +4,8 @@
 // break with no line; with H10 faked, Restart for the codes it mends, hidden during a turn, dispatching restart_agent.
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { assertWarm, WARM_MS, warmUp } from "@clauseo/components/lib/warm-up.ts";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import {
   agentText,
   header,
@@ -16,6 +17,7 @@ import {
   uuid,
 } from "../testing/stream-script.ts";
 import type { ErrorCode, ViewEntry } from "../transport/protocol.ts";
+import { loadThread } from "./thread/chunk.ts";
 import { stamp } from "./thread/clock.ts";
 import {
   defaultOutcome,
@@ -28,8 +30,16 @@ import {
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
 
+// the thread's chunk, which every mount waits on: loaded once before the first test, under its own budget (warm-up.ts),
+// so the first test's bound measures the test and not a cold load
+let warmFailure: string | null = null;
+beforeAll(async () => {
+  warmFailure = await warmUp("the thread's chunk", loadThread);
+}, WARM_MS + 5_000);
+
 let h: Harness | null = null;
 beforeEach(() => {
+  assertWarm(warmFailure);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
