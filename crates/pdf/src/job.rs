@@ -1,9 +1,12 @@
 //! Windows only: the interpreter in a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so
-//! killing `pdftoppm.exe` or `pdfinfo.exe` (Claude Code's 120 s timeout) ends `python.exe` too:
-//! the job's only handle is the launcher's, and Windows closes it however the launcher ends.
+//! killing `pdftoppm.exe`, `pdfinfo.exe` or `pdftotext.exe` (Claude Code's 120 s timeout) ends
+//! `python.exe` too, and the tesseract processes pdftotext's script starts, which are in the job
+//! as its children: the job's only handle is the launcher's, and Windows closes it however the
+//! launcher ends.
 //!
 //! The child goes into the job right after it starts (std's `Command` cannot start it
-//! suspended); the interpreter starts no process of its own, so nothing escapes in that moment.
+//! suspended). pdftoppm's and pdfinfo's script starts no process; pdftotext's starts tesseract
+//! only after it has loaded and read the PDF, long after that moment, so nothing escapes it.
 //! The calls are those of `clauseo-mcp`'s `browser_guard/job.rs`, repeated for a std child.
 #![expect(
     unsafe_code,

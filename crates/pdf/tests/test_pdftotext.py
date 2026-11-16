@@ -54,6 +54,12 @@ if not ok:
     sys.stderr.write("broken rules: %r\n" % (args,))
     sys.exit(3)
 width = data.split()[1].decode()
+if os.environ.get("FAKE_PIDS"):
+    with open(os.environ["FAKE_PIDS"], "a") as pids:
+        pids.write("%d\n" % os.getpid())
+if width == os.environ.get("FAKE_FAIL_WIDTH"):
+    sys.stderr.write("pixReadMemTiff: function not present\nError: page broke\n")
+    sys.exit(1)
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 hindi = os.environ.get("FAKE_HINDI") == "1" and "hin" in args[3]
 with open(os.environ["FAKE_LOG"], "a") as log:
@@ -256,7 +262,7 @@ class PdfToText(unittest.TestCase):
         self.assertTrue(1 <= len(first) < 5, first)
         marker = out.split("\f")[-1]
         self.assertRegex(marker, r"^\[pages? [0-9, -]+ of Bundle\.pdf: not yet recognised; OCR "
-                         r"stops after 2 minutes per run\. Run the same command again to "
+                         r"stops after 1 seconds per run\. Run the same command again to "
                          r"continue, or use -f/-l for the pages you need\.\]\n$")
         self.assertIn(marker.strip(), err)
         self.assertIn("not yet read", self.mirror("Bundle.pdf"))
@@ -401,6 +407,117 @@ class PdfToText(unittest.TestCase):
     def test_the_script_parses(self):
         with open(SCRIPT, encoding="utf-8") as file:
             ast.parse(file.read())
+
+    def test_a_slow_engine_is_stopped_inside_the_budget(self):
+        self.pdf([("blank", 200), ("blank", 210)])
+        began = time.monotonic()
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_BUDGET=2, FAKE_SLEEP=60)
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertEqual(code, 0, err)
+        self.assertIn("[pages 1-2 of doc.pdf: not yet recognised", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_failed_page_is_named_and_the_others_are_kept(self):
+        self.pdf([("blank", 200), ("blank", 210), ("blank", 220)])
+        code, out, err = self.run_tool("doc.pdf", "-", FAKE_FAIL_WIDTH=876, TEST_WORKERS=1)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.count("recognised words"), 2)
+        self.assertIn("[page 2 of doc.pdf: OCR failed (tesseract: Error: page broke); run the "
+                      "same command again to retry, or check the page image.]", out)
+        self.assertNotIn("not yet recognised", out)
+        code, out, _ = self.run_tool("doc.pdf", "-")
+        self.assertEqual(out.count("recognised words"), 3)
+        self.assertEqual(len(self.calls()), 3)
+
+    @unittest.skipUnless(hasattr(os, "kill") and os.name != "nt", "Unix signals")
+    def test_sigterm_leaves_no_tesseract_behind_in_the_probe_or_the_workers(self):
+        import signal
+
+        pids = os.path.join(self.dir, "pids")
+        self.pdf([("blank", 200 + 10 * n) for n in range(3)])
+        # First the language probe (page 1 of a fresh document, alone), then two workers (pages
+        # 2-3, once page 1 has decided the languages).
+        for args, want in ((("-l", "1"), 1), (("-f", "2"), 2)):
+            proc = self.start(*args, "doc.pdf", "-", FAKE_SLEEP=60, FAKE_PIDS=pids,
+                              TEST_WORKERS=2)
+            started = time.monotonic()
+            while time.monotonic() - started < 30:
+                if os.path.exists(pids):
+                    with open(pids) as file:
+                        if len(file.read().split()) >= want:
+                            break
+                time.sleep(0.05)
+            with open(pids) as file:
+                children = [int(p) for p in file.read().split()]
+            self.assertEqual(len(children), want)
+            proc.send_signal(signal.SIGTERM)
+            proc.communicate(timeout=30)
+            self.assertEqual(proc.returncode, 130)
+            for pid in children:
+                for _ in range(100):
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail(f"tesseract {pid} outlived pdftotext")
+            os.remove(pids)
+            if want == 1:
+                self.assertEqual(self.run_tool("-l", "1", "doc.pdf", "-")[0], 0)
+
+    def test_runtime_finds_tesseract_beside_its_own_interpreter(self):
+        runtime = script().runtime
+        root = os.path.join(self.dir, "clauseo-python-3.13.18-c4")
+        with self.subTest("macOS"):
+            os.makedirs(os.path.join(root, "bin"))
+            with open(os.path.join(root, "clauseo-python.json"), "w") as file:
+                json.dump({"schema": 1, "archive": "clauseo-python-c4-mac.tar.gz"}, file)
+            got = runtime(os.path.join(root, "bin", "python3"), windows=False)
+            self.assertEqual(got, (os.path.join(root, "bin", "tesseract"),
+                                   os.path.join(root, "bin", "tessdata"),
+                                   "clauseo-python-c4-mac.tar.gz"))
+        with self.subTest("Windows"):
+            got = runtime(os.path.join(root, "python.exe"), windows=True)
+            self.assertEqual(got, (os.path.join(root, "clauseo-bin", "tesseract.exe"),
+                                   os.path.join(root, "clauseo-bin", "tessdata"),
+                                   "clauseo-python-c4-mac.tar.gz"))
+        with self.subTest("no receipt"):
+            got = runtime(os.path.join(self.dir, "bin", "python3"), windows=False)
+            self.assertEqual(got[2], "?")
+
+    @unittest.skipUnless(os.name != "nt", "a symlinked interpreter")
+    def test_the_shipped_script_runs_the_tesseract_in_its_runtime(self):
+        # No harness: the script as shipped, run by an interpreter linked into a runtime-shaped
+        # folder whose bin/ holds the fake tesseract and tessdata/.
+        root = os.path.join(self.dir, "rt")
+        os.makedirs(os.path.join(root, "bin", "tessdata"))
+        os.symlink(sys.executable, os.path.join(root, "bin", "python3"))
+        os.symlink(self.fake, os.path.join(root, "bin", "tesseract"))
+        with open(os.path.join(root, "clauseo-python.json"), "w") as file:
+            json.dump({"schema": 1, "archive": "rt-test"}, file)
+        self.pdf([("blank", 200)])
+        done = subprocess.run([os.path.join(root, "bin", "python3"), SCRIPT, "pdftotext",
+                               "doc.pdf", "-"], cwd=self.matter, env=self.env(),
+                              capture_output=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.decode(), "recognised words w834\n\f")
+        self.assertEqual(self.calls(), ["eng+hin 834"])
+        [folder] = os.listdir(os.path.join(self.ocr, ".by-hash"))
+        self.assertTrue(folder.endswith("-" + __import__("hashlib").sha256(
+            b"rt-test|tesseract|300|1").hexdigest()[:8]), folder)
+
+    def test_a_page_too_big_renders_under_the_pixel_cap(self):
+        module = script()
+        import pypdfium2 as pdfium
+
+        path = self.pdf([("blank", 14_000)])
+        doc = pdfium.PdfDocument(path)
+        image = module.pgm(doc, 1)
+        doc.close()
+        width, height = (int(v) for v in bytes(image[:40]).split()[1:3])
+        self.assertLessEqual(width * height, module.MAX_PIXELS)
+        self.assertEqual(len(image), len(b"P5\n%d %d\n255\n" % (width, height)) + width * height)
 
     @unittest.skipUnless(os.environ.get("CLAUSEO_TEST_TESSERACT"), "CLAUSEO_TEST_TESSERACT unset")
     def test_a_scanned_page_yields_its_words_with_the_real_engine(self):
