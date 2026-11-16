@@ -461,6 +461,30 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
 
 ### Claude's permission mode
 
+- **2026-11-16 (orchestrator; never silently weaker): the mode is read back, never assumed.**
+  claude-agent-acp 0.89.1 starts a session in the matter's own `permissions.defaultMode`
+  (`<matter>/.claude/settings.local.json` and the like): `resolveInitialPermissionMode`
+  (`session-mode.js:22-35`) reads `resolveSettings({cwd})` (`settings.js:88-95`), which has no
+  flag settings, and `_meta` cannot set the start mode, since the adapter's managed-options
+  table marks `permissionMode` as not settable (`acp-agent.js:388`). So `session/new`, `load` or
+  `resume` can answer `acceptEdits`, `plan`, `bypassPermissions` or any other mode, and an empty
+  `session/set_mode` answer proves nothing. The host's switch still goes before any prompt on
+  new, load and resume (nothing is prompted before the attach), and now must be read back: the
+  last mode the agent reports among the updates it sent after the switch went out (a
+  `current_mode_update`, or the mode option's `currentValue` in a `config_option_update`;
+  0.89.1's `setSessionMode` sends the first when the mode differs and always the second, before
+  it answers, `session-mode.js:159-166`) must be the mode asked for (`auto`; `default` in forced
+  ask; the `acceptEdits` fallback). Auto asked and `acceptEdits` reported is the fallback as
+  before; anything else, or no report, refuses the launch before any prompt with
+  `agent.mode_not_set` (not retryable; one warn line naming the two modes;
+  `actor/turn/session/claude_mode.rs`). A session whose start already reports the mode needs no
+  switch. The same read-back follows the lawyer's `SetMode`, the switch back from a mode Claude
+  moved to, and the model switch's revert to `auto` (`actor/turn/forced_mode/read_back.rs`): a
+  mode that is not the one asked for fails the command (or the running turn) with
+  `agent.mode_not_set` and stops the agent, so the next message relaunches it. Belt: the guard
+  hook refuses every tool it checks while the hook input's `permission_mode` is
+  `bypassPermissions` or `dontAsk` (`pre_write_guard.rs` `UNASKED_MODES`). **Rejected:** trusting
+  `{}`, which lets a planted start mode run the first prompt.
 - **2026-11-16 (orchestrator; never silently weaker, audit row 4): a model switch that costs
   `auto` is refused.** claude-agent-acp 0.89.1's model option doesn't say which models can run
   auto, and for one that can't it moves the session to `acceptEdits` before it answers

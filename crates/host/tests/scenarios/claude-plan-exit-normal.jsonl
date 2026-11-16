@@ -16,6 +16,7 @@
 {"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"exit-plan-default"}}}}
 {"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"default"}}}
 {"expect":{"method":"session/set_mode","as":"back","params":{"sessionId":"sess-1","modeId":"auto"}}}
+{"note":"the read-back: claude-agent-acp 0.89.1's setSessionMode pushes the mode option before it answers (session-mode.js:164)","update":{"update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Manual"},{"value":"acceptEdits","name":"Accept edits"},{"value":"plan","name":"Plan"},{"value":"auto","name":"Auto"}]}]}}}
 {"respond":{"to":"back","result":{}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Planned."}}}}
 {"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

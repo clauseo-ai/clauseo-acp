@@ -183,6 +183,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentSettingsChanged,
             "Claude's settings file changed while Claude ran, so Clauseo stopped it",
         ),
+        failed(
+            ErrorCode::AgentModeNotSet,
+            "Claude Code did not confirm the \"auto\" mode Clauseo set; it reported \"plan\"",
+        ),
     ]
 }
 

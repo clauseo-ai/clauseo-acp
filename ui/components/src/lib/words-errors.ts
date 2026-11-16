@@ -132,6 +132,7 @@ export type ErrorCode =
   | "agent.firm_hooks_off"
   | "agent.user_policy"
   | "agent.settings_changed"
+  | "agent.mode_not_set"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -403,6 +404,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // it; the next message starts it again (retryable). Claude-only. Hindi later
   "agent.settings_changed":
     "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.",
+  // provisional (U3-err-agent.mode_not_set): Claude Code did not confirm the mode Clauseo set it to (auto; default in forced ask; acceptEdits
+  // when auto is not available), at the start or after a mode change, so the host sent no message and stopped the
+  // conversation. Claude-only, so no other plan's line; not retryable. Hindi later
+  "agent.mode_not_set":
+    "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

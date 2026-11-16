@@ -4,12 +4,20 @@
 //! auto` before the first prompt, with `allowDangerouslySkipPermissions: false` and
 //! `settingSources: ["user"]` in `_meta` on new, load and resume (the scenarios check them; user
 //! only keeps Claude Code from loading any project-level `.claude` skills, agents, commands or
-//! `CLAUDE.md` it finds walking up from the matter), and `SetMode` still works after the start. When auto is not available
+//! `CLAUDE.md` it finds walking up from the matter), and `SetMode` still works after the start.
+//! When auto is not available
 //! (not offered, the switch refused, or the agent moving off it at once) the session runs in
 //! `acceptEdits`, with one notice. An answer with no modes, one offering neither mode, and a
 //! refused fallback each fail the launch before any prompt. A matter whose folder Claude's
 //! sandbox cannot name is refused (`launch_folder.rs`). Forced ask starts in `default` instead
 //! (`forced_ask.rs`).
+//!
+//! The switch must be read back: the agent's last mode report after it (a `current_mode_update`
+//! or the mode option of a `config_option_update`) is the mode asked for, else the launch is
+//! refused with `agent.mode_not_set` before any prompt; a `SetMode` read back as another mode
+//! fails the same way and stops the agent. No prompt goes before the switch on new, load and
+//! resume: each scenario's script expects `session/set_mode` before `session/prompt`, so a
+//! prompt first is a mismatch, which `turn`'s `assert_no_mismatch` fails on.
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, NoticeKind, StopReason,
@@ -143,7 +151,7 @@ fn an_agent_that_moves_off_auto_at_once_runs_in_accept_edits_with_one_notice() {
     falls_back(
         "claude_mode_auto_moved",
         "claude-mode-auto-moved",
-        &["auto", "acceptEdits"],
+        &["acceptEdits"],
     );
 }
 
@@ -229,5 +237,75 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_auto() {
     events.until("ModeChanged acceptEdits", |e| modes(e).len() == 6);
     assert_eq!(modes(&events)[5..], ["acceptEdits"], "{}", events.dump());
     assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    host.shutdown();
+}
+
+/// A session that starts in a planted mode (`acceptEdits`, `plan`, an offered
+/// `bypassPermissions`, an unknown `yolo`), as a matter's `.claude/settings.local.json` makes
+/// claude-agent-acp 0.89.1 do, is switched to `auto` before its first prompt and runs once the
+/// agent reports `auto`; the reported move is logged once, by the attach.
+#[test]
+fn a_session_started_in_a_planted_mode_runs_in_auto_once_it_reads_back() {
+    for (test, scenario) in [
+        (
+            "claude_mode_start_accept_edits",
+            "claude-mode-start-accept-edits",
+        ),
+        ("claude_mode_start_plan", "claude-mode-start-plan"),
+        ("claude_mode_start_bypass", "claude-mode-start-bypass"),
+        ("claude_mode_start_unknown", "claude-mode-start-unknown"),
+    ] {
+        let dir = Dir::new(test, &[(CLAUDE, Scenario::Local(scenario))]);
+        let host = dir.start(0);
+        let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+        let events = turn(&host, thread, "Summarise clause 4.");
+        assert_eq!(modes(&events), ["auto"], "{scenario}: {}", events.dump());
+        assert_eq!(auto_notices(&events), 0, "{scenario}: {}", events.dump());
+        host.shutdown();
+    }
+}
+
+#[test]
+fn a_switch_the_agent_never_reads_back_sends_no_prompt() {
+    fails_before_prompt(
+        "claude_mode_no_read_back",
+        "claude-mode-no-read-back",
+        ErrorCode::AgentModeNotSet,
+    );
+}
+
+#[test]
+fn a_switch_read_back_as_another_mode_sends_no_prompt() {
+    fails_before_prompt(
+        "claude_mode_read_back_other",
+        "claude-mode-read-back-other",
+        ErrorCode::AgentModeNotSet,
+    );
+}
+
+/// A `SetMode` the agent answers after reporting another mode fails with `agent.mode_not_set`,
+/// logs no `ModeChanged` of its own, and stops the agent.
+#[test]
+fn a_set_mode_read_back_as_another_mode_fails_and_stops_the_agent() {
+    let dir = Dir::new(
+        "claude_mode_set_differs",
+        &[(CLAUDE, Scenario::Local("claude-mode-set-differs"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    let mut events = turn(&host, thread, "Summarise clause 4.");
+    assert_eq!(modes(&events), ["auto"], "{}", events.dump());
+    host.refused(
+        HostCommand::SetMode {
+            thread,
+            mode_id: AgentChoiceId::new("plan").unwrap(),
+        },
+        ErrorCode::AgentModeNotSet,
+    );
+    events.until("the agent stopped", |events| {
+        events.count(|event| matches!(event, DomainEvent::AgentSessionDetached(_))) > 0
+    });
+    events.assert_no_mismatch();
+    assert_eq!(modes(&events), ["auto"], "{}", events.dump());
     host.shutdown();
 }

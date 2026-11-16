@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::ErrorCode;
 use crate::serde_util::BorrowedStr;
-use crate::{MatterId, MatterPath};
+use crate::{Error, MatterId, MatterPath};
 
 /// What every host call returns on failure.
 ///

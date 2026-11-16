@@ -34,5 +34,14 @@
     "at": "2026-11-16",
     "by": "launch-never-weaker (provisional; Rohan batch review)",
     "note": "UC-TBD-settings-changed. agent.settings_changed: the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings; Claude-only; retryable"
+  },
+  "U3-err-agent.mode_not_set": {
+    "en": "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "launch-never-weaker (provisional; Rohan batch review)",
+    "note": "agent.mode_not_set: Claude Code did not confirm Clauseo's mode (auto; default in forced ask; acceptEdits when auto is unavailable) after the host's session/set_mode, at launch or mid-conversation, so the host sent no message and stopped the conversation; Claude-only; not retryable"
   }
 }

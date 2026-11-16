@@ -32,10 +32,10 @@ mod claude_mode;
 mod named;
 mod prepare;
 
-use claude_mode::claude_start;
-pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto};
+pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto, Switched};
+use claude_mode::{Switch, claude_start};
+use prepare::before_attach;
 pub(super) use prepare::on_prepared;
-use prepare::{Switch, before_attach};
 
 /// The fallback words of the notice a thread gets when its agent starts a new session after
 /// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
@@ -359,6 +359,7 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     let ask = switch.then_some(Switch {
         mode: ask,
         fallback: None,
+        held: None,
     });
     before_attach(actor, thread, (start, loaded), (ask, guard, picks));
 }

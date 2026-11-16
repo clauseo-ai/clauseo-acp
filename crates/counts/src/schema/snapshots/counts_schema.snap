@@ -1560,7 +1560,8 @@ expression: counts_schema()
         "agent.sandbox_unavailable",
         "agent.firm_hooks_off",
         "agent.user_policy",
-        "agent.settings_changed"
+        "agent.settings_changed",
+        "agent.mode_not_set"
       ],
       "type": "string"
     },

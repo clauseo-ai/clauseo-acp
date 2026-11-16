@@ -4,6 +4,7 @@
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"acceptEdits","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"}]}}}}
 {"note":"set_mode before any prompt: a prompt here is a mismatch","expect":{"method":"session/set_mode","as":"to-default","params":{"sessionId":"sess-1","modeId":"default"}}}
+{"note":"the read-back: claude-agent-acp 0.89.1's setSessionMode pushes the mode option before it answers (session-mode.js:164)","update":{"update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default","options":[{"value":"default","name":"Manual"},{"value":"acceptEdits","name":"Accept edits"},{"value":"plan","name":"Plan"},{"value":"auto","name":"Auto"}]}]}}}
 {"respond":{"to":"to-default","result":{}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"First answer."}}}}
