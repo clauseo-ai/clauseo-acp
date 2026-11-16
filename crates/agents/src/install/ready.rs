@@ -1,12 +1,15 @@
 //! The downloaded Node's checks and an agent's finished install, read at each start and at
 //! each job's start.
 
+use std::path::Path;
+
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
 use crate::config::AgentsConfig;
 use crate::node::{self, NotUsed, UserSearch};
 use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
+use crate::snapshot::AgentEntry;
 use crate::state::Installed;
 
 /// Whether the downloaded Node is unpacked and complete.
@@ -58,7 +61,8 @@ pub(crate) async fn runtime_check<T: Timer>(
     }
 }
 
-/// `agent`'s finished install: a valid receipt in its `<hash>` folder, run with a Node this
+/// `agent`'s finished install: a valid receipt in its `<hash>` folder with the files a start
+/// reads first still there ([`start_files_present`]), run with a Node this
 /// start would choose anyway. The receipt's Node is kept when it is the downloaded runtime and
 /// usable ([`RuntimeCheck::usable`]), or the Node the `PATH` search finds now, or one that
 /// search could not finish checking. Otherwise the receipt is rewritten (atomically) to name the
@@ -77,6 +81,10 @@ pub(crate) async fn ready_install<T: Timer>(
     let hash = config.snapshot.install_hash(agent, config.platform)?;
     let folder = install_folder(&config.data_dir, agent, &hash);
     let mut receipt = read_receipt(&folder, agent, &hash, config.platform)?;
+    if !start_files_present(&folder, entry) {
+        tracing::warn!(%agent, "agent start: the adapter's files are gone; to install again");
+        return None;
+    }
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let runtime = node::runtime_program(&runtime, config.platform.os);
     let mut runtime_usable = None;
@@ -118,4 +126,17 @@ pub(crate) async fn ready_install<T: Timer>(
         folder,
         version: receipt.version,
     })
+}
+
+/// Whether the files a start of `entry`'s adapter reads before any other are regular files
+/// in `folder` (read through no link): its script (`node <script>`), and its root package's
+/// `package.json`, which tells Node whether the script is an ES module. Not a walk of the tree:
+/// a file missing deeper in `node_modules` still fails at the start.
+fn start_files_present(folder: &Path, entry: &AgentEntry) -> bool {
+    let package = std::iter::once("node_modules")
+        .chain(entry.root.split('/'))
+        .fold(folder.to_path_buf(), |path, part| path.join(part))
+        .join("package.json");
+    let is_file = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file());
+    is_file(&script_path(folder, entry)) && is_file(&package)
 }

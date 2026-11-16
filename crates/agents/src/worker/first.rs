@@ -34,7 +34,6 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
             // An app update's new Python archive leaves the old runtime (read-only on Unix)
             // behind; what will not go now goes at the next start.
             let keep = config.snapshot.python_archive(config.platform);
-            let keep = keep.map(crate::snapshot::PythonArchive::stem);
             drop(python::remove_stale_runtimes(&config.data_dir, keep));
             drop(python);
         }

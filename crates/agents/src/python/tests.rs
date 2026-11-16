@@ -134,17 +134,28 @@ fn a_runtime_installs_read_only_with_its_manifest_and_receipt() {
     assert!(!dir.exists());
 }
 
+/// An installed runtime in `data`, made writable so a test can change it.
 #[cfg(unix)]
-#[test]
-fn a_changed_file_fails_the_contents_check_and_a_missing_manifest_the_receipt() {
-    let data = TestDir::new("python-contents");
-    let (path, entry, archive) = stage(&data, &fake_archive("echo 3.13.18"));
+fn installed(data: &TestDir) -> (PathBuf, PythonEntry, PythonArchive, PathBuf) {
+    let (path, entry, archive) = stage(data, &fake_archive("echo 3.13.18"));
     let dir = runtime_dir(&data.0, &archive);
     install(&path, &entry, &archive, &dir, &launcher()).unwrap();
+    assert!(python_runtime_valid(&dir, &archive, Os::Linux));
     write::make_writable(&dir).unwrap();
+    (path, entry, archive, dir)
+}
+
+/// The limit of the whole-check, which compares sizes only: a file changed to other bytes of
+/// the same size stays valid. Only the repair check, which hashes every byte, finds it.
+#[cfg(unix)]
+#[test]
+fn a_same_size_change_fails_only_the_contents_check_and_a_missing_manifest_the_receipt() {
+    let data = TestDir::new("python-contents");
+    let (_, _, archive, dir) = installed(&data);
     let os_py = dir.join("lib/python3.13/os.py");
     write::set_mode(&os_py, 0o644).unwrap();
-    write::write_atomic(&os_py, b"# changed\n").unwrap();
+    write::write_atomic(&os_py, b"# OS\n").unwrap();
+    whole::forget(&dir);
     assert!(python_runtime_valid(&dir, &archive, Os::Linux));
     assert!(!contents_match(&dir), "a changed file");
     write::remove_file(&dir.join(PYTHON_MANIFEST)).unwrap();
@@ -152,6 +163,50 @@ fn a_changed_file_fails_the_contents_check_and_a_missing_manifest_the_receipt() 
         !python_runtime_valid(&dir, &archive, Os::Linux),
         "no manifest"
     );
+}
+
+/// A file gone is noticed at the next start (the check's result is kept for the rest of this
+/// one): the runtime is then not valid.
+#[cfg(unix)]
+#[test]
+fn a_runtime_missing_one_file_is_not_valid_from_the_next_start() {
+    let data = TestDir::new("python-file-gone");
+    let (_, _, archive, dir) = installed(&data);
+    write::remove_file(&dir.join("lib/python3.13/os.py")).unwrap();
+    assert!(
+        python_runtime_valid(&dir, &archive, Os::Linux),
+        "kept this start"
+    );
+    whole::forget(&dir);
+    assert!(!python_runtime_valid(&dir, &archive, Os::Linux));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_truncated_file_is_not_valid() {
+    let data = TestDir::new("python-truncated");
+    let (_, _, archive, dir) = installed(&data);
+    let os_py = dir.join("lib/python3.13/os.py");
+    write::set_mode(&os_py, 0o644).unwrap();
+    write::write_atomic(&os_py, b"# o").unwrap();
+    whole::forget(&dir);
+    assert!(!python_runtime_valid(&dir, &archive, Os::Linux));
+    assert!(
+        !whole::sizes_match(&dir, "x 0 bin\n"),
+        "a folder is no file"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_removed_runtime_folder_is_not_valid_and_installs_again() {
+    let data = TestDir::new("python-folder-gone");
+    let (path, entry, archive, dir) = installed(&data);
+    write::remove_dir_all(&dir).unwrap();
+    assert!(!python_runtime_valid(&dir, &archive, Os::Linux));
+    install(&path, &entry, &archive, &dir, &launcher()).unwrap();
+    assert!(python_runtime_valid(&dir, &archive, Os::Linux));
+    assert!(contents_match(&dir));
 }
 
 #[test]
@@ -284,26 +339,62 @@ fn stale_python_folders_go_read_only_or_not_and_node_and_the_current_one_stay() 
         "agents/runtime/clauseo-python-3.13.18-c1-linux-x64/keep",
         b"",
     );
-    remove_stale_runtimes(&data.0, Some("clauseo-python-3.13.18-c1-linux-x64")).unwrap();
-    let mut names: Vec<String> = std::fs::read_dir(&runtime)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
+    // `old`'s receipt names the current archive, but the current folder is there: it goes.
+    remove_stale_runtimes(&data.0, Some(&archive)).unwrap();
     assert_eq!(
-        names,
+        names(&runtime),
         [
             "clauseo-python-3.13.18-c1-linux-x64",
             "node-v24.22.0-linux-x64"
         ]
     );
+    assert!(runtime.join(archive.stem()).join("keep").is_file());
     // With no Python for the platform, every Python folder goes.
     remove_stale_runtimes(&data.0, None).unwrap();
-    let names: Vec<String> = std::fs::read_dir(&runtime)
+    assert_eq!(names(&runtime), ["node-v24.22.0-linux-x64"]);
+}
+
+/// The names in `dir`, sorted.
+#[cfg(unix)]
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(names, ["node-v24.22.0-linux-x64"]);
+    names.sort();
+    names
+}
+
+/// A copy of the current runtime renamed away, with the current folder gone, is moved back
+/// (and then judged by the whole-check); a renamed copy of an old pin goes.
+#[cfg(unix)]
+#[test]
+fn a_renamed_copy_of_the_current_runtime_moves_back_and_an_old_pin_s_goes() {
+    let data = TestDir::new("python-move-back");
+    let runtime = data.0.join("agents/runtime");
+    let (path, entry, archive) = stage(&data, &fake_archive("echo 3.13.18"));
+    let copy = runtime.join("clauseo-python-3.13.18-c1-linux-x64 (2)");
+    install(&path, &entry, &archive, &copy, &launcher()).unwrap();
+    let old = data.file(
+        "agents/runtime/clauseo-python-3.13.17-c4-linux-x64-moved/clauseo-python.json",
+        br#"{"schema":1,"version":"3.13.17","archive":"clauseo-python-3.13.17-c4-linux-x64.tar.gz",
+"sha256":"","manifest_sha256":""}"#,
+    );
+    assert!(read_receipt(old.parent().unwrap()).is_some());
+    remove_stale_runtimes(&data.0, Some(&archive)).unwrap();
+    assert_eq!(names(&runtime), [archive.stem()]);
+    let dir = runtime_dir(&data.0, &archive);
+    assert!(python_runtime_valid(&dir, &archive, Os::Linux));
+    assert!(contents_match(&dir));
+
+    // Moved back with a file gone: not valid, so Python shows as missing and installs again.
+    let copy_gone = runtime.join("clauseo-python-3.13.18-c1-linux-x64-old");
+    write::rename(&dir, &copy_gone).unwrap();
+    write::make_writable(&copy_gone).unwrap();
+    write::remove_file(&copy_gone.join("lib/python3.13/os.py")).unwrap();
+    remove_stale_runtimes(&data.0, Some(&archive)).unwrap();
+    assert_eq!(names(&runtime), [archive.stem()]);
+    assert!(!python_runtime_valid(&dir, &archive, Os::Linux));
 }
 
 #[test]
