@@ -25,9 +25,8 @@ const SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 "#;
 
-/// Answers `initialize`, sends three updates (a replay's stand-in), and never answers
-/// `session/new`.
-const PACED_SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+/// Answers `initialize`, sends three updates (a replay's stand-in) and reads `session/new`.
+const PACED_START: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]},"session":"sess-1"}}
 {"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]},"session":"sess-1"}}
@@ -35,14 +34,21 @@ const PACED_SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","para
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 "#;
 
-/// As [`PACED_SILENT`], then answers `session/new` and the question.
+/// After [`PACED_START`], never answers `session/new`: it waits on stdin, so it ends only when
+/// the ladder closes that, and its own exit cannot race the updates.
+const PACED_SILENT: &str = r#"{"expect":{"method":"session/prompt","as":"never","params":{}}}
+"#;
+
+/// After [`PACED_START`], answers `session/new` and the question.
 const PACED_ANSWERS: &str = r#"{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
 "#;
 
-/// Less than the bound, three times over: the start takes longer than [`START_WAIT`] in all.
-const STEP: Duration = Duration::from_secs(100);
+/// Less than the bound, three times over: 210 s in all, longer than [`START_WAIT`]. Short
+/// enough that a timer the held updates keep waiting is never handled more than [`START_WAIT`]
+/// late, which the bound would read as sleep (`fails_after_silence` handles it before its jump).
+const STEP: Duration = Duration::from_secs(70);
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -90,6 +96,9 @@ fn paced_updates(rig: &mut Rig) {
 /// The agent stays silent: just short of the bound it still starts; at the bound it is stopped
 /// through the ladder and its turn fails. Gives the code it failed with.
 fn fails_after_silence(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<ErrorCode> {
+    // A timer already due waits behind the held updates: handle it at its time, not after the
+    // jump below, which would read as sleep.
+    rig.drain();
     rig.clock.advance(START_WAIT.checked_sub(MS).unwrap());
     // Nothing stops before the bound, so draining the re-armed timers races nothing.
     rig.drain();
@@ -178,7 +187,7 @@ fn a_start_that_never_answers_while_online_is_a_failed_start() {
 /// it, and its session attaches.
 #[test]
 fn a_start_that_keeps_sending_past_the_bound_succeeds() {
-    let steps = format!("{PACED_SILENT}{PACED_ANSWERS}");
+    let steps = format!("{PACED_START}{PACED_ANSWERS}");
     let mut rig = start_rig("start-paced", &steps, None, ReachProbe::fixed(true));
     let (thread, turn) = launched(&mut rig);
     paced_updates(&mut rig);
@@ -191,12 +200,8 @@ fn a_start_that_keeps_sending_past_the_bound_succeeds() {
 /// The same agent going silent after its updates fails once it was silent for the bound.
 #[test]
 fn a_start_that_goes_silent_after_sending_fails_at_the_bound() {
-    let mut rig = start_rig(
-        "start-paced-silent",
-        PACED_SILENT,
-        None,
-        ReachProbe::fixed(true),
-    );
+    let steps = format!("{PACED_START}{PACED_SILENT}");
+    let mut rig = start_rig("start-paced-silent", &steps, None, ReachProbe::fixed(true));
     let (thread, turn) = launched(&mut rig);
     paced_updates(&mut rig);
     assert_eq!(
