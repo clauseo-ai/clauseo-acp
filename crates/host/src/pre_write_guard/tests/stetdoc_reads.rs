@@ -53,7 +53,7 @@ fn a_document_with_a_second_name_is_refused() {
     );
     let hook = fx.hook(
         "Bash",
-        &json!({"command": "stetdoc view Contract.docx | head -5"}),
+        &json!({"command": "stetdoc view Free.docx | head -5"}),
     );
     assert_eq!(guard_with(&args, hook.to_string().as_bytes()), "");
 }
