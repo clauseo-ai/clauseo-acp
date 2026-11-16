@@ -125,7 +125,9 @@ impl<'a> Cursor<'a> {
 
     /// Reads `params`' `sessionId` and `update` into `out`. `None` where the read stops.
     fn params(&mut self, out: &mut SkippedUpdate) -> Option<()> {
-        self.expect(b'{')?;
+        if !self.open_object()? {
+            return Some(());
+        }
         loop {
             let key = self.plain_string()?;
             self.expect(b':')?;
@@ -150,7 +152,9 @@ impl<'a> Cursor<'a> {
         out.tool_call_update = None;
         out.tool_call = None;
         out.status = None;
-        self.expect(b'{')?;
+        if !self.open_object()? {
+            return Some(());
+        }
         loop {
             let key = self.plain_string()?;
             self.expect(b':')?;
@@ -189,6 +193,18 @@ impl<'a> Cursor<'a> {
     fn expect(&mut self, byte: u8) -> Option<()> {
         self.whitespace();
         (self.head.get(self.at) == Some(&byte)).then(|| self.at += 1)
+    }
+
+    /// Skips whitespace, then `{`: `Some(true)` when a member follows, `Some(false)` when the
+    /// object is empty (its `}` skipped too), so the read goes on after `"update":{}`.
+    fn open_object(&mut self) -> Option<bool> {
+        self.expect(b'{')?;
+        self.whitespace();
+        if self.head.get(self.at) == Some(&b'}') {
+            self.at += 1;
+            return Some(false);
+        }
+        Some(true)
     }
 
     /// Skips whitespace, then `,` (`Some(true)`: another member follows) or `}` (`Some(false)`:

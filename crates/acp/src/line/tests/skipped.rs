@@ -215,3 +215,77 @@ fn ids_inside_a_nested_object_are_not_read() {
     let nested_only = r#"{"sessionId":"s-1","update":{"sessionUpdate":"tool_call_update","meta":{"toolCallId":"inner"},"content":"#;
     assert_eq!(read(nested_only), said(Some("s-1"), Some(true), None, None));
 }
+
+/// The fuzz target `acp_skipped_update`'s check on a whole line with nothing that stops the
+/// scanner: each field it reads is what `serde_json` reads there, `None` where `serde_json` has
+/// none.
+fn reads_as_serde_json(line: &str) {
+    let got = skipped_update(line.as_bytes()).expect("a skippable start");
+    let value: serde_json::Value = serde_json::from_str(line).expect("whole JSON");
+    let params = &value["params"];
+    let update = &params["update"];
+    let text = |value: &serde_json::Value| value.as_str().map(str::to_owned);
+    let expected = SkippedUpdate {
+        session: text(&params["sessionId"]),
+        tool_call_update: update["sessionUpdate"]
+            .as_str()
+            .map(|kind| kind == "tool_call_update"),
+        tool_call: text(&update["toolCallId"]),
+        status: update["status"].as_str().and_then(|status| {
+            ["pending", "in_progress", "completed", "failed"]
+                .into_iter()
+                .find(|known| *known == status)
+        }),
+    };
+    assert_eq!(got, expected, "{line}");
+}
+
+#[test]
+fn the_session_after_the_update_is_read() {
+    // The nightly fuzz's inputs (run 43828352988): minimised, and the original.
+    reads_as_serde_json(r#"{"method":"session/update","params":{"update":{},"sessionId":""}}"#);
+    reads_as_serde_json(
+        r#"{ "method" : "session/update" , "params" : { "update" : {} , "sessionId" : "s" } }"#,
+    );
+    let updates = [
+        "{}",
+        "{ \n\t}",
+        r#"{"sessionUpdate":"tool_call_update","toolCallId":"t-1","status":"failed"}"#,
+        r#"{"sessionUpdate":"agent_message_chunk"}"#,
+        // Nested objects and arrays, empty ones included.
+        r#"{"_meta":{"a":{},"b":[],"c":[{"d":[1,{}]}]},"toolCallId":"t","status":"completed"}"#,
+        r#"{"x":[[],[{}],{"y":{"z":[]}}],"sessionUpdate":"plan"}"#,
+        // Strings holding a brace, a bracket or the key itself.
+        r#"{"title":"}","sessionUpdate":"tool_call_update","toolCallId":"t"}"#,
+        r#"{"title":"\"sessionId\":\"wrong\"}","note":"]}{["}"#,
+        r#"{"sessionId":"inner","toolCallId":"t"}"#,
+    ];
+    for update in updates {
+        for session in ["", "s", "sess-1"] {
+            for (after, before) in [
+                (
+                    format!(
+                        r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{update},"sessionId":"{session}"}}}}"#
+                    ),
+                    format!(
+                        r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{session}","update":{update}}}}}"#
+                    ),
+                ),
+                (
+                    format!(
+                        " {{ \"method\" : \"session/update\" ,\n \"params\" : {{ \"update\" : {update} ,\t\"sessionId\" : \"{session}\" }} }}"
+                    ),
+                    format!(
+                        " {{ \"method\" : \"session/update\" ,\n \"params\" : {{ \"sessionId\" : \"{session}\" ,\t\"update\" : {update} }} }}"
+                    ),
+                ),
+            ] {
+                reads_as_serde_json(&after);
+                reads_as_serde_json(&before);
+            }
+        }
+    }
+    // Empty params read as nothing, and no session at all stays unknown.
+    reads_as_serde_json(r#"{"method":"session/update","params":{}}"#);
+    reads_as_serde_json(r#"{"method":"session/update","params":{ "update":{ } }}"#);
+}
