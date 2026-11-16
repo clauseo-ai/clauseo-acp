@@ -289,8 +289,15 @@ impl AgentsBackend {
     /// The refusal of a sign-in for what bars it now, if anything. A stored key that could not
     /// be read is read again first: the card's Try again (a sign-in press) is the lawyer's
     /// retry once macOS's prompt is answered, and a read that succeeds shows the key's line.
+    /// The key cache is asked as well as [`Compose`], whose facts follow the cache's notes a
+    /// moment later (`refusal::follow_keys`): a press in between is refused too.
     fn barred(&self, agent: &AgentId) -> Option<HostError> {
-        let bar = self.compose.sign_in_bar(agent)?;
+        let firm = self.compose.firm_plan(agent);
+        let bar = if self.keys.unreadable_for(agent, firm) {
+            SignInBar::KeyUnreadable
+        } else {
+            self.compose.sign_in_bar(agent)?
+        };
         if bar == SignInBar::KeyUnreadable {
             tracing::info!(%agent, "sign-in press, stored key unreadable: read again");
             // Its answer comes back as a `KeyNote::Read` when the mark changes.
@@ -319,6 +326,19 @@ impl AgentsBackend {
         }
         pending::drop_press(self, agent, "a key or an endpoint took over");
         self.events.end_start(agent);
+    }
+
+    /// Ends `agent`'s plan sign-in, running or kept, when its stored key became unreadable
+    /// (rule 3 of `compose.rs`), as a key or an endpoint ends one (`end_sign_in`): rule 3
+    /// bars a new one, so one already going ends too. From each key note
+    /// (`refusal::follow_keys`).
+    pub(crate) fn end_sign_in_if_key_unreadable(&self, agent: &AgentId) {
+        let firm = self.compose.firm_plan(agent);
+        let going = self.agents.sign_in_going(agent) || lock(&self.pending).contains_key(agent);
+        if going && self.keys.unreadable_for(agent, firm) {
+            tracing::info!(%agent, "stored key unreadable: the sign-in going ends");
+            self.end_sign_in(agent);
+        }
     }
 
     /// `agent`'s new S18 job (a sign-in, a sign-out or a search) replaced any it had, so an

@@ -58,11 +58,14 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
-/// How a memory keychain's reads fail: [`Keychain::fail_reads`] and [`Keychain::deny_reads`].
+/// How a memory keychain's reads fail: [`Keychain::fail_reads`], [`Keychain::deny_reads`] and
+/// [`Keychain::panic_reads`].
 #[cfg(any(test, feature = "test-support"))]
 const FAIL_NO_ACCESS: u8 = 1;
 #[cfg(any(test, feature = "test-support"))]
 const FAIL_DENIED: u8 = 2;
+#[cfg(any(test, feature = "test-support"))]
+const FAIL_PANIC: u8 = 3;
 
 /// The keychain service every agent's key is stored under.
 pub const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop";
@@ -240,6 +243,15 @@ impl Keychain {
         }
     }
 
+    /// Tests only: with `panic`, every read of a memory keychain (and its clones) panics, as a
+    /// bug in a keychain crate would. Until called again with `false`; writes still work.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn panic_reads(&self, panic: bool) {
+        if let Backend::Memory(_, failing, _) = &self.backend {
+            failing.store(if panic { FAIL_PANIC } else { 0 }, Ordering::SeqCst);
+        }
+    }
+
     /// Tests only: with `hang`, every read of a memory keychain (and its clones) waits, as a
     /// keychain prompt nobody answers does, until called again with `false`, when the waiting
     /// reads go on. No effect on another keychain.
@@ -326,6 +338,8 @@ impl Keychain {
                             kind: PLATFORM_FAILURE,
                         });
                     }
+                    // Unwinds as a panic does, without the panic hook's report in the output.
+                    FAIL_PANIC => std::panic::resume_unwind(Box::new("a test's panicking read")),
                     _ => {}
                 }
                 lock(items).get(&account(agent)).map(|b| b.to_vec())
