@@ -1,6 +1,8 @@
 use super::super::lock::Lock;
 use super::super::target::{TARGETS, Target};
-use super::super::tesseract_build::{LEPTONICA_ARGS, TESSERACT_ARGS, foreign_libraries};
+use super::super::tesseract_build::{
+    LEPTONICA_ARGS, TESSERACT_ARGS, foreign_libraries, hardening_args, pe_flag_problems,
+};
 use super::super::{LOCK, NOTICES, notices, rules};
 use super::{bin_dir, exe, leptonica_url, pins, source_url, tessdata_url};
 use crate::workspace::workspace_root;
@@ -148,5 +150,97 @@ fn otool_output_names_foreign_libraries() {
     assert_eq!(
         foreign_libraries(&brew),
         ["/opt/homebrew/opt/libarchive/lib/libarchive.13.dylib"]
+    );
+}
+
+#[test]
+fn every_target_is_built_hardened() {
+    let args = |target| hardening_args(target).join(" ");
+    for target in [Target::WinArm64, Target::WinX64] {
+        assert!(
+            args(target).contains("-DCMAKE_C_FLAGS_INIT=/guard:cf"),
+            "{target:?}"
+        );
+        assert!(
+            args(target).contains("-DCMAKE_CXX_FLAGS_INIT=/guard:cf"),
+            "{target:?}"
+        );
+        assert!(
+            args(target).contains("-DCMAKE_EXE_LINKER_FLAGS_INIT=/guard:cf"),
+            "{target:?}"
+        );
+    }
+    assert!(args(Target::WinX64).contains("/CETCOMPAT"));
+    // ARM64 has no CET, and link.exe rejects /CETCOMPAT there.
+    assert!(!args(Target::WinArm64).contains("/CETCOMPAT"));
+    for target in [Target::MacArm64, Target::MacX64] {
+        for flag in ["-D_FORTIFY_SOURCE=2", "-fstack-protector-strong"] {
+            assert!(args(target).contains(flag), "{target:?} {flag}");
+        }
+    }
+}
+
+/// A minimal PE32+ image: `DllCharacteristics` `flags`, and with `ex_flags` a debug directory
+/// holding one `EX_DLLCHARACTERISTICS` entry in a section at RVA 0x1000, file offset 0x200.
+fn pe_image(flags: u16, ex_flags: Option<u32>) -> Vec<u8> {
+    let mut image = vec![0u8; 0x400];
+    let put = |image: &mut Vec<u8>, at: usize, bytes: &[u8]| {
+        image[at..at + bytes.len()].copy_from_slice(bytes);
+    };
+    let header = 0x80;
+    put(&mut image, 0, b"MZ");
+    put(
+        &mut image,
+        0x3C,
+        &u32::try_from(header).unwrap().to_le_bytes(),
+    );
+    put(&mut image, header, b"PE\0\0");
+    put(&mut image, header + 6, &1u16.to_le_bytes());
+    put(&mut image, header + 20, &240u16.to_le_bytes());
+    let optional = header + 24;
+    put(&mut image, optional, &0x20Bu16.to_le_bytes());
+    put(&mut image, optional + 70, &flags.to_le_bytes());
+    let section = optional + 240;
+    put(&mut image, section + 8, &0x200u32.to_le_bytes());
+    put(&mut image, section + 12, &0x1000u32.to_le_bytes());
+    put(&mut image, section + 20, &0x200u32.to_le_bytes());
+    if let Some(ex) = ex_flags {
+        put(&mut image, optional + 112 + 48, &0x1000u32.to_le_bytes());
+        put(&mut image, optional + 116 + 48, &28u32.to_le_bytes());
+        put(&mut image, 0x200 + 12, &20u32.to_le_bytes());
+        put(&mut image, 0x200 + 16, &4u32.to_le_bytes());
+        put(&mut image, 0x200 + 24, &0x300u32.to_le_bytes());
+        put(&mut image, 0x300, &ex.to_le_bytes());
+    }
+    image
+}
+
+#[test]
+fn the_pe_check_wants_aslr_dep_cfg_and_cet_on_x64() {
+    let all = 0x4000 | 0x100 | 0x40 | 0x20;
+    assert_eq!(
+        pe_flag_problems(&pe_image(all, Some(1)), Target::WinX64),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        pe_flag_problems(&pe_image(all, None), Target::WinArm64),
+        Vec::<String>::new()
+    );
+    let no_cet = pe_flag_problems(&pe_image(all, None), Target::WinX64);
+    assert_eq!(no_cet, ["CET_COMPAT is off (no /CETCOMPAT)"]);
+    assert_eq!(
+        pe_flag_problems(&pe_image(all, Some(0)), Target::WinX64),
+        no_cet
+    );
+    let no_cfg = pe_flag_problems(&pe_image(all & !0x4000, Some(1)), Target::WinX64);
+    assert_eq!(no_cfg.len(), 1);
+    assert!(no_cfg[0].starts_with("GUARD_CF is off"), "{no_cfg:?}");
+    let bare = pe_flag_problems(&pe_image(0, None), Target::WinArm64);
+    assert_eq!(bare.len(), 4, "{bare:?}");
+    let unreadable = ["its PE headers can't be read"];
+    assert_eq!(pe_flag_problems(b"MZ", Target::WinX64), unreadable);
+    assert_eq!(
+        pe_flag_problems(&pe_image(all, Some(1))[..0x100], Target::WinX64),
+        unreadable
     );
 }

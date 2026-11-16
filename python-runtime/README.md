@@ -50,9 +50,12 @@ from tesseract-ocr/tessdata_fast. Neither tesseract nor leptonica publishes a po
 these targets, so `build` compiles both with CMake and the target's own compiler (Xcode's clang,
 Visual Studio 2022's MSVC, native on each runner) from source tarballs pinned by sha256: leptonica
 with every image codec off, tesseract without training tools, libarchive, libcurl, libtiff or
-OpenCL, all static (`/MT` on Windows), for macOS 13.0. It reads PGM/PNM images only (pages
-rendered by pypdfium2 are written as PGM), links nothing but the system's libraries, and is signed
-ad hoc with the hardened runtime on macOS, as the app's helpers are until there is a Developer ID.
+OpenCL, all static (`/MT` on Windows), for macOS 13.0. It reads PNM, BMP, SPIX images only, the
+formats leptonica decodes by itself (pages rendered by pypdfium2 are written as PGM, a PNM), links
+nothing but the system's libraries, and is signed ad hoc with the hardened runtime on macOS, as the
+app's helpers are until there is a Developer ID. It is built hardened: Control Flow Guard and, on
+x64, CET shadow-stack compatibility on Windows (the build checks both in its PE flags, with ASLR and
+DEP); `_FORTIFY_SOURCE=2` and the stack protector on macOS.
 Callers pass `--tessdata-dir <its folder>/tessdata`; on Windows it also finds the folder beside
 itself unaided, on macOS it does not. tesseract and the models are Apache-2.0, leptonica
 BSD-2-Clause; the notices carry their licence files. See xtask's `python_runtime/tesseract.rs`.
