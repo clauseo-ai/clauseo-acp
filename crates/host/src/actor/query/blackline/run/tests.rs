@@ -209,8 +209,7 @@ fn shaded_table() -> ChangedTable {
 }
 
 /// A header's text one version only has says the header was not compared, unless a part the
-/// blackline shows holds it (in its older or its newer text), the notice is there already, or
-/// the headers' view did not read.
+/// blackline shows holds it (in its older or its newer text) or the notice is there already.
 #[test]
 fn a_header_text_one_version_only_has_is_said_unless_shown() {
     let lone = |texts: &[&str]| TablesCompared {
@@ -227,15 +226,11 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
         changed_tables_total: 0,
     };
     let mut unshown = empty.clone();
-    note_tables(&mut unshown, lone(&["Scheduleheader."]), true);
+    note_tables(&mut unshown, lone(&["Scheduleheader."]));
     assert_eq!(
         unshown.notices,
         [BlacklineNotice::HeaderOrFooterNotCompared]
     );
-    // When the headers' view did not read, stetdoc's list of changes says what is not shown.
-    let mut unread = empty.clone();
-    note_tables(&mut unread, lone(&["Scheduleheader."]), false);
-    assert_eq!(unread.notices, []);
     let mut shown = empty.clone();
     let run = |kind, text: &str| BlacklineRun {
         kind,
@@ -255,12 +250,12 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
             hidden: false,
         }],
     });
-    note_tables(&mut shown, lone(&["Headerone.", "Headertwo."]), true);
+    note_tables(&mut shown, lone(&["Headerone.", "Headertwo."]));
     assert_eq!(shown.notices, []);
     let mut said = empty;
     said.notices
         .push(BlacklineNotice::HeaderOrFooterNotCompared);
-    note_tables(&mut said, lone(&["Scheduleheader."]), true);
+    note_tables(&mut said, lone(&["Scheduleheader."]));
     assert_eq!(said.notices, [BlacklineNotice::HeaderOrFooterNotCompared]);
 }
 
@@ -285,7 +280,6 @@ fn what_the_table_comparison_found_is_said() {
             may_differ: true,
             ..TablesCompared::default()
         },
-        true,
     );
     assert_eq!(found.changed_tables, [shaded_table()]);
     assert_eq!(found.changed_tables_total, 1);
@@ -298,7 +292,7 @@ fn what_the_table_comparison_found_is_said() {
         ]
     );
     let mut none = empty.clone();
-    note_tables(&mut none, TablesCompared::default(), true);
+    note_tables(&mut none, TablesCompared::default());
     assert_eq!(none, empty);
 }
 
@@ -319,7 +313,7 @@ fn past_the_cap_the_tables_are_counted_and_may_differ() {
         changed: vec![shaded_table(); TABLES_MAX + 10],
         ..TablesCompared::default()
     };
-    note_tables(&mut many, compared, true);
+    note_tables(&mut many, compared);
     assert_eq!(many.changed_tables.len(), TABLES_MAX);
     assert_eq!(many.changed_tables_total, 60);
     assert_eq!(

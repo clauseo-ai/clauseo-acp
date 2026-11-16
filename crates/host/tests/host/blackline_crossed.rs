@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::BlacklineNotice::{
-    ChangesOutsideText, CommentChanged, MayDiffer, TextBoxChanged,
+    self, ChangesOutsideText, CommentChanged, HeaderOrFooterNotCompared, MayDiffer, TextBoxChanged,
 };
 use clauseo_protocol::{
     BlacklineParagraph, BlacklinePart, BlacklinePartKind, BlacklineRun, HeaderSlot, HeaderUse,
@@ -166,7 +166,14 @@ fn a_footnote_or_header_change_alone_is_shown_in_its_part() {
                 None,
                 &extra,
             );
-            assert_eq!(unshown.notices, [ChangesOutsideText], "{pair} {label}");
+            // A header's text no shown part holds also says it was not compared: true, as no
+            // part shows it.
+            let expected: &[BlacklineNotice] = if pair == "header" {
+                &[ChangesOutsideText, HeaderOrFooterNotCompared]
+            } else {
+                &[ChangesOutsideText]
+            };
+            assert_eq!(unshown.notices, expected, "{pair} {label}");
             assert_eq!(unshown.parts, [], "{pair} {label}");
         }
     }
