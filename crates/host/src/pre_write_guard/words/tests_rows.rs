@@ -108,13 +108,14 @@ fn a_parenthesised_redirection_target_is_unknown() {
         &mut read,
     );
     let all: Vec<_> = read.iter().collect();
-    let target = all.first().unwrap();
+    let [target, inner, ..] = all.as_slice() else {
+        panic!("two segments: {all:?}");
+    };
     assert_eq!(target.redirects, ["("]);
     assert_eq!(target.roles, [Role::Arg, Role::Target]);
     assert_eq!(target.unknown, [false, true]);
-    let inner = all.get(1).unwrap();
-    assert!(inner.roles.iter().all(|role| *role == Role::Arg));
-    assert!(inner.redirects.is_empty());
+    assert_eq!(inner.roles, [Role::Arg; 3]);
+    assert_eq!(inner.redirects, Vec::<String>::new());
 }
 
 /// Row 8 (L5): `'a'’b'` is one argument, the doubled pair keeping its second quote (`’`).
