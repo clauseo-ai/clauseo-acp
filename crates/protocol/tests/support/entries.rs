@@ -9,14 +9,14 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
-    Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
-    HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
-    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
-    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
-    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
+    AgentContentEntry, AgentTextEntry, AlwaysKind, AlwaysOffer, BackgroundMark, CheckpointKind,
+    ContentBlock, ContextUsage, Deliverable, Delivery, ElicitationEntry, ElicitationRequest,
+    ElicitationState, ExpiryReason, HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason,
+    MarkerEntry, MarkerKind, MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel,
+    PageVia, PermissionAbout, PermissionChoice, PermissionEntry, PermissionKind, PermissionOption,
+    PermissionState, Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob,
+    ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb,
+    UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry, WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -163,6 +163,11 @@ fn approval_entries() -> Vec<ViewEntry> {
                 held_open: Some(Box::new(path("Brief.docx"))),
             },
             about: Some(PermissionAbout::AgentPlan),
+            always: Some(AlwaysOffer {
+                kind: AlwaysKind::Command,
+                shown: Some("wc -l notes.txt".into()),
+                cwd: Some("Drafts".into()),
+            }),
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),
         ViewEntry::Elicitation(ElicitationEntry {

@@ -2,12 +2,12 @@
 //! `examples.rs`'s `every_event`, which chains on them.
 
 use clauseo_protocol::{
-    AvailableCommand, CommandsAvailable, ConfigCategory, ConfigChoice, ConfigOption,
-    ConfigOptionKind, ConfigOptionsReplaced, Deliverable, DomainEvent, ElicitationExpired,
-    ElicitationOutcome, ElicitationRequest, ElicitationRequested, ElicitationResolved,
-    ExpiryReason, ModeChanged, PermissionAbout, PermissionChoice, PermissionExpired,
-    PermissionKind, PermissionOption, PermissionRequested, PermissionResolved, PlanEntry,
-    PlanPriority, PlanReplaced, PlanStatus, Principal,
+    AlwaysKind, AlwaysOffer, AvailableCommand, CommandsAvailable, ConfigCategory, ConfigChoice,
+    ConfigOption, ConfigOptionKind, ConfigOptionsReplaced, Deliverable, DomainEvent,
+    ElicitationExpired, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
+    ElicitationResolved, ExpiryReason, ModeChanged, PermissionAbout, PermissionChoice,
+    PermissionExpired, PermissionKind, PermissionOption, PermissionRequested, PermissionResolved,
+    PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal,
 };
 
 use crate::fixtures::{elicitation_id, path, permission_request_id, raw, short, tool_call_id};
@@ -40,6 +40,11 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
             }],
             deliverable: Deliverable::Live,
             about: Some(PermissionAbout::AgentPlan),
+            always: Some(AlwaysOffer {
+                kind: AlwaysKind::Command,
+                shown: Some("wc -l notes.txt".into()),
+                cwd: Some("Drafts".into()),
+            }),
         }
         .into(),
         PermissionResolved {
@@ -98,4 +103,37 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
         }
         .into(),
     ]
+}
+
+/// The kinds of "Always" no example in [`session_events`] holds: a file edit, a site, a tool and
+/// a file read, each a permission request of its own, so the corpus writer finds a holder.
+pub(super) fn later_always_kinds() -> Vec<DomainEvent> {
+    [
+        (AlwaysKind::FileEdit, None),
+        (AlwaysKind::Site, Some("example.com")),
+        (AlwaysKind::Tool, Some("search_law")),
+        (AlwaysKind::Read, Some("Brief.docx")),
+    ]
+    .into_iter()
+    .zip(12..)
+    .map(|((kind, shown), request)| {
+        PermissionRequested {
+            request: permission_request_id(request),
+            tool_call: None,
+            options: vec![PermissionOption {
+                option_id: short("allow-once"),
+                kind: PermissionKind::AllowOnce,
+                agent_label: "Yes".to_owned(),
+            }],
+            deliverable: Deliverable::Live,
+            about: None,
+            always: Some(AlwaysOffer {
+                kind,
+                shown: shown.map(str::to_owned),
+                cwd: None,
+            }),
+        }
+        .into()
+    })
+    .collect()
 }

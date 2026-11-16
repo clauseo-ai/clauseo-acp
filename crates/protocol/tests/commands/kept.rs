@@ -31,12 +31,14 @@ fn kept_permissions_and_its_answer_on_the_wire() {
             kind: KeptKind::Run,
             subject: "npm test".to_owned(),
             server: None,
+            cwd: None,
         },
         KeptPermission {
             rule: "mcp__court__find_case".to_owned(),
             kind: KeptKind::Tool,
             subject: "find_case".to_owned(),
             server: Some("court".to_owned()),
+            cwd: None,
         },
     ]);
     round_trips(&answer);

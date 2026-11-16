@@ -110,7 +110,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
 | `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty), source? (`SearchSource`, default `web`, left out when `web`; R24), tool? (the connector's tool, cap 64 chars; R24) | acp | yes | T |
 | `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
-| `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`) | acp | yes | T |
+| `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`), always? (`AlwaysOffer`: kind `AlwaysKind`, shown? ≤ 8 KiB, cwd?) | acp | yes | T |
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
@@ -578,7 +578,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `NotKeptReason` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `AlwaysKind`, `NotKeptReason` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |

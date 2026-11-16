@@ -48,6 +48,10 @@ mod held_open;
 mod permission_about;
 
 #[cfg(test)]
+#[path = "events/always_offer.rs"]
+mod always_offer;
+
+#[cfg(test)]
 #[path = "events/constructors.rs"]
 mod constructors;
 

@@ -21,6 +21,7 @@ fn requested(about: Option<PermissionAbout>) -> DomainEvent {
         }],
         deliverable: Deliverable::Live,
         about,
+        always: None,
     }
     .into()
 }

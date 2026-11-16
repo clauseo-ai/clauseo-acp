@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 
 use super::{ContextUsage, QueueHoldReason, ThreadStatus, ToolState};
 use crate::{
-    AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
-    ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
-    ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
-    RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
-    Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
-    TurnUsage, WebResult,
+    AgentId, AlwaysOffer, AvailableCommand, CheckpointId, CheckpointKind, CompactString,
+    CompactionStatus, ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId,
+    ElicitationOutcome, ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange,
+    ImportSummary, LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind,
+    NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId,
+    PlanEntry, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind,
+    TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind,
+    ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -329,6 +329,10 @@ pub struct PermissionEntry {
     /// What the request is about when the host can tell (`PermissionRequested::about`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub about: Option<PermissionAbout>,
+    /// What "Always for this matter" would keep, when the host offers it (`clauseo.always`);
+    /// none when it is not offered (`PermissionRequested::always`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub always: Option<AlwaysOffer>,
     /// When it was answered or cancelled (display only; the `PermissionResolved` envelope's
     /// `ts`). `None` while pending and after it expired.
     #[serde(skip_serializing_if = "Option::is_none", default)]

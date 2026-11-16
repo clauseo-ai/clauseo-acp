@@ -8,10 +8,10 @@ use crate::web::{
     MAX_WEB_TITLE_CHARS, cut_chars, logged_url,
 };
 use crate::{
-    AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
-    ExpiryReason, MatterPath, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
-    PermissionRequestId, Principal, SearchSource, TextOrBlob, ToolCallContent, ToolCallId,
-    ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    AgentId, AlwaysOffer, CompactString, Deliverable, ElicitationId, ElicitationOutcome,
+    ElicitationRequest, ExpiryReason, MatterPath, PageVia, PermissionAbout, PermissionChoice,
+    PermissionOption, PermissionRequestId, Principal, SearchSource, TextOrBlob, ToolCallContent,
+    ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -75,6 +75,10 @@ pub struct PermissionRequested {
     /// own plan note in its own config folder, not one of the lawyer's files.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub about: Option<PermissionAbout>,
+    /// What "Always for this matter" would keep, when the host offers it (`clauseo.always`);
+    /// none when it is not offered.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub always: Option<AlwaysOffer>,
 }
 
 /// A permission request was answered; the first valid answer wins.

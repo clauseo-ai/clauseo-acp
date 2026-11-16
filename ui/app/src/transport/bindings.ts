@@ -416,6 +416,40 @@ export type AllowedSite = {
 	saved: boolean,
 };
 
+/**  What "Always for this matter" would keep from a permission request (decision 0063). */
+export type AlwaysKind = 
+/**  One exact command (and, for ChatGPT, its working folder). */
+"command" | 
+/**  Changes to any file inside the matter folder. */
+"file_edit" | 
+/**  Fetching pages on one exact site. */
+"site" | 
+/**  One tool (an MCP server's tool, or web search). */
+"tool" | 
+/**  Reading one exact file; `shown` is its path relative to the matter folder. */
+"read" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
+ *  What the card's "Always for this matter" would keep, when the host offers it
+ *  (`clauseo.always`, decision 0063).
+ */
+export type AlwaysOffer = {
+	/**  What kind of thing is kept. */
+	kind: AlwaysKind,
+	/**
+	 *  What it covers, as the card shows it: the exact command text, the site's host name or the
+	 *  tool's name; none for a file edit (it covers the whole matter). At most 8 KiB.
+	 */
+	shown?: string,
+	/**
+	 *  For a command: the working folder relative to the matter folder, `/`-separated; none when
+	 *  it runs in the matter folder itself.
+	 */
+	cwd?: string,
+};
+
 /**  The text an `AppendText` extends. JSON: `"agent_text"` or `{"user_block": 1}`. */
 export type AppendTarget = 
 /**  The `text` of the `AgentText` entry `message_id` names. */
@@ -3306,11 +3340,14 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key 
 
 /**  What a kept rule allows. */
 export type KeptKind = 
-/**  Running one exact command (`Bash`); the subject is the command. */
+/**
+ *  Running one exact command (`Bash`, `PowerShell`, or ChatGPT's `Run`); the subject is the
+ *  command.
+ */
 "run" | 
 /**
- *  Changing one file (`Edit`, which covers every file-changing tool); the subject is the
- *  file.
+ *  Changing files inside the matter folder (`Edit(*)`, which covers every file-changing
+ *  tool); the subject is empty.
  */
 "edit" | 
 /**  Reading one file; the subject is the file. */
@@ -3334,6 +3371,11 @@ export type KeptPermission = {
 	subject: string,
 	/**  The MCP server, for `Tool`; left out for every other kind. */
 	server?: string,
+	/**
+	 *  For a kept ChatGPT command: the working folder relative to the matter folder, `/`-separated;
+	 *  none when it runs in the matter folder itself, and for every other kind.
+	 */
+	cwd?: string,
 };
 
 /**
@@ -4690,6 +4732,11 @@ export type PermissionEntry = {
 	/**  What the request is about when the host can tell (`PermissionRequested::about`). */
 	about?: PermissionAbout,
 	/**
+	 *  What "Always for this matter" would keep, when the host offers it (`clauseo.always`);
+	 *  none when it is not offered (`PermissionRequested::always`).
+	 */
+	always?: AlwaysOffer,
+	/**
 	 *  When it was answered or cancelled (display only; the `PermissionResolved` envelope's
 	 *  `ts`). `None` while pending and after it expired.
 	 */
@@ -4749,6 +4796,11 @@ export type PermissionRequested = {
 	 *  own plan note in its own config folder, not one of the lawyer's files.
 	 */
 	about?: PermissionAbout,
+	/**
+	 *  What "Always for this matter" would keep, when the host offers it (`clauseo.always`);
+	 *  none when it is not offered.
+	 */
+	always?: AlwaysOffer,
 };
 
 /**  A permission request was answered; the first valid answer wins. */

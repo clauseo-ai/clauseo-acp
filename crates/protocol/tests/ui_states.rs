@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 use clauseo_protocol::{
-    CheckpointKind, Deliverable, Delivery, ElicitationOutcome, ErrorCode, ExpiryReason,
+    AlwaysKind, CheckpointKind, Deliverable, Delivery, ElicitationOutcome, ErrorCode, ExpiryReason,
     LimitSource, MatterStatus, NotProtectedCause, NoticeKind, NoticeLevel, PermissionAbout,
     PermissionKind, Protection, ProtectionTier, SkippedFileReason, SteerOutcome, StopReason,
     ThreadStatus, ToolCallStatus, ToolKind,
@@ -74,7 +74,7 @@ fn every_listed_variant_is_in_ui_states() {
             NotProtectedCause, ProtectionTier;
         unit: StopReason, ToolKind, ToolCallStatus, PermissionKind, ExpiryReason,
             ElicitationOutcome, CheckpointKind, SkippedFileReason, Delivery, ErrorCode,
-            Deliverable, NoticeLevel, PermissionAbout,
+            Deliverable, NoticeLevel, PermissionAbout, AlwaysKind,
     );
     let guarded = guarded_names(UI_STATES);
     let missing: Vec<String> = every

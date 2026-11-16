@@ -127,6 +127,7 @@ fn sent_layer_leads_and_rolls_back() {
                 options: vec![option()],
                 deliverable: Deliverable::Live,
                 about: None,
+                always: None,
             }),
             DomainEvent::ElicitationRequested(ElicitationRequested {
                 elicitation,
@@ -169,6 +170,7 @@ fn sent_layer_leads_and_rolls_back() {
                 options: vec![option()],
                 deliverable: Deliverable::Live,
                 about: None,
+                always: None,
             }),
             DomainEvent::PermissionResolved(PermissionResolved {
                 request,

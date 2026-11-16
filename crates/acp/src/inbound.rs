@@ -266,6 +266,7 @@ impl Inbound {
                         options: request.options,
                         paths: request.paths,
                         raw_input: request.raw_input,
+                        tool_kind: request.tool_kind,
                     }
                 }
                 Request::Elicitation(request) => {
@@ -304,6 +305,8 @@ struct PermissionRequest {
     paths: Vec<PathBuf>,
     /// `toolCall.rawInput`, when the request has one.
     raw_input: Option<Value>,
+    /// `toolCall.kind`, when the request names one this crate knows.
+    tool_kind: Option<clauseo_protocol::ToolKind>,
 }
 
 /// Checks a `session/request_permission`. Refuses (-32602) one that does not decode, that offers
@@ -317,6 +320,10 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         .and_then(|call| call.get("rawInput"))
         .filter(|input| !input.is_null())
         .cloned();
+    let tool_kind = params
+        .get("toolCall")
+        .and_then(|call| call.get("kind"))
+        .and_then(|kind| serde_json::from_value(kind.clone()).ok());
     let request = acp::RequestPermissionRequest::deserialize(params).map_err(|error| {
         let text = error.to_string();
         crate::diagnose::undecoded("session/request_permission", &text);
@@ -342,6 +349,7 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         options,
         paths,
         raw_input,
+        tool_kind,
     })
 }
 

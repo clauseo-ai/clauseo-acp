@@ -10,6 +10,7 @@ fn shown(rule: &str, folder: &str, windows: bool) -> Option<(KeptKind, String, O
              kind,
              subject,
              server,
+             cwd: _,
          }| {
             assert_eq!(kept, rule, "the exact rule is the removal key");
             (kind, subject, server)

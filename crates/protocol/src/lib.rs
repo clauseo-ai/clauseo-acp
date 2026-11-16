@@ -206,8 +206,9 @@ macro_rules! wire_types {
 wire_types! {
     allowed_sites::{AllowScope, AllowedSite},
     approval::{
-        Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
-        PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
+        AlwaysKind, AlwaysOffer, Deliverable, ElicitationOutcome, ElicitationRequest,
+        ElicitationResponse, ExpiryReason, PermissionAbout, PermissionChoice, PermissionKind,
+        PermissionOption, Principal,
     },
     blackline::{
         BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,

@@ -2,13 +2,14 @@
 //! an expired question settles like an answered one, a turn starts as `NeedsYou` while one
 //! waits, a restored state still counts the questions that wait, and the end of an earlier
 //! prompt's turn leaves the `Starting` of a later one. A request refused because a program holds
-//! the file open keeps the file in its settled state. A request's `about` reaches its entry.
+//! the file open keeps the file in its settled state. A request's `about` and `always` reach its entry.
 
 use clauseo_protocol::{
-    DomainEvent, ElicitationExpired, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, ElicitationState, ExpiryReason, MatterPath, MessageId, PermissionAbout,
-    PermissionChoice, PermissionExpired, PermissionKind, PermissionRequestId, PermissionResolved,
-    PermissionState, Principal, ThreadStatus, TurnId, TurnStarted, UserMessageStatus, ViewEntry,
+    AlwaysKind, AlwaysOffer, DomainEvent, ElicitationExpired, ElicitationOutcome,
+    ElicitationRequest, ElicitationRequested, ElicitationResolved, ElicitationState, ExpiryReason,
+    MatterPath, MessageId, PermissionAbout, PermissionChoice, PermissionExpired, PermissionKind,
+    PermissionRequestId, PermissionResolved, PermissionState, Principal, ThreadStatus, TurnId,
+    TurnStarted, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{StreamState, apply};
 
@@ -108,6 +109,43 @@ fn a_permission_entry_carries_what_the_request_is_about() {
             panic!("{:?}", out.changes);
         };
         assert_eq!(entry.about, about);
+    }
+}
+
+/// `PermissionRequested::always` is copied to the entry, set or absent, and stays once settled.
+#[test]
+fn a_permission_entry_carries_what_always_would_keep() {
+    let offer = AlwaysOffer {
+        kind: AlwaysKind::Command,
+        shown: Some("wc -l notes.txt".to_owned()),
+        cwd: Some("Drafts".to_owned()),
+    };
+    for always in [Some(offer), None] {
+        let mut log = Log::thread(23).unwrap();
+        log.push(thread_created().unwrap()).unwrap();
+        start_turn(&mut log, "Count the lines.").unwrap();
+        let request: PermissionRequestId = log.fresh().unwrap();
+        let mut requested = permission_requested(request, None);
+        if let DomainEvent::PermissionRequested(event) = &mut requested {
+            event.always = always.clone();
+        }
+        let mut state = fold(log.events());
+        let out = apply(&mut state, &log.push(requested).unwrap()).unwrap();
+        let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+            panic!("{:?}", out.changes);
+        };
+        assert_eq!(entry.always, always);
+        let cancelled = PermissionResolved {
+            request,
+            choice: PermissionChoice::Cancelled,
+            by: Principal::LocalDesktop,
+            held_open: None,
+        };
+        let out = apply(&mut state, &log.push(cancelled).unwrap()).unwrap();
+        let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+            panic!("{:?}", out.changes);
+        };
+        assert_eq!(entry.always, always);
     }
 }
 

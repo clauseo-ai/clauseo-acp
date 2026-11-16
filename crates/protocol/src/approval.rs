@@ -64,6 +64,40 @@ open_unit_enum! {
     test mod permission_about;
 }
 
+open_unit_enum! {
+    /// What "Always for this matter" would keep from a permission request (decision 0063).
+    pub enum AlwaysKind {
+        /// One exact command (and, for ChatGPT, its working folder).
+        Command,
+        /// Changes to any file inside the matter folder.
+        FileEdit,
+        /// Fetching pages on one exact site.
+        Site,
+        /// One tool (an MCP server's tool, or web search).
+        Tool,
+        /// Reading one exact file; `shown` is its path relative to the matter folder.
+        Read,
+    }
+    test mod always_kind;
+}
+
+/// What the card's "Always for this matter" would keep, when the host offers it
+/// (`clauseo.always`, decision 0063).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AlwaysOffer {
+    /// What kind of thing is kept.
+    pub kind: AlwaysKind,
+    /// What it covers, as the card shows it: the exact command text, the site's host name or the
+    /// tool's name; none for a file edit (it covers the whole matter). At most 8 KiB.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shown: Option<String>,
+    /// For a command: the working folder relative to the matter folder, `/`-separated; none when
+    /// it runs in the matter folder itself.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cwd: Option<String>,
+}
+
 open_data_enum! {
     /// How a permission request was answered.
     #[derive(Debug, Clone, PartialEq, Eq)]

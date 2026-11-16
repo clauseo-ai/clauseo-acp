@@ -48,6 +48,10 @@ pub enum AcpEvent {
         /// `toolCall.rawInput` as the agent sent it, when it did: the host reads the paths
         /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
         raw_input: Option<serde_json::Value>,
+        /// `toolCall.kind` as the request sent it (`execute`, `edit`…), when it sent one
+        /// this crate knows: the host reads ChatGPT's command and file-change cards by it
+        /// (`agent/always.rs`).
+        tool_kind: Option<clauseo_protocol::ToolKind>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
