@@ -5,11 +5,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::browser::Switch;
-use super::profile::{codex_keys, ClaudeKeys, Folders, Login};
-use super::{guard_missing, session_meta, GuardHook, McpControl};
+use super::profile::{ClaudeKeys, Folders, Login, codex_keys};
+use super::{GuardHook, McpControl, guard_missing, session_meta};
 use crate::browser::seed_sites::SEED_SITES;
 
 const ON: Switch = Switch {
