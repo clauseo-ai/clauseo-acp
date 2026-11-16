@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 
 use super::{MatterFence, Other, innermost};
+use crate::agent::short_forms::with_short_forms;
+use crate::network_paths::NetEnv;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
@@ -25,8 +27,22 @@ fn tree(test: &str, names: &[&str]) -> (TempDir, PathBuf) {
     (dir, root)
 }
 
+/// `paths`, each followed by its full 8.3 short form where the volume makes one (Windows), as
+/// the fence adds them (`agent::short_forms`); `paths` alone elsewhere.
+fn spelled<const N: usize>(paths: [PathBuf; N]) -> Vec<PathBuf> {
+    with_short_forms(paths.to_vec(), &NetEnv::current())
+}
+
+/// [`spelled`], sorted as [`paths`] sorts.
+fn sorted<const N: usize>(paths: [PathBuf; N]) -> Vec<PathBuf> {
+    let mut paths = spelled(paths);
+    paths.sort();
+    paths
+}
+
 /// The fence for a session whose matter is `root/own` and data folder `root/data`, of
-/// `others` (folder below `root`, invited).
+/// `others` (folder below `root`, invited); the matter and `<data>` each by its short form
+/// too, as the launch passes them (`launch_checks::folders`).
 fn fence(root: &Path, own: &str, others: &[(&str, bool)]) -> MatterFence {
     let asked = others
         .iter()
@@ -35,8 +51,10 @@ fn fence(root: &Path, own: &str, others: &[(&str, bool)]) -> MatterFence {
             Other::new(id(n), format!("M{n}"), root.join(folder), *invited)
         })
         .collect();
-    let (own, data) = (root.join(own), root.join("data"));
-    MatterFence::asked(asked).resolve(&[own.as_path()], &[data.as_path()])
+    let (own, data) = (spelled([root.join(own)]), spelled([root.join("data")]));
+    let own: Vec<&Path> = own.iter().map(PathBuf::as_path).collect();
+    let data: Vec<&Path> = data.iter().map(PathBuf::as_path).collect();
+    MatterFence::asked(asked).resolve(&own, &data)
 }
 
 fn paths(fence: &MatterFence, n: usize) -> Vec<PathBuf> {
@@ -49,9 +67,10 @@ fn paths(fence: &MatterFence, n: usize) -> Vec<PathBuf> {
 fn a_sibling_and_a_child_are_fenced_whole() {
     let (_dir, root) = tree("mfence-sibling", &["own/child", "other", "data"]);
     let fence = fence(&root, "own", &[("other", false), ("own/child", false)]);
-    assert_eq!(paths(&fence, 0), [root.join("other")]);
-    assert_eq!(paths(&fence, 1), [root.join("own/child")]);
-    assert_eq!(fence.denied_reads().count(), 2);
+    assert_eq!(paths(&fence, 0), sorted([root.join("other")]));
+    assert_eq!(paths(&fence, 1), sorted([root.join("own/child")]));
+    let both = spelled([root.join("other"), root.join("own/child")]);
+    assert_eq!(fence.denied_reads().count(), both.len());
 }
 
 #[test]
@@ -69,11 +88,11 @@ fn a_parent_is_fenced_by_its_siblings_along_the_way_never_the_own_matter() {
     let fence = fence(&root, "clients/acme/deal", &[("clients", false)]);
     assert_eq!(
         paths(&fence, 0),
-        [
+        sorted([
             root.join("clients/acme/old"),
             root.join("clients/notes.txt"),
             root.join("clients/zed"),
-        ]
+        ])
     );
     // `<data>` inside a parent is never denied either.
     let fence = self::fence(&root, "clients/acme/deal", &[("", false)]);
@@ -108,16 +127,16 @@ fn an_invite_opens_reads_only_and_its_place_in_a_fenced_parent() {
     let (_dir, root) = tree("mfence-invite", &["own", "shelf/b/x", "shelf/c", "data"]);
     let fence = fence(&root, "own", &[("shelf", false), ("shelf/b", true)]);
     // The fenced parent leaves the invited matter out; the invite keeps its edit deny.
-    assert_eq!(paths(&fence, 0), [root.join("shelf/c")]);
-    assert_eq!(paths(&fence, 1), [root.join("shelf/b")]);
+    assert_eq!(paths(&fence, 0), sorted([root.join("shelf/c")]));
+    assert_eq!(paths(&fence, 1), sorted([root.join("shelf/b")]));
     let reads: Vec<&Path> = fence.denied_reads().collect();
-    assert_eq!(reads, [root.join("shelf/c")]);
+    assert_eq!(reads, spelled([root.join("shelf/c")]));
     let edits: Vec<&Path> = fence.denied_edits().collect();
-    assert_eq!(edits, [root.join("shelf/c"), root.join("shelf/b")]);
+    assert_eq!(edits, spelled([root.join("shelf/c"), root.join("shelf/b")]));
     let allowed: Vec<&Path> = fence.read_allowed().collect();
-    assert_eq!(allowed, [root.join("shelf/b")]);
+    assert_eq!(allowed, spelled([root.join("shelf/b")]));
     let folders: Vec<&Path> = fence.fenced_folders().collect();
-    assert_eq!(folders, [root.join("shelf")]);
+    assert_eq!(folders, spelled([root.join("shelf")]));
 }
 
 #[test]
@@ -192,14 +211,16 @@ fn a_fenced_matter_inside_the_own_one_shuts_it_to_the_sandbox() {
     let own = root.join("own");
     let mut inside: Vec<(PathBuf, bool)> = fence.inside_own;
     inside.sort();
-    assert_eq!(
-        inside,
-        [
-            (own.join("Shared"), true),
-            (own.join("Sub"), false),
-            (own.join("p/q/Deep"), false),
-        ]
-    );
+    let mut want: Vec<(PathBuf, bool)> = [("Shared", true), ("Sub", false), ("p/q/Deep", false)]
+        .into_iter()
+        .flat_map(|(name, invited)| {
+            spelled([own.join(name)])
+                .into_iter()
+                .map(move |p| (p, invited))
+        })
+        .collect();
+    want.sort();
+    assert_eq!(inside, want);
 }
 
 /// Only an invited matter inside the own one, or none: the own matter is re-opened whole.
@@ -208,7 +229,11 @@ fn an_invited_matter_inside_the_own_one_leaves_it_open() {
     let (_dir, root) = tree("mfence-own-invited", &["own/Shared", "other", "data"]);
     let invited = fence(&root, "own", &[("own/Shared", true), ("other", false)]);
     assert!(!invited.own_shut);
-    assert_eq!(invited.inside_own, [(root.join("own/Shared"), true)]);
+    let shared: Vec<(PathBuf, bool)> = spelled([root.join("own/Shared")])
+        .into_iter()
+        .map(|path| (path, true))
+        .collect();
+    assert_eq!(invited.inside_own, shared);
     let plain = fence(&root, "own", &[("other", false)]);
     assert!(!plain.own_shut);
     assert_eq!(plain.inside_own, []);
@@ -226,7 +251,7 @@ fn a_parent_past_the_limit_is_reported_unfenced() {
     let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
     assert_eq!(fence.unfenced, [fence.others[0].id]);
     assert_eq!(fence.others[0].paths, Vec::<PathBuf>::new());
-    assert_eq!(fence.others[1].paths, [root.join("small")]);
+    assert_eq!(fence.others[1].paths, spelled([root.join("small")]));
 }
 
 /// For Codex an invited matter inside the own one stays denied (it could not be read-only); one
@@ -241,7 +266,10 @@ fn codex_keeps_an_invited_matter_inside_the_own_one_denied() {
     );
     let mut denied = fence.codex_denied();
     denied.sort();
-    assert_eq!(denied, [root.join("fenced"), root.join("own/Inner")]);
+    assert_eq!(
+        denied,
+        sorted([root.join("fenced"), root.join("own/Inner")])
+    );
 }
 
 /// The budget goes to the matters with the fewest paths first: one old parent with thousands
@@ -254,7 +282,7 @@ fn the_budget_fences_the_smallest_matters_first() {
     }
     let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
     assert_eq!(fence.unfenced, [fence.others[0].id]);
-    assert_eq!(fence.others[1].paths, [root.join("small")]);
+    assert_eq!(fence.others[1].paths, spelled([root.join("small")]));
 }
 
 /// The own matter by its short form too: a failed read of `CLAUSE~1\…\Acme\Deal\missing.docx`,
