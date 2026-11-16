@@ -12,7 +12,7 @@ use super::{
 use crate::write;
 
 /// A fresh folder under the temp folder for `test`, removed first.
-fn scratch(test: &str) -> PathBuf {
+pub(super) fn scratch(test: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("clauseo-codex-{test}-{}", std::process::id()));
     write::remove_dir_all(&root).unwrap();
     write::create_dir_all(&root).unwrap();
@@ -23,7 +23,8 @@ fn scratch(test: &str) -> PathBuf {
 /// crate adds fails here until the nesting is checked.
 fn switches() -> Value {
     json!({
-        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
+        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false,
+            "goals": false, "unified_exec_tty": false},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         "cli_auth_credentials_store": "file",
@@ -41,7 +42,7 @@ fn pinned() -> Value {
     pinned
 }
 
-fn object(value: Value) -> Map<String, Value> {
+pub(super) fn object(value: Value) -> Map<String, Value> {
     let Value::Object(object) = value else {
         panic!("an object");
     };
@@ -287,7 +288,7 @@ fn a_linked_matter_is_checked_where_it_points() {
 }
 
 /// The home under `data`, as `Locations::agent_home` makes it.
-fn home_in(data: &Path) -> PathBuf {
+pub(super) fn home_in(data: &Path) -> PathBuf {
     data.join("agents").join("codex-acp").join("home")
 }
 
@@ -443,6 +444,8 @@ fn home_config_holds_only_the_switches() {
             "skills.include_instructions = false",
             "cli_auth_credentials_store = \"file\"",
             "shell_environment_policy.ignore_default_excludes = false",
+            "features.goals = false",
+            "features.unified_exec_tty = false",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");
