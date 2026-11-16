@@ -165,7 +165,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Also after a failed step, so a binary built before its tests failed still reaches the Intel
+      # check. The leg stays red, and attest and publish need every leg green; with no binary at
+      # all, if-no-files-found fails this step.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
         with:
           name: agent-browser-${{ matrix.target }}
           path: |
