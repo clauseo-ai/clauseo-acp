@@ -274,10 +274,11 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
     );
 }
 
-/// `*` or `?` in any path the lists would hold turns the sandbox off: Claude Code reads both as
-/// a pattern with no escape. The caller then holds the session off `auto` (`Off::Wildcard`).
+/// `*` or `?` in a path of the session's own, or in `<data>`, turns the sandbox off: Claude
+/// Code reads both as a pattern with no escape. The caller then holds the session off `auto`
+/// (`Off::Wildcard`). Another matter's folder does not (`sandbox_wild_tests.rs`).
 #[test]
-fn a_wildcard_in_any_path_sends_no_sandbox() {
+fn a_wildcard_in_an_own_path_sends_no_sandbox() {
     for glob in ["A*", "Q?", "[A*]"] {
         let mut session = Session::new("s-1");
         session.matter = PathBuf::from("/Users/l/Clients").join(glob);
@@ -285,13 +286,11 @@ fn a_wildcard_in_any_path_sends_no_sandbox() {
             let off = ClaudeSandbox::for_os(os, &session.paths());
             assert_eq!(off, Err(Off::Wildcard), "{glob}");
         }
-        let mut session = Session::new("s-1");
-        session
-            .other_matters
-            .push(PathBuf::from("/Users/l/Clients").join(glob));
-        assert_eq!(mac(&session.paths()), Err(Off::Wildcard), "{glob}");
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
+        let mut session = Session::new("s-1");
+        session.data = vec![PathBuf::from("/Users/l").join(glob)];
+        assert_eq!(mac(&session.paths()), Err(Off::Wildcard), "{glob}");
     }
     assert!(mac(&Session::new("s-1").paths()).is_ok());
 }
@@ -390,7 +389,7 @@ fn no_short_temp_folder_sends_no_sandbox() {
 /// command runs on the classifier alone where the sandbox was meant to be.
 #[test]
 fn no_sandbox_where_one_was_meant_holds_auto_back() {
-    for off in [Off::NoTemp, Off::NotUtf8, Off::Wildcard] {
+    for off in [Off::NoTemp, Off::NotUtf8, Off::Wildcard, Off::CoversOwn] {
         assert!(off.holds_auto_back(), "{off:?}");
     }
     assert!(!Off::Windows.holds_auto_back());
@@ -534,3 +533,6 @@ fn only_the_trust_roots_file_opens() {
 
 #[path = "sandbox_nested_tests.rs"]
 mod nested;
+
+#[path = "sandbox_wild_tests.rs"]
+mod wild;

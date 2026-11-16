@@ -27,6 +27,12 @@
 //! every way through Clauseo refuses it. Windows has no OS fence: there a command in the own
 //! matter that never names the nested one (`rg x .`) reads it.
 //!
+//! A matter whose stored folder holds `*` or `?` (`Test*`, `What?`) keeps Claude's sandbox on:
+//! on macOS its deny is the pattern, which only ever covers more than the folder; on Linux the
+//! folder above it with neither, the session limited. Either way the sandbox is off
+//! (`agent::loads::sandbox::Off::CoversOwn`) when that deny would cover the session's own
+//! folders (`agent::loads::sandbox::deny_form`).
+//!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
 //! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
 //! other matter (an invite is read-only), and Claude's `Read` allow rules the folders of the
