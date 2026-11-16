@@ -152,6 +152,7 @@ struct Line {
     word: String,
     state: Word,
     /// Whether the segment being read is fed by a pipe, so it must have words.
+    piped_in: bool,
     /// Whether `2>&1` stood in the segment being read.
     skipped_redirect: bool,
     count: usize,
