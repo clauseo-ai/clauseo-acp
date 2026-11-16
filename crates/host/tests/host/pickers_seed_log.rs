@@ -1,6 +1,7 @@
 //! The line a fresh data folder's first conversation logs for a pick the agent does not take
-//! (`actor/turn/picks.rs`): the same lifecycle line as any stale pick, with the model dropped
-//! and no effort, since the seed's default (`agent_options/seed.rs`) is left out without a word.
+//! (`actor/turn/picks.rs`): the same lifecycle line as any stale pick. Its model is `-`, since
+//! `loggable` writes only a value the agent lists, and its effort `-`, since the seed's default
+//! (`agent_options/seed.rs`) is left out of the picks without a word.
 //!
 //! The log is the process's global subscriber, so this module holds one test: nextest runs it
 //! in a process of its own.
