@@ -18,6 +18,8 @@ pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
 mod codex_entry_tests;
+#[cfg(test)]
+mod emitted_tests;
 pub(crate) mod lawyer;
 #[cfg(test)]
 mod lawyer_tests;
