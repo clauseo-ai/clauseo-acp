@@ -60,6 +60,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     };
     current.phase = TurnPhase::Prompting;
     let mut content = Vec::with_capacity(current.prompt.len() + 1);
+    let note_sent = note.clone();
     if let Some(text) = note {
         content.push(ContentBlock::Text { text });
     }
@@ -82,6 +83,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     super::note::sent(actor, thread, turn);
+    if let Some(current) = super::current(actor, thread) {
+        current.note = note_sent;
+    }
     let retry = key_retry::for_call(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;
