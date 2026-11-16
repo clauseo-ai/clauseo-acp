@@ -183,3 +183,23 @@ test("out of credit counts as low: a top-up that leaves it low marks nothing; co
   transport.appEvent({ connectors_changed: state(low(true)) });
   expect(store.lowTurn("t1")).toBeUndefined();
 });
+
+test("two threads running when low turns true both keep the line; a thread whose turn starts after gets none", () => {
+  const transport = withFeed();
+  const store = createConnectorsStore(transport);
+  transport.appEvent({ connectors_changed: state(low(false)) });
+  store.turnStarted("t1", "a");
+  store.turnStarted("t2", "b");
+  transport.appEvent({ connectors_changed: state(low(true)) });
+  store.turnStarted("t3", "c");
+  // a later low state, mid-turn in t3, changes nothing
+  transport.appEvent({ connectors_changed: { ...state(low(true)), locked: true } });
+  // both earlier turns end; they keep the line
+  store.turnEnded("t1", "a");
+  store.turnEnded("t2", "b");
+  expect([store.lowTurn("t1"), store.lowTurn("t2"), store.lowTurn("t3")]).toEqual([
+    "a",
+    "b",
+    undefined,
+  ]);
+});
