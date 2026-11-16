@@ -26,16 +26,10 @@ import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { PasteChips } from "./paste-chips.tsx";
-import { usePasteChips, type Step } from "./paste-chips-state.ts";
-import {
-  chipOf,
-  draftOf,
-  EMPTY_DRAFT,
-  PASTE_CHIP_MIN,
-  sentOf,
-  type Draft,
-  type PasteChip,
-} from "./paste-chips-logic.ts";
+import { usePasteChips } from "./paste-chips-state.ts";
+import { chipOf, EMPTY_DRAFT, sentOf, type Draft } from "./paste-chips-logic.ts";
+import { chipsFor, draftIn, pasteLong, undone } from "./composer-paste.ts";
+import type { ComposerHandle } from "./composer-handle.ts";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
 import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
@@ -44,6 +38,7 @@ import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./work
 
 export type { ConfigMenu, PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 export type { Draft } from "./paste-chips-logic.ts";
+export type { ComposerHandle } from "./composer-handle.ts";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -75,10 +70,6 @@ const NO_COMMANDS: readonly SlashCommand[] = [];
  * title and page, and a press to take it off again. */
 export type QuestionPaper = Pick<Paper, "id" | "title" | "pb">;
 
-/** What the composer is given, as a Draft: a string is typed words for the field, or one chip, whole, when it is
- * PASTE_CHIP_MIN units or more (draftOf), so the field never takes a long text. */
-const draftIn = (text: string | Draft): Draft => (typeof text === "string" ? draftOf(text) : text);
-
 /** The working line opens upward from the field in 240 ms on the spring: the well grows from the field's own
  * height to take the row, whose words are already on it. Once, as Clauseo starts; its words change in place after. */
 function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
@@ -98,35 +89,6 @@ function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
     });
   }, [ref, on]);
 }
-
-/** What the room may do to the field from outside. The field is uncontrolled: React never writes its value, so the
- * engine's undo stack stays whole through an input method's edits, and every change made here goes through the
- * engine's own editing (`execCommand`), so Cmd/Ctrl+Z takes it back. */
-export type ComposerHandle = {
-  focus: () => void;
-  /** What goes if sent now, as one string: each long paste's text, then the typed words (paste-chips-logic.ts's
-   * sentOf). Made on each call: for a send, or to check what was sent, never per keystroke. */
-  text: () => string;
-  /** What the composer holds now, its typed words and its long pastes' texts apart (paste-chips-logic.ts's Draft). */
-  draft: () => Draft;
-  /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. A string is
-   * typed words (one chip when it is PASTE_CHIP_MIN units or more); a Draft brings its chips with it. */
-  setText: (text: string | Draft) => void;
-  /** Empties the field as one undoable step: with the field focused, or with focus on nothing or on a button of the
-   * field's own row (Ask, just pressed), which it takes back to the field. With focus anywhere else on the page it is
-   * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, the
-   * question just sent and accepted, it clears only while the composer holds exactly that, and Cmd/Ctrl+Z after it
-   * brings back no chip: the long pastes went with the question. While an input method composes it waits for the
-   * composition's end and clears then if the field still holds what it held. */
-  clear: (only?: string) => void;
-  /** Puts `text` into the field only while it is empty, as one undoable step, and never moves the lawyer's focus:
-   * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
-   * method composes it waits for the composition's end, and fills then only if the field is still empty. */
-  fill: (text: string | Draft) => void;
-  /** The things the field's `@` tokens mention now, in the order they first stand in it, each once: what a send of
-   * its words names alongside them. A token edited or deleted mentions nothing. */
-  mentioned: () => readonly MentionItem[];
-};
 
 export type ComposerProps<V extends string = string> = {
   /** "Took 38 seconds" once an answer is done, or nothing before the first. */
@@ -317,28 +279,12 @@ export function Composer<V extends string = string>({
     setEmpty(none);
     onInput?.(draft(), none && !chips.has());
   };
-  // a Cmd/Ctrl+Z the chips took (usePasteChips's undo): with its words not the engine's to undo, nothing more of the
-  // key, the field's words put back if they were taken out in place, and the room told. True when the key is done
-  const undone = (e: KeyboardEvent<HTMLElement>, step: Step | null, a: HTMLTextAreaElement) => {
-    if (step === null || step.engine) return false;
-    e.preventDefault();
-    if (step.was !== undefined) a.value = step.was;
-    changed();
-    return true;
-  };
   // the field's words and the chips together set to `next`, as it holds them apart: the chips first, so the field's
-  // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here.
-  // A chip kept in its place keeps its words' count
+  // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here
   const replace = (a: HTMLTextAreaElement, next: Draft, focus: boolean, inPlace = false) => {
     const { typed } = next;
     const was = a.value;
-    const now = chips.now();
-    const same =
-      next.pastes.length === now.length && next.pastes.every((t, i) => t === now[i]!.text);
-    const back: readonly PasteChip[] = same
-      ? now
-      : next.pastes.map((t, i) => (now[i]?.text === t ? now[i]! : chipOf(t)));
-    const step = chips.set(back, typed);
+    const step = chips.set(chipsFor(chips.now(), next.pastes), typed);
     if (inPlace) a.value = typed;
     const engine = !inPlace && replaceAll(a, typed, focus);
     if (step !== null) step.engine = engine && was !== typed;
@@ -475,7 +421,8 @@ export function Composer<V extends string = string>({
                     // Cmd/Ctrl+Z on a chip's button, as after a remove whose focus went to the next chip: the
                     // chip comes back
                     const a = area.current;
-                    if (a !== null) undone(e, chips.undo(e, platform === "mac", a.value, false), a);
+                    if (a !== null)
+                      undone(e, chips.undo(e, platform === "mac", a.value, false), a, changed);
                   }}
                 />
               )}
@@ -509,34 +456,7 @@ export function Composer<V extends string = string>({
             }}
             onInput={(e) => changed(true, (e.nativeEvent as InputEvent).inputType)}
             onPaste={(e) => {
-              // a long paste is a chip, not words in the field (paste-chips-logic.ts), one step undo takes back
-              const text = e.clipboardData.getData("text/plain");
-              if (composing.current || text.length < PASTE_CHIP_MIN) return;
-              e.preventDefault();
-              const a = e.currentTarget;
-              const was = a.value;
-              const [from, to] = [a.selectionStart, a.selectionEnd];
-              // the chip first, so the input event of the selection's removal reads it
-              const step = chips.add(text, was);
-              if (from === to) {
-                changed();
-                return;
-              }
-              // a paste over selected words takes them out, as any paste does: through the engine's editing where it
-              // can, so its undo puts them back with the chip's; else in place, and the step puts them back
-              const doc = a.ownerDocument;
-              const engine =
-                typeof doc.execCommand === "function" &&
-                doc.execCommand("delete") &&
-                a.value !== was;
-              if (!engine) {
-                a.value = was.slice(0, from) + was.slice(to);
-                a.setSelectionRange(from, from);
-                step.was = was;
-              }
-              step.box = a.value;
-              step.engine = engine;
-              if (!engine) changed();
+              if (!composing.current) pasteLong(e, chips, changed);
             }}
             onCompositionStart={() => {
               composing.current = true;
@@ -558,7 +478,7 @@ export function Composer<V extends string = string>({
               // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too; a chip removed comes back, and
               // a chip just pasted goes
               const a = e.currentTarget;
-              if (undone(e, chips.undo(e, platform === "mac", a.value, true), a)) return;
+              if (undone(e, chips.undo(e, platform === "mac", a.value, true), a, changed)) return;
               const key = {
                 key: e.key,
                 shiftKey: e.shiftKey,
