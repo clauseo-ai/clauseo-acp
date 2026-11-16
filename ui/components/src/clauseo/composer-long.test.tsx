@@ -139,7 +139,7 @@ test("setText of a text past PASTE_CHIP_MIN puts it in a chip, never through the
   expect(document.querySelectorAll('[data-testid="paste-chip"]')).toHaveLength(1);
   expect(ref.current?.text()).toBe(big);
   expect(document.activeElement).toBe(field());
-  expect(onInput).toHaveBeenCalledExactlyOnceWith(big, false);
+  expect(onInput).toHaveBeenCalledExactlyOnceWith({ typed: "", pastes: [big] }, false);
   // just under it, the words go through the engine, so undo takes them back
   const most = big.slice(0, PASTE_CHIP_MIN - 1);
   await act(async () => ref.current?.setText(most));

@@ -3,7 +3,7 @@ import { Composer } from "@clauseo/components/clauseo/composer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { useLayoutEffect } from "react";
 
-/** The composer at the window's foot, its draft `text`; with `focus`, the chip's remove button focused. */
+/** The composer at the window's foot, its draft a chip of `text`; with `focus`, the chip's remove button focused. */
 export function Pasted({ text, focus = false }: { text: string; focus?: boolean }) {
   useLayoutEffect(() => {
     if (focus) document.querySelector<HTMLButtonElement>(".q-paste .q-paper-remove")?.focus();
@@ -11,7 +11,7 @@ export function Pasted({ text, focus = false }: { text: string; focus?: boolean 
   return (
     <RoomScopeProvider>
       <div className="flex min-h-dvh flex-col justify-end">
-        <Composer took={null} plan="" hint={null} initialText={text} />
+        <Composer took={null} plan="" hint={null} initialText={{ typed: "", pastes: [text] }} />
       </div>
     </RoomScopeProvider>
   );

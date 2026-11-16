@@ -40,6 +40,14 @@ import {
   type SlashCommand,
   type ToolsSegment,
 } from "@clauseo/components/clauseo/composer.tsx";
+import {
+  draftOf,
+  isBlank,
+  joinDrafts,
+  rememberSent,
+  sentOf,
+  type Draft,
+} from "@clauseo/components/clauseo/paste-chips-logic.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
@@ -183,17 +191,19 @@ export function WorkComposer({
     () => ({
       focus: () => field.current?.focus(),
       text: () => field.current?.text() ?? "",
-      setText: (text: string) => field.current?.setText(text),
+      draft: () => field.current?.draft() ?? { typed: "", pastes: [] },
+      setText: (text: string | Draft) => field.current?.setText(text),
       clear: (only?: string) => field.current?.clear(only),
-      fill: (text: string) => field.current?.fill(text),
+      fill: (text: string | Draft) => field.current?.fill(text),
       mentioned: () => field.current?.mentioned() ?? [],
     }),
     [],
   );
   // whether the field is empty, for Queue: set only as it fills or empties, so a keystroke renders nothing
-  const [empty, setEmpty] = useState(
-    () => (draftKey === null ? "" : (drafts.get(draftKey) ?? "")).trim() === "",
-  );
+  const [empty, setEmpty] = useState(() => {
+    const d = draftKey === null ? undefined : drafts.get(draftKey);
+    return d === undefined || (d.typed.trim() === "" && d.pastes.length === 0);
+  });
   const emptyNow = useRef(empty);
   // U7: another conversation holding the matter, and whether Ask has raised its wait (design state.ts's `waiting`):
   // Ask then sends nothing, Queue sends; emptying the field lowers it
@@ -224,18 +234,18 @@ export function WorkComposer({
   const mark = useSyncExternalStore(subscribe, readMark, readMark);
   // moved on: cleared in this render, so the line's change is the flush's own commit, not one after it
   if (lost !== null && mark !== null && mark !== lost) setLost(null);
-  // the field holds the words, not React: each change goes straight to the conversation's draft, long pastes'
-  // chips and all (the composer's one string); `isEmpty` comes from the composer, as a trim of a long paste's text
-  // would copy it on every keystroke
-  const keep = (text: string, isEmpty: boolean) => {
+  // the field holds the words, not React: each change goes straight to the conversation's draft, as the composer
+  // holds it, the typed words and each long paste's text apart (a Draft, never one string split again); `isEmpty`
+  // comes from the composer, as a trim of a long paste's text would copy it on every keystroke
+  const keep = (draft: Draft, isEmpty: boolean) => {
     if (emptyNow.current !== isEmpty) {
       emptyNow.current = isEmpty;
       setEmpty(isEmpty);
       if (isEmpty) setRaised(false);
     }
     if (draftKey === null) return;
-    if (text === "") drafts.delete(draftKey);
-    else drafts.set(draftKey, text);
+    if (isBlank(draft)) drafts.delete(draftKey);
+    else drafts.set(draftKey, draft);
   };
   // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it steers the
   // words where the agent takes words mid-answer, else queues them, but not past the cap, when they stay in the field;
@@ -265,6 +275,10 @@ export function WorkComposer({
     if (lost !== null) setLost(null);
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
     const files = (field.current?.mentioned() ?? []).map((m) => m.id);
+    // the draft it goes from, so the host giving back exactly these words (a stopped question, a steer not sent, a
+    // lost edit) brings its chips back as they were (draftOf)
+    const from = field.current?.draft();
+    if (from !== undefined && sentOf(from) === asked) rememberSent(asked, from);
     if (how === undefined) asking.current = asked;
     void onAsk(asked, files.length === 0 ? how : { ...how, files }).then((ok) => {
       if (how === undefined) asking.current = null;
@@ -280,9 +294,11 @@ export function WorkComposer({
       field.current?.clear(asked);
       // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
       // gone to another conversation while the question went
-      if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
+      const kept = draftKey === null ? undefined : drafts.get(draftKey);
+      if (draftKey !== null && kept !== undefined && sentOf(kept) === asked)
+        drafts.delete(draftKey);
       // its turn already stopped (refill below): the question comes back into the field just emptied
-      if (back !== null) field.current?.fill(back);
+      if (back !== null) field.current?.fill(draftOf(back));
     });
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
@@ -290,31 +306,34 @@ export function WorkComposer({
   // the hint's Queue, as Enter where the agent takes no words mid-answer; its Send now stops the answer for the words
   const queueField = () => queue(field.current?.text() ?? "");
   const focusField = useCallback(() => field.current?.focus(), []);
-  // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
-  // over them
+  // the strip's lost edit: into an empty field as it is, else its typed words after the words there with a blank line
+  // between, and its chips after the chips there; never over them
   const editLost = useCallback(
     (text: string, say: boolean) => {
       const f = field.current;
       if (f === null) return;
-      const there = f.text();
-      if (there === "") f.fill(text);
-      else f.setText(`${there}\n\n${text}`);
+      const there = f.draft();
+      const back = draftOf(text);
+      if (isBlank(there)) f.fill(back);
+      else f.setText(joinDrafts(there, back, "\n\n"));
       // with other messages left, the strip says it had gone
       if (say && lost === null)
         setLost(markOf(stream === null ? undefined : store?.view(stream)) ?? "");
     },
     [lost, store, stream],
   );
-  // a steer never sent: its words back into the field, after the words there on a new line; with no field, the draft
+  // a steer never sent: its words back into the field, after the words there on a new line, and its chips after the
+  // chips there; with no field, the draft
   useNotSentRestore(store, stream, (text) => {
     const f = field.current;
+    const back = draftOf(text);
     if (f !== null) {
-      const there = f.text();
-      if (there === "") f.fill(text);
-      else f.setText(`${there}\n${text}`);
+      const there = f.draft();
+      if (isBlank(there)) f.fill(back);
+      else f.setText(joinDrafts(there, back, "\n"));
     } else if (draftKey !== null) {
-      const there = drafts.get(draftKey) ?? "";
-      drafts.set(draftKey, there === "" ? text : `${there}\n${text}`);
+      const there = drafts.get(draftKey);
+      drafts.set(draftKey, there === undefined ? back : joinDrafts(there, back, "\n"));
     }
   });
   const sendNowField = () =>
@@ -333,7 +352,7 @@ export function WorkComposer({
       held.current = refillText;
       return;
     }
-    field.current?.fill(refillText);
+    field.current?.fill(draftOf(refillText));
   }, [refillKey, refillText]);
   const waitTitle = wait?.title ?? mt(w.lang, "New conversation");
   const said =

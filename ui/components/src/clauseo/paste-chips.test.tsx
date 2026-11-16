@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // A long paste on the composer: a chip at PASTE_CHIP_MIN characters and over, words in the field under it; the chips'
-// texts after the typed words in what goes and what the room hears; removal; and the chips coming back with the
-// composer's words through every way they come back (a draft, setText, fill, clear and its undo).
+// texts with the typed words in what goes, and apart from them in what the room hears (a Draft); removal; and the
+// chips coming back with the composer's words through every way they come back (a draft, setText, fill, clear and its
+// undo), as they were, never split again from one string.
 import { act, createRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -10,12 +11,11 @@ import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { Composer, type ComposerHandle, type ComposerProps } from "./composer.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import {
-  askedOf,
-  chipOf,
-  chipTail,
+  draftOf,
   forgetChipsForTests,
   PASTE_CHIP_MIN,
-  splitAsked,
+  rememberSent,
+  sentOf,
   wordCount,
 } from "./paste-chips-logic.ts";
 
@@ -86,7 +86,7 @@ test("a paste at PASTE_CHIP_MIN is a chip, the field left empty; one character u
   expect(field().value).toBe("");
   expect(chips()).toHaveLength(1);
   expect(chips()[0]!.textContent).toBe("Pasted text3,334 words");
-  expect(onInput).toHaveBeenLastCalledWith(big, false);
+  expect(onInput).toHaveBeenLastCalledWith({ typed: "", pastes: [big] }, false);
   // Ask takes the chip alone
   expect(document.querySelector<HTMLButtonElement>('[data-testid="send"]')!.disabled).toBe(false);
 });
@@ -140,12 +140,12 @@ test("Remove pasted text takes its chip off, tells the room, and puts the focus 
   ).toMatch(/words$/);
   await act(async () => buttons[0]!.click());
   expect(chips()).toHaveLength(1);
-  expect(onInput).toHaveBeenLastCalledWith(two, false);
+  expect(onInput).toHaveBeenLastCalledWith({ typed: "", pastes: [two] }, false);
   expect(ref.current?.text()).toBe(two);
   expect(document.activeElement).toBe(chips()[0]!.querySelector("button"));
   await act(async () => chips()[0]!.querySelector("button")!.click());
   expect(chips()).toHaveLength(0);
-  expect(onInput).toHaveBeenLastCalledWith("", true);
+  expect(onInput).toHaveBeenLastCalledWith({ typed: "", pastes: [] }, true);
   expect(document.activeElement).toBe(field());
 });
 
@@ -164,30 +164,50 @@ test("a Backspace at the start of an empty field leaves the chips alone", async 
 test("a big paste keeps the field small: its value never holds the pasted text", async () => {
   const onInput = vi.fn();
   await mount(composer({ onInput }));
-  await paste(brief(6 * 1024 * 1024));
+  const big = brief(6 * 1024 * 1024);
+  await paste(big);
   await type("And this.");
   expect(field().value).toBe("And this.");
-  expect(onInput.mock.lastCall?.[0]).toHaveLength(6 * 1024 * 1024 + "And this.\n\n".length);
+  // what the room hears holds the paste as it came, not joined to the typed words
+  expect(onInput).toHaveBeenLastCalledWith({ typed: "And this.", pastes: [big] }, false);
 });
 
 test("the draft comes back with its chips: the typed words in the field, each chip as it was", async () => {
-  const one = chipOf(brief(PASTE_CHIP_MIN, "a")).text;
-  const two = chipOf(brief(PASTE_CHIP_MIN, "b")).text;
+  const one = brief(PASTE_CHIP_MIN, "a");
+  const two = brief(PASTE_CHIP_MIN, "b");
   const ref = createRef<ComposerHandle>();
-  await mount(
-    composer({ ref, initialText: askedOf("Compare these.", chipTail([chipOf(one), chipOf(two)])) }),
-  );
+  await mount(composer({ ref, initialText: { typed: "Compare these.", pastes: [one, two] } }));
   expect(field().value).toBe("Compare these.");
   expect(chips()).toHaveLength(2);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare these.", pastes: [one, two] });
   expect(ref.current?.text()).toBe(`Compare these.\n\n${one}\n\n${two}`);
 });
 
-test("a long text with no chip remembered comes back as one chip, never into the field", async () => {
+test("a chip whose text holds another chip's text comes back byte for byte, never cut up or doubled", async () => {
+  // a long agreement, and a schedule pasted out of it
+  const schedule = brief(25_000, "s");
+  const agreement = `${brief(30_000, "p")}${schedule}${brief(30_000, "q")}`;
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, initialText: { typed: "Check B.", pastes: [agreement, schedule] } }));
+  expect(chips()).toHaveLength(2);
+  expect(ref.current?.draft().pastes).toEqual([agreement, schedule]);
+  expect(field().value).toBe("Check B.");
+});
+
+test("a long string from outside is one chip, whole: never searched for chips; a sent question comes back as it went", async () => {
   const long = brief(PASTE_CHIP_MIN + 1, "z");
   await mount(composer({ initialText: long }));
   expect(field().value).toBe("");
   expect(chips()).toHaveLength(1);
-  expect(splitAsked("short")).toEqual({ typed: "short", chips: [] });
+  expect(draftOf("short")).toEqual({ typed: "short", pastes: [] });
+  // the chip text inside a longer string is not looked for
+  const inner = brief(PASTE_CHIP_MIN, "i");
+  rememberSent(inner, { typed: "", pastes: [inner] });
+  expect(draftOf(`Words.\n\n${inner}`)).toEqual({ typed: "", pastes: [`Words.\n\n${inner}`] });
+  // a question sent whole is found whole
+  const asked = { typed: "Read it.", pastes: [inner, long] };
+  rememberSent(sentOf(asked), asked);
+  expect(draftOf(sentOf(asked))).toEqual(asked);
 });
 
 test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them back with the words", async () => {
@@ -198,14 +218,16 @@ test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them b
   await paste(one);
   await type("Read it.");
   const asked = ref.current!.text();
+  const held = ref.current!.draft();
   expect(asked).toBe(`Read it.\n\n${one}`);
+  expect(held).toEqual({ typed: "Read it.", pastes: [one] });
   // a clear for other words does nothing
   await act(async () => ref.current?.clear("Read it."));
   expect(chips()).toHaveLength(1);
   await act(async () => ref.current?.clear(asked));
   expect(chips()).toHaveLength(0);
   expect(field().value).toBe("");
-  expect(onInput).toHaveBeenLastCalledWith("", true);
+  expect(onInput).toHaveBeenLastCalledWith({ typed: "", pastes: [] }, true);
   // happy-dom has no execCommand, so the clear was made in place: the composer's own undo brings both back
   field().focus();
   const z = new KeyboardEvent("keydown", {
@@ -221,13 +243,16 @@ test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them b
   await act(async () => ref.current?.fill("Other words."));
   expect(field().value).not.toBe("Other words.");
   await act(async () => ref.current?.clear(ref.current.text()));
-  await act(async () => ref.current?.fill(asked));
+  await act(async () => ref.current?.fill(held));
   expect(ref.current?.text()).toBe(asked);
   expect(chips()).toHaveLength(1);
   expect(field().value).toBe("Read it.");
-  // setText with words appended after them, as a lost edit comes back
-  await act(async () => ref.current?.setText(`${asked}\n\nAlso this.`));
-  expect(chips()).toHaveLength(1);
+  // setText with words after them and a second chip, as a lost edit comes back
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await act(async () =>
+    ref.current?.setText({ typed: "Read it.\n\nAlso this.", pastes: [one, two] }),
+  );
+  expect(chips()).toHaveLength(2);
   expect(field().value).toBe("Read it.\n\nAlso this.");
-  expect(ref.current?.text()).toBe(`Read it.\n\nAlso this.\n\n${one}`);
+  expect(ref.current?.draft()).toEqual({ typed: "Read it.\n\nAlso this.", pastes: [one, two] });
 });
