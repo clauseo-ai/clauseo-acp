@@ -102,6 +102,7 @@ import { FirstMark } from "./first-mark.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
 import { useSacNote } from "./sac/use-sac-note.ts";
+import { WindowsLine } from "./windows-line/windows-line.tsx";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -526,11 +527,10 @@ function RoomFrame({
           ) : (
             <StoreContext value={store}>
               {versions.centre}
-              {sac.show && (
-                <Suspense fallback={null}>
-                  <SacNote transport={transport} onGotIt={sac.dismiss} />
-                </Suspense>
-              )}
+              <Suspense fallback={null}>
+                {sac.show && <SacNote transport={transport} onGotIt={sac.dismiss} />}
+                <WindowsLine matters={view.matters.length} />
+              </Suspense>
               {scratch && <ScratchLine />}
               {retried !== null && (
                 <Suspense fallback={null}>

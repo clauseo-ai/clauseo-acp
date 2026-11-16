@@ -78,6 +78,7 @@ import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
 import { UC_CRASH } from "./registry-uc-crash.tsx";
+import { UC_WINDOWS_LINE } from "./registry-uc-windows-line.tsx";
 import { IT_ENTRIES } from "./registry-it.tsx";
 import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
 import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
@@ -559,6 +560,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UBL,
   ...R23,
   ...UC_CRASH,
+  ...UC_WINDOWS_LINE,
   ...IT_ENTRIES,
   ...NM,
   ...PK,
