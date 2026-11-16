@@ -38,6 +38,10 @@ use crate::agent::codex::prepare::{Job, off_actor};
 use crate::clock::Clock;
 use crate::error::Error;
 
+/// How long a file check's caller waits. 10 s, not the 5 s of `Job::short`, which the turn's
+/// cancel ladder also arms (a test moving the clock past a 5 s timer means the cancel's).
+const CHECK_WAIT: Duration = Duration::from_secs(10);
+
 /// How often [`watch`] checks the file while a prompt runs: Claude Code's own fallback poll.
 pub(in super::super) const POLL: Duration = Duration::from_secs(2);
 
@@ -75,7 +79,11 @@ pub(super) async fn check(
     let Some(home) = home else {
         return Ok(());
     };
-    let job = Job::short("Claude's settings check", matter);
+    let job = Job {
+        what: "Claude's settings check",
+        matter,
+        wait: CHECK_WAIT,
+    };
     let intact = off_actor(clock, job, move || {
         Ok(crate::agent::home::claude_settings_intact(&home))
     })

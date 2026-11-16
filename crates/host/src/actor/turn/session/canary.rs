@@ -191,9 +191,14 @@ pub(super) fn take(actor: &mut Actor, thread: ThreadId) -> Option<Expect> {
         .and_then(|agent| agent.canary.armed.take())
 }
 
+/// How long the read-back's caller waits. 10 s, not the 5 s of `Job::short`, which the turn's
+/// cancel ladder also arms (a test moving the clock past a 5 s timer means the cancel's).
+const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// After a session call (`call`) for `matter` answered (`answered`, well): its canary `expect`
-/// read back off the actor (`crate::agent::codex::prepare::off_actor`, a short job, so a read
-/// that hangs reads as [`Found::Unread`]). `None` when it carried no canary or failed.
+/// read back off the actor (`crate::agent::codex::prepare::off_actor`, waited on for
+/// [`READ_WAIT`], so a read that hangs reads as [`Found::Unread`]). `None` when it carried no
+/// canary or failed.
 pub(super) async fn after(
     clock: Arc<dyn Clock>,
     matter: Option<MatterId>,
@@ -201,7 +206,11 @@ pub(super) async fn after(
     answered: bool,
 ) -> Option<Checked> {
     let expect = expect.filter(|_| answered)?;
-    let job = Job::short("the settings canary's read-back", matter);
+    let job = Job {
+        what: "the settings canary's read-back",
+        matter,
+        wait: READ_WAIT,
+    };
     let found = off_actor(clock, job, move || Ok(read(&expect)))
         .await
         .unwrap_or(Found::Unread);
