@@ -387,9 +387,9 @@ jobs:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      # Booleans only: no secret's value reaches the step. Every Apple name counts: the six the
-      # Developer ID path reads (the next check's) and Tauri's Apple ID notary names, which it
-      # refuses. The safe rule: an Apple secret always means notarisation is required, so the
+      # Booleans only: no secret's value reaches the step. Every Apple name counts: the
+      # certificate trio and both notary trios, the API key's and the Apple ID's (the next
+      # check's). The safe rule: an Apple secret always means notarisation is required, so the
       # variable never weakens a signed set-up. In every mode.
       - name: Decide the unsigned beta
         id: beta
@@ -427,15 +427,19 @@ jobs:
           package-manager-cache: false
 
       # The Developer ID path's secrets, checked here, before any build leg starts, so a wrong
-      # certificate, password or API key fails minutes into the run (decision 0035, "Apple
-      # Developer ID"). With no Apple secret it says so: the build signs ad hoc (the unsigned
-      # beta's path). With any, all six must be set, else it names the missing ones (names only),
-      # and Tauri's Apple ID names are refused. Then, on Linux with openssl and node, no macOS
-      # needed: APPLE_CERTIFICATE opens with its password and holds one certificate and its key;
-      # the certificate is APPLE_SIGNING_IDENTITY's, of the Team ID in its "(TEAMID)", issued
-      # by Developer ID Certification Authority and not expired; and the notary service accepts
-      # the API key (apple-notary.mjs, what `notarytool history` asks). Before the ui install;
-      # nothing prints a secret. The build's macOS legs import the same certificate later.
+      # certificate, password or key fails minutes into the run (decision 0035, "Apple Developer
+      # ID"). With no Apple secret it says so: the build signs ad hoc (the unsigned beta's path).
+      # With any, exactly one complete set: the certificate trio and one notary trio, the API key's
+      # or the Apple ID's, never both and never part of one; it names what is wrong (names only).
+      # Then, on Linux with openssl and node, no macOS needed: APPLE_CERTIFICATE opens with its
+      # password and holds one certificate and its key; the certificate is
+      # APPLE_SIGNING_IDENTITY's, of the Team ID in its "(TEAMID)", issued by Developer ID
+      # Certification Authority and not expired. The API key: the notary service accepts it
+      # (apple-notary.mjs, what `notarytool history` asks). The Apple ID: APPLE_TEAM_ID is that
+      # Team ID and the password has an app-specific password's shape; the sign-in itself can't be
+      # tried here (notarytool's Apple ID sign-in is Apple's own protocol on macOS; the notary's
+      # web API takes only an API key's token), so the bundle step tries it first, before it signs
+      # anything. Before the ui install; nothing prints a secret.
       - name: Every Apple secret is set or none is, and the certificate and the API key work
         if: needs.check.outputs.mode == 'release'
         env:
@@ -445,23 +449,41 @@ jobs:
           APPLE_API_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_ISSUER || '' }}
           APPLE_API_KEY_P8: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_KEY_P8 || '' }}
-          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' || secrets.APPLE_PASSWORD != '' || secrets.APPLE_TEAM_ID != '' }}
+          APPLE_ID: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
-          [ "$HAS_APPLE_ID" = false ] ||
-            fail "APPLE_ID, APPLE_PASSWORD or APPLE_TEAM_ID is set; release.yml notarises with the API key (APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8) and reads none of them: delete them"
-          names="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8"
-          have=() missing=()
-          for name in $names; do
-            if [ -n "${!name}" ]; then have+=("$name"); else missing+=("$name"); fi
-          done
-          if [ "${#have[@]}" = 0 ]; then
+          certificate="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY"
+          api_key="APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8"
+          apple_id="APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
+          # $1 set or missing, $2 a set's names: those of them that are set, or not.
+          names() {
+            local name list=()
+            for name in $2; do
+              if [ -n "${!name}" ]; then [ "$1" = missing ] || list+=("$name"); else [ "$1" = set ] || list+=("$name"); fi
+            done
+            echo "${list[*]:-}"
+          }
+          if [ -z "$(names set "$certificate $api_key $apple_id")" ]; then
             echo "custody: no Apple secret; the macOS legs sign ad hoc" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          [ "${#missing[@]}" = 0 ] ||
-            fail "the release environment has ${have[*]} but not ${missing[*]}: set all six, or none"
+          if [ -n "$(names set "$api_key")" ] && [ -n "$(names set "$apple_id")" ]; then
+            fail "both notary sets are (partly) set, the API key's ($(names set "$api_key")) and the Apple ID's ($(names set "$apple_id")): keep one set, delete the other"
+          fi
+          [ -z "$(names missing "$certificate")" ] ||
+            fail "the certificate set lacks $(names missing "$certificate"): set APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD and APPLE_SIGNING_IDENTITY, or no Apple secret"
+          if [ -n "$(names set "$api_key")" ]; then
+            notary=api_key
+            [ -z "$(names missing "$api_key")" ] || fail "the API key set lacks $(names missing "$api_key")"
+          elif [ -n "$(names set "$apple_id")" ]; then
+            notary=apple_id
+            [ -z "$(names missing "$apple_id")" ] || fail "the Apple ID set lacks $(names missing "$apple_id")"
+          else
+            fail "no notary set: set APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_P8, or APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID"
+          fi
           [[ "$APPLE_SIGNING_IDENTITY" =~ ^Developer\ ID\ Application:\ .+\ \(([A-Z0-9]{10})\)$ ]] ||
             fail "APPLE_SIGNING_IDENTITY is not \"Developer ID Application: <name> (<TEAMID>)\""
           team=${BASH_REMATCH[1]}
@@ -494,8 +516,18 @@ jobs:
           openssl x509 -in "$dir/cert.pem" -noout -checkend 0 > /dev/null || fail "the Developer ID certificate expired on $end"
           openssl x509 -in "$dir/cert.pem" -noout -checkend 2592000 > /dev/null ||
             echo "::warning::the Developer ID certificate expires on $end, within 30 days: make the next one"
-          node .github/scripts/apple-notary.mjs --check
-          echo "custody: Developer ID of team $team, valid until $end; the notary service accepts the API key" |
+          if [ "$notary" = api_key ]; then
+            node .github/scripts/apple-notary.mjs --check
+            said="the notary service accepts the API key"
+          else
+            [ "$APPLE_TEAM_ID" = "$team" ] ||
+              fail "APPLE_TEAM_ID is not the Team ID of APPLE_SIGNING_IDENTITY and its certificate"
+            [[ "$APPLE_ID" == ?*@?*.?* ]] || fail "APPLE_ID is not an email address (the Apple Account's)"
+            [[ "$APPLE_PASSWORD" =~ ^[a-z]{4}-[a-z]{4}-[a-z]{4}-[a-z]{4}$ ]] ||
+              fail "APPLE_PASSWORD is not an app-specific password (xxxx-xxxx-xxxx-xxxx, from account.apple.com)"
+            said="notarising with the Apple ID of the same team (its sign-in is tried by the bundle step)"
+          fi
+          echo "custody: Developer ID of team $team, valid until $end; $said" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # Before the release key: the Tauri CLI from the lock file.
@@ -991,9 +1023,11 @@ jobs:
       # search list and signs the externalBin sidecars, the main binary and the .app with it
       # (--options runtime, macos/app.entitlements.plist, and --timestamp through the codesign
       # wrapper below, which fails a signature without one before anything is notarised),
-      # notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
-      # APPLE_API_KEY_PATH, the .p8 written here), prints the notary log if it is refused, and
-      # staples it; the DMG and the updater archive hold the stapled .app. The bundler never
+      # notarises the .app with the notary set custody let through, the API key (APPLE_API_KEY,
+      # APPLE_API_ISSUER and APPLE_API_KEY_PATH, the .p8 written here) or the Apple ID (APPLE_ID,
+      # APPLE_PASSWORD, an app-specific password, and APPLE_TEAM_ID), whose sign-in this step
+      # tries first with notarytool history, before it signs anything; prints the notary log if
+      # it is refused, and staples it; the DMG and the updater archive hold the stapled .app. The bundler never
       # notarises the DMG, so this step does, staples and validates it, and prints the notary log
       # on a refusal. The keychain and the .p8 go when the step ends; the next step checks it all.
       # After the bundle, both legs' bundler names the updater archive Clauseo.app.tar.gz, and its
@@ -1011,6 +1045,9 @@ jobs:
           APPLE_API_KEY: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_ISSUER || '' }}
           APPLE_API_KEY_P8: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_ID: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_TEAM_ID || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
         run: |
@@ -1042,9 +1079,24 @@ jobs:
             security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
             security find-identity -p codesigning "$keychain" | grep -qF "\"$APPLE_SIGNING_IDENTITY\"" ||
               fail "the keychain made from APPLE_CERTIFICATE has no APPLE_SIGNING_IDENTITY"
-            APPLE_API_KEY_PATH=$apple/AuthKey_$APPLE_API_KEY.p8
-            printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
-            export APPLE_API_KEY_PATH
+            # The notary set custody let through: the API key's or the Apple ID's. The bundler reads
+            # either from these names (the Apple ID's first), so the other set's empty names go.
+            if [ -n "$APPLE_API_KEY" ]; then
+              APPLE_API_KEY_PATH=$apple/AuthKey_$APPLE_API_KEY.p8
+              printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
+              export APPLE_API_KEY_PATH
+              unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+              notary=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+            else
+              [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] || fail "no complete notary set"
+              unset APPLE_API_KEY APPLE_API_ISSUER
+              # notarytool takes the app-specific password on its command line, as the bundler's
+              # own call does; GitHub masks it in the log, and the runner is this job's alone.
+              notary=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+            fi
+            # The notary sign-in, before anything is signed: for the Apple ID, its first try.
+            xcrun notarytool history "${notary[@]}" > /dev/null 2> "$apple/history.err" ||
+              { cat "$apple/history.err"; fail "the notary service refused the notary set (notarytool history)"; }
             # The bundler's codesign (tauri-macos-sign 2.4.1) passes no --timestamp and has no
             # setting for it, and codesign's default timestamps "some but not all" signatures. It
             # runs `codesign` from PATH, so this one, first in PATH, adds --timestamp to every
@@ -1077,7 +1129,7 @@ jobs:
             export PATH=$apple/bin:$PATH
           else
             [ "$APPLE_SIGNING_IDENTITY" = - ] || fail "an ad hoc leg with a real identity"
-            unset APPLE_API_KEY APPLE_API_ISSUER
+            unset APPLE_API_KEY APPLE_API_ISSUER APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           fi
           # From here the bundler sees no certificate (an empty APPLE_CERTIFICATE would make it
           # import nothing and fail) and only the .p8's path.
@@ -1102,7 +1154,6 @@ jobs:
             # The bundler's DMG signature again, explicitly timestamped and without the app's
             # entitlements, which a disk image has no use for.
             codesign --force -s "$APPLE_SIGNING_IDENTITY" --keychain "$keychain" --timestamp "$dmg"
-            notary=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
             submitted=$(xcrun notarytool submit "$dmg" "${notary[@]}" --wait --timeout 20m --output-format json) || true
             id=$(jq -r '.id // ""' <<< "$submitted" 2> /dev/null) || id=""
             verdict=$(jq -r '.status // ""' <<< "$submitted" 2> /dev/null) || verdict=""
@@ -1165,8 +1216,8 @@ jobs:
       # codesign -dvvv's flags=) and holds exactly its own entitlements, decided per binary in
       # decision 0035 ("Entitlements, per binary"): Contents/MacOS's files and the .app the
       # bundler's bundle.macOS.entitlements file (it signs them all with it), Contents/Helpers's
-      # none (this workflow signs them with none). Compared as keys, through plutil, so codesign's XML
-      # layout doesn't matter.
+      # none (this workflow signs them with none). Compared as keys, through plutil, so
+      # codesign's XML layout doesn't matter.
       - name: Every Mach-O has the hardened runtime and its own entitlements
         if: runner.os == 'macOS'
         run: |
