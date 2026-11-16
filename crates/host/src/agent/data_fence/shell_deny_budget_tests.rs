@@ -13,7 +13,7 @@
 //! variant where one other matter's folder is a text prefix of the open matter's
 //! (`Documents\Launch` beside `Documents\Launch Matter`). The rules are built as
 //! `loads::profile::deny_data_folder` builds them on Windows: Read and Edit (the data folder's,
-//! the other matters', the folders above them), the shell rules with their variable forms, the
+//! the other matters'; no folder above them), the shell rules with their variable forms, the
 //! matter marker; the allow rules are built and counted as nothing. The per-conversation groups
 //! (`run`, `agent-state`, Claude's projects) are the laptop's own and are not varied here.
 
@@ -74,7 +74,6 @@ fn id(n: usize) -> MatterId {
 struct Launch {
     deny: Vec<String>,
     allow: Vec<String>,
-    ancestors: usize,
     /// The own folders' Windows rules (`own_shell_allow_rules`, `own_shell_glob_deny_rules`):
     /// fixed per launch, in the settings file before any other matter's rule.
     own_folder: usize,
@@ -128,11 +127,6 @@ fn launch(matters: usize, short: bool, prefix: bool) -> Launch {
         ..deny
     };
     let mut rules = claude_deny_rules_on(&deny, true, false);
-    let ancestors = rules
-        .iter()
-        .filter(|rule| rule.starts_with("Edit(") && !rule.ends_with("/**)"))
-        .filter(|rule| rule.contains("/Documents/Matters)") || rule.contains("/Documents)"))
-        .count();
     let mut known: std::collections::HashSet<String> = rules.iter().cloned().collect();
     for rule in windows_shell_deny_rules(&deny, &env) {
         if known.insert(rule.clone()) {
@@ -149,7 +143,6 @@ fn launch(matters: usize, short: bool, prefix: bool) -> Launch {
     Launch {
         deny: rules,
         allow: claude_allow_rules_on(&deny, true),
-        ancestors,
         own_folder,
         glob_context,
     }
@@ -172,13 +165,12 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
                 let file = serde_json::to_string(&launch.deny).unwrap().len()
                     + serde_json::to_string(&launch.allow).unwrap().len();
                 eprintln!(
-                    "budget: {matters} matters, {} spelling(s){}: {} deny rules ({} above \
-                     other matters), {} allow, {} own-folder rules (glob denies {} B of context); \
-                     context {context} B; settings {file} B",
+                    "budget: {matters} matters, {} spelling(s){}: {} deny rules, {} allow, {} \
+                     own-folder rules (glob denies {} B of context); context {context} B; \
+                     settings {file} B",
                     if short { 2 } else { 1 },
                     if prefix { ", prefix matter" } else { "" },
                     launch.deny.len(),
-                    launch.ancestors,
                     launch.allow.len(),
                     launch.own_folder,
                     launch.glob_context,
@@ -215,16 +207,16 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
     }
 }
 
-/// The estimate against what the pinned binary sent through the stand-in API for these launches
-/// at #1085's b0d68aad7 with no other matters' shell rules and the 8.3 data spelling written as
-/// its name alone (`autoctx`'s variant V4; one and two spellings), like for like: the rules the
-/// head gained since are left out, the folders above other matters (`ancestor_edit_rules`) and
-/// the own folders' glob denies (`own_shell_glob_deny_rules`, from main's 1e4b199ae, 187 a
-/// spelling); V4 had no other matters' shell rules, nor has the head (e7795a867). Within 10% of
-/// it either way. Not one-sided, because the flat 225 B a `Read` or `Edit` rule under-counts
-/// the data folder's long-path rules and over-counts the matters' shorter ones: the estimate runs
-/// up to about 4% under at a few matters and up to about 9% over at 200. Costing each rule by its
-/// own JSON (#1154's estimator, the budget notes' option F) makes it one-sided again.
+/// The estimate against what the pinned binary sent through the stand-in API for these launches at
+/// #1085's b0d68aad7 with no other matters' shell rules and the 8.3 data spelling written as its
+/// name alone (`autoctx`'s variant V4; one and two spellings), like for like: the rules the head
+/// gained since are left out, the own folders' glob denies (`own_shell_glob_deny_rules`, from
+/// main's 1e4b199ae, 187 a spelling); V4 had no other matters' shell rules, nor has the head
+/// (e7795a867). Within 10% of it either way. Not one-sided, because the flat 225 B a `Read` or
+/// `Edit` rule under-counts the data folder's long-path rules and over-counts the matters' shorter
+/// ones: the estimate runs up to about 4% under at a few matters and up to about 9% over at 200.
+/// Costing each rule by its own JSON (#1154's estimator, the budget notes' option F) makes it
+/// one-sided again.
 #[test]
 fn the_estimate_is_pinned_to_the_measured_context() {
     let measured: [(usize, bool, usize); 8] = [
@@ -240,7 +232,7 @@ fn the_estimate_is_pinned_to_the_measured_context() {
     let mut rows = Vec::new();
     for (matters, short, sent) in measured {
         let launch = launch(matters, short, false);
-        let estimate = estimate(&launch.deny) - 225 * launch.ancestors - launch.glob_context;
+        let estimate = estimate(&launch.deny) - launch.glob_context;
         // How far off, in tenths of a percent.
         let sign = if estimate >= sent { '+' } else { '-' };
         let off = estimate.abs_diff(sent) * 1000 / sent;

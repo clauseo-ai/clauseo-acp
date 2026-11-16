@@ -1,12 +1,13 @@
-//! The exact `Edit` denies of the folders above other matters (`ancestor_edit_rules`): only
-//! those that hold neither the own matter nor the data folder, never a drive root, so the own
-//! matter's files stay writable.
+//! No folder above another matter is in an `Edit` deny: one covered everything inside it, so it
+//! refused an ordinary save (a copy to Documents while another matter lives there) and, for a
+//! matter under `/tmp` or `/var`, every shell command (Claude Code's sandbox keeps its working
+//! folder's file in `/tmp/clsb-…`). The other matters themselves stay denied.
 
 use std::path::PathBuf;
 
 use clauseo_protocol::MatterId;
 
-use super::{LaunchDeny, claude_deny_rules_on};
+use super::{LaunchDeny, claude_deny_rules_on, rule_path};
 use crate::agent::matter_fence::{MatterFence, Other};
 
 fn id(n: u128) -> MatterId {
@@ -14,8 +15,8 @@ fn id(n: u128) -> MatterId {
     MatterId::new(uuid::Uuid::from_u128(bits)).unwrap()
 }
 
-/// `C:\Clients\P\{A,B}` and `C:\Clients\Q\C`, the conversation in `A`; `B` invited when
-/// `invited`.
+/// A launch whose other matters are `others` (folder, invited), each fenced whole, and whose
+/// own matter is spelled `own`.
 fn launch(others: &[(&str, bool)], own: &[&str]) -> LaunchDeny {
     let others = others
         .iter()
@@ -31,14 +32,14 @@ fn launch(others: &[(&str, bool)], own: &[&str]) -> LaunchDeny {
     let mut fence = MatterFence::asked(others);
     fence.own = own.iter().map(PathBuf::from).collect();
     let mut deny = LaunchDeny::fixed(vec![PathBuf::from(
-        r"C:\Users\Asha\AppData\Local\ai.clauseo.desktop",
+        r"C:\Users\l\AppData\Local\ai.clauseo.desktop",
     )]);
     deny.matters = fence;
     deny
 }
 
-/// Whether any `Edit` rule of `rules` covers `path` (a rule path, `//c/…`), read as
-/// gitignore reads it: the path itself and all under it, or with `/**` all under it.
+/// Whether any `Edit` rule of `rules` covers the rule path `path` (`//c/…`), read as gitignore
+/// reads it: the path itself and all under it, or with `/**` all under it.
 fn edit_covers(rules: &[String], path: &str) -> Option<String> {
     let path = path.to_lowercase();
     rules
@@ -52,110 +53,103 @@ fn edit_covers(rules: &[String], path: &str) -> Option<String> {
         .map(|(rule, _)| rule.clone())
 }
 
-#[test]
-fn a_folder_above_other_matters_alone_is_denied_exactly() {
-    let deny = launch(
-        &[(r"C:\Clients\P\B", false), (r"C:\Clients\Q\C", false)],
-        &[r"C:\Clients\P\A"],
-    );
-    let rules = claude_deny_rules_on(&deny, true, false);
-    assert!(
-        rules.contains(&"Edit(//c/Clients/Q)".to_owned()),
-        "{rules:?}"
-    );
-    for absent in [
-        "Edit(//c/Clients)",
-        "Edit(//c/Clients/P)",
-        "Edit(//c)",
-        "Edit(//c/)",
-        "Edit(//c/Clients/Q/**)",
-        "Edit(//c/Clients/**)",
-    ] {
-        assert!(!rules.contains(&absent.to_owned()), "{absent}: {rules:?}");
+/// For each launch (`windows`: Windows' rule form), no folder above an other matter's folder is
+/// covered by an `Edit` rule, and each other matter's files are.
+fn assert_only_the_matters(deny: &LaunchDeny, windows: bool, above: &[&str], files: &[&str]) {
+    let rules = claude_deny_rules_on(deny, windows, false);
+    for folder in above {
+        let at = rule_path(folder, windows);
+        assert_eq!(edit_covers(&rules, &at), None, "{folder}: {rules:#?}");
+        let saved = format!("{at}/copy of the brief.docx");
+        assert_eq!(edit_covers(&rules, &saved), None, "{saved}: {rules:#?}");
     }
-    // The own matter's files stay writable; the others' are not.
-    for own in [
-        "//c/Clients/P/A/x.docx",
-        "//c/Clients/P/A",
-        "//c/clients/p/a/sub/y.txt",
-    ] {
-        assert_eq!(edit_covers(&rules, own), None, "{own}");
-    }
-    for other in [
-        "//c/Clients/P/B/f.txt",
-        "//c/Clients/Q/C/f.txt",
-        "//c/Clients/Q",
-    ] {
-        assert!(edit_covers(&rules, other).is_some(), "{other}");
+    for file in files {
+        let at = rule_path(file, windows);
+        assert!(edit_covers(&rules, &at).is_some(), "{file}: {rules:#?}");
     }
 }
 
-/// An invited matter's folders above it are denied too (an invite is read-only); a folder above
-/// the data folder never is (it holds the session's own run folder), nor any before the launch
-/// resolved the own matter.
+/// The own matter on the Desktop, another under Documents: nothing in `Documents` or
+/// `Documents/Clients` is denied but the other matter, so a copy saved to Documents goes.
 #[test]
-fn invited_matters_count_and_the_data_folders_parents_never_do() {
+fn a_folder_above_another_matter_gets_no_edit_rule() {
     let deny = launch(
         &[
-            (r"C:\Clients\Q\C", true),
-            (r"C:\Users\Asha\Matters\D", false),
+            ("/Users/l/Documents/Clients/B", false),
+            ("/Users/l/Documents/C", true),
         ],
-        &[r"C:\Clients\P\A"],
+        &["/Users/l/Desktop/Deal"],
     );
-    let rules = claude_deny_rules_on(&deny, true, false);
-    assert!(
-        rules.contains(&"Edit(//c/Clients/Q)".to_owned()),
-        "{rules:?}"
-    );
-    assert!(
-        rules.contains(&"Edit(//c/Users/Asha/Matters)".to_owned()),
-        "{rules:?}"
-    );
-    for absent in [
-        "Edit(//c/Users/Asha)",
-        "Edit(//c/Users)",
-        "Edit(//c/Clients)",
-    ] {
-        assert!(!rules.contains(&absent.to_owned()), "{absent}: {rules:?}");
-    }
-    let data = "//c/Users/Asha/AppData/Local/ai.clauseo.desktop/run/own/work/x.md";
-    assert_eq!(
-        edit_covers(&rules, data).filter(|r| !r.contains("ai.clauseo")),
-        None
-    );
-    // Each spelling once, across matters: two matters under `Q` give one rule.
-    let twice = launch(
-        &[(r"C:\Clients\Q\C", false), (r"C:\Clients\Q\E", false)],
-        &[r"C:\Clients\P\A"],
-    );
-    let rules = claude_deny_rules_on(&twice, true, false);
-    assert_eq!(
-        rules.iter().filter(|r| *r == "Edit(//c/Clients/Q)").count(),
-        1
-    );
-    let unresolved = launch(&[(r"C:\Clients\Q\C", false)], &[]);
-    let rules = claude_deny_rules_on(&unresolved, true, false);
-    assert!(
-        !rules.contains(&"Edit(//c/Clients/Q)".to_owned()),
-        "{rules:?}"
+    assert_only_the_matters(
+        &deny,
+        false,
+        &[
+            "/Users/l/Documents",
+            "/Users/l/Documents/Clients",
+            "/Users/l",
+            "/Users",
+            "/",
+        ],
+        &[
+            "/Users/l/Documents/Clients/B/f.txt",
+            "/Users/l/Documents/C/f.txt",
+        ],
     );
 }
 
-/// The own matter's 8.3 spelling keeps the short folders above it out too.
+/// Matters under `/tmp` and `/var/folders`: no `Edit` of `/tmp`, `/private/tmp`, `/var`,
+/// `/private/var` or any folder down to the matters, so Claude Code's sandbox temp folder
+/// (`/tmp/clsb-…`) stays writable.
 #[test]
-fn the_own_matters_short_spelling_counts() {
+fn matters_under_tmp_and_var_leave_the_temp_folders_writable() {
     let deny = launch(
-        &[(r"C:\CLIENT~1\Q\C", false), (r"C:\Clients\Q\C", false)],
-        &[r"C:\Clients\P\A", r"C:\CLIENT~1\P\A"],
+        &[
+            ("/tmp/x/B", false),
+            ("/private/tmp/y/B", false),
+            ("/private/var/folders/ab/cd/T/attach/B", false),
+            ("/var/folders/ab/cd/T/B", false),
+        ],
+        &["/Users/l/Desktop/Deal"],
     );
-    let rules = claude_deny_rules_on(&deny, true, false);
-    assert!(
-        rules.contains(&"Edit(//c/CLIENT~1/Q)".to_owned()),
-        "{rules:?}"
+    assert_only_the_matters(
+        &deny,
+        false,
+        &[
+            "/tmp",
+            "/tmp/x",
+            "/tmp/clsb-abcd1234/claude-501",
+            "/private/tmp",
+            "/var",
+            "/private/var",
+            "/var/folders",
+            "/private/var/folders",
+            "/private/var/folders/ab/cd/T/attach",
+        ],
+        &["/tmp/x/B/f", "/private/var/folders/ab/cd/T/attach/B/f"],
     );
-    assert!(
-        !rules.contains(&"Edit(//c/CLIENT~1)".to_owned()),
-        "{rules:?}"
+}
+
+/// The same on Windows: `C:\Users\l\Documents` and the folders down to another matter get no
+/// rule, its 8.3 spelling neither.
+#[test]
+fn a_windows_folder_above_another_matter_gets_no_edit_rule() {
+    let deny = launch(
+        &[
+            (r"C:\Users\l\Documents\Clients\B", false),
+            (r"C:\Users\l\DOCUME~1\Clients\B", false),
+        ],
+        &[r"C:\Users\l\Desktop\Deal"],
     );
-    assert_eq!(edit_covers(&rules, "//c/client~1/p/a/x.docx"), None);
+    assert_only_the_matters(
+        &deny,
+        true,
+        &[
+            r"C:\Users\l\Documents",
+            r"C:\Users\l\Documents\Clients",
+            r"C:\Users\l\DOCUME~1",
+            r"C:\Users\l",
+            r"C:\Users",
+        ],
+        &[r"C:\Users\l\Documents\Clients\B\f.txt"],
+    );
 }
