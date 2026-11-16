@@ -56,6 +56,12 @@ const choice = (name: string) =>
     (b) => b.textContent?.trim() === name,
   );
 
+// A test that times out mid-act (a 1 ms limit, so it always does): the next tests still get their room, because the
+// harness takes no act once its test has ended and unmounts after the one in flight (testing/rig-life.ts).
+test.fails("a test that times out mid-act leaves the next test its room", async () => {
+  h = await mountRoom(previewUndoScript(nothingSince));
+}, 1);
+
 test("a flagged file with nothing changed since: the dialog asks, keeps it, and Undo sends keep for it", async () => {
   h = await mountRoom(previewUndoScript(nothingSince));
   h.deliver([reset([changed([added(NOTE, true), added("agent.txt")])])]);

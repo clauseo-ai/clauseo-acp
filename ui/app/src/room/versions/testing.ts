@@ -1,11 +1,12 @@
 // A harness for Versions' tests: the real room (room.tsx) over a FakeTransport scripted for one matter, its thread's
 // stream and the matter's own stream, with frames run by hand. Not shipped: only tests import it. Written with
 // createElement, so this file holds no component.
-import { act, createElement } from "react";
+import { act as reactAct, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { StoreContext } from "../../store/hooks.ts";
 import { createViewStore, type ViewStore } from "../../store/store.ts";
 import { manualBatch } from "../../testing/dom.ts";
+import { rigLife } from "../../testing/rig-life.ts";
 import {
   batch,
   event,
@@ -235,6 +236,13 @@ export async function mountVersions(
   const host = document.createElement("div");
   document.body.append(host);
   const root: Root = createRoot(host);
+  // every act the harness makes goes through its life, so a test that times out cannot leave one open under the next
+  const life = rigLife(async () => {
+    await reactAct(async () => root.unmount());
+    host.remove();
+    store.dispose();
+  });
+  const act = life.act;
   await act(async () =>
     root.render(
       createElement(
@@ -304,10 +312,6 @@ export async function mountVersions(
       if (!cursors.has(MATTER_STREAM)) await deliver(MATTER_STREAM, [matterReset(versions)]);
     },
     button,
-    unmount: async () => {
-      await act(async () => root.unmount());
-      host.remove();
-      store.dispose();
-    },
+    unmount: life.end,
   };
 }

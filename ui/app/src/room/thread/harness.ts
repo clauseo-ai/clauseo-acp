@@ -1,11 +1,12 @@
 // A harness for the room's thread tests: the real room (room.tsx) over a FakeTransport scripted for one matter, inside
 // the page's view store with frames run by hand. Not shipped: only tests import it. Written with createElement, so
 // this file holds no component.
-import { act, createElement, Profiler, type ProfilerOnRenderCallback } from "react";
+import { act as reactAct, createElement, Profiler, type ProfilerOnRenderCallback } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { StoreContext } from "../../store/hooks.ts";
 import { createViewStore, type ViewStore } from "../../store/store.ts";
 import { manualBatch } from "../../testing/dom.ts";
+import { rigLife } from "../../testing/rig-life.ts";
 import { batch, EPOCH, event, MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
 import type {
@@ -150,6 +151,13 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   const host = document.createElement("div");
   document.body.append(host);
   const root: Root = createRoot(host);
+  // every act the harness makes goes through its life, so a test that times out cannot leave one open under the next
+  const life = rigLife(async () => {
+    await reactAct(async () => root.unmount());
+    host.remove();
+    store.dispose();
+  });
+  const act = life.act;
   const room = createElement(StoreContext, { value: store }, createElement(Room, { transport }));
   await act(async () =>
     root.render(
@@ -216,10 +224,6 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
       await act(async () => (el as HTMLElement).click());
       await settle();
     },
-    unmount: async () => {
-      await act(async () => root.unmount());
-      host.remove();
-      store.dispose();
-    },
+    unmount: life.end,
   };
 }
