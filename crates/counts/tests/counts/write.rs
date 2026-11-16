@@ -72,10 +72,11 @@ pub(crate) fn make_fifo(path: &Path) {
     assert!(status.success(), "mkfifo {}: {status}", path.display());
 }
 
-/// Makes `link` a symbolic link to the file `target`. Windows may refuse without the privilege,
-/// so the error is the caller's to read.
+/// Makes `link` (which must not exist; its folder is made) a symbolic link to the file `target`.
+/// Windows may refuse without the privilege, so the error is the caller's to read.
 #[cfg(windows)]
 pub(crate) fn symlink_file(link: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(link.parent().unwrap())?;
     std::os::windows::fs::symlink_file(target, link)
 }
 
