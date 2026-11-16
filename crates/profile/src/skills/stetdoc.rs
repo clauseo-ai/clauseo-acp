@@ -2,13 +2,14 @@
 //! `stetdoc/SKILL.md` with `stetdoc --version`'s first line as its version. Its frontmatter is
 //! rewritten to `name: stetdoc` and stetdoc's `description` alone ([`skill_source`]), so no
 //! `allowed-tools`, `hooks` or other key of stetdoc's reaches an agent. stetdoc 0.9.3 prints the
-//! skill's body alone, with no frontmatter, so its text is refused here: the agents then learn
-//! stetdoc from its own `--help` (`instructions::STETDOC_CLI`), and only the skill is left out.
+//! skill's body alone, with no frontmatter: Clauseo then writes the frontmatter itself, its
+//! description stetdoc's first `# ` heading (or [`FALLBACK_DESCRIPTION`]), the body unchanged.
 //! [`version`] and [`load_skill_at`] are the two halves of [`load_skill`], so a caller can tell
 //! a stetdoc that does not run from a skill text that is refused.
 //!
-//! [`load_skill`] runs once, when the app builds the profile, off the host thread; the
-//! actor-side calls only hand out what it loaded. stetdoc starts through `clauseo-process`, like
+//! [`load_skill`] runs when the app builds the profile, off the host thread ([`start`] runs
+//! it once more in the background after a slow first run); the actor-side calls only hand out
+//! what it loaded. stetdoc starts through `clauseo-process`, like
 //! every child: an absolute program, no shell, a tree of its own killed on a timeout.
 
 use std::collections::BTreeMap;
@@ -18,17 +19,28 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
-use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
+use futures::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use super::{SKILL_MD, SkillFile, SkillSource, frontmatter, is_current};
 use crate::error::ProfileError;
+
+pub mod start;
 
 /// The skill's name.
 pub const STETDOC: &str = "stetdoc";
 
 /// The one file of stetdoc's skill.
 const SKILL_FILE: &str = SKILL_MD;
+
+/// The description stetdoc's skill gets when its text has no frontmatter and no `# ` heading
+/// near its top ([`skill_source`]).
+pub const FALLBACK_DESCRIPTION: &str =
+    "Edit Word documents with real tracked changes using the stetdoc command.";
+
+/// How many non-empty lines from the top of a text with no frontmatter are searched for the
+/// `# ` heading that becomes the description.
+const HEADING_WITHIN: usize = 5;
 
 /// How long one stetdoc run may take (it starts in about 5 ms).
 pub const RUN_LIMIT: Duration = Duration::from_secs(10);
@@ -83,10 +95,25 @@ pub async fn version<T: Timer>(
     timer: &T,
     stetdoc: &Path,
 ) -> Result<String, ProfileError> {
-    let printed = run(launcher, timer, stetdoc, &["--version"]).await?;
+    version_within(launcher, timer, stetdoc, RUN_LIMIT)
+        .await
+        .map_err(RunError::into_error)
+}
+
+/// [`version`] within `limit`, telling a run that only passed its limit from one that failed.
+pub async fn version_within<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Path,
+    limit: Duration,
+) -> Result<String, RunError> {
+    let printed = run_within(launcher, timer, stetdoc, &["--version"], limit).await?;
     let version = printed.lines().next().unwrap_or_default().trim().to_owned();
     if version.is_empty() {
-        return Err(stetdoc_error(&["--version"], "it printed no version"));
+        return Err(RunError::Failed(stetdoc_error(
+            &["--version"],
+            "it printed no version",
+        )));
     }
     Ok(version)
 }
@@ -112,11 +139,42 @@ pub async fn load_skill_at<T: Timer>(
 }
 
 /// stetdoc's skill from the text `skills get core` printed (or a cached copy, already in this
-/// form): `name: stetdoc`, stetdoc's `description`, then its body. Every other frontmatter key
-/// is dropped. Text that is not UTF-8 or has no `description` is an error for this skill alone.
+/// form): `name: stetdoc`, a `description`, then the body. A leading UTF-8 BOM is dropped.
+///
+/// - A text with a frontmatter (its first line `---`, ending in LF or CRLF) keeps stetdoc's
+///   `description`; every other key is dropped. A frontmatter with no `description` is an
+///   error for this skill alone. A CRLF frontmatter is read with LF line ends; the body after
+///   it is kept as it is.
+/// - A text with none (stetdoc 0.9.3 prints the body alone) gets one from Clauseo: the
+///   description is the first `# ` heading in its first [`HEADING_WITHIN`] non-empty lines,
+///   trimmed, or [`FALLBACK_DESCRIPTION`]; the body is the text, unchanged.
+///
+/// Text that is not UTF-8 is an error for this skill alone.
 pub fn skill_source(version: &str, text: &[u8]) -> Result<SkillSource, ProfileError> {
     let text = std::str::from_utf8(text)
         .map_err(|err| ProfileError::skill(STETDOC, format!("its text is not UTF-8: {err}")))?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let rendered = if text.starts_with("---\r\n") {
+        with_own_frontmatter(&lf_frontmatter(text))?
+    } else if text.starts_with("---\n") {
+        with_own_frontmatter(text)?
+    } else {
+        let description = first_heading(text).unwrap_or(FALLBACK_DESCRIPTION);
+        format!("{}{text}", frontmatter::render(STETDOC, description))
+    };
+    Ok(SkillSource::verbatim(
+        STETDOC,
+        version,
+        vec![SkillFile {
+            path: SKILL_FILE.to_owned(),
+            bytes: rendered.into_bytes(),
+        }],
+    ))
+}
+
+/// `text`, which starts with a `---\n` line, as `SKILL.md`: `name: stetdoc` and its own
+/// `description` alone, then its body.
+fn with_own_frontmatter(text: &str) -> Result<String, ProfileError> {
     let (description, body) = frontmatter::lenient_description(text)
         .map_err(|reason| ProfileError::skill(STETDOC, reason))?;
     // A literal (`|`) description holds newlines; the rendered frontmatter is one line.
@@ -126,15 +184,61 @@ pub fn skill_source(version: &str, text: &[u8]) -> Result<SkillSource, ProfileEr
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let rendered = format!("{}{body}", frontmatter::render(STETDOC, &description));
-    Ok(SkillSource::verbatim(
-        STETDOC,
-        version,
-        vec![SkillFile {
-            path: SKILL_FILE.to_owned(),
-            bytes: rendered.into_bytes(),
-        }],
+    Ok(format!(
+        "{}{body}",
+        frontmatter::render(STETDOC, &description)
     ))
+}
+
+/// `text`, whose first line is `---` with a CRLF end, with LF ends in its frontmatter alone: up
+/// to and including the next `---` line (all of `text` when there is none, which the parse
+/// then refuses). The body after it is kept byte for byte.
+fn lf_frontmatter(text: &str) -> String {
+    let mut end = text.len();
+    let mut at = 0;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        at += line.len();
+        if index > 0 && line.trim_end_matches(['\r', '\n']) == "---" {
+            end = at;
+            break;
+        }
+    }
+    let (head, body) = text.split_at(end);
+    format!("{}{body}", head.replace("\r\n", "\n"))
+}
+
+/// The first non-empty `# ` heading's text, trimmed, in the first [`HEADING_WITHIN`] non-empty
+/// lines of `text` (LF or CRLF line ends); none when there is none.
+fn first_heading(text: &str) -> Option<&str> {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(HEADING_WITHIN)
+        .filter_map(|line| line.strip_prefix("# "))
+        .map(str::trim)
+        .find(|heading| !heading.is_empty())
+}
+
+/// Why a [`run_within`] gave no text to use: the run only passed its limit (a stetdoc that may
+/// work but is slow, such as the first run of a new program that the OS scans), or it failed.
+#[derive(Debug)]
+pub enum RunError {
+    /// It ran past its limit and was killed with its tree.
+    TimedOut(ProfileError),
+    /// It could not be started: the launch itself failed (missing, not a program, refused, or
+    /// held by the OS a moment, as a scanner may hold a new program).
+    NotStarted(ProfileError),
+    /// It exited with an error, or printed what cannot be used.
+    Failed(ProfileError),
+}
+
+impl RunError {
+    /// The error, whichever way the run went.
+    #[must_use]
+    pub fn into_error(self) -> ProfileError {
+        match self {
+            Self::TimedOut(error) | Self::NotStarted(error) | Self::Failed(error) => error,
+        }
+    }
 }
 
 /// stetdoc's stdout for `args`, run in stetdoc's own folder with nothing added to the
@@ -146,24 +250,43 @@ pub async fn run<T: Timer>(
     stetdoc: &Path,
     args: &[&str],
 ) -> Result<String, ProfileError> {
+    run_within(launcher, timer, stetdoc, args, RUN_LIMIT)
+        .await
+        .map_err(RunError::into_error)
+}
+
+/// [`run`] within `limit`: the deadline is [`RunError::TimedOut`], a failed launch
+/// [`RunError::NotStarted`], any other failure [`RunError::Failed`].
+pub async fn run_within<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Path,
+    args: &[&str],
+    limit: Duration,
+) -> Result<String, RunError> {
     let os_args: Vec<OsString> = args.iter().map(OsString::from).collect();
-    let ran = run_for(
-        launcher,
-        timer,
-        stetdoc,
-        &os_args,
-        &RunOptions::new(RUN_LIMIT),
-    )
-    .await
-    .map_err(|failure| stetdoc_error(args, failure.to_string()))?;
+    let ran = run_for(launcher, timer, stetdoc, &os_args, &RunOptions::new(limit))
+        .await
+        .map_err(|failure| {
+            let error = stetdoc_error(args, failure.to_string());
+            match failure {
+                RunFailure::TimedOut => RunError::TimedOut(error),
+                RunFailure::Launch(_) => RunError::NotStarted(error),
+                RunFailure::TooMuchOutput { .. } | RunFailure::Read(_) => RunError::Failed(error),
+            }
+        })?;
     if ran.code != Some(0) {
-        return Err(stetdoc_error(
+        return Err(RunError::Failed(stetdoc_error(
             args,
             format!("it exited with {:?}: {}", ran.code, ran.stderr_tail),
-        ));
+        )));
     }
-    String::from_utf8(ran.stdout)
-        .map_err(|err| stetdoc_error(args, format!("its stdout is not UTF-8: {err}")))
+    String::from_utf8(ran.stdout).map_err(|err| {
+        RunError::Failed(stetdoc_error(
+            args,
+            format!("its stdout is not UTF-8: {err}"),
+        ))
+    })
 }
 
 /// How one stetdoc run of [`run_for`] exited, whatever the code: stetdoc with `--json` prints
@@ -213,7 +336,8 @@ impl std::fmt::Display for RunFailure {
 
 /// Runs stetdoc with `args` in its own folder, with `options.env` added to the environment the
 /// launcher gives it, and returns how it exited, whatever the code, within `options.limit`.
-/// Past the limit or `options.stdout_max` bytes of stdout its process tree is killed. Waits on
+/// Its stdin ends at once. Past the limit or `options.stdout_max` bytes of stdout its process
+/// tree is killed, and the handle's drop ends it on every path. Waits on
 /// `timer` and stetdoc's pipes: run it off any thread that must stay responsive.
 pub async fn run_for<T: Timer>(
     launcher: &dyn Launcher,
@@ -227,7 +351,7 @@ pub async fn run_for<T: Timer>(
     let spec = LaunchSpec::new(stetdoc.to_owned(), args.to_vec(), options.env.clone(), cwd)
         .map_err(|err| RunFailure::Launch(err.to_string()))?;
     let Launched {
-        stdin,
+        mut stdin,
         stdout,
         stderr,
         mut handle,
@@ -235,10 +359,12 @@ pub async fn run_for<T: Timer>(
     } = launcher
         .launch(&spec)
         .map_err(|err| RunFailure::Launch(err.to_string()))?;
-    drop(stdin);
     let mut out = Vec::new();
     let ran = {
         let work = async {
+            // Closed, not only dropped: the handle holds the pipe too, so a stetdoc that read
+            // stdin would wait on it until the deadline. A failed close changes nothing.
+            drop(stdin.close().await);
             let mut limited = stdout.take(max.saturating_add(1));
             let mut drain = pin!(stderr.drain());
             let (read, drained) = {

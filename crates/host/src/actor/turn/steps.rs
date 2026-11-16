@@ -209,6 +209,8 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         let holder = match turns.holder {
             None => {
                 turns.holder = Some(Holder::Thread(thread));
+                // An agent-started turn shows from now: it has no prompt that would.
+                super::own_turn::log_opened(actor, thread, turn);
                 before_turn(actor, thread, turn);
                 return Ok(());
             }
@@ -287,7 +289,9 @@ pub(super) fn end_unstarted(
 
 /// Step 4: the before-turn checkpoint on the matter's thread.
 pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    if agents::restart_if_moved(actor, thread, turn) {
+    if agents::restart_if_moved(actor, thread, turn)
+        || agents::restart_if_marked(actor, thread, turn)
+    {
         return;
     }
     if let Some(current) = current(actor, thread) {
@@ -424,8 +428,12 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     } else if let Some(code) = current.store_failed {
         let detail = Some(STORE_DETAIL.to_owned());
         end::end_turn(actor, thread, End::failed(code, detail, None));
+    } else if current.own.is_some() {
+        super::own_turn::started(actor, thread, turn);
     } else {
         prompt::prompt(actor, thread, turn);
+        // Agent output that came between turns comes first in this one (`own_turn.rs`).
+        super::own_turn::flush(actor, thread, turn);
     }
 }
 

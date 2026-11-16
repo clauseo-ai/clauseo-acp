@@ -5,8 +5,10 @@
 // Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", which installs it
 // and then starts its sign-in. Once its install runs: the install line. Every plan not in use yet (not added, waiting
 // for its download, signed out, a sign-in that stopped) is the one card, plans-card.tsx, the same for both plans.
-// Under it, the other ways in (a key; for Claude the firm's address). A plan the firm's policy locks shows its line
-// and "Managed by firm", and no control.
+// Under it, one quiet "Use an API key instead", which opens the key's panel (plans-key.tsx), whether or not the plan is
+// added yet: a key saved for a plan not here starts its download. A key the provider refused says so in the line. A plan the firm's policy
+// locks shows its line (and for Claude the firm's address its policy set) and "Managed by firm", and no control. The
+// firm's address is set by the firm's policy only (plans.<id>, docs/firm-it.md): Plans offers no field for it.
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Gate,
@@ -25,12 +27,19 @@ import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts"
 import { say } from "@clauseo/components/lib/words-ui.ts";
 import { clockOf, localZone } from "../../room/when.ts";
 import { aboutMb, gateView, installView, refusalView } from "../../room/first-run/views.ts";
-import { CODEX, isReady, type AgentSetup, type SetupStore } from "../../store/setup.ts";
+import {
+  CODEX,
+  installForKey,
+  isReady,
+  keyRefused,
+  type AgentSetup,
+  type SetupStore,
+} from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
 import { Managed } from "./parts.tsx";
 import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
-import { PlansEndpoint } from "./plans-endpoint.tsx";
 import { PlansKey } from "./plans-key.tsx";
 import { Confirm, Refused } from "./plans-parts.tsx";
 
@@ -53,7 +62,7 @@ type SignedIn = NonNullable<Extract<SignIn, { signed_in: unknown }>["signed_in"]
 /** Where the block stands. */
 type Stand =
   | { kind: "none" }
-  /** Not here yet; `paused` when it waits for the other plan's download. */
+  /** Not here yet; `paused` when the lawyer paused its download (the other plan's never pauses it). */
   | { kind: "add"; mb: number; paused?: true }
   | { kind: "install" }
   | { kind: "signed"; signed: SignedIn }
@@ -68,12 +77,13 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   if (install !== undefined && install !== "managed" && !isReady(install)) {
     if (!adding && typeof install === "object" && install.missing !== undefined)
       return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
-    // waiting for the other plan's download: the same card, whose press queues the sign-in; once queued, the gate
+    // its download paused by the lawyer: the same card, whose press queues the sign-in; once queued, the gate
     if (!adding && install === "paused")
       return setup?.signIn === "queued"
         ? { kind: "gate" }
         : { kind: "add", mb: aboutMb(setup?.mb ?? 0), paused: true };
-    if (installView(setup) !== null) return { kind: "install" };
+    // only whether the install has a line: the network's words don't change that
+    if (installView(setup, false) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
   if (signIn === undefined) return { kind: "none" };
@@ -137,11 +147,13 @@ export function PlanBlock({
   blockRef: (el: HTMLElement | null) => void;
 }) {
   const { lang } = useDisplay();
+  const online = useOnline();
   const s = (key: SettingsKey, slots?: Record<string, string | number>) => st(lang, key, slots);
   const plan: Plan = agent === CODEX ? "chatgpt" : "claude";
   const name = NAME[plan];
   const app = APP[plan];
   const [pasting, setPasting] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
   const [signedOutHere, setSignedOutHere] = useState(false);
   // "Add {plan}" pressed: the add waits in the store's set until the install is ready (the state only re-renders)
   const [, setAdding] = useState(false);
@@ -164,6 +176,12 @@ export function PlanBlock({
     store.command({ start_sign_in: { agent } });
   }, [ready, store, agent]);
   const command = store.command;
+  // a saved key on a plan not added yet starts its download at once (installForKey), so the next question can go
+  const saveKey = (key: string) =>
+    store.send({ set_agent_key: { agent, key } }).then((ok) => {
+      if (ok) installForKey(store, agent);
+      return ok;
+    });
   const signIn = () => {
     setPasting(false);
     setSignedOutHere(false);
@@ -214,14 +232,11 @@ export function PlanBlock({
         else onOther();
         return;
       case "key-panel":
-        // the key's field stands under the block already: the press takes the lawyer there
-        if (a.open)
-          document
-            .querySelector<HTMLInputElement>(`[data-agent="${plan}"] [data-testid="plans-key"]`)
-            ?.focus();
+        // the key's panel under the block opens, its field taking the focus (plans-key.tsx)
+        setKeyOpen(a.open);
         return;
       case "key":
-        return store.send({ set_agent_key: { agent, key: a.key } });
+        return saveKey(a.key);
       case "plans":
         transport
           .openExternal(PRICES[plan])
@@ -231,17 +246,24 @@ export function PlanBlock({
         return;
     }
   };
-  const signedLine = (signed: SignedIn) => (
-    <p className="set-plan-line set-plan-signed">
-      <SignedLine
-        plan={plan}
-        method={signed.method}
-        reused={signed.source === "reused"}
-        email={signed.email}
-        label={signed.plan}
-      />
-    </p>
-  );
+  const signedLine = (signed: SignedIn) =>
+    // the provider refused the key in use (the host's refused, after a question failed): said, never "✓ Using an API
+    // key"; the key's panel under the block changes or removes it
+    signed.method === "api_key" && keyRefused({ signed_in: signed }) ? (
+      <p className="set-plan-line" data-testid="plans-key-refused">
+        {say(s("{name} didn't accept the API key.", { name }))}
+      </p>
+    ) : (
+      <p className="set-plan-line set-plan-signed">
+        <SignedLine
+          plan={plan}
+          method={signed.method}
+          reused={signed.source === "reused"}
+          email={signed.email}
+          label={signed.plan}
+        />
+      </p>
+    );
   const line = (words: string) => <p className="set-plan-line">{say(words)}</p>;
   let body: ReactNode = null;
   if (locked) {
@@ -298,7 +320,7 @@ export function PlanBlock({
       case "install": {
         const working = installLine(
           lang,
-          installView(setup),
+          installView(setup, online),
           name,
           {
             retry: () => command({ retry_agent_install: { agent } }),
@@ -412,6 +434,8 @@ export function PlanBlock({
           setup,
           { ...store.state(), keyOpen: false, pasting },
           (at) => clockOf(at, at, zone, lang).time,
+          undefined,
+          online,
         );
         // a sign-in that stopped in a way the card says: the card, with no key link (the key stands under it)
         if (view !== null && view.kind === "failed" && isStopped(view.code)) {
@@ -438,8 +462,9 @@ export function PlanBlock({
       }
     }
   }
-  // the other ways in, once the plan is here and the firm's policy leaves them to the lawyer
-  const ways = !locked && stand.kind !== "none" && stand.kind !== "add" && stand.kind !== "install";
+  // the key whether or not the plan is added yet (saving it starts the download), where the firm's policy leaves it to
+  // the lawyer
+  const ways = !locked && stand.kind !== "none";
   const method = stand.kind === "signed" ? stand.signed.method : null;
   return (
     <article
@@ -456,28 +481,16 @@ export function PlanBlock({
       {body}
       <Refused refused={refusalView(setup)} />
       {ways && (
-        <section className="set-plan-ways" aria-label={s("Other ways in")}>
-          <Heading level={4} className="set-plan-sub">
-            {say(s("Other ways in"))}
-          </Heading>
-          <PlansKey
-            plan={plan}
-            keys={keys}
-            keysKnown={keysKnown}
-            inUse={method === "api_key"}
-            onKey={(key) => store.send({ set_agent_key: { agent, key } })}
-            onRemove={() => command({ clear_agent_key: { agent } })}
-          />
-          {plan === "claude" && (
-            <PlansEndpoint
-              key={endpoint ?? ""}
-              endpoint={endpoint}
-              onConnect={(url) =>
-                command({ set_firm_endpoint: url === undefined ? { agent } : { agent, url } })
-              }
-            />
-          )}
-        </section>
+        <PlansKey
+          plan={plan}
+          keys={keys}
+          keysKnown={keysKnown}
+          inUse={method === "api_key"}
+          open={keyOpen}
+          onOpen={setKeyOpen}
+          onKey={saveKey}
+          onRemove={() => command({ clear_agent_key: { agent } })}
+        />
       )}
     </article>
   );

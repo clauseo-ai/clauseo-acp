@@ -10,7 +10,8 @@ use clauseo_matters::Error;
 use clauseo_protocol::ErrorCode;
 
 use crate::fixture::{
-    Fixture, added, assert_no_temp_files, cid, created, deleted, meta, modified, tools, undo,
+    Fixture, added, assert_no_temp_files, assert_none, cid, created, deleted, meta, modified,
+    tools, undo,
 };
 use crate::support;
 
@@ -100,7 +101,9 @@ fn a_folder_that_lists_but_cannot_be_entered_is_kept_as_unread() {
     let changes = created(matter.before_turn(&meta(2)).unwrap(), 2);
     assert_eq!(changes, [modified("a.txt", b"a", b"a2")]);
     drop(locked);
-    assert_eq!(matter.before_turn(&meta(3)).unwrap().outcome.id(), cid(2));
+    // The folder lists again: no file changed, but the skip record did (it no longer names
+    // `sub`), so the checkpoint is taken, with nothing to report.
+    assert_none(&created(matter.before_turn(&meta(3)).unwrap(), 3));
     fx.write("sub/b.txt", "b2");
     let changes = created(matter.before_turn(&meta(4)).unwrap(), 4);
     assert_eq!(changes, [modified("sub/b.txt", b"b", b"b2")]);

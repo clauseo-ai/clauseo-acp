@@ -27,7 +27,9 @@
 //! download (`browser_install.rs`), `BrowserPolicy` as the lawyer's re-read of the firm's
 //! browser policy starts and ends (`browser_policy.rs`; its latest in the catch-up), and
 //! `ConnectorsChanged` when the connector state changes
-//! (`connectors.rs`, R24; whole, and in the catch-up when connectors are wired). Still to come,
+//! (`connectors.rs`, R24; whole, and in the catch-up when connectors are wired), and
+//! `McpToolsChanged` when the lawyer's MCP servers change (`mcp.rs`; whole, and in every
+//! catch-up). Still to come,
 //! each through [`publish`] and each adding its part of the current state to [`catch_up`]:
 //! notices. The limits have their own subscribers
 //! (`limits.rs`). `subscribe_app` carries no window identity, so the host sends every changed
@@ -225,6 +227,10 @@ fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     events.extend(super::browser_install::current(actor));
     events.extend(super::browser_policy::current(actor));
     events.extend(super::connectors::current(actor));
+    // A window opening (Settings among them) reads the other apps' MCP config again, off the
+    // actor; the counts follow in an `McpToolsChanged` when they differ.
+    super::mcp::scan::scan(actor);
+    events.push(super::mcp::view::current(actor));
     events
         .iter()
         .filter_map(|event| {

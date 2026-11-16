@@ -10,13 +10,19 @@ import { installLine } from "@clauseo/components/clauseo/first-launch/install.ts
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
-  isReady,
+  awaitsInstall,
+  installForKey,
+  installGoing,
   isSignedIn,
+  keyInUse,
+  otherPlan,
   planInPlay,
+  signInWaits,
   setupStoreOf,
   type SetupSource,
   type SetupState,
@@ -48,7 +54,8 @@ import { loadProtectionNote } from "../protection/note-load.ts";
 import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
 import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
-import { gateView, installView, refusalView } from "./views.ts";
+import { gateView, installView, queuedView, refusalView } from "./views.ts";
+import { footActs, stillNote, welcomeFoot } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -63,22 +70,24 @@ function actsFor(
   return (a) => {
     switch (a.act) {
       case "sign-in":
+        // Sign in and Try again, through the store's queue: it waits for the other plan's sign-in, never its download
         store.set({ pasting: false, keyOpen: false });
-        store.command({ start_sign_in: a.console === true ? { agent, console: true } : { agent } });
+        store.signIn(agent, { console: a.console === true, again: true });
         return;
-      case "sign-in-to":
+      case "sign-in-to": {
         // either plan's own Sign in, through the store's queue: the other plan's choice moves the new conversation to
-        // it as "Use … instead" did
-        store.signInTo(a.plan === "chatgpt" ? CODEX : CLAUDE);
-        return;
-      case "cancel":
-        store.set({ pasting: false });
-        // the plan waiting its turn stops waiting; nothing was sent for it
-        if (store.state().queued === agent) {
-          store.unqueue();
+        // it as "Use … instead" did. A plan with its key saved and not installed yet installs instead (no sign-in)
+        const to = a.plan === "chatgpt" ? CODEX : CLAUDE;
+        if (keyInUse(store.state().agents[to]?.signIn)) {
+          store.command({ install_agent: { agent: to } });
           return;
         }
-        store.command({ cancel_sign_in: { agent } });
+        store.signInTo(to);
+        return;
+      }
+      case "cancel":
+        // the plan waiting its turn stops waiting (nothing sent), or cancel_sign_in goes; its download carries on
+        store.cancelSignIn(agent);
         return;
       case "paste":
         store.set({ pasting: true });
@@ -105,20 +114,20 @@ function actsFor(
       case "different":
         store.command({ use_different_account: { agent } });
         return;
-      case "instead": {
-        // the other plan's install starts unless it is ready (Claude's download pauses where it is, R20), and the new
-        // conversation takes it at once (FirstRun's pending choice)
-        const other = agent === CODEX ? CLAUDE : CODEX;
-        store.set({ chosen: other, pending: other, keyOpen: false, pasting: false });
-        if (!isReady(store.state().agents[other]?.install))
-          store.command({ install_agent: { agent: other } });
+      case "instead":
+        // the other plan's own Sign in, through the store's queue: its download starts beside this plan's, which goes
+        // on, and the new conversation takes it at once (FirstRun's pending choice)
+        store.signInTo(otherPlan(agent));
         return;
-      }
       case "key-panel":
         store.set({ keyOpen: a.open });
         return;
       case "key":
-        return store.send({ set_agent_key: { agent, key: a.key } });
+        // a saved key on a plan not here yet starts its download at once, so the next question can go
+        return store.send({ set_agent_key: { agent, key: a.key } }).then((ok) => {
+          if (ok) installForKey(store, agent);
+          return ok;
+        });
       case "plans":
         transport
           .openExternal(PLANS[planOf(agent)])
@@ -143,6 +152,8 @@ type RoomSide = {
   lang: Lang;
   platform: string;
   releaseMode: ReleaseMode;
+  /** What the window says of the network (online.ts): a waiting install's words follow it. */
+  online: boolean;
 };
 
 /** UC: the Safe workspace step's acts over the window's protection store. */
@@ -165,15 +176,57 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
 function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => string) {
   const { agent, drafting } = room;
   const setup = state.agents[agent];
+  // its API key is saved but the plan isn't here yet: nothing can go until it is installed, so the set-up view holds the
+  // question (its act installs; busy while the download runs, which the working line follows), never "Sign in"
+  if (keyInUse(setup?.signIn) && awaitsInstall(setup)) {
+    const install = setup?.install;
+    // not started (missing, or paused behind the other plan's download): its act starts it; else it runs, or stopped
+    // with the working line's own Try again
+    const idle =
+      install === "paused" ||
+      (typeof install === "object" && "missing" in install && install.missing !== undefined);
+    return { kind: "set-up", expired: false, instead: drafting, keyed: true, busy: !idle } as const;
+  }
   if (state.queued === agent && !isSignedIn(setup?.signIn))
-    return { kind: "queued", offline: false } as const;
-  const view = gateView(setup, state, clock);
+    return queuedView(setup, state, agent, room.online);
+  const view = gateView(setup, state, clock, agent, room.online);
   if (view?.kind !== "signed-out" || view.found !== undefined) return view;
   const other = isSignedIn(state.agents[agent === CODEX ? CLAUDE : CODEX]?.signIn);
   if (drafting && !other) return view;
   const signIn = setup?.signIn;
   const expired = typeof signIn === "object" && signIn.failed?.code === "agent.auth_required";
   return { kind: "set-up", expired, instead: drafting } as const;
+}
+
+/** The other plan's line in the composer, as the first screen says it (its name in front, its own Cancel), while its
+ * install is under way, failed or offline, or its sign-in waits or is open in the browser; null otherwise (only
+ * offered, ready or signed in). */
+function otherLine(
+  store: SetupStore,
+  state: SetupState,
+  other: AgentId,
+  lang: Lang,
+  online: boolean,
+) {
+  const setup = state.agents[other];
+  const view = installView(setup, online);
+  const signIn = setup?.signIn;
+  const moving =
+    installGoing(setup) ||
+    (view !== null && view.kind !== "missing") ||
+    signInWaits(state, other) ||
+    (typeof signIn === "object" && signIn.waiting !== undefined);
+  if (!moving) return null;
+  return welcomeFoot(
+    lang,
+    other,
+    NAME[planOf(other)],
+    setup,
+    state,
+    online,
+    footActs(store, other, state),
+    IDS.install,
+  );
 }
 
 /** The composer's hold for this setup state: the gate until the plan the send uses is signed in, the install's working
@@ -190,13 +243,21 @@ function holdOf(
   const plan = planOf(agent);
   const setup = state.agents[agent];
   const clock = (at: number) => clockOf(at, Date.now(), room.zone, lang).time;
-  const working = installLine(
+  const line = installLine(
     lang,
-    installView(setup),
+    installView(setup, room.online),
     NAME[plan],
     installActs(store, agent, state.copied),
     IDS.install,
   );
+  // its sign-in cancelled while it downloads: the note under its line, as the first screen's row has it
+  const note = stillNote(lang, NAME[plan], setup);
+  const own = line?.kind === "wait" && note !== null ? { ...line, note } : line;
+  // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
+  // hides the other's download, and each line keeps its own progress and Cancel
+  const other = otherLine(store, state, otherPlan(agent), lang, room.online);
+  const working = own ?? other;
+  const also = own === null ? null : other;
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
   const view = viewFor(state, room, clock);
   const signedIn = setup?.signIn;
@@ -225,6 +286,7 @@ function holdOf(
         />
       ),
       working,
+      also,
       line: <DocumentsLine name={one === null ? null : NAME[planOf(one)]} />,
     };
   }
@@ -255,6 +317,7 @@ function holdOf(
         />
       ),
       working,
+      also,
     };
   }
   if (shield !== null && step === "off") {
@@ -262,6 +325,7 @@ function holdOf(
     const { WorkspaceOff } = shield.parts;
     return {
       working,
+      also,
       line: (
         <WorkspaceOff
           plan={plan}
@@ -280,6 +344,7 @@ function holdOf(
   if (typeof signedIn === "object" && signedIn.signed_in !== undefined && signedHere)
     return {
       working,
+      also,
       line: (
         <SignedLine
           plan={plan}
@@ -291,7 +356,7 @@ function holdOf(
         />
       ),
     };
-  return working === null ? null : { working };
+  return working === null ? null : { working, also };
 }
 
 export function FirstRun({
@@ -341,6 +406,7 @@ export function FirstRun({
   );
   const display = useDisplay();
   const { lang, platform, releaseMode } = display;
+  const online = useOnline();
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
   const openAgent = talks.rows.find((r) => r.key === talks.open)?.agent ?? null;
   const agent = openAgent ?? talks.agent;
@@ -378,7 +444,7 @@ export function FirstRun({
   // and again when the room's side changes
   useEffect(() => {
     const holder = holderOf(transport);
-    const room: RoomSide = { agent, fixed, drafting, zone, lang, platform, releaseMode };
+    const room: RoomSide = { agent, fixed, drafting, zone, lang, platform, releaseMode, online };
     let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
     const withParts = (shield: ProtectionState | null) =>
       shields === null || shield === null || parts === null
@@ -403,7 +469,20 @@ export function FirstRun({
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, shields, parts, agent, fixed, drafting, zone, lang, platform, releaseMode]);
+  }, [
+    transport,
+    store,
+    shields,
+    parts,
+    agent,
+    fixed,
+    drafting,
+    zone,
+    lang,
+    platform,
+    releaseMode,
+    online,
+  ]);
   // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
   // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
   // repair is the installer, nothing is sent

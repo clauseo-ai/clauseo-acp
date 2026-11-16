@@ -293,14 +293,15 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
     host.ok(HostCommand::ForgetMatter { matter });
     // A folder inside it or holding it is refused, naming no matter: the forgotten one is not
     // on the list, so there is nothing to open.
-    for path in [inside, folder.parent().unwrap().to_owned()] {
+    for (path, code) in [
+        (inside, ErrorCode::MatterFolderInsideMatter),
+        (
+            folder.parent().unwrap().to_owned(),
+            ErrorCode::MatterFolderHoldsMatter,
+        ),
+    ] {
         let error = import(&host, "Other", &path, (None, None)).expect_err("refused");
-        assert_eq!(
-            error.code(),
-            ErrorCode::MatterFolderIsMatter,
-            "{}: {error}",
-            path.display()
-        );
+        assert_eq!(error.code(), code, "{}: {error}", path.display());
         assert_eq!(error.matter(), None, "{}", path.display());
     }
     let parent = wait(
@@ -315,7 +316,7 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderIsMatter,
+        ErrorCode::MatterFolderInsideMatter,
     );
     assert_eq!(error.matter(), None);
     assert!(!folder.join("Appeal").exists());

@@ -11,26 +11,15 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-02": {
-    "en": "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
-    "hi": "आप यहाँ फ़ाइलें बदल सकते हैं, पर इस फ़ोल्डर की अनुमतियाँ नहीं। Claude और ChatGPT को मामले के भीतर रखने के लिए Clauseo को इनकी ज़रूरत है। कुछ संपादन नहीं हो पाएँगे।",
+    "en": "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
+    "hi": "Clauseo इस फ़ोल्डर में अपनी सुरक्षा नहीं जोड़ सकता, इसलिए हर संपादन से पहले पूछता है। इस कंप्यूटर पर आपके खुद बनाए फ़ोल्डर में, जैसे Documents के किसी फ़ोल्डर में, उसे पूछने की ज़रूरत नहीं होती।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-09",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
-  },
-  "FR-03": {
-    "en": "What to tell IT",
-    "hi": "IT को क्या बताएँ",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the folder-rights copy page"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "why the bar asks, and where it needn't; was \"You can change files here, but not this folder's permissions…\" (IT sweep: What to tell IT, FR-03 and FR-05, retired)"
   },
   "FR-04": {
     "en": "Close",
@@ -39,17 +28,6 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the folder-rights copy page"
-  },
-  "FR-05": {
-    "en": "Please give my account \"Change permissions\" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder's permissions so Claude and ChatGPT, which it runs, can write only inside it. / Copy",
-    "hi": "कृपया इस फ़ोल्डर पर मेरे खाते को \"Change permissions\" दें: {path}। इस मामले के लिए मेरा ऐप Clauseo फ़ोल्डर की अनुमतियों में एक प्रविष्टि जोड़ता है, ताकि वह जिन Claude और ChatGPT को चलाता है, वे केवल इसी फ़ोल्डर के भीतर लिख सकें। / कॉपी करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-09",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-06": {
     "en": "Can't set folder permissions / Clauseo can't change this folder's permissions, so it asks before each edit.",
@@ -198,5 +176,82 @@
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
     "note": "macOS only: the line under Open Privacy settings"
+  },
+  "FR-24": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder. / This folder's name has a backslash",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, New matter's warning for a folder whose name has a backslash, where Claude can't start (the host refuses it as matter.folder_backslash); Choose another folder (FR-09) and Create anyway (FR-10)"
+  },
+  "FR-25": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step for a folder picked whose name has a backslash, on macOS and Linux: FR-24's title and body, then Choose another folder (FR-09) and Locate anyway (FR-26)"
+  },
+  "FR-26": {
+    "en": "Locate anyway",
+    "hi": "फिर भी यही फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step's other button: relocates the matter to the folder with a backslash anyway"
+  },
+  "FR-27": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename it in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, New matter's warning for a folder whose own name has a backslash: its body, naming the file manager (title and name as FR-24); Locate's step and the first screen's say the same"
+  },
+  "FR-28": {
+    "en": "The folder \"{folder}\" in this folder's path has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename that folder in Finder first, or choose another folder. / A folder in this folder's path has a backslash",
+    "hi": "इस फ़ोल्डर के पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के पाथ में किसी फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On the Mac, New matter's warning when a folder above the one picked has the backslash, named by {folder} (the nearest): its title, body and accessible name; Locate's step and the first screen's say the same"
+  },
+  "FR-29": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename that folder in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, the same as FR-28: its body, naming the file manager"
+  },
+  "FR-30": {
+    "en": "Open anyway",
+    "hi": "फिर भी खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, the first screen's Open the folder, a folder picked whose path has a backslash: the step's other button, which opens the folder as a matter anyway (the step's words as FR-24 or FR-28; Choose another folder as FR-09)"
   }
 }

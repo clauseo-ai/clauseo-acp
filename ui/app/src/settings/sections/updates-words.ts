@@ -9,9 +9,9 @@ import type { ManagedBy, UpdateView } from "../../transport/protocol.ts";
 export const MANAGED_WORDS: Record<ManagedBy, UpdateKey> = {
   policy: "Your firm manages updates for Clauseo.",
   per_machine:
-    "Clauseo is installed for everyone on this computer, so whoever looks after it installs updates.",
+    "Clauseo is installed for everyone on this computer, so it doesn't update itself. To update, run the new installer from an administrator account.",
   read_only_location:
-    "Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.",
+    "Clauseo can't update itself from where it's installed. To update, install the new version over this one.",
   package: "Updates come through the package manager that installed Clauseo.",
   unavailable:
     "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.",

@@ -174,6 +174,9 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         data: &crate::agent::data_fence::LaunchDeny::default(),
         case_law: false,
         browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -223,6 +226,9 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law: false,
             browser: false,
+            sandbox: None,
+            matter: None,
+            trusted_servers: &[],
         };
         session_meta(
             hook.as_object().cloned(),
@@ -283,6 +289,9 @@ fn forced_ask_adds_its_ask_rules_after_the_hooks() {
         data: &crate::agent::data_fence::LaunchDeny::default(),
         case_law: false,
         browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -323,6 +332,9 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             data: &data,
             case_law: false,
             browser: false,
+            sandbox: None,
+            matter: None,
+            trusted_servers: &[],
         };
         let guard = Some(GuardHook {
             program: Path::new("/app/clauseo"),
@@ -454,6 +466,9 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
         data: &data,
         case_law: false,
         browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let hook = json!({"claudeCode": {"options": {"settings": {"permissions": {
         "allow": ["Bash(ls:*)"]}}}}});
@@ -511,14 +526,14 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
     }
 }
 
-/// A session outside forced ask, the one that runs in `acceptEdits` (`CLAUDE_MODE`), keeps every
+/// A session outside forced ask (in `auto`, or its `acceptEdits` fallback) keeps every
 /// guard that does not depend on asking: the data folder's deny rules (deny wins in every mode),
 /// the pre-write guard's hook before each write and shell command, bypass off, and no
 /// `permission-mode` flag a hook could slip in. Its auto-edit scope beyond the matter folder is
 /// exactly the work folder and the matter's notes, as Codex's writable roots.
 #[test]
 fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() {
-    assert_eq!(super::claude_mode(false), "acceptEdits");
+    assert_eq!(super::CLAUDE_FALLBACK_MODE, "acceptEdits");
     let data = crate::agent::data_fence::LaunchDeny::fixed(vec![std::path::PathBuf::from("/data")]);
     let keys = ClaudeKeys {
         web_search: ON,
@@ -529,6 +544,9 @@ fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() 
         data: &data,
         case_law: false,
         browser: false,
+        sandbox: None,
+        matter: None,
+        trusted_servers: &[],
     };
     let guard = Some(GuardHook {
         program: Path::new("/app/clauseo"),

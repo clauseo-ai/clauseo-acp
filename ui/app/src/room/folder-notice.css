@@ -1,5 +1,5 @@
 /* folder rights: the notice at the top of the work column, on the well and inside the reading column, its words
-   beside their icon, What to tell IT and Close at the end; the IT text under it, with Copy */
+   beside their icon, Close at the end */
 @reference "../styles/system.css";
 
 /* the composer's gutter on both sides, so its edges stand on the composer's field */
@@ -39,12 +39,4 @@
 .room-folder-text .room-info {
   vertical-align: middle;
   margin-inline-start: var(--s1);
-}
-.room-folder-it {
-  display: grid;
-  justify-items: start;
-  gap: var(--s2);
-  margin-top: var(--s2);
-  padding-top: var(--s2);
-  box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
 }

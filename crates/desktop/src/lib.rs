@@ -33,8 +33,7 @@
 //!   returns at once (a Windows logoff reaches it through tao's `WM_ENDSESSION`), and a second
 //!   start during a quit raises nothing (`quit::on_second_start`).
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
-//!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
-//!   (`webview2.rs`).
+//!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app.
 //! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
 //!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
@@ -49,10 +48,9 @@
 //!   `subscribe_app`, `ack`, `display_info`, `setup`) and the same drag pair, and the bridge admits
 //!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
 //!   (and `RefreshLimits`, and the updater's `SetUpdateMode`, `CheckForUpdate` and
-//!   `GetUpdate`, 0037), and of the app feed
-//!   only `settings_changed` and `update_changed`: never the matter and thread lists (0028).
-//!   `setup` (0048, `setup.rs`) has its own allow-list per window, and its events go to both
-//!   windows.
+//!   `GetUpdate`, 0037), and of the app feed only `settings_changed` and `update_changed`:
+//!   never the matter and thread lists (0028). `setup` (0048, `setup.rs`) has its own
+//!   allow-list per window, and its events go to both windows.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -66,8 +64,7 @@
 //!   300 of a run (`ipc.rs`): its name, start, length, outcome, and no argument.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
 //!   as the host encoded it, a setup event (0048), a fragment of either, or a stream failure,
-//!   always below 8 KB (and in
-//!   the `e2e` build an event with its receive time, `timed`). At most
+//!   always below 8 KB (and in the `e2e` build an event with its receive time, `timed`). At most
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall. A window's
 //!   channel lives until the window is destroyed (`Bridge::close_window`).
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
@@ -86,8 +83,7 @@
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path but `chooser_list`'s typed one (`chooser.rs`, checked there; the
 //!   chooser admits only through a native confirm): folders come from a dialog drawn in Rust,
-//!   files are named by the refs the host issued, and `reveal` names a matter or the app data
-//!   folder (`open.rs`, 0026).
+//!   files are named by the refs the host issued; `reveal` names a matter or the data folder.
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`
 //!   (`clippy.toml`) forbids the other public ways we know of to register a plugin, grant a
@@ -121,10 +117,12 @@ mod host_log;
 mod host_start;
 mod ipc;
 mod jailed;
+mod last_run;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
-#[cfg(any(test, target_os = "macos"))]
+mod mcp;
+#[cfg(any(test, target_os = "macos", windows))]
 mod menu;
 mod native_mark;
 mod navigation;
@@ -153,8 +151,7 @@ mod window_events;
 mod window_frame;
 mod window_size;
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::{Arc, atomic::Ordering};
 
 use bridge::Bridge;
 use clauseo_host::HostConfig;
@@ -308,6 +305,7 @@ pub fn run() -> tauri::Result<()> {
             // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
             let locations = Locations::resolve_without_documents(&SystemDirs, &SystemEnv)?;
+            last_run::start(app.handle(), locations.data_dir()); // a crash from here counts
             // Managed before the window opens: a command reaching unmanaged state fails.
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
@@ -332,7 +330,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
             open_main_window(app)?;
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             menu::follow_language(app.handle().clone());
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
@@ -440,6 +438,7 @@ fn start_host<R: Runtime>(
                 reused,
             )))
             .with_sign_in_again(clauseo_agents::is_sign_in_again)
+            .with_last_run_unclean(last_run::unclean(&app))
             .with_key_retry(key_retry)
             .with_limits_reader(readers);
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
@@ -448,6 +447,8 @@ fn start_host<R: Runtime>(
         let secrets = connectors::secret_store();
         let config = connectors::with_connectors(config, app.clone(), &data_dir, secrets);
         let config = blocklist::with_blocklist(&app, config, secrets);
+        let config = mcp::with_mcp_confirm(mcp::with_mcp_secrets(config, secrets), app.clone());
+        let config = mcp::with_mcp_import(config);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());
@@ -535,6 +536,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
         // No thread for it: exit now; the host's next start repairs what it left open.
         fallback_exit.mark_stopped();
         host_log::flush_app(&fallback);
+        last_run::closed(&fallback);
         fallback.exit(code);
     }
 }
@@ -558,7 +560,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .window_classname(MAIN_WINDOW_CLASS)
         .use_https_scheme(true);
     let builder = window_size::with_size(builder, (width, height)).center();
-    // The ground from the first frame on Windows, before WebView2 starts (window_size.rs).
+    // The first frame's ground: on Windows before WebView2, elsewhere shown after (window_size.rs).
     let builder = window_size::with_ground(window_frame::with_frame(builder));
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
     // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
@@ -588,6 +590,9 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
+    window_size::show_first_frame(&window);
+    #[cfg(windows)]
+    window_frame::quit_item::add(&window);
     // Destroyed: the bridge drops main's stream, and the settings window goes too.
     settings_window::on_destroyed(&window, built);
     Ok(())

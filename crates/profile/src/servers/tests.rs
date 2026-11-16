@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on};
+use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on, shell_browser_on};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -36,6 +36,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
         after_cwd(&unix.args),
         [
             "{browser_dir}",
+            "--downloads",
+            "{matter_downloads}",
             "--cdp-port",
             "{cdp_port}",
             "--",
@@ -48,6 +50,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
         after_cwd(&windows.args),
         [
             "{browser_dir}",
+            "--downloads",
+            "{matter_downloads}",
             "--cdp-port",
             "{cdp_port}",
             "--daemon-port",
@@ -58,8 +62,9 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
             "core"
         ]
     );
-    assert_eq!(unix.env["AGENT_BROWSER_STREAM_PORT"], "{stream_port}");
-    assert_eq!(windows.env["AGENT_BROWSER_STREAM_PORT"], "{stream_port}");
+    // No stream port: the guard turns agent-browser's stream server off itself.
+    assert!(!unix.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
+    assert!(!windows.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
     assert_eq!(unix.env["AGENT_BROWSER_SOCKET_DIR"], "{socket_dir}");
     assert!(!windows.env.contains_key("AGENT_BROWSER_SOCKET_DIR"));
     // No proxy: Chrome goes direct, and the host opens no egress proxy for the entry.
@@ -73,8 +78,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
                 .all(|text| !text.contains("{proxy_port}"))
         );
     }
-    assert_eq!(unix.env.len(), 5);
-    assert_eq!(windows.env.len(), 4);
+    assert_eq!(unix.env.len(), 4);
+    assert_eq!(windows.env.len(), 3);
 }
 
 /// The `case-law` entry: `clauseo-mcp connector case-law` with the relay's address and the
@@ -99,30 +104,23 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
     );
 }
 
-/// Codex gets the entry on macOS and Linux and no browser at all on Windows, where its part points
-/// the lawyer to a Claude conversation with no install advice and no tool named; Claude never gets
-/// the entry and always may have its shell command.
+/// Codex gets the entry on macOS and Linux and no browser at all on Windows. Claude has no
+/// browser on any OS, neither the entry nor its shell command, so the command is copied nowhere.
+/// An agent with no kind (a test's) is left as it was.
 #[test]
-fn codex_has_the_entry_off_windows_and_no_browser_on_windows() {
-    use crate::instructions::{BrowserPart, browser_part};
+fn codex_has_the_entry_off_windows_and_claude_no_browser_anywhere() {
     use clauseo_protocol::AgentKind;
     for windows in [false, true] {
         assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
-        assert!(!no_browser_on(Some(AgentKind::Claude), windows));
         assert!(!browser_mcp_on(None, windows));
+        assert!(!no_browser_on(None, windows));
+    }
+    for windows in [false, true] {
+        assert!(no_browser_on(Some(AgentKind::Claude), windows));
+        assert!(!shell_browser_on(windows));
     }
     assert!(browser_mcp_on(Some(AgentKind::Codex), false));
     assert!(!no_browser_on(Some(AgentKind::Codex), false));
     assert!(!browser_mcp_on(Some(AgentKind::Codex), true));
     assert!(no_browser_on(Some(AgentKind::Codex), true));
-    let claude_only = browser_part(BrowserPart::ClaudeOnly);
-    assert!(claude_only.contains("You have no browser in this session"));
-    assert!(
-        claude_only.contains("a Claude conversation can"),
-        "{claude_only}"
-    );
-    for word in ["Chrome", "install", "MCP", "tool", "skill", "agent-browser"] {
-        assert!(!claude_only.contains(word), "{word}: {claude_only}");
-    }
-    assert!(claude_only.split_whitespace().count() <= 40);
 }

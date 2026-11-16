@@ -9,7 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::tests::{Fake, FakeFs};
-use super::{Disk, Walked, walk};
+use super::{Disk, Walked, comparable, walk};
 use crate::network_paths::NetEnv;
 use crate::network_paths::tests::plain_net;
 
@@ -156,4 +156,36 @@ fn drive_paths_refuse_every_failure_and_keep_a_rejected_name() {
             .iter()
             .any(|path| path.starts_with(r"C:\m\bad\x") || path.starts_with(r"C:\m\locked\x"))
     );
+}
+
+/// A matter path of 260 characters or more, `C:\` and `\\?\C:\` forms, as `dunce` gives each.
+fn long_matter(prefix: &str) -> String {
+    let mut text = format!(r"{prefix}Users\a\Documents\Matters\");
+    while text.len() < 280 {
+        text.push_str(r"A long folder name\");
+    }
+    text + "brief.docx"
+}
+
+/// A long path's verbatim drive form compares as its plain form; a short one, a share's
+/// verbatim form and a device path stay as they are, and nothing network turns local.
+#[test]
+fn a_long_verbatim_drive_path_compares_as_its_plain_form() {
+    let plain = long_matter(r"C:\");
+    let verbatim = format!(r"\\?\{plain}");
+    assert!(plain.len() >= 260);
+    assert_eq!(comparable(Path::new(&verbatim)), Path::new(&plain));
+    assert_eq!(comparable(Path::new(&plain)), Path::new(&plain));
+    assert_eq!(comparable(Path::new(r"\\?\c:\")), Path::new(r"C:\"));
+    for kept in [
+        long_matter(r"\\?\UNC\server\share\"),
+        long_matter(r"\\?\UNC\localhost\c$\"),
+        long_matter(r"\\server\share\"),
+        long_matter(r"\\.\C:\"),
+        long_matter(r"\\?\C:x\"),
+        long_matter(r"\\?\Volume{0}\"),
+        "relative/a".to_owned(),
+    ] {
+        assert_eq!(comparable(Path::new(&kept)), Path::new(&kept), "{kept}");
+    }
 }

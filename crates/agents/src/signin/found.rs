@@ -5,9 +5,10 @@
 //! **The status check** (`check_status`, at start and when R20 asks):
 //! - a recorded `reused` (for Codex also "a missing file with a home `auth.json`") is checked
 //!   first: "At a later start, a recorded `reused` whose login still holds is `Reused` with no
-//!   question." Claude holds when detection still finds a login (a stat; else
-//!   `ReusedSignedOut`) and the status
-//!   under the session's environment is signed in (else the run-time fallback). Codex holds while
+//!   question." Claude holds when detection still finds a login (a stat, and on macOS the
+//!   Keychain query; else `ReusedSignedOut`, but a query that could not tell leaves the state)
+//!   and the status under the session's environment is signed in (else the run-time fallback).
+//!   Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
 //!   confirms the account (`codex::confirm`; signed out is `ReusedSignedOut` too).
@@ -19,32 +20,33 @@
 //!   `account: null`, a JSON-RPC error, or an account that is not a `ChatGPT` one.
 //! - otherwise Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
 //! - otherwise, unless `no-reuse` is there, detection (`super::detect`): `LoginFound`, or
-//!   `SignedOut` with what was seen. Detection is a stat for both agents, so `LoginFound` has
-//!   no email; "Use it" confirms through the agent's own status under the reused environment.
-//!   A reused login that later shows another account is not flagged: the agent runs as the
-//!   lawyer, and switching accounts is their own doing.
+//!   `SignedOut` with what was seen. Detection is a stat for both agents (plus, for Claude on
+//!   macOS, an attributes-only Keychain query), so `LoginFound` has no email; "Use it" confirms
+//!   through the agent's own status under the reused environment. A reused login that later
+//!   shows another account is not flagged: the agent runs as the lawyer, and switching accounts
+//!   is their own doing.
 //!
 //! **Reuse stops** ([`stop`]) with the reason in `found`, and never with a logout: "With no
 //! reason … it writes `no-reuse`, so the next start does not reuse again without asking. With a
 //! reason it clears the reuse record only, so the next start shows `LoginFound` again." For Codex
 //! the home's link goes too (`reuse::unlink_reused_login`), the leave order's unlink step.
 
-use std::pin::pin;
-use std::time::Duration;
-
 use clauseo_process::Timer;
-use futures::future::{Either, select};
 
 use crate::signin::codex::Confirmation;
 use crate::signin::detect::{self, Detected};
 use crate::signin::env::{RunKind, Vendor};
-use crate::signin::job::SigninJob;
+use crate::signin::job::{SigninJob, Task};
 use crate::signin::marker::{self, LoginSource};
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed, claude,
-    codex, reuse,
+    codex, keychain_lock, reuse,
 };
 use crate::status::Identity;
+
+mod status_job;
+
+pub(crate) use status_job::{quick_check, start_check};
 
 /// Whether the agent's login is the lawyer's, reused, by Clauseo's record: `login-source` says
 /// `reused`, or for Codex there is no marker and the home holds a login file. No logout runs
@@ -115,6 +117,11 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
 /// tell).
 pub(crate) async fn check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     match job.vendor {
+        // A background check runs no Claude while the keychain is locked (`keychain_lock`).
+        Vendor::Claude if job.task == Task::Status && keychain_lock::locked(&job.config) => {
+            tracing::warn!(agent = %job.ticket.agent, "claude status: keychain locked; not run");
+            None
+        }
         Vendor::Claude => check_claude(job).await,
         Vendor::Codex => check_codex(job).await,
     }
@@ -125,9 +132,14 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
     if let Some(LoginSource::Reused { email }) =
         marker::read_source(&job.config.data_dir, &job.ticket.agent)
     {
-        let found = detect::claude(job, cancel)?;
-        // A login file still there holds, whatever account it is now: the agent runs as the
-        // lawyer, and switching accounts is their own doing.
+        let found = detect::claude(job, cancel).await?;
+        // A login still found holds, whatever account it is now: the agent runs as the
+        // lawyer, and switching accounts is their own doing. A Keychain query that could not
+        // tell (a timeout, another exit, no start) keeps the reuse: the state stays as it is.
+        if found.could_not_tell {
+            tracing::warn!(agent = %job.ticket.agent, "reused claude login: could not tell; kept");
+            return None;
+        }
         return match &found.state {
             SigninState::LoginFound { .. } => claude_session(job, email, found, false).await,
             _ => Some(stop(job, Some(Found::ReusedSignedOut)).await),
@@ -141,7 +153,7 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
             found: Some(Found::ReuseOff),
         });
     }
-    Some(detect::claude(job, cancel)?.state)
+    Some(detect::claude(job, cancel).await?.state)
 }
 
 /// Claude's status under the session's environment (`CLAUDE_CONFIG_DIR` Clauseo's folder,
@@ -149,7 +161,9 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
 /// report `loggedIn: true`." Signed in: `Reused` (with `record`, `login-source` is written
 /// first). Signed out while detection found the login, the run-time fallback: "S18 logs
 /// `claude_reuse_fallback` and offers Clauseo's own sign-in" (the note, then reuse stops with no
-/// reason, so it is not offered again until "Look for my Claude Code login").
+/// reason, so it is not offered again until "Look for my Claude Code login"). The state says
+/// `ReuseUnusable` rather than `ReuseOff`, so the card tells the lawyer why "Use it" did not
+/// take.
 async fn claude_session<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     email: Option<String>,
@@ -159,7 +173,12 @@ async fn claude_session<T: Timer + Send + Sync>(
     let reused = RunKind::Reused { home: &job.home };
     let Some(session) = claude::status_as(job, &job.ticket.cancel, reused).await? else {
         job.note(SigninNote::ClaudeReuseFallback);
-        return Some(stop(job, None).await);
+        return Some(match stop(job, None).await {
+            SigninState::SignedOut { .. } => SigninState::SignedOut {
+                found: Some(Found::ReuseUnusable),
+            },
+            failed => failed,
+        });
     };
     if record {
         // Cancelled or replaced while status ran: no record of a reuse nobody chose to keep.
@@ -219,132 +238,6 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
     Some(detect::codex(job, cancel)?.state)
 }
 
-/// The limit of the status check's first run at start: 15 s. A post-reboot run takes about 11 s
-/// on Windows, so it is not killed as a 5 s one was (the Claude limit, [`claude::STATUS_LIMIT`],
-/// and Codex's 15 s are both no longer than this).
-pub(crate) const FIRST_LIMIT: Duration = Duration::from_secs(15);
-/// The limit of the one retry after the first run got no answer (a run killed at its limit): 20 s.
-pub(crate) const RETRY_LIMIT: Duration = Duration::from_secs(20);
-/// The waits before the first background re-checks once Sign in is shown after the retries:
-/// 30 s, then 60 s; [`RECHECK_CAP`] each time after.
-pub(crate) const RECHECK_BACKOFF: [Duration; 2] =
-    [Duration::from_secs(30), Duration::from_secs(60)];
-/// The longest wait between background re-checks.
-pub(crate) const RECHECK_CAP: Duration = Duration::from_secs(120);
-/// The limit of the quick status check a sign-in runs first.
-pub(crate) const QUICK_LIMIT: Duration = Duration::from_secs(5);
-
-/// The status check job (`check_status`, at start and when desktop asks again), so the card is
-/// never left with nothing on it:
-/// - with no state shown yet, `Checking` first;
-/// - the first run has a 15 s limit ([`FIRST_LIMIT`]); a check that could not tell (a run killed
-///   at its limit) is asked once more with a 20 s one ([`RETRY_LIMIT`]);
-/// - still no answer: a state already shown stays (Codex's kept rule); with none shown, a
-///   `warn` naming the limits, `SignedOut` (Sign in), and re-checks in the background after
-///   30 s, 60 s, then every 120 s ([`RECHECK_BACKOFF`]) until one answers, which is the state.
-///   That late answer always flips the card.
-///   A sign-in, sign-out or any other job supersedes the job and ends them, as does shutdown.
-pub(crate) async fn start_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
-    let hub = &job.shared.signin;
-    let cancel = &job.ticket.cancel;
-    let blank = matches!(
-        hub.state(&job.ticket.agent),
-        None | Some(SigninState::Checking)
-    );
-    if blank {
-        job.report(SigninState::Checking);
-    }
-    let mut tried = Vec::with_capacity(2);
-    for limit in [FIRST_LIMIT, RETRY_LIMIT] {
-        if !hub.is_live(&job.ticket) {
-            return None;
-        }
-        job.set_status_limit(Some(limit));
-        tried.push(limit);
-        if let Some(state) = check(job).await {
-            return Some(state);
-        }
-    }
-    if !blank || !hub.is_live(&job.ticket) {
-        return None;
-    }
-    let tried: Vec<String> = tried
-        .iter()
-        .map(|limit| format!("{} s", limit.as_secs()))
-        .collect();
-    tracing::warn!(
-        agent = %job.ticket.agent,
-        timeouts = %tried.join(", "),
-        "sign-in status check got no answer within each limit: showing Sign in, checking again in the background"
-    );
-    job.report(SigninState::SignedOut { found: None });
-    let mut waits = RECHECK_BACKOFF
-        .into_iter()
-        .chain(std::iter::repeat(RECHECK_CAP));
-    loop {
-        let wait = waits.next()?;
-        if let Either::Right(_) =
-            select(pin!(job.timer.after(wait)), pin!(cancel.cancelled())).await
-        {
-            return None;
-        }
-        if !hub.is_live(&job.ticket) {
-            return None;
-        }
-        if let Some(state) = check(job).await {
-            return Some(state);
-        }
-    }
-}
-
-/// The quick status check a sign-in makes first, on Clauseo's own login with a 5 s limit
-/// ([`QUICK_LIMIT`]): `SignedIn` when it says signed in, so no login runs and no browser opens.
-/// Anything else, a timeout included, is `None`: the sign-in goes on as usual. Never for a
-/// Codex home whose login file is the lawyer's (reused, or one file with theirs): its status
-/// would read the lawyer's login as Clauseo's own, so the sign-in's own guard decides.
-pub(crate) async fn quick_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
-    let cancel = &job.ticket.cancel;
-    if job.vendor == Vendor::Codex
-        && (is_reused(job)
-            || job
-                .config
-                .signin
-                .lawyer_home()
-                .is_some_and(|lawyer| reuse::codex_login_shared(&job.home, &lawyer)))
-    {
-        return None;
-    }
-    // The card shows `Checking` while the quick check runs, as at start (`start_check`), so a
-    // press that waits up to the limit never looks unchanged. The sign-in flow publishes its own
-    // states once the check has answered "not signed in" or timed out.
-    job.report(SigninState::Checking);
-    job.set_status_limit(Some(QUICK_LIMIT));
-    let own = RunKind::Own { home: &job.home };
-    let state = match job.vendor {
-        Vendor::Claude => claude::status(job, cancel)
-            .await
-            .flatten()
-            .map(|identity| claude::signed_in(job, identity)),
-        Vendor::Codex => match codex::status_run(job, cancel, own, &job.home).await {
-            codex::StatusSaid::LoggedIn => {
-                match codex::confirm_account(job, cancel, own, &job.home).await {
-                    Confirmation::Confirmed(identity) => Some(codex::signed_in(job, identity)),
-                    Confirmation::SignedOut | Confirmation::Unknown => None,
-                }
-            }
-            _ => None,
-        },
-    };
-    job.set_status_limit(None);
-    if cancel.is_cancelled() {
-        return None;
-    }
-    if state.is_some() {
-        job.note(SigninNote::StatusConfirmed);
-    }
-    state
-}
-
 /// Codex's own confirmation under `kind` in the home, for the status check: asked once more when
 /// the first got no answer at all (a run killed at its limit, or one that did not start),
 /// unless the job was cancelled. Still `Unknown` after that, the
@@ -387,11 +280,12 @@ pub(crate) async fn find_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Op
 /// link; then `login-source` `reused`; then `SignedIn { source: Reused }`." Detection runs
 /// again first, and "Use it" goes on while it still finds a login and its email equals the one
 /// shown. That does not tie "Use it" to an account: detection is a stat of each agent's login
-/// file and gives no email, so `None` is compared with `None`, and a different account signed
-/// in between "found" and "Use it" is reused. That is accepted: the agent runs as the lawyer,
-/// and switching accounts is their own doing. A login gone in between is not reused:
-/// the new detection is the state. Detection that could not tell ends the job:
-/// `signin.cancelled` when it was cancelled (or the job replaced), else `signin.failed`.
+/// file (on macOS, for Claude, also a Keychain query) and gives no email, so `None` is compared
+/// with `None`, and a different account signed in between "found" and "Use it" is reused. That
+/// is accepted: the agent runs as the lawyer, and switching accounts is their own doing. A login
+/// gone in between is not reused: the new detection is the state. Detection that could not tell
+/// ends the job: `signin.cancelled` when it was cancelled (or the job replaced), else
+/// `signin.failed`.
 pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> SigninState {
     let cancel = &job.ticket.cancel;
     let shown = match job.shared.signin.state(&job.ticket.agent) {
@@ -399,7 +293,7 @@ pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Sig
         _ => None,
     };
     let found = match job.vendor {
-        Vendor::Claude => detect::claude(job, cancel),
+        Vendor::Claude => detect::claude(job, cancel).await,
         Vendor::Codex => detect::codex(job, cancel),
     };
     if !job.shared.signin.is_live(&job.ticket) {

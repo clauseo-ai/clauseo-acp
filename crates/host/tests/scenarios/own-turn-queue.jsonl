@@ -1,0 +1,12 @@
+{"scenario":"own-turn-queue","description":"claude-agent-acp: prompt 1 ends, then the agent starts a turn of its own and sends text with no end; a prompt queued meanwhile goes as prompt 2 once that turn has ended","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-own-1","content":{"type":"text","text":"The build finished: 3 warnings."}}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Next question"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Next answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

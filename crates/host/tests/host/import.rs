@@ -22,7 +22,7 @@ fn import_refuses_a_folder_inside_the_data_folder() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderInMattersRoot,
+        ErrorCode::MatterFolderInClauseoData,
     );
     assert!(
         !agents.join(".clauseo").exists(),

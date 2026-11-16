@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use std::fs::File;
 
 use async_channel::Receiver;
-use clauseo_protocol::{AccountLimits, AccountRef, AgentKind, Seq, StreamId};
+use clauseo_protocol::{AccountLimits, AccountRef, AgentKind, MatterId, Seq, StreamId};
 use futures::channel::oneshot;
 use rusqlite::Connection;
 
 use crate::open::Opened;
-use crate::{Commit, Committed, Error, answer, codec};
+use crate::{Commit, Committed, Error, PendingAction, answer, codec};
 
 mod apply;
 
@@ -25,6 +25,14 @@ pub(crate) enum WriteRequest {
     },
     PutAccountLimits {
         limits: Box<AccountLimits>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    PutPendingAction {
+        action: Box<PendingAction>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    ClearPendingAction {
+        matter: MatterId,
         reply: oneshot::Sender<Result<(), Error>>,
     },
     ForgetAccountLimits {
@@ -138,6 +146,12 @@ impl Writer {
                 WriteRequest::Heads { reply } => answer(reply, Ok(self.heads())),
                 WriteRequest::PutAccountLimits { limits, reply } => {
                     answer(reply, apply::put_account_limits(&self.conn, &limits));
+                }
+                WriteRequest::PutPendingAction { action, reply } => {
+                    answer(reply, apply::put_pending_action(&self.conn, &action));
+                }
+                WriteRequest::ClearPendingAction { matter, reply } => {
+                    answer(reply, apply::clear_pending_action(&self.conn, matter));
                 }
                 WriteRequest::ForgetAccountLimits { agent, keep, reply } => {
                     answer(

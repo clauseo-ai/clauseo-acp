@@ -21,8 +21,8 @@ export const HI = {
   "Those answers don't fit the question.": "ये उत्तर प्रश्न से मेल नहीं खाते।",
   "Claude didn't start. Your question is kept.": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
   "Claude sent something Clauseo can't read.": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
-  "Sign in to Claude first. Your question is kept.":
-    "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in with Claude first. Your question is kept.":
+    "पहले Claude से साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Claude Code doesn't work with Clauseo.":
     "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "Clauseo can't start Claude safely here. Reinstall Clauseo.":
@@ -36,11 +36,15 @@ export const HI = {
   "ChatGPT sent something Clauseo can't read.": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "{name} sent something Clauseo can't read.": "{name} ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "The AI sent something Clauseo can't read.": "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
-  "Sign in to ChatGPT in Codex first. Your question is kept.":
+  // agent.auth_required while the plan runs on an API key: the key wasn't accepted, never a sign-in (UC-149, UD2-29's
+  // words and Hindi)
+  "{name} didn't accept the API key. Your question is kept.":
+    "{name} ने API key स्वीकार नहीं की। आपका प्रश्न रखा गया है।",
+  "Sign in with ChatGPT in Codex first. Your question is kept.":
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
-  "Sign in to {name} first. Your question is kept.":
-    "पहले {name} में साइन इन करें। आपका प्रश्न रखा गया है।",
-  "Sign in to the AI first. Your question is kept.": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in with {name} first. Your question is kept.":
+    "पहले {name} से साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in first. Your question is kept.": "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Codex doesn't work with Clauseo.":
     "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "This version of {name} doesn't work with Clauseo.":
@@ -76,17 +80,22 @@ export const HI = {
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
-  "A whole drive can't be a matter.": "पूरी ड्राइव मामला नहीं बन सकती।",
-  "Your home folder can't be a matter.": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
-  "A system folder can't be a matter.": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+  "This is the top of a drive. Choose a folder on it.":
+    "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+  "This is your home folder. Choose a folder inside it.":
+    "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+  "This is a system folder. Choose another folder.": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
   "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
-  "That folder is already a matter's, or inside one.":
-    "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
-  "That folder holds Clauseo's own data.": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
+  "Clauseo can't make a matter of this folder. Choose another folder.":
+    "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+  "That folder is where Clauseo keeps matters. Choose the folder for one matter.":
+    "उस फ़ोल्डर में Clauseo मामले रखता है। एक मामले का फ़ोल्डर चुनें।",
+  "This folder is part of Clauseo's own data. Choose another folder.":
+    "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
   "That wasn't allowed, so nothing changed.": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
-  "Your organisation manages that setting, so it can't be changed.":
-    "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+  "Your firm manages that setting, so it can't be changed.":
+    "यह सेटिंग आपकी फ़र्म प्रबंधित करती है, इसलिए इसे बदला नहीं जा सकता।",
   "Clauseo couldn't save that setting. Your settings are as they were.":
     "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
   "A key is already kept on this computer. To change it, open Settings, then Plans.":
@@ -97,8 +106,6 @@ export const HI = {
     "प्रश्न आपकी फ़र्म के अपने खाते से जाते हैं, इसलिए यहाँ साइन इन करने को कुछ नहीं है।",
   "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.":
     "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
-  "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.":
-    "Clauseo आपकी फ़र्म का पता इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और पता हटाएँ।",
   "You're offline. Setting up waits for the connection.":
     "आप ऑफ़लाइन हैं। कनेक्शन मिलने तक सेटअप रुका रहेगा।",
   "Your network is blocking the download.": "आपका नेटवर्क डाउनलोड रोक रहा है।",
@@ -175,6 +182,84 @@ export const HI = {
   // the connection dropped mid-answer (provisional Hindi)
   "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.":
     "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
+  // prompt.too_long: a question over the host's cap on a prompt's text, kept in the field (provisional Hindi)
+  "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.":
+    "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
+  // Cancel in the native confirm before an MCP server is saved (provisional Hindi)
+  "You chose Cancel, so nothing was saved.": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
+  // agent.service_error: the agent's service had a problem and it gave up on the turn (#1030). ChatGPT's approved
+  // (orchestrator, 2026-11-12); Claude's, {name}'s and the AI's derived from it (provisional Hindi)
+  "Claude had a problem on its side. Try again.": "Claude की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "ChatGPT had a problem on its side. Try again.": "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "{name} had a problem on its side. Try again.": "{name} की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "The AI had a problem on its side. Try again.": "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  // agent.quiet: the agent sent nothing for 5 minutes and the host ended the turn (D-050). The English is approved
+  // (orchestrator, 2026-11-13); this Hindi is provisional
+  "Claude stopped answering. Try again.": "Claude ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  "ChatGPT stopped answering. Try again.": "ChatGPT ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  "{name} stopped answering. Try again.": "{name} ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  "The AI stopped answering. Try again.": "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  // agent.unreachable: the agent couldn't get through to its service while the computer seemed online (offline
+  // truth). The English and this Hindi are provisional
+  "Clauseo couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.":
+    "Clauseo, Claude तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+  "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.":
+    "Clauseo, ChatGPT तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+  "Clauseo couldn't reach {name}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.":
+    "Clauseo, {name} तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+  "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.":
+    "Clauseo, AI तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+  // an MCP import too long to show whole in one native confirm (provisional Hindi)
+  "There are too many tools to import at once, so nothing was imported. Add them one at a time.":
+    "एक साथ आयात करने के लिए टूल बहुत अधिक हैं, इसलिए कुछ भी आयात नहीं हुआ। इन्हें एक-एक करके जोड़ें।",
+  // matter.folder_backslash: the matter folder's path has a backslash, where the agent can't start. Draft English
+  // (Rohan to approve); this Hindi is provisional
+  "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  // matter.folder_backslash on Linux, whose file manager has no one name. Draft English (Rohan to approve); this Hindi
+  // is provisional
+  "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  // matter.folder_backslash when the backslash is in a folder above the matter's, named by {folder}: Finder on the
+  // Mac, your file manager on Linux. Draft English (Rohan to approve); this Hindi is provisional
+  "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    '{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    '{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  // agent.folder_inaccessible: the agent couldn't open the matter folder as it started. Draft English (Rohan to
+  // approve); this Hindi is provisional
+  "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "Claude मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "ChatGPT मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

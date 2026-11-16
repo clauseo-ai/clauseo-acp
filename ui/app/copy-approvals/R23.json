@@ -275,26 +275,26 @@
     "note": "Settings, Updates (R23, ADR 0037)"
   },
   "R23-26": {
-    "en": "Clauseo is installed for everyone on this computer, so whoever looks after it installs updates.",
-    "hi": "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए इसकी देखरेख करने वाले व्यक्ति अपडेट इंस्टॉल करते हैं।",
+    "en": "Clauseo is installed for everyone on this computer, so it doesn't update itself. To update, run the new installer from an administrator account.",
+    "hi": "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए वह ख़ुद को अपडेट नहीं करता। अपडेट करने के लिए, किसी व्यवस्थापक खाते से नया इंस्टॉलर चलाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app copy (R23; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app copy (R23)",
-    "note": "Settings, Updates (R23, ADR 0037)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "Settings, Updates (R23, ADR 0037); was \"Clauseo is installed for everyone on this computer, so whoever looks after it installs updates.\" (IT sweep)"
   },
   "R23-27": {
-    "en": "Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.",
-    "hi": "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+    "en": "Clauseo can't update itself from where it's installed. To update, install the new version over this one.",
+    "hi": "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app copy (R23; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app copy (R23)",
-    "note": "Settings, Updates (R23, ADR 0037)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "Settings, Updates (R23, ADR 0037); was \"Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.\" (IT sweep)"
   },
   "R23-28": {
     "en": "Updates come through the package manager that installed Clauseo.",

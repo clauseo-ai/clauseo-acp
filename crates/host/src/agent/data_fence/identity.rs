@@ -8,6 +8,9 @@
 //!   home never refuses every local matter;
 //! - a missing name, or one the system rejects as a name (a shell word's `*`, a URL's `https:`:
 //!   the walk keeps such a name as written), is no file, so it can't be `<data>`: not an error;
+//! - an object on a local FAT or exFAT volume, which has no file IDs ([`is_no_file_ids`]), is
+//!   not `<data>`: `<data>`'s own identity was read, so its volume has file IDs. Only for a
+//!   path a request leads to; `<data>`'s own folders keep the fallback below;
 //! - `<data>`'s own identity and its folders' above it (the host's own folders, which a search
 //!   root is compared with): when one can't be read, nothing can be compared with it, and
 //!   refusing every path or search for it would refuse every local matter. The text compare
@@ -21,7 +24,8 @@ use std::cell::Cell;
 use std::path::Path;
 
 use super::health::{Captured, DataFenceHealth, Id};
-use crate::network_paths::resolve::{Fs, no_such_name};
+use crate::network_paths::file_ids::is_no_file_ids;
+use crate::network_paths::resolve::{Fs, comparable, no_such_name};
 
 /// An identity that could not be read.
 struct Unreadable;
@@ -129,9 +133,13 @@ impl<'a> DataIdentity<'a> {
         let Some(data) = self.data else {
             return false;
         };
+        // By their text with a long path's verbatim `\\?\` read as plain (`comparable`).
+        let real_data = self.real_data.map(comparable);
         let a_parent_of_data = |folder: &Path| {
-            self.real_data
-                .is_some_and(|real| real != folder && real.starts_with(folder))
+            let folder = comparable(folder);
+            real_data
+                .as_deref()
+                .is_some_and(|real| real != folder.as_ref() && real.starts_with(&folder))
         };
         path.ancestors()
             .filter(|folder| !a_parent_of_data(folder))
@@ -155,12 +163,13 @@ impl<'a> DataIdentity<'a> {
     }
 
     /// `path`'s identity: `None` for no such name ([`no_such_name`]: missing, or a name the
-    /// system rejects), [`Unreadable`] when it can't be read (the first time per decision
-    /// logged by its kind, no path).
+    /// system rejects) and for an object with no file ID ([`is_no_file_ids`]),
+    /// [`Unreadable`] when it can't be read (the first time per decision logged by its kind, no
+    /// path).
     fn read(&self, path: &Path) -> Result<Option<Id>, Unreadable> {
         match self.fs.identity(path) {
             Ok(id) => Ok(Some(id)),
-            Err(error) if no_such_name(&error) => Ok(None),
+            Err(error) if no_such_name(&error) || is_no_file_ids(&error) => Ok(None),
             Err(error) => {
                 if !self.unreadable.replace(true) {
                     tracing::warn!(
@@ -171,5 +180,31 @@ impl<'a> DataIdentity<'a> {
                 Err(Unreadable)
             }
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod long_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{DataFenceHealth, DataIdentity};
+    use crate::network_paths::resolve::tests::FakeFs;
+
+    /// A long path's verbatim folders above the data folder (`dunce` keeps `\\?\` past 260
+    /// characters) are known by their text as the data folder's parents, so an unreadable home
+    /// does not refuse it.
+    #[test]
+    fn a_long_verbatim_path_skips_the_data_folders_parents() {
+        let data = Path::new(r"C:\Users\a\AppData\Roaming\Clauseo");
+        let mut fs = FakeFs::with(&[]);
+        fs.ids.insert(data.to_path_buf(), (1, 7));
+        fs.unreadable_ids.push(PathBuf::from(r"\\?\C:\Users\a"));
+        let health = DataFenceHealth::default();
+        let identity = DataIdentity::capture(&fs, data, &health);
+        let mut long = String::from(r"\\?\C:\Users\a\Documents\");
+        while long.len() < 280 {
+            long.push_str(r"A long folder name\");
+        }
+        assert!(!identity.holds(Path::new(&long)));
     }
 }

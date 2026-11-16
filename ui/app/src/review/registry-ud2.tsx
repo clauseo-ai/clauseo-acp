@@ -99,8 +99,10 @@ type Scene = {
   /** Why the host holds the queue (#537's queue_held_reason). */
   reason?: QueueHoldReason;
   title?: string;
-  /** The Claude plan's sign-in, on the setup wire (the first run, which gives the card). */
+  /** The thread's plan's sign-in, on the setup wire (the first run, which gives the card). */
   signIn?: SignIn;
+  /** The thread's agent: Claude's unless said. */
+  agent?: "claude-acp" | "codex-acp";
   /** The thread's resuming_since (R20b): the time a resume after an idle stop began. */
   resuming?: number;
 };
@@ -114,12 +116,14 @@ function sceneHost(s: Scene): () => FakeTransport {
     if (s.reason !== undefined) head.header!.queue_held_reason = s.reason;
     if (s.title !== undefined) head.header!.title = s.title;
     if (s.resuming !== undefined) head.header!.resuming_since = s.resuming;
+    const agent = s.agent ?? "claude-acp";
+    head.header!.agent = agent;
     const events: SetupEvent[] = [
       { setup_info: { keys_available: true } },
-      { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
+      { agent_install_progress: { agent, state: { ready: { version: "0.1.0" } } } },
       {
         sign_in_changed: {
-          agent: "claude-acp",
+          agent,
           state: s.signIn ?? { signed_in: { method: "plan", source: "own", at: 1 } },
         },
       },
@@ -134,7 +138,7 @@ function sceneHost(s: Scene): () => FakeTransport {
               {
                 thread: THREAD,
                 matter: MATTER.matter,
-                agent: "claude-acp",
+                agent,
                 status: "idle",
                 ...(s.title === undefined ? {} : { title: s.title }),
                 ...(s.held === true ? { queue_held: true } : {}),
@@ -238,6 +242,21 @@ const expired = (signIn: SignIn) =>
     signIn,
   });
 const EXPIRED = expired({ failed: { code: "agent.auth_required", at: 2000 } });
+
+/** A room whose plan runs on the lawyer's API key, its one thread held: the question, and its turn's entries (UC-147
+ * to UC-149's scenes, from the Windows key test). */
+export const keyRoom = (agent: "claude-acp" | "codex-acp", turn: ViewEntry[]) =>
+  room({
+    entries: [userMessage(2, 1, "What does note.txt say?"), ...turn],
+    held: true,
+    agent,
+    signIn: { signed_in: { method: "api_key", source: "own", at: 1 } },
+  });
+
+/** The ChatGPT room after OpenAI refused the key (keypath-proof-vm): the question held after its turn failed with
+ * agent.auth_required, Codex's own 401 warning before it as the notice codex-acp sends (UC-149's scene). */
+export const refusedKeyRoom = (notice: ViewEntry) =>
+  keyRoom("codex-acp", [notice, step(4, { stop: "failed", failure: "agent.auth_required" })]);
 const again = (over: { email?: string; plan?: string }) =>
   expired({ signed_in: { method: "plan", source: "own", at: AT, ...over } });
 

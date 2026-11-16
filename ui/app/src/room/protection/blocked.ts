@@ -3,7 +3,7 @@
 // of snake_case names, and `other_account` (another Windows account on this computer owns the Safe
 // workspace). The words are picked from the protection state's cause, never from a refused turn's
 // `sandbox.blocked`. Each reason has its own line; an unknown one, from a newer Clauseo, says
-// the firm manages this computer's settings. Outside the room's first load: the note's chunk and
+// only that something on this computer stops it. Outside the room's first load: the note's chunk and
 // Settings import it. TODO(R17 PR-E):
 // bindings.ts lacks both causes on this base, so the reason is read loosely; once PR-E lands, read
 // the generated type and keep this table keyed on the same names.
@@ -22,27 +22,26 @@ export type BlockReason =
   | "admin_copy_unsafe"
   | "other_account";
 
-/** Each reason's line: the lawyer's own step where one exists (set up again, install again), else
- * that the firm manages it; a missing admin copy's repair (repairLine) follows its line. */
+/** Each reason's line: the lawyer's own step where one exists (set up again, allow it and install
+ * again), else what stops it, never who manages it; a missing admin copy's repair (repairLine)
+ * follows its line. */
 const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
   logon_right:
     "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
-  policy:
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+  policy: "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
   tool_missing:
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
   admin_copy_missing: "The Safe workspace wasn't set up when Clauseo was installed.",
   admin_copy_changed:
     "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   admin_copy_unsafe:
-    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Install Clauseo again to restore it.",
   other_account:
-    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
 };
 
 /** A reason this version doesn't know. */
-const UNKNOWN_WORDS: ProtectionKey =
-  "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.";
+const UNKNOWN_WORDS: ProtectionKey = "Something on this computer stops the Safe workspace.";
 
 /** The block a cause names: its reason, "unknown" for a reason (or a shape) this version doesn't
  * know, or null when the cause is neither `blocked` nor `other_account`. */
@@ -92,18 +91,20 @@ export type ManagedBy =
   | "unavailable"
   | null;
 
-/** A firm install: a per-machine install (exe under Program Files, or the HKLM uninstall key), or,
- * as an extra hint, the firm's policy (`update.mode` none, `sandbox.required`, or
- * `sandbox.allow_unprotected_auto` off). */
-export const firmInstall = (
+/** Whether the firm's policy is active, read from what the protection store already holds: the
+ * updater's `managed.by` "policy" (`update.mode` none), `sandbox.required`, or
+ * `sandbox.allow_unprotected_auto` off (as a policy that can't be read leaves it). A per-machine
+ * install alone isn't a firm's: anyone can install for everyone on a computer of their own. Gates
+ * "Your firm manages how Clauseo is installed" (repairLine) and "Copy details for IT" outside the
+ * firm's requirement (note.tsx, Settings' workspace.tsx). */
+export const firmPolicy = (
   view: ProtectionView | null | undefined,
   managedBy: ManagedBy | undefined,
 ): boolean =>
-  managedBy === "per_machine" ||
   managedBy === "policy" ||
   (view !== null && view !== undefined && (view.required || !view.unprotected_auto_allowed));
 
-/** The repair's line: run the installer again (a per-user install), or that the firm manages the install (a firm's). */
+/** The repair's line: run the installer again, or, while the firm's policy is active, that the firm manages the install. */
 export const repairLine = (
   lang: Lang,
   view: ProtectionView | null | undefined,
@@ -111,7 +112,7 @@ export const repairLine = (
 ): string =>
   pw(
     lang,
-    firmInstall(view, managedBy)
+    firmPolicy(view, managedBy)
       ? "Your firm manages how Clauseo is installed on this computer."
       : "Run the Clauseo installer again to set up the Safe workspace.",
   );

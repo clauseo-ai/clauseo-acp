@@ -32,3 +32,14 @@ test("slots fill in either language, with the part of the day first in Hindi", (
   // a slot the caller didn't give stays as it is, so a missing value shows rather than vanishing
   expect(mt("en", "Client, {client}")).toBe("Client, {client}");
 });
+
+test("no words file says a folder is already a matter (folder PR 2: a nested folder names the matter it sits with)", () => {
+  const files = import.meta.glob<string>(["./words*.ts", "!./*.test.ts"], {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  expect(Object.keys(files).length).toBeGreaterThan(10);
+  for (const [file, text] of Object.entries(files))
+    expect(text, file).not.toMatch(/already a matter/i);
+});

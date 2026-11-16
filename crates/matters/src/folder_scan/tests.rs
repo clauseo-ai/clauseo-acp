@@ -51,6 +51,7 @@ impl Fixture {
             },
             retention: Retention::KeepAll,
             probe: Arc::new(CloudNamed),
+            trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
         };
         Self {
             _dir: dir,

@@ -1,16 +1,19 @@
 //! Reading stetdoc's answers into the wire's [`Revision`]s, and writing the edit batch.
 //!
 //! `check --json` gives each change's ids, kind, full author, block and date, by author;
-//! `view --revisions --full --all --json` gives the text, in its `text` ledger, one line per
-//! change: `#2,3 insert C 2026-11-09 p4 "New para."` (the text JSON-escaped; a formatting
-//! change has none). The two are joined by ids.
+//! `view --revisions --full --all --json` gives the text and the place, in its `text` ledger,
+//! one line per change: `#2,3 insert C 2026-11-09 p4 "New para."` (the text JSON-escaped; a
+//! formatting change has none), with `in headers`, `in notes` or `in comments` after the block
+//! for a change outside the main text. The two are joined by ids: the ledger's are Word's change
+//! ids, the ones `check` gives (stetdoc 0.9.3 numbers by position only in the note about others'
+//! changes that its other views print, never in the ledger).
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use clauseo_protocol::{
     ErrorCode, MAX_REVISION_TEXT_CHARS, MAX_REVISIONS, MatterPath, Revision, RevisionDecision,
-    RevisionKind, Timestamp,
+    RevisionKind, RevisionPlace, Timestamp,
 };
 use serde::Deserialize;
 
@@ -60,20 +63,57 @@ struct View {
     text: String,
 }
 
+/// stetdoc's answer that did not read as expected: `word.edit_failed`.
+fn unreadable(err: &serde_json::Error) -> Error {
+    // The class only: serde's message can quote authors or text (ADR 0047).
+    tracing::warn!(class = ?err.classify(), "stetdoc's revisions did not read");
+    Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
+}
+
+/// Every change id `check` names, however many, in chunks of at most `max` ids for one edit
+/// each: what Accept all and Reject all decide. A change's ids stay in one chunk (a replacement
+/// is a deletion and an insertion); changes go by their first id, ascending. Empty when the file
+/// has none.
+pub(super) fn all_chunks(check: &serde_json::Value, max: usize) -> Result<Vec<Vec<u32>>, Error> {
+    let check = Check::deserialize(check).map_err(|err| unreadable(&err))?;
+    let mut changes: Vec<Vec<u32>> = check
+        .existing
+        .into_iter()
+        .flat_map(|by| by.changes.into_iter().map(|change| change.ids))
+        .map(|mut ids| {
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .filter(|ids| !ids.is_empty())
+        .collect();
+    changes.sort_unstable();
+    let mut seen = std::collections::HashSet::new();
+    let mut chunks: Vec<Vec<u32>> = Vec::new();
+    for mut ids in changes {
+        // An id two changes name is decided once.
+        ids.retain(|id| seen.insert(*id));
+        if ids.is_empty() {
+            continue;
+        }
+        match chunks.last_mut() {
+            Some(chunk) if chunk.len() + ids.len() <= max => chunk.extend(ids),
+            _ => chunks.push(ids),
+        }
+    }
+    Ok(chunks)
+}
+
 /// The revisions `check` and `view` describe, in document order (by block, then id), the first
-/// [`MAX_REVISIONS`], and whether there were more.
+/// [`MAX_REVISIONS`], whether there were more, and how many there are.
 pub(super) fn revisions(
     check: &serde_json::Value,
     view: &serde_json::Value,
-) -> Result<(Vec<Revision>, bool), Error> {
-    let unreadable = |err: serde_json::Error| {
-        // The class only: serde's message can quote authors or text (ADR 0047).
-        tracing::warn!(class = ?err.classify(), "stetdoc's revisions did not read");
-        Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
-    };
+) -> Result<(Vec<Revision>, bool, u32), Error> {
+    let unreadable = |err: serde_json::Error| unreadable(&err);
     let check = Check::deserialize(check).map_err(unreadable)?;
     let view = View::deserialize(view).map_err(unreadable)?;
-    let texts = &ledger_texts(&view.text);
+    let lines = &ledger(&view.text);
     let mut revisions: Vec<Revision> = check
         .existing
         .into_iter()
@@ -82,16 +122,14 @@ pub(super) fn revisions(
             by.changes.into_iter().map(move |change| {
                 let mut ids = change.ids;
                 ids.sort_unstable();
-                let text = ids
-                    .iter()
-                    .find_map(|id| texts.get(id))
-                    .map(|text| cut(text));
+                let line = ids.iter().find_map(|id| lines.get(id));
                 Revision {
                     kind: kind(&change.kind),
                     author: author.clone(),
                     at: change.date.as_deref().and_then(timestamp),
                     block: change.block,
-                    text,
+                    place: line.and_then(|line| line.place),
+                    text: line.and_then(|line| line.text.as_deref()).map(cut),
                     ids,
                 }
             })
@@ -100,34 +138,69 @@ pub(super) fn revisions(
     revisions.sort_by(|a, b| {
         block_order(&a.block, &b.block).then_with(|| a.ids.first().cmp(&b.ids.first()))
     });
+    let total = u32::try_from(revisions.len()).unwrap_or(u32::MAX);
     let truncated = revisions.len() > MAX_REVISIONS;
     revisions.truncate(MAX_REVISIONS);
-    Ok((revisions, truncated))
+    Ok((revisions, truncated, total))
 }
 
-/// Each ledger line's text, by every id the line names.
-fn ledger_texts(ledger: &str) -> HashMap<u32, String> {
-    let mut texts = HashMap::new();
+/// What one ledger line says of its change besides what `check` does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Line {
+    /// Its text, if it has any.
+    pub(super) text: Option<String>,
+    /// Where it is, when that is not the main text.
+    pub(super) place: Option<RevisionPlace>,
+}
+
+/// Each ledger line's text and place, by every id the line names.
+pub(super) fn ledger(ledger: &str) -> HashMap<u32, Line> {
+    let mut lines = HashMap::new();
     for line in ledger.lines() {
         let Some(rest) = line.strip_prefix('#') else {
             continue;
         };
         let ids = rest.split(' ').next().unwrap_or_default();
-        let Some(quoted) = line.find(" \"").and_then(|at| line.get(at + 1..)) else {
-            continue;
-        };
-        let Ok(text) = serde_json::from_str::<String>(quoted) else {
-            continue;
+        // the fields before the text, which is the line's first quote on
+        let quote = line.find(" \"");
+        let head = quote.and_then(|at| line.get(..at)).unwrap_or(line);
+        let text = quote
+            .and_then(|at| line.get(at + 1..))
+            .and_then(|quoted| serde_json::from_str::<String>(quoted).ok());
+        let words: Vec<&str> = head.split(' ').collect();
+        let place = match words.as_slice() {
+            [.., "in", story] => Some(place(story)),
+            _ => None,
         };
         for id in ids.split(',').filter_map(|id| id.parse::<u32>().ok()) {
-            texts.insert(id, text.clone());
+            lines.insert(
+                id,
+                Line {
+                    text: text.clone(),
+                    place,
+                },
+            );
         }
     }
-    texts
+    lines
 }
 
-/// stetdoc's change kind as the wire's.
-fn kind(kind: &str) -> RevisionKind {
+/// stetdoc's story outside the main text as the wire's place: `headers` holds the headers and
+/// the footers, `notes` the footnotes and the endnotes.
+fn place(story: &str) -> RevisionPlace {
+    match story {
+        "headers" => RevisionPlace::HeaderFooter,
+        "notes" => RevisionPlace::Note,
+        "comments" => RevisionPlace::Comment,
+        _ => RevisionPlace::Unknown,
+    }
+}
+
+/// stetdoc's change kind as the wire's. Of 0.9.3's: `move`; `insertion` and `paragraph_`,
+/// `mark_`, `row_` and `cell_inserted`; `deletion` and the same `_deleted`; and as formatting
+/// `run_`, `paragraph_`, `section_`, `table_`, `row_` and `cell_format`, `grid_change` (a
+/// table's column widths), `cell_merged` and `numbering_change`.
+pub(super) fn kind(kind: &str) -> RevisionKind {
     if kind.contains("move") {
         RevisionKind::Move
     } else if kind.contains("insert") {
@@ -144,6 +217,8 @@ fn kind(kind: &str) -> RevisionKind {
         "section",
         "table",
         "number",
+        "grid",
+        "merged",
     ]
     .iter()
     .any(|word| kind.contains(word))

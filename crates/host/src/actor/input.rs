@@ -167,10 +167,12 @@ pub(crate) enum MatterTag {
     Scratch,
     /// The open the actor sends first to a matter's new worker; its reply is only logged.
     Open,
-    /// The locate of a `RelocateMatter` command, with the folder it locates.
+    /// The locate of a `RelocateMatter` command, with the folder it locates; `created` for an
+    /// import of a listed matter's moved folder, answered `MatterCreated` (`answer.rs`).
     Relocate {
         command: CommandId,
         folder: std::path::PathBuf,
+        created: bool,
     },
     /// A turn's job.
     Turn(TurnJob),
@@ -272,10 +274,14 @@ pub(crate) enum Input {
     BrowserPolicy(super::browser_policy::PolicyInput),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
     SkillPack(Box<super::settings::packs::PackRead>),
+    /// A file action's record was put or cleared (`last_exit.rs`).
+    Recorded(Box<super::last_exit::Recorded>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
     Update(super::update::UpdateInput),
     /// A connector command's work, or a relay's event (`connectors.rs`).
     Connector(Box<super::connectors::ConnectorInput>),
+    /// A keychain thread of an MCP server command (`mcp.rs`).
+    Mcp(Box<super::mcp::McpInput>),
     /// A sandbox set-up, removal or check ended, from its thread (`protection/work.rs`).
     Protection(Box<super::protection::work::Done>),
     /// A session proxy's sink reports a site the block list made it refuse (`blocked.rs`), as
@@ -333,6 +339,7 @@ impl std::fmt::Debug for Input {
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",
+            Self::Mcp(_) => "Mcp",
             Self::Protection(_) => "Protection",
             Self::SiteBlocked { .. } => "SiteBlocked",
             #[cfg(feature = "test-support")]
@@ -340,6 +347,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::StateForTest(_) => "StateForTest",
             Self::Allowed(_) => "Allowed",
+            Self::Recorded(_) => "Recorded",
             #[cfg(not(windows))]
             Self::PapersChanged(_) => "PapersChanged",
             #[cfg(not(windows))]

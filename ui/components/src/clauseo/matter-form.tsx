@@ -6,12 +6,14 @@
 // missing says so under it. The lawyer's words take the composer's setting, 17 px at 600. First launch opens the form on
 // its first screen, and the rail's New matter opens the same form in a dialog. A warning about the folder picked, from
 // the caller, sits under the folder row, its two buttons in Create's place; a refusal sits there too, with its one way
-// on: Open it for a folder that is already a matter, Choose another folder for any other folder refused.
+// on: Open {name} for a folder inside or holding a matter on the list, Choose another folder for any other folder
+// refused.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Field } from "@base-ui/react/field";
 import { Input } from "@base-ui/react/input";
 import { Button } from "../ui/button.tsx";
 import { fieldLabel, textControl } from "../ui/recipes-controls.ts";
+import { isolate } from "../lib/bidi.ts";
 import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
 import { fr } from "../lib/words-folder.ts";
@@ -56,9 +58,9 @@ export type NewMatterFormProps = {
   error?: string | null | undefined;
   /** Optional: the line is about the folder: Choose another folder sits under it and opens the picker. */
   folderError?: boolean | undefined;
-  /** Optional: for a line that names a matter on the list (matter.folder_is_matter), Open it sits under the line and
-   * calls this, which opens that matter, in Choose another folder's place. */
-  openMatter?: (() => void) | undefined;
+  /** Optional: for a line that names a matter on the list (a folder inside or holding its folder), Open {name} sits
+   * under the line, the name isolated, and calls `open`, which opens that matter, in Choose another folder's place. */
+  openMatter?: { name: string; open: () => void } | undefined;
   /** Optional: a warning about the folder picked, under the folder row, from the caller in the language. While it
    * shows, its two buttons stand in Create's place: `choose`, the main one, calls `onChoose` or, left out, opens the
    * picker as Choose folder… does; `anyway` creates as Create does. */
@@ -318,9 +320,11 @@ export function NewMatterForm({
               kind="tone"
               size="small"
               data-testid={testIds?.open}
-              onClick={() => openMatter()}
+              onClick={() => openMatter.open()}
             >
-              <span className="deva-nudge">{mt(lang, "Open it")}</span>
+              <span className="deva-nudge">
+                {mt(lang, "Open {name}", { name: isolate(openMatter.name) })}
+              </span>
             </Button>
           ) : (
             folderError &&

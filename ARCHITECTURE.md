@@ -75,9 +75,9 @@ to write instead.
 | `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, zeroize, specta, specta-serde | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread and matter state and view patches; the snapshot format (`MessagePack`, `REDUCER_SCHEMA_VERSION`) | protocol, serde, rmp-serde | any I/O, clock, tauri | exists |
 | `reducer_bench` | The gungraun instruction-count bench of `reducer`'s fold (Linux, CI) | none (dev: protocol, reducer, gungraun) | tauri | exists |
-| `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite, serde, serde_json, rmp-serde, blake3, zstd, async-channel, futures | tauri | exists |
+| `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite, serde, serde_json, rmp-serde, blake3, zstd, async-channel, futures, tracing | tauri | exists |
 | `search` | `search.sqlite`, the derived FTS5 index of matter and thread titles, entries, tool titles and file names: its writes, the query text built from the lawyer's words, ranking, paging, snippets and the one text normalisation (0043) | protocol, rusqlite, unicode-normalization | tauri, host | exists |
-| `matters` | Shadow repos via gix: create and import, checkpoints, undo, restore, compare; retention after G9 (the open matter's folder watch is `host`'s, 0055) | protocol, gix, serde, serde_json, tracing, dunce, unicode-normalization; nix (macOS only); windows (Windows only); process (macOS and Windows only: the running Word processes, for the stale owner-file rule) | tauri | exists |
+| `matters` | Shadow repos via gix: create and import, checkpoints, undo, restore, compare; retention after G9 (the open matter's folder watch is `host`'s, 0055) | protocol, gix, serde, serde_json, tracing, dunce, unicode-normalization; nix, objc2-foundation (macOS only); windows, windows-core (Windows only); process (macOS and Windows only: the running Word processes, for the stale owner-file rule) | tauri | exists |
 | `settings` | Settings schema and locations, the policy layer | serde, serde_json, serde_json_lenient, schemars, unicode-normalization, plist; windows (Windows only); nix (Unix only); objc2-core-foundation (macOS only) | tauri | exists |
 | `process` | Spawning, graceful shutdown, process-tree kill, the agent's descendants and the sweep of those new since a listing, the processes running under a name (macOS and Windows), restart supervisor, the `Launcher` trait | protocol, async-process, async-io, futures, memchr; windows (Windows only); nix (Unix only); libc (macOS only) | tauri | exists |
 | `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol, futures, async-channel, serde, serde_json, memchr | tauri, tokio | exists |
@@ -96,7 +96,8 @@ to write instead.
 | `legal` | Case-law and regulator data clients and parsers | protocol | tauri | planned |
 | `citations` | Deterministic citation parsing and checks | protocol, legal | tauri | planned |
 | `skills` | Skill format, built-in skills, validation, install through `profile` | protocol, profile | tauri | planned |
-| `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server, and the connector relay client (0050) | serde, serde_json; nix (Unix only); windows (Windows only) | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls | exists |
+| `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server, and the connector relay client (0050) | serde, serde_json, getrandom; nix (Unix only); windows (Windows only) | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls | exists |
+| `pdf` | Clauseo's own `pdftoppm` and `pdfinfo` for the agents (scanned PDFs): launchers that run the Python runtime on a bundled script over pypdfium2 and Pillow; no poppler | windows (Windows only) | tauri, tokio, host, agents | exists |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), `ui/components`

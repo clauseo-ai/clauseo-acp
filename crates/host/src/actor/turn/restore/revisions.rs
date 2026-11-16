@@ -13,20 +13,20 @@ use std::sync::Arc;
 
 use clauseo_matters::{CheckpointOutcome, CommitId, Replaced, TimelineEntry};
 use clauseo_protocol::{
-    CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DecideRevisions, MatterId,
-    StreamId,
+    CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DecideRevisions,
+    InterruptedKind, MatterId, RevisionDecision, StreamId,
 };
 
-use super::super::super::Actor;
 use super::super::super::commands::CommandCtx;
 use super::super::super::input::MatterTag;
+use super::super::super::{Actor, last_exit};
 use super::super::{known, undo};
 use super::{RestoreLog, give_up, send_log, take_writer};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::pipeline::MatterEvent;
-use crate::revisions::{Act, Decided, RevisionsDone, RevisionsJob};
+use crate::revisions::{Act, Decided, Ids, RevisionsDone, RevisionsJob};
 
 /// A decision between its checks and the matter thread's answer.
 #[derive(Debug)]
@@ -52,10 +52,24 @@ pub(crate) fn decide_revisions(
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            if let Err(error) = loaded.and_then(|()| send(actor, ctx, decide, stetdoc)) {
+            if let Err(error) = loaded {
                 give_up(actor, matter, ctx, error);
+                actor.release(stream);
+                return;
             }
-            actor.release(stream);
+            // Recorded first (`last_exit.rs`): sent once the record is durable.
+            let kind = match decide.decision {
+                RevisionDecision::Accept => InterruptedKind::AcceptChanges,
+                RevisionDecision::Reject => InterruptedKind::RejectChanges,
+            };
+            let action = last_exit::action(matter, kind, Some(1), None, actor.now().wall);
+            let then = move |actor: &mut Actor, _recorded: Result<(), Error>| {
+                if let Err(error) = send(actor, ctx, decide, stetdoc) {
+                    give_up(actor, matter, ctx, error);
+                }
+                actor.release(stream);
+            };
+            last_exit::record(actor, action, Box::new(then));
         }),
     );
 }
@@ -75,7 +89,11 @@ fn send(
         clock: Arc::clone(&actor.clock),
         act: Act::Decide {
             version: decide.version,
-            ids: decide.ids,
+            ids: if decide.all {
+                Ids::All
+            } else {
+                Ids::These(decide.ids)
+            },
             decision: decide.decision,
             outside_edits: actor.ids.mint(now)?,
             checkpoint: actor.ids.mint(now)?,
@@ -186,7 +204,7 @@ fn log(actor: &Actor, ask: &RevisionsAsk, decided: Decided) -> RestoreLog {
     RestoreLog {
         ctx: ask.ctx,
         events,
-        written: Vec::new(),
+        note: None,
         thread: None,
         outcome: CommandOutcome::RevisionsDecided {
             before,

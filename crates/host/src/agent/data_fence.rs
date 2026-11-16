@@ -14,6 +14,12 @@
 //!   and Claude's plans folder are left out by naming their siblings instead, and so are the
 //!   tool results Claude saves in its own project folder. Run folders, matters' notes and other
 //!   matters' Claude projects made after the launch are the accepted residual of these rules.
+//!   On Windows, where Claude has no sandbox, `Bash(…)` and `PowerShell(…)` rules name the same
+//!   targets in every spelling of `<data>` a command may use (`shell_deny.rs`): the own run
+//!   folder, this matter's notes, Claude's plans folder, its tool results and the read-only
+//!   tools stay reachable by a command, and everything else under `<data>`, the folder itself
+//!   too, is denied when a command names it. The rules go to Claude Code in a settings file
+//!   (`agent::launch_settings`), since a busy data folder's rules outgrow a command line.
 //! - The host's auto-deny ([`FenceCheck`]): a permission request whose paths ([`candidates`]:
 //!   the request's locations and diffs, `rawInput`'s path keys and every string in it shaped
 //!   like a path, the path words of a shell command and the targets of its `ln`, and any path
@@ -46,32 +52,42 @@ use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
+pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
-pub(crate) use input::{candidates, candidates_roots, candidates_words};
-pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
+pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
+pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use shell_deny::{
+    own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
+    windows_shell_deny_rules_without_variables,
+};
+pub(crate) use variables::launch_vars;
 
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
 /// launch adds every other entry that exists then, `launch.rs`), as rule patterns under it,
 /// each denied to Claude for Read and Edit: the skill packs' sources, the version store, the
 /// logs, the updater's downloads, the usage counts, the Windows sandbox's ledger, the limits
 /// reader's state, the browser's config, the block list's store and the lawyer's allowed sites, the
+/// trust roots file Claude's sandboxed commands trust (`tls/roots.pem`, `loads::tls_roots`: a
+/// root Claude wrote there would be trusted by `curl` and Python in every later session), the
 /// settings file, the updater's marker, the counts' first-act marker, the host's store, the search
 /// index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
 /// Under `agents`: Codex's home, the installs, the runtime and npm folders, the sign-in shim and
-/// markers, and in Claude's own home its login, its settings, its transcripts (every project's,
-/// with its subagents' and its memory; not the whole of `projects`, which also holds the large
-/// tool results the model must Read back, `launch.rs`), its skills and
-/// plugins, and what it keeps across sessions, so across matters: the prompt history, the
-/// edited files' copies, the to-do lists and the shell snapshots. Not Claude's home whole:
-/// Claude Code writes its plan note to `plans` there with its own Edit tool, and a deny rule
-/// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
-/// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
-/// through them would land in the transcript; and the shell browser's config file
+/// markers, and in Claude's own home its transcripts (every project's, with its subagents' and
+/// its memory; not the whole of `projects`, which also holds the large tool results the model
+/// must Read back, `launch.rs`); the rest of that home is [`claude_home::CLAUDE_HOME`]. Not
+/// Claude's home whole: Claude Code writes its plan note to `plans` there with its own Edit
+/// tool, and a deny rule has no exceptions. And in every run folder, the own one too, the
+/// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
+/// need it, and a token read through them would land in the transcript; and the shell
+/// browser's config file
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
-/// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists.
-pub(crate) const DENIED: [&str; 38] = [
+/// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
+/// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
+/// it itself at its start, so its tools never need it, and it holds every session's rules.
+/// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
+pub(crate) const DENIED: [&str; 31] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -83,6 +99,7 @@ pub(crate) const DENIED: [&str; 38] = [
     "limits/**",
     "browser/**",
     "blocklist/**",
+    "tls/**",
     clauseo_settings::SETTINGS_FILE,
     "update.json",
     clauseo_counts::FIRST_ACT,
@@ -92,24 +109,16 @@ pub(crate) const DENIED: [&str; 38] = [
     "agents/claude-acp/install/**",
     "agents/claude-acp/login-source",
     "agents/claude-acp/no-reuse",
-    "agents/claude-acp/home/.credentials.json",
-    "agents/claude-acp/home/.claude.json*",
-    "agents/claude-acp/home/settings.json",
     "agents/claude-acp/home/projects/*/*.jsonl",
     "agents/claude-acp/home/projects/*/*/subagents/**",
     "agents/claude-acp/home/projects/*/memory/**",
-    "agents/claude-acp/home/skills/**",
-    "agents/claude-acp/home/plugins/**",
-    "agents/claude-acp/home/history.jsonl",
-    "agents/claude-acp/home/file-history/**",
-    "agents/claude-acp/home/todos/**",
-    "agents/claude-acp/home/shell-snapshots/**",
     "agents/runtime/node-v*/**",
     "agents/runtime/.tmp-*/**",
     "agents/downloads/**",
     "agents/npm-cache/**",
     "agents/signin/**",
     "agents/npmrc*",
+    "launch-settings/**",
 ];
 
 /// What of `<data>` every session may read, with the reason: neither denied to Claude nor listed
@@ -146,8 +155,24 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it. A spelling that is not UTF-8 gets none (no rule could name it).
-pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
+/// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
+/// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
+/// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
+/// allowed listing or read of an own folder that holds a glob. Under the sandbox they would buy
+/// nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob after
+/// an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny being
+/// matched on the whole command too. A spelling that is not UTF-8 gets none (no rule could
+/// name it).
+pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
+    claude_deny_rules_on(deny, cfg!(windows), sandboxed)
+}
+
+/// [`claude_deny_rules`] with the paths in Windows' rule form when `windows` ([`rule_path`]).
+pub(crate) fn claude_deny_rules_on(
+    deny: &LaunchDeny,
+    windows: bool,
+    sandboxed: bool,
+) -> Vec<String> {
     let mut rules = Vec::new();
     let mut push = |rule: String| {
         if !rules.contains(&rule) {
@@ -155,7 +180,7 @@ pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
         }
     };
     for spelling in &deny.spellings {
-        let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
+        let Some(base) = spelling.to_str().map(|text| rule_path(text, windows)) else {
             continue;
         };
         for target in &deny.targets {
@@ -165,6 +190,11 @@ pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
         }
         for place in READ_ONLY {
             push(format!("Edit({base}/{place}/**)"));
+        }
+    }
+    if !sandboxed {
+        for rule in own_shell_glob_deny_rules(deny, windows) {
+            push(rule);
         }
     }
     rules
@@ -177,18 +207,26 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 
 /// Claude's `permissions.allow` rules for a launch: `Read` of the built-in skills' folder
 /// ([`BUILT_IN_SKILLS`]) and all under it, so a built-in skill never asks the lawyer, then of
-/// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`. Read only, and
-/// nothing wider; a deny rule (another session's, a link's) still beats each. A spelling that is
-/// not UTF-8 gets none.
+/// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`; then the session's
+/// own work and notes folders' (`LaunchDeny::own_reads`): `Read` of each and all under it, and
+/// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
+/// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
+/// A spelling that is not UTF-8 gets none.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
+    claude_allow_rules_on(deny, cfg!(windows))
+}
+
+/// [`claude_allow_rules`] with Windows' paths and shell rules when `windows`.
+pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let skills: Vec<String> = BUILT_IN_SKILLS.iter().map(|name| escape(name)).collect();
     let skills = skills.join("/");
     let mut rules = Vec::new();
     for spelling in &deny.spellings {
-        let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
+        let Some(base) = spelling.to_str().map(|text| rule_path(text, windows)) else {
             continue;
         };
-        let places = std::iter::once(skills.as_str()).chain(READ_ONLY);
+        let own = deny.own_reads.iter().map(String::as_str);
+        let places = std::iter::once(skills.as_str()).chain(READ_ONLY).chain(own);
         for place in places {
             let rule = format!("Read({base}/{place}/**)");
             if !rules.contains(&rule) {
@@ -196,6 +234,7 @@ pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
             }
         }
     }
+    rules.extend(own_shell_allow_rules(deny, windows));
     rules
 }
 
@@ -278,6 +317,9 @@ pub(crate) struct FenceCheck {
     /// The host's data-fence health: the data folder's identity kept once read, retried while
     /// it can't be, and whether the fence compares by names only.
     pub(crate) health: DataFenceHealth,
+    /// The agent's launch variables that hold a path ([`launch_vars`]), for PowerShell's
+    /// `$env:NAME` in a path; a variable not among them is read from the host's environment.
+    pub(crate) vars: Vec<(String, String)>,
 }
 
 impl FenceCheck {
@@ -341,27 +383,48 @@ impl FenceCheck {
                 }
             }
         };
-        // An agent's text with a name Windows reads as another place is refused untouched.
-        let agent = |path: &PathBuf| {
-            if refused_windows_name(path, disk.net) {
-                vec![Found::Refused]
-            } else {
-                resolve::resolve_all(path, &self.cwd, home, disk)
+        let var = |name: &str| {
+            let launch = self
+                .vars
+                .iter()
+                .find(|(var, _)| var.eq_ignore_ascii_case(name));
+            launch
+                .map(|(_, value)| value.clone())
+                .or_else(|| std::env::var(name).ok())
+        };
+        // An agent's text with a name Windows reads as another place is refused untouched, and
+        // a search folder whose variable can't be expanded too.
+        let agent = |path: &PathBuf, root: bool| {
+            let Some(paths) = variables::judged(path, disk.net.windows, root, &var) else {
+                return vec![Found::Refused];
+            };
+            let mut found = Vec::new();
+            for path in &paths {
+                if refused_windows_name(path, disk.net) {
+                    found.push(Found::Refused);
+                } else {
+                    found.extend(resolve::resolve_all(path, &self.cwd, home, disk));
+                }
             }
+            found
         };
         let embedded = self.embedded(&real_data, !network_data, insensitive, disk.net.windows);
         let reached = self
             .paths
             .iter()
             .chain(&embedded)
-            .any(|path| agent(path).iter().any(inside));
+            .any(|path| agent(path, false).iter().any(inside));
         // A search from a folder that holds `<data>` (or is it) reaches all of it.
         let holds = |found: &Found| {
             inside(found)
                 || matches!(found, Found::Path(root) if !network_data
                     && (data.starts_with(&key(root, insensitive)) || identity.is_on_line(root)))
         };
-        reached || self.roots.iter().any(|root| agent(root).iter().any(holds))
+        reached
+            || self
+                .roots
+                .iter()
+                .any(|root| agent(root, true).iter().any(holds))
     }
 
     /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.
@@ -466,9 +529,11 @@ pub(crate) fn check_paths(
 }
 
 /// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny
-/// folds at least as broadly as the file system, `ſ` and the Kelvin sign included).
+/// folds at least as broadly as the file system, `ſ` and the Kelvin sign included), a long
+/// path's verbatim `\\?\C:\` read as `C:\` ([`resolve::comparable`]).
 fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
-    path.components()
+    resolve::comparable(path)
+        .components()
         .map(|part| {
             let part = part.as_os_str();
             if insensitive {
@@ -481,7 +546,10 @@ fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
 }
 
 #[cfg(test)]
+pub(crate) mod big_folder;
+#[cfg(test)]
 mod bypass_tests;
+mod claude_home;
 mod command;
 #[cfg(test)]
 mod command_tests;
@@ -499,12 +567,18 @@ mod names_only_tests;
 mod network_forms_tests;
 #[cfg(test)]
 mod network_tests;
+#[cfg(test)]
+mod no_file_ids_tests;
+#[cfg(test)]
+mod powershell_env_tests;
 mod resolve;
 mod search;
 #[cfg(test)]
 mod search_tests;
+mod shell_deny;
 #[cfg(test)]
 mod tests;
+mod variables;
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_names_only_tests;

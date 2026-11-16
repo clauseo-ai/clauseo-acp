@@ -173,7 +173,6 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
         "AGENT_BROWSER_CONFIG",
         "AGENT_BROWSER_EXECUTABLE_PATH",
         "AGENT_BROWSER_SESSION",
-        "AGENT_BROWSER_STREAM_PORT",
     ];
     if cfg!(unix) {
         required.push("AGENT_BROWSER_SOCKET_DIR");
@@ -194,9 +193,6 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
         ("AGENT_BROWSER_CONFIG", "agent-browser.json"),
         ("AGENT_BROWSER_EXECUTABLE_PATH", "/no/such/chrome"),
         ("AGENT_BROWSER_SESSION", "a b"),
-        ("AGENT_BROWSER_STREAM_PORT", "80"),
-        ("AGENT_BROWSER_STREAM_PORT", "65536"),
-        ("AGENT_BROWSER_STREAM_PORT", "0"),
     ] {
         let mut command = guard_command(&scratch, &stub, &args);
         command.env(name, value);
@@ -247,21 +243,24 @@ fn an_unstartable_child_exits_1() {
     let (status, (_, text)) = guard.finish_with_stderr();
     assert_eq!(status.code(), Some(1));
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(
-        lines.get(..2),
-        Some(
-            [
-                "clauseo-mcp browser-guard: Chrome started; waiting for it to listen on the \
-                 claimed debugging port 61101",
-                "clauseo-mcp browser-guard: Chrome is listening on the claimed debugging port 61101"
-            ]
-            .as_slice()
+    let chrome = scratch.path().join(crate::support::CHROME);
+    let chrome = chrome.display();
+    let notes = [
+        format!("clauseo-mcp browser-guard: starting {chrome} over a DevTools pipe"),
+        format!(
+            "clauseo-mcp browser-guard: {chrome} started; waiting for its answer on its DevTools \
+             pipe"
         ),
-        "{text}"
-    );
+        format!(
+            "clauseo-mcp browser-guard: {chrome} answers on its DevTools pipe; the relay listens \
+             on 127.0.0.1"
+        ),
+    ];
+    let notes: Vec<&str> = notes.iter().map(String::as_str).collect();
+    assert_eq!(lines.get(..3), Some(notes.as_slice()), "{text}");
     assert!(
         lines
-            .get(2)
+            .get(3)
             .is_some_and(|line| line.starts_with("clauseo-mcp browser-guard: cannot run ")),
         "{text}"
     );

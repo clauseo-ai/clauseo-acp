@@ -201,6 +201,21 @@
     white-space: pre-wrap;
     tab-size: 4;
   }
+  /* above a blackline paragraph's words: only its formatting changed, or it holds text Word hides */
+  .ver-para-note {
+    @apply text-small font-chip text-quiet;
+    display: block;
+    white-space: normal;
+  }
+  /* a change with no text of its own, named in brackets: an inserted picture, a deleted footnote */
+  .ver-object {
+    font-style: italic;
+  }
+  /* a place the blackline couldn't show, said plainly where the paragraph stood */
+  .ver-not-shown {
+    @apply text-muted;
+    font-style: italic;
+  }
   .ver-mark-line {
     @apply text-small text-primary;
     max-width: calc(var(--measure) + var(--page-extra));

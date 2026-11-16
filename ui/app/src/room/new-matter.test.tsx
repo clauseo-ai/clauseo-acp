@@ -223,6 +223,10 @@ const CODES = [
   "matter.folder_unreadable",
   "matter.folder_is_matter",
   "matter.folder_in_matters_root",
+  "matter.folder_in_clauseo_data",
+  "matter.folder_inside_matter",
+  "matter.folder_holds_matter",
+  "matter.folder_too_deep",
   "matter.folder_missing",
   "internal",
 ] as const;
@@ -272,57 +276,78 @@ function refusingNext(refusal: NextHostError, sent: NextCommand[], open?: Matter
   };
 }
 
-test("a folder already a matter names the matter on the list, and Open it sends open_matter and closes the form", async () => {
-  const sent: NextCommand[] = [];
-  const OPEN: MatterSummary = { matter: uuid(3, 2), name: "Rao v. Union of India", kind: "folder" };
-  const transport = await mount(
-    refusingNext(
-      {
-        code: "matter.folder_is_matter",
-        message: "SECRET-DETAIL",
-        retryable: false,
-        matter: A.matter,
-      },
-      sent,
-      OPEN,
-    ),
-  );
-  expect(title()).toBe(OPEN.name);
-  await openForm();
-  await press("matter-made");
-  await press("create-matter");
-  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
-    `This folder is already a matter: \u2068${A.name}\u2069.`,
-  );
-  expect(dialog()?.textContent).not.toContain("SECRET-DETAIL");
-  await press("open-matter");
-  expect(sent).toContainEqual({ open_matter: { matter: A.matter } });
-  expect(created(transport)).toEqual([]);
-  expect(dialog()).toBeNull();
-  expect(title()).toBe(A.name);
-});
+const NESTED = [
+  ["matter.folder_inside_matter", "This folder is inside the folder of {name}."],
+  ["matter.folder_holds_matter", "This folder holds the folder of {name}."],
+] as const;
 
-test("a folder already a matter whose matter is not on the list says so, with no Open it", async () => {
-  const sent: NextCommand[] = [];
-  await mount(
-    refusingNext(
-      { code: "matter.folder_is_matter", message: "", retryable: false, matter: uuid(9, 9) },
-      sent,
-    ),
-  );
-  await openForm();
-  await press("matter-made");
-  await press("create-matter");
-  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
-    "This folder is already a matter.",
-  );
-  expect(byId("open-matter")).toBeNull();
-  expect(
-    [...(dialog()?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()),
-  ).not.toContain("Open it");
-  expect(sent.filter((c) => "open_matter" in c)).toEqual([]);
-  expect(dialog()).not.toBeNull();
-});
+for (const [code, words] of NESTED) {
+  test(`${code} names the matter on the list, and Open {name} sends open_matter and closes the form`, async () => {
+    const sent: NextCommand[] = [];
+    const OPEN: MatterSummary = {
+      matter: uuid(3, 2),
+      name: "Rao v. Union of India",
+      kind: "folder",
+    };
+    const transport = await mount(
+      refusingNext(
+        { code, message: "SECRET-DETAIL", retryable: false, matter: A.matter },
+        sent,
+        OPEN,
+      ),
+    );
+    expect(title()).toBe(OPEN.name);
+    await openForm();
+    await press("matter-made");
+    await press("create-matter");
+    expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+      words.replace("{name}", `\u2068${A.name}\u2069`),
+    );
+    expect(dialog()?.textContent).not.toContain("SECRET-DETAIL");
+    expect(byId("open-matter")?.textContent).toBe(`Open \u2068${A.name}\u2069`);
+    // Create waits for another folder, as for any folder refused
+    expect(byId<HTMLButtonElement>("create-matter")?.disabled).toBe(true);
+    await press("open-matter");
+    expect(sent).toContainEqual({ open_matter: { matter: A.matter } });
+    expect(created(transport)).toEqual([]);
+    expect(dialog()).toBeNull();
+    expect(title()).toBe(A.name);
+  });
+}
+
+const UNNAMED: [string, NextHostError][] = [
+  [
+    "a nested folder whose matter is not on the list",
+    { code: "matter.folder_inside_matter", message: "", retryable: false, matter: uuid(9, 9) },
+  ],
+  [
+    "a folder holding a matter being made or forgotten (no matter)",
+    { code: "matter.folder_holds_matter", message: "", retryable: false },
+  ],
+  [
+    "folder_is_matter, even naming a matter on the list",
+    { code: "matter.folder_is_matter", message: "", retryable: false, matter: A.matter },
+  ],
+];
+
+for (const [what, refusal] of UNNAMED) {
+  test(`${what} says the refused line, with no Open, and Create waits`, async () => {
+    const sent: NextCommand[] = [];
+    await mount(refusingNext(refusal, sent));
+    await openForm();
+    await press("matter-made");
+    await press("create-matter");
+    expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+      "Clauseo can't make a matter of this folder. Choose another folder.",
+    );
+    expect(dialog()?.textContent).not.toMatch(/already a matter/);
+    expect(byId("open-matter")).toBeNull();
+    expect(byId("folder-choose-another")).not.toBeNull();
+    expect(byId<HTMLButtonElement>("create-matter")?.disabled).toBe(true);
+    expect(sent.filter((c) => "open_matter" in c)).toEqual([]);
+    expect(dialog()).not.toBeNull();
+  });
+}
 
 test("the matters' own folder is a choose-another refusal, and says where Clauseo keeps matters with its path", async () => {
   const refusal: NextHostError = {

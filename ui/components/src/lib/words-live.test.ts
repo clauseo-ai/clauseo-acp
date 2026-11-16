@@ -10,7 +10,7 @@ import {
   errorWords,
   plannedKey,
   PLANNED_CODES,
-  type ErrorCode,
+  type WordedCode,
 } from "./words-errors.ts";
 import { errorHindi } from "./words-errors.hi.ts";
 import { fr, type FolderKey } from "./words-folder.ts";
@@ -103,7 +103,7 @@ test("the working line says Answering. in both languages", () => {
 });
 
 test("every error code has a sentence with Hindi or Hindi later, and none says agent", () => {
-  const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
+  const codes = Object.keys(ERROR_WORDS) as WordedCode[];
   expect(codes.length).toBeGreaterThan(30);
   // the stopped sentence is the thread's, so it is not in errorHindi and reads as undefined here
   const hindi: Readonly<Record<string, string | null>> = errorHindi;
@@ -174,12 +174,12 @@ const PLANNED_LINES = [
   ],
   [
     "agent.auth_required",
-    "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "Sign in with ChatGPT in Codex first. Your question is kept.",
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
-    "Sign in to gemini first. Your question is kept.",
-    "पहले gemini में साइन इन करें। आपका प्रश्न रखा गया है।",
-    "Sign in to the AI first. Your question is kept.",
-    "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "Sign in with gemini first. Your question is kept.",
+    "पहले gemini से साइन इन करें। आपका प्रश्न रखा गया है।",
+    "Sign in first. Your question is kept.",
+    "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.unsupported_version",
@@ -198,6 +198,51 @@ const PLANNED_LINES = [
     "Clauseo यहाँ gemini को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
     "Clauseo can't start the AI safely here. Reinstall Clauseo.",
     "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+  ],
+  [
+    "agent.service_error",
+    "ChatGPT had a problem on its side. Try again.",
+    "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "gemini had a problem on its side. Try again.",
+    "gemini की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "The AI had a problem on its side. Try again.",
+    "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  ],
+  [
+    "agent.quiet",
+    "ChatGPT stopped answering. Try again.",
+    "ChatGPT ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "gemini stopped answering. Try again.",
+    "gemini ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "The AI stopped answering. Try again.",
+    "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  ],
+  [
+    "matter.folder_backslash",
+    "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "gemini can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "gemini इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "agent.folder_inaccessible",
+    "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "ChatGPT मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "gemini couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "gemini मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "agent.unreachable",
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, ChatGPT तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+    "Clauseo couldn't reach gemini. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, gemini तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+    "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, AI तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
   ],
 ] as const;
 
@@ -238,7 +283,7 @@ test("an agent's name fills no other code", () => {
 });
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
-  const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter((c) =>
+  const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter((c) =>
     ERROR_WORDS[c].includes("Claude"),
   );
   expect([...PLANNED_CODES].sort()).toEqual(naming.sort());
@@ -263,3 +308,60 @@ test.each([["./words-errors.hi.ts"], ["./words-limits.hi.ts"], ["./words-thread.
     }
   },
 );
+
+// matter.folder_backslash by where the backslash is and the computer: the matter folder's own name, or the nearest folder
+// above it by name (isolated), and Finder on the Mac, "your file manager" on Linux; each agent's line, in both languages
+const FOLDER = "\u2068Old\\Work\u2069";
+test.each([
+  [
+    "mac",
+    null,
+    "can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "linux",
+    null,
+    "can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "mac",
+    "Old\\Work",
+    `can't work in this matter's folder because the folder "${FOLDER}" in its path has a backslash (\\). Rename that folder in Finder, then Try again.`,
+    `इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "${FOLDER}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।`,
+  ],
+  [
+    "linux",
+    "Old\\Work",
+    `can't work in this matter's folder because the folder "${FOLDER}" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.`,
+    `इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "${FOLDER}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।`,
+  ],
+] as const)(
+  "matter.folder_backslash on %s, the folder above with it %j: each agent's line",
+  (platform, parent, en, hi) => {
+    const place = { platform, parent };
+    const code = "matter.folder_backslash";
+    for (const [agent, enName, hiName] of [
+      [CLAUDE, "Claude", "Claude"],
+      [undefined, "Claude", "Claude"],
+      [CODEX, "ChatGPT", "ChatGPT"],
+      [named("gemini"), "gemini", "gemini"],
+      [named(null), "The AI", "AI"],
+    ] as const) {
+      expect(errorWords("en", code, agent, place)).toBe(`${enName} ${en}`);
+      expect(errorWords("hi", code, agent, place)).toBe(`${hiName} ${hi}`);
+      sound(errorWords("en", code, agent, place), errorWords("hi", code, agent, place));
+    }
+    // the place reaches no other code's line
+    expect(errorWords("en", "agent.folder_inaccessible", CLAUDE, place)).toBe(
+      ERROR_WORDS["agent.folder_inaccessible"],
+    );
+  },
+);
+
+test("matter.folder_backslash with no place known: the Mac's line for the folder's own name, as before", () => {
+  expect(errorWords("en", "matter.folder_backslash")).toBe(
+    errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
+  );
+});

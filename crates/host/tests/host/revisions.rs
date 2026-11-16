@@ -20,6 +20,11 @@ use crate::support::{Dir, Running, Scenario};
 use crate::versions::matter_events;
 use crate::write;
 
+#[path = "revisions_all.rs"]
+mod all;
+#[path = "revisions_parts.rs"]
+mod parts;
+
 /// How long stetdoc's edit may take (the host's `EDIT_LIMIT`).
 const EDIT_LIMIT: Duration = Duration::from_secs(30);
 
@@ -87,7 +92,25 @@ impl Rig {
             version,
             ids,
             decision: RevisionDecision::Accept,
+            all: false,
         })
+    }
+
+    /// Accept all of `version`, with `ids` (which should be none).
+    fn decide_all(&self, version: DocVersion, ids: Vec<u32>) -> HostCommand {
+        let HostCommand::DecideRevisions(one) = self.decide(version, ids) else {
+            unreachable!("decide makes a DecideRevisions");
+        };
+        HostCommand::DecideRevisions(DecideRevisions { all: true, ..one })
+    }
+
+    /// The fake's calls, by their first argument.
+    fn calls(&self) -> Vec<String> {
+        std::fs::read_to_string(self.bin.join("calls.txt"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
     }
 
     fn lease_bytes(&self) -> Vec<u8> {
@@ -193,6 +216,11 @@ fn accept_writes_the_file_and_a_restore_of_before_undoes_it() {
     let mut accepted = ORIGINAL.to_vec();
     accepted.extend_from_slice(b"@accept\nids: 1\n");
     assert_eq!(rig.lease_bytes(), accepted);
+    // Named ids are one edit of the copy, as before Accept all went in chunks.
+    assert_eq!(
+        std::fs::read_to_string(rig.bin.join("edits.txt")).unwrap(),
+        "read.docx -> out.docx\n"
+    );
     rig.assert_no_copies();
     rig.host.settle();
     let events = matter_events(&rig.host, rig.matter);

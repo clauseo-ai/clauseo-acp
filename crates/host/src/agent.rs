@@ -17,19 +17,23 @@
 //! [`PUMP_END_ROUNDS`] bounds. It never gives up on the bound alone: a host thread that ran late
 //! (or a test clock moved on) must not leave the agent's last chunk unposted behind its `Ended`.
 
+pub(crate) mod claude_tmp;
 pub(crate) mod codex;
 pub(crate) mod codex_fence;
 pub(crate) mod data_fence;
 pub(crate) mod data_folder;
 pub(crate) mod folder_access;
+pub(crate) mod folder_name;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
 pub(crate) mod home;
 pub(crate) mod launch_refusals;
+pub(crate) mod launch_settings;
 pub(crate) mod leftovers;
 pub(crate) mod loads;
 pub(crate) mod login_link;
 pub(crate) mod login_splits;
+pub(crate) mod mcp_trust;
 pub(crate) mod plan_note;
 pub(crate) mod shell_path;
 mod spec;

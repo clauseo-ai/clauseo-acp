@@ -12,6 +12,7 @@ import type { AppFeedSource, HostTransport } from "../transport/host-transport.t
 import type {
   AgentSummary,
   ErrorCode,
+  McpToolsView,
   FolderRefId,
   FolderScanned,
   HostError,
@@ -224,7 +225,8 @@ export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterI
  * every catch-up; the case-law hint for a turn (R24), never in a catch-up; and how far the scan of a folder picked
  * in New matter has got (R20a, room/scan/), never logged; and a site the unsafe-site list
  * blocked (0053, store/blocked-sites.ts), never in a catch-up; and that a matter's papers changed (the tracked-changes
- * scan found more), so the wall lists them again (use-papers.ts), never in a catch-up. */
+ * scan found more), so the wall lists them again (use-papers.ts), never in a catch-up; and the lawyer's MCP servers
+ * (Settings › Tools, settings/sections/tools-model.ts), in every catch-up and after every change. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
@@ -237,7 +239,8 @@ export type AppEvent =
   | { protection_view_changed: unknown }
   | { site_blocked: SiteBlocked }
   | { papers_changed: { matter: MatterId } }
-  | { update_changed: UpdateView };
+  | { update_changed: UpdateView }
+  | { mcp_tools_changed: McpToolsView };
 
 /** 0053: a site the unsafe-site list blocked in a turn; re-sent with the same `block_id` and a
  * higher `count`. */

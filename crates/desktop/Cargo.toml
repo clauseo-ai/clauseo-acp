@@ -85,6 +85,8 @@ async-io = { workspace = true }
 memchr = { workspace = true }
 # open_external's link check (src/open.rs): the scheme, the host in its ASCII form.
 url = { workspace = true }
+# open_external's look at a link's visible text (src/open/ask.rs): width-folded as link.tsx does.
+unicode-normalization = { workspace = true }
 # open_file's containment check resolves paths; clippy.toml bans std's canonicalize.
 dunce = { workspace = true }
 # The command ids the bridge mints for `answer_permission` and the focus refresh.
@@ -114,7 +116,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # CreateProcessAsUserW.
 # The uninstaller's deletion (src/delete_app_data/ops.rs): Storage_FileSystem for a linked
 # `sandbox`'s reparse tag and its delete on one handle (GetFileInformationByHandleEx,
-# SetFileInformationByHandle). Other crates already build the feature.
+# SetFileInformationByHandle). Other crates already build the feature. Also GetLongPathNameW, a
+# picked folder's 8.3 short names spelt out (src/picked/long_name.rs).
 # The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
 # to see the per-machine installer's uninstall key.
 # The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's

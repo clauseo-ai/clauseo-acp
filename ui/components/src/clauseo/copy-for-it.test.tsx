@@ -58,6 +58,15 @@ test("a press copies the note, says Message copied, then its label again after 2
   expect(button().textContent).toBe("Copy details for IT");
 });
 
+test("a label given names the button and its field in place of Copy details for IT (a blocked download's Copy addresses)", async () => {
+  clipboard(() => Promise.reject(new Error("refused")));
+  await act(async () => root.render(<CopyForIt lang="en" text={NOTE} label="Copy addresses" />));
+  expect(button().textContent).toBe("Copy addresses");
+  await press();
+  expect(field()?.getAttribute("aria-label")).toBe("Copy addresses");
+  expect(button().textContent).toBe("Copy addresses");
+});
+
 test.each([
   ["writeText rejects", () => clipboard(() => Promise.reject(new Error("NotAllowedError")))],
   [

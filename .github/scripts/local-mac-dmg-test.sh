@@ -26,7 +26,13 @@ has "$plan" "node .github/scripts/sidecars.mjs --check aarch64-apple-darwin" pla
 has "$plan" "pnpm -C ui install --frozen-lockfile" plan
 has "$plan" "vite build --sourcemap hidden" plan
 has "$plan" "CLAUSEO_VERSION_SUFFIX=dev.$sha9" plan
-has "$plan" "--no-bundle --config release/release.conf.json --config release/blocklist.conf.json --config release/sidecars.generated.json -- --locked" plan
+has "$plan" "--no-bundle --config release/release.conf.json --config release/sidecars.generated.json -- --locked" plan
+# The block-list switch off, as release.yml's check output bundle_blocklist is for launch: no
+# snapshot download, no blocklist.conf.json in a build (the overlay check still names the file).
+has "$plan" "BUNDLE_BLOCKLIST=false" plan
+has "$plan" "skipped: bundle_blocklist is false in release.yml" plan
+grep -q 'fetch_blocklist$' <<< "$plan" && bad "--plan runs fetch_blocklist with the switch off"
+grep -E 'tauri (build|bundle)' <<< "$plan" | grep -q blocklist && bad "--plan passes blocklist.conf.json with the switch off"
 has "$plan" "export APPLE_SIGNING_IDENTITY=-" plan
 has "$plan" 'codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"' plan
 has "$plan" "codesign --verify --deep --strict" plan
@@ -93,10 +99,27 @@ done
 out=$(cd "$fx" && PATH="$tmp/mac:$tmp/tools" "$(command -v bash)" "$tmp/copy.sh" 2>&1) &&
   bad "no tools: exit 0"
 has "$out" "missing: rustup -> curl --proto '=https' -sSf https://sh.rustup.rs | sh" "no tools"
-has "$out" "missing: minisign (blocklist step) -> brew install minisign" "no tools"
+grep -q "missing: minisign" <<< "$out" && bad "no tools: minisign asked for with the switch off"
 has "$out" "missing: codesign, hdiutil, shasum -> xcode-select --install" "no tools"
 has "$out" "install what is missing above" "no tools"
 grep -q '^== step 2' <<< "$out" && bad "no tools: step 2 ran"
+
+# The switch on in the fixture's release.yml: the download and the overlay come back, and minisign
+# is needed again.
+sed -i.bak "s/^      bundle_blocklist: 'false'$/      bundle_blocklist: 'true'/" "$fx/.github/workflows/release.yml"
+rm "$fx/.github/workflows/release.yml.bak"
+grep -q "^      bundle_blocklist: 'true'$" "$fx/.github/workflows/release.yml" || bad "the fixture's switch did not turn on"
+on=$(cd "$fx" && bash "$tmp/copy.sh" --plan 2>&1) || bad "switch on: --plan exited non-zero"
+has "$on" "BUNDLE_BLOCKLIST=true" "switch on"
+grep -q 'fetch_blocklist$' <<< "$on" || bad "switch on: --plan does not run fetch_blocklist"
+has "$on" '--no-bundle --config release/release.conf.json --config release/blocklist.conf.json --config release/sidecars.generated.json -- --locked' "switch on"
+out=$(cd "$fx" && PATH="$tmp/mac:$tmp/tools" "$(command -v bash)" "$tmp/copy.sh" --allow-dirty 2>&1) &&
+  bad "switch on, no tools: exit 0"
+has "$out" "missing: minisign (blocklist step) -> brew install minisign" "switch on, no tools"
+sed -i.bak "s/^      bundle_blocklist: 'true'$/      bundle_blocklist: maybe/" "$fx/.github/workflows/release.yml"
+rm "$fx/.github/workflows/release.yml.bak"
+out=$(cd "$fx" && bash "$tmp/copy.sh" --plan 2>&1) && bad "switch neither true nor false: exit 0"
+has "$out" "bundle_blocklist is maybe, not true or false" "switch neither"
 
 [ "$fail" = 0 ] && echo "local-mac-dmg-test: all cases pass"
 exit "$fail"

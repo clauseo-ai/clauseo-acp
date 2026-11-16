@@ -17,7 +17,9 @@ use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
+use crate::agent::loads::lawyer;
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
+use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
@@ -61,10 +63,13 @@ pub(super) fn launch_keys(
         // as it stands now (a slot taken in between leaves wrong words, but no browser).
         let control = loads::mcp_control(&actor.managed_mcp);
         let (_, browser_switch) = switches(actor);
-        let inputs = browser_inputs(actor, &prepared.run, control, browser_switch);
+        let matter = super::session::folder(actor, thread)?;
+        let downloads = matter.join(browser::DOWNLOADS_FOLDER);
+        let inputs = browser_inputs(actor, &prepared.run, (control, browser_switch), &downloads);
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
-        let none_here = browser::no_browser(AgentKind::of(&agent_id), cfg!(windows));
+        let kind = AgentKind::of(&agent_id);
+        let none_here = browser::no_browser(kind, cfg!(windows)).then_some(BrowserPart::Off);
         let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
@@ -94,11 +99,50 @@ pub(super) fn launch_keys(
 /// `additionalDirectories`.
 pub(super) type SessionLoads = (Map<String, Value>, Vec<McpServer>, Vec<PathBuf>);
 
+/// Notes on `thread`'s agent what may run unasked in its session (`agent/mcp_trust.rs`): only
+/// what Clauseo sent, the lawyer's `trusted` servers and `case-law` when its entry went.
+fn note_mcp_sent(actor: &mut Actor, thread: ThreadId, trusted: &[String], case_law: bool) {
+    let mut sent = trusted.to_vec();
+    if case_law {
+        sent.push(clauseo_profile::servers::CASE_LAW.to_owned());
+    }
+    if let Some(agent) = super::state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && let Some(slot) = agent.mcp_sent.as_mut()
+    {
+        *slot = sent;
+    }
+}
+
+/// Of the lawyer's servers `sent` to `thread`'s session, the ones that run unasked
+/// (`agent/mcp_trust.rs`): only a server the agent gets, so the trust never names one left out,
+/// nor a remote one when the agent takes none (no `mcpCapabilities.http`: `clauseo-acp` leaves
+/// it out of the session call).
+fn trusted_sent(
+    actor: &mut Actor,
+    thread: ThreadId,
+    control: loads::McpControl,
+    sent: &[McpServer],
+) -> Vec<String> {
+    let http = super::state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .and_then(|agent| agent.info.as_ref())
+        .is_some_and(|info| info.mcp_http);
+    let gets = |server: &McpServer| http || !matches!(server, McpServer::Http { .. });
+    let mut trusted =
+        crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
+    trusted.retain(|name| {
+        sent.iter()
+            .any(|server| server.name() == name && gets(server))
+    });
+    trusted
+}
+
 /// The `_meta`, MCP servers and extra roots for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
 /// packs token, so Claude's second plugin is this launch's); the servers the lawyer turned on, then
-/// the hook's (none when the firm's `managed-mcp.json` is present); and for Codex, its run folder
+/// the hook's (none when the firm's `managed-mcp.json` is present; none of the lawyer's in the
+/// Safe workspace, nor one whose keychain value is missing); and for Codex, its run folder
 /// and the matter's notes ([`codex_directories`]). Holds the session's tool state for the
 /// thread's header until the session call answers ([`show_tools`]).
 pub(super) fn session_loads(
@@ -121,12 +165,14 @@ pub(super) fn session_loads(
     let (hook, case_law_entry, case_law_state) = case_law_servers(actor, &run, offered, control);
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
-    let inputs = browser_inputs(actor, &run, control, browser_switch);
+    let downloads = matter.join(browser::DOWNLOADS_FOLDER);
+    let inputs = browser_inputs(actor, &run, (control, browser_switch), &downloads);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
-    // Claude's shell tool; none for an agent offered the entry.
+    // The shell tool (no agent's for launch); none for an agent offered the entry.
     let shell = shell_browser(actor, &run, &agent_id);
-    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, none_here);
+    let absent = none_here.then_some(BrowserPart::Off);
+    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, absent);
     if shell.is_some() || browser_state.is_some() || none_here {
         // For support: whether this session has the browser, and which Chrome by file name.
         let (browser, chrome) = browser::part_log(session_browser, run.chrome.as_deref());
@@ -149,6 +195,14 @@ pub(super) fn session_loads(
     let forced_ask = super::state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .is_some_and(|agent| agent.forced_ask);
+    let browser_on = shell
+        .as_ref()
+        .is_some_and(|(_, part)| *part == BrowserPart::On);
+    let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter);
+    // The lawyer's servers this session gets, and those left out (a keychain value or the
+    // program missing, the Safe workspace).
+    let (lawyer_sent, left_out) = sent_lawyer_servers(&run, control);
+    let trusted = trusted_sent(actor, thread, control, &lawyer_sent);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
@@ -157,9 +211,10 @@ pub(super) fn session_loads(
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),
-        browser: shell
-            .as_ref()
-            .is_some_and(|(_, part)| *part == BrowserPart::On),
+        browser: browser_on,
+        sandbox: sandbox.as_ref(),
+        matter: Some(matter),
+        trusted_servers: &trusted,
     });
     let guard = actor
         .pre_write_guard
@@ -193,11 +248,14 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
+    super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
-    let mut servers = loads::mcp_servers(&actor.effective, control);
+    let mut servers = lawyer_sent;
+    super::super::mcp::left_out(actor, left_out);
+    note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
     if browser_state
@@ -221,6 +279,116 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
+}
+
+/// A Claude session's sandbox ([`claude_sandbox`]); none for another agent. Where one was meant
+/// to be and is not, holds `auto` back for `thread`.
+fn session_sandbox(
+    actor: &mut Actor,
+    thread: ThreadId,
+    kind: Option<AgentKind>,
+    agent_id: &clauseo_protocol::AgentId,
+    run: &RunFolders,
+    matter: &Path,
+) -> Option<ClaudeSandbox> {
+    let sandbox =
+        (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, agent_id, run, matter));
+    if let Some(Err(off)) = sandbox
+        && off.holds_auto_back()
+    {
+        // No sandbox where one was meant to be: no command may run on the classifier alone.
+        super::session::hold_auto_back(actor, thread);
+    }
+    sandbox.and_then(Result::ok)
+}
+
+/// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder
+/// is `matter` (`agent::loads::sandbox`), or why there is none (on Windows, among others).
+/// Path joins only.
+fn claude_sandbox(
+    actor: &Actor,
+    agent_id: &clauseo_protocol::AgentId,
+    run: &RunFolders,
+    matter: &Path,
+) -> Result<ClaudeSandbox, Off> {
+    let tmp = crate::agent::temp::temp_dir(&run.root);
+    let skills: Vec<PathBuf> = run
+        .data_deny
+        .spellings
+        .iter()
+        .map(|data| {
+            crate::agent::data_fence::BUILT_IN_SKILLS
+                .iter()
+                .fold(data.clone(), |path, name| path.join(name))
+        })
+        .collect();
+    let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
+    // Every other matter's folder the host knows now; one registered later is the residual.
+    let other_matters: Vec<PathBuf> = actor
+        .matters
+        .iter()
+        .filter(|(id, _)| **id != run.key.matter)
+        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
+        .collect();
+    let paths = SandboxPaths {
+        matter,
+        work: &run.work,
+        tmp: &tmp,
+        claude_tmp: run.claude_tmp.as_deref(),
+        downloads: &run.downloads,
+        skill_packs: &run.skill_packs,
+        notes: &run.notes,
+        skills: &skills,
+        path: &run.path.dirs,
+        env_file: run.path.env_file.as_deref(),
+        ca_file: run.path.ca_file.as_deref(),
+        claude_home: &claude_home,
+        data: &run.data_deny.spellings,
+        other_matters: &other_matters,
+    };
+    ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
+}
+
+/// The run's snapshot of the lawyer's servers, made at launch ([`lawyer_servers`]), and those
+/// left out; none once the firm's `managed-mcp.json` is present.
+fn sent_lawyer_servers(
+    run: &RunFolders,
+    control: loads::McpControl,
+) -> (Vec<McpServer>, Vec<lawyer::LeftOut>) {
+    if control != loads::McpControl::Clauseo {
+        return (Vec::new(), Vec::new());
+    }
+    (run.lawyer.servers.clone(), run.lawyer.left_out.clone())
+}
+
+/// The lawyer's servers `run`'s sessions get (`agent::loads::lawyer`), and those left out for a
+/// keychain value they lack: made once, at launch, from the values the launch prep read. None in
+/// the Safe workspace. The firm's `managed-mcp.json` is checked at each session call.
+pub(super) fn lawyer_servers(actor: &Actor, run: &RunFolders) -> lawyer::Sent {
+    let host: Vec<(OsString, OsString)> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None => std::env::vars_os().collect(),
+    };
+    let lookup = |name: &str| {
+        host.iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    let windows_env = case_law::windows_env(cfg!(windows), lookup, case_law::windows_directory);
+    let path = host
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        .and_then(|(key, value)| Some((key.to_str()?, value)));
+    let lawyer = lawyer::Lawyer {
+        control: loads::McpControl::Clauseo,
+        safe_workspace: actor.protection.safe_workspace(),
+    };
+    let env = lawyer::HostEnv {
+        path,
+        windows_env: &windows_env,
+    };
+    let (servers, left_out) = lawyer::servers(&actor.effective, lawyer, &run.mcp_secrets, env);
+    lawyer::Sent { servers, left_out }
 }
 
 /// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after
@@ -270,12 +438,13 @@ fn case_law_servers(
     (rest, entry, state)
 }
 
-/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`).
+/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`), whose
+/// matter's downloads folder is `matter_downloads`.
 fn browser_inputs<'a>(
     actor: &Actor,
     run: &'a RunFolders,
-    control: loads::McpControl,
-    switch: Switch,
+    (control, switch): (loads::McpControl, Switch),
+    matter_downloads: &'a Path,
 ) -> BrowserInputs<'a> {
     BrowserInputs {
         switch,
@@ -287,6 +456,7 @@ fn browser_inputs<'a>(
         blocked_by_policy: run.browser_blocked,
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
+        matter_downloads,
         claims: run.browser_session.as_deref().map(Claims::of),
     }
 }
@@ -309,10 +479,11 @@ fn socket_dir(run: &RunFolders) -> Option<&Path> {
 }
 
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
-    actor.profile.mcp_servers(agent).iter().any(|server| {
-        let McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    })
+    actor
+        .profile
+        .mcp_servers(agent)
+        .iter()
+        .any(|server| server.name() == clauseo_profile::servers::BROWSER)
 }
 
 /// The shell tool's header state and browser part for `run`'s session, or none when the app
@@ -362,18 +533,18 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
-/// Which browser part `run`'s session gets: the Claude-only line for an agent with no browser on
-/// this OS (`none_here`, Codex on Windows: `browser::no_browser`); else the shell tool's
-/// (Claude), else the one the `browser` entry's state gives (Codex, `browser::entry_part`),
-/// else none.
+/// Which browser part `run`'s session gets: `none_here`'s for an agent with no browser on this
+/// OS (`browser::no_browser`: the no-browser sentence for Claude anywhere and Codex on
+/// Windows); else the shell tool's (no agent's for launch), else the one the `browser` entry's
+/// state gives (Codex, `browser::entry_part`), else none.
 fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
     entry: Option<&clauseo_protocol::ToolState>,
     run: &RunFolders,
-    none_here: bool,
+    none_here: Option<BrowserPart>,
 ) -> BrowserPart {
-    if none_here {
-        return BrowserPart::ClaudeOnly;
+    if let Some(part) = none_here {
+        return part;
     }
     match (shell, entry) {
         (Some((_, part)), _) => *part,

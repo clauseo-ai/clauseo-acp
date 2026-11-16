@@ -5,13 +5,15 @@
 // to their file names. Kept per entry object (an update makes a new one), so a flush reads them once. In the room's
 // first chunk with the working line: small, with nothing of the settled group's words.
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
+import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-live.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
+import { caseLawOf, toolNameOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
+import { guideOf, skillOf } from "./skill-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
  * hover; `query`: the words searched for; `what`: the agent's own short words for a task (a command's description). */
@@ -195,8 +197,30 @@ export function internalOf(entry: ToolCallEntry): boolean {
   return places.length > 0 && places.every((p) => AGENT_STATE.test(p));
 }
 
-/** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. */
-export function titled(entry: ToolCallEntry, plain: string): string {
+/** What a step titled with a known tool's name (tool-names.ts) is doing. */
+const TOOL_LIVE: Record<ToolAs, StepLiveKey> = {
+  network: "Letting a task reach the internet.",
+  execute: "Running a task.",
+  read: "Reading the papers.",
+  edit: "Changing a paper.",
+  search: "Searching the papers.",
+  fetch: "Looking online.",
+};
+
+/** What a step of Clauseo's case-law connector (tool-names.ts, caseLawOf) is doing. */
+const CASE_LAW_LIVE: Record<CaseLaw, StepLiveKey> = {
+  search: "Searching case law.",
+  credits: "Checking your case-law credits.",
+  payment: "Getting a payment link for case-law credits.",
+};
+
+/** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. A title
+ * that is a tool's name is never shown: a known one says what it does, any other reads as `plain`. */
+export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string {
+  const law = caseLawOf(entry.title);
+  if (law !== null) return stepLive(lang, CASE_LAW_LIVE[law]);
+  const tool = toolNameOf(entry.title);
+  if (tool !== undefined) return tool.as === null ? plain : stepLive(lang, TOOL_LIVE[tool.as]);
   const title = titleOf(entry.title);
   return title === "" ? plain : sentenceOf(title);
 }
@@ -204,28 +228,39 @@ export function titled(entry: ToolCallEntry, plain: string): string {
 /** What a step is doing now, in a sentence: "Reading Lease.pdf.", "Searching for 'notice period'.", or the agent's
  * title with its paths cut, for a kind with no words of its own. */
 export function doingOf(lang: Lang, entry: ToolCallEntry): string {
+  // a skill is a guide being read, never its internal name (skill-words.ts)
+  const skill = skillOf(entry);
+  if (skill !== null) {
+    const guide = guideOf(lang, skill);
+    return guide === null
+      ? stepLive(lang, "Reading a guide.")
+      : stepLive(lang, "Reading {name}.", { name: guide });
+  }
+  // a case-law tool says what it does, whatever kind the agent gave it (Claude's other, ChatGPT's execute)
+  const law = caseLawOf(entry.title);
+  if (law !== null) return stepLive(lang, CASE_LAW_LIVE[law]);
   const p = placeOf(entry);
   const name = p.name;
   switch (entry.kind) {
     case "read":
       return name === null
-        ? titled(entry, stepLive(lang, "Reading the papers."))
+        ? titled(entry, stepLive(lang, "Reading the papers."), lang)
         : stepLive(lang, "Reading {name}.", { name });
     case "edit":
       return name === null
-        ? titled(entry, stepLive(lang, "Changing a paper."))
+        ? titled(entry, stepLive(lang, "Changing a paper."), lang)
         : stepLive(lang, "Changing {name}.", { name });
     case "delete":
       return name === null
-        ? titled(entry, stepLive(lang, "Deleting a paper."))
+        ? titled(entry, stepLive(lang, "Deleting a paper."), lang)
         : stepLive(lang, "Deleting {name}.", { name });
     case "move":
       return name === null
-        ? titled(entry, stepLive(lang, "Moving a paper."))
+        ? titled(entry, stepLive(lang, "Moving a paper."), lang)
         : stepLive(lang, "Moving {name}.", { name });
     case "search":
       return p.query === null
-        ? titled(entry, stepLive(lang, "Searching the papers."))
+        ? titled(entry, stepLive(lang, "Searching the papers."), lang)
         : stepLive(lang, "Searching for '{query}'.", { query: p.query });
     case "fetch": {
       const sq = p.query === null ? null : siteQuery(p.query);
@@ -238,12 +273,18 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
         ? stepLive(lang, "Searching online for '{query}'.", { query: sq.query })
         : name !== null
           ? stepLive(lang, "Reading {name} online.", { name })
-          : titled(entry, stepLive(lang, "Looking online."));
+          : titled(entry, stepLive(lang, "Looking online."), lang);
     }
     case "execute": {
       const t = taskOf(entry);
       if (t.own !== null) return sentenceOf(t.own);
-      if (t.program === null) return stepLive(lang, "Running a task.");
+      if (t.program === null) {
+        if (t.described !== null)
+          return stepLive(lang, "Running {description}.", { description: t.described });
+        const tool = toolNameOf(entry.title)?.as;
+        return stepLive(lang, tool == null ? "Running a task." : TOOL_LIVE[tool]);
+      }
+      if (t.count > 1) return stepLive(lang, "Running {n} tasks.", { n: String(t.count) });
       return t.paper === null
         ? stepLive(lang, "Running {program}.", { program: t.program })
         : stepLive(lang, "Running {program} on {name}.", { program: t.program, name: t.paper });
@@ -251,7 +292,7 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
     case "think":
       return stepLive(lang, "Thinking it through.");
     default:
-      return titled(entry, stepLive(lang, "Working on it."));
+      return titled(entry, stepLive(lang, "Working on it."), lang);
   }
 }
 

@@ -8,17 +8,23 @@
 //! 1. S18's running states (`Queued`, `Waiting`, `DeviceCode`) and `Failed` pass through as they
 //!    are, whatever else holds, so a running sign-in can still be joined (`Setup::start_sign_in`
 //!    joins only while the latest state is a running one) and is never restarted under an
-//!    `ApiKey` or `Firm` line, and a failure is shown. An automatic leave that did not finish
-//!    (`leave/auto.rs`) shows `Switching { since, stuck }` between the two: a running sign-in
-//!    still shows, and a failure of the leave's own S18 call never does.
+//!    `ApiKey` or `Firm` line, and a failure is shown, until a key or an endpoint arrives after
+//!    it: a first key, a saved key or a first endpoint takes S18's resting `Failed` as
+//!    `SignedOut` (`took_over`), so a cancelled or failed sign-in never hides the line that
+//!    replaced it. An automatic leave that did not finish (`leave/auto.rs`) shows `Switching {
+//!    since, stuck }` between the two: a running sign-in still shows, and a failure of the
+//!    leave's own S18 call never does.
 //! 2. Otherwise, with policy unreadable and the `firm-policy` marker there (`firm_policy.rs`),
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
-//! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`), `Failed {
-//!    code: agent.key_unreadable }`: its launches are refused until a read succeeds. It bars no
+//! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`; for a read
+//!    that failed with no "key stored" mark, only under a firm plan), `Failed { code:
+//!    agent.key_unreadable }`: its launches are refused until a read succeeds. It bars no
 //!    sign-in: a key that may be there is no key in use (the desktop review's item 1).
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
-//! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored);
+//! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored), with
+//!    `refused` when the agent refused that key since it was saved (`Compose::key_refused`,
+//!    after an `agent.auth_required`); saving or removing a key clears it;
 //! 6. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
@@ -34,10 +40,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clauseo_agents::{Clock, Found, LoginFrom, SigninCode, SigninState, Source};
+use clauseo_agents::{Clock, SigninCode, SigninState};
 use clauseo_protocol::{
-    AgentId, AgentKind, ErrorCode, FoundLogin, PlanLabel, SetupEvent, SignIn, SignInMethod,
-    SignInSource, Timestamp,
+    AgentId, ErrorCode, SetupEvent, SignIn, SignInMethod, SignInSource, Timestamp,
 };
 
 use super::SetupEvents;
@@ -54,6 +59,9 @@ pub(crate) struct Facts {
     pub(crate) key: Option<SystemTime>,
     /// Since when the agent's stored key could not be read, if it cannot.
     pub(crate) unreadable: Option<SystemTime>,
+    /// Since when the agent's key read failed with no "key stored" mark, if it did: shown as
+    /// `unreadable` only under a firm plan (`KeyCache::unreadable_for`).
+    pub(crate) read_failed: Option<SystemTime>,
     /// Since when policy is unreadable with the `firm-policy` marker there, if it is.
     pub(crate) blocked: Option<SystemTime>,
     /// Since when a firm policy sets the agent's endpoint or provider, if it does.
@@ -62,6 +70,10 @@ pub(crate) struct Facts {
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
     pub(crate) stuck: bool,
+    /// When the agent last refused the key in memory (a launch or a turn of it failed with
+    /// `agent.auth_required`), if it did since the key was saved: `SignedIn { method: ApiKey }`
+    /// carries it as `refused`.
+    pub(crate) refused: Option<SystemTime>,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
@@ -89,7 +101,8 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
             at: timestamp(since),
         });
     }
-    if let Some(since) = facts.unreadable {
+    let firm = facts.managed.or(facts.firm).is_some();
+    if let Some(since) = facts.unreadable.or(facts.read_failed.filter(|_| firm)) {
         return Some(SignIn::Failed {
             code: ErrorCode::AgentKeyUnreadable,
             at: timestamp(since),
@@ -99,7 +112,11 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(signed_in_by(SignInMethod::Firm, since));
     }
     if let Some(since) = facts.key {
-        return Some(signed_in_by(SignInMethod::ApiKey, since));
+        let mut state = signed_in_by(SignInMethod::ApiKey, since);
+        if let SignIn::SignedIn { refused, .. } = &mut state {
+            *refused = facts.refused.map(timestamp);
+        }
+        return Some(state);
     }
     s18.and_then(|state| wire(agent, state))
 }
@@ -146,93 +163,8 @@ fn signed_in_by(method: SignInMethod, since: SystemTime) -> SignIn {
         method,
         source: SignInSource::Own,
         at: timestamp(since),
+        refused: None,
     }
-}
-
-/// S18's `state` on the wire, a sign-in with `method: Plan`; `None` for a state this version
-/// does not know.
-pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
-    Some(match state {
-        SigninState::SignedOut { found } => SignIn::SignedOut {
-            found: found.and_then(found_login),
-        },
-        SigninState::Checking => SignIn::Checking,
-        SigninState::Queued => SignIn::Queued,
-        SigninState::Waiting { since, nudge } => SignIn::Waiting {
-            since: timestamp(*since),
-            nudge: *nudge,
-        },
-        SigninState::DeviceCode {
-            url,
-            code,
-            expires_at,
-        } => SignIn::DeviceCode {
-            url: url.clone(),
-            code: code.clone(),
-            expires_at: timestamp(*expires_at),
-        },
-        SigninState::LoginFound { from, email } => SignIn::LoginFound {
-            from: login_from(*from)?,
-            email: email.clone(),
-        },
-        SigninState::SignedIn {
-            email,
-            plan,
-            source,
-            at,
-        } => SignIn::SignedIn {
-            email: email.clone(),
-            plan: plan.as_deref().and_then(|plan| plan_words(agent, plan)),
-            method: SignInMethod::Plan,
-            source: sign_in_source(*source)?,
-            at: timestamp(*at),
-        },
-        SigninState::Failed { code, at } => SignIn::Failed {
-            code: ErrorCode::from_str_lossy(code.code()),
-            at: timestamp(*at),
-        },
-        _ => return None,
-    })
-}
-
-/// The plan's words for `agent`'s raw plan string, as `limits` names it; `None` for a plan or
-/// an agent it does not know.
-fn plan_words(agent: &AgentId, plan: &str) -> Option<PlanLabel> {
-    let words = match AgentKind::of(agent)? {
-        AgentKind::Claude => clauseo_limits::claude_plan(plan),
-        AgentKind::Codex => clauseo_limits::codex_plan(plan),
-    };
-    words.map(|words| PlanLabel(words.to_owned()))
-}
-
-fn found_login(found: Found) -> Option<FoundLogin> {
-    Some(match found {
-        Found::ClaudeSettings => FoundLogin::ClaudeSettings,
-        Found::ClaudeWindowsSandbox => FoundLogin::ClaudeWindowsSandbox,
-        Found::CodexKeyring => FoundLogin::CodexKeyring,
-        Found::ReusedFailed => FoundLogin::ReusedFailed,
-        Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
-        Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
-        Found::NoLogin => FoundLogin::NoneFound,
-        Found::ReuseOff => FoundLogin::ReuseOff,
-        _ => return None,
-    })
-}
-
-fn login_from(from: LoginFrom) -> Option<clauseo_protocol::LoginFrom> {
-    Some(match from {
-        LoginFrom::ClaudeCode => clauseo_protocol::LoginFrom::ClaudeCode,
-        LoginFrom::Codex => clauseo_protocol::LoginFrom::Codex,
-        _ => return None,
-    })
-}
-
-fn sign_in_source(source: Source) -> Option<SignInSource> {
-    Some(match source {
-        Source::Reused => SignInSource::Reused,
-        Source::Own => SignInSource::Own,
-        _ => return None,
-    })
 }
 
 /// `time` as the wire's milliseconds since the epoch; the epoch for a time it cannot carry.
@@ -440,28 +372,72 @@ impl Compose {
 
     /// Whether memory holds a key for `agent`, and whether its stored key could not be read:
     /// one change, so the windows never see one without the other.
-    pub(crate) fn set_key_read(&self, agent: &AgentId, in_memory: bool, unreadable: bool) {
+    pub(crate) fn set_key_read(
+        &self,
+        agent: &AgentId,
+        in_memory: bool,
+        unreadable: bool,
+        read_failed: bool,
+    ) {
         self.change(agent, |known, now| {
+            if in_memory && known.facts.key.is_none() {
+                took_over(agent, known);
+            }
             known.facts.key = in_memory.then(|| known.facts.key.unwrap_or(now));
             known.facts.unreadable = unreadable.then(|| known.facts.unreadable.unwrap_or(now));
+            known.facts.read_failed = read_failed.then(|| known.facts.read_failed.unwrap_or(now));
+            if !in_memory {
+                known.facts.refused = None;
+            }
+        });
+    }
+
+    /// A key for `agent` was saved: a refusal of the key it replaced is cleared (`show_key`
+    /// keeps a replaced key's `since`, so it cannot tell), and so is a
+    /// sign-in that ended `Failed` before it (as [`Compose::set_key_read`] does for a first
+    /// key), so the window shows the new key's line at once.
+    pub(crate) fn key_saved(&self, agent: &AgentId) {
+        self.change(agent, |known, _| {
+            took_over(agent, known);
+            known.facts.refused = None;
+        });
+    }
+
+    /// The agent refused `agent`'s key in memory (`agent.auth_required`): `refused` from now,
+    /// carried by the key's line. Only while that key is what the agent runs with: no
+    /// endpoint or provider (theirs wins, and the refusal was of it).
+    pub(crate) fn key_refused(&self, agent: &AgentId) {
+        self.change(agent, |known, now| {
+            let facts = &mut known.facts;
+            if facts.key.is_some() && facts.firm.is_none() && facts.managed.is_none() {
+                facts.refused = Some(now);
+            }
         });
     }
 
     /// [`Compose::set_key_read`] as `keys` holds `agent`'s key now: in memory, or unreadable.
     /// Never [`KeyCache::has`], which counts an unreadable key as stored for the launches.
     pub(crate) fn show_key(&self, agent: &AgentId, keys: &KeyCache) {
-        self.set_key_read(agent, keys.in_memory(agent), keys.unreadable(agent));
+        self.set_key_read(
+            agent,
+            keys.in_memory(agent),
+            keys.unreadable(agent),
+            keys.read_failed(agent),
+        );
     }
 
     /// Whether a key is in memory for `agent`, none unreadable: the tests' shorthand.
     #[cfg(test)]
     pub(crate) fn set_key(&self, agent: &AgentId, stored: bool) {
-        self.set_key_read(agent, stored, false);
+        self.set_key_read(agent, stored, false, false);
     }
 
     /// Whether `agent` has an endpoint or a provider.
     pub(crate) fn set_firm(&self, agent: &AgentId, firm: bool) {
         self.change(agent, |known, now| {
+            if firm && known.facts.firm.is_none() {
+                took_over(agent, known);
+            }
             known.facts.firm = firm.then(|| known.facts.firm.unwrap_or(now));
         });
     }
@@ -530,6 +506,18 @@ impl Compose {
     }
 }
 
+/// A key or an endpoint for `agent` took over: S18's resting `Failed` (a sign-in that was
+/// cancelled or failed before it) is taken as `SignedOut`, as [`Compose::expect_end`] does
+/// for a running one, so rule 1 no longer shows it over the key's or the endpoint's line. A
+/// running sign-in is left as it is: the backend ends it, and its end comes through
+/// [`Compose::signin`].
+fn took_over(agent: &AgentId, known: &mut Known) {
+    if matches!(known.s18, Some(SigninState::Failed { .. })) {
+        tracing::info!(%agent, "an ended sign-in's failure is cleared: a key or an endpoint took over");
+        known.s18 = Some(SigninState::SignedOut { found: None });
+    }
+}
+
 /// A `SignedIn` that re-confirms the account the last state was already signed in to (same
 /// email, plan and source) keeps that state's `at`: a status check after `auth_required`
 /// reads the local login file, which an expired or revoked token still passes, and a fresh
@@ -560,3 +548,6 @@ fn keep_signed_in_at(previous: Option<&SigninState>, state: &mut SigninState) {
 
 #[cfg(test)]
 mod tests;
+mod wire;
+
+pub(crate) use wire::wire;

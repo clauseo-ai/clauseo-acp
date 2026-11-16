@@ -15,7 +15,10 @@
 //!    workspace's, never the plain client's Codex entry) with no proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
-//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. On
+//!    Windows each installed browser's own policy counts, so only every one off blocks, named
+//!    `BrowserBlockedEdge`, `BrowserBlockedChrome` or (both) `BrowserBlockedByPolicy`; and the
+//!    only Chrome a per-user one the guard cannot start: `BrowserPerUserChromeOnly`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
@@ -33,13 +36,17 @@ use std::path::Path;
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
-    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, PROXY_PORT,
-    SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, MATTER_DOWNLOADS,
+    PROXY_PORT, SESSION_ID, SOCKET_DIR,
 };
 use clauseo_profile::servers::BROWSER;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
 use super::McpControl;
+
+/// The matter's folder for what the browser saves, `<session folder>/downloads`
+/// (`{matter_downloads}`), which the guard makes.
+pub(crate) const DOWNLOADS_FOLDER: &str = "downloads";
 
 /// A `tools.*` switch as the settings hold it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +87,9 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
     pub(crate) browser_dir: &'a Path,
+    /// The matter's downloads folder, `<session folder>/downloads`, where the guard delivers
+    /// what the browser saves (`{matter_downloads}`).
+    pub(crate) matter_downloads: &'a Path,
     /// The session's claimed ports, socket folder and agent-browser name, if they were claimed.
     pub(crate) claims: Option<Claims<'a>>,
 }
@@ -92,8 +102,6 @@ pub(crate) struct Claims<'a> {
     pub(crate) name: &'a str,
     /// `{cdp_port}`.
     pub(crate) cdp_port: u16,
-    /// `{stream_port}`.
-    pub(crate) stream_port: u16,
     /// `{daemon_port}`, Windows only.
     pub(crate) daemon_port: Option<u16>,
     /// `{socket_dir}`, macOS and Linux only: the folder as made (`/tmp/...`), never its
@@ -107,7 +115,6 @@ impl<'a> Claims<'a> {
         Self {
             name: &session.name,
             cdp_port: session.ports.cdp.port(),
-            stream_port: session.ports.stream.port(),
             daemon_port: session
                 .ports
                 .daemon
@@ -130,8 +137,7 @@ pub(crate) fn hook_servers(
     let mut servers = Vec::new();
     let mut state = None;
     for server in hook {
-        let McpServer::Stdio { name, .. } = &server;
-        if name != BROWSER {
+        if server.name() != BROWSER {
             if inputs.control == McpControl::Clauseo {
                 servers.push(server);
             }
@@ -185,17 +191,18 @@ fn browser_entry(
     } else {
         None
     };
-    let (Some(executable), Some(browser_dir)) = (
+    let (Some(executable), Some(browser_dir), Some(matter_downloads)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
+        dunce::simplified(inputs.matter_downloads).to_str(),
     ) else {
         tracing::warn!(
-            "the Chrome or the session's browser folder is not UTF-8: the browser is left out"
+            "the Chrome, the session's browser folder or the matter's folder is not UTF-8: the \
+             browser is left out"
         );
         return Err(ToolsUnavailableReason::BrowserNotInstalled);
     };
     let cdp_port = claims.cdp_port.to_string();
-    let stream_port = claims.stream_port.to_string();
     let daemon_port = claims.daemon_port.map(|port| port.to_string());
     let socket_dir = match claims.socket_dir.map(Path::to_str) {
         Some(Some(text)) => Some(text),
@@ -209,10 +216,10 @@ fn browser_entry(
     // Windows) is unfillable if the entry holds it, which leaves the browser out below.
     let mut values = vec![
         (BROWSER_DIR, browser_dir),
+        (MATTER_DOWNLOADS, matter_downloads),
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),
-        (STREAM_PORT, stream_port.as_str()),
     ];
     values.extend(port.as_deref().map(|port| (PROXY_PORT, port)));
     values.extend(daemon_port.as_deref().map(|port| (DAEMON_PORT, port)));
@@ -223,7 +230,11 @@ fn browser_entry(
         command,
         args,
         env,
-    } = server;
+    } = server
+    else {
+        tracing::error!("the browser entry is not a stdio server: the browser is left out");
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
+    };
     let filled = (|| -> Result<McpServer, placeholders::Unfilled> {
         Ok(McpServer::Stdio {
             name,
@@ -256,10 +267,12 @@ pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
     }
 }
 
-/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows
-/// (`clauseo_profile::servers::no_browser_on`, decision record 0030). Such a session gets no
-/// entry, no shell tool, no browser in its header (the app then offers no browser action: no
-/// install advice, no switch) and the Claude-only part (`BrowserPart::ClaudeOnly`).
+/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows,
+/// and Claude on every OS (`clauseo_profile::servers::no_browser_on`, decision record 0030).
+/// Such a session gets no entry, no shell tool (no `agent-browser` on `PATH`, no
+/// `AGENT_BROWSER_*` variables, no browser rules), no browser in its header (the app then offers
+/// no browser action: no install advice, no switch) and the no-browser sentence
+/// (`BrowserPart::Off`).
 pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: bool) -> bool {
     clauseo_profile::servers::no_browser_on(kind, windows)
 }
@@ -269,10 +282,7 @@ pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: boo
 /// header state for the browser.
 pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpServer> {
     if none_here {
-        servers.retain(|server| {
-            let McpServer::Stdio { name, .. } = server;
-            name != BROWSER
-        });
+        servers.retain(|server| server.name() != BROWSER);
     }
     servers
 }
@@ -281,7 +291,9 @@ pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpSe
 /// `{proxy_port}`. The plain client's Codex entry does not (Chrome goes direct, as Claude's shell
 /// browser does); the parked Safe workspace's would.
 pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
-    let McpServer::Stdio { args, env, .. } = server;
+    let McpServer::Stdio { args, env, .. } = server else {
+        return false;
+    };
     args.iter()
         .chain(env.iter().map(|(_, value)| value))
         .any(|text| text.contains(PROXY_PORT))
@@ -295,7 +307,7 @@ pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
 /// so never the lawyer's own profile), all three in its run folder's `agent-browser` folder,
 /// the one place the data fences open to this session's agent-browser and to no other session's
 /// (`agent::codex_fence`, `agent::data_fence`), and the Chrome the launch prep
-/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy, stream port or
+/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy or
 /// socket folder: the shell tool has none of the guard's claims.
 pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
     [
@@ -391,7 +403,6 @@ pub(crate) fn part_log(
         BrowserPart::On => "on",
         BrowserPart::Off => "off",
         BrowserPart::NotInstalled => "not_installed",
-        BrowserPart::ClaudeOnly => "claude_only",
     };
     let name = executable.map_or("none", |path| {
         let file = path.file_name().and_then(OsStr::to_str).unwrap_or_default();

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The finished answer's Copy and Try again (D-026, D-027), a code block's Copy, and a task's row and permission prompt
-// in plain words with the command folded and cut to the matter (D-016, D-017, D-046), in the real room.
+// in plain words with the command folded and cut to the matter (D-016, D-017, D-046), and a refused step's plain
+// why (#plain-refusal), in the real room.
 import { afterEach, expect, test, vi } from "vitest";
 import {
   agentText,
@@ -57,10 +58,19 @@ test("a finished answer offers Copy, its words as written; no Try again after an
   expect(h.one("answer-try-again")).toBeNull();
   await h.click(h.one("answer-copy"));
   expect(writeText).toHaveBeenCalledWith("It asks for payment.\n\n```\nSection 138\n```");
-  expect(h.one("answer-copy")?.textContent).toBe("Copied");
-  // the code block's own Copy, its code alone
-  await h.click(h.one("code-copy"));
+  // the copy icon, named Copy; once pressed a polite live region beside it says Copied
+  const answerCopy = h.one("answer-copy")!;
+  expect(answerCopy.getAttribute("aria-label")).toBe("Copy");
+  expect(answerCopy.textContent).toBe("");
+  expect(answerCopy.parentElement?.querySelector('[role="status"]')?.textContent).toBe("Copied");
+  // the code block's own Copy, its code alone, the same control
+  const codeCopy = h.one("code-copy")!;
+  expect(codeCopy.getAttribute("aria-label")).toBe("Copy");
+  await h.click(codeCopy);
   expect(writeText).toHaveBeenLastCalledWith("Section 138");
+  // it stands in the block's wrapper beside the pre, never inside the code that scrolls
+  expect(codeCopy.closest('[data-clauseo="code-block"]')).not.toBeNull();
+  expect(codeCopy.closest("pre")).toBeNull();
 });
 
 test("after a Stop, Try again sends the same question as a new turn; only on the latest answer", async () => {
@@ -109,6 +119,29 @@ test("a task's row says the program and the paper, folds its command cut to the 
   );
 });
 
+test("a step Claude's safety check refused says why in plain words under its row, not the raw text", async () => {
+  h = await mount();
+  const text =
+    "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access] " +
+    "Reading outside the matter. If you have other tasks that don't depend on this action, continue working on those.";
+  const read: ViewEntry = {
+    tool_call: {
+      ...toolCall(7, 201, "failed").tool_call!,
+      raw_output: { inline: JSON.stringify(text) },
+      content: [{ text: { text: { inline: "```\n" + text + "\n```" } } }],
+    },
+  };
+  h.deliver([reset([ASKED, read, toolCall(8, 202, "completed"), ANSWER, step(30)])]);
+  await h.settle();
+  await h.click(h.one("step-group")?.querySelector("button"));
+  const why = h.all("tool-call")[0]!.querySelector("[data-testid=tool-call-why]")?.textContent;
+  expect(why).toBe(
+    "Claude's built-in safety check stopped this: it looked like reaching files or systems Claude wasn't asked " +
+      "to use. Nothing was changed.",
+  );
+  expect(h.all("tool-call")[0]!.textContent).not.toMatch(/classifier|auto mode|Unauthorized/);
+});
+
 test("a task's permission prompt says what it would do in plain words, its command folded and cut", async () => {
   h = await mount();
   h.deliver([reset([ASKED, python("pending"), permission(8, 201)])]);
@@ -123,3 +156,40 @@ test("a task's permission prompt says what it would do in plain words, its comma
     'python3 read.py "papers/Legal notice.pdf"',
   );
 });
+
+test("a chained command's row and prompt count its tasks, not name the first; the fold shows it whole", async () => {
+  h = await mount();
+  const chained = `New-Item -ItemType Directory "${ROOT}/drafts"; Copy-Item notice.docx drafts`;
+  const raw = { inline: JSON.stringify({ command: ["pwsh", "-c", chained] }) };
+  h.deliver([reset([ASKED, python("pending", { raw_input: raw }), permission(8, 201)])]);
+  await h.settle();
+  const prompt = h.one("permission")!;
+  expect(prompt.querySelector(".perm-title bdi")?.textContent).toBe("Run 2 tasks.");
+  h.deliver([reset([ASKED, python("completed", { raw_input: raw }), ANSWER, step(30)])]);
+  await h.settle();
+  await h.click(h.one("step-group")?.querySelector("button"));
+  const row = h.all("tool-call")[0]!;
+  expect(row.querySelector(".step-row-text bdi")?.textContent).toBe("Ran 2 tasks.");
+  await h.click(row.querySelector("[data-testid=task-command-press]"));
+  expect(row.querySelector("[data-testid=task-command]")?.textContent).toBe(
+    'New-Item -ItemType Directory "drafts"; Copy-Item notice.docx drafts',
+  );
+});
+
+test.each([
+  ["Get-ChildItem C:\\m\\; Remove-Item papers", "Run 2 tasks."],
+  ["cd C:\\matter\\; Remove-Item -Recurse papers", "Run Remove-Item."],
+  ["cd C:\\matter", null],
+])(
+  "a Windows command's permission prompt keeps its fold, a program found or not: %s",
+  async (line, plain) => {
+    h = await mount();
+    const raw = { inline: JSON.stringify({ command: ["powershell", "-c", line] }) };
+    h.deliver([reset([ASKED, python("pending", { raw_input: raw }), permission(8, 201)])]);
+    await h.settle();
+    const prompt = h.one("permission")!;
+    if (plain !== null) expect(prompt.querySelector(".perm-title bdi")?.textContent).toBe(plain);
+    await h.click(prompt.querySelector("[data-testid=task-command-press]"));
+    expect(prompt.querySelector("[data-testid=task-command]")?.textContent).toBe(line);
+  },
+);

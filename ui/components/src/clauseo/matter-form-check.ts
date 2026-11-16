@@ -7,11 +7,13 @@ import { mt } from "../lib/words-matters.ts";
 import { ERROR_WORDS, errorWords } from "../lib/words-errors.ts";
 
 /** The form's line for a matter the host wouldn't make, from the error's code and, where the caller has it, the
- * folder's display ("Documents/Acme", "C:\\"), home written as "~" and isolated in the line, and for matter.folder_is_matter the name of the
- * matter that has the folder, when the matters list has it. matter.folder_refused, which doesn't say why, takes a line
- * true of every reason the host gives it: a folder already a matter, an unreadable matter file, the matters' own
- * folder, a drive, the home folder, a system folder. H5's codes each say their reason; any other matter.folder_ code
- * words-errors has a line for gives that line, in the language; every other code gives the generic line. */
+ * folder's display ("Documents/Acme", "C:\\"), home written as "~" and isolated in the line, and for
+ * matter.folder_inside_matter and matter.folder_holds_matter the name of the matter on the list whose folder it is
+ * nested with. Each folder refusal says its reason (folder PR 2). A folder nested with a matter the list doesn't have
+ * (one being made, or forgotten), matter.folder_is_matter (now only a rare same-folder case) and
+ * matter.folder_refused, which doesn't say why, take the line of a folder Clauseo can't make a matter of. Any other
+ * matter.folder_ code words-errors has a line for gives that line, in the language; every other code gives the generic
+ * line. */
 export function createErrorLine(
   lang: Lang,
   code: string,
@@ -23,13 +25,20 @@ export function createErrorLine(
   const named = shown !== undefined && shown !== "";
   // home as "~", as the form's Folder row writes it (folder-path.ts)
   const path = named ? isolate(homeShown(shown)) : "";
+  const cant = () => mt(lang, "Clauseo can't make a matter of this folder. Choose another folder.");
+  const known = matterName !== undefined && matterName !== "";
   switch (code) {
     case "matter.folder_refused":
-      return mt(lang, "Clauseo can't make a matter of this folder. Choose another folder.");
     case "matter.folder_is_matter":
-      return matterName === undefined || matterName === ""
-        ? mt(lang, "This folder is already a matter.")
-        : mt(lang, "This folder is already a matter: {name}.", { name: isolate(matterName) });
+      return cant();
+    case "matter.folder_inside_matter":
+      return known
+        ? mt(lang, "This folder is inside the folder of {name}.", { name: isolate(matterName) })
+        : cant();
+    case "matter.folder_holds_matter":
+      return known
+        ? mt(lang, "This folder holds the folder of {name}.", { name: isolate(matterName) })
+        : cant();
     case "matter.folder_in_matters_root":
       return both(
         named
@@ -37,21 +46,16 @@ export function createErrorLine(
           : mt(lang, "That folder is where Clauseo keeps matters."),
         mt(lang, "Choose the folder for one matter."),
       );
+    case "matter.folder_in_clauseo_data":
+      return mt(lang, "This folder is part of Clauseo's own data. Choose another folder.");
     case "matter.folder_is_drive":
-      return both(
-        named ? mt(lang, "{path} is a whole drive.", { path }) : null,
-        mt(lang, "A matter is one folder of papers. Choose the folder for one matter."),
-      );
+      return mt(lang, "This is the top of a drive. Choose a folder on it.");
     case "matter.folder_is_home":
-      return both(
-        named ? mt(lang, "{path} is your home folder.", { path }) : null,
-        mt(lang, "It holds far more than one matter. Choose the folder for one matter."),
-      );
+      return mt(lang, "This is your home folder. Choose a folder inside it.");
     case "matter.folder_is_system":
-      return both(
-        named ? mt(lang, "{path} is a folder the computer keeps for itself.", { path }) : null,
-        mt(lang, "Choose the folder that holds the matter's papers."),
-      );
+      return mt(lang, "This is a system folder. Choose another folder.");
+    case "matter.folder_too_deep":
+      return mt(lang, "This folder is too deeply nested for Windows. Choose a shorter path.");
     case "matter.folder_unreadable":
       return both(
         named
@@ -66,3 +70,8 @@ export function createErrorLine(
         : mt(lang, "Clauseo couldn't create the matter. Try again, or choose another folder.");
   }
 }
+
+/** Whether a refusal says the folder is nested with a matter's: its line names that matter when the list has it, and
+ * Open {name} opens it. */
+export const nestedRefusal = (code: string | undefined) =>
+  code === "matter.folder_inside_matter" || code === "matter.folder_holds_matter";

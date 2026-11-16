@@ -14,11 +14,13 @@ import { U12 } from "./registry-u12.tsx";
 import { U15 } from "./registry-u15.tsx";
 import { U15_ROOM } from "./registry-u15-room.tsx";
 import { U17 } from "./registry-u17.tsx";
+import { LONG_QUESTION } from "./registry-long-question.tsx";
 import { WEB_SETTINGS } from "./registry-web-settings.tsx";
 import { U16A_RAIL } from "./registry-u16a-rail.tsx";
 import { U16A_FIND } from "./registry-u16a-find.tsx";
 import { ARCHIVED } from "./registry-archived.tsx";
 import { U8 } from "./registry-u8.tsx";
+import { U8_UNDO } from "./registry-u8-undo.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
 import { U7 } from "./registry-u7.tsx";
@@ -33,6 +35,10 @@ import { UD1 } from "./registry-ud1.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
+import { UC_TOOLNAMES } from "./registry-uc-toolnames.tsx";
+import { UC_TOOL_ROWS } from "./registry-uc-tool-rows.tsx";
+import { PLAIN_REFUSAL } from "./registry-plain-refusal.tsx";
+import { UC_CONVERSATION_SMALL_FIXES } from "./registry-uc-conversation-small-fixes.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
 import { ownEntries, ownEntry } from "./registry-offline.tsx";
@@ -65,11 +71,18 @@ import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/s
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
+import { BACKSLASH_ENTRIES } from "./registry-backslash.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
+import { UC_CRASH } from "./registry-uc-crash.tsx";
 import { IT_ENTRIES } from "./registry-it.tsx";
+import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
+import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
+import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
+import { UC_AGENTS } from "./registry-uc-agents.tsx";
+import { RELEASE_NOTES } from "./registry-release-notes.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -372,11 +385,13 @@ export const REGISTRY: readonly Entry[] = [
   ...U15,
   ...U15_ROOM,
   ...U17,
+  ...LONG_QUESTION,
   ...WEB_SETTINGS,
   ...U16A_RAIL,
   ...U16A_FIND,
   ...ARCHIVED,
   ...U8,
+  ...U8_UNDO,
   ...U9,
   ...H11,
   ...NATIVE,
@@ -393,6 +408,12 @@ export const REGISTRY: readonly Entry[] = [
   ...UD2,
   ...UD2_PLANS,
   ...UC_ALL,
+  ...UC_TOOLNAMES,
+  ...UC_TOOL_ROWS,
+  ...PLAIN_REFUSAL,
+  ...UC_CONVERSATION_SMALL_FIXES,
+  ...UC_MCP_CONFIRM,
+  ...UC_MCP_IMPORT,
   ...SAC,
   {
     id: "U2-01",
@@ -406,43 +427,8 @@ export const REGISTRY: readonly Entry[] = [
   railState("U2-07", limitWords("Limit reached until {time}")),
   railState("U2-08", limitWords("Limit reached until {day} {time}")),
   railState("U2-09", limitWords("Limit reached")),
-  refusal(
-    "U2-10",
-    matterWords("{path} is a whole drive."),
-    "matter.folder_is_drive",
-    "/Volumes/Case",
-  ),
-  // the second line of a whole drive (matter.folder_refused has its own line, U2-31)
-  refusal(
-    "U2-11",
-    matterWords("A matter is one folder of papers. Choose the folder for one matter."),
-    "matter.folder_is_drive",
-    "/Volumes/Case",
-  ),
-  refusal(
-    "U2-12",
-    matterWords("{path} is your home folder."),
-    "matter.folder_is_home",
-    "/Users/rmehra",
-  ),
-  refusal(
-    "U2-13",
-    matterWords("It holds far more than one matter. Choose the folder for one matter."),
-    "matter.folder_is_home",
-    "/Users/rmehra",
-  ),
-  refusal(
-    "U2-14",
-    matterWords("{path} is a folder the computer keeps for itself."),
-    "matter.folder_is_system",
-    "/System",
-  ),
-  refusal(
-    "U2-15",
-    matterWords("Choose the folder that holds the matter's papers."),
-    "matter.folder_is_system",
-    "/System",
-  ),
+  // U2-10 to U2-15, retired: a whole drive, the home folder and a system folder each say folder PR 2's one line
+  // (ME-06 to ME-08)
   refusal(
     "U2-16",
     matterWords("Clauseo can't read {path}."),
@@ -545,8 +531,8 @@ export const REGISTRY: readonly Entry[] = [
     ...RAIL,
     render: () => <RoomAfter host={railHost} steps={[{ find: "Zaveri" }]} />,
   },
-  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
-  // matters' own folder, a drive, the home folder and a system folder
+  // matter.folder_refused, which doesn't say why; also a folder nested with a matter the list doesn't have, and
+  // matter.folder_is_matter
   refusal(
     "U2-31",
     matterWords("Clauseo can't make a matter of this folder. Choose another folder."),
@@ -565,11 +551,16 @@ export const REGISTRY: readonly Entry[] = [
   // U2-34, retired: the Folder row's label names it for a screen reader too
   ...U16B,
   ...FOLDER_RIGHTS,
+  ...BACKSLASH_ENTRIES,
   ...FOLDER_CHOOSER,
   ...TN,
   ...UBL,
   ...R23,
+  ...UC_CRASH,
   ...IT_ENTRIES,
   ...NM,
   ...PK,
+  ...MCP_TOOLS,
+  ...UC_AGENTS,
+  ...RELEASE_NOTES,
 ];

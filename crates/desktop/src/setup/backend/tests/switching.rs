@@ -160,6 +160,7 @@ fn reused_line() -> SignIn {
         method: clauseo_protocol::SignInMethod::Plan,
         source: SignInSource::Reused,
         at: Timestamp::ZERO,
+        refused: None,
     }
 }
 

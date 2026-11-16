@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpCommand::SetServerEnabled { name: \"github\".to_owned(), enabled: false, }"
+---
+{
+  "set_server_enabled": {
+    "name": "github",
+    "enabled": false
+  }
+}

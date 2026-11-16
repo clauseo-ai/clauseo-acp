@@ -22,9 +22,10 @@ pub(super) fn is_remote(folder: &Path) -> bool {
     drive_type(folder).is_some_and(|kind| kind == DRIVE_REMOTE)
 }
 
-/// `GetDriveTypeW` of the volume holding `folder`; `None` when its volume path cannot be read
+/// `GetDriveTypeW` of the volume holding `folder` (or a file), also for the Recycle Bin's
+/// check (`trash/windows.rs`); `None` when its volume path cannot be read
 /// (logged, never the path).
-pub(super) fn drive_type(folder: &Path) -> Option<u32> {
+pub(crate) fn drive_type(folder: &Path) -> Option<u32> {
     let wide = HSTRING::from(long_path(folder).as_path());
     // The volume path is never longer than the path it is taken from, plus a `\` and a NUL.
     let mut root = vec![0_u16; wide.len().saturating_add(2).max(261)];

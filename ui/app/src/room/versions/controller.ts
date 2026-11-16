@@ -23,6 +23,7 @@ import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { Conversations } from "./conversations.ts";
 import {
   DoneWatch,
+  editedSince,
   lockedRestore,
   pageBack,
   previewRestore,
@@ -37,9 +38,11 @@ import {
   freshSnapshot,
   inRowOrder,
   keepChangedSince,
+  keepEdited,
   outcomeOf,
   sameChanges,
   staleNewest,
+  undoAsk,
   type Ask,
   type Done,
   type Look,
@@ -308,14 +311,18 @@ export class VersionsController {
 
   /* ---------- undoing and restoring ---------- */
 
-  /** Opens the undo dialog for a turn's version. */
+  /** Opens the undo dialog for a turn's version; Undo waits for what changed since (keepEdited). */
   askUndo(id: string): void {
     const m = this.meta(id);
     if (!undoable(m) || m?.step == null) return;
     const since = changedSince(this.#snap.timeline, id);
     const choices = defaultChoices(m.step, new Set(since.keys()));
     this.#chosen = new Set();
-    this.#set({ ask: { act: "undo", id, choices, stage: "confirm", failed: null }, failed: null });
+    this.#set({ ask: undoAsk(id, choices), failed: null });
+    void editedSince(this.#transport, m.thread, m.step.turn).then((edited) => {
+      const ask = keepEdited(this.#snap.ask, id, edited, this.#chosen);
+      if (ask !== null) this.#set({ ask });
+    });
   }
 
   /** The toolbar's Undo: looks at the newest turn's version whose change can be undone, paging steps in as it goes,
@@ -441,7 +448,7 @@ export class VersionsController {
   /** Goes ahead with what the dialog asks. */
   async confirm(): Promise<void> {
     const ask = this.#snap.ask;
-    if (ask === null || this.#acting) return;
+    if (ask === null || this.#acting || (ask.act === "undo" && ask.checking === true)) return;
     if (ask.act === "undo") await this.#undo(ask);
     else await this.#restore(ask);
   }
@@ -585,14 +592,8 @@ export class VersionsController {
       return;
     }
     if (asked !== this.#asked || preview === null) return;
-    const next: RestoreAsk = {
-      act: "restore",
-      id: ask.id,
-      preview,
-      undoes: ask.undoes,
-      stage: "confirm",
-      failed: null,
-    };
+    const { act, id, undoes } = ask;
+    const next: RestoreAsk = { act, id, preview, undoes, stage: "confirm", failed: null };
     if (sameChanges(ask.preview, preview)) await this.#restore(next);
     else this.#set({ ask: next, failed: null });
   }

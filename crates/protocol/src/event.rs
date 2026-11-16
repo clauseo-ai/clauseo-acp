@@ -275,7 +275,7 @@ domain_events! {
     /// Files changed outside Clauseo (matter stream; matters, through host).
     OutsideEdits(OutsideEdits) = "outside_edits", matter;
     /// An earlier version was restored (matter stream; host, matters).
-    VersionRestored(VersionRestored) = "version_restored", matter;
+    VersionRestored(Box<VersionRestored>) = "version_restored", matter;
     /// The matter's folder was located after it moved (matter stream; host, matters).
     MatterRelocated(MatterRelocated) = "matter_relocated", matter;
 }
@@ -297,5 +297,6 @@ from_unboxed!(
     ContentAppended,
     ToolCallStarted,
     ToolCallUpdated,
-    WebSearchRecorded
+    WebSearchRecorded,
+    VersionRestored
 );

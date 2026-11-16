@@ -122,11 +122,19 @@ pub struct InstallConfig {
     /// file), so a test on any OS stands in for an antivirus holding the fresh files.
     #[cfg(feature = "test-support")]
     pub rename_fault: Option<Arc<RenameFault>>,
+    /// Tests only: the free bytes the disk checks read instead of the data folder's, so a test
+    /// stands in for a disk too small for two installs. `None` from it: not readable.
+    #[cfg(feature = "test-support")]
+    pub free_bytes: Option<Arc<FreeBytes>>,
 }
 
 /// Tests only: [`InstallConfig::rename_fault`].
 #[cfg(feature = "test-support")]
 pub type RenameFault = dyn Fn() -> Option<std::io::Error> + Send + Sync;
+
+/// Tests only: [`InstallConfig::free_bytes`].
+#[cfg(feature = "test-support")]
+pub type FreeBytes = dyn Fn() -> Option<u64> + Send + Sync;
 
 impl InstallConfig {
     /// `agent`'s sign-in proxy: its [`InstallConfig::signin_proxy`] entry, else
@@ -237,6 +245,22 @@ pub struct SigninConfig {
     /// `test-support` the field does not exist, so the probe is always `127.0.0.1:1455`.
     #[cfg(feature = "test-support")]
     pub callback_port: Option<u16>,
+    /// Tests only: the program detection's macOS Keychain query runs in place of
+    /// `/usr/bin/security` (a fake that exits as a test tells it). Outside `test-support` the
+    /// field does not exist, so the query always runs Apple's `security` by absolute path.
+    #[cfg(feature = "test-support")]
+    pub security_program: Option<PathBuf>,
+    /// Tests only: lets a test with no [`SigninConfig::security_program`] run Apple's own
+    /// `security` (the one real-macOS test). Unset, such a test panics at the query instead of
+    /// asking the machine's Keychain.
+    #[cfg(feature = "test-support")]
+    pub allow_real_security: bool,
+    /// Tests only: the macOS login keychain's lock state the background status check sees
+    /// (`signin/keychain_lock.rs`). `None` makes the real `SecKeychainGetStatus` call, which
+    /// reads the machine's own default and login keychains (and its user record), so a test that
+    /// runs the status check on macOS must set it (`Some(false)` for an unlocked keychain).
+    #[cfg(feature = "test-support")]
+    pub keychain_locked: Option<bool>,
 }
 
 /// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
@@ -250,6 +274,12 @@ impl SigninConfig {
             base_env: std::env::vars_os().collect(),
             #[cfg(feature = "test-support")]
             callback_port: None,
+            #[cfg(feature = "test-support")]
+            security_program: None,
+            #[cfg(feature = "test-support")]
+            allow_real_security: false,
+            #[cfg(feature = "test-support")]
+            keychain_locked: None,
         }
     }
 
@@ -275,6 +305,31 @@ impl SigninConfig {
     )]
     pub(crate) fn callback_port(&self) -> u16 {
         CODEX_CALLBACK_PORT
+    }
+
+    /// The program the macOS Keychain query runs: a test's fake, or `/usr/bin/security` for a
+    /// test that allowed it. Any other test panics here rather than ask the machine's Keychain.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        if let Some(fake) = &self.security_program {
+            return fake.clone();
+        }
+        assert!(
+            self.allow_real_security,
+            "a test reached the real Keychain query: set SigninConfig::security_program to a \
+             fake, or allow_real_security"
+        );
+        PathBuf::from(crate::signin::reuse::SECURITY)
+    }
+
+    /// The program the macOS Keychain query runs: always `/usr/bin/security` outside tests.
+    #[cfg(not(feature = "test-support"))]
+    #[expect(
+        clippy::unused_self,
+        reason = "the test-support build reads a test's fake from self; one signature for both"
+    )]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        PathBuf::from(crate::signin::reuse::SECURITY)
     }
 }
 

@@ -31,7 +31,12 @@
 // With ?reveal=refused, Show in Finder is refused with the folder missing, for the rail's Locate folder beside the
 // refusal; with ?rail=triage, every matter's threads arrive at the start, so the open matter's menu (with
 // ?thread=commands) has Snooze until and Mark done. With ?sac=evaluation, Windows says Smart App Control is still
-// deciding, so the room shows its note (room/sac/), shown again on each load. Not shipped.
+// deciding, so the room shows its note (room/sac/), shown again on each load. With ?thread=long-command, the thread
+// is a finished turn that ran one command line wider than the thread, then quoted it in a shell block
+// (testing/long-command.ts), for a block's Copy beside a line that scrolls sideways. With ?scan=small, empty or large,
+// New matter's picker gives a folder and its scan plays those counts (scan/probe-scan.ts); with ?scan=long-path, the
+// folder picked and the place for new matters have long paths, for the folder row and its "Use a new folder in" line
+// cut short in their middle. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -46,8 +51,12 @@ import type {
 } from "../transport/protocol.ts";
 import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
 import { HINDI_ANSWER, HINDI_QUESTION } from "../testing/hindi-answer.ts";
+import { longCommandEntries } from "../testing/long-command.ts";
 import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import { firstReadProbe } from "./first-read/probe-state.ts";
+import { installsProbe } from "./first-run/probe-installs.ts";
+import { fakeFullScreen } from "./probe-full-screen.ts";
+import { fakeNotched } from "./probe-notched.ts";
 import {
   batch,
   chosen,
@@ -65,14 +74,25 @@ import {
   userMessage,
 } from "../testing/stream-script.ts";
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
+import {
+  CHUNK,
+  LONG_ANSWER,
+  longQuestion,
+  longQuestionOf,
+  longQuestionText,
+  SIX_MIB,
+} from "./long-question-fixtures.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
-import { scanProbe } from "./scan/probe-scan.ts";
+import { scanLocation, scanProbe } from "./scan/probe-scan.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { planProbe } from "./limits/probe-plan.ts";
+import { pickersProbe } from "./probe-pickers.ts";
 import { probeThreads } from "./probe-threads.ts";
+import { RAW_TOOL_PERMISSIONS, rawTools } from "./probe-toolnames.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
+import { wallTypesProbe } from "./wall-types-probe.ts";
 import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
 
 const FILES = [
@@ -110,6 +130,7 @@ const HINDI = [
 const page = new URLSearchParams(location.search);
 const mixedPapers = page.get("papers") === "mixed";
 const hindiPapers = page.get("papers") === "hindi";
+const typedPapers = wallTypesProbe(page.get("papers"));
 
 /** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
 const wordPage = wordPageOf(page.get("word"));
@@ -122,7 +143,7 @@ const papers: PaperSummary[] = (
       ? [...FILES, ...MIXED]
       : hindiPapers
         ? HINDI
-        : FILES
+        : (typedPapers?.names ?? FILES)
 ).map((name, i) => ({
   file: uuid(i + 1, 8),
   path: `papers/${name}`,
@@ -146,8 +167,13 @@ const hindiThread = page.get("thread") === "hindi";
 const shapingThread = page.get("thread") === "shaping";
 /** ?thread=first-read: the matter's first read, reading codex's quoted read of a file outside the matter. */
 const firstReading = page.get("thread") === "first-read";
+/** ?thread=long-command: an idle thread, a finished turn with one command line wider than the thread. */
+const longCommand = page.get("thread") === "long-command";
+/** ?question=2page, 50page or 2page-hi: an idle thread whose question is a long pasted text (long-question-fixtures.ts),
+ * about 1,000 words, about 25,000 words (160 KB) or two pages of Hindi, and a short answer. */
+const longKind = longQuestionOf(page.get("question"));
 /** The pages whose matter lists one idle thread, which the room opens and subscribes to. */
-const idleThread = commanding || hindiThread || shapingThread;
+const idleThread = commanding || hindiThread || shapingThread || longCommand || longKind !== null;
 
 /** The agent's commands on ?thread=commands, in the order the composer's `/` menu lists them: the first six are the
  * spike's fixture (spike/src/mentions/fixtures.json), the last two match a name typed in Devanagari or Tamil. */
@@ -170,6 +196,54 @@ const PERMISSIONS: ViewPatchBody[] = [
   upsert(permission(103, 302, chosen("allow_once"))),
 ];
 
+/** ?question=6mib: as the host sends a 6 MiB question each time the conversation opens: a Reset with the header, the
+ * question's Upsert holding its first 4 KiB, its AppendText patches of 4 KiB each, then the answer's Upsert. */
+function sixMibBodies(): ViewPatchBody[] {
+  const text = longQuestionText("6mib");
+  const bodies: ViewPatchBody[] = [
+    reset([], header("idle")),
+    upsert(userMessage(2, 1, text.slice(0, CHUNK))),
+  ];
+  for (let at = CHUNK; at < text.length; at += CHUNK)
+    bodies.push({
+      append_text: {
+        message_id: uuid(1, 5),
+        target: { user_block: 0 },
+        from_len: at,
+        text: text.slice(at, at + CHUNK),
+      },
+    });
+  bodies.push(upsert(agentText(3, 100, LONG_ANSWER)));
+  return bodies;
+}
+
+declare global {
+  interface Window {
+    /** ?question=…: when the thread's first patches were delivered, the first frame the question showed, and the
+     * first frame it showed whole (performance.now() times), for the probe to read. */
+    __clauseoLongOpen?: { delivered: number; firstPaint?: number; whole?: number; length: number };
+  }
+}
+
+/** ?question=…: times the question's arrival, from the first patch delivered to the frames it shows in. */
+function timeOpen(length: number) {
+  const open: NonNullable<Window["__clauseoLongOpen"]> = { delivered: performance.now(), length };
+  window.__clauseoLongOpen = open;
+  const frame = () => {
+    const asked = document.querySelector('[data-testid="message-user"] .asked');
+    if (asked !== null) {
+      // after this frame's paint
+      open.firstPaint ??= performance.now();
+      if ((asked.textContent ?? "").length >= length) {
+        open.whole = performance.now();
+        return;
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
 /** The scripted turn after the prompt, in batches of 25 bodies, as the bridge would deliver them. */
 function stream(): HostEvent[] {
   const turn = scriptedTurn().bodies;
@@ -182,41 +256,58 @@ function stream(): HostEvent[] {
             header("idle"),
           ),
         ]
-      : shapingThread
-        ? [
-            reset(
-              [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
-              header("idle"),
-            ),
-          ]
-        : commanding
+      : longCommand
+        ? [reset(longCommandEntries(), header("idle"))]
+        : shapingThread
           ? [
               reset(
-                [
-                  userMessage(2, 1, "When did the bank reply?"),
-                  agentText(3, 100, "The bank replied on 12 March 2001."),
-                ],
-                header("idle", COMMANDS),
+                [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
+                header("idle"),
               ),
             ]
-          : asking
+          : commanding
             ? [
-                reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
-                ...turn.slice(0, -1),
-                ...PERMISSIONS,
+                reset(
+                  [
+                    userMessage(2, 1, "When did the bank reply?"),
+                    agentText(3, 100, "The bank replied on 12 March 2001."),
+                  ],
+                  header("idle", COMMANDS),
+                ),
               ]
-            : questioning
+            : asking
               ? [
                   reset(
-                    [
-                      userMessage(2, 1, "Draft the petition to quash."),
-                      askEntry(3, uuid(1, 9), TWO_QUESTIONS),
-                      askEntry(4, uuid(2, 9), ONE_QUESTION),
-                    ],
+                    [userMessage(2, 1, "Tighten the notice to the bank.")],
                     header("needs_you"),
                   ),
+                  ...turn.slice(0, -1),
+                  ...(rawTools(page) ? RAW_TOOL_PERMISSIONS : PERMISSIONS),
                 ]
-              : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+              : questioning
+                ? [
+                    reset(
+                      [
+                        userMessage(2, 1, "Draft the petition to quash."),
+                        askEntry(3, uuid(1, 9), TWO_QUESTIONS),
+                        askEntry(4, uuid(2, 9), ONE_QUESTION),
+                      ],
+                      header("needs_you"),
+                    ),
+                  ]
+                : longKind === "6mib"
+                  ? sixMibBodies()
+                  : longKind !== null
+                    ? [
+                        reset(
+                          [
+                            userMessage(2, 1, longQuestionText(longKind)),
+                            agentText(3, 100, LONG_ANSWER),
+                          ],
+                          header("idle"),
+                        ),
+                      ]
+                    : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -256,6 +347,8 @@ const NATIVE_LIGHTS = {
 const planning = planProbe(page.get("plan"));
 /** ?plans=chatgpt: both plans installed and listed, Claude's sign-in cancelled and ChatGPT signed in (D-014's default). */
 const chatgptOnly = page.get("plans") === "chatgpt";
+/** ?pickers=default: both plans signed in, each agent's options at its defaults (probe-pickers.ts). */
+const picking = pickersProbe(page.get("pickers"));
 const SETUP_CHATGPT_ONLY: SetupEvent[] = [
   { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
   { agent_install_progress: { agent: "codex-acp", state: { ready: { version: "0.1.0" } } } },
@@ -281,6 +374,9 @@ const SETUP_CHATGPT_ONLY: SetupEvent[] = [
   },
 ];
 
+/** ?installs=both, chatgpt-signing or after: both plans' installs at once (first-run/probe-installs.ts). */
+const installing = installsProbe(page.get("installs"));
+
 /** ?reveal=refused: every Show in Finder answers the folder missing. */
 const refuseReveal = (): never => {
   throw { code: "matter.folder_missing", message: "missing", retryable: false };
@@ -305,10 +401,14 @@ const transport = new FakeTransport({
     ? { setup: planning.setup, openSettings: () => {} }
     : chatgptOnly
       ? { setup: { first: () => SETUP_CHATGPT_ONLY } }
-      : {}),
+      : picking !== null
+        ? { setup: picking.setup }
+        : installing !== null
+          ? { setup: installing }
+          : {}),
   // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
   ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
-  // ?scan=small, empty or large: New matter's picker and its folder's counts (scan/probe-scan.ts)
+  // ?scan=small, empty, large or long-path: New matter's picker and its folder's counts (scan/probe-scan.ts)
   ...scanProbe(page.get("scan")),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
@@ -341,15 +441,20 @@ const transport = new FakeTransport({
         for (const message of staged.subscribe(streamId)) transport.deliver(message);
         return;
       }
-      for (const message of stream()) transport.deliver(message);
+      const events = stream();
+      if (longKind !== null)
+        timeOpen(longKind === "6mib" ? SIX_MIB : longQuestionText(longKind).length);
+      for (const message of events) transport.deliver(message);
     });
   },
   // the thread a matter lists: the host's next_query answers list_threads (the `query` above answers only the legacy
   // HostQuery form), so ?thread=permission lists its thread waiting on the lawyer, and ?thread=commands its idle one
   next: fakeNext({
     matters: () => matters,
+    ...(typedPapers === null ? {} : { listing: typedPapers.listing }),
     papers,
-    location: "Documents/Clauseo",
+    // ?scan=long-path: a long place for new matters, for New matter's "Use a new folder in" line
+    location: scanLocation(page.get("scan")),
     // ?rail=triage: every matter's threads arrive at the start, so the matter's menu has Snooze until and Mark done
     frames: page.get("rail") === "triage",
     ...(planning !== null
@@ -361,7 +466,9 @@ const transport = new FakeTransport({
               { id: "codex-acp", kind: "codex" as const },
             ],
           }
-        : {}),
+        : picking !== null
+          ? { agents: picking.agents }
+          : {}),
     // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(
@@ -382,25 +489,38 @@ declare global {
   interface Window {
     /** ?thread=commands: the calls the fake transport has had (sends among them), for the probe to read. */
     __clauseoProbeCalls?: FakeCall[];
+    /** ?question=…: a long fake legal text of about this many words (long-question-fixtures.ts). */
+    __clauseoLongText?: (words: number) => string;
   }
 }
 // the fake's calls, for the probe to read what the composer sent: only on ?thread=commands, so no other page has them
-if (commanding) window.__clauseoProbeCalls = transport.calls;
+if (commanding || longKind !== null) window.__clauseoProbeCalls = transport.calls;
+// ?question=…: the fixture's builder, so a page can paste a long text of any length into the composer
+if (longKind !== null) window.__clauseoLongText = longQuestion;
 
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
 // by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app
 installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
+fakeFullScreen(page.get("fullscreen"));
+fakeNotched(page.get("notched"), transport);
+
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");
 // as the room's main.tsx: a Hindi page renders once its words are in
+// ?tools=<scene>: Settings › Tools in the room's place (settings/sections/tools-probe-page.tsx)
+const toolsPage = page.get("tools");
 whenWordsReady(() =>
-  createRoot(container).render(
-    <StrictMode>
-      <App
-        transport={transport}
-        {...(page.get("lights") === "native" ? { windowControls: NATIVE_LIGHTS } : {})}
-      />
-    </StrictMode>,
-  ),
+  toolsPage !== null
+    ? void import("../settings/sections/tools-probe-page.tsx").then((m) =>
+        m.renderToolsProbe(container, toolsPage, page),
+      )
+    : createRoot(container).render(
+        <StrictMode>
+          <App
+            transport={transport}
+            {...(page.get("lights") === "native" ? { windowControls: NATIVE_LIGHTS } : {})}
+          />
+        </StrictMode>,
+      ),
 );

@@ -6,7 +6,8 @@
 // when the host sends the tools' switches (SettingsView.tools), each row led by its tool's glyph with the state on it and
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
 // key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; the Browser
-// switch's helper the same on or off (no "Not available yet" since #870); the nav's icon not the web's globe; no
+// switch's helper the same on or off (no "Not available yet" since #870), and on Windows no Browser row at all, the
+// websites' row then following Web search alone; the nav's icon not the web's globe; no
 // Indian Kanoon. The anonymous counts' switch (D-052) only when the host sends SettingsView.privacy, in the first
 // run's words, a flip sent as set_privacy_settings, a firm's lock shown off and disabled, a host change shown live.
 import axe from "axe-core";
@@ -15,6 +16,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { connectDisplay } from "../../display/connect.ts";
+import type { Platform } from "@clauseo/components/lib/display.ts";
 import type { DisplayStore } from "../../room/display-store.ts";
 import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
@@ -82,12 +84,14 @@ async function mount({
   locked = [],
   limits,
   refuse = false,
+  platform = "mac",
 }: {
   tools?: ToolsSettingsView;
   privacy?: PrivacySettings;
   locked?: string[];
   limits?: LimitsView;
   refuse?: boolean;
+  platform?: Platform;
 } = {}) {
   const settings: Settings = {
     ui: UI,
@@ -117,6 +121,7 @@ async function mount({
   await act(async () =>
     root?.render(<SettingsApp store={made} transport={transport} windowControls={null} />),
   );
+  await act(async () => made.setPlatform(platform));
   await act(async () => settled());
   return { el, transport };
 }
@@ -232,7 +237,7 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
 });
 
 const SEARCH_NOTE = "Search the web and read pages.";
-const BROWSER_NOTE = "Runs on this computer.";
+const BROWSER_NOTE = "ChatGPT uses it. Runs on this computer.";
 // the room popover's lock wording, one for both
 const LOCKED = "Managed by firm";
 // UEP-16, retired after #870: the browser runs without a website check, so this never shows
@@ -368,6 +373,46 @@ test.each([true, false])(
     );
   },
 );
+
+test.each(["mac", "linux"] as const)(
+  "on %s, the Browser switch says ChatGPT uses it, and that the browser runs on this computer",
+  async (platform) => {
+    const { el } = await mount({ tools: ON, platform });
+    const row = switchNamed(el, "Browser")?.closest(".set-row");
+    expect(row?.textContent).toBe("BrowserChatGPT uses it. Runs on this computer.");
+    expect(row?.querySelector("label")?.textContent).toBe("Browser");
+  },
+);
+
+test("on Windows, the Browser row is hidden for launch, and Web search keeps its row", async () => {
+  const { el } = await mount({ tools: ON, platform: "windows" });
+  expect(pane(el).textContent).toContain("On the web");
+  expect(switchNamed(el, "Browser")).toBeNull();
+  expect(pane(el).textContent).not.toContain(BROWSER_NOTE);
+  expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
+});
+
+test("the websites' row follows Web search alone on Windows, where the browser counts as off", async () => {
+  const websites = async (tools: ToolsSettingsView, platform: Platform) => {
+    const { el } = await mount({ tools, platform });
+    const shown = el.querySelector('[data-testid="dest-websites"]') !== null;
+    await act(async () => root?.unmount());
+    host?.remove();
+    store?.dispose();
+    root = null;
+    host = null;
+    store = null;
+    return shown;
+  };
+  // Web search on: the websites' row shows, browser or no
+  expect(await websites({ web_search: true, browser: true }, "windows")).toBe(true);
+  expect(await websites({ web_search: true, browser: false }, "windows")).toBe(true);
+  // Web search off: no websites' row, though the browser's switch is on in the host's settings
+  expect(await websites({ web_search: false, browser: true }, "windows")).toBe(false);
+  expect(await websites({ web_search: false, browser: false }, "windows")).toBe(false);
+  // off the Windows, the browser still counts: the row shows with it on alone
+  expect(await websites({ web_search: false, browser: true }, "mac")).toBe(true);
+});
 
 test("Privacy's nav icon is neither the web's globe nor the Safe workspace's lock", () => {
   const privacy = SECTIONS.find((s) => s.id === "privacy");

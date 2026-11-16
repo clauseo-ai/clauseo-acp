@@ -1,4 +1,4 @@
-// The pickers' copy review entries (PK-01 to PK-05): the agent's model and effort on the composer's status line, and
+// The pickers' copy review entries (PK-01 to PK-05, and UC-152's "(default)"): the agent's model and effort on the composer's status line, and
 // the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
 // options as they last reported them, and the scene's steps taken in order (RoomDriven). The model and value names are
 // the agents' own, never Clauseo's words, so they are fake here. Apart from registry.tsx to keep that file under the
@@ -77,6 +77,27 @@ export const OPTIONS: Record<AgentId, ConfigOption[]> = {
   ],
 };
 
+/** The options at the agents' own defaults, as each reports them: Claude's Default rows, the model's naming what it
+ * stands for in its description (claude-agent-acp, session-model.js), the effort's naming nothing; ChatGPT's values all
+ * concrete, its default among them. */
+export const DEFAULTS: Record<AgentId, ConfigOption[]> = {
+  [CLAUDE]: [
+    select("model", "model", "default", [
+      ["default", "Default (recommended)", "Sonnet"],
+      ["opus", "Opus", "For the hardest questions"],
+      ["sonnet", "Sonnet", "For everyday work"],
+      ["haiku", "Haiku", "For quick answers"],
+    ]),
+    select("effort", "thought_level", "default", [
+      ["default", "Default"],
+      ["low", "Low"],
+      ["medium", "Medium"],
+      ["high", "High"],
+    ]),
+  ],
+  [CODEX]: OPTIONS[CODEX]!,
+};
+
 export const install = (agent: AgentId): SetupEvent => ({
   agent_install_progress: { agent, state: { ready: { version: "0.1.0" } } },
 });
@@ -99,6 +120,8 @@ export type PickScene = {
   /** The agents listed (R15), each with its options; both by default. */
   agents?: AgentId[];
   steps?: DrivenStep[];
+  /** Each agent's options; OPTIONS by default. */
+  options?: Record<AgentId, ConfigOption[]>;
 };
 
 const SETTINGS = {
@@ -140,7 +163,7 @@ export function pickHost(s: PickScene): () => FakeTransport {
           (s.agents ?? [CLAUDE, CODEX]).map((id) => ({
             id,
             kind: id === CLAUDE ? ("claude" as const) : ("codex" as const),
-            config_options: OPTIONS[id]!,
+            config_options: (s.options ?? OPTIONS)[id]!,
           })),
         parts: ["agents"],
       }),
@@ -152,7 +175,7 @@ export function pickHost(s: PickScene): () => FakeTransport {
           head.header!.thread = open.thread;
           head.header!.matter = MATTER.matter;
           head.header!.agent = open.agent;
-          head.header!.config_options = OPTIONS[open.agent]!;
+          head.header!.config_options = (s.options ?? OPTIONS)[open.agent]!;
           transport.deliver(event(batch(1, [reset([], head)], undefined, stream)));
         }),
     });
@@ -206,6 +229,17 @@ export const PK: Entry[] = [
       events: BOTH,
       threads: ONGOING,
       steps: [{ press: '[data-testid="pick-effort"]' }],
+    }),
+  },
+  // a new conversation at Claude's defaults: the model menu open, its Default row in the model's name, marked
+  {
+    id: "UC-152",
+    words: threadWords("(default)"),
+    screen,
+    render: renderPick({
+      events: BOTH,
+      options: DEFAULTS,
+      steps: [{ press: '[data-testid="pick-model"]' }],
     }),
   },
   // a new conversation, ChatGPT chosen but not set up on this computer

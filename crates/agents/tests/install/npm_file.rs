@@ -39,9 +39,9 @@ fn npm_args(spec: &clauseo_process::LaunchSpec) -> Option<Vec<String>> {
         .then_some(args)
 }
 
-/// The `.tgz` files in `<data>/agents/downloads`.
+/// The `.tgz` files in `<data>/agents/downloads/agent-a`, agent A's own.
 fn downloaded(data: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(data.join("agents/downloads"))
+    std::fs::read_dir(data.join("agents/downloads/agent-a"))
         .map(|entries| {
             entries
                 .flatten()

@@ -54,6 +54,11 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             "KNOWN_DOMAIN_EVENT_KINDS",
             clauseo_protocol::DomainEvent::KINDS,
         )
+        // The composer checks a question against it when Ask is pressed (`prompt.too_long`).
+        .constant(
+            "MAX_PROMPT_TEXT_BYTES",
+            clauseo_protocol::MAX_PROMPT_TEXT_BYTES,
+        )
 }
 
 /// The builder the bindings come from, with protocol's types in their `WireFormat` form.

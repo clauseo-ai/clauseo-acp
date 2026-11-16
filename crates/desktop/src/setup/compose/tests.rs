@@ -86,6 +86,7 @@ fn by(method: SignInMethod) -> SignIn {
         method,
         source: SignInSource::Own,
         at: timestamp(at(T)),
+        refused: None,
     }
 }
 
@@ -151,6 +152,7 @@ fn s18_states_map_to_the_wire_with_the_plan_in_words() {
             method: SignInMethod::Plan,
             source: SignInSource::Reused,
             at: timestamp(at(T)),
+            refused: None,
         })
     );
     let codex_plus = SigninState::SignedIn {
@@ -261,6 +263,7 @@ fn compose_sends_each_change_once_in_order_and_a_key_over_a_running_sign_in_wait
                 method: SignInMethod::Plan,
                 source: SignInSource::Own,
                 at: timestamp(at(T)),
+                refused: None,
             },
         ]
     );
@@ -290,6 +293,25 @@ fn each_find_login_ends_in_one_sign_in_changed_even_when_unchanged() {
     assert_eq!(sent(&mut feed), [off.clone(), off]);
 }
 
+/// A "Use it" whose login Claude could not use here (S18's run-time fallback) says so on the
+/// wire, apart from a plain `reuse_off`, so the card can tell the lawyer why.
+#[test]
+fn a_failed_use_it_goes_out_as_reuse_unusable() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.signin(
+        &claude(),
+        SigninState::SignedOut {
+            found: Some(Found::ReuseUnusable),
+        },
+    );
+    let unusable = SignIn::SignedOut {
+        found: Some(FoundLogin::ReuseUnusable),
+    };
+    assert_eq!(sent(&mut feed), [unusable]);
+}
+
 #[test]
 fn a_search_waits_through_running_states_for_its_resting_answer() {
     let events = Arc::new(SetupEvents::default());
@@ -308,5 +330,111 @@ fn a_search_waits_through_running_states_for_its_resting_answer() {
     assert_eq!(
         sent(&mut feed),
         [reuse_off.clone(), SignIn::Queued, reuse_off]
+    );
+}
+
+/// The Windows test's defect 2: a sign-in that ended `Failed` (cancelled) before a key or an
+/// endpoint arrived no longer hides it; the key's or the endpoint's line goes out at once.
+#[test]
+fn a_key_or_an_endpoint_after_a_failed_sign_in_clears_the_failure() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    let cancelled = SigninState::Failed {
+        code: SigninCode::Cancelled,
+        at: at(T),
+    };
+    compose.signin(&codex(), cancelled.clone());
+    compose.set_key(&codex(), true);
+    compose.signin(&claude(), cancelled);
+    compose.set_firm(&claude(), true);
+    let failed = SignIn::Failed {
+        code: ErrorCode::SigninCancelled,
+        at: timestamp(at(T)),
+    };
+    assert_eq!(
+        sent(&mut feed),
+        [
+            failed.clone(),
+            by(SignInMethod::ApiKey),
+            failed,
+            by(SignInMethod::Firm),
+        ]
+    );
+    // Removing them shows S18's state underneath: signed out, not the old failure.
+    compose.set_key(&codex(), false);
+    assert_eq!(sent(&mut feed), [SignIn::SignedOut { found: None }]);
+}
+
+/// A key saved over one already in memory clears a failure too; a running sign-in still
+/// passes through a key (the backend ends it).
+#[test]
+fn a_saved_key_clears_a_failure_but_a_running_sign_in_still_shows() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.set_key(&claude(), true);
+    compose.signin(
+        &claude(),
+        SigninState::Failed {
+            code: SigninCode::LinkExpired,
+            at: at(T),
+        },
+    );
+    compose.key_saved(&claude());
+    compose.signin(&claude(), SigninState::Queued);
+    compose.key_saved(&claude());
+    assert_eq!(
+        sent(&mut feed),
+        [
+            by(SignInMethod::ApiKey),
+            SignIn::Failed {
+                code: ErrorCode::SigninLinkExpired,
+                at: timestamp(at(T)),
+            },
+            by(SignInMethod::ApiKey),
+            SignIn::Queued,
+        ]
+    );
+}
+
+/// A refused key: the key's line carries `refused` until a key is saved or removed; an
+/// endpoint's or a plan's line never does.
+#[test]
+fn a_refused_key_shows_on_its_line_until_a_key_is_saved_or_removed() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.signin(&claude(), SigninState::SignedOut { found: None });
+    compose.key_refused(&claude());
+    compose.set_key(&claude(), true);
+    compose.key_refused(&claude());
+    compose.key_saved(&claude());
+    compose.key_refused(&claude());
+    compose.set_key(&claude(), false);
+    compose.set_firm(&codex(), true);
+    compose.set_key(&codex(), true);
+    compose.key_refused(&codex());
+    compose.set_firm(&codex(), false);
+    let refused = SignIn::SignedIn {
+        email: None,
+        plan: None,
+        method: SignInMethod::ApiKey,
+        source: SignInSource::Own,
+        at: timestamp(at(T)),
+        refused: Some(timestamp(at(T))),
+    };
+    assert_eq!(
+        sent(&mut feed),
+        [
+            SignIn::SignedOut { found: None },
+            by(SignInMethod::ApiKey),
+            refused.clone(),
+            by(SignInMethod::ApiKey),
+            refused,
+            SignIn::SignedOut { found: None },
+            by(SignInMethod::Firm),
+            by(SignInMethod::ApiKey),
+        ]
     );
 }

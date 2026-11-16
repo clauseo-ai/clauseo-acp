@@ -22,6 +22,9 @@ enum ChromeSearch {
     Forced(PathBuf),
     /// Search these roots; `None` is this machine's, with the data folder as app data.
     Roots(Option<ChromeRoots>),
+    /// Already picked, or none found: Windows' search, made with the firm's policy per browser
+    /// ([`policy`]).
+    Picked(Option<PathBuf>),
 }
 
 impl ChromeSearch {
@@ -30,11 +33,22 @@ impl ChromeSearch {
         match self {
             Self::Skip => None,
             Self::Forced(chrome) => Some(chrome),
+            Self::Picked(chrome) => chrome,
             Self::Roots(roots) => {
                 let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
                 crate::browser::chrome::find(&roots)
             }
         }
+    }
+
+    /// On Windows, the roots whose browsers the firm's policy is asked about one by one
+    /// (`browser::rd_policy`); `None` for a forced Chrome and on any other machine.
+    fn windows_roots(&self, data: &Path) -> Option<ChromeRoots> {
+        let Self::Roots(roots) = self else {
+            return None;
+        };
+        let roots = roots.clone().unwrap_or_else(|| ChromeRoots::system(data));
+        roots.platform.is_windows().then_some(roots)
     }
 
     /// The Chrome found, once agent-browser's config file is in place
@@ -108,8 +122,9 @@ impl BrowserPrep {
 
     /// The Chrome found and the session's claims. The firm's browser policy comes first,
     /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
-    /// launch: when it blocks, both are left out and the entry drops with
-    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
+    /// launch: when it blocks, both are left out and the entry drops with a `BrowserBlocked*`
+    /// reason or `BrowserPolicyUnreadable`. On Windows it is asked per
+    /// browser over those installed ([`policy`]), so the search comes with it. A missing sidecar
     /// leaves both out, with a warning (a development build has no agent-browser); a failed
     /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
     /// Registry, file system and socket calls: off the actor.
@@ -117,7 +132,8 @@ impl BrowserPrep {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return Prepared::default();
         }
-        let policy_block = self.rd_policy.check(self.allowed_anyway);
+        let (policy_block, chrome) =
+            policy(self.chrome, &self.rd_policy, self.allowed_anyway, data);
         let read = Prepared {
             policy_read: true,
             policy_block,
@@ -133,9 +149,9 @@ impl BrowserPrep {
         // The shell tool's config is the session's own (`launch_checks::shell_folders`); the
         // app-wide one under `<data>/browser` is the parked MCP entry's.
         let found = if self.shell {
-            self.chrome.find(data)
+            chrome.find(data)
         } else {
-            self.chrome.find_with_config(data)
+            chrome.find_with_config(data)
         };
         let Some(chrome) = found else {
             return read;
@@ -179,6 +195,41 @@ impl BrowserPrep {
     }
 }
 
+/// The firm's browser policy for `search`, read now: why it leaves the session without a
+/// browser, if it does (on Windows also `BrowserPerUserChromeOnly`, when the only Chrome is one
+/// the guard cannot start), and the search to make. On Windows (`ChromeSearch::windows_roots`) the
+/// policy is asked per browser over what is installed, so the search is already made
+/// (`ChromeSearch::Picked`); elsewhere, and for a forced Chrome, one false or unread place
+/// blocks every browser and the search comes after. Registry and file system calls: off the
+/// actor.
+fn policy(
+    search: ChromeSearch,
+    rd_policy: &RdPolicy,
+    allowed_anyway: bool,
+    data: &Path,
+) -> (Option<ToolsUnavailableReason>, ChromeSearch) {
+    let Some(roots) = search.windows_roots(data) else {
+        return (rd_policy.check(allowed_anyway), search);
+    };
+    let installed = crate::browser::chrome::windows_installed(&roots);
+    match rd_policy.pick(allowed_anyway, &installed.usable) {
+        // Nothing usable, but a per-user Chrome: the lawyer is told why it is not used rather
+        // than to install a Chrome they already have.
+        Ok(None) if installed.per_user_chrome.is_some() => {
+            tracing::info!(
+                "the only Chrome is installed for this user alone, which Clauseo's browser cannot \
+                 start; the session has no browser"
+            );
+            (
+                Some(ToolsUnavailableReason::BrowserPerUserChromeOnly),
+                ChromeSearch::Picked(None),
+            )
+        }
+        Ok(picked) => (None, ChromeSearch::Picked(picked)),
+        Err(reason) => (Some(reason), ChromeSearch::Picked(None)),
+    }
+}
+
 /// What [`BrowserPrep::prepare`] found for the session.
 #[derive(Debug, Default)]
 pub(super) struct Prepared {
@@ -186,7 +237,9 @@ pub(super) struct Prepared {
     pub(super) chrome: Option<PathBuf>,
     /// The session's claims, if made.
     pub(super) session: Option<Arc<BrowserSession>>,
-    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`); on
+    /// Windows also `BrowserPerUserChromeOnly`, which is no policy block
+    /// (`actor/browser_policy.rs` reads it as clear).
     pub(super) policy_block: Option<ToolsUnavailableReason>,
     /// Whether the firm's browser policy was read for this launch (`actor/browser_policy.rs`).
     pub(super) policy_read: bool,
@@ -265,9 +318,10 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
 /// profile hook offers this agent a `browser` entry (Codex:
 /// `clauseo_profile::servers::browser_mcp`), the guarded entry: nothing when no browser can go
 /// to it (`tools.browser` off, a proxy asked for and none set, or no slot and none coming
-/// free), else its sidecars, a Chrome search and the claims. Otherwise,
-/// with the shell tool wired (`ProfileHook::browser_tool`, Claude): its `agent-browser` command
-/// and a Chrome search when `tools.browser` is on, else nothing.
+/// free), else its sidecars, a Chrome search and the claims. Otherwise, with the shell tool
+/// wired (`ProfileHook::browser_tool`, no agent's for launch): its `agent-browser` command and a
+/// Chrome search when `tools.browser` is on, else nothing. Nothing for an agent with no browser
+/// on this OS.
 pub(super) fn browser_prep(
     actor: &Actor,
     agent: &clauseo_protocol::AgentId,
@@ -284,15 +338,17 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
-    // Codex on Windows has no browser at all (`agent::loads::browser::no_browser`).
+    // Codex on Windows, and Claude on every OS, have no browser at all
+    // (`agent::loads::browser::no_browser`).
     let kind = clauseo_protocol::AgentKind::of(agent);
     if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
         return skip;
     }
-    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
-        let clauseo_acp::McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    });
+    let entry = actor
+        .profile
+        .mcp_servers(agent)
+        .into_iter()
+        .find(|server| server.name() == clauseo_profile::servers::BROWSER);
     if let (None, Some(tools)) = (&entry, actor.profile.browser_tool()) {
         if !settings.tools.browser {
             return skip;
@@ -313,7 +369,9 @@ pub(super) fn browser_prep(
         return skip;
     };
     let proxy = crate::agent::loads::browser::asks_for_proxy(&entry);
-    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry;
+    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry else {
+        return skip;
+    };
     if !settings.tools.browser
         || (proxy && actor.wiring.proxy.is_none())
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
@@ -359,16 +417,29 @@ pub(super) fn entry_folder(run: &mut super::RunFolders, data: &Path) {
     }
 }
 
+/// Chrome's `Default/Preferences` for the shell tool's profile: a PDF link downloads rather than
+/// opening in Chrome's viewer, so agent-browser's `download` gets the download event it waits for
+/// (`always_open_pdf_externally`; the guard's Chrome has the same entry, `browser_guard/quiet.rs`).
+const PROFILE_PREFERENCES: &str = r#"{"plugins":{"always_open_pdf_externally":true}}"#;
+
 /// Makes the shell tool's downloads and profile folders and writes its `{}` config file, all in
 /// the launch's own `agent-browser` folder, so the profile starts empty (no earlier launch's
-/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. One that cannot be
-/// made leaves the session without the browser (`BrowserNotInstalled`), with a warning; the
-/// launch goes on.
+/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. The profile's
+/// `Default/Preferences` is written with [`PROFILE_PREFERENCES`]. One that cannot be made leaves
+/// the session without the browser (`BrowserNotInstalled`), with a warning; the launch goes on.
 pub(super) fn shell_folders(run: &mut super::RunFolders, data: &Path) {
-    let made = [&run.agent_browser, &run.downloads, &run.browser_profile]
-        .into_iter()
-        .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
-        .and_then(|()| crate::browser::write_session_config(&run.browser_config));
+    let default = run.browser_profile.join("Default");
+    let (preferences, bytes) = (default.join("Preferences"), PROFILE_PREFERENCES.as_bytes());
+    let made = [
+        &run.agent_browser,
+        &run.downloads,
+        &run.browser_profile,
+        &default,
+    ]
+    .into_iter()
+    .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
+    .and_then(|()| crate::write::replace_private_file(&preferences, bytes))
+    .and_then(|()| crate::browser::write_session_config(&run.browser_config));
     if let Err(error) = made {
         tracing::warn!(
             error = %crate::log_file::Cause(&error),

@@ -73,7 +73,8 @@ pub enum InstallState {
         download_bytes: u64,
     },
     /// Waiting to try again by itself; no try is counted. `reason` is
-    /// [`FailureKind::Offline`] today: name resolution or connect failed with no route.
+    /// [`FailureKind::Offline`] today: name resolution failed, connect failed with no route, or
+    /// the connection was reset, aborted or timed out.
     Waiting {
         /// Why it waits.
         reason: FailureKind,
@@ -97,8 +98,8 @@ pub enum InstallState {
     },
     /// Stopped with a failure; `retry` starts again.
     Failed(Failure),
-    /// Paused because another agent's install started; its own `install` resumes it, keeping
-    /// its partial files.
+    /// Paused by its own `pause` (the lawyer's cancel); its own `install` resumes it, keeping its
+    /// partial files. Another agent's install never pauses it.
     Paused,
     /// IT's runtime: policy sets `agents.<id>`, so nothing is installed for it.
     Managed,

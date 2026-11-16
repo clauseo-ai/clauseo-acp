@@ -2,18 +2,18 @@
 //! folder now), the files of a checkpoint, and a file's bytes at one. Nothing here writes: no
 //! object, no cache, no checkpoint.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
 
 use clauseo_protocol::{CheckpointId, FileChange, MatterPath};
 
-use crate::Error;
-use crate::checkpoint::{Core, OnHeld};
+use crate::checkpoint::{Core, OnHeld, Walked};
 use crate::diff::{DiffFile, content_id, diff_by};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{CacheEntry, EntryState};
 use crate::types::{CompareSide, Settings, VersionFile};
+use crate::{Error, rules};
 
 /// One file of a side of a comparison, with its size when it is known without a lookup.
 struct SideFile {
@@ -54,12 +54,72 @@ pub(crate) fn compare(
         .filter(|entry| entry.state == EntryState::Skipped)
         .map(|entry| entry.path.as_str())
         .collect();
-    let old = side(core, from, now, &unversioned)?;
-    let new = side(core, to, now, &unversioned)?;
-    diff_by(&old, &new, &BTreeSet::new(), &mut |file| match file.size {
-        Some(size) => Ok(size),
-        None => core.size_of(file.path.as_str(), file.blob),
-    })
+    let mut old = side(core, from, now, &unversioned)?;
+    let mut new = side(core, to, now, &unversioned)?;
+    // A file read for the first time since the checkpoint, unchanged since, is no change: the
+    // checkpoint's side takes its baseline, as a checkpoint's own diff leaves it out.
+    match (from, to) {
+        (CompareSide::Checkpoint(id), _) => pin_baselines(core, id, &walked, &mut old)?,
+        (_, CompareSide::Checkpoint(id)) => pin_baselines(core, id, &walked, &mut new)?,
+        _ => {}
+    }
+    diff_by(
+        &old,
+        &new,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &mut |file| match file.size {
+            Some(size) => Ok(size),
+            None => core.size_of(file.path.as_str(), file.blob),
+        },
+    )
+}
+
+/// Gives `files` (checkpoint `id`'s side, sorted by path bytes) the baseline of each file read
+/// for the first time since: the content a later checkpoint read it with, or for one the walk
+/// `walked` reads for the first time unchanged, its content now.
+fn pin_baselines(
+    core: &Core,
+    id: CheckpointId,
+    walked: &Walked,
+    files: &mut Vec<SideFile>,
+) -> Result<(), Error> {
+    let mut pins: BTreeMap<MatterPath, Oid> = BTreeMap::new();
+    if let Some((head, _, _)) = core.timeline.head() {
+        for (path, tree) in core.timeline.step_reads(id, head).baseline {
+            // One recorded before the exclusion rule covered its folder stays left out.
+            if rules::is_excluded_path(path.as_str()) {
+                continue;
+            }
+            if let Some(blob) = core.history.file_at(tree, path.as_str())? {
+                pins.insert(path, blob);
+            }
+        }
+    }
+    for (path, blob) in core.live_baselines(walked) {
+        pins.entry(path).or_insert(blob);
+    }
+    for (path, blob) in pins {
+        let at = files
+            .binary_search_by(|file| file.path.as_str().as_bytes().cmp(path.as_str().as_bytes()));
+        match at {
+            Ok(index) => {
+                if let Some(file) = files.get_mut(index) {
+                    file.blob = blob;
+                    file.size = None;
+                }
+            }
+            Err(index) => files.insert(
+                index,
+                SideFile {
+                    path,
+                    blob,
+                    size: None,
+                },
+            ),
+        }
+    }
+    Ok(())
 }
 
 /// The files of one side, sorted by path.

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Tests pre-push.sh, lefthook's pre-push command: a push of deletes only passes without the check,
+# a push that changes a Cargo.toml or Cargo.lock first runs `cargo metadata --locked` on fuzz/Cargo.toml,
 # and every other push runs `cargo xtask check --quick --no-tests --no-dependents`, in CI mode unless CI says otherwise, with
 # `--skip-ui` only when changes.sh says every pushed branch changes no ui path, and then Windows clippy for
 # the crates the push touches when the x86_64-pc-windows-gnu target and MinGW-w64 are there. First
 # the script alone, fed git's ref lines; then through lefthook, with this repo's lefthook.yml, in a
 # scratch repo that pushes to a local bare remote, so the test also fails when lefthook stops
-# passing git's stdin on. A fake `cargo` first on PATH records each call instead of checking; a fake
+# passing git's stdin on. A fake `cargo` first on PATH records each call instead of checking (its
+# metadata call fails only with FAKE_METADATA_EXIT); a fake
 # `rustup` lists the targets in FAKE_TARGETS, and a fake MinGW-w64 gcc is on PATH only where a case
 # puts $tmp/mingw there.
 # fast-lane runs it after installing the pinned tools, lefthook among them.
@@ -24,6 +26,7 @@ mkdir "$tmp/bin"
 cat > "$tmp/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 echo "CI=${CI-unset} $*" >> "$CALLS"
+if [ "$1" = metadata ]; then exit "${FAKE_METADATA_EXIT:-0}"; fi
 if [ "$1" = clippy ]; then exit "${FAKE_CLIPPY_EXIT:-0}"; fi
 exit "${FAKE_CARGO_EXIT:-0}"
 EOF
@@ -56,9 +59,13 @@ z64=$z40$z40
 z64=${z64:0:64}
 a=1111111111111111111111111111111111111111
 b=2222222222222222222222222222222222222222
+nl=$'\n'
 check="CI=1 xtask check --quick --no-tests --no-dependents"
 skip="CI=1 xtask check --quick --no-tests --no-dependents --skip-ui"
 skip_note="pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"
+# The fuzz lock check's cargo call, as the script makes it (after CI is exported as 1).
+fuzz="metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml"
+meta="CI=1 $fuzz"
 win="x86_64-pc-windows-gnu"
 win_note="pre-push: Windows clippy skipped: it needs"
 # The Windows clippy call for the crates named.
@@ -80,14 +87,17 @@ alone "one delete" "refs/heads/x $z40 refs/heads/x $a"$'\n' "" 0
 grep -q "deletes only (1 ref(s)), nothing to check" "$tmp/out" || fail "alone: one delete: no message (output: $(cat "$tmp/out"))"
 alone "two deletes" "(delete) $z40 refs/heads/x $a"$'\n'"(delete) $z40 refs/tags/t $b"$'\n' "" 0
 alone "a delete in a SHA-256 repo" "(delete) $z64 refs/heads/x ${a}${a:0:24}"$'\n' "" 0
-alone "an update" "refs/heads/x $a refs/heads/x $b"$'\n' "$check" 0
-alone "a new branch" "refs/heads/x $a refs/heads/x $z40"$'\n' "$check" 0
-alone "a delete and an update" "(delete) $z40 refs/heads/x $a"$'\n'"refs/heads/y $b refs/heads/y $a"$'\n' "$check" 0
-alone "no refs" "" "$check" 0
-alone "a line without a sha" "refs/heads/x"$'\n' "$check" 0
-CI=0 alone "CI=0 runs the check in local mode" "refs/heads/x $a refs/heads/x $b"$'\n' "CI=0 xtask check --quick --no-tests --no-dependents" 0
-FAKE_CARGO_EXIT=3 alone "a failed check fails the push" "refs/heads/x $a refs/heads/x $b"$'\n' "$check" 3
+alone "an update" "refs/heads/x $a refs/heads/x $b"$'\n' "$meta$nl$check" 0
+alone "a new branch" "refs/heads/x $a refs/heads/x $z40"$'\n' "$meta$nl$check" 0
+alone "a delete and an update" "(delete) $z40 refs/heads/x $a"$'\n'"refs/heads/y $b refs/heads/y $a"$'\n' "$meta$nl$check" 0
+alone "no refs" "" "$meta$nl$check" 0
+alone "a line without a sha" "refs/heads/x"$'\n' "$meta$nl$check" 0
+CI=0 alone "CI=0 runs the check in local mode" "refs/heads/x $a refs/heads/x $b"$'\n' "CI=0 $fuzz$nl""CI=0 xtask check --quick --no-tests --no-dependents" 0
+FAKE_CARGO_EXIT=3 alone "a failed check fails the push" "refs/heads/x $a refs/heads/x $b"$'\n' "$meta$nl$check" 3
 FAKE_CARGO_EXIT=3 alone "a delete passes whatever the check would say" "(delete) $z40 refs/heads/x $a"$'\n' "" 0
+FAKE_METADATA_EXIT=5 alone "a failed fuzz lock check fails the push before the xtask check" "refs/heads/x $a refs/heads/x $b"$'\n' "$meta" 1
+grep -qF "pre-push: fuzz/Cargo.lock is out of date with the workspace (cargo metadata --locked failed)" "$tmp/out" || fail "alone: failed fuzz lock check: no message (output: $(cat "$tmp/out"))"
+FAKE_METADATA_EXIT=5 alone "a delete passes without the fuzz lock check" "(delete) $z40 refs/heads/x $a"$'\n' "" 0
 
 # Runs git in the scratch repo `$repo` (set by each section), whatever the user's git config says.
 g() { git -C "$repo" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
@@ -124,6 +134,8 @@ branch rust crates/core/src/lib.rs
 branch rust2 crates/core/Cargo.toml
 branch ui ui/app/src/App.tsx
 branch mixed crates/core/src/lib.rs ui/app/src/App.tsx
+branch fuzzlock fuzz/Cargo.lock
+branch notmanifest docs/Cargo.toml.md
 # The line git writes for a push of the branch $1 to a new remote branch.
 line() { echo "refs/heads/$1 $(g rev-parse "$1") refs/heads/$1 $z40"; }
 # $1 name, $2 stdin, $3 calls expected, $4 exit expected; env from the caller.
@@ -136,21 +148,27 @@ in_repo() {
 unset CI
 in_repo "a Rust-only branch skips the ui steps" "$(line rust)"$'\n' "$skip" 0
 grep -qxF "$skip_note" "$tmp/out" || fail "in a repo: a Rust-only branch: no note (output: $(cat "$tmp/out"))"
-in_repo "two Rust-only branches skip the ui steps" "$(line rust)"$'\n'"$(line rust2)"$'\n' "$skip" 0
+in_repo "two Rust-only branches skip the ui steps" "$(line rust)"$'\n'"$(line rust2)"$'\n' "$meta$nl$skip" 0
 in_repo "a delete and a Rust-only branch skip the ui steps" "(delete) $z40 refs/heads/x $a"$'\n'"$(line rust)"$'\n' "$skip" 0
 CI=0 in_repo "CI=0 skips the ui steps in local mode" "$(line rust)"$'\n' "CI=0 xtask check --quick --no-tests --no-dependents --skip-ui" 0
 FAKE_CARGO_EXIT=3 in_repo "a failed check without the ui steps fails the push" "$(line rust)"$'\n' "$skip" 3
+in_repo "a branch changing a crate's Cargo.toml runs the fuzz lock check first" "$(line rust2)"$'\n' "$meta$nl$skip" 0
+grep -qxF "$skip_note" "$tmp/out" || fail "in a repo: a Cargo.toml branch: the ui skip note is missing"
+FAKE_METADATA_EXIT=5 in_repo "a failed fuzz lock check fails the push before the check" "$(line rust2)"$'\n' "$meta" 1
+grep -qF "pre-push: fuzz/Cargo.lock is out of date with the workspace (cargo metadata --locked failed)" "$tmp/out" || fail "in a repo: failed fuzz lock check: no message (output: $(cat "$tmp/out"))"
+in_repo "a change to fuzz/Cargo.lock alone runs the fuzz lock check" "$(line fuzzlock)"$'\n' "$meta$nl$skip" 0
+in_repo "a file named like a manifest runs no fuzz lock check" "$(line notmanifest)"$'\n' "$skip" 0
 in_repo "a ui-only branch runs the ui steps" "$(line ui)"$'\n' "$check" 0
 grep -qF "skipping the ui steps" "$tmp/out" && fail "in a repo: a ui-only branch: the skip note printed"
 in_repo "a Rust and ui branch runs the ui steps" "$(line mixed)"$'\n' "$check" 0
 in_repo "two branches, one with a ui change, run the ui steps" "$(line rust)"$'\n'"$(line ui)"$'\n' "$check" 0
 in_repo "a branch with no change since origin/main runs the ui steps" "$(line main)"$'\n' "$check" 0
-in_repo "no refs run the ui steps" "" "$check" 0
-in_repo "a sha git does not know runs the ui steps" "refs/heads/x $a refs/heads/x $z40"$'\n' "$check" 0
+in_repo "no refs run the ui steps" "" "$meta$nl$check" 0
+in_repo "a sha git does not know runs the ui steps" "refs/heads/x $a refs/heads/x $z40"$'\n' "$meta$nl$check" 0
 in_repo "one delete is still a no-op" "(delete) $z40 refs/heads/x $a"$'\n' "" 0
 rust_line="$(line rust)"$'\n'
 g update-ref -d refs/remotes/origin/main
-in_repo "no origin/main runs the ui steps" "$rust_line" "$check" 0
+in_repo "no origin/main runs the ui steps" "$rust_line" "$meta$nl$check" 0
 g update-ref refs/remotes/origin/main main
 cp "$repo/.github/scripts/changes.sh" "$tmp/changes.sh"
 printf '#!/usr/bin/env bash\necho ui=false\nexit 1\n' > "$repo/.github/scripts/changes.sh"
@@ -181,36 +199,35 @@ crate_branch one core:clauseo-core
 crate_branch two core:clauseo-core zeta:clauseo-zeta xtask:xtask
 branch root Cargo.lock
 ready="$tmp/mingw:$PATH"
-nl=$'\n'
 g checkout -q one
 FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate's change runs Windows clippy for it after the check" \
-  "$(line one)$nl" "$skip$nl$(winclippy clauseo-core)" 0
+  "$(line one)$nl" "$meta$nl$skip$nl$(winclippy clauseo-core)" 0
 grep -qF "pre-push: Windows clippy ($win) for clauseo-core" "$tmp/out" || fail "in a repo: one crate: no Windows clippy note (output: $(cat "$tmp/out"))"
 FAKE_TARGETS="$win" PATH="$ready" FAKE_CLIPPY_EXIT=4 in_repo "a failed Windows clippy fails the push" \
-  "$(line one)$nl" "$skip$nl$(winclippy clauseo-core)" 4
+  "$(line one)$nl" "$meta$nl$skip$nl$(winclippy clauseo-core)" 4
 FAKE_TARGETS="$win" PATH="$ready" FAKE_CARGO_EXIT=3 in_repo "a failed check stops before Windows clippy" \
-  "$(line one)$nl" "$skip" 3
+  "$(line one)$nl" "$meta$nl$skip" 3
 FAKE_TARGETS="$win" PATH="$ready" PREPUSH_WINDOWS_CLIPPY=0 in_repo "PREPUSH_WINDOWS_CLIPPY=0 skips it" \
-  "$(line one)$nl" "$skip" 0
+  "$(line one)$nl" "$meta$nl$skip" 0
 grep -qF "PREPUSH_WINDOWS_CLIPPY=0; skipping Windows clippy" "$tmp/out" || fail "in a repo: PREPUSH_WINDOWS_CLIPPY=0: no note"
-PATH="$ready" in_repo "without the target it is skipped with a note" "$(line one)$nl" "$skip" 0
+PATH="$ready" in_repo "without the target it is skipped with a note" "$(line one)$nl" "$meta$nl$skip" 0
 grep -qF "$win_note" "$tmp/out" || fail "in a repo: no target: no note (output: $(cat "$tmp/out"))"
 if command -v x86_64-w64-mingw32-gcc > /dev/null; then
   echo "skip: without MinGW-w64: this machine has a real one on PATH (CI's runner has none)"
 else
-  FAKE_TARGETS="$win" in_repo "without MinGW-w64 it is skipped with a note" "$(line one)$nl" "$skip" 0
+  FAKE_TARGETS="$win" in_repo "without MinGW-w64 it is skipped with a note" "$(line one)$nl" "$meta$nl$skip" 0
   grep -qF "$win_note" "$tmp/out" || fail "in a repo: no MinGW: no note (output: $(cat "$tmp/out"))"
 fi
-FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate the working tree lacks is left out" "$(line two)$nl" "$skip$nl$(winclippy clauseo-core)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate the working tree lacks is left out" "$(line two)$nl" "$meta$nl$skip$nl$(winclippy clauseo-core)" 0
 FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate change and a ui change run both" "$(line one)$nl$(line ui)$nl" \
-  "$check$nl$(winclippy clauseo-core)" 0
-FAKE_TARGETS="$win" PATH="$ready" in_repo "no refs run no Windows clippy" "" "$check" 0
+  "$meta$nl$check$nl$(winclippy clauseo-core)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "no refs run no Windows clippy" "" "$meta$nl$check" 0
 g checkout -q two
 FAKE_TARGETS="$win" PATH="$ready" in_repo "three crates go in one Windows clippy, sorted" \
-  "$(line two)$nl" "$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
+  "$(line two)$nl" "$meta$nl$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
 FAKE_TARGETS="$win" PATH="$ready" in_repo "two branches touching one crate name it once" \
-  "$(line one)$nl$(line two)$nl" "$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
-FAKE_TARGETS="$win" PATH="$ready" in_repo "a root file touches no crate" "$(line root)$nl" "$skip" 0
+  "$(line one)$nl$(line two)$nl" "$meta$nl$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a root file touches no crate" "$(line root)$nl" "$meta$nl$skip" 0
 g checkout -q main
 FAKE_TARGETS="$win" PATH="$ready" in_repo "a path under crates/ with no Cargo.toml names no crate" "$(line rust)$nl" "$skip" 0
 
@@ -246,16 +263,20 @@ else
   branch rust crates/core/src/lib.rs
   branch ui ui/app/src/App.tsx
   branch mixed crates/core/src/lib.rs ui/app/src/App.tsx
+  branch fuzzlock fuzz/Cargo.lock
   pushed "a Rust-only branch skips the ui steps" "$skip" 0 rust:refs/heads/rust
   pushed "a ui-only branch runs the ui steps" "$check" 0 ui:refs/heads/ui
   pushed "a Rust and ui branch runs the ui steps" "$check" 0 mixed:refs/heads/mixed
   pushed "two branches, one with a ui change, run the ui steps" "$check" 0 rust:refs/heads/rust-b ui:refs/heads/ui-b
+  pushed "a fuzz/Cargo.lock change runs the fuzz lock check" "$meta$nl$skip" 0 fuzzlock:refs/heads/fuzzlock
+  FAKE_METADATA_EXIT=5 pushed "a failed fuzz lock check stops the push" "$meta" 1 fuzzlock:refs/heads/fuzzlock-b
+  git -C "$tmp/remote.git" rev-parse -q --verify refs/heads/fuzzlock-b > /dev/null && fail "lefthook: a failed fuzz lock check stops the push: the branch reached the remote"
   crate_branch one core:clauseo-core
   g checkout -q one
   FAKE_TARGETS="$win" PATH="$tmp/mingw:$PATH" pushed "a crate's change runs Windows clippy for it" \
-    "$skip$nl$(winclippy clauseo-core)" 0 one:refs/heads/one
+    "$meta$nl$skip$nl$(winclippy clauseo-core)" 0 one:refs/heads/one
   FAKE_TARGETS="$win" PATH="$tmp/mingw:$PATH" FAKE_CLIPPY_EXIT=4 pushed "a failed Windows clippy stops the push" \
-    "$skip$nl$(winclippy clauseo-core)" 1 one:refs/heads/one-b
+    "$meta$nl$skip$nl$(winclippy clauseo-core)" 1 one:refs/heads/one-b
   git -C "$tmp/remote.git" rev-parse -q --verify refs/heads/one-b > /dev/null && fail "lefthook: a failed Windows clippy stops the push: the branch reached the remote"
   g checkout -q main
 fi

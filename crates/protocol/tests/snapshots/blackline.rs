@@ -28,8 +28,13 @@ fn query_result_word_blackline() {
     let run = |kind, text: &str| BlacklineRun {
         kind,
         text: text.to_owned(),
+        object: None,
     };
-    let paragraph = |change, runs| BlacklineParagraph { change, runs };
+    let paragraph = |change, runs| BlacklineParagraph {
+        change,
+        runs,
+        hidden: false,
+    };
     let answer = QueryResult::WordBlackline(WordBlackline {
         paragraphs: vec![
             paragraph(
@@ -55,6 +60,7 @@ fn query_result_word_blackline() {
             ),
         ],
         truncated: false,
+        notices: Vec::new(),
     });
     snapshot!("query_result_word_blackline", answer);
     round_trips(&answer);

@@ -96,7 +96,7 @@ test.each([
     expect(confirm?.textContent).toContain(
       pw(
         "en",
-        "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+        "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
       ),
     );
     expect(sentRetries()).toEqual([]);
@@ -114,7 +114,7 @@ test("admin_copy_missing: the note says not set up yet, why, the repair, and Get
   const note = inBody("np-note");
   expect(note?.dataset["cause"]).toBe("needs_set_up");
   for (const line of [
-    "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+    "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
     "The Safe workspace wasn't set up when Clauseo was installed.",
     "Run the Clauseo installer again to set up the Safe workspace.",
   ] as const)
@@ -123,7 +123,7 @@ test("admin_copy_missing: the note says not set up yet, why, the repair, and Get
   await h!.click(inBody("protection-installer"));
   await settle();
   expect(h!.transport.only("open_external")).toEqual([
-    { call: "open_external", url: installerPage(APP_VERSION) },
+    { call: "open_external", url: installerPage(APP_VERSION), alwaysAsk: true },
   ]);
   expect(h!.transport.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(sentRetries()).toEqual([]);
@@ -133,22 +133,22 @@ test.each([
   [
     "tool_missing",
     { not_protected: { cause: { blocked: { reason: "tool_missing" } } } } as Protection,
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
   ],
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
   ],
   [
     "a reason from a newer Clauseo",
     PROT.blockedNewer,
-    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    "Something on this computer stops the Safe workspace.",
   ],
 ] as const)(
   "a block, %s: the note says what stops it and its line, with no retry",
@@ -161,7 +161,7 @@ test.each([
     expect(note?.textContent).toContain(
       pw(
         "en",
-        "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+        "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
       ),
     );
     expect(note?.textContent).toContain(pw("en", line));
@@ -210,7 +210,7 @@ test("Add room: its confirm first; confirming sends one retry_protection, and a 
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
   );
   expect(sentRetries()).toEqual([]);

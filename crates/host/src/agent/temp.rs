@@ -30,6 +30,21 @@ pub(crate) fn temp_env(tmp: &Path, windows: bool) -> BTreeMap<OsString, OsString
         .collect()
 }
 
+/// What the host forces on an agent's launch for its run folder `run_root`: [`temp_env`], and
+/// for a Claude agent whose sandbox runs, its short temp folder `claude_tmp`
+/// (`agent::claude_tmp::claude_env`).
+pub(crate) fn session_env(
+    run_root: &Path,
+    claude_tmp: Option<&Path>,
+    windows: bool,
+) -> BTreeMap<OsString, OsString> {
+    let mut env = temp_env(&temp_dir(run_root), windows);
+    if let Some(dir) = claude_tmp.filter(|_| !windows) {
+        env.extend(super::claude_tmp::claude_env(dir));
+    }
+    env
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -50,6 +65,27 @@ mod tests {
                 Some(&tmp.clone().into_os_string())
             );
         }
+    }
+
+    #[test]
+    fn claude_gets_its_short_temp_folder_where_its_sandbox_runs() {
+        let run = PathBuf::from("/data/run/s1");
+        let short = PathBuf::from("/tmp/clsb-abcd1234");
+        let claude = session_env(&run, Some(&short), false);
+        assert_eq!(
+            claude.get(&OsString::from("CLAUDE_CODE_TMPDIR")),
+            Some(&short.clone().into_os_string())
+        );
+        assert_eq!(
+            claude.get(&OsString::from("TMPDIR")),
+            Some(&run.join("tmp").into_os_string())
+        );
+        assert_eq!(session_env(&run, None, false).len(), 1);
+        assert_eq!(
+            session_env(&run, Some(&short), true).len(),
+            2,
+            "TEMP and TMP only"
+        );
     }
 
     #[test]

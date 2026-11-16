@@ -1,0 +1,10 @@
+{"scenario":"own-turn-restart","description":"claude-agent-acp: prompt 1 ends, then the agent starts a turn of its own (text, then a tool call, no end); the host is killed while that turn is open","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-own-1","content":{"type":"text","text":"The build finished: 3 warnings."}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-own-1","title":"Read build.log","kind":"read","status":"completed"}}}

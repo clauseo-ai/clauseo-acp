@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::Mcp(clauseo_protocol::McpCommand::RemoveServer\n{ name: \"github\".to_owned(), })"
+---
+{
+  "mcp": {
+    "remove_server": {
+      "name": "github"
+    }
+  }
+}

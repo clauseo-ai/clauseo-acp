@@ -1,29 +1,35 @@
 //! Agent events: the rate cap per session, then each event by its origin. `Turn` of the live
-//! turn is logged; `Late` is dropped; `Idle` is logged unless it needs a turn; `Replay` is
-//! dropped when the log already has it and otherwise logged outside a turn, which for text and
-//! tool calls (they name a turn) means dropped with a warning.
+//! turn is logged; `Late` is dropped, but a session title still counts while its window is open
+//! (D-070); `Idle` is the live agent-started turn's, else logged, unless it needs a turn: text
+//! and new tool calls then wait for a turn of their own (`own_turn.rs`); `Replay` is dropped
+//! when the log already has it and otherwise logged outside a turn, which for text and tool
+//! calls (they name a turn) means dropped with a warning.
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
-    AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus,
-    ConfigOptionsReplaced, ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced,
-    StreamId, TextKind, ThreadId, ToolCallPatch, TurnId, UsageUpdated,
+    AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ConfigOptionsReplaced,
+    ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, StreamId, TextKind,
+    ThreadId, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
 use super::super::Actor;
 use super::agents::{Agent, Stage};
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, state, text};
+use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, own_turn, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
-use crate::sources::Sources;
 
+pub(super) mod gave_up;
 mod title;
+mod tools;
 mod warning;
+
+pub(super) use tools::known_tool;
+use tools::{tool_call, tool_update};
 
 /// Where an update belongs.
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +64,10 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
-            | AcpEvent::Warning { .. } => false,
+            | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. } => false,
         }
     {
         agent.replayed.push(*event);
@@ -111,7 +120,12 @@ pub(super) fn flush_rate(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+/// One event, past the rate cap. A request with no prompt in flight waits for a turn
+/// (`own_turn.rs`).
+pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+    let Some(event) = own_turn::hold_ask(actor, thread, event) else {
+        return;
+    };
     match event {
         AcpEvent::Update {
             session,
@@ -121,6 +135,7 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
         event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
             session,
+            origin: _,
             key,
             elicitation_id,
             acp_tool_call_id,
@@ -140,17 +155,45 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
                 agent.url_elicitations.remove(&elicitation_id);
             }
             super::super::limits::asking_changed(actor);
+            offline::ask_ended(actor, thread);
         }
         AcpEvent::Limit {
             session,
             origin,
             signal,
         } => asks::on_limit(actor, thread, &session, origin, &signal),
-        AcpEvent::Warning { session, warning } => {
-            let warning = warning::kind(&warning);
-            tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");
+        AcpEvent::TooLong { origin, kind, .. } => {
+            // The turn's end reads it with the answer's own (`end.rs`).
+            if let Origin::Turn(turn) = origin
+                && let Some(current) = current(actor, thread).filter(|current| current.turn == turn)
+            {
+                current.too_long = current.too_long.or(Some(kind));
+            }
         }
+        AcpEvent::ConnectionLost { origin, lost, .. } => {
+            offline::on_connection_lost(actor, thread, origin, &lost);
+        }
+        AcpEvent::Warning { session, warning } => warning::log(thread, session.as_ref(), &warning),
+        AcpEvent::UpdateSkipped {
+            session,
+            origin,
+            acp_tool_call_id,
+        } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
     }
+}
+
+/// A session title that comes late, after a cancel, still names the thread while its title
+/// window is open (D-070): a cancel that lands mid-answer marks the session late, and the agent's
+/// title for that answer may come after it. Other late updates stay dropped.
+fn late_title_counts(
+    actor: &mut Actor,
+    thread: ThreadId,
+    origin: Origin,
+    update: &AgentUpdate,
+) -> bool {
+    matches!(origin, Origin::Late(_))
+        && matches!(update, AgentUpdate::SessionTitle { .. })
+        && super::state::title_open(actor, thread, false)
 }
 
 /// Where an update of `origin` belongs, or `None` to drop it.
@@ -161,7 +204,9 @@ fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Contex
         }
         Origin::Late(_) => None,
         Origin::Replay => Some(Context::Outside { replay: true }),
-        Origin::Idle => Some(Context::Outside { replay: false }),
+        Origin::Idle => Some(
+            own_turn::live(actor, thread).map_or(Context::Outside { replay: false }, Context::Live),
+        ),
     }
 }
 
@@ -172,17 +217,34 @@ fn on_update(
     origin: Origin,
     update: AgentUpdate,
 ) {
-    let Some(context) = context(actor, thread, origin) else {
+    // A cancelled agent-started turn's output, with no prompt in flight (`own_turn/late.rs`).
+    if origin == Origin::Idle && own_turn::late_drops(actor, thread, &update) {
         return;
+    }
+    let context = match context(actor, thread, origin) {
+        Some(context) => context,
+        None if late_title_counts(actor, thread, origin, &update) => {
+            Context::Outside { replay: false }
+        }
+        None => return,
     };
     let update = match context {
         Context::Live(turn) => match offline::on_live(actor, thread, turn, session, update) {
             Some(update) => update,
             None => return,
         },
+        Context::Outside { .. } if offline::outside_note(thread, &update) => return,
+        Context::Outside { replay: false } if own_turn::holds(actor, thread, session, &update) => {
+            own_turn::hold(actor, thread, session, update);
+            return;
+        }
         Context::Outside { .. } => update,
     };
+    let ends = own_turn::ends_turn(&update);
     log_update(actor, thread, session, context, update);
+    if ends && let Context::Live(turn) = context {
+        own_turn::usage_ended(actor, thread, turn);
+    }
 }
 
 /// A live update of `turn` the offline watch held back, logged now (`offline.rs`).
@@ -230,7 +292,7 @@ fn log_update(
         | AgentUpdate::Notice { .. }
         | AgentUpdate::CompactionStarted { .. }
         | AgentUpdate::CompactionEnded { .. }
-        | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update),
+        | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update, context),
     };
     if let Err(error) = done {
         tracing::warn!(%thread, error = %Cause(&error), "an agent update was not logged");
@@ -343,157 +405,13 @@ fn message_id(
     Ok(id)
 }
 
-fn tool_call(
-    actor: &mut Actor,
-    thread: ThreadId,
-    context: Context,
-    session: &AgentSessionId,
-    mut call: clauseo_acp::ToolCall,
-) -> Result<(), Error> {
-    let known = known_tool(actor, thread, session, &call.acp_id);
-    let Context::Live(turn) = context else {
-        if known.is_none() {
-            tracing::warn!(%thread, ?context, "a tool call outside a turn was dropped");
-        }
-        return Ok(());
-    };
-    if known.is_some() {
-        tracing::debug!(%thread, acp_id = %call.acp_id, "a tool call started twice");
-        return Ok(());
-    }
-    if let Some(current) = current(actor, thread) {
-        // The turn's paths stay in memory, so they take the call as the agent sent it; what is
-        // logged (the sources and the build) takes it with the withheld values scrubbed.
-        current.tool_paths.note(&call.locations, &call.content);
-        current.withheld.scrub_call(&mut call);
-    }
-    let now = actor.clock.now();
-    let id = actor.ids.mint(now.wall)?;
-    let case_law = source_of(actor, thread, |sources, agent| {
-        sources.case_law.started(now.mono, turn, id, agent, &call)
-    });
-    let source = if case_law.is_some() {
-        None
-    } else {
-        source_of(actor, thread, |sources, agent| {
-            sources.started(turn, id, agent, &call)
-        })
-    };
-    let (built, _fields) = build::tool_call_started(turn, id, call);
-    commit(actor, thread, [built.value.into()], built.blobs)?;
-    sourced(
-        actor,
-        thread,
-        source.into_iter().chain(case_law.into_iter().flatten()),
-    )
-}
-
-/// What a tool call adds to the thread's sources (`sources.rs`), asked of the thread's state
-/// with the thread's agent.
-fn source_of<T>(
-    actor: &mut Actor,
-    thread: ThreadId,
-    record: impl FnOnce(&mut Sources, &AgentId) -> Option<T>,
-) -> Option<T> {
-    let agent = actor.check_thread(thread).ok()?.row.agent.clone();
-    record(&mut state(actor, thread)?.sources, &agent)
-}
-
-/// Logs what a tool call added to the thread's sources, after the call's own event.
-fn sourced(
-    actor: &mut Actor,
-    thread: ThreadId,
-    source: impl IntoIterator<Item = DomainEvent>,
-) -> Result<(), Error> {
-    let events: Vec<DomainEvent> = source.into_iter().collect();
-    if events.is_empty() {
-        return Ok(());
-    }
-    let hint = events.iter().any(|event| {
-        matches!(event, DomainEvent::WebSearchRecorded(record) if crate::connectors::hint::fires(record))
-    });
-    if hint && let Some(current) = current(actor, thread) {
-        current.case_law_hint = crate::connectors::hint::TurnLooks::CaseLaw;
-    }
-    commit(actor, thread, events, Vec::new())
-}
-
-fn tool_update(
-    actor: &mut Actor,
-    thread: ThreadId,
-    context: Context,
-    session: &AgentSessionId,
-    acp_id: &str,
-    mut patch: ToolCallPatch,
-) -> Result<(), Error> {
-    let found = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.sent.tool_call(session, acp_id))
-        .map(|(id, tool)| (id, tool.fields));
-    let Some((id, fields)) = found else {
-        tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
-        return Ok(());
-    };
-    if matches!(context, Context::Outside { replay: true }) {
-        return Ok(());
-    }
-    // The turn's paths stay in memory, so they take the patch as the agent sent it. The
-    // elicitation values withheld from this call (`withheld.rs`) then go before anything
-    // logged reads it: the sources, and `build.rs`'s inline or blob decision.
-    if let Some(current) = current(actor, thread) {
-        if matches!(context, Context::Live(_)) {
-            let locations = patch.locations.as_deref().unwrap_or_default();
-            let content = patch.content.as_deref().unwrap_or_default();
-            current.tool_paths.note(locations, content);
-        }
-        current.withheld.scrub_patch(acp_id, &mut patch);
-    }
-    let mut source = Vec::new();
-    match context {
-        Context::Outside { replay: true } => return Ok(()),
-        Context::Live(turn) => {
-            let now = actor.now().mono;
-            let case_law = source_of(actor, thread, |sources, agent| {
-                sources.case_law.updated(now, turn, acp_id, agent, &patch)
-            });
-            source = match case_law {
-                Some(records) => records,
-                None => source_of(actor, thread, |sources, agent| {
-                    sources.updated(turn, acp_id, agent, &patch)
-                })
-                .into_iter()
-                .collect(),
-            };
-        }
-        Context::Outside { replay: false } => {}
-    }
-    let (built, _fields) = build::tool_call_updated(id, patch, fields);
-    commit(actor, thread, [built.value.into()], built.blobs)?;
-    sourced(actor, thread, source)
-}
-
-/// The tool call ACP knows as `acp_id` in `session`, if the host has it.
-pub(super) fn known_tool(
-    actor: &mut Actor,
-    thread: ThreadId,
-    session: &AgentSessionId,
-    acp_id: &str,
-) -> Option<clauseo_protocol::ToolCallId> {
-    let logged = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.sent.tool_call(session, acp_id))
-        .map(|(id, _)| id);
-    logged.or_else(|| {
-        agent(actor, thread)?
-            .replay
-            .as_ref()?
-            .tool_call(session, acp_id)
-            .map(|(id, _)| id)
-    })
-}
-
 /// An update that needs no turn: logged as its event.
-fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(), Error> {
+fn plain(
+    actor: &mut Actor,
+    thread: ThreadId,
+    update: AgentUpdate,
+    context: Context,
+) -> Result<(), Error> {
     let event: DomainEvent = match update {
         AgentUpdate::Plan(entries) => PlanReplaced { entries }.into(),
         AgentUpdate::Commands(commands) => CommandsAvailable {
@@ -518,7 +436,9 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
             kind: None,
         }
         .into(),
-        AgentUpdate::SessionTitle { title } => return title::changed(actor, thread, title),
+        AgentUpdate::SessionTitle { title } => {
+            return title::changed(actor, thread, title, context);
+        }
         AgentUpdate::CompactionStarted { acp_id } => {
             if let Some(agent) = agent(actor, thread) {
                 agent.compaction.remove(&acp_id);

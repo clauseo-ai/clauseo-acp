@@ -5,6 +5,7 @@ import type {
   FileChange,
   FileChoice,
   RestorePreview,
+  SkippedFile,
   StepEntry,
   ThreadId,
   ThreadStatus,
@@ -16,8 +17,16 @@ import type { Timeline } from "./timeline.ts";
  * back at a version, comparing it with the folder now or not. */
 export type Look = { kind: "now"; id?: string } | { kind: "back"; id: string; comparing: boolean };
 
-/** An undo of one turn's change, with the lawyer's choice for each of its files. */
-type UndoAsk = { act: "undo"; id: string; choices: ReadonlyMap<string, FileChoice> };
+/** An undo of one turn's change, with the lawyer's choice for each of its files; edited: the files the host says changed
+ * since the turn's version (preview_undo, as the thread's Undo asks it), once it answers. */
+type UndoAsk = {
+  act: "undo";
+  id: string;
+  choices: ReadonlyMap<string, FileChoice>;
+  edited?: ReadonlySet<string>;
+  /** The host hasn't answered yet: Undo waits. */
+  checking?: boolean;
+};
 /** A restore of the matter to a version, with what restoring it writes now; undoes: the restore it takes back. */
 type RestoreAsk = { act: "restore"; id: string; preview: RestorePreview; undoes: string | null };
 
@@ -53,7 +62,14 @@ export function inRowOrder(t: Timeline, id: string, paths: readonly string[]): s
 export type Done =
   | { kind: "restored"; to: string; n: number; outcome: Outcome }
   | { kind: "undidRestore"; at: Timestamp }
-  | { kind: "undidChange"; of: Timestamp; papers: readonly string[] };
+  | {
+      kind: "undidChange";
+      of: Timestamp;
+      papers: readonly string[];
+      /**  The files the lawyer chose to undo that stay as they are: Clauseo had no earlier copy of
+       * them. */
+      kept?: readonly SkippedFile[];
+    };
 
 /** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
  * that found nothing to write answers with a version that was already there, and has no marker. */
@@ -165,6 +181,35 @@ export function keepChangedSince(
     next.set(path, "keep");
   }
   return next;
+}
+
+/** The undo dialog for version `id` as it opens: Undo waits while the host checks what changed since. */
+export const undoAsk = (id: string, choices: ReadonlyMap<string, FileChoice>): Ask => ({
+  act: "undo",
+  id,
+  choices,
+  stage: "confirm",
+  failed: null,
+  checking: true,
+});
+
+/** The undo dialog for version `id` once the host answered which files changed since that version (edited; null: it
+ * refused or there was no conversation to ask): each file named is kept, unless the lawyer chose for it (`chosen`), as
+ * a file a newer version changed is. A file the turn added and the lawyer edited after it would otherwise go with the
+ * lawyer's edits. Undo waits for the answer (checking); with none, each file's flag decides, as in the thread. Null when
+ * the dialog is no longer that undo's. */
+export function keepEdited(
+  ask: Ask | null,
+  id: string,
+  edited: readonly string[] | null,
+  chosen: ReadonlySet<string>,
+): Ask | null {
+  if (ask?.act !== "undo" || ask.id !== id) return null;
+  if (edited === null || ask.stage !== "confirm") return { ...ask, checking: false };
+  const choices = new Map(ask.choices);
+  for (const path of edited)
+    if (!chosen.has(path) && choices.get(path) === "undo") choices.set(path, "keep");
+  return { ...ask, choices, edited: new Set(edited), checking: false };
 }
 
 /** The files of a step changed again by a later version, by path, with the newest version that did. */

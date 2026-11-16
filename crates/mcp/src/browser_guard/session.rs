@@ -2,15 +2,17 @@
 //!
 //! Nothing runs at the guard's start but the guard (and on Unix its reaper). The agent's first
 //! `tools/call` starts the browser ([`start`], from the agent pump in `relay/pumps.rs`, under the
-//! state's lock): the guard waits up to [`PORT_WAIT`] for the claimed debugging port to be free
-//! (the run an MCP reconnect replaced may still be ending its Chrome there), starts Chrome on it
-//! with the run's profile, kept from an earlier start, then agent-browser connected to it.
+//! state's lock): the guard starts the browser over its `DevTools` pipe with the run's profile,
+//! kept from an earlier start (`session/browser.rs`), then agent-browser, given the relay's
+//! endpoint and let in by the relay's peer check (route 2, decision record 0060).
 //!
-//! [`stop`] ends both as the guard's exit does: on Windows the job; on Unix agent-browser's
+//! [`stop`] ends both as the guard's exit does: on Windows the job, waited out and replaced by a
+//! new one for the next start (`job.rs`); on Unix agent-browser's
 //! process group, the run's daemon (`reaper::kill_daemon`) and Chrome's group, each reaped here
 //! and told to the reaper. The profile stays until the guard exits. The relay stops the browser
-//! after [`IDLE_STOP`] with no tool call in flight or completed, when Chrome dies the first time
-//! (the next call starts it again), and when the guard ends.
+//! after [`IDLE_STOP`] with no tool call in flight or completed, once the agent's
+//! `agent_browser_close` is answered, when Chrome dies the first time (the next call starts it
+//! again), and when the guard ends.
 //!
 //! Each start and each stop moves the generation on. What an incarnation's threads report
 //! carries its generation, and the relay ignores what an ended one reports, so a child the guard
@@ -19,7 +21,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, BufReader};
-use std::net::{Ipv4Addr, TcpListener};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::atomic::AtomicBool;
@@ -29,18 +30,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::chrome::{self, Chrome, Spec};
-use super::downloads::Held;
-use super::parent::{self, Parent};
+use super::chrome::{self, Chrome};
+use super::downloads::{Held, Saved};
+#[cfg(windows)]
+use super::note;
+use super::parent::Parent;
 use super::port_file::Expected;
 use super::record::{self, ChromeState};
 use super::relay::lines::{Out, ToChild};
 use super::relay::{Event, end_group, pumps, send};
-use super::{Child, ChildStdin, PARENT_GONE, env, note, now, pause};
+use super::{Child, ChildStdin, env, now};
 
 /// How long the browser runs with no tool call in flight or completed before the guard stops
 /// it: agent-browser's own idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS` (`env::FIXED`), so the
-/// daemon's end and the guard's stop come together rather than one undoing the other.
+/// daemon's end and the guard's stop come together rather than one undoing the other. An agent
+/// that closes the browser (`agent_browser_close`, `relay.rs`) stops it sooner.
 pub(crate) const IDLE_STOP: Duration = Duration::from_secs(600);
 /// Tests only (the `test-support` feature, never in a shipped build): the idle stop in
 /// milliseconds, read from the guard's own environment.
@@ -50,8 +54,39 @@ pub(crate) const IDLE_STOP_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_IDLE_MS";
 /// [`chrome::START_WAIT`] in milliseconds, read from the guard's own environment.
 #[cfg(feature = "test-support")]
 const START_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_START_MS";
-/// How long a start waits for the claimed debugging port to be free.
-pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
+
+/// Why a start failed: its own kind when Chrome's sandbox could not start, so the agent's call
+/// gets [`chrome::sandbox::REFUSAL`] and the host can tell it apart later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StartError {
+    /// Chrome's sandbox could not start; what Chrome printed (the fixed part, no path), or
+    /// `None` when the guard refused before starting it (Linux, as root).
+    Sandbox(Option<&'static str>),
+    /// Anything else; the reason.
+    Other(String),
+}
+
+impl From<String> for StartError {
+    fn from(reason: String) -> Self {
+        Self::Other(reason)
+    }
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sandbox(Some(said)) => write!(
+                f,
+                "Chrome's sandbox could not start (Chrome said \"{said}\"); the guard never runs \
+                 Chrome without it"
+            ),
+            Self::Sandbox(None) => f.write_str(
+                "Chrome's sandbox cannot start as root; the guard never runs Chrome without it",
+            ),
+            Self::Other(reason) => f.write_str(reason),
+        }
+    }
+}
 
 /// The idle stop: [`IDLE_STOP`], or in a `test-support` build the test's.
 pub(crate) fn idle_stop() -> Duration {
@@ -65,8 +100,8 @@ pub(crate) fn idle_stop() -> Duration {
     IDLE_STOP
 }
 
-/// How long a start waits for Chrome's endpoint: [`chrome::START_WAIT`], or in a `test-support`
-/// build the test's.
+/// How long a start waits for the browser's answer on its pipe: [`chrome::START_WAIT`], or in a
+/// `test-support` build the test's.
 fn start_wait() -> Duration {
     #[cfg(feature = "test-support")]
     if let Some(ms) = std::env::var(START_WAIT_FOR_TESTS)
@@ -83,10 +118,11 @@ pub(crate) struct Launcher {
     /// `AGENT_BROWSER_EXECUTABLE_PATH`.
     pub(crate) executable: PathBuf,
     pub(crate) cwd: PathBuf,
+    /// The downloads folder (the guard's `--downloads`), which the mover delivers to.
+    pub(crate) downloads: PathBuf,
     /// The run's id and profile (`runs.rs`), kept from one start to the next.
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
-    pub(crate) cdp_port: u16,
     /// `AGENT_BROWSER_PROXY`, if the host gave one.
     pub(crate) proxy: Option<OsString>,
     /// [`env::chrome_env`].
@@ -109,6 +145,32 @@ pub(crate) struct Launcher {
     pub(crate) reaper: super::reaper::Teller,
     #[cfg(windows)]
     pub(crate) job: super::job::Job,
+    /// The browser that started last, tried first next time (`session/browser.rs`).
+    pub(crate) started_with: Mutex<Option<PathBuf>>,
+}
+
+/// Why a start failed: the guard's line (its own kind for Chrome's sandbox), and words for the
+/// agent's tool call beyond the plain "could not start" (on Windows, when no browser is installed
+/// or every one is blocked).
+#[derive(Debug)]
+pub(crate) struct StartFailure {
+    pub(crate) reason: StartError,
+    pub(crate) agent_note: Option<&'static str>,
+}
+
+impl From<StartError> for StartFailure {
+    fn from(reason: StartError) -> Self {
+        StartFailure {
+            reason,
+            agent_note: None,
+        }
+    }
+}
+
+impl From<String> for StartFailure {
+    fn from(reason: String) -> Self {
+        StartError::Other(reason).into()
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -118,9 +180,10 @@ impl Launcher {
         Launcher {
             executable: dir.join("chrome"),
             cwd: dir.to_owned(),
+            downloads: dir.join("downloads"),
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
-            cdp_port: 61_101,
+            started_with: Mutex::new(None),
             proxy: Some(OsString::from("http://127.0.0.1:9")),
             chrome_env: BTreeMap::new(),
             program: dir.join("agent-browser"),
@@ -149,6 +212,9 @@ pub(crate) struct Shared {
     /// The downloads Chrome holds for confirmation, which the agent has not been told about yet
     /// (`downloads/held.rs`); kept across starts.
     pub(crate) held: Arc<Held>,
+    /// The files the mover delivered, which the agent has not been told about yet
+    /// (`downloads/saved.rs`); kept across starts.
+    pub(crate) saved: Arc<Saved>,
 }
 
 impl Shared {
@@ -159,8 +225,11 @@ impl Shared {
                 generation: 0,
                 live: None,
                 in_flight: Vec::new(),
+                sent: 0,
                 idle_since: now(),
                 restarted: false,
+                domain_restarts: 0,
+                sandbox_refused: None,
                 closing: false,
                 ended: false,
             }),
@@ -168,6 +237,7 @@ impl Shared {
             closing: AtomicBool::new(false),
             oneshot: Mutex::new(None),
             held: Arc::default(),
+            saved: Arc::default(),
         }
     }
 }
@@ -178,18 +248,57 @@ pub(crate) struct State {
     pub(crate) generation: u64,
     /// Chrome and agent-browser, while they run.
     pub(crate) live: Option<Live>,
-    /// The requests sent to the running agent-browser and not yet answered: each id, and
-    /// whether it is a tool call.
-    in_flight: Vec<(Value, bool)>,
+    /// The requests sent to the running agent-browser and not yet answered: each id, and what
+    /// it is.
+    in_flight: Vec<(Value, Request)>,
+    /// How many requests have gone to agent-browser in the guard's life: a close's stop is
+    /// skipped once another has gone since its reply was taken (`relay.rs`).
+    sent: u64,
     /// When the browser started or last answered a tool call.
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
     pub(crate) restarted: bool,
+    /// How often the guard has stopped the browser for agent-browser's refusal of
+    /// `--allowed-domains` (`relay/pumps.rs`): at most once per run.
+    pub(crate) domain_restarts: u32,
+    /// Set once a running Chrome said its sandbox cannot start (`relay.rs`): no browser starts
+    /// again, and each later call gets the sandbox's refusal; what Chrome said.
+    pub(crate) sandbox_refused: Option<&'static str>,
     /// Set once the agent has closed stdin: nothing starts or idles any more.
     pub(crate) closing: bool,
     /// Set by the relay's end, under this lock, before its final [`stop`]: from then on no
     /// request starts the browser or a one-shot agent-browser; each gets an error instead.
     pub(crate) ended: bool,
+}
+
+/// What a request sent to the running agent-browser is, for its reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Request {
+    /// A tool call but those below: its reply carries the download notes.
+    Call,
+    /// An `agent_browser_open` call: its reply, when the URL turned into a download, says the
+    /// file was saved (`downloads/saved.rs`).
+    Open,
+    /// An `agent_browser_tools_profiles` call: its reply loses the mention of JavaScript eval
+    /// (`filter::without_eval`).
+    Profiles,
+    /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
+    Close,
+    /// `tools/list`: its reply loses the tools and argument keys the guard refuses
+    /// (`filter::advertised_tools`).
+    List,
+    /// Any other request (`ping`), relayed as read.
+    Other,
+}
+
+impl Request {
+    /// Whether it is a tool call, whose reply restarts the idle time.
+    pub(crate) fn is_call(self) -> bool {
+        matches!(
+            self,
+            Request::Call | Request::Close | Request::Open | Request::Profiles
+        )
+    }
 }
 
 /// The running Chrome and agent-browser.
@@ -209,21 +318,38 @@ pub(crate) struct Stopped {
 
 impl State {
     /// Notes request `id` sent to the running agent-browser.
-    pub(crate) fn sent(&mut self, id: Value, call: bool) {
-        self.in_flight.push((id, call));
+    pub(crate) fn sent(&mut self, id: Value, request: Request) {
+        self.in_flight.push((id, request));
+        self.sent += 1;
     }
 
-    /// Takes the reply to `id` off the list, and returns whether it answers a tool call. A tool
-    /// call's reply restarts the idle time.
-    pub(crate) fn answered(&mut self, id: &Value) -> bool {
-        let Some(at) = self.in_flight.iter().position(|(sent, _)| sent == id) else {
-            return false;
-        };
-        let (_, call) = self.in_flight.remove(at);
-        if call {
+    /// How many requests have gone to agent-browser so far.
+    pub(crate) fn sent_count(&self) -> u64 {
+        self.sent
+    }
+
+    /// Takes the reply to `id` off the list, and returns what it answers (`None` for no request
+    /// in flight). A tool call's reply restarts the idle time.
+    pub(crate) fn answered(&mut self, id: &Value) -> Option<Request> {
+        let at = self.in_flight.iter().position(|(sent, _)| sent == id)?;
+        let (_, request) = self.in_flight.remove(at);
+        if request.is_call() {
             self.idle_since = now();
         }
-        call
+        Some(request)
+    }
+
+    /// Whether the browser runs with nothing in flight and the agent still there.
+    pub(crate) fn quiet(&self) -> bool {
+        self.live.is_some() && self.in_flight.is_empty() && !self.closing
+    }
+
+    /// Whether the stop after an `agent_browser_close` reply may run (`relay.rs`): the browser
+    /// is [`State::quiet`] and no request has gone to agent-browser since the close's reply was
+    /// taken, when [`State::sent_count`] read `sent`. A call sent and answered in between would
+    /// leave the browser quiet, and the stop would end the Chrome that call just used.
+    pub(crate) fn close_may_stop(&self, sent: u64) -> bool {
+        self.quiet() && self.sent == sent
     }
 
     /// The ids still unanswered, which the guard now answers itself.
@@ -234,7 +360,7 @@ impl State {
     /// How long until the browser has idled for `idle`: `None` unless it runs with nothing in
     /// flight and the agent is still there.
     pub(crate) fn idle_left(&self, idle: Duration) -> Option<Duration> {
-        (self.live.is_some() && self.in_flight.is_empty() && !self.closing)
+        self.quiet()
             .then(|| idle.saturating_sub(self.idle_since.elapsed()))
     }
 }
@@ -247,7 +373,11 @@ pub(crate) fn start(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), StartFailure> {
+    // A Chrome whose sandbox failed is never started again, nor any other browser.
+    if let Some(said) = state.sandbox_refused {
+        return Err(StartError::Sandbox(Some(said)).into());
+    }
     let started = start_both(shared, state, parent, events);
     if started.is_err() {
         let launcher = &shared.launcher;
@@ -262,46 +392,9 @@ fn start_both(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), StartFailure> {
     let launcher = &shared.launcher;
-    wait_for_port(launcher.cdp_port, parent)?;
-    let spec = Spec {
-        executable: &launcher.executable,
-        cwd: &launcher.cwd,
-        profile: &launcher.profile,
-        cdp_port: launcher.cdp_port,
-        proxy: launcher.proxy.as_deref(),
-        env: &launcher.chrome_env,
-    };
-    record::write_state(&launcher.cwd, &launcher.run, &ChromeState::Starting);
-    let mut chrome = chrome::launch(
-        &spec,
-        #[cfg(windows)]
-        &launcher.job,
-    )?;
-    record::write_state(&launcher.cwd, &launcher.run, &chrome.recorded());
-    // Before the wait for Chrome's endpoint: a guard killed during it leaves the reaper to end
-    // Chrome's group. Once the guard reaps Chrome, the reaper leaves its pid alone.
-    #[cfg(unix)]
-    {
-        launcher.reaper.say(&format!("chrome {}", chrome.pid()));
-        let teller = launcher.reaper.clone();
-        chrome.on_reap(move || teller.say("reaped chrome"));
-    }
-    note(&format!(
-        "Chrome started; waiting for it to listen on the claimed debugging port {}",
-        launcher.cdp_port
-    ));
-    let endpoint = chrome.endpoint(
-        launcher.cdp_port,
-        start_wait(),
-        parent,
-        Arc::clone(&shared.held),
-    )?;
-    note(&format!(
-        "Chrome is listening on the claimed debugging port {}",
-        launcher.cdp_port
-    ));
+    let (mut chrome, endpoint) = browser::start_browser(shared, parent)?;
     let mut env = launcher.env.clone();
     env::set_cdp(&mut env, &endpoint);
     let cannot_run =
@@ -317,17 +410,23 @@ fn start_both(
     .map_err(cannot_run)?;
     #[cfg(unix)]
     launcher.reaper.say(&format!("agent {}", agent.id()));
+    // agent-browser and its descendants (its daemon) may connect to the relay; nothing else.
+    chrome.allow_client(agent.id());
     let (Some(stdin), Some(stdout)) = (agent.stdin.take(), agent.stdout.take()) else {
         drop(end_agent(launcher, &mut agent));
-        return Err(cannot_run(io::Error::other(
-            "its stdin or stdout is not piped",
-        )));
+        return Err(cannot_run(io::Error::other("its stdin or stdout is not piped")).into());
     };
     state.generation += 1;
     let generation = state.generation;
     {
         let events = events.clone();
         chrome.watch(move || send(&events, Event::ChromeExited(generation)));
+    }
+    {
+        let events = events.clone();
+        chrome.on_sandbox_failure(move |said| {
+            send(&events, Event::SandboxFailed(generation, said));
+        });
     }
     {
         let (shared, events) = (Arc::clone(shared), events.clone());
@@ -357,6 +456,8 @@ pub(crate) fn stop(launcher: &Launcher, state: &mut State) -> Option<Stopped> {
     // Before anything here ends Chrome (the job's end on Windows): a Chrome gone now died by
     // itself.
     let chrome_died = chrome.exited();
+    // Returns once the job's processes are gone (their files closed), and leaves a new job for
+    // the next start, which Windows would refuse in the ended one (`job.rs`).
     #[cfg(windows)]
     if !launcher.job.kill() {
         note("Windows refused to end the guard's job; ending agent-browser and Chrome alone");
@@ -385,27 +486,29 @@ pub(crate) fn end_agent(
     agent.wait()
 }
 
-/// Returns once nothing listens on the claimed debugging port (a bind there succeeds), at most
-/// [`PORT_WAIT`], looking at the guard's parent every [`parent::POLL`].
-fn wait_for_port(port: u16, parent: &Parent) -> Result<(), String> {
-    let polls = PORT_WAIT.as_millis() / parent::POLL.as_millis();
-    for poll in 0..=polls {
-        if TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok() {
-            return Ok(());
-        }
-        if poll == 0 {
-            note(&format!(
-                "the claimed debugging port {port} is taken; waiting up to {} s for it",
-                PORT_WAIT.as_secs()
-            ));
-        }
-        if parent.gone() {
-            return Err(PARENT_GONE.to_owned());
-        }
-        pause(parent::POLL);
+mod browser;
+
+#[cfg(all(test, unix))]
+mod tests {
+    use serde_json::json;
+
+    use super::{Request, Shared};
+
+    /// A call sent and answered after a close's reply was taken leaves nothing in flight, but
+    /// moves the count on, so the close's stop is skipped (`relay.rs`'s `stop_after_close`):
+    /// without the count the stop would end the Chrome that call had just used.
+    #[test]
+    fn a_call_answered_after_the_close_moves_the_count_on() {
+        let dir = std::env::temp_dir();
+        let shared = Shared::new(super::Launcher::for_tests(&dir, Vec::new()));
+        let mut state = shared.state.lock().unwrap();
+        state.sent(json!("close"), Request::Close);
+        assert_eq!(state.answered(&json!("close")), Some(Request::Close));
+        let at_close = state.sent_count();
+        assert_eq!(state.in_flight.len(), 0);
+        state.sent(json!("open"), Request::Call);
+        assert_eq!(state.answered(&json!("open")), Some(Request::Call));
+        assert_eq!(state.in_flight.len(), 0, "the open is answered");
+        assert_ne!(state.sent_count(), at_close, "the open went unnoticed");
     }
-    Err(format!(
-        "the claimed debugging port {port} stayed taken for {} s",
-        PORT_WAIT.as_secs()
-    ))
 }

@@ -43,6 +43,7 @@ import type {
   ViewPosition,
 } from "./protocol.ts";
 import { Lane } from "./lane.ts";
+import { FullScreenFeed, type FullScreenSource } from "./full-screen-feed.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import type { SetupFeed } from "./setup-feed.ts";
 
@@ -65,6 +66,45 @@ function isBackground(command: CommandEnvelope): boolean {
   return kind !== undefined && BACKGROUND_COMMANDS.has(kind);
 }
 
+/** The app events the transport passes to `onAppEvent` listeners, one HostEvent key each; OTHER_EVENTS has the rest. */
+export const APP_EVENTS = [
+  "settings_changed",
+  "matters_changed",
+  "threads_changed",
+  "browser_install",
+  "browser_policy",
+  "connectors_changed",
+  "case_law_hint",
+  "folder_scanned",
+  "protection_changed",
+  "site_blocked",
+  "papers_changed",
+  "update_changed",
+  "protection_view_changed",
+  "mcp_tools_changed",
+] as const;
+
+/** The HostEvent keys `APP_EVENTS` leaves out: each is handled by another branch of the channel's receive callback, or
+ * dropped on purpose. */
+export const OTHER_EVENTS = [
+  "patches", // a view subscription's batch: the stream subscribers, in the view branch
+  "limits_view_changed", // the whole limits view: LimitsFeed, in its branch
+  "events", // an event subscription's envelopes: no window subscribes to one, so it falls through unheard
+  "caught_up", // an event subscription's end of replay: likewise falls through unheard
+  "account_limits_changed", // dropped on purpose: no UI reads it
+] as const;
+
+// Compile-time guard: every HostEvent key is listed, every listed key is a HostEvent key, and no key is listed twice.
+// Adding a HostEvent variant (bindings.ts) fails `tsc` until it is listed. A failing line names its key in the error.
+type KeyOf<U> = U extends unknown ? keyof U : never;
+type Listed = (typeof APP_EVENTS)[number] | (typeof OTHER_EVENTS)[number];
+type Unlisted = Exclude<KeyOf<HostEvent> | Listed, KeyOf<HostEvent> & Listed>;
+type Doubled = Extract<(typeof APP_EVENTS)[number], (typeof OTHER_EVENTS)[number]>;
+/** `true` while the keys of HostEvent and the two lists agree; otherwise the assignment fails here, naming the keys. */
+export const everyEventListed: [Unlisted] extends [never] ? true : Unlisted = true;
+/** `true` while no key is in both lists; otherwise the assignment fails here, naming the key. */
+export const noEventListedTwice: [Doubled] extends [never] ? true : Doubled = true;
+
 type Answer<T> = { status: "ok"; data: T } | { status: "error"; error: unknown };
 
 /** One command's answer as a promise of its data. An error rejects as a `HostError`: the host's own, or `internal` for
@@ -86,7 +126,9 @@ export type TauriOptions = {
   nextFrame?: (run: () => void) => void;
 };
 
-export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
+export class TauriTransport
+  implements HostTransport, AppFeedSource, LimitsSource, FullScreenSource
+{
   readonly kind = "tauri";
   /** UC: whether the desktop carries the protection wire (settings/sections/workspace-shown.ts). Off: the Safe
    * workspace is parked for launch (Rohan, 2026-11-09), so Settings › Safe workspace and the first-run step stay
@@ -94,6 +136,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   readonly protectionWire = false;
   /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
   readonly updateWire = true;
+  /** The desktop answers `last_exit` (room/crash-notice.tsx). */
+  readonly lastExitWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
@@ -125,6 +169,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   #appReady: Promise<void> | null = null;
   /** The limits view the channel carries from `open_stream` on (R16): the last one, and its listeners. */
   readonly #limits: LimitsFeed;
+  /** Whether the main window is in the OS's own full screen, as the desktop says on the app feed: the last value, and
+   * its listeners. */
+  readonly #fullScreen: FullScreenFeed;
   /** The install and sign-in events `subscribe_app` brings (0048): the last of each, and their listeners. Loaded on
    * the first `onSetup` or setup message (setup-feed.ts lives outside the first load); null until then. */
   #setup: SetupFeed | null = null;
@@ -139,6 +186,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     this.#warn = warn;
     this.#nextFrame = options.nextFrame ?? ((run) => requestAnimationFrame(() => run()));
     this.#limits = new LimitsFeed(warn);
+    this.#fullScreen = new FullScreenFeed(warn);
     this.#subs = new Subscriptions(
       {
         subscribe: async (stream, after) => {
@@ -157,7 +205,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
         // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
         // under an answer (room/thread/sources.tsx) come from the view's tool calls, each one's `web`.
         const failed = streamFailedOf(event);
-        if ("setup" in (event as object)) {
+        if (this.#fullScreen.take(event)) {
+          // desktop's own, on the app feed: no stream and no position, processed at once
+        } else if ("setup" in (event as object)) {
           // no stream and no position: processed at once, as settings_changed is
           if (this.#setup !== null) this.#setup.receive(event);
           else {
@@ -174,25 +224,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           if (view === null) warn("limits_view_changed carried no view");
           else this.#limits.deliver(view);
         } else if (
-          ("settings_changed" in event && event.settings_changed !== undefined) ||
-          ("matters_changed" in event && event.matters_changed !== undefined) ||
-          ("threads_changed" in event && event.threads_changed !== undefined) ||
-          ("browser_install" in event && event.browser_install !== undefined) ||
-          ("browser_policy" in event && event.browser_policy !== undefined) ||
-          ("connectors_changed" in event && event.connectors_changed !== undefined) ||
-          ("case_law_hint" in event && event.case_law_hint !== undefined) ||
-          ("folder_scanned" in event && event.folder_scanned !== undefined) ||
-          ("protection_changed" in event && event.protection_changed !== undefined) ||
-          ("site_blocked" in event && event.site_blocked !== undefined) ||
-          ("papers_changed" in event && event.papers_changed !== undefined) ||
-          ("update_changed" in event && event.update_changed !== undefined) ||
-          // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
-          Object.hasOwn(event, "protection_view_changed")
+          APP_EVENTS.some(
+            (key) =>
+              Object.hasOwn(event, key) && (event as Record<string, unknown>)[key] !== undefined,
+          )
         ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
             try {
-              // protection_view_changed (R17 PR-B) isn't in HostEvent yet; the room reads it loosely
               listener(event as HostEvent);
             } catch (error) {
               warn(`an app event listener threw: ${String(error)}`);
@@ -215,8 +254,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       // a channel opened again (after a failed open) carries no app events until subscribed again
       opened.then(
         () => {
-          if ((this.#appListeners.size > 0 || this.#setupListeners > 0) && this.#appReady === null)
-            this.#subscribeApp().catch(() => {});
+          const listening =
+            this.#appListeners.size > 0 ||
+            this.#setupListeners > 0 ||
+            this.#fullScreen.listeners > 0;
+          if (listening && this.#appReady === null) this.#subscribeApp().catch(() => {});
         },
         () => {},
       );
@@ -260,10 +302,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
-   * `browser_install`, `browser_policy`, `connectors_changed`, `case_law_hint`,
-   * `folder_scanned`, `protection_changed`, `site_blocked`, `update_changed`). The first listener
-   * subscribes the window's channel to
+  /** Hears each app-wide event (`APP_EVENTS`). The first listener subscribes the window's channel to
    * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
@@ -279,6 +318,15 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
    * carries them from `open_stream` on, so nothing is subscribed here. */
   onLimits(listener: (view: LimitsView) => void): () => void {
     return this.#limits.onLimits(listener);
+  }
+
+  /** Hears whether the main window is in the OS's own full screen, as the desktop reads it; one that comes after the
+   * first value hears the last one at once. The desktop sends it on the app feed, which the first listener asks for. */
+  onFullScreen(listener: (fullScreen: boolean) => void): () => void {
+    const stop = this.#fullScreen.onFullScreen(listener);
+    // a refusal is warned in #subscribeApp; the next listener, or the next open, tries again
+    this.#subscribeApp().catch(() => {});
+    return stop;
   }
 
   #onMessage(): void {
@@ -385,8 +433,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   displayInfo(): Promise<DisplayInfo> {
     return this.#background.run(() => call(commands.displayInfo()));
   }
-  async openExternal(url: string): Promise<void> {
-    await call(commands.openExternal(url));
+  async openExternal(url: string, shown?: string, alwaysAsk?: boolean): Promise<void> {
+    await call(commands.openExternal(url, shown ?? null, alwaysAsk ?? null));
   }
   async quitApp(): Promise<void> {
     await call(commands.quitApp());

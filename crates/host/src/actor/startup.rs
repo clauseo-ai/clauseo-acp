@@ -24,6 +24,10 @@ use crate::snapshot::SnapshotWorker;
 use crate::write;
 
 /// Opens what the actor owns. Every read here awaits directly: the loop has not started.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one field per actor part, each set in the one struct literal; splitting it hides none"
+)]
 pub(super) async fn open(
     (config, first): (HostConfig, super::protection::Observed),
     spawner: LocalSpawner,
@@ -66,6 +70,8 @@ pub(super) async fn open(
         super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
     });
     let browser_install = super::browser_install::BrowserInstall::for_wiring(&parts.wiring);
+    let last_exit =
+        super::last_exit::at_start(&store, parts.last_run_unclean, parts.clock.now().wall).await;
     let update = super::update::start(
         parts.update,
         parts.effective.locations().clone(),
@@ -89,10 +95,12 @@ pub(super) async fn open(
         pre_write_guard: parts.pre_write_guard,
         // Before `wiring` moves.
         connectors: super::connectors::ConnectorsOnActor::new(parts.wiring.connectors.clone()),
+        mcp: super::mcp::McpOnActor::default(),
         protection: super::protection::ProtectionHost::new(parts.sandbox, first),
         wiring: parts.wiring,
         counts: parts.counts,
         update,
+        last_exit,
         count_on_commit: BTreeMap::new(),
         browser_install,
         browser_policy: super::browser_policy::PolicyCheck::default(),
@@ -184,6 +192,7 @@ fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     super::limits::start(actor, cached);
     super::browser_install::start(actor);
     super::connectors::start(actor);
+    super::mcp::start(actor);
     super::protection::start(actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     tracing::info!(

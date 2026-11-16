@@ -25,29 +25,21 @@ export const UC_BLOCKS: Entry[] = [
   room(
     "UC-80",
     pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.policy),
   ),
-  settings(
-    "UC-81",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    ),
-    held(P.policy),
-  ),
+  settings("UC-81", pw("Something on this computer stops the Safe workspace."), held(P.policy)),
   settings(
     "UC-82",
-    pw(
-      "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
-    ),
+    pw("A Windows policy on this computer blocks the program that sets up the Safe workspace."),
     held(P.policy),
   ),
   room(
     "UC-83",
     pw(
-      "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+      "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
     ),
     "room/np-note",
     note(P.tool),
@@ -82,25 +74,19 @@ export const UC_BLOCKS: Entry[] = [
   settings(
     "UC-89",
     pw(
-      "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+      "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Install Clauseo again to restore it.",
     ),
     held(P.unsafe),
   ),
   room(
     "UC-90",
     pw(
-      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+      "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
     ),
     "room/np-note",
     note(P.other),
   ),
-  settings(
-    "UC-91",
-    pw(
-      "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
-    ),
-    held(P.newer),
-  ),
+  settings("UC-91", pw("Something on this computer stops the Safe workspace."), held(P.newer)),
   room(
     "UC-92",
     pw(
@@ -112,7 +98,7 @@ export const UC_BLOCKS: Entry[] = [
   settings(
     "UC-93",
     pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
+      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Settings › Safe workspace says what to do.",
     ),
     {
       view: () => viewOf(P.failed, NO_PROMPT),
@@ -127,7 +113,7 @@ export const UC_BLOCKS: Entry[] = [
   room(
     "UC-95",
     pw(
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
     "room/protection-confirm",
     { protection: P.pool, press: [LINE, SETUP] },

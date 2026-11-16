@@ -171,8 +171,9 @@ fn without_a_login_check_a_key_never_authenticates() {
 }
 
 /// The host's log line for the chunk the agent streams while it holds `authenticate`: no
-/// prompt is in flight, so the text is dropped.
-const HELD: &str = "agent text outside a turn was dropped";
+/// prompt is in flight, so the text waits for a turn; the Stop then drops it as the cancelled
+/// turn's tail.
+const HELD: &str = "agent output outside a turn waits for a turn";
 
 /// Waits (at most the watchdog's 20 s) for a log line containing `what`.
 fn until_logged(lines: &Mutex<Vec<String>>, what: &str) {
@@ -192,7 +193,7 @@ fn a_stop_during_authenticate_sends_no_second_prompt_and_the_turn_ends_cancelled
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Look at the matter.");
-    // The agent holds `authenticate` and streams a chunk, which the host drops: the first
+    // The agent holds `authenticate` and streams a chunk, which waits for a turn: the first
     // prompt already answered, so no prompt is in flight when the Stop comes.
     until_logged(&lines, HELD);
     assert_eq!(

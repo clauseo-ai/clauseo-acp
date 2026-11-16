@@ -1,6 +1,8 @@
 //! The `browser-guard` mode: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
-//! --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` after
-//! `--cdp-port` on Windows.
+//! [--downloads <folder>] --cdp-port <port> -- <agent-browser args...>`, with
+//! `--daemon-port <port>` after `--cdp-port` on Windows. `--downloads` is where Chrome's
+//! downloads are delivered (`downloads.rs`): `<matter>/downloads` in a Codex session, made
+//! here if missing; without it, `<cwd>/downloads`.
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
 //! command line (exit 2 on anything else), build the child's environment from the host's
@@ -13,24 +15,39 @@
 //!
 //! Chrome starts lazily (`session.rs`): while it is stopped, a request that is no tool call
 //! goes to a one-shot agent-browser with no Chrome (`relay/oneshot.rs`). The first tool call
-//! starts Chrome on the claimed debugging port (`chrome.rs`; the reaper learns its pid, or the
+//! starts the browser over its `DevTools` pipe (`chrome.rs`; the reaper learns its pid, or the
 //! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), then
-//! agent-browser connected to it; after each child line the guard checks that the stream server
-//! and on Windows the daemon are on their claimed ports (`port_file.rs`). Ten minutes without a
-//! tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's first
-//! unexpected exit stops them too, and its second ends the guard. The guard ends when the
+//! agent-browser connected to it; on Windows, after each child line, the guard checks that the
+//! stream server is off and the daemon is on its claimed port (`port_file.rs`). Ten minutes
+//! without a tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's
+//! first unexpected exit stops them too, and its second ends the guard. The guard ends when the
 //! agent's stdin ends, agent-browser exits, a start fails or the guard's parent goes
 //! (`parent.rs`). On the way out, whatever the reason, it ends agent-browser's daemon and Chrome
 //! and deletes the run's profile, its Chrome record and its lock file. [`runs_settled`] and
 //! [`chrome_groups`] let the host read the runs under a `--cwd`.
 //! `docs/decisions/0029-browser.md` gives every rule its reason.
+//!
+//! Route 2 (`docs/decisions/0060-browser-devtools-pipe.md`), on every system: the browser has
+//! no debugging port. The guard starts it over a `DevTools` pipe (`chrome/pipe.rs`) and relays the
+//! pipe to agent-browser on a 127.0.0.1 websocket with a 256-bit secret path, letting in only
+//! agent-browser's own processes (`devtools.rs`, `devtools/peer.rs`); `--cdp-port` is unused,
+//! and agent-browser is told to start no stream server (`env.rs`, `port_file.rs`). The guard
+//! first hides itself from other processes of the user (`harden.rs`; exit 1 if it cannot): on
+//! Windows a protected DACL from its creation, by running as a copy of itself that its first
+//! process starts hardened (passing on its exit code), which every child it starts gets too; on
+//! Linux `PR_SET_DUMPABLE` 0, its first act. On Windows the browser is Edge, or else a Program
+//! Files Chrome (`browsers.rs`).
 
+#[cfg(any(windows, test))]
+mod browsers;
 mod chrome;
 #[cfg(any(windows, test))]
 mod command_line;
+mod devtools;
 mod downloads;
 mod env;
 mod filter;
+mod harden;
 #[cfg(windows)]
 mod job;
 mod logon;
@@ -77,6 +94,10 @@ const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <f
 
 /// The exit code for a bad command line or environment.
 const EXIT_USAGE: i32 = 2;
+/// agent-browser's download folder variable, set to `--downloads`.
+const DOWNLOAD_PATH: &str = "AGENT_BROWSER_DOWNLOAD_PATH";
+/// How long the guard waits on its way out for agent-browser's last stderr (`relay/redact.rs`).
+const STDERR_DRAIN: Duration = Duration::from_secs(2);
 /// The exit code when the guard cannot make its folders or start agent-browser.
 const EXIT_FAILED: i32 = 1;
 
@@ -85,7 +106,10 @@ const EXIT_FAILED: i32 = 1;
 struct Command {
     agent_browser: PathBuf,
     cwd: PathBuf,
-    /// Chrome's debugging port, passed to the guard's Chrome as `--remote-debugging-port`.
+    /// `--downloads`, or `<cwd>/downloads`.
+    downloads: PathBuf,
+    /// The port the host claimed for Chrome's debugging port. Unused since route 2: the browser
+    /// has no debugging port (decision record 0060); the host still claims and passes it.
     cdp_port: u16,
     /// Windows only: the port agent-browser's daemon must listen on.
     daemon_port: Option<u16>,
@@ -107,8 +131,29 @@ fn windows_dirs() -> env::WindowsDirs {
 /// Runs the guard with the arguments after `browser-guard`. Returns agent-browser's exit code
 /// (1 when a signal killed it), or a [`Failure`].
 pub fn run(args: &[OsString]) -> Result<i32, Failure> {
+    // Linux: the very first act, so as little as can be opened before it (`harden.rs`).
+    #[cfg(target_os = "linux")]
+    harden::not_dumpable().map_err(|error| {
+        failed(&format!(
+            "cannot hide the guard's process, so it starts no browser: {error}"
+        ))
+    })?;
     // First, before anything slow: a parent that dies later is then still the one watched.
     let parent = parent::Parent::now().ok_or_else(|| failed(PARENT_GONE))?;
+    // Windows: only the copy created hardened goes on, refusing to when it is not (fail closed);
+    // the first process starts it and waits (`harden.rs`).
+    #[cfg(windows)]
+    let (args, hardened) = match args.split_first() {
+        Some((marker, rest)) if marker == harden::HARDENED_COPY => {
+            let hardened = harden::Hardened::verified().map_err(|error| {
+                failed(&format!(
+                    "the guard's copy was not created hardened, so it starts no browser: {error}"
+                ))
+            })?;
+            (rest, hardened)
+        }
+        _ => return run_hardened_copy(args, &parent),
+    };
     let command = parse(args, env::Os::CURRENT).map_err(|reason| Failure {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {reason}\n{USAGE}"),
@@ -123,6 +168,23 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {error}"),
     })?;
+    // Nothing that reaches agent-browser's command line or `AGENT_BROWSER_ARGS` may name a switch
+    // that weakens Chrome's sandbox, though agent-browser never starts Chrome here (`chrome.rs`).
+    if let Some(switch) = command
+        .child_args
+        .iter()
+        .chain(env.get(env::ARGS))
+        .find_map(|arg| chrome::sandbox::weakening_in(arg))
+    {
+        return Err(Failure {
+            code: EXIT_USAGE,
+            message: format!(
+                "clauseo-mcp browser-guard: agent-browser's arguments or {} name {switch}, which \
+                 weakens Chrome's sandbox",
+                env::ARGS
+            ),
+        });
+    }
     #[cfg(unix)]
     {
         let dir = env.get(env::SOCKET_DIR).map_or(Path::new(""), Path::new);
@@ -163,15 +225,64 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         env.insert(env::SESSION.to_owned(), OsString::from(&session));
         (env, session)
     };
-    for folder in env::folders(env::Os::CURRENT, &command.cwd) {
-        make_folder(&folder).map_err(|error| {
+    let mut env = env;
+    // The download tool's folder is the mover's: agent-browser's own `download` is refused
+    // (`filter.rs`), but nothing names a folder outside the matter for a download.
+    env.insert(
+        DOWNLOAD_PATH.to_owned(),
+        command.downloads.clone().into_os_string(),
+    );
+    let folders = env::folders(env::Os::CURRENT, &command.cwd);
+    for folder in folders.iter().chain([&command.downloads]) {
+        write::make_folder(folder).map_err(|error| {
             failed(&format!(
                 "cannot make the folder {}: {error}",
                 folder.display()
             ))
         })?;
     }
-    serve(&command, env, &session, &parent, &run)
+    serve(
+        &command,
+        env,
+        &session,
+        &parent,
+        &run,
+        #[cfg(windows)]
+        hardened,
+    )
+}
+
+/// Windows: the guard's first process. Hardens itself, starts its hardened copy with `args` and
+/// the same standard handles (`job::start_copy`), and returns the copy's exit code. If this
+/// process's parent goes first it exits 1 at once: the copy, which watches this process as its
+/// parent, then ends the browser, cleans up and says so on the shared stderr.
+#[cfg(windows)]
+fn run_hardened_copy(args: &[OsString], parent: &parent::Parent) -> Result<i32, Failure> {
+    let hardened = harden::Hardened::apply().map_err(|error| {
+        failed(&format!(
+            "cannot harden the guard's process, so it starts no browser: {error}"
+        ))
+    })?;
+    let copy = job::start_copy(&hardened, args).map_err(|error| {
+        failed(&format!(
+            "cannot start the guard's hardened copy, so it starts no browser: {error}"
+        ))
+    })?;
+    drop(hardened);
+    let (tell, ended) = std::sync::mpsc::channel();
+    let gone = tell.clone();
+    parent.watch(move || drop(gone.send(None)));
+    // Never joined: it ends with the copy, or with this process.
+    drop(std::thread::spawn(move || {
+        drop(tell.send(Some(copy.wait())));
+    }));
+    match ended.recv() {
+        Ok(Some(Ok(code))) => Ok(i32::from_ne_bytes(code.to_ne_bytes())),
+        Ok(Some(Err(error))) => Err(failed(&format!(
+            "cannot wait for the guard's hardened copy: {error}"
+        ))),
+        Ok(None) | Err(_) => Ok(EXIT_FAILED),
+    }
 }
 
 /// Relays, starting Chrome and agent-browser at the first tool call (`session.rs`); ends both,
@@ -182,22 +293,28 @@ fn serve(
     session: &str,
     parent: &parent::Parent,
     run: &runs::Run,
+    #[cfg(windows)] hardened: harden::Hardened,
 ) -> Result<i32, Failure> {
     #[cfg(unix)]
     let socket_dir = env
         .get(env::SOCKET_DIR)
         .map_or_else(PathBuf::new, PathBuf::from);
     #[cfg(unix)]
-    let reaper = reaper::Reaper::start(&socket_dir, session, &command.cwd, run.id())
-        .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
+    let reaper = reaper::Reaper::start(
+        &socket_dir,
+        session,
+        (&command.cwd, &command.downloads),
+        run.id(),
+    )
+    .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
     let launcher = session::Launcher {
         executable: env
             .get(env::EXECUTABLE_PATH)
             .map_or_else(PathBuf::new, PathBuf::from),
         cwd: command.cwd.clone(),
+        downloads: command.downloads.clone(),
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
-        cdp_port: command.cdp_port,
         proxy: env.get(env::PROXY).cloned(),
         chrome_env: env::chrome_env(&env),
         program: command.agent_browser.clone(),
@@ -212,11 +329,14 @@ fn serve(
         #[cfg(unix)]
         reaper: reaper.teller(),
         #[cfg(windows)]
-        job: job::Job::new().map_err(|error| failed(&error.to_string()))?,
+        job: job::Job::new(hardened).map_err(|error| failed(&error.to_string()))?,
+        started_with: std::sync::Mutex::new(None),
     };
     let shared = Arc::new(session::Shared::new(launcher));
     // Stops whatever runs (Chrome's tree, agent-browser's, the daemon) before it returns.
     let outcome = relay::run(&shared, parent);
+    // agent-browser and its daemon are ended: their last stderr lines, redacted, before the exit.
+    relay::redact::drain(STDERR_DRAIN);
     chrome::remove_profile(run.profile());
     // Chrome is reaped: the record goes, before the run's lock (`runs::Run`'s drop).
     record::clear(&command.cwd, run.id());
@@ -238,7 +358,7 @@ fn outcome_code(outcome: relay::Outcome, agent_browser: &Path) -> Result<i32, Fa
         }
         relay::Outcome::ChromeExited => Err(failed("Chrome exited; the guard ended agent-browser")),
         relay::Outcome::ParentGone => Err(failed(PARENT_GONE)),
-        relay::Outcome::StartFailed(reason) => Err(failed(&reason)),
+        relay::Outcome::StartFailed(reason) => Err(failed(&reason.to_string())),
         relay::Outcome::AgentFailed(error) => Err(failed(&format!(
             "cannot run {}: {error}",
             agent_browser.display()
@@ -302,8 +422,8 @@ pub(crate) fn pause(time: Duration) {
     std::thread::sleep(time);
 }
 
-/// The port files the relay checks after each child line: the stream server's in the socket
-/// folder (the host's on Unix, `<cwd>\run` on Windows), and the daemon's on Windows.
+/// The port files the relay checks after each child line, on Windows only: the stream server's,
+/// which must not exist, and the daemon's, in `<cwd>\run`.
 fn port_checks(
     env: &BTreeMap<String, OsString>,
     command: &Command,
@@ -313,12 +433,10 @@ fn port_checks(
         .get(env::SOCKET_DIR)
         .map_or_else(|| env::windows_socket_dir(&command.cwd), PathBuf::from);
     let mut checks = Vec::new();
-    // `env::build` checked the stream port already.
-    if let Some(port) = env
-        .get(env::STREAM_PORT)
-        .and_then(|value| env::port_of(value))
-    {
-        checks.push(port_file::Expected::stream(&socket_dir, session, port));
+    // agent-browser gets no stream port anywhere (route 2). On Windows its server must not run
+    // at all; elsewhere an upstream agent-browser may still start one, which is let be.
+    if env::Os::CURRENT == env::Os::Windows {
+        checks.push(port_file::Expected::stream_off(&socket_dir, session));
     }
     if let Some(port) = command.daemon_port {
         checks.push(port_file::Expected::daemon(&socket_dir, session, port));
@@ -332,10 +450,19 @@ const EXPECTED_UNIX: &str =
 const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <args...>";
 
 /// Exactly `--agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>`, in that
-/// order, with `--daemon-port <port>` after `--cdp-port` on Windows and never on Unix; each
-/// path absolute and existing, each port from 1024 to 65535 in plain decimal. The child's
-/// arguments are kept as given.
+/// order, with `--downloads <folder>` after `--cwd` or not, and `--daemon-port <port>` after
+/// `--cdp-port` on Windows and never on Unix; each path absolute and existing (for
+/// `--downloads`, its parent: the guard makes the folder), each port from 1024 to 65535 in plain
+/// decimal. The child's arguments are kept as given.
 fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
+    let (args, downloads) = match args.get(4..6) {
+        Some([flag, folder]) if flag == "--downloads" => {
+            let mut rest = args.get(..4).unwrap_or_default().to_vec();
+            rest.extend_from_slice(args.get(6..).unwrap_or_default());
+            (rest, Some(PathBuf::from(folder)))
+        }
+        _ => (args.to_vec(), None),
+    };
     let expected = match os {
         env::Os::Unix => EXPECTED_UNIX,
         env::Os::Windows => EXPECTED_WINDOWS,
@@ -348,7 +475,7 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         flag_cdp,
         cdp,
         rest @ ..,
-    ] = args
+    ] = args.as_slice()
     else {
         return Err(expected);
     };
@@ -378,6 +505,10 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     if !cwd.is_absolute() || !cwd.is_dir() {
         return Err("--cwd must be the absolute path of an existing folder");
     }
+    let downloads = downloads.unwrap_or_else(|| cwd.join("downloads"));
+    if !downloads.is_absolute() || !downloads.parent().is_some_and(Path::is_dir) {
+        return Err("--downloads must be an absolute path in an existing folder");
+    }
     let cdp_port = env::port_of(cdp)
         .ok_or("--cdp-port must be a port from 1024 to 65535 with no leading zero")?;
     let daemon_port = match daemon {
@@ -390,24 +521,11 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     Ok(Command {
         agent_browser: program.to_owned(),
         cwd: cwd.to_owned(),
+        downloads,
         cdp_port,
         daemon_port,
         child_args: child_args.to_vec(),
     })
-}
-
-/// Makes `path` if it is missing, then insists it is a real folder, not a link or a file.
-fn make_folder(path: &Path) -> io::Result<()> {
-    match write::create_dir(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error),
-    }
-    if std::fs::symlink_metadata(path)?.is_dir() {
-        Ok(())
-    } else {
-        Err(io::Error::other("it exists and is not a folder"))
-    }
 }
 
 #[cfg(test)]

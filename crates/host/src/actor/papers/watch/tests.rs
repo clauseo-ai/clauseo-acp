@@ -86,12 +86,19 @@ const SHORT: Timing = Timing {
     quiet: Duration::from_millis(150),
     max_wait: Duration::from_millis(600),
     recheck: Duration::ZERO,
+    look_every: None,
 };
 
-/// A burst thread over the folder `dir`, fed by the returned sender; its posts come on the
+/// [`SHORT`], with the folder read every 100 ms as on macOS.
+const READ: Timing = Timing {
+    look_every: Some(Duration::from_millis(100)),
+    ..SHORT
+};
+
+/// A burst thread over the folder `folder`, fed by the returned sender; its posts come on the
 /// returned receiver.
 fn burst_thread(
-    dir: &TempDir,
+    folder: &std::path::Path,
     timing: Timing,
 ) -> (mpsc::Sender<()>, async_channel::Receiver<Input>) {
     let (send, changes) = mpsc::channel();
@@ -99,8 +106,8 @@ fn burst_thread(
     let burst = Burst {
         matter: "01900000-0000-7000-8000-000000000001".parse().unwrap(),
         generation: 7,
-        folder: dir.path().to_path_buf(),
-        root: root_id(dir.path()),
+        folder: folder.to_path_buf(),
+        root: root_id(folder),
         clock: std::sync::Arc::new(crate::clock::SystemClock),
     };
     std::thread::spawn(move || bursts(&burst, timing, &changes, &post));
@@ -124,7 +131,7 @@ fn told(posts: &async_channel::Receiver<Input>, patience: Duration) -> Option<(u
 #[test]
 fn a_lone_change_is_told_once_the_folder_is_quiet() {
     let dir = TempDir::new("watch-quiet");
-    let (send, posts) = burst_thread(&dir, SHORT);
+    let (send, posts) = burst_thread(dir.path(), SHORT);
     send.send(()).unwrap();
     send.send(()).unwrap();
     assert_eq!(
@@ -141,7 +148,7 @@ fn a_lone_change_is_told_once_the_folder_is_quiet() {
 #[test]
 fn a_trickle_that_never_goes_quiet_is_told_at_the_longest_wait() {
     let dir = TempDir::new("watch-trickle");
-    let (send, posts) = burst_thread(&dir, SHORT);
+    let (send, posts) = burst_thread(dir.path(), SHORT);
     // A change at most every 30 ms, never the 150 ms of quiet, for up to 6 s: ten times the
     // 600 ms wait.
     let mut first = None;
@@ -181,4 +188,103 @@ fn a_folder_gone_reads_missing_and_one_swapped_in_reads_replaced() {
     assert!(seen(Look::Missing));
     crate::write::rename(&other, &folder).unwrap();
     assert!(seen(Look::Replaced));
+}
+
+#[test]
+fn a_folder_read_every_while_quiet_tells_only_of_a_move_or_a_swap() {
+    let dir = TempDir::new("watch-read");
+    let folder = dir.path().join("m");
+    let other = dir.path().join("other");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::create_dir_all(&other).unwrap();
+    let (send, posts) = burst_thread(&folder, READ);
+    // Read five times over, unmoved: nothing to tell.
+    assert_eq!(told(&posts, Duration::from_millis(500)), None);
+    // Swapped with no change from the feed: replaced.
+    crate::write::rename(&folder, &dir.path().join("m-old")).unwrap();
+    crate::write::rename(&other, &folder).unwrap();
+    assert_eq!(
+        told(&posts, Duration::from_secs(10)),
+        Some((7, Look::Replaced))
+    );
+    // The actor starts a new watch, and this one ends.
+    drop(send);
+
+    let (_send, posts) = burst_thread(&folder, READ);
+    crate::write::rename(&folder, &dir.path().join("m-moved")).unwrap();
+    assert_eq!(
+        told(&posts, Duration::from_secs(10)),
+        Some((7, Look::Missing))
+    );
+}
+
+/// The real watch of the folder `clients/m` in `dir`, through the OS's feed with the real waits,
+/// once it tells of a probe file and has then gone quiet: the folder, the watch and its posts.
+#[cfg(target_os = "macos")]
+fn live_watch(
+    dir: &TempDir,
+) -> (
+    PathBuf,
+    notify::RecommendedWatcher,
+    async_channel::Receiver<Input>,
+) {
+    let folder = dir.path().join("clients").join("m");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"x").unwrap();
+    let (post, posts) = async_channel::unbounded();
+    let matter = "01900000-0000-7000-8000-000000000001".parse().unwrap();
+    let clock = std::sync::Arc::new(crate::clock::SystemClock);
+    let watcher = super::watch(matter, &folder, 7, &post, clock).unwrap();
+    let probe = folder.join("probe.txt");
+    let started = (0..20).any(|round| {
+        crate::write::write_file(&probe, format!("{round}").as_bytes()).unwrap();
+        told(&posts, Duration::from_secs(1)).is_some()
+    });
+    assert!(started, "the watch never told of the probe");
+    crate::write::remove_file(&probe).unwrap();
+    // Quiet: whatever the probe set off has been told, so what comes next is the move's.
+    while told(&posts, Duration::from_secs(1)).is_some() {}
+    (folder, watcher, posts)
+}
+
+/// How long a move may take to be told on macOS: 2 s to the next read of the folder, 2 s to the
+/// re-check, and room for a loaded machine.
+#[cfg(target_os = "macos")]
+const MOVE_TOLD: Duration = Duration::from_secs(6);
+
+/// `FSEvents` tells the watch that its own folder moved.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_the_watched_folder_moved_away_reads_missing() {
+    let dir = TempDir::new("watch-mac-moved");
+    let (folder, _watcher, posts) = live_watch(&dir);
+    crate::write::rename(&folder, &dir.path().join("m-moved")).unwrap();
+    let told = told(&posts, MOVE_TOLD);
+    assert_eq!(told, Some((7, Look::Missing)));
+}
+
+/// `FSEvents` tells the watch nothing when a folder above its own moves: the read every 2 s
+/// finds it.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_the_watched_folders_parent_moved_away_reads_missing() {
+    let dir = TempDir::new("watch-mac-parent");
+    let (_folder, _watcher, posts) = live_watch(&dir);
+    crate::write::rename(&dir.path().join("clients"), &dir.path().join("clients-old")).unwrap();
+    let told = told(&posts, MOVE_TOLD);
+    assert_eq!(told, Some((7, Look::Missing)));
+}
+
+/// Another folder put in its place: the watch is on the old one, and a new one starts.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_the_watched_folder_swapped_reads_replaced() {
+    let dir = TempDir::new("watch-mac-swap");
+    let other = dir.path().join("other");
+    crate::write::create_dir_all(&other).unwrap();
+    let (folder, _watcher, posts) = live_watch(&dir);
+    crate::write::rename(&folder, &dir.path().join("m-old")).unwrap();
+    crate::write::rename(&other, &folder).unwrap();
+    let told = told(&posts, MOVE_TOLD);
+    assert_eq!(told, Some((7, Look::Replaced)));
 }

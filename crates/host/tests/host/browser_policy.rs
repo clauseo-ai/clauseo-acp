@@ -3,9 +3,9 @@
 //! Chrome for Testing in the roots), and a place that cannot be read with
 //! `BrowserPolicyUnreadable`, until a later launch reads it, unless the firm's Clauseo policy
 //! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
-//! browser on.
+//! browser on. On Windows the rule goes per browser: Edge's false leaves a Program Files Chrome.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,7 +18,7 @@ use clauseo_settings::chromium_policy::{
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
+    BROWSING, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
     template, turn,
 };
 use crate::support::{Dir, Running};
@@ -65,11 +65,19 @@ impl RemoteDebuggingPolicy for FailsOnce {
 pub(super) enum Chrome {
     /// The tests' forced Chrome.
     Forced,
-    /// Chrome for Testing that Clauseo downloaded, in the roots, and nothing installed.
+    /// Chrome for Testing that Clauseo downloaded, in a Mac's roots, and nothing installed.
     ForTesting,
+    /// Windows' roots with Edge and Google Chrome in Program Files.
+    WindowsBoth,
+    /// Windows' roots with Edge alone.
+    WindowsEdge,
+    /// Windows' roots with only Chrome for Testing, which Windows never takes.
+    WindowsForTesting,
+    /// Windows' roots with only a Google Chrome installed for this user (`%LOCALAPPDATA%`).
+    WindowsPerUser,
 }
 
-/// The browser state one `CLAUDE` session shows under `says`, with the firm's Clauseo
+/// The browser state one `BROWSING` session shows under `says`, with the firm's Clauseo
 /// `policy` (a `policy.json`'s text) if any.
 fn reason(
     test: &str,
@@ -82,7 +90,7 @@ fn reason(
         .expect("one launch")
 }
 
-/// A host whose `CLAUDE` sessions may have the browser, under `rd_policy` and the firm's
+/// A host whose `BROWSING` sessions may have the browser, under `rd_policy` and the firm's
 /// Clauseo `policy` (a `policy.json`'s text) if any, with one matter for its threads.
 pub(super) struct Rig {
     pub(super) host: Running,
@@ -106,29 +114,13 @@ impl Rig {
         );
         settings(
             &dir,
-            agents(&[(CLAUDE, &claude, json!({}))]),
+            agents(&[(BROWSING, &claude, json!({}))]),
             json!({"tools": {"browser": true, "web_search": false}}),
         );
         if let Some(policy) = policy {
             dir.set_policy(policy);
         }
-        let app = dir.data().join("app");
-        let cft = app
-            .join("browsers")
-            .join("chrome-131.0.6778.85")
-            .join("chrome-win64")
-            .join("chrome.exe");
-        write::create_dir_all(cft.parent().unwrap());
-        write::write(&cft, b"");
-        let roots = ChromeRoots {
-            platform: Platform::WindowsX64,
-            root: dir.data().join("no-root"),
-            home: None,
-            program_files: None,
-            program_files_x86: None,
-            local_app_data: None,
-            app_data: app,
-        };
+        let roots = roots(&dir, chrome);
         let launcher = Wired::new(&dir);
         let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
             let config = config
@@ -151,7 +143,7 @@ impl Rig {
     /// One more session, in a thread of its own, after a turn: the thread and the browser state
     /// its header shows.
     pub(super) fn launch(&self) -> (ThreadId, Option<ToolsUnavailableReason>) {
-        let thread = self.host.create_thread(self.matter, CLAUDE);
+        let thread = self.host.create_thread(self.matter, BROWSING);
         turn(&self.host, thread);
         (thread, self.browser(thread))
     }
@@ -175,7 +167,7 @@ impl Rig {
     }
 }
 
-/// The browser state each of `launches` `CLAUDE` sessions shows, one after the other, each in
+/// The browser state each of `launches` `BROWSING` sessions shows, one after the other, each in
 /// a thread of its own, under `rd_policy` and the firm's Clauseo `policy` if any.
 fn reasons(
     test: &str,
@@ -193,7 +185,64 @@ fn reasons(
 fn with_chrome(config: HostConfig, chrome: Chrome, roots: ChromeRoots) -> HostConfig {
     match chrome {
         Chrome::Forced => config.with_browser_executable(Some(PathBuf::from("/chrome"))),
-        Chrome::ForTesting => config.with_chrome_roots(roots),
+        _ => config.with_chrome_roots(roots),
+    }
+}
+
+/// An empty file at `base` joined with `parts`.
+fn touch(base: &Path, parts: &[&str]) {
+    let path = parts
+        .iter()
+        .fold(base.to_owned(), |path, part| path.join(part));
+    write::create_dir_all(path.parent().unwrap());
+    write::write(&path, b"");
+}
+
+/// The roots `chrome` searches, with its browsers made under the data folder.
+fn roots(dir: &Dir, chrome: Chrome) -> ChromeRoots {
+    let app = dir.data().join("app");
+    let pf = dir.data().join("pf");
+    let pf86 = dir.data().join("pf86");
+    let local = dir.data().join("local");
+    let cft = ["browsers", "chrome-131.0.6778.85"];
+    let platform = match chrome {
+        Chrome::Forced | Chrome::ForTesting => {
+            let mac = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+            touch(
+                &app,
+                &[
+                    &cft[..],
+                    &["chrome-mac-arm64"],
+                    &mac.split('/').collect::<Vec<_>>(),
+                ]
+                .concat(),
+            );
+            Platform::MacArm64
+        }
+        Chrome::WindowsBoth | Chrome::WindowsEdge => {
+            touch(&pf86, &["Microsoft", "Edge", "Application", "msedge.exe"]);
+            if matches!(chrome, Chrome::WindowsBoth) {
+                touch(&pf, &["Google", "Chrome", "Application", "chrome.exe"]);
+            }
+            Platform::WindowsX64
+        }
+        Chrome::WindowsForTesting => {
+            touch(&app, &[&cft[..], &["chrome-win64", "chrome.exe"]].concat());
+            Platform::WindowsX64
+        }
+        Chrome::WindowsPerUser => {
+            touch(&local, &["Google", "Chrome", "Application", "chrome.exe"]);
+            Platform::WindowsX64
+        }
+    };
+    ChromeRoots {
+        platform,
+        root: dir.data().join("no-root"),
+        home: None,
+        program_files: Some(pf),
+        program_files_x86: Some(pf86),
+        local_app_data: Some(local),
+        app_data: app,
     }
 }
 
@@ -264,5 +313,62 @@ fn the_firms_clauseo_policy_allows_the_browser_when_the_policy_was_not_read() {
             Chrome::Forced
         ),
         None
+    );
+}
+
+/// Windows: Edge's own false leaves a Program Files Chrome to start; with Edge alone it blocks,
+/// named, and the firm's Clauseo opt-in does not lift it (the guard would set Edge aside).
+#[test]
+fn on_windows_edges_false_leaves_chrome() {
+    let edge_off = || Found::Disallowed;
+    assert_eq!(
+        reason("rd_win_chrome", edge_off(), None, Chrome::WindowsBoth),
+        None
+    );
+    assert_eq!(
+        reason("rd_win_edge", edge_off(), None, Chrome::WindowsEdge),
+        Some(ToolsUnavailableReason::BrowserBlockedEdge)
+    );
+    assert_eq!(
+        reason(
+            "rd_win_edge_allowed",
+            edge_off(),
+            Some(ALLOW),
+            Chrome::WindowsEdge
+        ),
+        Some(ToolsUnavailableReason::BrowserBlockedEdge)
+    );
+    assert_eq!(
+        reason("rd_win_edge_ok", Found::Absent, None, Chrome::WindowsEdge),
+        None
+    );
+}
+
+/// Windows: with only a per-user Chrome there, the lawyer is told it can't be used, not to
+/// install Chrome.
+#[test]
+fn on_windows_a_per_user_chrome_alone_is_told_apart() {
+    assert_eq!(
+        reason(
+            "rd_win_per_user",
+            Found::Absent,
+            None,
+            Chrome::WindowsPerUser
+        ),
+        Some(ToolsUnavailableReason::BrowserPerUserChromeOnly)
+    );
+}
+
+/// Windows: with only Chrome for Testing there, nothing is installed, whatever the policy says.
+#[test]
+fn on_windows_chrome_for_testing_is_not_installed() {
+    assert_eq!(
+        reason(
+            "rd_win_cft",
+            Found::Disallowed,
+            None,
+            Chrome::WindowsForTesting
+        ),
+        Some(ToolsUnavailableReason::BrowserNotInstalled)
     );
 }

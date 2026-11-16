@@ -9,7 +9,7 @@
 // on that press), with Back to the tiles. The room keys the wall by its matter, so another matter's
 // wall starts with nothing under it. Among the tiles, by path, a dimmed tile for each file only online and each
 // folder Clauseo couldn't open (wall-away.ts), which opens nothing, with why on it and how to keep it in its tip.
-import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
+import { fileToneOf, fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import { IconFolder } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
@@ -106,6 +106,7 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
                 tip={words.tip}
                 label={words.tip}
                 fileIcon={item.folder ? IconFolder : fileTypeIcon(item.path)}
+                fileTone={item.folder ? "neutral" : fileToneOf(item.path)}
                 away={words.line}
               />
             );
@@ -123,6 +124,7 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
               fileName
               tip={name}
               fileIcon={fileTypeIcon(path)}
+              fileTone={fileToneOf(path)}
               {...(opener === null
                 ? {}
                 : {

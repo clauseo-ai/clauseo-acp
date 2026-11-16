@@ -1,0 +1,83 @@
+{
+  "UC-475": {
+    "en": "Searching case law.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Running; the case-law search row: search_law, read_document, citator and check_citations (mcp__case-law__<tool> under Claude, mcp.case-law.<tool> under ChatGPT)"
+  },
+  "UC-476": {
+    "en": "Searched case law.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Done; the case-law search row: search_law, read_document, citator and check_citations (mcp__case-law__<tool> under Claude, mcp.case-law.<tool> under ChatGPT)"
+  },
+  "UC-477": {
+    "en": "Tried to search case law.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Failed or stopped; the case-law search row: search_law, read_document, citator and check_citations (mcp__case-law__<tool> under Claude, mcp.case-law.<tool> under ChatGPT)"
+  },
+  "UC-478": {
+    "en": "Checking your case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Running; the case-law credits row: account, which only reads the lawyer's credits, prices and spend (mcp__case-law__account, mcp.case-law.account)"
+  },
+  "UC-479": {
+    "en": "Getting a payment link for case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Running; the case-law payment-link row: recharge, which creates a payment link the lawyer pays on Razorpay's page; never pays by itself (mcp__case-law__recharge, mcp.case-law.recharge)"
+  },
+  "UC-480": {
+    "en": "Checked your case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Done; the case-law credits row: account, which only reads the lawyer's credits, prices and spend (mcp__case-law__account, mcp.case-law.account)"
+  },
+  "UC-481": {
+    "en": "Tried to check your case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Failed or stopped; the case-law credits row: account, which only reads the lawyer's credits, prices and spend (mcp__case-law__account, mcp.case-law.account)"
+  },
+  "UC-482": {
+    "en": "Got a payment link for case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Done; the case-law payment-link row: recharge, which creates a payment link the lawyer pays on Razorpay's page; never pays by itself (mcp__case-law__recharge, mcp.case-law.recharge)"
+  },
+  "UC-483": {
+    "en": "Tried to get a payment link for case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; orchestrator to approve)",
+    "note": "Failed or stopped; the case-law payment-link row: recharge, which creates a payment link the lawyer pays on Razorpay's page; never pays by itself (mcp__case-law__recharge, mcp.case-law.recharge)"
+  }
+}

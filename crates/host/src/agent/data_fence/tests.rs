@@ -33,11 +33,22 @@ pub(super) fn layout(test: &str) -> TempDir {
     dir
 }
 
-/// The check for session `s1` of the matter at `root/matter`, for `paths` and `raw_input`.
+/// The check for session `s1` of the matter at `root/matter`, for `paths` and `raw_input`,
+/// from a tool whose shell is not known.
 pub(super) fn check(
     root: &Path,
     paths: &[&str],
     raw_input: Option<&serde_json::Value>,
+) -> FenceCheck {
+    check_as(root, paths, raw_input, super::ShellKind::Unknown)
+}
+
+/// [`check`] of a request from a tool whose shell is `shell`.
+pub(super) fn check_as(
+    root: &Path,
+    paths: &[&str],
+    raw_input: Option<&serde_json::Value>,
+    shell: super::ShellKind,
 ) -> FenceCheck {
     let data = root.join("data");
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
@@ -54,9 +65,10 @@ pub(super) fn check(
         cwd: root.join("matter"),
         home: Some(root.to_owned()),
         paths: candidates(&paths, raw_input, cfg!(windows)),
-        roots: candidates_roots(raw_input, cfg!(windows)),
+        roots: candidates_roots(raw_input, cfg!(windows), shell),
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
+        vars: Vec::new(),
     }
 }
 
@@ -69,7 +81,7 @@ pub(super) fn text(path: &Path) -> String {
 /// plans a session needs (those of other sessions are named per launch, `launch_tests.rs`).
 #[test]
 fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]), false);
     for rule in [
         "Read(//d/ata/skill-packs/**)",
         "Edit(//d/ata/skill-packs/**)",
@@ -103,10 +115,10 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         };
         assert!(!rules.iter().any(|r| named(&r)), "{kept}: {rules:?}");
     }
-    let both = claude_deny_rules(&LaunchDeny::fixed(vec![
-        PathBuf::from("/a"),
-        PathBuf::from("/b"),
-    ]));
+    let both = claude_deny_rules(
+        &LaunchDeny::fixed(vec![PathBuf::from("/a"), PathBuf::from("/b")]),
+        false,
+    );
     assert_eq!(both.len(), rules.len() * 2);
 }
 

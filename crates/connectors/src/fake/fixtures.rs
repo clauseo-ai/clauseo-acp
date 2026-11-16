@@ -127,6 +127,26 @@ const FILES: &[(&str, &str)] = &[
         "mcp/ik-search-law-no-hits.json",
         include_str!("../../fixtures/mcp/ik-search-law-no-hits.json"),
     ),
+    // Results whose documents went to a download file (`output: "file"`, or past the inline
+    // cap). `ik-read-document-file.json` is the server's summary as it is (server main
+    // 921725f); the other three add the listing the server is asked for ("In the file:" and
+    // one line per document).
+    (
+        "mcp/ik-search-law-file.json",
+        include_str!("../../fixtures/mcp/ik-search-law-file.json"),
+    ),
+    (
+        "mcp/ik-search-law-over-cap-json.json",
+        include_str!("../../fixtures/mcp/ik-search-law-over-cap-json.json"),
+    ),
+    (
+        "mcp/ik-read-document-file.json",
+        include_str!("../../fixtures/mcp/ik-read-document-file.json"),
+    ),
+    (
+        "mcp/ik-read-document-file-listed.json",
+        include_str!("../../fixtures/mcp/ik-read-document-file-listed.json"),
+    ),
 ];
 
 /// A fixture's text as it is on disk (every URL on `https://data.clauseo.chat`), by its path

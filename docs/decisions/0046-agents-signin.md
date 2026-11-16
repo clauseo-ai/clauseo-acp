@@ -82,7 +82,8 @@ environment (`signin/env.rs`):
     `NODE_EXTRA_CA_CERTS` (Claude) or `SSL_CERT_FILE` (Codex).
   - Claude's login runs on macOS and Linux: `BROWSER` (the shim) and `CLAUSEO_SIGNIN_URL_FILE`.
     An inherited `BROWSER` stays where there is no shim (Codex, Windows).
-- Detection starts no run for either agent (see "Detection"), so it has no environment.
+- Detection starts no agent run (see "Detection"). Its one run, macOS's attributes-only
+  `/usr/bin/security` query for Claude, gets `HOME` alone.
 
 **The caller's launcher must clear the environment.** The child gets only the built map
 because the caller gives `Agents::start` a launcher made with
@@ -403,7 +404,8 @@ written atomically:
 at start and when a window shows Plans. It runs:
 1. A recorded reuse first. For Codex, a missing `login-source` with a login file in the home
    also counts, per the brief.
-   - Claude: detection must still find a login (a stat, see "Detection"). It reports no email,
+   - Claude: detection must still find a login (a stat, and on macOS the Keychain query; see
+     "Detection"). It reports no email,
      and a login file still there holds whatever account it is now (`ReusedChanged` is no longer
      produced); no login file gives `ReusedSignedOut`. Then status under the
      session's environment (`CLAUDE_CONFIG_DIR` the home, `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`)
@@ -431,14 +433,79 @@ files. A real folder already there below the data folder
 is set to 0700 as well, as `make_home` does. `agents` itself does not depend on host.
 
 **Detection** (`signin/detect.rs`) is a stat of each agent's login file where its CLI keeps it
-by default, never an open, and starts no CLI: no write into the lawyer's config and no network
-(2026-11-09, #857). `signin/reuse.rs` is the one file that names the login files.
+by default, never an open, and starts no agent CLI: no write into the lawyer's config and no
+network (2026-11-09, #857). On macOS it adds, for Claude, an attributes-only `security
+find-generic-password` query for Claude's default Keychain item: never `-w`/`-g`; exit status
+only (2026-11-15). `signin/reuse.rs` is the one file that names the login files and the item.
 - Claude: `~/.claude/.credentials.json` (`%USERPROFILE%\.claude\.credentials.json` on Windows)
   a regular file is `LoginFound { from: ClaudeCode, email: None }`; anything else (missing, a
-  symbolic link or other reparse point, a folder) is `SignedOut { found: NoLogin }`. macOS keeps
-  the login in the Keychain, so nothing is found there. With `CLAUDE_CONFIG_DIR` set in the
-  lawyer's environment nothing is found: their Claude Code keeps its login under that folder,
-  and "Use it" reads the default store only. `ClaudeSettings` is no longer reported.
+  symbolic link or other reparse point, a folder) is `SignedOut { found: NoLogin }`. When the
+  lawyer's environment moves Claude's store, nothing is found and nothing is queried: their
+  Claude Code keeps its login elsewhere, and "Use it" reads the default store only. By Claude
+  Code 0.3.293's rule (`claude_store_moved`): with `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, a
+  folder moves the store and `""` is the default store (`~/.claude`, the unsuffixed item)
+  whatever `CLAUDE_CONFIG_DIR` says; unset, a non-empty `CLAUDE_CONFIG_DIR` moves it.
+  `ClaudeSettings` is no longer reported.
+- **macOS** (`config.platform`, decided at run time). Claude Code keeps its login in the
+  Keychain: a generic password, service `Claude Code-credentials`, account `$USER` (else the OS
+  user name; `claude-code-user` when that is not `[A-Za-z0-9._-]+`), for the default config.
+  With `CLAUDE_CONFIG_DIR` set, or `CLAUDE_SECURESTORAGE_CONFIG_DIR` set to a folder, the service
+  gets `-<first 8 hex of sha256(folder)>` (Claude Code 0.3.293's service rule). So when the stat
+  finds no file, detection runs `/usr/bin/security find-generic-password -s "Claude
+  Code-credentials"`, plus `-a <USER>` when the lawyer's `USER` fits that account rule (else the
+  service alone), by absolute path, with `HOME` the only variable, stdin closed and stdout and
+  stderr thrown away unread (they name the account), killed past 3 s. Exit 0 is
+  `LoginFound { from: ClaudeCode, email: None }`; 44 ("could not be found") is a definite no;
+  any other end (another code, a timeout, a failed start) could not tell, logged with the code or
+  a fixed word only. At first detection both are `SignedOut { found: NoLogin }`. A recorded
+  `reused` re-checked at a status check stops (`ReusedSignedOut`) on 44 only; could not tell
+  keeps the record and leaves the state as it is, and the next check asks again (2026-11-15
+  review).
+  - **Locked keychain.** `security find-generic-password` searches the file-based login
+    keychain with `SecKeychainSearchCopyNext`, and Apple documents that functions needing an
+    unlocked keychain show the Unlock Keychain dialog unless `SecKeychainSetUserInteractionAllowed`
+    is false (process-wide, deprecated); over SSH the same search fails "User interaction is not
+    allowed". So a locked keychain may show the dialog even for this attributes-only query
+    (unverified on a Mac; checklist rows). An in-process `SecItemCopyMatching` with
+    `kSecUseAuthenticationUI` skip or fail would not help: Apple's Security source
+    (`OSX/libsecurity_keychain/lib/SecItem.cpp`) sends a legacy-keychain query to
+    `SecItemCopyMatching_osx`, which never reads that key. The guard: detection keeps the
+    Keychain's answer for 10 minutes (`KeychainMemo`, one per `Agents`, on the config clock's
+    monotonic reading), whatever it was, so status checks, their retries and Sign in presses ask
+    at most once per 10 minutes and a dialog cannot repeat sooner. Only the lawyer's own "Look
+    for my Claude Code login" asks afresh. `-w`, `-g` and `-d` are never passed, so the secret is
+  never read or printed; on a Mac (stage C, 2026-11-15) the query exits 0 with attributes only
+  and no Keychain dialog, and 44 for a missing service. `tests/credential_names.rs` keeps the
+  service name in `reuse.rs` and fails any file that runs the query and holds one of those flags.
+  Linux and Windows keep the stat alone. Tests pin the fixture to Linux on a Mac
+  (`testing::signin_test_platform`), and a test that reaches the query with no fake `security`
+  panics unless it opts in (`SigninConfig::allow_real_security`, the one real-macOS test).
+  Everything after detection is as elsewhere: "Use it"
+  confirms through `auth status` under `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, which addresses the
+  unsuffixed item, and each status check detects again.
+- **Locked keychain, background runs (2026-11-15, VM).** In a macOS 27.2 VM with the login
+  keychain locked, detection's attributes-only query found the item with no prompt, but Claude
+  Code's own `security find-generic-password -w` of Clauseo's suffixed item, run by the status
+  check, showed "security wants to use the 'login' keychain" at times the lawyer did nothing (on
+  main before this change too). So the status check the app starts by itself (`Task::Status`:
+  at start, a window's Plans, its background re-checks) runs no Claude, own or reused, while the
+  default keychain is locked (`signin/keychain_lock.rs`, `SecKeychainGetStatus` on the default
+  keychain, which reads the state and never prompts; a failed call counts as locked;
+  `security show-keychain-info` exits 0 locked or unlocked in the GUI session). It could not tell: the state stays (a blank
+  card shows Sign in), a recorded reuse is kept, and the background re-checks (30 s, 60 s, then
+  every 120 s) ask again. Turns, sign-ins, "Use it" and "Look for my login" are the lawyer's own
+  acts and are not guarded. Desktop's limits readers (`setup/readers.rs`) hold Claude's
+  scheduled read the same way through `clauseo_agents::login_keychain_locked`: it fails at once,
+  the last numbers stay as stale, and the next read asks again.
+- **Guard: Keychain shims and jails are for `own` only.** Reuse on macOS works only because a
+  reused Claude reaches the lawyer's real item through Apple's `/usr/bin/security` and
+  SecurityServer. Any Keychain shim, jail or `keychain(false)` sandbox profile for Claude (draft
+  #815, plan-c's `keychain-shim/security`) must apply to source `own` only, never `reused`, or the
+  reused login reads as signed out. Clauseo's own login is
+  `Claude Code-credentials-<sha256(home)[:8]>` (or the file in the home), never the lawyer's
+  item: own runs strip the inherited `CLAUDE_SECURESTORAGE_CONFIG_DIR` (`signin/env.rs`) and the
+  own session sets it to the home (`desktop/src/setup/backend/entry.rs`). The same note sits in
+  `signin/reuse.rs`, `signin/env.rs` and `entry.rs`.
 - Codex: `~/.codex/auth.json` a regular file is `LoginFound { from: Codex, email: None }`, else
   `SignedOut { found: NoLogin }`. With `CODEX_HOME` set in the lawyer's environment nothing is
   found: "Use it", the split check and the guard address `~/.codex` only. `CodexKeyring` is no
@@ -467,7 +534,8 @@ The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the bas
 `HOME`, or `USERPROFILE` on Windows.
 
 **"Use it"** runs detection again first. It goes on while detection still finds a login and its
-email equals the one `LoginFound` showed. Detection is a stat and gives no email for either
+email equals the one `LoginFound` showed. Detection is a stat (on macOS, for Claude, also the
+Keychain query) and gives no email for either
 vendor, so this compares `None` with `None` and does not tie "Use it" to the account the lawyer
 saw (see "Detection"). A login gone in between is not reused: the
 new detection is the state. Detection that cannot tell

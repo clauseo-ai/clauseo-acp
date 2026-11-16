@@ -1,8 +1,8 @@
 //! Lines the line filter used to pass on as JSON-RPC but the SDK's own decode refuses or reads
 //! differently: a number out of `f64`'s range (`1e400`, which `serde_json` skips when it ignores a
 //! value but refuses when it builds one), `serde_json`'s private `RawValue` token used as a map
-//! key, shapes its `RawJsonRpcMessage` decode refuses, and an agent's line naming the filter's
-//! own marker method. Such a line is a malformed line like any other: it becomes a
+//! key, shapes its `RawJsonRpcMessage` decode refuses, and an agent's line naming one of the
+//! filter's own marker methods. Such a line is a malformed line like any other: it becomes a
 //! `ProtocolWarning::MalformedLine` of its own size, nothing is written back to the agent, and
 //! it never holds back the lines after it.
 
@@ -33,9 +33,18 @@ const NOT_JSON_RPC: [&str; 4] = [
 const FAKE_MARKER: &str =
     r#"{"jsonrpc":"2.0","method":"_clauseo/malformed_line","params":{"bytes":1}}"#;
 
+/// An agent's line naming the filter's own skipped-update marker method, claiming a status.
+const FAKE_SKIPPED: &str = r#"{"jsonrpc":"2.0","method":"_clauseo/skipped_update","params":{"bytes":1,"sessionId":"s-1","kind":"tool_call_update","toolCallId":"t-1","status":"failed"}}"#;
+
 /// Every line above.
 fn refused() -> Vec<&'static str> {
-    let mut lines = vec![HUGE_NUMBER, RAW_VALUE_KEY, RAW_VALUE_PARAMS, FAKE_MARKER];
+    let mut lines = vec![
+        HUGE_NUMBER,
+        RAW_VALUE_KEY,
+        RAW_VALUE_PARAMS,
+        FAKE_MARKER,
+        FAKE_SKIPPED,
+    ];
     lines.extend(NOT_JSON_RPC);
     lines
 }

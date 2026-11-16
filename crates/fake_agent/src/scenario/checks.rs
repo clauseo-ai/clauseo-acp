@@ -145,6 +145,13 @@ fn check_step<'a>(
                 )));
             }
         }
+        StepKind::TranscriptUser(text) => {
+            if text.trim().is_empty() {
+                return Err(at.load_error(
+                    "transcript_user: the text is blank, and the host never finds a blank steer",
+                ));
+            }
+        }
         StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
     }
     Ok(())

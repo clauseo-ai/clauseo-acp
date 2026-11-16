@@ -38,7 +38,7 @@ expression: tally_schema()
       "description": "`crash` (weekly tally only): the next start after a crash.",
       "properties": {
         "after_launch": {
-          "description": "Whether it came within a short time of the start.",
+          "description": "Whether the window had shown the app before the crash.",
           "type": "boolean"
         },
         "kind": {

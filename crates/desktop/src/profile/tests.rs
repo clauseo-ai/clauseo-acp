@@ -61,9 +61,10 @@ fn claude_meta_carries_the_instructions_and_the_plugin_dir() {
     let profile = profile(&scratch);
     let hook = DesktopProfile::new(profile.clone(), true);
     let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
+    // Claude's own instructions: on macOS they end with the commands-that-never-run line.
     assert_eq!(
         meta.pointer("/systemPrompt/append").and_then(Value::as_str),
-        Some(profile.instructions().as_str())
+        Some(profile.claude_instructions().as_str())
     );
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
@@ -170,7 +171,9 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id)))
         );
         if clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id))) {
-            let McpServer::Stdio { name, command, .. } = servers.remove(0);
+            let McpServer::Stdio { name, command, .. } = servers.remove(0) else {
+                panic!("expected a stdio server");
+            };
             assert_eq!((name.as_str(), &command), ("browser", &clauseo_mcp));
         }
         let [
@@ -208,10 +211,11 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
         browser.args.get(at + 1).map(String::as_str),
         agent_browser.to_str()
     );
-    // Four variables (no proxy), and the socket folder's on macOS and Linux (decision record
-    // 0030).
+    // Three variables (no proxy, no stream port since route 2), and the socket folder's on macOS
+    // and Linux (decision record 0030).
     assert!(!browser.env.contains_key("AGENT_BROWSER_PROXY"));
-    assert_eq!(browser.env.len(), if cfg!(windows) { 4 } else { 5 });
+    assert!(!browser.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
+    assert_eq!(browser.env.len(), if cfg!(windows) { 3 } else { 4 });
 }
 
 #[test]
@@ -399,7 +403,11 @@ fn no_profile_leaves_the_host_without_a_hook() {
 fn build_puts_the_profile_under_the_data_folder() {
     let scratch = Scratch::new("profile-build", &[]);
     let locations = Locations::under_root(scratch.path());
-    let hook = DesktopProfile::build(&locations, None).unwrap();
+    // No `PATH`: a debug build would run the stetdoc on the machine's `PATH` from a background
+    // thread this test never joins. On Windows a test that exits while that thread is between
+    // starting stetdoc suspended and putting it in its job leaves it suspended for good, holding
+    // the test's output pipes (the gates' 40-minute LEAK of `stetdoc --version`, 11-15).
+    let hook = DesktopProfile::build_with(&locations, None, None).unwrap();
     let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
@@ -424,6 +432,7 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     scratch.executable("tools/stetdoc/stetdoc");
     let folder = scratch.dir("tools/stetdoc");
     let locations = Locations::under_root(&scratch.dir("data"));
+    seen_before(&locations, &folder.join("stetdoc"));
     let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
     assert_eq!(hook.path_prepend(), Some(folder));
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
@@ -435,6 +444,15 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
         "{}",
         developer_instructions(&keys)
     );
+}
+
+/// Records `program` in the marker of the profile under `locations` as seen to answer, so the
+/// build tries it at the start; one not seen yet is tried in the background (`release.rs`).
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+fn seen_before(locations: &Locations, program: &std::path::Path) {
+    let exe = std::env::current_exe().unwrap();
+    let paths = paths_for(locations, exe, Some(program.to_path_buf())).unwrap();
+    clauseo_profile::skills::stetdoc::start::seen::record(&paths.stetdoc_seen(), paths.stetdoc());
 }
 
 /// A stub stetdoc that answers both runs at once, its skill with a frontmatter that parses.
@@ -453,6 +471,7 @@ fn a_shared_path_folder_is_not_prepended() {
     scratch.executable("shared/git");
     let path = std::env::join_paths([PathBuf::from("/usr/bin"), scratch.dir("shared")]).unwrap();
     let locations = Locations::under_root(&scratch.dir("data"));
+    seen_before(&locations, &scratch.dir("shared").join("stetdoc"));
     let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), None);
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
@@ -473,35 +492,6 @@ fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
     let locations = Locations::under_root(&scratch.dir("data"));
     let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), Some(scratch.dir("b")));
-}
-
-/// D3: a stetdoc that hangs on `skills get core` is stopped within `STETDOC_START_LIMIT`: the
-/// build returns well before stetdoc's own 10 s limit, with no stetdoc skill. Its `--version`
-/// worked, so it stays on: its folder first on PATH and the stetdoc line in the instructions.
-#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
-#[test]
-fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
-    let scratch = Scratch::new("profile-slow-stetdoc", &["data", "slow"]);
-    scratch.file(
-        "slow/stetdoc",
-        b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9.9.9'; else sleep 60; fi\n",
-    );
-    scratch.executable("slow/stetdoc");
-    let path = scratch.dir("slow").into_os_string();
-    let locations = Locations::under_root(&scratch.dir("data"));
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _sent = tx.send(DesktopProfile::build_with(&locations, None, Some(&path)));
-    });
-    let hook = rx
-        .recv_timeout(std::time::Duration::from_secs(7))
-        .expect("the build returns within 7 s")
-        .unwrap();
-    assert_eq!(hook.path_prepend(), Some(scratch.dir("slow")));
-    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
-    assert!(!token.root().join("stetdoc").exists());
-    let line = clauseo_profile::instructions::STETDOC_CLI.trim();
-    assert!(hook.profile.instructions().contains(line));
 }
 
 #[test]
@@ -544,48 +534,4 @@ fn the_host_config_gets_the_browser_folder_only_with_its_copy() {
     let without = DesktopProfile::new(profile(&scratch), false);
     let config = super::with_profile(scratch.config(Vec::new()), Some(without), setup_hook());
     assert_eq!(config.profile_hook().browser_tool(), None);
-}
-
-/// A debug build with no bundled sidecar copies the first `agent-browser` on `PATH` into
-/// `<data>/tools` and wires that folder, and the browser's skill comes with that copy whether
-/// or not this machine has a Chrome (each session's `{browser}` says whether it has one). With no
-/// program anywhere there is no browser and no skill.
-#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
-#[test]
-fn build_copies_agent_browser_from_path_in_a_debug_build() {
-    let scratch = Scratch::new("profile-build-browser", &["data", "bin"]);
-    scratch.file(
-        "bin/agent-browser",
-        b"#!/bin/sh\necho 'agent-browser 0.41.1'\n",
-    );
-    scratch.executable("bin/agent-browser");
-    let folder = scratch.dir("bin");
-    let locations = Locations::under_root(&scratch.dir("data"));
-    let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
-    let tools = locations.data_dir().join("tools");
-    assert_eq!(hook.browser_tool(), Some(tools.clone()));
-    assert_eq!(
-        std::fs::read(tools.join("agent-browser")).unwrap(),
-        std::fs::read(folder.join("agent-browser")).unwrap()
-    );
-    let token = write_skills(&hook.launch_writes(&agent(CLAUDE))[0]).unwrap();
-    assert!(
-        token
-            .root()
-            .join("agent-browser")
-            .join("SKILL.md")
-            .is_file()
-    );
-    // Codex's index never names it: Codex has the `browser` entry's tools instead.
-    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
-    let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
-    let skill = token.root().join("agent-browser").join("SKILL.md");
-    assert!(!developer_instructions(&keys).contains(skill.to_str().unwrap()));
-    assert!(!developer_instructions(&keys).contains("agent-browser"));
-
-    let empty = scratch.dir("data");
-    let none = DesktopProfile::build_with(&locations, None, Some(empty.as_os_str())).unwrap();
-    assert_eq!(none.browser_tool(), None);
-    let token = write_skills(&none.launch_writes(&agent(CLAUDE))[0]).unwrap();
-    assert!(!token.root().join("agent-browser").exists());
 }

@@ -104,6 +104,7 @@ fn rpc(method: &str, code: i32, message: &str, data: &str) -> Error {
         message: message.to_owned(),
         data: data.to_owned(),
         data_text: None,
+        data_fields: clauseo_acp::RpcData::default(),
     })
 }
 
@@ -168,4 +169,27 @@ fn a_cwd_key_among_others_still_counts() {
         session_refusal(&error).map(|error| error.code()),
         Some(ErrorCode::MatterFolderPermission)
     );
+}
+
+/// Claude Code's exit at start in a folder it can't access, as claude-agent-acp passed it on to
+/// Rohan's `session/new` (-32603 "Internal error", `data.details` holding Claude Code's stderr):
+/// `agent.folder_inaccessible`, with no path.
+#[test]
+fn claude_codes_working_directory_exit_is_folder_inaccessible_with_no_path() {
+    let details = r#"{"details":"Claude Code process exited with code 1. stderr: Error: Can't access working directory /Users/rohan/Documents/Clauseo\\ Test\\ Matter: Path \"/Users/rohan/Documents/Clauseo\\ Test\\ Matter\" does not exist"}"#;
+    let error = Error::Acp(clauseo_acp::Error::Rpc {
+        method: "session/new".to_owned(),
+        code: -32603,
+        message: "Internal error".to_owned(),
+        data: "keys [details]".to_owned(),
+        data_text: Some(details.to_owned()),
+        data_fields: clauseo_acp::RpcData::default(),
+    });
+    let refusal = session_refusal(&error).expect("a refusal");
+    assert_eq!(refusal.code(), ErrorCode::AgentFolderInaccessible);
+    let message = refusal.to_wire().message().to_owned();
+    assert!(!message.contains("rohan"), "{message}");
+    // Any other internal error stays the ACP crate's code.
+    let other = rpc("session/new", -32603, "Internal error", "keys [details]");
+    assert!(session_refusal(&other).is_none());
 }

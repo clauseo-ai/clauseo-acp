@@ -233,6 +233,19 @@ impl HistoryStore for GixStore {
         self.objects.read_blob(&to_gix(blob), path, out)
     }
 
+    fn write_blob(&mut self, data: &[u8]) -> Result<Oid, Error> {
+        let id = gix::objs::compute_hash(HashKind::Sha1, Kind::Blob, data)
+            .map_err(|err| Error::history("hash", err))?;
+        put(
+            self.objects.deflated(),
+            &mut self.new_objects,
+            Kind::Blob,
+            data,
+            id,
+        )?;
+        to_oid(&id)
+    }
+
     fn blob_len(&self, blob: Oid) -> Result<u64, Error> {
         let id = to_gix(blob);
         match self.objects.header(&id)? {

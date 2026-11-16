@@ -29,7 +29,9 @@ export type InstallView =
       totalMb: number;
     }
   | { kind: "installing" }
-  | { kind: "offline" }
+  /** The host's agent.install_offline: the download waits and resumes by itself. `online`: the window says it is online
+   * meanwhile, so the download can't be reached, and the line says that, not "You're offline". */
+  | { kind: "offline"; online?: boolean }
   | { kind: "blocked"; hosts: readonly string[] }
   | { kind: "disk"; need: number; free: number }
   /** `setup`: every file downloaded, and setting them up failed (agent.install_setup_failed). */
@@ -39,7 +41,7 @@ export type InstallView =
 export type InstallActs = {
   retry: () => void;
   proxy: () => void;
-  /** Copies the log ("Copy details for IT" copies its message itself, copy-for-it.tsx). */
+  /** Copies the log (Copy addresses copies its message itself, copy-for-it.tsx). */
   copy: (text: string) => void;
   /** Whether the log was copied for the failure on screen now: the line reads it back. */
   copied: "log" | null;
@@ -48,7 +50,7 @@ export type InstallActs = {
    * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
    * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
   signIn?: (() => void) | undefined;
-  /** The Sign in names its plan, "Sign in to {name}": where both plans stand side by side (the first screen). */
+  /** The Sign in names its plan, "Sign in with {name}": where both plans stand side by side (the first screen). */
   named?: boolean | undefined;
   /** The plan's install, the normal one (`install_agent`, its size, progress and failures on this line): offered as
    * "Install {plan}" for a plan whose install went missing after Clauseo installed it (#859). Left out, that plan's
@@ -89,7 +91,7 @@ export function checkingLine(
           aria-busy="true"
           data-testid={ids.signIn}
         >
-          {named ? w("Sign in to {name}", { name }) : w("Sign in")}
+          {named ? w("Sign in with {name}", { name }) : w("Sign in")}
         </Button>
       </span>
     ),
@@ -174,7 +176,7 @@ export function installLine(
               onClick={acts.signIn}
               data-testid={ids.signIn}
             >
-              {acts.named === true ? w("Sign in to {name}", { name }) : w("Sign in")}
+              {acts.named === true ? w("Sign in with {name}", { name }) : w("Sign in")}
             </Button>
           ),
         ),
@@ -205,7 +207,10 @@ export function installLine(
     case "offline":
       return {
         kind: "wait",
-        words: errorWords(lang, "agent.install_offline"),
+        words:
+          view.online === true
+            ? w("Clauseo can't reach the download right now. It tries again by itself.")
+            : errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
         actions: wrap(
@@ -217,7 +222,7 @@ export function installLine(
       };
     case "blocked": {
       const message = w(
-        "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
+        "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.",
         { name, list: view.hosts.join(", ") },
       );
       return {
@@ -230,6 +235,7 @@ export function installLine(
             {proxyButton("tone")}
             <CopyForIt
               lang={lang}
+              label={w("Copy addresses")}
               text={message}
               className="working-act"
               {...(ids.askIt === undefined ? {} : { testId: ids.askIt })}

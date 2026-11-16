@@ -5,7 +5,8 @@
 //! own home). The fake CLIs write what the real ones do on any run (`fake_agent`'s
 //! `first_meet`: Claude's global config and its backup, Codex's `tmp/arg0`), so a detection run
 //! on the lawyer's folders fails this. Each agent is checked signed out and with a stand-in
-//! login file (never a real credential).
+//! login file (never a real credential). Claude as a Mac, with a fake `security`, is
+//! `detect_keychain.rs`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -17,10 +18,10 @@ use clauseo_agents::{Found, LoginFrom, SigninState};
 use clauseo_protocol::AgentId;
 use sha2::{Digest, Sha256};
 
-use crate::support::{Fixture, claude, codex};
+use crate::support::{Fixture, Launch, claude, codex};
 
 /// Claude's stand-in credential file, under the lawyer's home.
-const CLAUDE_LOGIN: &str = concat!(".claude/.credentials", ".json");
+pub(crate) const CLAUDE_LOGIN: &str = concat!(".claude/.credentials", ".json");
 /// Codex's stand-in login file, under the lawyer's home.
 const CODEX_LOGIN: &str = ".codex/auth.json";
 
@@ -61,9 +62,17 @@ fn snapshot(fx: &Fixture) -> BTreeMap<PathBuf, Entry> {
 }
 
 /// Runs the status check for `agent` (Clauseo signed in to nothing, so it detects), checks that
-/// the lawyer's config is as it was and that every run started had Clauseo's own home (so none
-/// was detection's), then gives the state.
+/// the lawyer's config is as it was, that every run started had Clauseo's own home (so none
+/// was detection's) and that no Keychain query ran, then gives the state.
 fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
+    let (state, queries) = detect_with_queries(fx, agent);
+    assert_eq!(queries, Vec::<Launch>::new(), "a Keychain query ran");
+    state
+}
+
+/// [`detect_unchanged`] with the Keychain queries it ran (macOS's `security`, which the
+/// recording launcher sees by their first argument) given back rather than refused.
+pub(crate) fn detect_with_queries(fx: &Fixture, agent: &AgentId) -> (SigninState, Vec<Launch>) {
     let before = snapshot(fx);
     let (agents, events) = fx.start_for(agent.clone());
     agents.check_status(agent).unwrap();
@@ -84,7 +93,10 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
     } else {
         "CODEX_HOME"
     };
-    let runs = fx.launches();
+    let (queries, runs): (Vec<Launch>, Vec<Launch>) = fx
+        .launches()
+        .into_iter()
+        .partition(|run| run.args.first().map(String::as_str) == Some("find-generic-password"));
     assert!(
         runs.iter()
             .all(|run| run.env.get(OsStr::new(var)) == Some(&home)),
@@ -92,14 +104,14 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
     );
     // The one run is Clauseo's own status, signed out (a definite answer, so not asked again).
     assert_eq!(runs.len(), 1, "{runs:?}");
-    state
+    (state, queries)
 }
 
-fn found(from: LoginFrom) -> SigninState {
+pub(crate) fn found(from: LoginFrom) -> SigninState {
     SigninState::LoginFound { from, email: None }
 }
 
-fn no_login() -> SigninState {
+pub(crate) fn no_login() -> SigninState {
     SigninState::SignedOut {
         found: Some(Found::NoLogin),
     }

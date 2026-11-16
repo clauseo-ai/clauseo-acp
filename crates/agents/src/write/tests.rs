@@ -128,3 +128,84 @@ fn a_read_only_tree_is_removed_without_following_a_link() {
     assert_eq!(mode, 0o555);
     set_mode(&outside, 0o755).unwrap();
 }
+
+/// The lock files' rules, which two installs in one process rely on as much as two processes
+/// do: every open is its own holder (`flock` on Unix, `LockFileEx` on Windows), so an exclusive
+/// hold excludes a second open in this very process; shared holds go together; an exclusive and
+/// a shared one never do; and a closed file gives its lock up. Each agent's lock is its own.
+#[test]
+fn agents_locks_exclude_each_other_within_one_process() {
+    use super::{AgentsLock, Mode, try_lock};
+    use clauseo_protocol::AgentId;
+
+    let data = TestDir::new("locks");
+    let a = AgentId::new("claude-acp").unwrap();
+    let b = AgentId::new("codex-acp").unwrap();
+    let take = |lock, mode| try_lock(&data.0, lock, mode).unwrap();
+
+    let own_a = take(AgentsLock::Agent(&a), Mode::Exclusive).expect("A's lock is free");
+    assert!(
+        take(AgentsLock::Agent(&a), Mode::Exclusive).is_none(),
+        "A's lock twice"
+    );
+    assert!(
+        take(AgentsLock::Agent(&b), Mode::Exclusive).is_some(),
+        "B's is its own"
+    );
+    drop(own_a);
+    assert!(
+        take(AgentsLock::Agent(&a), Mode::Exclusive).is_some(),
+        "given up on close"
+    );
+
+    let one = take(AgentsLock::All, Mode::Shared).expect("shared");
+    let two = take(AgentsLock::All, Mode::Shared).expect("shared beside shared");
+    assert!(
+        take(AgentsLock::All, Mode::Exclusive).is_none(),
+        "exclusive beside shared"
+    );
+    drop((one, two));
+    let whole = take(AgentsLock::All, Mode::Exclusive).expect("exclusive once none share");
+    assert!(
+        take(AgentsLock::All, Mode::Shared).is_none(),
+        "shared beside exclusive"
+    );
+    drop(whole);
+
+    let node = take(AgentsLock::Node, Mode::Exclusive).expect("Node's lock");
+    assert!(take(AgentsLock::Node, Mode::Shared).is_none());
+    assert!(
+        take(AgentsLock::Python, Mode::Exclusive).is_some(),
+        "Python's is apart"
+    );
+    drop(node);
+    let names: Vec<String> = std::fs::read_dir(data.0.join("agents"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    for name in [
+        ".lock",
+        ".lock-claude-acp",
+        ".lock-codex-acp",
+        ".lock-node",
+        ".lock-python",
+    ] {
+        assert!(names.iter().any(|n| n == name), "{name} in {names:?}");
+    }
+}
+
+/// A link standing where a lock file goes is refused, never followed (Unix; Windows refuses one
+/// found by `symlink_metadata` the same way, `open_no_follow`).
+#[cfg(unix)]
+#[test]
+fn a_link_at_a_lock_file_is_refused() {
+    use super::{AgentsLock, Mode, try_lock};
+
+    let data = TestDir::new("locks-link");
+    let elsewhere = TestDir::new("locks-link-target");
+    let target = elsewhere.file("victim", b"kept");
+    std::fs::create_dir_all(data.0.join("agents")).unwrap();
+    super::symlink(&target, &data.0.join("agents").join(".lock-node")).unwrap();
+    assert!(try_lock(&data.0, AgentsLock::Node, Mode::Exclusive).is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"kept");
+}

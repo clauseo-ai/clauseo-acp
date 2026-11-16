@@ -24,6 +24,9 @@
   /* ---------- Folder: the label, then the field, then the note or the offer under it ---------- */
   .matter-form-folder {
     display: grid;
+    /* one column as wide as the form, never the width of a long path: an auto column would grow to the offer's or
+       the field's one-line width and push Choose folder… past the dialog's edge */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s1-5);
     min-width: 0;
   }
@@ -63,14 +66,24 @@
   /* the offer: its plus under the field's folder icon, its words in the primary tone so it reads as a choice */
   .matter-form-offer {
     justify-self: start;
+    min-width: 0;
     max-width: 100%;
     padding-inline: var(--s3);
     color: var(--primary);
   }
-  .matter-form-offer > span {
+  /* its words whole on one line, the path between them giving way, its parent first, as the field's path does */
+  .matter-form-offer-line {
+    display: flex;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  }
+  .matter-form-offer-words {
+    flex: none;
+    white-space: pre;
+  }
+  .matter-form-offer-path {
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   /* a path on one line: the parent gives way first, cut with an ellipsis, so the folder's own name stays in view; the

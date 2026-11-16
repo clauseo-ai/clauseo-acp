@@ -83,6 +83,13 @@ impl ProtectionHost {
         self.sandbox.is_some()
     }
 
+    /// Whether a session started now runs in the Safe workspace: a sandbox is wired and the
+    /// computer is protected (each matter's protection is the computer's until R18's switch).
+    /// The lawyer's own MCP servers stay out of such a session (`agent::loads::lawyer`).
+    pub(crate) fn safe_workspace(&self) -> bool {
+        self.sandbox_wired() && matches!(self.observed.computer, Protection::Protected { .. })
+    }
+
     /// The data fence's health, for each permission request's fence check.
     pub(crate) fn data_fence(&self) -> &DataFenceHealth {
         &self.data_fence

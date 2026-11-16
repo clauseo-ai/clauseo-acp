@@ -3,6 +3,7 @@
 mod content;
 mod limit;
 mod session;
+mod too_long;
 mod tool;
 
 #[cfg(test)]
@@ -18,8 +19,9 @@ use serde_json::Value;
 use crate::event::{AcpEvent, AgentUpdate, MessageRole, Origin, ProtocolWarning};
 
 pub(crate) use content::{prompt_block, split_text};
-pub(crate) use limit::session_failure;
+pub(crate) use limit::{Failure, session_failure};
 pub(crate) use session::{agent_info, config_options, modes, stop_reason};
+pub(crate) use too_long::rpc_says_too_long;
 
 /// The `sessionUpdate` names this crate maps: every stable variant of schema 1.11.0, and the
 /// unstable `plan_update` and `plan_removed` codex-acp sends. Anything else (the AIR
@@ -164,18 +166,22 @@ pub(crate) fn update(
             }
         }
         acp::SessionUpdate::SessionInfoUpdate(update) => {
-            let failure = update.meta.as_ref().and_then(limit::session_failure);
+            let failure = update
+                .meta
+                .as_ref()
+                .and_then(limit::session_failure)
+                .map(|failure| failure_event(session.clone(), origin, failure));
             let title = match update.title {
                 MaybeUndefined::Value(title) => Some(Some(title)),
                 MaybeUndefined::Null => Some(None),
                 MaybeUndefined::Undefined => None,
             };
             match (failure, title) {
-                (Some(failure), Some(title)) => {
-                    out.push(limit_event(session.clone(), origin, failure));
+                (Some(event), Some(title)) => {
+                    out.push(event);
                     AgentUpdate::SessionTitle { title }
                 }
-                (Some(failure), None) => return out.push(limit_event(session, origin, failure)),
+                (Some(event), None) => return out.push(event),
                 (None, Some(title)) => AgentUpdate::SessionTitle { title },
                 (None, None) => return,
             }
@@ -283,7 +289,14 @@ fn usage(
     match update.meta.as_ref().and_then(limit::rate_limit) {
         Some(signal) => {
             out.push(update_event(session.clone(), origin, usage));
-            out.push(limit_event(session, origin, signal));
+            out.push(match signal {
+                Ok(signal) => AcpEvent::Limit {
+                    session,
+                    origin,
+                    signal,
+                },
+                Err(warning) => warning_event(Some(session), warning),
+            });
         }
         None => out.push(update_event(session, origin, usage)),
     }
@@ -336,18 +349,35 @@ fn tool_blocks(quarantined: impl Iterator<Item = Quarantined>) -> Vec<(usize, Co
         .collect()
 }
 
-fn limit_event(
-    session: AgentSessionId,
-    origin: Origin,
-    signal: Result<crate::event::LimitSignal, ProtocolWarning>,
-) -> AcpEvent {
-    match signal {
-        Ok(signal) => AcpEvent::Limit {
+/// The event an update's `sessionFailure` makes.
+fn failure_event(session: AgentSessionId, origin: Origin, failure: Failure) -> AcpEvent {
+    match failure {
+        Failure::Limit(signal) => AcpEvent::Limit {
             session,
             origin,
             signal,
         },
-        Err(warning) => warning_event(Some(session), warning),
+        Failure::TooLong(kind) => AcpEvent::TooLong {
+            session,
+            origin,
+            kind,
+        },
+        Failure::Connection(lost) => AcpEvent::ConnectionLost {
+            session,
+            origin,
+            lost,
+        },
+        // codex-acp sends one on an update only for a turn other than the running one, or after
+        // the prompt's answer: it ends no turn, so it stays a warning, as it was.
+        Failure::Failed(failed) => warning_event(
+            Some(session),
+            ProtocolWarning::SessionFailure {
+                category: failed.category,
+                severity: Some("error".to_owned()),
+                title: failed.title,
+            },
+        ),
+        Failure::Warning(warning) => warning_event(Some(session), warning),
     }
 }
 

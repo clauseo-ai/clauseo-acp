@@ -282,7 +282,8 @@ test("check: one on mount, before any state, and none on a section change", asyn
 });
 
 test("zero timers after any state", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
+  // the clears too: Plan and usage, open for a moment before #connectors, clears its minute's interval
+  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"] });
   const r = await open({ status: SIGNED_IN });
   for (const status of ["not_added", "signing_in", "signed_out", "key_revoked"] as const)
     await r.play(stateOf({ status }));

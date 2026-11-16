@@ -16,6 +16,12 @@
 //!   `unresolved[]` are never sources, and a `{"id": …, "pending": true}` entry (no title, no
 //!   link yet) is skipped. An object without the tool's list leaves the remaining blocks to the
 //!   line form.
+//! - **Files.** With `output: "file"`, or past the server's inline cap, the documents go to a
+//!   download file on the server (`https://data.clauseo.chat/f/…`), which is never read: only
+//!   the result's own text is. Lines in it, as above, are read as ever (the form the server is
+//!   asked to list a file's documents in). A read's file summary names its documents on a
+//!   block's first line, `d143202244, d91938676 saved as JSONL: …` (or `Markdown`): each
+//!   becomes an untitled link, after the lines, so one a line titles keeps its title.
 //! - **Links.** The text names none per document (only the `{id}` template), so a link is built
 //!   from the id, `d` included: `https://data.clauseo.chat/d/d143202244`.
 //!
@@ -48,6 +54,12 @@ const MAX_ID_DIGITS: usize = 20;
 
 /// What closes a title: the first field separator on the line.
 const SEPARATOR: &str = " · ";
+
+/// What follows the ids in a read's file summary.
+const SAVED: &str = " saved as ";
+
+/// The formats a read's file summary names, each with what follows it.
+const SAVED_FORMATS: [&str; 2] = ["Markdown: ", "JSONL: "];
 
 /// One `content[]` block, raw.
 #[derive(Deserialize)]
@@ -101,6 +113,11 @@ pub(super) fn links(tool: CaseLawTool, content: &RawValue) -> Vec<FoundLink> {
     }
     for text in rest {
         line_entries(text, &mut found);
+    }
+    if tool == CaseLawTool::ReadDocument {
+        for text in rest {
+            saved_entries(text, &mut found);
+        }
     }
     found.links
 }
@@ -243,6 +260,23 @@ fn entry(line: &str) -> Option<(&str, Option<&str>)> {
     Some((id, (title.len() <= MAX_TEXT_BYTES).then_some(title)))
 }
 
+/// A read's file summary, the first line of `text`: `d1, d2 saved as JSONL: …` (or
+/// `Markdown`). Each id is an untitled link; a list with anything but ids names nothing.
+fn saved_entries(text: &str, found: &mut Found) {
+    let Some((ids, rest)) = text.lines().next().and_then(|line| line.split_once(SAVED)) else {
+        return;
+    };
+    if !SAVED_FORMATS.iter().any(|format| rest.starts_with(format)) {
+        return;
+    }
+    if !ids.split(", ").all(|id| id_len(id) == Some(id.len())) {
+        return;
+    }
+    for id in ids.split(", ") {
+        found.add(&format!("{DOC_LINK}{id}"), None);
+    }
+}
+
 /// The JSON form's hits or documents: each an object whose `link`, when it is a document's, is
 /// used, and otherwise whose `id` builds one; its `title` when a string. A pending entry is
 /// skipped.
@@ -285,5 +319,7 @@ fn is_doc_link(link: &str) -> bool {
         && link.get(DOC_ORIGIN.len()..DOC_LINK.len()) == Some("d/")
 }
 
+#[cfg(test)]
+mod file_tests;
 #[cfg(test)]
 mod tests;

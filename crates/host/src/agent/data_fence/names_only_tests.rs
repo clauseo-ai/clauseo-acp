@@ -67,6 +67,7 @@ fn request(health: &DataFenceHealth, paths: &[PathBuf], command: Option<&str>) -
         roots: Vec::new(),
         words: candidates_words(raw.as_ref(), cfg!(windows)),
         health: health.clone(),
+        vars: Vec::new(),
     }
 }
 

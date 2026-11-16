@@ -1,5 +1,6 @@
 //! `python-runtime/THIRD-PARTY-NOTICES.txt`: every licence text of what the archives ship
-//! (`CPython`, the libraries PBS builds into it, pip, each package's wheel, and pandoc), written by
+//! (`CPython`, the libraries PBS builds into it, pip, each package's wheel, pandoc, and tesseract
+//! with leptonica and its models), written by
 //! `bump` from the files themselves and stamped with the lock's sha256, so `check` sees a stale
 //! file offline and `build` checks that every licence file in the runtime is in it before it
 //! ships it.
@@ -116,6 +117,13 @@ pub(crate) fn render(lock: &Lock, lock_text: &str, sections: &[Section]) -> Stri
         ),
         "its licence and where its complete source code is.".to_owned(),
         String::new(),
+        format!(
+            "And the tesseract {} OCR program, which Clauseo builds from source with leptonica {}",
+            lock.tesseract.version, lock.tesseract.leptonica
+        ),
+        "linked in, and its trained models from tessdata_fast; their sections follow pandoc's."
+            .to_owned(),
+        String::new(),
         "Contents".to_owned(),
     ];
     parts.extend(
@@ -184,6 +192,7 @@ pub(crate) fn problems(notices: &str, lock: &Lock, lock_text: &str) -> Vec<Strin
     if !notices.contains(&super::pandoc::source_url(&lock.pandoc.version)) {
         found.push("THIRD-PARTY-NOTICES.txt does not give pandoc's source tarball".to_owned());
     }
+    super::tesseract::notice_problems(notices, &lock.tesseract, &mut found);
     found
 }
 

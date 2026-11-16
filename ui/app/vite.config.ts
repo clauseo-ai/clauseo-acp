@@ -212,9 +212,10 @@ export const BARE_CHUNKS = [
   "words-hi",
 ];
 
-/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2) and the Safe workspace's (UC)
- * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
-export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace"];
+/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2), the Safe workspace's (UC) and Tools' (settings/sections/mcp-tools.tsx, UC-169 on)
+ * imports only the settings window's first load, and at most a part only they share (the alert dialog: the Safe workspace's and
+ * Tools' confirms). vite-config.test.ts checks it carries no preload. */
+export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace", "mcp-tools"];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left

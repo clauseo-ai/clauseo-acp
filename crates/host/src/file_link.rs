@@ -8,9 +8,17 @@ use std::path::Path;
 /// that does not resolve is outside.
 pub(crate) fn inside(path: &Path, folder: &Path) -> bool {
     match (dunce::canonicalize(path), dunce::canonicalize(folder)) {
-        (Ok(path), Ok(folder)) => path.starts_with(folder),
+        (Ok(path), Ok(folder)) => within(&path, &folder),
         _ => false,
     }
+}
+
+/// Whether the canonical `path` lies in the canonical `folder`, by components, a long path's
+/// verbatim `\\?\C:\` read as `C:\` (`dunce` keeps it past 260 characters, so a deep file in a
+/// shorter folder would differ by its prefix alone).
+pub(crate) fn within(path: &Path, folder: &Path) -> bool {
+    use crate::network_paths::resolve::comparable;
+    comparable(path).starts_with(comparable(folder))
 }
 
 /// The `file://` URI of the absolute `path` (RFC 8089), percent-encoded by RFC 3986.

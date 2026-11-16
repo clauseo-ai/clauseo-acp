@@ -84,6 +84,7 @@ a `respond` step sent, or of the last `session/load` request an `expect` matched
 | `write_file` | `path`: relative path. `content`: string. | Creates the parent folders and writes `content` to `path` under the session cwd, replacing any file there. Fails (exit 3) before any session. | `path` is not empty, not absolute (`/x`, `\x`, `C:...`), and has no `..` part. |
 | `delete_file` | `path`: relative path. | Deletes the file at `path` under the session cwd. Fails (exit 3) when it is not a file, or before any session. | As `write_file`. |
 | `move_file` | `from`, `to`: relative paths. | Moves `from` to `to` under the session cwd, creating `to`'s parent folders. Fails (exit 3) when `from` is not a file, or before any session. | Both paths as `write_file`. |
+| `transcript_user` | A string: the lawyer's words. | Appends Claude Code's transcript line for words it took in, `{"type":"user","timestamp":"2999-01-01T00:00:00.000Z","sessionId":...,"cwd":...,"message":{"role":"user","content":[{"type":"text","text":...}]}}`, to `<CLAUDE_CONFIG_DIR>/projects/<project key of the session cwd>/<current session>.jsonl`, making its folders. The host confirms a steer claude-agent-acp answered `injected` only from such a line (`crates/host/src/actor/turn/queue/transcript.rs`); the project key is Claude Code's, as the host computes it. Stamped far ahead, since the agent reads no clock. Fails (exit 3) before any session, with no current session, when `CLAUDE_CONFIG_DIR` is unset or empty (the host always sets it for a Claude agent), or for a session id that is not a plain file name. | The text is not blank. |
 | `stderr` | `line`: string. `repeat`: optional integer, default `1`. | Writes `line` and `\n` to stderr `repeat` times, in one write. | `repeat` is 0 to 100,000 (`MAX_REPEAT`). |
 | `spawn_child` | `pid_file`: relative path. `own_group`: optional boolean, default `false`. | Starts `fake_agent --hold` with null stdio and never waits for it, writes its PID and `\n` to `pid_file`, then writes `fake_agent: child <pid>` to stderr. `pid_file` is relative to the agent's working directory (the process folder), not the session cwd, so it needs no session. With `own_group: true` the child leads a process group of its own on Unix, as a command Codex starts in a session of its own does, so a signal to the agent's group misses it; on Windows the flag changes nothing (the child stays in the agent's job). | `pid_file` as `write_file`'s `path`. |
 | `exit` | `code`: integer. | Flushes stdout and exits with `code`. Later steps never run. | `code` is 0 to 255 and not 2 or 3, which `fake_agent` keeps for itself (see [Exit codes](#exit-codes)). |
@@ -101,6 +102,7 @@ Examples from the bundled scenarios:
 {"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
 {"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
 {"move_file":{"from":"notes/b.txt","to":"archive/b.txt"}}
+{"transcript_user":"Focus on clause 4"}
 {"stderr":{"line":"fake_agent exit-mid-turn stderr filler.","repeat":200}}
 {"spawn_child":{"pid_file":"grandchild.pid"}}
 {"exit":{"code":1}}

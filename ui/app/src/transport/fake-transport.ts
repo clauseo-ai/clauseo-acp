@@ -12,14 +12,14 @@ import type {
   NextOutcome,
   NextQuery,
   NextQueryResult,
-  Papers,
   Settings,
 } from "../room/host-next.ts";
-import { NO_NEXT, WIRE } from "../room/host-next.ts";
+import { NO_NEXT } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
 import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
 import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
 import { displayInfoOf, type FakeDisplayHost } from "./fake-display.ts";
+import { nextPartsOf } from "./fake-transport-next.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
@@ -58,6 +58,7 @@ import type {
   UpdateView,
   ViewPosition,
 } from "./protocol.ts";
+import { FullScreenFeed } from "./full-screen-feed.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
 import type { SendMarks } from "../start-marks.ts";
@@ -77,7 +78,7 @@ export type FakeCall =
     }
   | { call: "pick_folder" }
   | FakeChooserCall
-  | { call: "open_external"; url: string }
+  | { call: "open_external"; url: string; shown?: string; alwaysAsk?: true }
   | { call: "quit_app" }
   | { call: "open_privacy_settings" }
   | { call: "open_file"; file: FileRefId }
@@ -124,7 +125,7 @@ export type FakeHost = FakeDisplayHost & {
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
    * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
    * Protected View. */
-  openExternal?: (url: string) => void | Promise<void>;
+  openExternal?: (url: string, shown?: string) => void | Promise<void>;
   /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
   quitApp?: () => void | Promise<void>;
   /** Answer `openPrivacySettings`; throwing refuses. Without one the pane opens. */
@@ -177,6 +178,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
+  readonly #fullScreen = new FullScreenFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
@@ -184,90 +186,14 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly setup: ((command: SetupCommand) => Promise<void>) | undefined;
   readonly countUi: ((event: UiCount) => Promise<void>) | undefined;
   readonly #setupHeard = new Set<(event: SetupEvent) => void>();
-  readonly #parts: { [P in NextPart]-?: NonNullable<NextHost[P]> } = {
-    papers: {
-      listPapers: async (matter) => {
-        const result = await this.#nextQuery({ [WIRE.listPapers]: { matter } });
-        if (!("papers" in result)) throw internalError("list_papers answered without papers");
-        return result.papers satisfies Papers;
-      },
-    },
-    settings: {
-      getSettings: async () => {
-        const result = await this.#nextQuery(WIRE.getSettings);
-        if (!("settings" in result)) throw internalError("get_settings answered without settings");
-        return result.settings;
-      },
-      setUiSettings: async (patch) => {
-        await this.#nextCommand({ [WIRE.setUiSettings]: { patch } });
-      },
-      setToolSettings: async (patch) => {
-        await this.#nextCommand({ [WIRE.setToolSettings]: { patch } });
-      },
-      setPrivacySettings: async (patch) => {
-        await this.#nextCommand({ [WIRE.setPrivacySettings]: { patch } });
-      },
-      onSettingsChanged: (listener) => {
-        this.#settingsHeard.add(listener);
-        return () => this.#settingsHeard.delete(listener);
-      },
-    },
-    matters: {
-      listMatters: async () => {
-        const result = await this.#nextQuery(WIRE.listMatters);
-        if (!("matters" in result)) throw internalError("list_matters answered without matters");
-        return result.matters;
-      },
-      listThreads: async (matter) => {
-        const result = await this.#nextQuery({ [WIRE.listThreads]: { matter } });
-        if (!("threads" in result)) throw internalError("list_threads answered without threads");
-        return result.threads;
-      },
-      command: (command) => this.#nextCommand(command),
-    },
-    location: {
-      getDefaultLocation: async () => {
-        const result = await this.#nextQuery(WIRE.getDefaultLocation);
-        if (!("default_location" in result))
-          throw internalError("get_default_location answered without default_location");
-        return result.default_location.display;
-      },
-    },
-    app: {
-      subscribeApp: (listener) => {
-        this.#appHeard.add(listener);
-        const first = this.host.next?.first?.() ?? [];
-        if (first.length > 0)
-          queueMicrotask(() => {
-            for (const event of first) if (this.#appHeard.has(listener)) listener(event);
-          });
-        return () => this.#appHeard.delete(listener);
-      },
-    },
-    restart: {
-      restartAgent: async (thread) => {
-        await this.dispatch({
-          command_id: crypto.randomUUID(),
-          command: { restart_agent: { thread } },
-        });
-      },
-    },
-    agents: {
-      listAgents: async () => {
-        const result = await this.#nextQuery(WIRE.listAgents);
-        if (!("agents" in result)) throw internalError("list_agents answered without agents");
-        return result.agents;
-      },
-    },
-    retry: {
-      retryFrom: async (thread, message) => {
-        const outcome = await this.#nextCommand({ [WIRE.retryFrom]: { thread, message } });
-        if (typeof outcome === "string" || !("thread_created" in outcome))
-          throw internalError("retry_from answered without a thread");
-        return outcome.thread_created.thread;
-      },
-    },
-  };
+  readonly #parts = nextPartsOf({
+    firstApp: () => this.host.next?.first?.() ?? [],
+    query: (query) => this.#nextQuery(query),
+    command: (command) => this.#nextCommand(command),
+    dispatch: (command) => this.dispatch(command),
+    settingsHeard: this.#settingsHeard,
+    appHeard: this.#appHeard,
+  });
 
   constructor(host: FakeHost = {}) {
     this.host = host;
@@ -321,6 +247,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     this.#reader = new ChannelReader(
       (event: ChannelEvent) => {
         const failed = streamFailedOf(event);
+        if (this.#fullScreen.take(event)) return;
         if (failed !== null) this.#subs.fail(failed.stream, toHostError(failed.error));
         else if ("patches" in event && event.patches !== undefined)
           this.#subs.deliver(event.patches);
@@ -350,6 +277,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   onLimits(listener: (view: LimitsView) => void): () => void {
     return this.#limits.onLimits(listener);
   }
+
+  /** Plays `window_full_screen` on the channel, as the desktop sends it on the app feed (FullScreenSource). */
+  fullScreenChanged = (full: boolean) => this.deliver({ window_full_screen: full });
+  onFullScreen: FullScreenFeed["onFullScreen"] = (listener) =>
+    this.#fullScreen.onFullScreen(listener);
 
   /** The `refresh_limits` commands dispatched, in order: the agent (undefined for every agent) and why. */
   refreshes(): { agent: AgentKind | undefined; why: RefreshWhy }[] {
@@ -539,9 +471,14 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return (await this.host.pickFolder?.()) ?? null;
   }
 
-  async openExternal(url: string): Promise<void> {
-    this.calls.push({ call: "open_external", url });
-    await this.#answer(() => this.host.openExternal?.(url));
+  async openExternal(url: string, shown?: string, alwaysAsk?: boolean): Promise<void> {
+    this.calls.push({
+      call: "open_external",
+      url,
+      ...(shown === undefined ? {} : { shown }),
+      ...(alwaysAsk === true ? { alwaysAsk } : {}),
+    });
+    await this.#answer(() => this.host.openExternal?.(url, shown));
   }
 
   async quitApp(): Promise<void> {

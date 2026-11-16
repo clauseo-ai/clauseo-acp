@@ -112,7 +112,8 @@ pub(super) fn queued_prompt_edited(
 }
 
 /// Where a steered message went: its outcome, and the turn that answers it. A message that moved
-/// to a new turn waits as that turn's prompt; each tool call set aside is marked background.
+/// to a new turn waits as that turn's prompt; each tool call set aside is marked background. A
+/// message not sent keeps its turn: no turn answers it.
 pub(super) fn steer_resolved(state: &mut ThreadState, event: &SteerResolved, out: &mut Applied) {
     let target = EntryId::UserMessage(event.message);
     let Some(order) = state.index.users.get(&event.message).copied() else {
@@ -126,11 +127,13 @@ pub(super) fn steer_resolved(state: &mut ThreadState, event: &SteerResolved, out
         SteerOutcome::Injected { turn }
         | SteerOutcome::Requeued { turn }
         | SteerOutcome::SentNow { turn } => Some(*turn),
-        SteerOutcome::Unknown { .. } => None,
+        SteerOutcome::NotSent { .. } | SteerOutcome::Unknown { .. } => None,
     };
     let moved = match &event.outcome {
         SteerOutcome::Requeued { turn } | SteerOutcome::SentNow { turn } => Some(*turn),
-        SteerOutcome::Injected { .. } | SteerOutcome::Unknown { .. } => None,
+        SteerOutcome::Injected { .. }
+        | SteerOutcome::NotSent { .. }
+        | SteerOutcome::Unknown { .. } => None,
     };
     if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order) {
         let mut changed = set(&mut prompt.steer, Some(event.outcome.clone()));

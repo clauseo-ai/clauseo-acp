@@ -202,7 +202,7 @@ test("admin_copy_missing: the repair's words and Get the installer, no command; 
   await press(byId("protection-installer"));
   await settle();
   expect(t.only("open_external")).toEqual([
-    { call: "open_external", url: installerPage(APP_VERSION) },
+    { call: "open_external", url: installerPage(APP_VERSION), alwaysAsk: true },
   ]);
   expect(t.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(t.protectionCommands()).toEqual([]);
@@ -237,7 +237,7 @@ test("needs_set_up with retry_asks_admin true (the admin copy there, after an in
   expect(step()?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
   );
   expect(byId("protection-repair")).toBeNull();
@@ -283,10 +283,7 @@ test("Not now is an outcome: the line says Not protected in Claude's words, and 
   expect(t.protectionCommands()).toEqual([]);
   expect(step()?.dataset["state"]).toBe("off");
   expect(step()?.textContent).toContain(
-    tbt(
-      "en",
-      "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
-    ),
+    tbt("en", "Clauseo changes files in this matter without asking."),
   );
   expect(byId("protection-failed")).toBeNull();
   expect(offered(t)).toBe(1);

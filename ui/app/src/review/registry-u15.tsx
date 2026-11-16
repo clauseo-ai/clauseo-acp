@@ -169,7 +169,7 @@ export const U15: Entry[] = [
   entry("U15-14", "{credits} credits left", "balance"),
   entry("U15-15", "Worth {rupees}.", "balance"),
   entry("U15-76", "As of {time}.", "balance"),
-  entry("U15-77", "Using your firm's key.", "key-line"),
+  entry("U15-77", "Using your key.", "key-line"),
   entry(
     "U15-78",
     "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
@@ -216,11 +216,7 @@ export const U15: Entry[] = [
   entry("U15-47", "Your balance updates here once the payment goes through.", "paying"),
   entry("U15-48", "Open the payment page again", "paying"),
   entry("U15-49", "API key", "api-key"),
-  entry(
-    "U15-50",
-    "Your firm's key for Clauseo's case-law service. Kept on this computer.",
-    "api-key",
-  ),
+  entry("U15-50", "Your key for Clauseo's case-law service. Kept on this computer.", "api-key"),
   entry("U15-51", "Add key", "api-key"),
   entry("U15-52", "What each search sends", "not-added"),
   entry(

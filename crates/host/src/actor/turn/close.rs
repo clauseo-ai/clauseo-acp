@@ -1,7 +1,7 @@
 //! The commit that closes a turn. Every path that ends a turn (step 7, a turn that never
 //! started, a dequeued turn, the retry of a failed end, start-up repair) builds one
 //! [`TurnClose`] and pushes it with [`TurnClose::push_into`], which keeps the order rules:
-//! expiries, cancelled tool calls, the matter's checkpoint events, `FilesChanged`,
+//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`,
 //! `TurnFailed`, `TurnEnded`, `TurnStoppedAtLimit`, and the detach last, so R6 leaves the
 //! thread in the state the detach gives.
 //!
@@ -13,13 +13,15 @@
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
     ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
-    StreamId, ThreadId, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
 };
 
 use super::super::Actor;
 use super::out::Out;
+use super::skipped::{self, Skipped};
 use super::{LimitMark, cancel};
 use crate::error::Error;
+use crate::log_file::LIFECYCLE;
 use crate::pipeline::MatterEvent;
 
 /// The requests a close expires.
@@ -94,6 +96,11 @@ pub(super) struct TurnClose {
     pub(super) expiries: Expiries,
     /// `Cancelled` for each tool call of the turn not finished, as sent.
     pub(super) cancel_tools: bool,
+    /// When not cancelling: `Completed` for each of these tool calls not finished, as sent.
+    /// Set on a turn the agent ended well to the calls whose update the ACP reader dropped over
+    /// its line cap with no status read (`skipped.rs`), so a call whose last update never came
+    /// does not stay running.
+    pub(super) complete_tools: Skipped,
     /// Events of the matter's stream: checkpoint records (with their rows) and outside edits.
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
@@ -114,6 +121,7 @@ impl TurnClose {
             failure: None,
             expiries: Expiries::None,
             cancel_tools: false,
+            complete_tools: Skipped::None,
             matter: None,
             files: None,
             checkpoint_after: None,
@@ -135,7 +143,10 @@ impl TurnClose {
         let turn = self.turn;
         self.expiries.push_into(actor, out)?;
         if self.cancel_tools {
-            cancel::push_tool_cancels(actor, out.thread(), turn, out)?;
+            cancel::push_tool_settles(actor, out.thread(), turn, ToolCallStatus::Cancelled, out)?;
+        } else {
+            let tools = skipped::unfinished(actor, out.thread(), turn, &self.complete_tools);
+            cancel::push_statuses(actor, tools, ToolCallStatus::Completed, out)?;
         }
         if let Some((matter, events)) = &self.matter {
             for event in events {
@@ -178,6 +189,28 @@ impl TurnClose {
         Ok(())
     }
 
+    /// The lifecycle line of the durable end: the stop, how many papers the turn changed and
+    /// how many of those may hold the lawyer's own edits. Counts only, never a path.
+    pub(super) fn log_end(&self, thread: ThreadId) {
+        let files = self
+            .files
+            .as_ref()
+            .map_or(&[][..], |changed| &changed.files[..]);
+        let flagged = files
+            .iter()
+            .filter(|file| file.may_include_lawyer_edits())
+            .count();
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            turn = %self.turn,
+            stop = ?self.stop,
+            changed = files.len(),
+            flagged,
+            "a turn ended"
+        );
+    }
+
     /// One commit holding the close, tagged `then`.
     pub(super) fn send(
         &self,
@@ -205,6 +238,23 @@ impl TurnClose {
         self.expiries = Expiries::Pending(self.expiries.reason());
         self.cancel_tools = true;
     }
+}
+
+/// Whether a turn that stops with `stop`, and no failure, completes the tool calls it leaves
+/// unfinished whose update the reader dropped ([`TurnClose::complete_tools`]): the stops where
+/// the agent answered the prompt. A cancel closes every unfinished one `Cancelled` itself, and a
+/// failure leaves them as they are. An agent that ends its turn has run its tool calls, so one
+/// still open after a dropped update lost its last one.
+pub(super) fn completes_tools(stop: StopReason) -> bool {
+    matches!(
+        stop,
+        StopReason::EndTurn
+            | StopReason::MaxTokens
+            | StopReason::MaxTurnRequests
+            | StopReason::Refusal
+            | StopReason::AtLimit
+            | StopReason::TooLong
+    )
 }
 
 /// Sends `stopped` in `thread` as its own commit, tagged so that its result reaches the

@@ -4,12 +4,13 @@
 import { createContext } from "react";
 
 export type MarkdownHost = {
-  /** Open an http(s) or mailto URL outside the app. */
-  openExternal(url: string): void;
+  /** Open an http(s) or mailto URL outside the app; `shown` is the link's visible text, which the host compares with
+   * where the link goes before it opens it unasked. */
+  openExternal(url: string, shown?: string): void;
   /** Open a citation or a paper of the matter, by its validated id. */
   openReference(kind: "citation" | "paper", id: string): void;
-  /** Open the paper a relative link names (`[Reply notes.md](Reply%20notes.md)`), by its matter-relative path,
-   * percent-decoded; the host says so when the matter's folder no longer holds it. */
+  /** Open the paper on the wall a file link names (PaperLinksContext), by its matter-relative path; the host says so
+   * when the matter's folder no longer holds it. */
   openPath(path: string): void;
 };
 
@@ -20,6 +21,16 @@ const NO_HOST: MarkdownHost = {
 };
 
 export const MarkdownHostContext = createContext<MarkdownHost>(NO_HOST);
+
+/**
+ * Which paper on the wall a file link names (`/Users/…/Reply%20to%20notice.docx`, `file://…`, `sandbox:/mnt/data/…`,
+ * `Reply.docx`): that paper's matter-relative path, which the link hands to `openPath`, or undefined. A file link it
+ * names no paper for shows as plain text, never as a link that does nothing. The room gives one that reads the wall;
+ * with none (every other surface) no file link matches.
+ */
+export type PaperLinks = (href: string) => string | undefined;
+
+export const PaperLinksContext = createContext<PaperLinks>(() => undefined);
 
 /**
  * True inside the streaming last block: its links render inert (no href, no action) until it is finished,

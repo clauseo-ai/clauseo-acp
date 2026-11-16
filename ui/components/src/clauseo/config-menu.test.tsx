@@ -25,8 +25,9 @@ const settle = () =>
     for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
   });
 
-const menuOf = (value: string, picked: string[] = []): ConfigMenu => ({
+const menuOf = (value: string, picked: string[] = [], scope = "thread:a"): ConfigMenu => ({
   id: "model",
+  scope,
   label: "Model",
   value,
   options: [
@@ -112,4 +113,57 @@ test("a pointer's open moves no focus to a value", async () => {
   expect((document.activeElement as HTMLElement | null)?.getAttribute("role")).not.toBe(
     "menuitemradio",
   );
+});
+
+test("the default row: the trigger shows the name alone, the menu adds the quiet note after it", async () => {
+  const menu: ConfigMenu = {
+    ...menuOf("default"),
+    options: [
+      { value: "default", name: "Opus 5.5", note: "(default)" },
+      { value: "sonnet", name: "Sonnet 5.5" },
+    ],
+  };
+  const trigger = await mount(menu);
+  expect(trigger.textContent).toBe("Opus 5.5");
+  expect(trigger.getAttribute("aria-label")).toBe("Model: Opus 5.5");
+  await act(async () => trigger.click());
+  await settle();
+  const ticked = document.querySelector('[aria-checked="true"]')!;
+  expect(ticked.textContent).toBe("Opus 5.5 (default)");
+  expect(ticked.querySelector(".text-muted")?.textContent).toBe(" (default)");
+  expect(document.querySelector('[aria-checked="false"]')?.textContent).toBe("Sonnet 5.5");
+});
+
+test("a polite live region says the value as the trigger names it each time it changes, never as it first shows", async () => {
+  const trigger = await mount(menuOf("sonnet"));
+  const live = () => host?.querySelector<HTMLElement>('[aria-live="polite"]');
+  expect(live()?.textContent).toBe("");
+  expect(live()?.classList.contains("sr-only")).toBe(true);
+  // a pick, as the room shows it at once
+  await act(async () => root?.render(<ConfigMenuTrigger menu={menuOf("haiku")} />));
+  expect(live()?.textContent).toBe("Model: Haiku");
+  expect(trigger.getAttribute("aria-label")).toBe("Model: Haiku");
+  // the host moving it back
+  await act(async () => root?.render(<ConfigMenuTrigger menu={menuOf("sonnet")} />));
+  expect(live()?.textContent).toBe("Model: Sonnet");
+});
+
+test("another conversation's value comes in silently: the live region says nothing and empties", async () => {
+  await mount(menuOf("sonnet"));
+  const live = () => host?.querySelector<HTMLElement>('[aria-live="polite"]');
+  await act(async () => root?.render(<ConfigMenuTrigger menu={menuOf("haiku")} />));
+  expect(live()?.textContent).toBe("Model: Haiku");
+  // another conversation opened, its model another
+  await act(async () => root?.render(<ConfigMenuTrigger menu={menuOf("opus", [], "thread:b")} />));
+  expect(live()?.textContent).toBe("");
+  const trigger = host?.querySelector<HTMLButtonElement>('[data-testid="pick-model"]');
+  expect(trigger?.getAttribute("aria-label")).toBe("Model: Opus");
+  // back in the first, at its own value: still nothing
+  await act(async () => root?.render(<ConfigMenuTrigger menu={menuOf("haiku", [], "thread:a")} />));
+  expect(live()?.textContent).toBe("");
+  // a pick there speaks again
+  await act(async () =>
+    root?.render(<ConfigMenuTrigger menu={menuOf("sonnet", [], "thread:a")} />),
+  );
+  expect(live()?.textContent).toBe("Model: Sonnet");
 });

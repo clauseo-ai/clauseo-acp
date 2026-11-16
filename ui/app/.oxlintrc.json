@@ -775,7 +775,11 @@
       }
     },
     {
-      "files": ["scripts/split-copy-approvals.mjs", "scripts/split-copy-approvals.test.mjs"],
+      "files": [
+        "scripts/split-copy-approvals.mjs",
+        "scripts/split-copy-approvals.test.mjs",
+        "scripts/copy-approve.mjs"
+      ],
       "rules": {
         "no-restricted-imports": [
           "error",

@@ -3,8 +3,8 @@
 // short plain-text note for the firm's IT (words-first-launch.ts's itNote builds it from facts that
 // hold no secret) and the button says "Message copied" for 2 s. Where the webview refuses the
 // clipboard (no clipboard, or writeText rejected), the note shows under the button in a read-only
-// field, selected, so it can be copied by hand, and the button never claims it was copied. UD1-15's
-// download line (first-launch/install.tsx) uses it too.
+// field, selected, so it can be copied by hand, and the button never claims it was copied. A blocked
+// download (first-launch/install.tsx) uses it too, named "Copy addresses" (UC-144), on any computer.
 import { useEffect, useRef, useState } from "react";
 import type { Lang } from "../lib/display.ts";
 import { fl } from "../lib/words-first-launch.ts";
@@ -26,6 +26,7 @@ export function CopyForIt({
   testId = "copy-for-it",
   className,
   size = "small",
+  label: named,
 }: {
   lang: Lang;
   /** The note for IT, built by the surface's details builder. */
@@ -33,6 +34,8 @@ export function CopyForIt({
   testId?: string;
   className?: string | undefined;
   size?: "small" | "default";
+  /** The button's own name where it isn't a note for IT (a blocked download's "Copy addresses"). */
+  label?: string | undefined;
 }) {
   const [state, setState] = useState<"idle" | "copied" | "refused">("idle");
   const field = useRef<HTMLTextAreaElement>(null);
@@ -46,7 +49,7 @@ export function CopyForIt({
     field.current?.focus();
     field.current?.select();
   }, [state]);
-  const label = fl(lang, "Copy details for IT");
+  const label = named ?? fl(lang, "Copy details for IT");
   return (
     <>
       <Button

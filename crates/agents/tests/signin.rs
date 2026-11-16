@@ -68,6 +68,10 @@ mod found_at_press;
 mod detect_nowrite;
 
 #[cfg(test)]
+#[path = "signin/detect_keychain.rs"]
+mod detect_keychain;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
 

@@ -1,7 +1,9 @@
 //! The sites every matter's allowlist starts from: official Indian legal sites (S27, "Consent,
 //! in every tier"; research 25:515-517). Stage C's proxy reads this list (S16), and R21 seeds
 //! one Claude `WebFetch(domain:<host>)` allow rule per host from it while `tools.web_search` is
-//! on. Rules match the exact host name, so each is listed as the site serves it.
+//! on. Rules match the exact host name, so each is listed as the site serves it. The same session
+//! also gets a bare `WebFetch` allow, so a fetch from any other site does not ask either; the
+//! seeded rules stay as the record of the trusted sites.
 //!
 //! The High Courts are each court's own site, never a portal such as eCourts. Each host was
 //! checked to resolve with `getent hosts` on 2026-11-03 (decision record 0029, "Seed and deny

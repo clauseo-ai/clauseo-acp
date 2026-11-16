@@ -2,7 +2,9 @@
 
 use serde_json::{Value, json};
 
-use super::super::{ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL};
+use super::super::{
+    ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, advertised_tools, without_eval,
+};
 use super::{Verdict, call_tool, refused_on, verdict};
 
 /// A refused call's text, after checking it is an `isError` result with the call's id.
@@ -47,10 +49,10 @@ fn every_live_view_is_unavailable() {
     }
 }
 
-/// The allowlist is agent-browser v0.41.1's `core` profile, all 29 tools, and each passes.
+/// The allowlist is agent-browser v0.41.1's `core` profile less eval, 28 tools, and each passes.
 #[test]
 fn every_core_tool_passes() {
-    assert_eq!(ALLOWED_TOOLS.len(), 29);
+    assert_eq!(ALLOWED_TOOLS.len(), 28);
     for tool in ALLOWED_TOOLS {
         assert_eq!(refused_on(tool, &json!({})), None, "{tool}");
     }
@@ -64,6 +66,7 @@ fn an_unknown_tool_is_refused() {
     assert_ne!(UNKNOWN_TOOL, UNAVAILABLE);
     for tool in [
         "agent_browser_connect",
+        "agent_browser_eval",
         "agent_browser_get_cdp_url",
         "agent_browser_install",
         "agent_browser_plugin_run",
@@ -168,4 +171,59 @@ fn no_tool_can_name_a_file_outside_the_browser_folder() {
         .as_deref(),
         Some("file URLs")
     );
+}
+
+/// A `tools/list` reply loses every tool off the allowlist (eval, a live view), keeping the
+/// rest in order and every other key; a reply with nothing to drop, or no tool list, is left as
+/// read.
+#[test]
+fn the_tool_list_keeps_only_allowed_tools() {
+    let reply = json!({"jsonrpc": "2.0", "id": 3, "result": {"tools": [
+        {"name": "agent_browser_open", "inputSchema": {}},
+        {"name": "agent_browser_eval"},
+        {"name": "agent_browser_stream_enable"},
+        {"name": "agent_browser_snapshot"},
+        {"title": "no name"},
+    ], "nextCursor": null}});
+    let only = advertised_tools(reply.to_string().as_bytes()).unwrap();
+    let only: Value = serde_json::from_slice(&only).unwrap();
+    assert_eq!(
+        only,
+        json!({"jsonrpc": "2.0", "id": 3, "result": {"tools": [
+            {"name": "agent_browser_open", "inputSchema": {}},
+            {"name": "agent_browser_snapshot"},
+            {"title": "no name"},
+        ], "nextCursor": null}})
+    );
+    let kept =
+        json!({"jsonrpc": "2.0", "id": 4, "result": {"tools": [{"name": "agent_browser_open"}]}});
+    assert_eq!(advertised_tools(kept.to_string().as_bytes()), None);
+    for other in [
+        json!({"jsonrpc": "2.0", "id": 5, "result": {"content": []}}),
+        json!({"jsonrpc": "2.0", "id": 6, "error": {"code": -1, "message": "x"}}),
+    ] {
+        assert_eq!(advertised_tools(other.to_string().as_bytes()), None);
+    }
+    assert_eq!(advertised_tools(b"not json"), None);
+}
+
+/// The profiles' reply loses "JavaScript eval, " wherever it sits, text or structured content;
+/// a reply without it goes on as read.
+#[test]
+fn the_profiles_reply_never_mentions_javascript_eval() {
+    let core = "Everyday browser automation with navigation, snapshots, common interaction, \
+        waits, screenshots, basic reads, tab basics, JavaScript eval, close, and profile discovery.";
+    let summary = json!([{"name": "core", "description": core}]).to_string();
+    let reply = json!({"jsonrpc": "2.0", "id": 3, "result": {
+        "content": [{"type": "text", "text": summary}],
+        "structuredContent": {"profiles": [{"name": "core", "description": core}]}}});
+    let changed = without_eval(reply.to_string().as_bytes()).unwrap();
+    let text = String::from_utf8(changed).unwrap();
+    assert!(!text.contains("eval"), "{text}");
+    assert!(
+        text.contains("tab basics, close, and profile discovery."),
+        "{text}"
+    );
+    let plain = br#"{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"ok"}]}}"#;
+    assert_eq!(without_eval(plain), None);
 }

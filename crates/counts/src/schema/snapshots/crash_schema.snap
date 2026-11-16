@@ -1,0 +1,408 @@
+---
+source: crates/counts/src/schema/tests/wire.rs
+expression: crash_schema()
+---
+{
+  "$defs": {
+    "Arch": {
+      "description": "The CPU architecture.",
+      "oneOf": [
+        {
+          "const": "x86_64",
+          "description": "Intel and AMD.",
+          "type": "string"
+        },
+        {
+          "const": "aarch64",
+          "description": "Apple silicon and ARM64 Windows.",
+          "type": "string"
+        }
+      ]
+    },
+    "Channel": {
+      "description": "The release channel, a build constant.",
+      "oneOf": [
+        {
+          "const": "stable",
+          "description": "Released builds.",
+          "type": "string"
+        },
+        {
+          "const": "beta",
+          "description": "Beta builds.",
+          "type": "string"
+        }
+      ]
+    },
+    "CrashArea": {
+      "description": "Where Clauseo stopped: the crate the panic came from (its source file's, else the\ncrashing thread's), `webview` for the renderer, `other` when neither says.",
+      "oneOf": [
+        {
+          "const": "acp",
+          "description": "`crates/acp`.",
+          "type": "string"
+        },
+        {
+          "const": "agents",
+          "description": "`crates/agents`.",
+          "type": "string"
+        },
+        {
+          "const": "blocklist",
+          "description": "`crates/blocklist`.",
+          "type": "string"
+        },
+        {
+          "const": "codex_appserver",
+          "description": "`crates/codex_appserver`.",
+          "type": "string"
+        },
+        {
+          "const": "connectors",
+          "description": "`crates/connectors`.",
+          "type": "string"
+        },
+        {
+          "const": "counts",
+          "description": "`crates/counts`.",
+          "type": "string"
+        },
+        {
+          "const": "desktop",
+          "description": "`crates/desktop`.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "`crates/host`.",
+          "type": "string"
+        },
+        {
+          "const": "limits",
+          "description": "`crates/limits`.",
+          "type": "string"
+        },
+        {
+          "const": "matters",
+          "description": "`crates/matters`.",
+          "type": "string"
+        },
+        {
+          "const": "mcp",
+          "description": "`crates/mcp`.",
+          "type": "string"
+        },
+        {
+          "const": "process",
+          "description": "`crates/process`.",
+          "type": "string"
+        },
+        {
+          "const": "profile",
+          "description": "`crates/profile`.",
+          "type": "string"
+        },
+        {
+          "const": "protocol",
+          "description": "`crates/protocol`.",
+          "type": "string"
+        },
+        {
+          "const": "reducer",
+          "description": "`crates/reducer`.",
+          "type": "string"
+        },
+        {
+          "const": "sandbox",
+          "description": "`crates/sandbox`.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "`crates/search`.",
+          "type": "string"
+        },
+        {
+          "const": "settings",
+          "description": "`crates/settings`.",
+          "type": "string"
+        },
+        {
+          "const": "store",
+          "description": "`crates/store`.",
+          "type": "string"
+        },
+        {
+          "const": "webview",
+          "description": "The webview's renderer.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "A dependency, the OS, or no crate known.",
+          "type": "string"
+        }
+      ]
+    },
+    "CrashKind": {
+      "description": "`crash.kind`.",
+      "oneOf": [
+        {
+          "const": "panic",
+          "description": "A Rust panic.",
+          "type": "string"
+        },
+        {
+          "const": "signal",
+          "description": "A signal or exception.",
+          "type": "string"
+        },
+        {
+          "const": "renderer_gone",
+          "description": "The webview's renderer went.",
+          "type": "string"
+        },
+        {
+          "const": "stall",
+          "description": "A stall the app never came back from.",
+          "type": "string"
+        }
+      ]
+    },
+    "CrashProcess": {
+      "description": "`crash.process`.",
+      "oneOf": [
+        {
+          "const": "host",
+          "description": "The host.",
+          "type": "string"
+        },
+        {
+          "const": "webview",
+          "description": "The webview.",
+          "type": "string"
+        }
+      ]
+    },
+    "CrashReportId": {
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Line": {
+      "maximum": 999999,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "Os": {
+      "description": "The operating system. Its major version travels beside it as `os_major`.",
+      "oneOf": [
+        {
+          "const": "macos",
+          "description": "macOS, `os_major` 13 to 40.",
+          "type": "string"
+        },
+        {
+          "const": "windows",
+          "description": "Windows, `os_major` 10 or 11.",
+          "type": "string"
+        },
+        {
+          "const": "linux",
+          "description": "Linux, with no version.",
+          "type": "string"
+        }
+      ]
+    },
+    "OsMajor": {
+      "maximum": 40,
+      "minimum": 10,
+      "type": "integer"
+    },
+    "PanicLocation": {
+      "additionalProperties": false,
+      "description": "Where a panic happened: its source file and line, never its message.",
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/SourceFile",
+          "description": "Relative to the workspace, or to the registry for a dependency."
+        },
+        "line": {
+          "$ref": "#/$defs/Line",
+          "description": "The line."
+        }
+      },
+      "required": [
+        "file",
+        "line"
+      ],
+      "type": "object"
+    },
+    "RendererGoneReason": {
+      "description": "Why the webview's renderer went, as the OS says. Windows' `ProcessFailed` gives the\nreason; Linux's `web-process-terminated` gives crashed, out of memory or terminated;\nmacOS gives none, so its reports say `other`.",
+      "oneOf": [
+        {
+          "const": "crashed",
+          "description": "It crashed.",
+          "type": "string"
+        },
+        {
+          "const": "out_of_memory",
+          "description": "It ran out of memory, or past the OS's limit.",
+          "type": "string"
+        },
+        {
+          "const": "unresponsive",
+          "description": "It stopped answering and was ended.",
+          "type": "string"
+        },
+        {
+          "const": "terminated",
+          "description": "Something outside it ended it.",
+          "type": "string"
+        },
+        {
+          "const": "launch_failed",
+          "description": "It failed to start.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "No reason given, or one not listed.",
+          "type": "string"
+        }
+      ]
+    },
+    "SchemaVersion": {
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "SignalCode": {
+      "maximum": 4294967295,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "SourceFile": {
+      "maxLength": 200,
+      "pattern": "^(crates/(acp|agents|blocklist|codex_appserver|connectors|counts|desktop|host|limits|matters|mcp|process|profile|protocol|reducer|sandbox|search|settings|store)|[A-Za-z][A-Za-z0-9_-]{0,63}-(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})(-[0-9A-Za-z]{1,16}(\\.[0-9A-Za-z]{1,16}){0,3})?)/src/([A-Za-z0-9_]{1,64}/){0,10}[A-Za-z0-9_]{1,64}\\.rs$",
+      "type": "string"
+    },
+    "Version": {
+      "pattern": "^(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})$",
+      "type": "string"
+    },
+    "Week": {
+      "pattern": "^2[0-9]{3}-W[0-9]{2}$",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One crash, found on the lawyer's machine and sent with counts on. No install id, so it can\nnever be joined to one; the week, not a time.",
+  "properties": {
+    "after_launch": {
+      "description": "Whether the window had shown the app before the crash.",
+      "type": "boolean"
+    },
+    "arch": {
+      "$ref": "#/$defs/Arch",
+      "description": "The CPU architecture."
+    },
+    "area": {
+      "$ref": "#/$defs/CrashArea",
+      "description": "Where Clauseo stopped."
+    },
+    "channel": {
+      "$ref": "#/$defs/Channel",
+      "description": "`stable` or `beta`."
+    },
+    "code": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SignalCode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`signal` only, and always there: the signal number or exception code."
+    },
+    "kind": {
+      "$ref": "#/$defs/CrashKind",
+      "description": "What kind: `panic`, `signal` or `renderer_gone`."
+    },
+    "location": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PanicLocation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`panic` only: its file and line, left out when the file fits neither form."
+    },
+    "os": {
+      "$ref": "#/$defs/Os",
+      "description": "The OS."
+    },
+    "os_major": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OsMajor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The OS's major version; Linux leaves it out."
+    },
+    "process": {
+      "$ref": "#/$defs/CrashProcess",
+      "description": "`host` for a panic or a signal, `webview` for a renderer gone."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RendererGoneReason"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`renderer_gone` only, and always there: why the renderer went."
+    },
+    "report": {
+      "$ref": "#/$defs/CrashReportId",
+      "description": "This report's own random id."
+    },
+    "schema": {
+      "$ref": "#/$defs/SchemaVersion",
+      "description": "`1`."
+    },
+    "version": {
+      "$ref": "#/$defs/Version",
+      "description": "The app's version."
+    },
+    "week": {
+      "$ref": "#/$defs/Week",
+      "description": "The ISO week the crash was found in."
+    }
+  },
+  "required": [
+    "schema",
+    "report",
+    "week",
+    "version",
+    "channel",
+    "os",
+    "arch",
+    "process",
+    "kind",
+    "area",
+    "after_launch"
+  ],
+  "title": "CrashReport",
+  "type": "object"
+}

@@ -1,6 +1,7 @@
 // What Versions' controller (controller.ts) reads beyond the matter's timeline: every older page of a stream, the
 // newest change that couldn't be kept as a version, whether the matter's stream has gained an entry that isn't the
-// room's last act's own (which ends the line saying what the act did), and which file a refused restore was held on.
+// room's last act's own (which ends the line saying what the act did), which file a refused restore was held on, and
+// which files of a step changed since its version.
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -8,6 +9,7 @@ import type {
   HostError,
   MatterId,
   RestorePreview,
+  SkippedFile,
   StreamId,
   ThreadId,
   ThreadSummary,
@@ -110,28 +112,31 @@ export function movedPast(view: StreamView, base: ReadonlySet<string>, own: Own)
   return false;
 }
 
-/** The files the host put back for a turn's undo, as the step_undone marker on its conversation's stream says; null
- * until the marker comes. */
-export function restoredOf(
-  store: ViewStore,
-  thread: ThreadId,
+/**  The step_undone marker's body for the undo of `turn`, the newest on the stream's window; null
+ * until it comes. (The thread's note reads the marker through room/undone-marker.ts.) */
+function stepUndoneOf(
+  view: StreamView | undefined,
   turn: TurnId,
-): readonly string[] | null {
-  const view = store.view(streamOf(thread));
-  let restored: readonly string[] | null = null;
+): { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null {
+  let found: { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null = null;
   for (const id of view?.ids ?? []) {
     const undone = view?.entries.get(id)?.marker?.kind.step_undone;
-    if (undone?.turn === turn) restored = undone.restored;
+    if (undone?.turn === turn)
+      found = { restored: undone.restored, unversioned: undone.unversioned ?? NO_FILES };
   }
-  return restored;
+  return found;
 }
+
+const NO_FILES: readonly SkippedFile[] = [];
 
 /** The undo a line says was done: the turn's conversation, the turn, and the version it took back. */
 export type Undid = { thread: ThreadId; turn: TurnId; id: string };
 
-/** The line for the room's last act: it stands until the matter's stream gains an entry not the act's own, and an
- * undo's names the files the host put back once the marker on the conversation's stream says which: a file the host
- * couldn't write stays as it is, whatever the lawyer chose. */
+/** The line for the room's last act: it stands until the matter's stream gains an entry not the
+ * act's own, and an undo's names the files the host put back once the step_undone marker on the
+ * conversation's stream says which: a file the host couldn't write stays as it is, whatever the
+ * lawyer chose. The marker's unversioned files, which Clauseo had no earlier copy of, are the
+ * line's kept: never named as gone back. */
 export class DoneWatch {
   /** The matter's entries as the act was sent. */
   #base: ReadonlySet<string> = new Set();
@@ -159,11 +164,25 @@ export class DoneWatch {
     }
     if (done.kind !== "undidChange" || by.undid === null) return done;
     const { thread, turn, id } = by.undid;
-    const restored = restoredOf(store, thread, turn);
-    // none put back says nothing the line could name: it keeps the lawyer's choices
-    if (restored === null || restored.length === 0) return done;
-    const papers = inRowOrder(timeline, id, restored);
-    return papers.join("\n") === done.papers.join("\n") ? done : { ...done, papers };
+    const undone = stepUndoneOf(store.view(streamOf(thread)), turn);
+    if (undone === null) return done;
+    const kept = undone.unversioned;
+    const keptPaths = new Set(kept.map((f) => f.path));
+    // none put back says nothing the line could name: it keeps the lawyer's choices, less those
+    // Clauseo had no earlier copy of
+    const papers =
+      undone.restored.length === 0
+        ? done.papers.filter((p) => !keptPaths.has(p))
+        : inRowOrder(
+            timeline,
+            id,
+            undone.restored.filter((p) => !keptPaths.has(p)),
+          );
+    const same =
+      papers.join("\n") === done.papers.join("\n") &&
+      kept.map((f) => `${f.path}:${f.reason}`).join("\n") ===
+        (done.kept ?? []).map((f) => `${f.path}:${f.reason}`).join("\n");
+    return same ? done : { ...done, papers, kept };
   }
 }
 
@@ -236,4 +255,34 @@ export async function refusedPreview(
     previewOf,
   );
   return ask.stage === "word" || (ask.act === "restore" && ask.preview !== none) ? ask : null;
+}
+
+/** How long Undo waits for the host to say what changed since: a busy matter or a share that doesn't answer leaves
+ * each file's flag to decide after it. */
+export const EDITED_WAIT_MS = 5_000;
+
+/** The files of a turn's step changed since its after-turn version, as the thread's Undo asks the host
+ * (preview_undo): null where the host refuses, answers another shape (an older host has none) or doesn't answer within
+ * EDITED_WAIT_MS, and the dialog keeps to what the versions say. */
+export async function editedSince(
+  transport: Pick<HostTransport, "query">,
+  thread: ThreadId | undefined,
+  turn: TurnId,
+): Promise<readonly string[] | null> {
+  if (thread === undefined) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), EDITED_WAIT_MS);
+  });
+  const ask = async (): Promise<readonly string[] | null> => {
+    const r = await transport.query({ preview_undo: { thread, turn } });
+    return "undo_preview" in r && r.undo_preview !== undefined ? r.undo_preview.edited_since : null;
+  };
+  try {
+    return await Promise.race([ask(), late]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

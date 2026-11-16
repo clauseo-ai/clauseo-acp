@@ -1,5 +1,5 @@
 // A .docx's tracked changes, read and decided through the host: list_revisions reads them, decide_revisions accepts or
-// rejects the ones named against the version the list was read from, and the latest decision is undone by restoring
+// rejects the ones named (or all of them) against the version the list was read from, and the latest decision is undone by restoring
 // the file from the checkpoint the host took just before it (restore_version, this file only). Every send carries a
 // command id of its own, so Try again is a new command. After each decision and undo the list is read again: the
 // decided changes leave it. A file Word holds asks for the lock's dialog, whose Try again sends the same decision; every
@@ -16,8 +16,14 @@ import type {
   RevisionList,
 } from "../../transport/protocol.ts";
 
-/** A decision as sent: the change ids, accept or reject, and the version of the list they were named from. */
-export type Decision = { ids: readonly number[]; decision: RevisionDecision; version: DocVersion };
+/** A decision as sent: the change ids, or all of them (Accept all, Reject all: every change in the file, past the
+ * list's cut too), accept or reject, and the version of the list they were named from. */
+export type Decision = {
+  ids: readonly number[];
+  all: boolean;
+  decision: RevisionDecision;
+  version: DocVersion;
+};
 
 /**
  * The latest decision the host wrote: the checkpoint before it (Undo restores the file from it), when, and the version
@@ -144,7 +150,15 @@ export class Revisions {
   decide(ids: readonly number[], decision: RevisionDecision): void {
     const { list, sending } = this.#view;
     if (list === null || sending || ids.length === 0) return;
-    void this.#send({ ids, decision, version: list.version });
+    void this.#send({ ids, all: false, decision, version: list.version });
+  }
+
+  /** Accept all or Reject all: every change of the file at the version in view, in one decision, so one Undo takes
+   * it back; the host reads them from that version, the ones past the list's cut too. */
+  decideAll(decision: RevisionDecision): void {
+    const { list, sending } = this.#view;
+    if (list === null || sending || list.total === 0) return;
+    void this.#send({ ids: [], all: true, decision, version: list.version });
   }
 
   /** The failed edit's Try again, or the lock dialog's: the same decision, as a new command. */
@@ -171,6 +185,7 @@ export class Revisions {
             version: d.version,
             ids: [...d.ids],
             decision: d.decision,
+            ...(d.all ? { all: true } : {}),
           },
         },
       });

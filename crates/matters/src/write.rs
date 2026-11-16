@@ -25,23 +25,38 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// `fs::remove_file`. In tests a file can come back after it (`no_download::resurrect` in unit
-/// tests, `test_support::bring_back_after_delete` with the `test-support` feature).
+/// `fs::remove_file`. In tests a file can come back after it, as after any [`removing`].
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    removing(path, delete_file)
+}
+
+/// Takes the file at `path` out of the folder with `remove`: a move to a trash
+/// ([`crate::Trash`]), or [`delete_file`]. In tests a file can come back after it
+/// (`no_download::resurrect` in unit tests, `test_support::bring_back_after_delete` with the
+/// `test-support` feature), whichever way it went.
+pub(crate) fn removing<T>(
+    path: &Path,
+    remove: impl FnOnce(&Path) -> io::Result<T>,
+) -> io::Result<T> {
     #[cfg(test)]
     let back = crate::no_download::resurrect::removing(path);
     #[cfg(feature = "test-support")]
     let bytes = crate::test_support::before_delete(path);
-    let removed = std::fs::remove_file(path);
+    let removed = remove(path);
     #[cfg(test)]
-    if let (Ok(()), Some(back)) = (&removed, back) {
+    if let (Ok(_), Some(back)) = (&removed, back) {
         crate::no_download::resurrect::removed(path, back);
     }
     #[cfg(feature = "test-support")]
-    if let (Ok(()), Some(bytes)) = (&removed, bytes) {
+    if let (Ok(_), Some(bytes)) = (&removed, bytes) {
         crate::test_support::after_delete(path, &bytes);
     }
     removed
+}
+
+/// `fs::remove_file`, without the test hooks: what [`removing`] calls.
+pub(crate) fn delete_file(path: &Path) -> io::Result<()> {
+    std::fs::remove_file(path)
 }
 
 /// `fs::remove_dir` (an empty folder only).

@@ -3,7 +3,16 @@
 // revisions' words. Pure: no DOM, no React.
 
 /** A run of words: the same in both, added in the later, or taken out of it. mine: the lawyer wrote it. */
-export type Run = { kind: "same" | "ins" | "del"; text: string; mine: boolean };
+/** What a marked-up run with no text of its own stands for (the host's BlacklineObject): a picture, a chart, a
+ * shape, a note's reference, a field, or anything else ("other", and "unknown" from a newer host). */
+export type MarkedObject = "picture" | "chart" | "shape" | "note" | "field" | "other" | "unknown";
+
+export type Run = {
+  kind: "same" | "ins" | "del";
+  text: string;
+  mine: boolean;
+  object?: MarkedObject;
+};
 type Word = { text: string; mine: boolean };
 
 /** A word with what joins it inside, "P-2", "12(3)", "A.B", or one mark of punctuation, each with its trailing
@@ -90,33 +99,49 @@ export function diffWords(a: string, b: string): Run[] {
   return merge(out);
 }
 
-/** One paragraph place of a document, compared: the same, changed, added or taken out. */
+/** One paragraph place of a document, compared: the same, changed, added or taken out. A blackline marked up
+ * elsewhere may say more (note): only its formatting changed, or the place couldn't be shown; and whether it holds
+ * text Word hides. */
 export type ParaDiff = {
   place: number;
   kind: "same" | "changed" | "added" | "removed";
   runs: Run[];
+  note?: "formatted" | "not_shown";
+  hidden?: boolean;
 };
 
-/** A paragraph of a blackline another program marked up (the host's Word tool): how it changed, and its runs. Both
- * kinds are open: a newer host may send one this version doesn't know ("unknown"). */
+/** A paragraph of a blackline another program marked up (the host's Word tool): how it changed, its runs, and whether
+ * it holds hidden text. Both kinds are open: a newer host may send one this version doesn't know ("unknown"). */
 export type MarkedParagraph = {
-  change: ParaDiff["kind"] | "unknown";
-  runs: readonly { kind: Run["kind"] | "unknown"; text: string }[];
+  change: ParaDiff["kind"] | "formatted" | "not_shown" | "unknown";
+  runs: readonly { kind: Run["kind"] | "unknown"; text: string; object?: MarkedObject | null }[];
+  hidden?: boolean;
 };
 
 /** A blackline marked up elsewhere, as the sheet sets one: each paragraph in its place. No run is the lawyer's own,
- * since the marks don't say who wrote what. A paragraph changed in a way this version doesn't know reads as changed,
- * and a run of a kind it doesn't know as the same words. */
+ * since the marks don't say who wrote what. A paragraph whose formatting alone changed, or a place that couldn't be
+ * shown, reads as changed with its note; one changed in a way this version doesn't know reads as changed, and a run of
+ * a kind it doesn't know as the same words. */
 export const markedDiffs = (paragraphs: readonly MarkedParagraph[]): ParaDiff[] =>
-  paragraphs.map((p, place) => ({
-    place,
-    kind: p.change === "unknown" ? "changed" : p.change,
-    runs: p.runs.map((r) => ({
-      kind: r.kind === "unknown" ? "same" : r.kind,
-      text: r.text,
-      mine: false,
-    })),
-  }));
+  paragraphs.map((p, place) => {
+    const note = p.change === "formatted" || p.change === "not_shown" ? p.change : undefined;
+    const kind: ParaDiff["kind"] =
+      p.change === "unknown" || p.change === "formatted" || p.change === "not_shown"
+        ? "changed"
+        : p.change;
+    return {
+      place,
+      kind,
+      runs: p.runs.map((r) => ({
+        kind: r.kind === "unknown" ? "same" : r.kind,
+        text: r.text,
+        mine: false,
+        ...(r.object === undefined || r.object === null ? {} : { object: r.object }),
+      })),
+      ...(note === undefined ? {} : { note }),
+      ...(p.hidden === true ? { hidden: true } : {}),
+    };
+  });
 
 const asRuns = (kind: Run["kind"], s: string): Run[] =>
   merge(words(s).map((w) => ({ kind, text: w.text, mine: w.mine })));

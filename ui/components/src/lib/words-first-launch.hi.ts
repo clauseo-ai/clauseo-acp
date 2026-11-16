@@ -26,6 +26,8 @@ export const HI = {
   "{name} is ready": "{name} तैयार है",
   "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
   "Copy details for IT": "IT के लिए विवरण कॉपी करें",
+  // UC-144: a blocked download's copy button, which copies the addresses (UD1-17)
+  "Copy addresses": "पते कॉपी करें",
   "Message copied": "संदेश कॉपी हो गया",
   // the facts in a note for IT (words-first-launch.ts's itNote), each "key: value" (new,
   // provisional)
@@ -37,8 +39,8 @@ export const HI = {
   "Program hash: {hash}": "प्रोग्राम का हैश: {hash}",
   "Clauseo version: {version}": "Clauseo संस्करण: {version}",
   "Clauseo for firm IT: {url}": "फ़र्म IT के लिए Clauseo: {url}",
-  "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
-    "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
+  "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.":
+    "Clauseo को {name} डाउनलोड करना है। ये पते इस कंप्यूटर से पहुँच में होने चाहिए: {list}।",
   "{name} needs {need} MB free on this computer, and {free} MB is free.":
     "{name} को इस कंप्यूटर पर {need} MB खाली जगह चाहिए, और अभी {free} MB खाली है।",
   "{name} couldn't be downloaded.": "{name} डाउनलोड नहीं हो सका।",
@@ -48,26 +50,44 @@ export const HI = {
   Details: "विवरण",
   // the download done, while npm puts it together: no bytes to count and no time to promise (new)
   "Setting up {name}…": "{name} सेट अप हो रहा है…",
+  // agent.install_offline while the window says it is online: the download's address can't be reached, so not
+  // "You're offline" (new; the plans' line and the document tools' line)
+  "Clauseo can't reach the download right now. It tries again by itself.":
+    "Clauseo अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
 
   // the fine print, up front (design)
   "Your papers stay on this computer. {name} sees the parts it reads to answer you.":
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। {name} उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
 
   // the plan, in the composer (design)
-  "Sign in to Claude or ChatGPT to ask about this matter":
-    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
+  "Sign in with Claude or ChatGPT to ask about this matter":
+    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT से साइन इन करें",
   "Sign in": "साइन इन करें",
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
-  "Use an API key or my firm's account": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
+  // UC-141: the quiet way to the key panel, in Connectors' Hindi (U15-09)
+  "Use an API key instead": "इसके बजाय API key इस्तेमाल करें",
   "Your browser opens when you reconnect.": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
-  // the field's own word, in Hindi: "API key" stays the term, as everywhere in the Hindi (D-069)
-  "API key": "API key डालें",
+  // the install waits while the window says it is online: the download can't be reached, so not "reconnect" (new)
+  "Your browser opens when setting up can continue.": "सेटअप आगे बढ़ने पर आपका ब्राउज़र खुलेगा।",
+  // UC-139 and UC-140: the field names the key by its maker; "API key" stays in Latin script (D-069)
+  "Anthropic API key": "Anthropic API key",
+  "OpenAI API key": "OpenAI API key",
   "Use this key": "यह key इस्तेमाल करें",
-  "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.":
-    "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
+  // UC-145 and UC-146: the key panel's help names the key's maker; "Anthropic Console", "OpenAI" and "API key" stay
+  // in Latin script (D-069)
+  "A key from the Anthropic Console. Billed to that account.":
+    "Anthropic Console की key। शुल्क उसी खाते पर लगता है।",
+  "A key from the OpenAI platform. Billed to that account.":
+    "OpenAI platform की key। शुल्क उसी खाते पर लगता है।",
   "Using an API key, billed to its own account": "API key से, उसी के खाते पर शुल्क",
   // Sign in pressed before the install is ready, in place of the design's "Sign in at {time}" (new)
   "Your browser opens when {name} is ready.": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
+  // the plan ready while the other plan's sign-in is under way: sign-ins go one at a time (new, UC-153)
+  "Your browser opens for {name} after {other}'s sign-in.":
+    "{other} का साइन इन पूरा होते ही {name} के लिए आपका ब्राउज़र खुलेगा।",
+  // a waiting sign-in cancelled while its plan downloads: the download carries on (new, UC-230)
+  "Sign-in cancelled. {name} is still downloading; sign in when it's ready.":
+    "साइन-इन रद्द हुआ। {name} अभी डाउनलोड हो रहा है; तैयार होने पर साइन इन करें।",
   // where the key is kept, by display_info's platform, and a computer with no keyring (new)
   "Kept in this Mac's Keychain.": "इस Mac के Keychain में रखी है।",
   "Kept in Windows Credential Manager.": "Windows Credential Manager में रखी है।",
@@ -125,11 +145,14 @@ export const HI = {
     "इस कंप्यूटर पर Codex का साइन इन बदल गया, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
   "{app}'s sign-in stopped working here, so Clauseo stopped using it.":
     "{app} का साइन इन यहाँ काम नहीं कर रहा, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
+  // "Use it" (or a later start) found the login, but it didn't work here (FoundLogin reuse_unusable)
+  "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.":
+    "Clauseo आपके {app} साइन इन का इस्तेमाल नहीं कर सका। हो सकता है वह समाप्त हो गया हो, इसलिए इसके बजाय यहाँ साइन इन करें।",
 
   // ChatGPT's device code, offered only after the browser didn't work (new)
   "Use a code instead": "इसके बजाय कोड इस्तेमाल करें",
-  "Sign in to ChatGPT on that page and enter this code.":
-    "उस पेज पर ChatGPT में साइन इन करें और यह कोड डालें।",
+  "Sign in with ChatGPT on that page and enter this code.":
+    "उस पेज पर ChatGPT से साइन इन करें और यह कोड डालें।",
   "The code works until {time}.": "यह कोड {time} बजे तक काम करेगा।",
   Copy: "कॉपी करें",
   "Open page": "पेज खोलें",
@@ -175,7 +198,7 @@ export const HI = {
     "जिस प्लान का भुगतान आप करते हैं, उससे साइन इन करें: Claude, ChatGPT या दोनों।",
   "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
-  "Sign in to {name}": "{name} में साइन इन करें",
+  "Sign in with {name}": "{name} से साइन इन करें",
   // the plan chosen for a conversation, not set up on this computer (PK): its one act, in the composer
   "{name} isn't set up on this computer.": "{name} इस कंप्यूटर पर सेट अप नहीं है।",
   "Set up {name}": "{name} सेट अप करें",

@@ -1,14 +1,18 @@
 """The smoke test of Clauseo's Python runtime, run by `cargo xtask python-runtime build` with the
 finished runtime, isolated (-I) and without writing bytecode (-B):
 
-    <runtime python> -I -B smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version>
+    <runtime python> -I -B smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version> \
+        <tesseract version>
 
 It checks that this is the runtime's own CPython, that every bundled package imports from the
 runtime, that what the trim removed is gone, and that each library does its job: a .docx, .xlsx and
 .pptx written and read back, the fixture PDF read with pypdf and pypdfium2, and a small pandas and
 numpy computation. It also runs the runtime's pandoc (bin/pandoc on macOS, clauseo-bin\\pandoc.exe on
-Windows): `--version` must name <pandoc version>, and the .docx goes to Markdown and back. It
-writes only into <work dir>. Any failure raises and exits non-zero.
+Windows): `--version` must name <pandoc version>, and the .docx goes to Markdown and back. And it
+runs the runtime's tesseract (bin/tesseract, clauseo-bin\\tesseract.exe): `--version` must name
+<tesseract version> and no optional library, the models in tessdata/ beside it must be listed, and
+a page it draws with Pillow (English lines and one Hindi word) must come back as text, read from a
+PGM file and from stdin. It writes only into <work dir>. Any failure raises and exits non-zero.
 """
 
 import importlib
@@ -197,10 +201,93 @@ def pandoc(root, work, version):
     check(back.tables and back.tables[0].rows[0].cells[1].text == "Acme Ltd", "the table survives the round trip")
 
 
+# The page tesseract reads: English lines in Pillow's own font, and a Hindi word (kamal, lotus)
+# of plain letters only, so it draws right without complex text shaping.
+OCR_LINES = ["Clauseo smoke test", "The quick brown fox jumps over the lazy dog 1234."]
+OCR_HINDI = "\u0915\u092e\u0932"
+# Devanagari fonts each OS ships: macOS's Kohinoor and Devanagari MT, Windows' Nirmala UI and
+# Mangal, and Noto on Linux (a local try only; Linux is not a target).
+DEVANAGARI_FONTS = [
+    "/System/Library/Fonts/Kohinoor.ttc",
+    "/System/Library/Fonts/Supplemental/DevanagariMT.ttc",
+    "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc",
+    os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "Nirmala.ttc"),
+    os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "Nirmala.ttf"),
+    os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "mangal.ttf"),
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
+]
+# Libraries tesseract --version names when it was built with them; the runtime's has none.
+OPTIONAL_LIBRARIES = ["libarchive", "libcurl", "libpng", "libjpeg", "libtiff", "libwebp",
+                      "libopenjp2", "zlib", "giflib", "OpenCL"]
+
+
+def ocr_page(work):
+    from PIL import Image, ImageDraw, ImageFont
+
+    font_path = next((p for p in DEVANAGARI_FONTS if os.path.isfile(p)), None)
+    check(font_path is not None, f"a Devanagari font for the OCR page ({font_path})")
+    latin = ImageFont.load_default(size=40)
+    hindi = ImageFont.truetype(font_path, 64)
+    page = Image.new("L", (1400, 400), 255)
+    draw = ImageDraw.Draw(page)
+    for i, line in enumerate(OCR_LINES):
+        draw.text((60, 50 + 70 * i), line, font=latin, fill=0)
+    draw.text((60, 230), OCR_HINDI, font=hindi, fill=0)
+    path = os.path.join(work, "ocr.pgm")
+    page.save(path)
+    return path
+
+
+def tesseract(root, work, version):
+    folder = os.path.join(root, "clauseo-bin" if os.name == "nt" else "bin")
+    exe = os.path.join(folder, "tesseract.exe" if os.name == "nt" else "tesseract")
+    tessdata = os.path.join(folder, "tessdata")
+    check(os.path.isfile(exe), f"tesseract is at {exe}")
+    env = {k: v for k, v in os.environ.items() if k not in ("TESSDATA_PREFIX", "OMP_THREAD_LIMIT")}
+    env["OMP_THREAD_LIMIT"] = "1"
+
+    def run(*args, stdin=None):
+        done = subprocess.run([exe, *args], cwd=work, input=stdin, capture_output=True,
+                              timeout=300, env=env)
+        if done.returncode != 0:
+            err = done.stderr.decode("utf-8", "replace").strip()
+            raise SystemExit(f"smoke: FAILED: tesseract {' '.join(args)}: {err}")
+        return done.stdout.decode("utf-8")
+
+    said = run("--version")
+    first = said.splitlines()[0]
+    check(first == f"tesseract {version}", f"{first} (want tesseract {version})")
+    found = [name for name in OPTIONAL_LIBRARIES if name in said]
+    check(not found, f"tesseract is built without optional libraries (found {found})")
+    langs = run("--list-langs", "--tessdata-dir", tessdata).split()
+    check("eng" in langs and "hin" in langs, f"tesseract lists eng and hin in {tessdata}")
+
+    def recognised(text, how):
+        words = " ".join(text.split())
+        for line in OCR_LINES:
+            check(line in words, f"tesseract {how} reads {line!r} (got {words!r})")
+        check(OCR_HINDI in words, f"tesseract {how} reads the Hindi word (got {words!r})")
+
+    page = ocr_page(work)
+    recognised(run(page, "stdout", "-l", "eng+hin", "--tessdata-dir", tessdata), "from a file")
+    with open(page, "rb") as pgm:
+        data = pgm.read()
+    recognised(run("stdin", "stdout", "-l", "eng+hin", "--tessdata-dir", tessdata, stdin=data),
+               "from stdin")
+    if os.name == "nt":
+        # Without --tessdata-dir or TESSDATA_PREFIX, Windows' tesseract looks beside itself.
+        recognised(run(page, "stdout", "-l", "eng+hin"), "with its own tessdata")
+
+
 def main():
-    if len(sys.argv) != 5:
-        raise SystemExit("usage: smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version>")
-    root, fixtures, work, version = sys.argv[1:5]
+    if len(sys.argv) != 6:
+        raise SystemExit("usage: smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version> "
+                         "<tesseract version>")
+    # Windows' console code page cannot print the Hindi word; -I ignores PYTHONIOENCODING.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    root, fixtures, work, version, tesseract_version = sys.argv[1:6]
     interpreter(root)
     imports(root)
     docx_roundtrip(work)
@@ -209,6 +296,7 @@ def main():
     pptx_roundtrip(work)
     pdf_read(fixtures)
     numbers()
+    tesseract(root, work, tesseract_version)
     print("smoke: all passed")
 
 

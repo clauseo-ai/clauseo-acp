@@ -215,14 +215,40 @@ fn chrome_that_dies_twice_ends_agent_browser_and_the_guard() {
     assert_nothing_left(&scratch, pids);
 }
 
-/// The first call's start fails: the call gets an error and the guard exits 1.
-fn start_fails(scratch: &Scratch) -> String {
+/// Unix: a stream port file agent-browser's daemon might write (`<socket dir>/<session>.stream`)
+/// is no longer checked: the guard passes no stream port, so any port there is left alone and
+/// agent-browser and its daemon run on. (Windows still refuses any such file,
+/// `src/browser_guard/port_file.rs`.)
+#[cfg(unix)]
+#[test]
+fn a_stream_port_file_does_not_end_agent_browser() {
+    let scratch = Scratch::new("life_stream_file");
+    let mut command = guard_command(&scratch, &example("daemon_stub"), &no_args());
+    command.env_remove("AGENT_BROWSER_STREAM_PORT");
+    let mut guard = Guard::start(command);
+    guard.call("open");
+    let pids = session_pids(&scratch);
+    let pid_file = crate::support::daemon_pid_file(&scratch.socket_dir()).unwrap();
+    write::write(pid_file.with_extension("stream"), "50124").unwrap();
+    assert!(
+        throughout(Duration::from_secs(2), || alive(pids[0]) && alive(pids[1])),
+        "the daemon or Chrome ended after the stream port file"
+    );
+    let answer = guard.call("again");
+    assert!(answer.get("error").is_none(), "{answer}");
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(!stderr.contains("stream port"), "{stderr}");
+    assert_nothing_left(&scratch, pids);
+}
+
+/// The first call's start fails, with `env` on top of the guard's own: the call gets an error
+/// and the guard exits 1. Returns the guard's stderr.
+fn start_fails(scratch: &Scratch, env: &[(&str, &str)]) -> String {
     let log = scratch.log();
-    let mut guard = Guard::start(guard_command(
-        scratch,
-        &example("echo_stub"),
-        &[log.as_os_str()],
-    ));
+    let mut command = guard_command(scratch, &example("echo_stub"), &[log.as_os_str()]);
+    command.envs(env.iter().copied());
+    let mut guard = Guard::start(command);
     let answer = guard.call("open");
     assert_eq!(answer["error"]["code"], -32603, "{answer}");
     let (status, rest) = guard.finish_with_stderr();
@@ -231,35 +257,51 @@ fn start_fails(scratch: &Scratch) -> String {
     rest.1
 }
 
-#[test]
-fn chrome_on_another_port_is_refused_before_agent_browser_starts() {
-    let scratch = Scratch::new("life_port");
-    scratch.chrome_mode("wrong-port");
-    let stderr = start_fails(&scratch);
-    assert_eq!(
-        stderr.trim_end().lines().last(),
-        Some(
-            "clauseo-mcp browser-guard: Chrome listens on debugging port 47120, not the claimed \
-             port 61101"
-        )
+/// The note the guard prints when the stand-in fails its start, and the guard's last line: the
+/// same reason in both.
+fn assert_start_failed(scratch: &Scratch, stderr: &str, reason: impl Fn(&str) -> bool) {
+    let chrome = scratch.path().join(crate::support::CHROME);
+    let note = format!(
+        "clauseo-mcp browser-guard: {} did not start: ",
+        chrome.display()
     );
+    let noted = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix(note.as_str()));
+    assert!(noted.is_some_and(&reason), "{stderr}");
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    let last = last.strip_prefix("clauseo-mcp browser-guard: ");
+    assert_eq!(last, noted, "{stderr}");
     assert!(!scratch.log().exists(), "agent-browser never started");
     assert_eq!(run_files(&scratch.cwd()), Vec::<std::path::PathBuf>::new());
+}
+
+/// A browser that never answers on its pipe (a firm policy that turned remote debugging off)
+/// fails the start at the start wait, shortened through the `test-support` knob.
+#[test]
+fn chrome_that_never_answers_is_refused() {
+    let scratch = Scratch::new("life_silent");
+    scratch.chrome_mode("silent");
+    let stderr = start_fails(&scratch, &[("CLAUSEO_TEST_GUARD_START_MS", "1000")]);
+    assert_start_failed(&scratch, &stderr, |reason| {
+        reason
+            == "the browser did not answer on its DevTools pipe within 1 s (a firm policy may \
+                turn its remote debugging off)"
+    });
 }
 
 #[test]
 fn chrome_that_exits_at_its_start_is_refused() {
     let scratch = Scratch::new("life_exit");
     scratch.chrome_mode("exit");
-    let stderr = start_fails(&scratch);
-    assert!(
-        stderr.lines().last().is_some_and(|line| line.starts_with(
-            "clauseo-mcp browser-guard: Chrome stopped before it listened on the claimed \
-             debugging port"
-        )),
-        "{stderr}"
-    );
-    assert!(!scratch.log().exists(), "agent-browser never started");
+    let stderr = start_fails(&scratch, &[]);
+    // Its exit, its pipe's end and the guard's first write race; any is the reason, without
+    // stderr lines to quote.
+    assert_start_failed(&scratch, &stderr, |reason| {
+        reason.starts_with("the browser stopped before it answered on its DevTools pipe")
+            || reason.starts_with("the browser closed its DevTools pipe")
+            || reason.starts_with("cannot write to the browser's DevTools pipe: ")
+    });
 }
 
 /// The mover at the guard's level: files Chrome finished in the staging folder reach the

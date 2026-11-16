@@ -261,8 +261,8 @@ test("Create stands pressed while the create runs, and the caller's error shows 
   expect(create()?.disabled).toBe(false);
 });
 
-test("a refusal's one way on: Open it for a matter on the list, else Choose another folder for a folder refused", async () => {
-  const line = "This folder is already a matter: Acme.";
+test("a refusal's one way on: Open {name} for a matter on the list, else Choose another folder for a folder refused", async () => {
+  const line = "This folder is inside the folder of Acme.";
   let opened = 0;
   let picks = 0;
   const pickFolder = () => {
@@ -277,14 +277,19 @@ test("a refusal's one way on: Open it for a matter on the list, else Choose anot
       folderError
       pickFolder={pickFolder}
       onCreate={() => {}}
-      openMatter={() => {
-        opened += 1;
+      openMatter={{
+        name: "Acme",
+        open: () => {
+          opened += 1;
+        },
       }}
       testIds={{ open: "open-matter" }}
     />,
   );
   expect(document.querySelector("[role=alert]")?.textContent).toBe(line);
   expect(button("Choose another folder")).toBeUndefined();
+  // the name isolated in the button, as in the line
+  expect(byTestId("open-matter")?.textContent).toBe("Open \u2068Acme\u2069");
   await act(async () => byTestId("open-matter")?.click());
   expect(opened).toBe(1);
   await act(async () => root?.unmount());
@@ -299,7 +304,7 @@ test("a refusal's one way on: Open it for a matter on the list, else Choose anot
       onCreate={() => {}}
     />,
   );
-  expect(button("Open it")).toBeUndefined();
+  expect(byTestId("open-matter")).toBeUndefined();
   await act(async () => button("Choose another folder")?.click());
   expect(picks).toBe(1);
   expect(path()?.textContent).toBe("~/Documents/Other");

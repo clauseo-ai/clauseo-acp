@@ -8,6 +8,7 @@ import {
   WordChanges,
   type TrackedChange,
   type TrackedKind,
+  type TrackedPlace,
 } from "@clauseo/components/clauseo/word-changes.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
@@ -19,6 +20,7 @@ import { clockOf, localZone } from "../when.ts";
 import { Revisions } from "./revisions.ts";
 
 const KINDS: readonly TrackedKind[] = ["insert", "delete", "move", "format"];
+const PLACES: readonly TrackedPlace[] = ["header_footer", "note", "comment"];
 
 /** When a change was made, in the language: "Today, 3:42 pm", else "Monday 3:42 pm"; "" where the file records no
  * time. */
@@ -35,6 +37,7 @@ const rowOf = (r: Revision, now: Timestamp, zone: string, lang: Lang): TrackedCh
   kind: KINDS.includes(r.kind) ? r.kind : "unknown",
   author: r.author,
   when: whenOf(r.at, now, zone, lang),
+  place: r.place === undefined ? null : PLACES.includes(r.place) ? r.place : "unknown",
   text: r.text ?? null,
 });
 
@@ -67,6 +70,7 @@ export function ChangesPane({
       <WordChanges
         file={file}
         changes={s.list?.revisions.map((r) => rowOf(r, s.readAt, zone, lang)) ?? null}
+        total={s.list?.total ?? 0}
         sending={s.sending}
         decided={
           s.last === null
@@ -76,6 +80,7 @@ export function ChangesPane({
         line={line}
         onBack={onBack}
         onDecide={(ids, decision) => revisions.decide(ids, decision)}
+        onDecideAll={(decision) => revisions.decideAll(decision)}
         onUndo={() => void revisions.undo()}
         onRetry={() => revisions.again()}
       />

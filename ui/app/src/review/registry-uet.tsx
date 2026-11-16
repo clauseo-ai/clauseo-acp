@@ -161,13 +161,52 @@ export const UET: Entry[] = [
     WINDOWS,
   ),
   // the firm's Chrome or Edge policy blocks every browser: the reason, then in full under it
-  entry("UET-44", lineWords("Blocked by your firm"), [browser("browser_blocked_by_policy")]),
+  entry("UET-44", lineWords("Blocked by a browser policy"), [browser("browser_blocked_by_policy")]),
   entry(
     "UET-45",
     popWords(
-      "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.",
+      "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.",
     ),
     [browser("browser_blocked_by_policy")],
+  ),
+  // on Windows, every installed browser blocked by its own policy, naming those; or only a per-user Chrome
+  entry(
+    "UC-550",
+    popWords(
+      "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_by_policy")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-551",
+    popWords(
+      "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.",
+    ),
+    [browser("browser_per_user_chrome_only")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-552",
+    popWords(
+      "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_edge")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-553",
+    popWords(
+      "Your firm's settings don't let apps control Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_chrome")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-554",
+    lineWords("Can't use your Chrome"),
+    [browser("browser_per_user_chrome_only")],
+    WINDOWS,
   ),
   // the firm's browser policy couldn't be read: the reason, then in full under it, and Try again
   entry("UET-46", lineWords("Couldn't check browser settings"), [

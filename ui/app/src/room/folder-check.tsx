@@ -7,13 +7,15 @@
 // the old answer. Part of New matter's chunk, with the warning (folder-warning.tsx) and its words (words-folder.ts).
 // An existing folder picked is scanned too (UD2, room/scan/): its lines show under the folder line, Stop drops the pick,
 // a refused scan is said as the check's refusal is, and Create waits for the scan's first event and a synced folder's
-// "Got it".
+// "Got it". On macOS and Linux a folder whose name has a backslash warns the same way, at once from the picked folder's
+// display (folder-backslash.ts), ahead of the check's warning: Claude can't start there.
 import { useRef, useState } from "react";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { fr } from "@clauseo/components/lib/words-folder.ts";
 import { toHostError } from "../transport/host-transport.ts";
 import type { FolderRefId, HostError } from "../transport/protocol.ts";
 import type { NextMatterSource } from "./host-next.ts";
+import { backslashAt } from "./folder-backslash.ts";
 import { FolderWarning, type Warned } from "./folder-warning.tsx";
 import type { Matters } from "./matters.ts";
 import { ScanLines } from "./scan/scan-lines.tsx";
@@ -56,6 +58,7 @@ async function within(asked: Promise<Answer>): Promise<Answer> {
 
 /** The folder the form picked by Choose folder…, and its check. */
 export function usePickedFolder(matters: Matters, lang: Lang) {
+  const { platform } = useDisplay();
   const [existing, setExisting] = useState<Picked | null>(null);
   // undefined while the check runs
   const [answer, setAnswer] = useState<Answer | undefined>(null);
@@ -116,7 +119,9 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     if (!(await scan.settle())) return null;
     return found;
   };
-  const warned = answer != null && "warn" in answer ? answer.warn : null;
+  const backslash = existing === null ? null : backslashAt(existing.display, platform);
+  const warned: Warned | null =
+    backslash !== null ? "backslash" : answer != null && "warn" in answer ? answer.warn : null;
   const checkRefused = answer != null && "refused" in answer ? answer.refused : null;
   const scanned = existing !== null && scan.scan?.folder === existing.folder ? scan.scan : null;
   return {
@@ -134,7 +139,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
       warned === null
         ? undefined
         : {
-            note: <FolderWarning kind={warned} />,
+            note: <FolderWarning kind={warned} at={backslash ?? undefined} />,
             choose: fr(lang, "Choose another folder"),
             anyway: fr(lang, "Create anyway"),
           },

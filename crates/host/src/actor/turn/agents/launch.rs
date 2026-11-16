@@ -11,20 +11,26 @@ use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
-use super::super::key_retry::KeyRetry;
+use super::super::key_retry::{KeyRetry, own_login};
 use super::super::launch_checks::Prepared;
+use super::super::offline::probe::Target;
 use super::{CodexAgent, path, start_failure};
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
-/// Claude launch's plans folder, and the matter folder's spellings for its stderr summary.
+/// Claude launch's plans folder, the matter folder's spellings for its stderr summary, a Claude
+/// launch's home, the launch variables the data fence expands (`data_fence::launch_vars`), and
+/// what the offline probe asks (`offline/probe/service.rs`).
 pub(super) type Launched = (
     AgentLink,
     PathBuf,
     Option<CodexAgent>,
     Option<PathBuf>,
     Vec<String>,
+    Option<PathBuf>,
+    Vec<(String, String)>,
+    Option<Target>,
 );
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
@@ -45,9 +51,12 @@ pub(super) fn launch(
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
-    let redacted = super::super::launch_checks::relay::redacted(&prepared.run);
+    // The relay token reaches the agent in a file; its stderr tail hides it all the same. So
+    // are the lawyer's MCP values and remote URLs, which reach it in `session/new`.
+    let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
+    redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
     let folder = prepared.stored;
+    let claude_home = prepared.claude_home.clone();
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
@@ -67,13 +76,14 @@ pub(super) fn launch(
         (forced.unwrap_or_default(), None)
     };
     // Every agent's temp folder is its session's own, gone with the run folder.
-    forced.extend(agent::temp::temp_env(
-        &agent::temp::temp_dir(&prepared.run.root),
-        cfg!(windows),
-    ));
+    let short = prepared.run.claude_tmp.as_deref();
+    let temp = agent::temp::session_env(&prepared.run.root, short, cfg!(windows));
+    forced.extend(temp);
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
+    // The offline probe asks only `chatgpt.com` for a login that is Clauseo's own.
+    let own = codex.as_ref().is_some_and(|(_, login)| own_login(*login));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {
         codex.key_retry = KeyRetry::at_launch(&hook, login);
@@ -99,6 +109,15 @@ pub(super) fn launch(
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
+    let fence_vars = agent::data_fence::launch_vars(spec.env());
+    // The service and route the offline probe asks, from the env the agent gets, unless the
+    // agent's own settings files move them (read by the prep).
+    let kind = AgentKind::of(&row.agent);
+    // The unit tests' `fake-agent` has no kind; a test names the one it plays.
+    #[cfg(test)]
+    let kind = kind.or(actor.turn_path.kind_for_tests);
+    let moved = prepared.settings.moved;
+    let probe = kind.map(|kind| Target::at_launch(kind, spec.env(), own).unless_moved(moved));
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -112,7 +131,16 @@ pub(super) fn launch(
         post,
         tree,
     )?;
-    Ok((link, folder, codex, plan_notes, matter_spellings))
+    Ok((
+        link,
+        folder,
+        codex,
+        plan_notes,
+        matter_spellings,
+        claude_home,
+        fence_vars,
+        probe,
+    ))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its

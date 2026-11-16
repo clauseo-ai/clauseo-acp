@@ -76,10 +76,13 @@ function Permission({
       : (task.own ??
         (task.program === null
           ? null
-          : task.paper === null
-            ? w.th("Run {program}.", { program: task.program })
-            : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
-  const command = plain !== null ? (task?.command ?? null) : null;
+          : task.count > 1
+            ? w.th("Run {n} tasks.", { n: String(task.count) })
+            : task.paper === null
+              ? w.th("Run {program}.", { program: task.program })
+              : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
+  // the fold whenever there is a command, whether or not a program was found in it: never less of it than before
+  const command = task?.command ?? null;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);

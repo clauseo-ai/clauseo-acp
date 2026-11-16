@@ -32,11 +32,12 @@ const q = (n: number) => `user_message:${uuid(n, 5)}`;
 const a = (n: number) => `agent_text:${uuid(n, 6)}`;
 const s = (turn: TurnId) => `step:${turn}`;
 
-const group = (entries: ViewEntry[], running = false) =>
-  groupExchanges(
-    entries.map((e) => [entryIdOf(e), e] as const),
-    running,
-  ).map((ex) => ({ asked: ex.asked, ids: ex.ids, sentNow: ex.sentNow }));
+const group = (entries: ViewEntry[]) =>
+  groupExchanges(entries.map((e) => [entryIdOf(e), e] as const)).map((ex) => ({
+    asked: ex.asked,
+    ids: ex.ids,
+    sentNow: ex.sentNow,
+  }));
 
 test("each sent question heads its turn's exchange; queued and removed messages are in none", () => {
   expect(
@@ -96,10 +97,21 @@ test("a steer taken in joins the running answer by order; one sent now marks the
   ]);
 });
 
-test("a steer not yet resolved is a mark while a turn runs, a question when none does", () => {
-  const entries = [ask(1, 1, T1), say(2, 1, T1), ask(3, 2, T2, { delivery: "steer" })];
-  expect(group(entries, true)).toEqual([{ asked: true, ids: [q(1), a(1), q(2)], sentNow: null }]);
-  expect(group(entries, false).map((ex) => ex.ids)).toEqual([[q(1), a(1)], [q(2)]]);
+test("a steer not yet resolved waits in the answer it was sent into, never heading an exchange of its own", () => {
+  // sent into T1 (the host's contract: its turn is the steered one), after T1's tail: still in T1's exchange
+  expect(
+    group([
+      ask(1, 1, T1),
+      say(2, 1, T1),
+      ask(3, 2, T1, { delivery: "steer" }),
+      say(4, 3, T1),
+      step(5, { turn: T1 }),
+    ]),
+  ).toEqual([{ asked: true, ids: [q(1), a(1), q(2), a(3), s(T1)], sentNow: null }]);
+  // a turn of its own the view has no exchange for: the answer still running where it arrived, as a mark joins it
+  expect(group([ask(1, 1, T1), say(2, 1, T1), ask(3, 2, T2, { delivery: "steer" })])).toEqual([
+    { asked: true, ids: [q(1), a(1), q(2)], sentNow: null },
+  ]);
 });
 
 test("a window that opens mid-turn starts with an exchange without a question", () => {

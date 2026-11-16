@@ -153,21 +153,17 @@ pub(crate) fn agent_prefs_text(prefs: &AgentPrefs) -> Result<String, Error> {
 }
 
 /// A `matters.agent_prefs` read back: text that is not such an object (an unknown agent kind,
-/// more picks than `ConfigPicks` holds) is corrupt.
+/// more picks than `ConfigPicks` holds) is corrupt. The error leaves the text out; the decoder's
+/// message may quote a part of it, so no caller logs it.
 pub(crate) fn agent_prefs(text: &str) -> Result<AgentPrefs, Error> {
-    serde_json::from_str(text).map_err(|error| {
-        Error::corrupt(format!(
-            "a matter's agent prefs {text:?} do not parse: {error}"
-        ))
-    })
+    serde_json::from_str(text)
+        .map_err(|error| Error::corrupt(format!("a matter's agent prefs do not parse: {error}")))
 }
 
 /// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that
-/// breaks the list's rules (more than 32 ids, an id twice), is corrupt.
+/// breaks the list's rules (more than 32 ids, an id twice), is corrupt. The error leaves the text
+/// out; the decoder's message may quote a part of it, so no caller logs it.
 pub(crate) fn skill_packs(text: &str) -> Result<PackList, Error> {
-    serde_json::from_str(text).map_err(|error| {
-        Error::corrupt(format!(
-            "a matter's skill packs {text:?} do not parse: {error}"
-        ))
-    })
+    serde_json::from_str(text)
+        .map_err(|error| Error::corrupt(format!("a matter's skill packs do not parse: {error}")))
 }

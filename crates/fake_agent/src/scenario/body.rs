@@ -62,6 +62,7 @@ enum StepBody {
     WriteFile(WriteFileBody),
     DeleteFile(PathBody),
     MoveFile(MoveFileBody),
+    TranscriptUser(String),
     Stderr(StderrBody),
     SpawnChild(SpawnChildBody),
     Exit(ExitBody),
@@ -225,6 +226,7 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
             let (from, to) = (b.from, b.to);
             (StepKind::File(FileOp::Move { from, to }), false)
         }
+        StepBody::TranscriptUser(text) => (StepKind::TranscriptUser(text), false),
         StepBody::Stderr(b) => (stderr(b)?, false),
         StepBody::SpawnChild(b) => (
             StepKind::SpawnChild {

@@ -21,6 +21,53 @@ pub(crate) struct Lock {
     pub packages: Vec<Package>,
     /// pandoc, which rides in the same archives (`pandoc.rs`).
     pub pandoc: Pandoc,
+    /// tesseract and its models, built from source into the same archives (`tesseract.rs`).
+    pub tesseract: Tesseract,
+}
+
+/// tesseract with leptonica, built by `build` from their source tarballs, and its trained models
+/// from `tesseract-ocr/tessdata_fast`: `version`, `leptonica`, `tessdata_commit` and `languages`
+/// are edited by hand, `bump` writes the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tesseract {
+    /// tesseract's release tag, `5.5.4`.
+    pub version: String,
+    /// The commit the tag points at, as GitHub's API gives it.
+    #[serde(default)]
+    pub commit: String,
+    /// The sha256 and size of the tag's source tarball (`tesseract::source_url`).
+    #[serde(default)]
+    pub source_sha256: String,
+    #[serde(default)]
+    pub source_size: u64,
+    /// leptonica's release tag, `1.87.0`.
+    pub leptonica: String,
+    /// The sha256 and size of leptonica's release tarball, which must be GitHub's `digest`.
+    #[serde(default)]
+    pub leptonica_sha256: String,
+    #[serde(default)]
+    pub leptonica_size: u64,
+    /// The `tessdata_fast` commit the models and its `LICENSE` come from.
+    pub tessdata_commit: String,
+    /// The models shipped, by tesseract's language code, sorted: `["eng", "hin"]`.
+    pub languages: Vec<String>,
+    /// The sha256 and size of `tessdata_fast`'s `LICENSE` at that commit.
+    #[serde(default)]
+    pub tessdata_licence_sha256: String,
+    #[serde(default)]
+    pub tessdata_licence_size: u64,
+    /// Each language's `<lang>.traineddata`, keyed by language.
+    #[serde(default)]
+    pub models: BTreeMap<String, Model>,
+}
+
+/// One `<lang>.traineddata` file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Model {
+    pub sha256: String,
+    pub size: u64,
 }
 
 /// pandoc from jgm/pandoc's GitHub release: `version` is edited by hand, `bump` writes the rest.
@@ -225,7 +272,40 @@ impl Lock {
             lines.push(format!("binary = {}", quote(&archive.binary)));
         }
         lines.push(String::new());
+        self.render_tesseract(&mut lines);
+        lines.push(String::new());
         lines.join("\n")
+    }
+
+    /// `[tesseract]` and its models, as `bump` writes them.
+    fn render_tesseract(&self, lines: &mut Vec<String>) {
+        let t = &self.tesseract;
+        lines.extend(TESSERACT_NOTE.lines().map(str::to_owned));
+        lines.push("[tesseract]".to_owned());
+        lines.push(format!("version = {}", quote(&t.version)));
+        lines.push(format!("commit = {}", quote(&t.commit)));
+        lines.push(format!("source_sha256 = {}", quote(&t.source_sha256)));
+        lines.push(format!("source_size = {}", t.source_size));
+        lines.push(format!("leptonica = {}", quote(&t.leptonica)));
+        lines.push(format!("leptonica_sha256 = {}", quote(&t.leptonica_sha256)));
+        lines.push(format!("leptonica_size = {}", t.leptonica_size));
+        lines.push(format!("tessdata_commit = {}", quote(&t.tessdata_commit)));
+        let languages: Vec<String> = t.languages.iter().map(|l| quote(l)).collect();
+        lines.push(format!("languages = [{}]", languages.join(", ")));
+        lines.push(format!(
+            "tessdata_licence_sha256 = {}",
+            quote(&t.tessdata_licence_sha256)
+        ));
+        lines.push(format!(
+            "tessdata_licence_size = {}",
+            t.tessdata_licence_size
+        ));
+        for (language, model) in &t.models {
+            lines.push(String::new());
+            lines.push(format!("[tesseract.models.{}]", key(language)));
+            lines.push(format!("sha256 = {}", quote(&model.sha256)));
+            lines.push(format!("size = {}", model.size));
+        }
     }
 }
 
@@ -233,6 +313,13 @@ impl Lock {
 const PANDOC_NOTE: &str = "\
 # pandoc, from jgm/pandoc's immutable GitHub release: edit only `version` by hand; bump writes the
 # rest. Windows on arm64 takes the x86_64 build, which runs there under Prism.
+";
+
+/// The comment above `[tesseract]`.
+const TESSERACT_NOTE: &str = "\
+# tesseract with leptonica, which build compiles from these source tarballs on each target, and
+# the models from tesseract-ocr/tessdata_fast: edit only `version`, `leptonica`, `tessdata_commit`
+# and `languages` by hand; bump writes the rest.
 ";
 
 /// The comment at the top of the lock.

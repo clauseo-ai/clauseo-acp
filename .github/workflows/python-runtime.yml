@@ -8,7 +8,9 @@
 # - workflow_dispatch from main with `publish`: the same check and builds, then `attest` signs the
 #   archives' build provenance and `publish` makes the release python-runtime-<python>-c<build>
 #   (from the lock) with the four archives and SHA256SUMS. A release is never replaced: when the
-#   tag or the release is already there, `publish` fails and changes nothing.
+#   tag or the release is already there, `publish` fails and changes nothing. The release is made
+#   with --latest=false: the app's updater reads releases/latest/download/latest.json (decision
+#   0037), so a runtime release must never become the repository's latest release.
 # - schedule (nightly): `audit` re-checks every pinned hash against PyPI, PBS and pandoc's GitHub
 #   release, asks OSV for advisories, and `report` opens an issue (once per title) when anything
 #   is found.
@@ -23,8 +25,10 @@
 #   sha256, every download must have the lock's sha256 and size, and `gh attestation verify` must
 #   prove PBS's own release workflow built the asset; pandoc's archive must have the lock's sha256
 #   and size, and `gh release verify-asset` must find it in jgm/pandoc's immutable release (pandoc
-#   publishes no build provenance; see xtask's python_runtime/pandoc.rs); any failure stops the
-#   build (fail closed).
+#   publishes no build provenance; see xtask's python_runtime/pandoc.rs); tesseract's and
+#   leptonica's source tarballs and the tessdata_fast models must have the lock's sha256 and size
+#   before tesseract is compiled from them on the runner (python_runtime/tesseract.rs); any
+#   failure stops the build (fail closed).
 #   pip installs the wheels offline with --require-hashes.
 # - `attest` runs no repository code: it only downloads the artifacts and attests them, so the OIDC
 #   token that signs never meets the build's code.
@@ -93,7 +97,8 @@ jobs:
     needs: check
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # tesseract and leptonica compile from source on the runner (CMake, Xcode or VS 2022).
+    timeout-minutes: 90
     permissions:
       contents: read # checkout; gh reads PBS's and pandoc's public attestations with this token
     strategy:
@@ -116,8 +121,8 @@ jobs:
         run: rustup toolchain install
 
       # Checks PBS's SHA256SUMS, every sha256 and size, PBS's build attestation and pandoc's
-      # release attestation (gh) before anything is unpacked; then assembles, smoke-tests and
-      # packs the archive.
+      # release attestation (gh) before anything is unpacked; then assembles (compiling
+      # tesseract), smoke-tests (OCR included) and packs the archive.
       - name: Build the runtime
         env:
           GH_TOKEN: ${{ github.token }}
@@ -126,7 +131,7 @@ jobs:
 
       # A clean Windows has no VC++ Redistributable, so every VC++ DLL the runtime's files import
       # must be one it ships (CPython's vcruntime140 beside python.exe, the wheels' msvcp140 in
-      # <pkg>.libs/). The header of .github/scripts/pe-crt-imports.mjs says how that is decided.
+      # <pkg>.libs/; clauseo-bin\tesseract.exe is built with /MT and must import none). The header of .github/scripts/pe-crt-imports.mjs says how that is decided.
       # stage/python is the tree pack.py packs, so it is the archive's contents.
       - name: Check the runtime's VC++ imports resolve to DLLs it ships
         if: runner.os == 'Windows'
@@ -264,7 +269,7 @@ jobs:
             echo '```'
           } > notes.md
           gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "$TAG" --notes-file notes.md
+            --verify-tag --latest=false --title "$TAG" --notes-file notes.md
 
   audit:
     name: audit

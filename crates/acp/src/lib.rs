@@ -79,6 +79,9 @@ mod diagnose;
 mod driver;
 mod error;
 mod event;
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing;
 mod inbound;
 mod line;
 mod map;
@@ -96,15 +99,15 @@ use agent_client_protocol::{Client, Lines};
 
 pub use client::AcpClient;
 pub use driver::Driver;
-pub use error::Error;
+pub use error::{Error, RpcData};
 pub use event::{
-    AcpEvent, AgentUpdate, FrameDirection, LimitSignal, LimitStatus, MessageRole, Origin,
-    PendingKey, ProtocolWarning, RawFrame, ToolCall,
+    AcpEvent, AgentFailed, AgentUpdate, ConnectionLost, FrameDirection, LimitSignal, LimitStatus,
+    MessageRole, Origin, PendingKey, ProtocolWarning, RawFrame, ToolCall,
 };
 pub use line::{ReadMark, ReadProgress};
 pub use types::{
     AgentInfo, AuthKind, AuthMethod, ConnectOptions, LoadSession, McpServer, NewSession, PromptEnd,
-    SessionMode, SessionModes, SessionStart, SteerResult,
+    SessionMode, SessionModes, SessionStart, SteerResult, TooLong,
 };
 
 /// How many events the channel holds before the driver stops reading the agent.

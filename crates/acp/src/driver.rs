@@ -102,8 +102,9 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
         Command::Steer {
             session,
             content,
+            held,
             reply,
-        } => steer::steer(cx, shared, &session, content, reply),
+        } => steer::steer(cx, shared, &session, content, held, reply),
         Command::AnswerPermission {
             key,
             option_id,
@@ -157,11 +158,7 @@ fn new_session(
     reply: Reply<SessionStart>,
 ) {
     let cwd = request.cwd;
-    let servers = request
-        .mcp_servers
-        .into_iter()
-        .map(mcp_server)
-        .collect::<Vec<_>>();
+    let servers = mcp_servers(shared, request.mcp_servers);
     let mut sent = acp::NewSessionRequest::new(cwd.clone())
         .additional_directories(request.additional_directories)
         .mcp_servers(servers);
@@ -222,8 +219,10 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
             state.stop(error.clone());
             return Err(error);
         }
+        let mcp_http = response.agent_capabilities.mcp_capabilities.http;
         let info = map::agent_info(response);
         let mut locked = state.state();
+        locked.mcp_http = mcp_http;
         locked.prompt_capabilities = info.capabilities.prompt;
         locked.steering = info.capabilities.steering;
         locked.auth_methods.clone_from(&info.auth_methods);
@@ -233,12 +232,24 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 
 /// What Clauseo advertises: no `fs`, no `terminal`, no `subagents`; terminal sign-in, form and
 /// URL elicitation, notices, compaction, boolean config options, `plan`, and the AIR
-/// `sessionFailure` capability in `clientCapabilities._meta`.
+/// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`.
+///
+/// `recommendedValue` (claude-agent-acp 0.89.1, `clientSupportsRecommendedConfigValue`,
+/// `acp-agent.js:8203`): the model and effort options lose their "Default" rows and show real
+/// values. The effort's `currentValue` is the adapter's recommendation ("medium" when the model
+/// offers it, `session-effort.js:68-90`), which the adapter also applies to the SDK
+/// (`acp-agent.js:7625`). The model's "Default" row goes only when it resolves to a listed
+/// model, which then becomes the `currentValue` (`session-model.js:163-190`). codex-acp 2.2.2
+/// only adds `_meta.jetbrains.air.recommendedValue` to its options, whose values were already
+/// concrete (`dist/index.js:44000-44020`).
 pub(crate) fn client_capabilities() -> acp::ClientCapabilities {
     let mut air = serde_json::Map::new();
     air.insert(
         "jetbrains".to_owned(),
-        serde_json::json!({"air": {"version": 1, "capabilities": ["sessionFailure"]}}),
+        serde_json::json!({"air": {
+            "version": 1,
+            "capabilities": ["sessionFailure", "recommendedValue"],
+        }}),
     );
     acp::ClientCapabilities::new()
         .auth(acp::AuthCapabilities::new().terminal(true))
@@ -271,13 +282,7 @@ fn load_session(
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
-        .mcp_servers(
-            request
-                .mcp_servers
-                .into_iter()
-                .map(mcp_server)
-                .collect::<Vec<_>>(),
-        );
+        .mcp_servers(mcp_servers(shared, request.mcp_servers));
     sent.meta = request.meta;
     let state = Arc::clone(shared);
     let session = request.session;
@@ -312,13 +317,7 @@ fn resume_session(
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::ResumeSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
-        .mcp_servers(
-            request
-                .mcp_servers
-                .into_iter()
-                .map(mcp_server)
-                .collect::<Vec<_>>(),
-        );
+        .mcp_servers(mcp_servers(shared, request.mcp_servers));
     sent.meta = request.meta;
     let state = Arc::clone(shared);
     let session = request.session;
@@ -374,25 +373,32 @@ fn prompt(
                 && entry.prompt == Some(turn)
             {
                 entry.prompt = None;
-                if entry.origin == Origin::Turn(turn) {
+                // A cancelled prompt's answer ends its late updates too: what comes after is
+                // the agent's own (a turn it starts by itself), not the cancelled turn's tail.
+                if entry.origin == Origin::Turn(turn) || entry.origin == Origin::Late(turn) {
                     entry.origin = Origin::Idle;
                 }
             }
         }
         let response = result?;
-        let mut limit = None;
-        if let Some(failure) = response.meta.as_ref().and_then(map::session_failure) {
-            match failure {
-                Ok(signal) => limit = Some(signal),
-                Err(warning) => {
-                    let event = map::warning_event(Some(session), warning);
-                    state.emit(event).await;
-                }
+        let (mut limit, mut too_long, mut connection, mut failed) = (None, None, None, None);
+        match response.meta.as_ref().and_then(map::session_failure) {
+            Some(map::Failure::Limit(signal)) => limit = Some(signal),
+            Some(map::Failure::TooLong(kind)) => too_long = Some(kind),
+            Some(map::Failure::Connection(lost)) => connection = Some(lost),
+            Some(map::Failure::Failed(gave_up)) => failed = Some(gave_up),
+            Some(map::Failure::Warning(warning)) => {
+                let event = map::warning_event(Some(session), warning);
+                state.emit(event).await;
             }
+            None => {}
         }
         Ok(PromptEnd {
             stop: map::stop_reason(response.stop_reason),
             limit,
+            too_long,
+            connection,
+            failed,
         })
     };
     send_with(cx, shared, request, reply, on_answer);
@@ -417,8 +423,42 @@ fn session_start(
     })
 }
 
+/// The servers as ACP has them, for `session/new`, `session/load` and `session/resume`. An
+/// http server goes only to an agent whose `initialize` said `mcpCapabilities.http` (before
+/// `initialize` answers, none goes); to any other it is left out, with a warning once per
+/// server on this connection that names it and nothing else (its URL and header values can hold
+/// secrets; the name is the lawyer's label for it, and a launch logs it already when a value is
+/// missing).
+fn mcp_servers(shared: &Shared, servers: Vec<McpServer>) -> Vec<acp::McpServer> {
+    let mut state = shared.state();
+    let http = state.mcp_http;
+    let sent = servers
+        .into_iter()
+        .filter(|server| {
+            let sent = http || !matches!(server, McpServer::Http { .. });
+            if !sent && state.mcp_http_left_out.insert(server.name().to_owned()) {
+                tracing::warn!(
+                    server = server.name(),
+                    "left out an http MCP server: the agent did not advertise mcpCapabilities.http"
+                );
+            }
+            sent
+        })
+        .collect::<Vec<_>>();
+    drop(state);
+    sent.into_iter().map(mcp_server).collect()
+}
+
 fn mcp_server(server: McpServer) -> acp::McpServer {
     match server {
+        McpServer::Http { name, url, headers } => acp::McpServer::Http(
+            acp::McpServerHttp::new(name, url).headers(
+                headers
+                    .into_iter()
+                    .map(|(name, value)| acp::HttpHeader::new(name, value))
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         McpServer::Stdio {
             name,
             command,
@@ -506,6 +546,7 @@ fn rpc_error(shared: &Shared, method: &str, error: agent_client_protocol::Error)
         code: error.code.into(),
         data: crate::diagnose::data_shape(error.data.as_ref()),
         data_text: crate::error::data_text(error.data.as_ref()),
+        data_fields: crate::error::RpcData::read(error.data.as_ref()),
         message: error.message,
     }
 }

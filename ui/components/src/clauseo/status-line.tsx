@@ -61,9 +61,17 @@ export type PlanChoice<V extends string = string> = {
  * it gives them, never translated. */
 export type ConfigMenu = {
   id: string;
+  /** What the value belongs to, the open conversation or the draft: a value that changes with it is not announced. */
+  scope?: string | undefined;
   label: string;
   value: string;
-  options: readonly { value: string; name: string; description?: string | undefined }[];
+  /** `note`: a quiet mark after the name, in the open menu only: "(default)" on the row that is the agent's default. */
+  options: readonly {
+    value: string;
+    name: string;
+    description?: string | undefined;
+    note?: string | undefined;
+  }[];
   onValueChange: (value: string) => void;
 };
 

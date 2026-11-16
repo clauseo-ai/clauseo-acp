@@ -1,0 +1,75 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::McpToolsChanged(super::mcp::tools_view())"
+---
+{
+  "mcp_tools_changed": {
+    "control": "lawyer",
+    "servers": [
+      {
+        "name": "github",
+        "kind": "local",
+        "command": "/opt/homebrew/bin/npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "env": [
+          {
+            "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "saved": true
+          },
+          {
+            "name": "GITHUB_TOOLSETS",
+            "saved": false
+          }
+        ],
+        "headers": [],
+        "enabled": true
+      },
+      {
+        "name": "linear",
+        "kind": "remote",
+        "args": [],
+        "url": "https://mcp.linear.app/mcp",
+        "env": [],
+        "headers": [
+          {
+            "name": "Authorization",
+            "saved": true
+          }
+        ],
+        "enabled": false
+      }
+    ],
+    "importable": [
+      {
+        "source": "claude_code",
+        "count": 2
+      },
+      {
+        "source": "codex",
+        "count": 1
+      }
+    ],
+    "last_import": {
+      "command": "01900000-0000-7000-8000-000000000007",
+      "source": "claude_desktop",
+      "imported": [
+        "github"
+      ],
+      "skipped": [
+        {
+          "name": "filesystem",
+          "reason": "command_not_found",
+          "program": "npx"
+        },
+        {
+          "name": "linear",
+          "reason": "already_added"
+        }
+      ],
+      "others": 3
+    }
+  }
+}

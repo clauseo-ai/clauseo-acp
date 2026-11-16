@@ -11,10 +11,25 @@ import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { useSyncExternalStore } from "react";
+import type { Matters } from "./matters.ts";
+import { locateRefusalLine } from "./locate-refusal.ts";
+
+// Locate's step for a folder Claude can't start in, which the room mounts once beside these (locate-warning-host.tsx).
+export { LocateWarningHost } from "./locate-warning-host.tsx";
 
 /** The moved folder's line: that it moved, where it was (when the host says, H20's folder_display), that nothing is
- * lost, and Locate folder. */
-export function MovedFolder({ folder, onLocate }: { folder?: string; onLocate: () => void }) {
+ * lost, and Locate folder. A Locate the host refused says why under it (`refused`, locate-refusal.ts), in New matter's
+ * line for the code: the same primary-tone line (matter-form-error) a refused folder gets there. */
+export function MovedFolder({
+  folder,
+  refused,
+  onLocate,
+}: {
+  folder?: string;
+  refused?: string;
+  onLocate: () => void;
+}) {
   const { lang } = useWords();
   return (
     <div className="room-moved" role="status">
@@ -41,11 +56,37 @@ export function MovedFolder({ folder, onLocate }: { folder?: string; onLocate: (
           )}
         </Say>
       </p>
+      {refused !== undefined && (
+        <p role="alert" className="text-small-row text-primary" data-testid="locate-refused">
+          <Say>{refused}</Say>
+        </p>
+      )}
       <Button kind="tone" className="room-moved-act" onClick={onLocate}>
         <IconLocateFolder size={16} />
         {ui(lang, "Locate folder")}
       </Button>
     </div>
+  );
+}
+
+/** The open matter's moved folder line, with the refusal of its last Locate (locate-refusal.ts) said under it. */
+export function LocatedFolder({ matters, onLocate }: { matters: Matters; onLocate: () => void }) {
+  const { lang } = useWords();
+  const refused = useSyncExternalStore(
+    matters.locateRefused.subscribe,
+    matters.locateRefused.view,
+    matters.locateRefused.view,
+  );
+  const view = matters.view();
+  const open = view.open;
+  if (open === null) return null;
+  const said = refused.get(open.matter);
+  return (
+    <MovedFolder
+      {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
+      {...(said === undefined ? {} : { refused: locateRefusalLine(lang, said, view.matters) })}
+      onLocate={onLocate}
+    />
   );
 }
 

@@ -24,7 +24,7 @@ export const EPOCH = uuid(1, 3);
 export const TURN = uuid(1, 4);
 
 export const header = (
-  status: "idle" | "running" | "needs_you" = "idle",
+  status: "idle" | "starting" | "running" | "needs_you" = "idle",
   commands: AvailableCommand[] = [],
 ): ViewEntry => ({
   header: {

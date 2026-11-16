@@ -1,0 +1,43 @@
+{
+  "base": "20886ffe2df6d000:0:20886ffe2df6d000",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 2
+      }
+    ],
+    "count": 2,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 0,
+        "deleted": "one year",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two years",
+        "kind": "insert"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p6",
+    "remaining_tokens": 0,
+    "scope": "p1..p6",
+    "shown": 3,
+    "total": 3
+  },
+  "text": "{stet 1 view=body base=20886ffe2df6d000:0:20886ffe2df6d000 mode=redline common-style=\"Normal\" range=p1..p6}\n{authors: C \"Clauseo\"}\n{summary: 2 tracked changes (C 2) · 1 section}\np1 Intro.\nt1 {table cols=2}\nr1 {row}\np2 Outer left.\nt2 {+} {table cols=1}\nr2 {row}\np3 Inner cell {--one year--}{#1 C}{++two years++}{#0 C}.\n{/table}\np4 {+}\np5 Outer right.\n{/table}\np6 Last paragraph.\n{position: p1..p6 of p1..p6 (3 of 3 blocks)}\n",
+  "tokens": 107,
+  "warnings": []
+}

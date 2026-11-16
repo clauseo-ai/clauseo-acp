@@ -4,24 +4,36 @@
 //! (`pumps.rs`): to the running agent-browser; a tool call while the browser is stopped starts
 //! Chrome and agent-browser first (`session.rs`); any other request then goes to a one-shot
 //! agent-browser (`oneshot.rs`). Every start of agent-browser has a thread that copies its stdout
-//! to the agent, whole lines and unchanged bytes. All of them write to the guard's stdout only
-//! under one lock, a whole line at a time, so a refusal never lands inside a line of the child's.
+//! to the agent, whole lines and unchanged bytes but the relay's URL (`redact.rs`). All of them
+//! write to the guard's stdout only under one lock, a whole line at a time, so a refusal never
+//! lands inside a line of the child's.
 //! agent-browser starts with the map `env.rs` built plus Chrome's endpoint, in `--cwd`, with
-//! piped stdin and stdout and the guard's stderr.
+//! piped stdin and stdout, and its stderr copied to the guard's without the URL.
 //!
 //! This thread waits for the events. With nothing in flight for [`session::IDLE_STOP`] after the
-//! last tool call it stops the browser, keeping the profile; the next call starts it again. When
-//! Chrome dies the first time, it stops agent-browser too, answers each request in flight with an
-//! error, and the next call starts both again; the second time the guard exits 1. When the agent
-//! closes stdin, the guard asks a running agent-browser to close its browser (one
-//! `agent_browser_close` call, whose reply is not relayed; for the guard's Chrome that only
-//! disconnects), waits up to [`CLOSE_WAIT`] for that reply, closes the child's stdin and waits
-//! up to [`EXIT_WAIT`] for its stdout to end, then kills it. When agent-browser ends by itself
-//! the guard exits with its code (1 if Chrome had died too). When the guard's parent goes
-//! (`parent.rs`), the guard exits 1. Whatever ends the relay, the browser is stopped (`stop`), a
-//! running one-shot killed, and every request still in flight answered with an error. From that
-//! final stop on, the agent pump answers each request with an error itself: no browser or
-//! one-shot starts after it, so none outlives the guard.
+//! last tool call it stops the browser, keeping the profile; the next call starts it again. The
+//! agent's own `agent_browser_close` stops it the same way once its reply has gone to the agent
+//! ([`Event::Closed`]), unless a request went to agent-browser since: agent-browser only
+//! disconnects from a Chrome it did not launch, so without this Chrome and its loopback debugging
+//! port lived until the idle stop, and the port now lives only while the agent uses the browser
+//! (open to close within a turn; Codex closes at the end of every turn). A close while the browser
+//! is stopped starts nothing: the guard answers it with agent-browser's own result
+//! ([`CLOSED_RESULT`]); one that waited for a start in progress goes to the started browser and
+//! stops it again. A pipe instead of the port is for after the launch.
+//!
+//! When Chrome dies the first time, the relay stops agent-browser too, answers each request in
+//! flight with an error, and the next call starts both again; the second time the guard exits 1.
+//! When agent-browser answers a call with its refusal of `--allowed-domains`, which would stick
+//! on its session, its stdout pump stops the browser as the idle stop does (`pumps.rs`).
+//! When the agent closes stdin, the guard asks a running agent-browser to close its browser (one
+//! `agent_browser_close` call, [`CLOSE_REQUEST`], whose reply is not relayed and stops nothing
+//! itself: the final stop follows), waits up to [`CLOSE_WAIT`] for that reply, closes the child's
+//! stdin and waits up to [`EXIT_WAIT`] for its stdout to end, then kills it. When agent-browser
+//! ends by itself the guard exits with its code (1 if Chrome had died too). When the guard's
+//! parent goes (`parent.rs`), the guard exits 1. Whatever ends the relay, the browser is stopped
+//! (`stop`), a running one-shot killed, and every request still in flight answered with an
+//! error. From that final stop on, the agent pump answers each request with an error itself: no
+//! browser or one-shot starts after it, so none outlives the guard.
 //!
 //! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
 //! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
@@ -40,6 +52,7 @@
 pub(crate) mod lines;
 mod oneshot;
 pub(crate) mod pumps;
+pub(crate) mod redact;
 
 use std::io;
 use std::sync::Arc;
@@ -47,14 +60,57 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
+use super::chrome::sandbox::REFUSAL;
 use super::parent::Parent;
-use super::session::{self, Shared, Stopped};
+use super::session::{self, Shared, StartError, Stopped};
 use super::{Child, note};
 pub(crate) use lines::{Line, Overflow, read_line};
 use lines::{answer_all, lock};
 
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
+/// agent-browser's tool that closes its browser. Its reply to the agent stops the guard's
+/// browser (`Event::Closed`); while the browser is stopped the guard answers it itself.
+pub(crate) const CLOSE_TOOL: &str = "agent_browser_close";
+/// The tool whose failed navigation may be a download (`downloads/saved.rs`).
+pub(crate) const OPEN_TOOL: &str = "agent_browser_open";
+/// The tool that lists agent-browser's profiles (`filter::without_eval`).
+pub(crate) const PROFILES_TOOL: &str = "agent_browser_tools_profiles";
+/// agent-browser v0.41.1's result for `agent_browser_close` on the guard's Chrome, the same JSON
+/// as it sends, which the guard sends for a close while its browser is stopped. The real-Chrome
+/// test `real_chrome::close::a_close_while_stopped_starts_nothing_and_gets_agent_browsers_result`
+/// compares it with the real binary's, so a bump that changes it fails there.
+const CLOSED_RESULT: &str = concat!(
+    r##"{"content":[{"text":"{\n  \"data\": {\n    \"closed\": true,\n    \"lifecycle\":"##,
+    r##" {\n      \"effectiveLaunch\": {\n        \"browserLaunched\": false,\n        \"engine\":"##,
+    r##" \"chrome\",\n        \"launchHash\": null\n      },\n      \"launched\": false,"##,
+    r##"\n      \"relaunchedBrowser\": false,\n      \"restartedBackground\": false,\n      \"restoreStatus\":"##,
+    r##" \"not_configured\",\n      \"reused\": false,\n      \"saveStatus\": \"not_configured\"\n    },"##,
+    r##"\n    \"restoreStatus\": \"not_configured\",\n    \"saveStatus\": \"not_configured\"\n  },"##,
+    r##"\n  \"error\": null,\n  \"success\": true\n}","type":"text"}],"isError":false,"structuredContent":"##,
+    r##"{"exitCode":0,"response":{"success":true,"data":{"closed":true,"lifecycle":{"effectiveLaunch":"##,
+    r##"{"browserLaunched":false,"engine":"chrome","launchHash":null},"launched":false,"relaunchedBrowser":"##,
+    r##"false,"restartedBackground":false,"restoreStatus":"not_configured","reused":false,"##,
+    r##""saveStatus":"not_configured"},"restoreStatus":"not_configured","saveStatus":"not_configured"},"##,
+    r##""error":null},"stderr":"","stdout":"{\"success\":true,\"data\":{\"closed\":true,"##,
+    r##"\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":false,\"engine\":\"chrome\","##,
+    r##"\"launchHash\":null},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":"##,
+    r##"false,\"restoreStatus\":\"not_configured\",\"reused\":false,\"saveStatus\":\"not_configured\"},"##,
+    r##"\"restoreStatus\":\"not_configured\",\"saveStatus\":\"not_configured\"},\"error\":"##,
+    r##"null}\n"}}"##,
+);
+
+/// The guard's reply to an `agent_browser_close` with `id` while its browser is stopped: the
+/// result agent-browser gives, so the agent sees no difference. With its newline.
+pub(crate) fn closed_reply(id: &serde_json::Value) -> String {
+    let result: serde_json::Value =
+        serde_json::from_str(CLOSED_RESULT).unwrap_or(serde_json::Value::Null);
+    format!(
+        "{}\n",
+        serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result})
+    )
+}
+
 /// How long the guard waits for the close reply before closing the child's stdin anyway.
 pub(crate) const CLOSE_WAIT: Duration = Duration::from_secs(10);
 /// How long the guard waits for the child's stdout to end after closing its stdin, before it
@@ -82,6 +138,11 @@ pub(crate) enum Event {
     PortRefused(u64, String),
     /// The guard's Chrome exited.
     ChromeExited(u64),
+    /// The guard's running Chrome said its sandbox cannot start; the fixed part of what it said.
+    SandboxFailed(u64, &'static str),
+    /// agent-browser's reply to an `agent_browser_close` call went to the agent; with
+    /// `State::sent_count` as the reply was taken.
+    Closed(u64, u64),
     /// The agent's stdin reached EOF (and the close request went out to a running child).
     AgentEnded,
     /// The reply to the close request arrived.
@@ -89,7 +150,7 @@ pub(crate) enum Event {
     /// The guard's parent has gone.
     ParentGone,
     /// The browser could not start for a tool call; the reason.
-    StartFailed(String),
+    StartFailed(StartError),
     /// A one-shot agent-browser could not start; the error.
     AgentFailed(String),
     /// A one-shot agent-browser ended the server with this code.
@@ -114,7 +175,7 @@ pub(crate) enum Outcome {
     /// The guard's parent went and agent-browser was ended.
     ParentGone,
     /// The browser could not start; the reason.
-    StartFailed(String),
+    StartFailed(StartError),
     /// agent-browser could not start; the error.
     AgentFailed(String),
 }
@@ -129,7 +190,7 @@ enum End {
     ParentGone,
     /// The agent left with no agent-browser running.
     AgentGone,
-    StartFailed(String),
+    StartFailed(StartError),
     AgentFailed(String),
     OneShotEnded(i32),
 }
@@ -243,11 +304,15 @@ fn wait_for_end(shared: &Shared, inbox: &mpsc::Receiver<Event>) -> End {
                     return End::ChromeExited;
                 }
             }
+            Event::SandboxFailed(of, said) if current(of) => refuse_after_start(shared, said),
+            Event::Closed(of, sent) if current(of) => stop_after_close(shared, sent),
             // From a start the guard has stopped already.
-            Event::ChildEnded(_)
+            Event::Closed(..)
+            | Event::ChildEnded(_)
             | Event::ChildOversize(_)
             | Event::PortRefused(..)
-            | Event::ChromeExited(_) => {}
+            | Event::ChromeExited(_)
+            | Event::SandboxFailed(..) => {}
             Event::ParentGone => return End::ParentGone,
             Event::StartFailed(reason) => return End::StartFailed(reason),
             Event::AgentFailed(error) => return End::AgentFailed(error),
@@ -293,6 +358,44 @@ fn stop_if_idle(shared: &Shared) {
             shared.launcher.idle.as_secs()
         ));
     }
+}
+
+/// The agent's `agent_browser_close` was answered: stops the browser as the idle stop does,
+/// keeping the profile, so Chrome's debugging port lives only while the agent uses the browser.
+/// Runs on this thread after the reply is out, so the stop (with its wait for Chrome's group,
+/// `chrome.rs`) never delays the reply. Not when a request went to agent-browser since the reply
+/// was taken (`sent`, `State::close_may_stop`), even one already answered: the agent browses
+/// again and the idle stop covers it; nor once the agent has gone (the final stop follows). It
+/// holds the state lock through the stop as the idle stop does, so a call waits for it, then
+/// starts the browser again.
+fn stop_after_close(shared: &Shared, sent: u64) {
+    let mut state = lock(&shared.state);
+    if state.close_may_stop(sent) {
+        drop(session::stop(&shared.launcher, &mut state));
+        drop(state);
+        note(
+            "agent_browser_close: stopped Chrome and agent-browser, keeping the profile until the \
+             session ends",
+        );
+    }
+}
+
+/// The running Chrome said its sandbox cannot start (after its start was accepted, or just before,
+/// too late for the start's check; `chrome/stderr.rs`): stops Chrome and agent-browser, answers
+/// what is in flight with the sandbox's refusal, and refuses every later call the same way
+/// (`session::start`, which then ends the guard as a refused start does). No browser starts again.
+fn refuse_after_start(shared: &Shared, said: &'static str) {
+    let in_flight = {
+        let mut state = lock(&shared.state);
+        state.sandbox_refused = Some(said);
+        drop(session::stop(&shared.launcher, &mut state));
+        state.take_in_flight()
+    };
+    note(&format!(
+        "{}; stopped Chrome and agent-browser",
+        StartError::Sandbox(Some(said))
+    ));
+    answer_all(&shared.out, &in_flight, REFUSAL);
 }
 
 /// Chrome died while relaying. The first time: stops agent-browser, answers what is in flight

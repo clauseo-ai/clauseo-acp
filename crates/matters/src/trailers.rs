@@ -11,19 +11,38 @@
 //! ```
 //!
 //! Writers emit the trailers in that order, `Clauseo-Thread` and `Clauseo-Turn` only when the
-//! checkpoint has them. Readers take the last paragraph, accept the trailers in any order, ignore
-//! keys they do not know, and need only `Clauseo-Checkpoint`.
+//! checkpoint has them, then `Clauseo-Skips` on every commit (`none`, or the id of the blob
+//! holding the skip record: `skip_record.rs`), then one `Clauseo-Baseline` and one
+//! `Clauseo-Was-Skipped` per file read for the first time (`first_read.rs`), each sorted by
+//! path:
+//!
+//! ```text
+//! Clauseo-Skips: 5b0e3c1f9a2d4e6b8c7a1f0e9d8c7b6a5f4e3d2c
+//! Clauseo-Baseline: cloud-only notes.txt
+//! Clauseo-Was-Skipped: over-size-cap Exhibits/scan 2.pdf
+//! ```
+//!
+//! The value is the reason the file had been skipped, a space, then its path exactly (a path
+//! holds no control character, so no line break; spaces in it are kept). Readers take the last
+//! paragraph, accept the trailers in any order, ignore keys they do not know, and need only
+//! `Clauseo-Checkpoint`.
 
 use std::str::FromStr;
 
-use clauseo_protocol::{CheckpointId, CheckpointKind, ThreadId, TurnId};
+use clauseo_protocol::{CheckpointId, CheckpointKind, MatterPath, SkippedFile, ThreadId, TurnId};
 
+use crate::first_read::FirstReads;
+use crate::history::Oid;
+use crate::skip_record::{SkipsRef, reason_from, reason_name};
 use crate::types::TimelineEntry;
 
 const CHECKPOINT: &str = "Clauseo-Checkpoint";
 const KIND: &str = "Clauseo-Kind";
 const THREAD: &str = "Clauseo-Thread";
 const TURN: &str = "Clauseo-Turn";
+const SKIPS: &str = "Clauseo-Skips";
+const BASELINE: &str = "Clauseo-Baseline";
+const WAS_SKIPPED: &str = "Clauseo-Was-Skipped";
 
 /// The trailer spelling of each kind. `Unknown` has none: it is never written.
 const KINDS: [(CheckpointKind, &str); 7] = [
@@ -67,8 +86,9 @@ fn kind_words(kind: CheckpointKind) -> &'static str {
 }
 
 /// The commit message for checkpoint `entry` with `files` files changed (for an import: in
-/// the tree). `entry.kind` must not be `Unknown`.
-pub(crate) fn message(entry: &TimelineEntry, files: usize) -> String {
+/// the tree), its skip record and the files it read for the first time, `reads`. `entry.kind`
+/// must not be `Unknown`; `reads.skips` is never `Unrecorded` from this writer.
+pub(crate) fn message(entry: &TimelineEntry, files: usize, reads: &FirstReads) -> String {
     let noun = if files == 1 { "file" } else { "files" };
     let words = kind_words(entry.kind);
     let changed = if entry.kind == CheckpointKind::Import {
@@ -85,10 +105,74 @@ pub(crate) fn message(entry: &TimelineEntry, files: usize) -> String {
         .turn
         .map(|turn| format!("{TURN}: {turn}\n"))
         .unwrap_or_default();
-    format!(
+    let mut text = format!(
         "{words}: {files} {noun}{changed}\n\n{CHECKPOINT}: {}\n{KIND}: {kind}\n{thread}{turn}",
         entry.id
-    )
+    );
+    #[cfg(test)]
+    let old = before_marker::active();
+    #[cfg(not(test))]
+    let old = false;
+    if old {
+        return text;
+    }
+    match reads.skips {
+        SkipsRef::Unrecorded => {}
+        SkipsRef::Empty => text.push_str("Clauseo-Skips: none\n"),
+        SkipsRef::Blob(blob) => {
+            text.push_str(SKIPS);
+            text.push_str(": ");
+            text.push_str(&blob.to_hex());
+            text.push('\n');
+        }
+    }
+    for (key, list) in [(BASELINE, &reads.baseline), (WAS_SKIPPED, &reads.changed)] {
+        for file in list {
+            let reason = reason_name(file.reason);
+            for part in [key, ": ", reason, " ", file.path.as_str(), "\n"] {
+                text.push_str(part);
+            }
+        }
+    }
+    text
+}
+
+/// The files read for the first time that a commit message records, from its last paragraph's
+/// `Clauseo-Baseline` and `Clauseo-Was-Skipped` trailers, in the order written, and its skip
+/// record (`Clauseo-Skips`; a commit from before has none, and a value that does not read is
+/// taken as none recorded). A reason this version does not know reads as `Unknown`; a value
+/// without a valid path is left out.
+pub(crate) fn first_reads(message: &str) -> FirstReads {
+    // Only line breaks are trimmed: a path may end in a space.
+    let trimmed = message.trim_end_matches(['\n', '\r']);
+    let last = trimmed.rsplit("\n\n").next().unwrap_or(trimmed);
+    let mut reads = FirstReads::default();
+    for line in last.lines() {
+        let Some((key, value)) = line.split_once(": ") else {
+            continue;
+        };
+        let list = match key {
+            SKIPS => {
+                reads.skips = match value.trim_end_matches('\r') {
+                    "none" => SkipsRef::Empty,
+                    hex => Oid::from_hex(hex).map_or(SkipsRef::Unrecorded, SkipsRef::Blob),
+                };
+                continue;
+            }
+            BASELINE => &mut reads.baseline,
+            WAS_SKIPPED => &mut reads.changed,
+            _ => continue,
+        };
+        let Some((reason, path)) = value.split_once(' ') else {
+            continue;
+        };
+        let Ok(path) = MatterPath::new(path.trim_end_matches('\r')) else {
+            continue;
+        };
+        let reason = reason_from(reason);
+        list.push(SkippedFile { path, reason });
+    }
+    reads
 }
 
 /// The checkpoint a commit message describes, from its last paragraph's trailers; `None` when
@@ -120,6 +204,29 @@ pub(crate) fn parse(message: &str) -> Option<TimelineEntry> {
         thread,
         turn,
     })
+}
+
+/// Unit tests only: commits written as a Clauseo from before the first-read trailers wrote them,
+/// with neither `Clauseo-Skips` nor a `Clauseo-Baseline` or `Clauseo-Was-Skipped`.
+#[cfg(test)]
+pub(crate) mod before_marker {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ACTIVE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Runs `run` with every commit message written on this thread in the old format.
+    pub(crate) fn write<T>(run: impl FnOnce() -> T) -> T {
+        ACTIVE.set(true);
+        let out = run();
+        ACTIVE.set(false);
+        out
+    }
+
+    pub(super) fn active() -> bool {
+        ACTIVE.get()
+    }
 }
 
 #[cfg(test)]

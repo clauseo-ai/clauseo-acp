@@ -1,5 +1,5 @@
 //! What the turn path's own tasks post back to the actor: agent call results and whole-log
-//! reads.
+//! reads; and a matter job's name for the log.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
 use clauseo_protocol::{
@@ -40,12 +40,16 @@ pub(crate) enum TurnInput {
     },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
+    /// A read of Claude's transcript for unconfirmed steers answered (`queue/confirm.rs`).
+    SteerChecked(Box<super::queue::SteerChecked>),
     /// The host's probe of the agent's service for `thread`'s `turn` answered (`offline.rs`).
     OfflineProbe {
         thread: ThreadId,
         turn: TurnId,
-        reached: bool,
+        reach: super::offline::probe::Reach,
     },
+    /// The offline-shell note's steer to `thread` did not land (`shell_network.rs`).
+    OfflineNoteOwed(ThreadId),
 }
 
 /// An agent call's result.
@@ -64,6 +68,8 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, crate::error::Error>,
         picked: super::picks::Picked,
+        /// A Claude switch to `auto` was refused and fell back to `acceptEdits`.
+        fell_back: bool,
     },
     Prompt {
         turn: TurnId,
@@ -106,4 +112,19 @@ pub(crate) enum LogFor {
         turn: TurnId,
         reply: Reply<QueryResult>,
     },
+    /// The undo note's restores: those of the thread's matter's log from here (`note.rs`).
+    Restores(super::note::Bound),
+}
+
+impl super::JobKind {
+    /// The variant's name, for the log: its fields can hold paths.
+    pub(super) const fn name(&self) -> &'static str {
+        match self {
+            Self::Before(_) => "Before",
+            Self::After(_) => "After",
+            Self::Reconcile(_) => "Reconcile",
+            Self::Undo(_) => "Undo",
+            Self::Permission(_) => "Permission",
+        }
+    }
 }

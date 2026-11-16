@@ -1,23 +1,20 @@
-// The line under a finished answer (D-026, D-027): Copy, which puts the answer's words on the clipboard as written
-// (its Markdown, every part of it between the steps, a blank line apart), and on the thread's latest answer, once it
+// The line under a finished answer (D-026, D-027): Copy, the copy icon (ui/copy-button.tsx), which puts the answer's
+// words on the clipboard as written (its Markdown, every part of it between the steps, a blank line apart), and on the thread's latest answer, once it
 // was stopped or failed, Try again, which sends the same question as a new turn (its words; a paper it mentioned goes
 // as the words that named it). Nothing shows while the turn runs: the line comes with the turn's step. The texts are
 // read from the store on the press, so a flush renders nothing here.
 import { useRef, useState } from "react";
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
-import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import { CopyButton } from "@clauseo/components/ui/copy-button.tsx";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { answerText } from "./answer-text.ts";
 import { questionText, turnRunning } from "./live.ts";
 import { useThreadActions } from "./session.ts";
-
-/** How long "Copied" stands in Copy's place. */
-const COPIED_MS = 2_000;
 
 /** How the turn ended, by its step: whether Try again belongs under it (a Stop, or a failure). */
 const retryable = (e: ViewEntry | undefined): boolean =>
@@ -44,7 +41,6 @@ export function AnswerActions({
   const w = useWords();
   const store = useViewStore();
   const { resend } = useThreadActions();
-  const [copied, setCopied] = useState(false);
   const [going, setGoing] = useState(false);
   // two presses in one moment send one question: the ref holds before React renders the state
   const sending = useRef(false);
@@ -58,17 +54,6 @@ export function AnswerActions({
       retryable(paged.get(step) ?? v?.entries.get(step)),
   );
   const has = useStreamPart(store, stream, (v) => answerText(ids, v, paged) !== "");
-  const copy = () => {
-    const text = answerText(ids, store.view(stream), paged);
-    if (text === "" || navigator.clipboard === undefined) return;
-    navigator.clipboard.writeText(text).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), COPIED_MS);
-      },
-      () => {},
-    );
-  };
   const retry = () => {
     if (resend === undefined || question === undefined || sending.current) return;
     const view = store.view(stream);
@@ -86,11 +71,12 @@ export function AnswerActions({
   return (
     <div className="mt-s1 flex flex-wrap items-center gap-x-s2" data-testid="answer-actions">
       {has && (
-        <Button kind="quiet" size="small" data-testid="answer-copy" onClick={copy}>
-          <span className="deva-nudge" aria-live="polite">
-            <Say>{th(w.lang, copied ? "Copied" : "Copy")}</Say>
-          </span>
-        </Button>
+        <CopyButton
+          testId="answer-copy"
+          text={() => answerText(ids, store.view(stream), paged)}
+          label={th(w.lang, "Copy")}
+          done={th(w.lang, "Copied")}
+        />
       )}
       {again && resend !== undefined && (
         <Button

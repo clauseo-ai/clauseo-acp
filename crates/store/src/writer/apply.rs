@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use clauseo_protocol::{
-    AccountLimits, AccountRef, AgentKind, AgentSessionId, ClientName, Seq, StreamId, Timestamp,
+    AccountLimits, AccountRef, AgentKind, AgentSessionId, ClientName, MatterId, Seq, StreamId,
+    Timestamp,
 };
 use rusqlite::{Connection, params};
 
 use super::StreamState;
 use crate::codec::{self, MAX_STREAM_ID};
-use crate::{Commit, Committed, Error, Receipt, SnapshotIn, read};
+use crate::{Commit, Committed, Error, PendingAction, Receipt, SnapshotIn, read};
 
 /// The streams one commit touches, over the writer's map and its group's staged changes.
 pub(super) struct Changes<'a> {
@@ -382,4 +383,31 @@ const fn agent_text(agent: AgentKind) -> &'static str {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
     }
+}
+
+/// Keeps `action` as its matter's pending action, replacing any earlier one. Outside a group
+/// commit, so SQLite's own transaction syncs it (`synchronous=FULL`) before this returns.
+pub(super) fn put_pending_action(conn: &Connection, action: &PendingAction) -> Result<(), Error> {
+    conn.prepare_cached(
+        "INSERT INTO pending_actions (matter, kind, files, thread, at) VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT (matter) DO UPDATE SET kind = excluded.kind, files = excluded.files, \
+         thread = excluded.thread, at = excluded.at",
+    )?
+    .execute(params![
+        action.matter.to_string(),
+        action.kind.name(),
+        action
+            .files
+            .map(|files| i64::try_from(files.get()).unwrap_or(i64::MAX)),
+        action.thread.map(|thread| thread.to_string()),
+        action.at.as_millis(),
+    ])?;
+    Ok(())
+}
+
+/// Forgets `matter`'s pending action; none is fine.
+pub(super) fn clear_pending_action(conn: &Connection, matter: MatterId) -> Result<(), Error> {
+    conn.prepare_cached("DELETE FROM pending_actions WHERE matter = ?1")?
+        .execute([matter.to_string()])?;
+    Ok(())
 }

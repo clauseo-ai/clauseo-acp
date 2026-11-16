@@ -200,7 +200,7 @@ jobs:
       # sidecar script and the VC++ runtime import check are tested here, in plain Node, without
       # the network or cargo.
       - name: Test the release scripts and release.yml's rules
-        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs
+        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs .github/scripts/copy-release-gate.test.mjs
 
       # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
       # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
@@ -471,6 +471,11 @@ jobs:
 
       - name: vitest
         run: pnpm -C ui/app run test
+
+      # Every lawyer-facing string registered, with an approved or provisional entry that matches its
+      # words, and no duplicate, malformed or orphan id. A release holds them all to approved.
+      - name: copy:check
+        run: pnpm -C ui/app run copy:check
 
       # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
       - name: Save the pnpm store (main)

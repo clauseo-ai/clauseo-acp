@@ -1,5 +1,6 @@
 //! The check on each line the agent sends to agent-browser. It sees only that direction; what
-//! agent-browser sends back is relayed untouched (`relay.rs`).
+//! agent-browser sends back is relayed as read (`relay.rs`), but a `tools/list` reply, which
+//! loses the tools and the argument keys refused here (`schema.rs`, [`advertised_tools`]).
 //!
 //! A line is parsed once, as a `serde_json::Value`, and only that value moves on: the child gets
 //! the guard's own serialisation of it, so a duplicate key, odd whitespace or an escape cannot
@@ -16,9 +17,12 @@
 //!    [`UNAVAILABLE`], any other [`UNKNOWN_TOOL`]; nothing forwarded. `agent_browser_batch` is
 //!    not on the list.
 //! 5. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
+//!    0. `allowedDomains` in any spelling, as a key or a flag at any depth (`domains.rs`):
+//!    [`domains::ALLOWED_DOMAINS`];
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
-//!    c. a `timeoutMs` that is not a whole number up to [`MAX_TIMEOUT_MS`];
+//!    c. a key of [`TIME_KEYS`] (`timeoutMs` and the other waits) that is not a whole number up
+//!    to its [`time_max`]: [`MAX_TIMEOUT_MS`], or [`MAX_DELAY_MS`] for `delayMs`;
 //!    d. on `agent_browser_screenshot`, a `selector` agent-browser would take for a file path;
 //!    on `agent_browser_read`, any key of [`READ_FETCH_KEYS`];
 //!    e. a `url` that is not a string, names a scheme other than http, https or
@@ -26,15 +30,22 @@
 //!    f. an `extraArgs` that is not an array of strings each in [`EXTRA_ARGS_ALLOWED`];
 //!    g. any other string, at any depth, shaped like a command-line flag (`-x`, `--x`,
 //!    `--x=y`, see [`looks_like_flag`]): agent-browser's MCP server puts typed values into the
-//!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`).
-//!    `agent_browser_eval`'s `script` is exempt: it travels on stdin (`mcp.rs:3950-3957`).
+//!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`);
+//!    h. any key off the tool's pass list (`keys.rs`): "This option is not supported in
+//!    Clauseo.", the same line for every key.
+//!    Nothing passes by being unknown.
 //!
 //!    A refused request gets an `isError` tool result with its id; a refused notification is
 //!    dropped. Anything else is forwarded.
 
+pub(crate) mod domains;
 mod host;
+pub(crate) mod keys;
+mod schema;
 
 use serde_json::{Map, Value, json};
+
+pub(crate) use schema::advertised_tools;
 
 /// The longest agent line the guard reads, in bytes without the newline. A longer one is
 /// refused as a parse error and never forwarded.
@@ -78,8 +89,6 @@ pub(crate) const RESERVED_ID: &str = "clauseo-guard-close";
 
 /// The tool whose single positional may be read as a file path (`commands.rs:912-933`).
 const TOOL_SCREENSHOT: &str = "agent_browser_screenshot";
-/// The tool whose `script` goes to agent-browser on stdin, never into argv.
-const TOOL_EVAL: &str = "agent_browser_eval";
 const TOOL_READ: &str = "agent_browser_read";
 
 /// The keys on `agent_browser_read` that make agent-browser's daemon fetch over HTTP itself
@@ -94,20 +103,55 @@ pub(crate) const READ_FETCH: &str =
     "agent_browser_read fetching a page itself (open the page, then read it)";
 /// The refusal's name for a screenshot selector that reads as a path.
 pub(crate) const SCREENSHOT_PATH: &str = "a file path as the screenshot selector";
-/// The refusal's name for a `timeoutMs` out of range.
-pub(crate) const TIMEOUT: &str = "a timeoutMs other than a whole number up to 300000";
+/// The keys that hold a time in milliseconds, each capped at its [`time_max`]: a wait
+/// (`waitTimeoutMs`, `agent_browser_wait_ms`'s `ms`), the delay between keystrokes (`delayMs`)
+/// or `readTimeoutMs` could otherwise stall the one call the MCP server runs at a time.
+pub(crate) const TIME_KEYS: &[&str] = &[
+    "timeoutMs",
+    "waitTimeoutMs",
+    "ms",
+    "delayMs",
+    "readTimeoutMs",
+];
 
-/// The only `extraArgs` tokens that pass, each exactly. None takes a value.
-pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
-    &["--json", "--full", "-i", "--quiet", "-q", "--annotate"];
+/// The longest `delayMs` that passes: agent-browser waits it between every two keystrokes, so
+/// 300000 would make a short text take hours.
+pub(crate) const MAX_DELAY_MS: u64 = 1000;
+
+/// The most a key of [`TIME_KEYS`] may hold: [`MAX_DELAY_MS`] for `delayMs`, else
+/// [`MAX_TIMEOUT_MS`].
+pub(crate) fn time_max(key: &str) -> u64 {
+    if key == "delayMs" {
+        MAX_DELAY_MS
+    } else {
+        MAX_TIMEOUT_MS
+    }
+}
+
+/// The refusal's name for a key of [`TIME_KEYS`] out of range, such as "a timeoutMs other than
+/// a whole number up to 300000".
+pub(crate) fn time_refusal(key: &str) -> String {
+    format!("a {key} other than a whole number up to {}", time_max(key))
+}
+
+/// The only `extraArgs` tokens that pass, each exactly: global flags, which agent-browser's CLI
+/// reads wherever they stand (`GLOBAL_BOOL_FLAGS`, `flags.rs:1298-1324`), so none can become a
+/// command's positional. None takes a value. `-i` and `--full` are not global: on a command
+/// that does not read them they are a positional (`screenshot <selector> -i` writes a file
+/// named `-i`, `commands.rs:906-929`; `read -i` fetches `https://-i`, `commands.rs:2445-2452`),
+/// and the typed keys `interactive`, `full` and `fullPage` do their work; `--annotate` is
+/// the typed `annotate`.
+pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] = &["--json", "--quiet", "-q"];
 
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
 
-/// The only tools that reach agent-browser: exactly agent-browser v0.41.1's `core` profile
+/// The only tools that reach agent-browser: agent-browser v0.41.1's `core` profile
 /// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
-/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`). An agent that starts the
-/// guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
+/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`), less `agent_browser_eval`:
+/// page JavaScript is off for both agents, so it is refused as any other tool off the list, and
+/// dropped from agent-browser's `tools/list` reply ([`advertised_tools`]). An agent that starts
+/// the guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
 /// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
 /// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
 pub(crate) const ALLOWED_TOOLS: &[&str] = &[
@@ -138,9 +182,46 @@ pub(crate) const ALLOWED_TOOLS: &[&str] = &[
     "agent_browser_tab_list",
     "agent_browser_tab_switch",
     "agent_browser_tab_close",
-    "agent_browser_eval",
     "agent_browser_close",
 ];
+
+/// The words in agent-browser's `core` profile description (`ToolProfile::description`,
+/// `cli/src/mcp.rs:257` at v0.41.1) that name the eval tool the guard refuses.
+const EVAL_WORDS: &str = "JavaScript eval, ";
+
+/// A reply to `agent_browser_tools_profiles` (`line`, without its newline) with
+/// [`EVAL_WORDS`] taken out of every string in it, the text content and any structured content
+/// alike, so the agent is never told its tools include JavaScript eval. `None` when nothing
+/// changes: the line then goes on as read.
+pub(crate) fn without_eval(line: &[u8]) -> Option<Vec<u8>> {
+    fn strip(value: &mut Value) -> bool {
+        match value {
+            Value::String(text) if text.contains(EVAL_WORDS) => {
+                *text = text.replace(EVAL_WORDS, "");
+                true
+            }
+            // Every item, not up to the first change.
+            Value::Array(items) => {
+                items
+                    .iter_mut()
+                    .map(strip)
+                    .filter(|changed| *changed)
+                    .count()
+                    > 0
+            }
+            Value::Object(map) => {
+                map.values_mut()
+                    .map(strip)
+                    .filter(|changed| *changed)
+                    .count()
+                    > 0
+            }
+            _ => false,
+        }
+    }
+    let mut reply: Value = serde_json::from_slice(line).ok()?;
+    strip(reply.get_mut("result")?).then(|| serde_json::to_vec(&reply).ok())?
+}
 
 /// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
 /// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
@@ -240,7 +321,15 @@ fn check_object(object: &Map<String, Value>) -> Result<(), String> {
     else {
         return Ok(());
     };
-    check_arguments(tool, arguments).map_err(|name| refusal_text(&name))
+    if domains::names_allowed_domains(arguments) {
+        return Err(domains::ALLOWED_DOMAINS.to_owned());
+    }
+    check_arguments(tool, arguments).map_err(|name| refusal_text(&name))?;
+    // Last, so a key refused by name above keeps its own refusal.
+    match arguments.keys().find(|key| !keys::passes(tool, key)) {
+        Some(_) => Err(keys::UNSUPPORTED.to_owned()),
+        None => Ok(()),
+    }
 }
 
 fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), String> {
@@ -257,10 +346,12 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
     }) {
         return Err((*key).to_owned());
     }
-    if let Some(timeout) = arguments.get("timeoutMs")
-        && timeout.as_u64().is_none_or(|ms| ms > MAX_TIMEOUT_MS)
-    {
-        return Err(TIMEOUT.to_owned());
+    if let Some(key) = TIME_KEYS.iter().find(|key| {
+        arguments
+            .get(**key)
+            .is_some_and(|value| value.as_u64().is_none_or(|ms| ms > time_max(key)))
+    }) {
+        return Err(time_refusal(key));
     }
     if tool == TOOL_SCREENSHOT
         && let Some(selector) = arguments.get("selector").and_then(Value::as_str)
@@ -282,8 +373,7 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
         check_extra_args(extra)?;
     }
     for (key, value) in arguments {
-        let exempt = key == "extraArgs" || (tool == TOOL_EVAL && key == "script");
-        if !exempt {
+        if key != "extraArgs" {
             check_no_flags(value)?;
         }
     }

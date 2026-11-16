@@ -30,7 +30,12 @@ import { Say } from "./say.tsx";
  * icon's slot left empty, until it is false or the row goes, so the lawyer sees the answer is still coming. What is being done now is
  * the state's own words (a wait's `words`, such as "Answering." or "Reading the complaint."), so assistive technology
  * hears it too. Left out, the row shows the still wait icon, as before. */
-export type WorkingState =
+/** The line's state, with `also`: a second line, compact under this one (the first run's other plan, while both plans
+ * have something to say). */
+export type WorkingState = WorkingOne & { also?: WorkingOne };
+
+/** One row's state. */
+export type WorkingOne =
   /** name and waitingFor are the app's words, in the language: "Acme Ltd v. State", "judgments since 2001 that cite
    * it". expected, on a check and a series, is the clock time the answer is expected, or null when the app has none:
    * then the row has no pill. */
@@ -74,6 +79,9 @@ export type WorkingState =
       /** Optional: what leads the row instead of the clock: nothing (a plan only offered, its slot kept so the words
        * line up) or the tick (a plan that is ready). */
       lead?: "none" | "done";
+      /** Optional: a muted line under the row, as the first screen's plan rows have one (a cancelled sign-in's note
+       * under its download that carries on). */
+      note?: string;
     };
 
 /** What leads the row: the permission's shield or the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
@@ -206,6 +214,7 @@ function TimePill({ children, place }: { children: string; place: "row" | "field
  * composer holds the status region these go into, mounted whenever the composer is, so each change (Answering., then
  * a break's words, or nothing between) is said once in place; the row's own words are seen, not read twice. */
 export function WorkingSaid({ state }: { state: WorkingState }) {
+  const also = state.also ?? null;
   const { words, pill } = useParts(state);
   const spoken = state.kind === "wait" && state.said !== undefined ? state.said : words;
   const said =
@@ -214,6 +223,18 @@ export function WorkingSaid({ state }: { state: WorkingState }) {
     <>
       <Say>{said}</Say>
       {pill !== null && ` ${pill}`}
+      {state.kind === "wait" && state.note !== undefined && (
+        <>
+          {" "}
+          <Say>{state.note}</Say>
+        </>
+      )}
+      {also !== null && (
+        <>
+          {" "}
+          <WorkingSaid state={also} />
+        </>
+      )}
     </>
   );
 }
@@ -237,6 +258,37 @@ export function WorkingLine({
   state: WorkingState;
   testId?: string | undefined;
 }) {
+  if (state.also !== undefined)
+    return (
+      <>
+        <WorkingRow state={state} testId={testId} />
+        <Note state={state} />
+        <div className="working-also">
+          <WorkingRow state={state.also} />
+          <Note state={state.also} />
+        </div>
+      </>
+    );
+  return (
+    <>
+      <WorkingRow state={state} testId={testId} />
+      <Note state={state} />
+    </>
+  );
+}
+
+/** A row's note, muted under it; nothing without one. The live region hears it with the row (WorkingSaid). */
+function Note({ state }: { state: WorkingOne }) {
+  if (state.kind !== "wait" || state.note === undefined) return null;
+  return (
+    <p className="working-note" aria-hidden="true" data-testid="working-note">
+      <Say>{state.note}</Say>
+    </p>
+  );
+}
+
+/** One row of the line. */
+function WorkingRow({ state, testId }: { state: WorkingState; testId?: string | undefined }) {
   const wd = useThreadWords();
   const { words, pill, actions, details } = useParts(state);
   const row = (more: ReactNode) => (

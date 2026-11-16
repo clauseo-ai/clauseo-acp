@@ -3,6 +3,8 @@
 
 #[path = "profile/browser.rs"]
 mod browser;
+#[path = "profile/browser_rules.rs"]
+mod browser_rules;
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +12,7 @@ use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
     self, BROWSER, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS,
-    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
+    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, WORK_FOLDER,
 };
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
@@ -66,6 +68,8 @@ fn the_instructions_are_the_tools_part_under_300_words() {
     assert!(text.contains("--author \"Clauseo\""));
     assert!(text.contains("{work_folder}"));
     assert!(!text.contains("{author}"));
+    // Both agents, every OS: a long PDF is read through pypdf (Claude's Read needs poppler).
+    assert!(text.contains("PDFs over 10 pages with `python3` pypdf (`python` on Windows)"));
     insta::assert_snapshot!(text);
 }
 
@@ -118,7 +122,16 @@ fn the_author_keeps_letters_marks_digits_and_four_marks_of_punctuation_only() {
 
 #[test]
 fn the_claude_fragment_holds_only_the_profiles_keys() {
-    let meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
+    let mut meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
+    // One snapshot for every OS: macOS's Claude line (legal.rs checks it) is taken out first; the
+    // "Working at scale" part, when it ships, follows it.
+    if let Some(line) = clauseo_profile::instructions::claude_shell(cfg!(target_os = "macos")) {
+        let append = &mut meta["systemPrompt"]["append"];
+        let text = append.as_str().unwrap();
+        let line = format!("\n\n{line}");
+        assert!(text.contains(&line));
+        *append = Value::String(text.replacen(&line, "", 1));
+    }
     let options = meta["claudeCode"]["options"].as_object().unwrap();
     assert!(
         options
@@ -282,6 +295,8 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
         agent_browser.as_str(),
         "--cwd",
         "{browser_dir}",
+        "--downloads",
+        "{matter_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];
@@ -309,14 +324,14 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
     if cfg!(unix) {
         expected.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}".to_owned()));
     }
-    expected.push(("AGENT_BROWSER_STREAM_PORT", "{stream_port}".to_owned()));
     assert_eq!(env, expected);
 }
 
 #[test]
 fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
     let profile = profile();
-    let mut texts = vec![profile.instructions()];
+    // What each agent is sent: `{plan}` is the profile's own token, filled per agent.
+    let mut texts = vec![profile.claude_instructions(), profile.codex_instructions()];
     let tokens: Vec<&str> = IN_INSTRUCTIONS.iter().chain(&IN_SERVERS).copied().collect();
     for server in profile.servers(Some(AgentKind::Codex)) {
         texts.extend(server.args);
@@ -346,7 +361,6 @@ fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
             (PROXY_PORT, "1"),
             (BROWSER_EXECUTABLE, "/c"),
             (SOCKET_DIR, "/tmp/clauseo-ab-0123456789abcdef"),
-            (STREAM_PORT, "61100"),
             (CDP_PORT, "61101"),
             (DAEMON_PORT, "61102"),
         ]
@@ -469,5 +483,29 @@ fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator()
     assert_eq!(
         own.path_prepend(),
         Some(Path::new(r"C:\Program Files\Clauseo\stetdoc"))
+    );
+}
+
+/// A verbatim stetdoc path (Tauri's resource folder, from a canonicalized exe) goes on the
+/// agents' `PATH` in its plain form, which cmd.exe takes too.
+#[cfg(windows)]
+#[test]
+fn a_verbatim_windows_stetdoc_path_goes_on_path_plain() {
+    let paths = ProfilePaths::new(
+        &Locations::under_root(Path::new(r"C:\data")),
+        PathBuf::from(r"C:\Clauseo\clauseo.exe"),
+        PathBuf::from(r"\\?\C:\Clauseo\stetdoc\stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: PathBuf::from(r"C:\Clauseo\clauseo-mcp.exe"),
+            agent_browser: PathBuf::from(r"C:\Clauseo\agent-browser.exe"),
+        },
+    )
+    .unwrap();
+    let folder = paths.path_prepend().unwrap();
+    assert!(!folder.to_string_lossy().starts_with(r"\\?\"), "{folder:?}");
+    assert_eq!(folder, Path::new(r"C:\Clauseo\stetdoc"));
+    assert_eq!(
+        paths.stetdoc(),
+        Path::new(r"C:\Clauseo\stetdoc\stetdoc.exe")
     );
 }

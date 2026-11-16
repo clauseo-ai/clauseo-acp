@@ -284,6 +284,10 @@ export const CHECKING = {
 export const PERMISSION_PAPER = "Notice to the bank";
 export const CHANGED = ["Notice to the bank.docx", "Draft reply"];
 
+/** A paper's path 327 characters long, with a 200-character folder name that has no break in it: the change note's text
+ * wraps it inside its column, and the note's buttons stay beside or under it. */
+export const LONG_PAPER = `C:\\Users\\Rohan\\Documents\\Matters\\${"a".repeat(200)}\\Deep Agreement, clause 4.1(b) tracked reply, final draft for the client file, rev 2 of 3.docx`;
+
 /** An accepted earlier exchange: its question, its reply and what it made. */
 export const EARLIER = {
   at: "3:58 pm",

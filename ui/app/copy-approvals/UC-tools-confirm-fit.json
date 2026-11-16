@@ -1,0 +1,57 @@
+{
+  "UC-336": {
+    "en": "{count} more tools didn't fit here and won't be imported now: {names}. Import again to add them.",
+    "hi": "{count} और टूल यहाँ नहीं आ सके और अभी इम्पोर्ट नहीं होंगे: {names}। उन्हें जोड़ने के लिए फिर से इम्पोर्ट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "orchestrator (toolsfit: import keeps what fits)",
+    "note": "import confirm: the servers that didn't fit, named"
+  },
+  "UC-337": {
+    "en": "1 more tool didn't fit here and won't be imported now: {names}. Import again to add it.",
+    "hi": "1 और टूल यहाँ नहीं आ सका और अभी इम्पोर्ट नहीं होगा: {names}। उसे जोड़ने के लिए फिर से इम्पोर्ट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "orchestrator (toolsfit: import keeps what fits)",
+    "note": "import confirm: the one server that didn't fit, named"
+  },
+  "UC-338": {
+    "en": "{count} more tools didn't fit here and won't be imported now. Import again to add them.",
+    "hi": "{count} और टूल यहाँ नहीं आ सके और अभी इम्पोर्ट नहीं होंगे। उन्हें जोड़ने के लिए फिर से इम्पोर्ट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "orchestrator (toolsfit: import keeps what fits)",
+    "note": "import confirm: the servers that didn't fit, too many names to show"
+  },
+  "UC-339": {
+    "en": "1 more tool didn't fit here and won't be imported now. Import again to add it.",
+    "hi": "1 और टूल यहाँ नहीं आ सका और अभी इम्पोर्ट नहीं होगा। उसे जोड़ने के लिए फिर से इम्पोर्ट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "orchestrator (toolsfit: import keeps what fits)",
+    "note": "import confirm: the one server that didn't fit, name too long to show"
+  },
+  "UC-340": {
+    "en": "{name}: there were too many tools to import at once. Import again to add it.",
+    "hi": "{name}: एक बार में बहुत सारे टूल थे। इसे जोड़ने के लिए फिर से इम्पोर्ट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "orchestrator (toolsfit: import keeps what fits)",
+    "note": "Settings › Tools import result: a tool left out (too_many)"
+  }
+}

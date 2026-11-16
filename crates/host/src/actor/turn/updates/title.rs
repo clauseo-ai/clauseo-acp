@@ -5,21 +5,30 @@ use clauseo_protocol::{CompactString, RenameSource, ThreadId, ThreadRenamed};
 use super::super::super::{Actor, title_source};
 use super::super::out::Out;
 use super::super::{Then, current, lost};
-use super::agent;
+use super::{Context, agent};
 use crate::error::Error;
 
 /// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
-/// thread takes (see `title_source`). A title the thread already has from the agent makes no
-/// event, so the replay Codex sends on load adds nothing.
+/// thread takes (see `title_source`). The name settles after the first answered turn ends
+/// (`state::title_open`): an agent title is taken within `TITLE_GRACE` after that end, and never
+/// once the next prompt has gone out, a title replayed on load or sent later is ignored (D-070).
+/// A turn with no answer text settles nothing. A title the thread already has from the agent
+/// makes no event, so the replay Codex sends on load adds nothing.
 pub(super) fn changed(
     actor: &mut Actor,
     thread: ThreadId,
     title: Option<String>,
+    context: Context,
 ) -> Result<(), Error> {
     let Some(title) = title else {
         tracing::debug!(%thread, "the agent cleared its session title");
         return Ok(());
     };
+    let idle = matches!(context, Context::Outside { replay: false });
+    if !super::super::state::title_open(actor, thread, idle) {
+        tracing::debug!(%thread, "the name has settled; the agent's session title is ignored");
+        return Ok(());
+    }
     let prompt = current(actor, thread).map(|current| current.prompt.as_slice());
     let Some(title) = title_source::agent_title(thread, &title, prompt) else {
         return Ok(());

@@ -95,14 +95,18 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   lines it left out, and decoding refuses more. Sizes are `Count`s.
 - `SignInChanged { agent, state: SignIn }`, S18's `SigninState` with how the agent is signed in:
   `SignedOut { found }`, `Queued`, `Waiting { since, nudge }`, `DeviceCode { url, code,
-  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at }`,
+  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at, refused }`,
   `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
   is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
   `reused_changed`, `codex_link_split`, then UD2's `none_found`: the search ran and found no
   login, and `reuse_off`: S18's `no-reuse` is there, so nothing was looked for); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
-  the lawyer's own CLI login, or `own`, Clauseo's). `plan` is a `PlanLabel` in words, from
+  the lawyer's own CLI login, or `own`, Clauseo's). `refused` is optional and comes only with
+  `method: api_key`: it is set when a sign-in recheck meets an `agent.auth_required` hold while a
+  key is in memory and no endpoint or provider outranks it, so the provider refused that key,
+  and it clears when a key is saved or removed. A later turn the provider accepts with the same
+  key does not clear it. `plan` is a `PlanLabel` in words, from
   `limits`' plan words; desktop turns S18's raw plan string into it. Times are `Timestamp`s. A
   device code is shown to the lawyer, so it is a plain string, not a `Secret`.
 
@@ -446,12 +450,29 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
     setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
     agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
-    it, and it launches with the key; a read that failed sets `agent.key_unreadable`. Such a
-    key never reads as "no key" and the agent never launches without it. A read that has not
+    it, and it launches with the key. A read that failed (the keychain's error) or has not
     answered by the bound sets `agent.key_unreadable` only for an agent the "key stored" marker
-    below marks; an unmarked agent has no key Clauseo stored, so it launches without one and no
-    refusal follows. The log line names the agent, "key unreadable" and the error's kind; never
-    the key, the item's name or a path.
+    below marks: such a key never reads as "no key" and the agent never launches without it, so
+    a firm's stored key is never skipped silently. An unmarked agent has no key Clauseo stored,
+    so it launches without one and no refusal follows, unless a firm endpoint or provider is
+    set for it (`plans.<id>`): under a firm plan a failed read sets `agent.key_unreadable`
+    whatever the marker (`KeyCache::unreadable_for`). A keyless launch with the firm's
+    `ANTHROPIC_BASE_URL` would let Claude Code offer the lawyer's own claude.ai sign-in token
+    to the firm's gateway, and "Firm" on screen must stay true. (The orchestrator's ruling on
+    the review of #1132.) (Amended 2026-11-15, the orchestrator's
+    ruling on VM row M-d: a failed read used to set the refusal for every agent, and a Mac with
+    no login keychain, where every read fails, showed "Sign-in didn't finish." in place of Sign
+    in for agents that had never stored a key.) The accepted cost: a marker lost together with a
+    keychain error means a session without the stored key, until a read answers and the marker
+    is set again. That session is not always a refused one: the session launch sets no key variable
+    (`setup/hook.rs`, `setup_parts`; the entry's placeholder stays empty), so the agent signs in with whatever login it finds, Clauseo's
+    own or the lawyer's reused one, and a firm's matter can run on a personal account, under
+    that account's data terms, in place of the firm's key. What the lawyer sees then follows
+    the login in use, not the key: the sign-in line is S18's, with that account's email and
+    plan (`setup/compose.rs`, rules 5 and 6), the limits read that login's numbers
+    (`setup/readers.rs`, `keys_ready`), and the key's row does not say it is in use. The log line names the agent, "key unreadable" (or, unmarked, that the
+    read failed and it launches without a key) and the error's kind; never the key, the item's
+    name or a path.
   - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,
     outside the keychain, a list of the agents Clauseo stored a key for:
     `<data_dir>/agents/key-stored.json`, `{"agents": ["claude-acp"]}`, beside the `firm-policy`

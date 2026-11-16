@@ -15,6 +15,7 @@ import {
   press,
   setups,
   signIn,
+  setOnline,
   stubClipboard,
   text,
 } from "./rig.tsx";
@@ -34,7 +35,7 @@ test("install: missing on the first screen says the size, about, and sends nothi
   expect(text()).toContain("Claude · needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
   const sign = byId("install-sign-in");
-  expect(sign?.textContent).toBe("Sign in to Claude");
+  expect(sign?.textContent).toBe("Sign in with Claude");
   expect(foot()?.contains(sign)).toBe(true);
   await press(sign);
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
@@ -149,6 +150,35 @@ test("install: dl-offline waits for the connection and resumes by itself", async
   expect(setups(t)).toEqual([]);
 });
 
+const UNREACHABLE = "Clauseo can't reach the download right now. It tries again by itself.";
+const OFFLINE_WORDS = "You're offline. Setting up waits for the connection.";
+
+test("install: waiting with the window offline says you're offline; online, that the download can't be reached", async () => {
+  await mountFirstRun({ matters: [], first: [OFFLINE], online: false });
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(OFFLINE_WORDS);
+  expect(text()).not.toContain(UNREACHABLE);
+  // the window's online event: the same wait, now in the words that don't say offline
+  await setOnline(true);
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(UNREACHABLE);
+  expect(text()).not.toContain(OFFLINE_WORDS);
+  expect(byId("install-retry")?.textContent).toBe("Try again");
+  await setOnline(false);
+  expect(text()).toContain(OFFLINE_WORDS);
+});
+
+test("install: waiting in a matter's composer with the window online says the download can't be reached", async () => {
+  await mountFirstRun({
+    matters: [A],
+    first: [OFFLINE, signIn(CLAUDE, { signed_out: {} })],
+    online: true,
+  });
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(UNREACHABLE);
+  expect(text()).not.toContain(OFFLINE_WORDS);
+});
+
 test("install: dl-offline offers Try again and Use the system proxy, Try again first", async () => {
   await mountFirstRun({ matters: [], first: [OFFLINE] });
   expect(foot()?.dataset["state"]).toBe("offline");
@@ -170,7 +200,7 @@ test("install: dl-offline's Use the system proxy sends RetryAgentInstall with us
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
 });
 
-test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_system_proxy) and copies the IT message", async () => {
+test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_system_proxy) and Copy addresses copies the addresses", async () => {
   const writeText = stubClipboard();
   const t = await mountFirstRun({
     matters: [],
@@ -180,10 +210,10 @@ test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_sy
   expect(text()).toContain("Your network is blocking the download.");
   await press(byId("install-proxy"));
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
-  expect(byId("install-ask-it")?.textContent).toBe("Copy details for IT");
+  expect(byId("install-ask-it")?.textContent).toBe("Copy addresses");
   await press(byId("install-ask-it"));
   expect(writeText).toHaveBeenCalledWith(
-    "Clauseo needs to download Claude to work. Please allow these addresses on the firm's network: registry.npmjs.org, nodejs.org.",
+    "Clauseo needs to download Claude. These addresses must be reachable from this computer: registry.npmjs.org, nodejs.org.",
   );
   expect(byId("install-ask-it")?.textContent).toBe("Message copied");
 });

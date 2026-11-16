@@ -1,11 +1,15 @@
 //! `Agents`: the handle the app holds, and the worker thread behind it.
 //!
 //! Every call sends a command to the worker and returns at once; the worker gives each agent
-//! its first state at start, then runs one job thread per install ([`crate::install`]). Jobs
-//! run one after another: each takes the job lock before its work, so a new job starts only
-//! once a paused one's thread has stopped. Every event a job sends goes through
-//! [`Shared::emit_job`], under the same lock `pause` takes, and is dropped once the job is
-//! paused or superseded: a paused job never speaks after its `Paused`.
+//! its first state at start, then runs one job thread per install ([`crate::install`]). Each
+//! agent has its own job slot, so two agents install at once (decision 0033, "Two installs at
+//! once", 2026-11-11): one agent's install, pause or retry never stops another's. A new job for
+//! an agent supersedes that agent's running one, and takes the agent's turn lock before its
+//! work, so it starts only once the superseded job's thread has stopped. What the two share on
+//! disk (the Node runtime, Python, the folder's lock files) is held through `agents/.lock-*`
+//! (`install.rs`), and the free space is counted for both (`worker/space.rs`). Every event
+//! a job sends goes through [`Shared::emit_job`], under the same lock `pause` takes, and is
+//! dropped once the job is paused or superseded: a paused job never speaks after its `Paused`.
 //!
 //! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
 //! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
@@ -37,6 +41,7 @@ mod first;
 mod python_log;
 mod shared;
 mod signin;
+pub(crate) mod space;
 mod stop;
 mod switch;
 mod thread;
@@ -78,9 +83,13 @@ pub(crate) struct Shared {
     /// ends.
     jobs: Mutex<usize>,
     job_ended: Condvar,
+    /// Held through each disk check (`space.rs`), so two tries never both count on one byte.
+    space: Mutex<()>,
     events: async_channel::Sender<AgentsEvent>,
     /// Every agent's sign-in state and running sign-in job.
     pub(crate) signin: SigninHub,
+    /// Claude's last macOS Keychain answer, so detection asks at most once per 10 minutes.
+    pub(crate) keychain: crate::signin::detect::KeychainMemo,
 }
 
 #[derive(Debug)]
@@ -95,8 +104,12 @@ struct Inner {
     /// The clock `python_began` reads.
     ticks: Ticks,
     installed: BTreeMap<AgentId, Installed>,
-    /// The job that may emit now, if any.
-    current: Option<Ticket>,
+    /// The install jobs that may emit now: one per agent at most, so two agents install at
+    /// once and one's job never stops another's.
+    jobs: BTreeMap<AgentId, Slot>,
+    /// The job installing Python now, if any: Python is one for the computer, so one job at a
+    /// time installs it, and another reaching its agent's `Ready` meanwhile ends there.
+    python_job: Option<u64>,
     next_job: u64,
     /// Each agent's tries in its last install job that ended, the last one included.
     tries: BTreeMap<AgentId, u32>,
@@ -134,6 +147,15 @@ impl std::fmt::Debug for Ticks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Ticks")
     }
+}
+
+/// One running install job: its ticket and the free space its try counts on.
+#[derive(Debug)]
+struct Slot {
+    ticket: Ticket,
+    /// What its try's disk check counted on, once passed: other tries' checks count what of
+    /// it is not written yet.
+    reserve: space::Reserve,
 }
 
 /// One job's identity and pause signal.
@@ -177,7 +199,9 @@ impl Agents {
             }),
             jobs: Mutex::new(0),
             job_ended: Condvar::new(),
+            space: Mutex::new(()),
             signin: SigninHub::new(&config, events.clone()),
+            keychain: crate::signin::detect::KeychainMemo::default(),
             events,
         });
         let (commands, inbox) = mpsc::channel();
@@ -189,7 +213,7 @@ impl Agents {
             signin_launcher: signin,
             timer: Arc::new(timer),
             shared: Arc::clone(&shared),
-            job_lock: Arc::new(Mutex::new(())),
+            turns: BTreeMap::new(),
             system_proxy: None,
         };
         let spawned = std::thread::Builder::new()
@@ -202,8 +226,8 @@ impl Agents {
 
     /// Installs `agent`: `Managed` again for IT's runtime, `Ready` again when installed (and
     /// Python's install started when it is `Missing` and no job runs), nothing when
-    /// it is installing already. Otherwise any other agent's running install is
-    /// paused (its partial files kept) and this one starts, or resumes from its files.
+    /// it is installing already. Otherwise this one starts, or resumes from its files, beside
+    /// any other agent's running install, which goes on untouched.
     pub fn install(&self, agent: &AgentId) {
         self.send(Command::Install(agent.clone()));
     }
@@ -255,8 +279,8 @@ impl Agents {
         self.shared.lock().tries.get(agent).copied()
     }
 
-    /// Stops everything for the app's quit, within `wait`: no job starts from now on, and the
-    /// install job is cancelled (it kills its child's tree as it sees it). Every sign-in job is
+    /// Stops everything for the app's quit, within `wait`: no job starts from now on, and every
+    /// install job is cancelled (each kills its child's tree as it sees it). Every sign-in job is
     /// stopped gracefully: each run ends as its kind allows (a status or a logout is awaited,
     /// Codex's browser login gets `GET /cancel`, an app-server its stdin closed), and a job still
     /// running [`KILL_MARGIN`] before `wait` ends is killed, so its thread can end inside `wait`.
@@ -279,12 +303,13 @@ impl Agents {
         self.shared.wait_for_jobs(KILL_MARGIN)
     }
 
-    /// Closes the worker to new jobs and cancels the install job.
+    /// Closes the worker to new jobs and cancels every install job.
     fn close_installs(&self) {
         let mut inner = self.shared.lock();
         inner.closed = true;
-        if let Some(running) = inner.current.take() {
-            running.cancel.cancel();
+        inner.python_job = None;
+        for (_, running) in std::mem::take(&mut inner.jobs) {
+            running.ticket.cancel.cancel();
         }
     }
 

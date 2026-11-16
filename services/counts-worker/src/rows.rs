@@ -71,6 +71,9 @@ pub(crate) fn accept(route: Route, json: &[u8], now: Time) -> Result<Accepted, R
                 rows: vec![tally_row(&tally)?],
             })
         }
+        // A crash report is read by `crash::accept`, which also makes its object; the read
+        // routes store nothing.
+        Route::Crash | Route::Dash | Route::Query => Err(Refusal::NotFound),
     }
 }
 

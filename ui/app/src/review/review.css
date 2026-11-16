@@ -8,6 +8,7 @@
 @import "../settings/usage.css";
 @import "../settings/privacy.css";
 @import "../settings/connectors.css";
+@import "../settings/tools.css";
 @import "../settings/plans.css";
 @import "../settings/workspace.css";
 @source "../room";
@@ -202,6 +203,28 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--s2);
+}
+/* the release notes' first-open block on GitHub's release page (registry-release-notes.tsx) */
+.review-notes-ground {
+  min-height: 100vh;
+  padding: var(--s4);
+  background: var(--ground);
+}
+.review-notes {
+  display: grid;
+  gap: var(--s3);
+  max-width: 760px;
+  color: var(--primary);
+}
+.review-notes h2,
+.review-notes p,
+.review-notes ul {
+  margin: 0;
+}
+.review-notes ul {
+  display: grid;
+  gap: var(--s2);
+  padding-inline-start: var(--s4);
 }
 /* the Mac's menu bar, one menu opened under its title (registry-mn.tsx) */
 .review-menu {

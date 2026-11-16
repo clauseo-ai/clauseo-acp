@@ -108,6 +108,7 @@ fn every_entry_kind() -> Vec<Envelope> {
         checkpoint: log.fresh().unwrap(),
         restored: vec![doc_path(4).unwrap()],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     log.push(undo).unwrap();
     // The web the call ran and opened: its search and a page, so the shape pins both.

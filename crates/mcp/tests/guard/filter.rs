@@ -8,8 +8,10 @@ use crate::support::{Guard, Scratch, example, guard_command};
 
 /// A guard in front of the echo stub.
 struct Session {
-    scratch: Scratch,
+    /// Before `scratch`, so a failed test's guard has ended (its drop) before its folder goes:
+    /// fields drop in order, and on Windows a folder in use cannot be removed.
     guard: Guard,
+    scratch: Scratch,
     next_id: u64,
     /// Every line the child must have received, in order.
     forwarded: Vec<Value>,
@@ -105,6 +107,12 @@ impl Session {
         assert_eq!(self.scratch.received(), expected);
     }
 }
+
+const ALLOWED_DOMAINS: &str = "Clauseo already controls which sites the browser may open; open \
+                               the page without allowedDomains.";
+const RESTARTED: &str = "Clauseo already controls which sites the browser may open; open the page \
+                         without allowedDomains. Clauseo restarted the browser, so the next call \
+                         starts clean.";
 
 fn refusal(name: &str) -> String {
     format!("Clauseo does not allow {name} in the browser.")
@@ -242,12 +250,40 @@ fn allowed_calls_tools_list_and_initialize_reach_the_child_unchanged() {
         "params": {"protocolVersion": "2025-06-18", "capabilities": {},
             "clientInfo": {"name": "claude-code", "version": "2"}}}));
     session.passes(&json!({"jsonrpc": "2.0", "id": "list", "method": "tools/list"}));
-    let open = session.tool_call(&json!({"url": "https://sci.gov.in",
-        "allowedDomains": ["sci.gov.in"], "timeoutMs": 30000}));
+    let open = session.tool_call(&json!({"url": "https://sci.gov.in", "timeoutMs": 30000}));
     session.passes(&open);
     session.passes(&json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
         "params": {"name": "agent_browser_fill",
             "arguments": {"selector": "#q", "text": "Section 138 -- \"cheque\" é"}}}));
+    session.finish();
+}
+
+/// The `tools/list` reply loses the eval tool, which the guard refuses, from the one-shot that
+/// answers a stopped browser's request and from the running child alike; the open tool stays.
+#[test]
+fn the_tool_list_never_names_eval() {
+    let mut session = Session::start("filter_tool_list");
+    let names = |reply: &Value| -> Vec<String> {
+        reply["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let list = json!({"jsonrpc": "2.0", "id": "l1", "method": "tools/list"});
+    session.guard.send(&list);
+    let reply = session.guard.read();
+    assert_eq!(reply["result"]["received"], list, "{reply}");
+    assert_eq!(names(&reply), ["agent_browser_open"], "{reply}");
+    session.forwarded.push(list);
+    session.start_browser();
+    let list = json!({"jsonrpc": "2.0", "id": "l2", "method": "tools/list"});
+    session.guard.send(&list);
+    let reply = session.guard.read();
+    assert_eq!(reply["result"]["received"], list, "{reply}");
+    assert_eq!(names(&reply), ["agent_browser_open"], "{reply}");
+    session.forwarded.push(list);
     session.finish();
 }
 
@@ -319,9 +355,13 @@ fn the_review_rules_end_to_end() {
         "params": {"name": "agent_browser_select",
             "arguments": {"selector": "#state", "values": ["--Select--", "-Select-", "-5"]}}});
     session.passes(&select);
+    // eval is off for both agents: refused as any tool off the list, never forwarded.
     let eval = json!({"jsonrpc": "2.0", "id": "ev", "method": "tools/call",
-        "params": {"name": "agent_browser_eval", "arguments": {"script": "--x"}}});
-    session.passes(&eval);
+        "params": {"name": "agent_browser_eval", "arguments": {"script": "1"}}});
+    session.guard.send(&eval);
+    let answer = session.guard.read();
+    assert_eq!(answer["id"], "ev", "{answer}");
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
     assert_eq!(
         session.refused(&json!({"text": "--proxy=x"})),
         refusal("--proxy")
@@ -396,4 +436,103 @@ fn an_oversize_child_line_kills_the_child_and_fails_the_guard() {
         stderr.contains("agent-browser wrote a line over 67108864 bytes; the guard killed it"),
         "{stderr}"
     );
+}
+
+/// Stage C's sequence: an open with `allowedDomains`, then two plain opens. The first is refused
+/// before agent-browser sees it, with what to do instead, and both plain opens work: nothing of
+/// it sticks. The same holds while the browser runs, for the other spellings.
+#[test]
+fn allowed_domains_is_refused_and_the_next_open_works() {
+    let mut session = Session::start("filter_allowed_domains");
+    let stage_c = json!({"url": "https://www.sci.gov.in",
+        "allowedDomains": ["sci.gov.in", "www.sci.gov.in"]});
+    assert_eq!(session.refused(&stage_c), ALLOWED_DOMAINS);
+    for _ in 0..2 {
+        let open = session.tool_call(&json!({"url": "https://www.sci.gov.in"}));
+        session.passes(&open);
+    }
+    for spelling in [
+        json!({"url": "https://www.sci.gov.in", "allowed_domains": ["sci.gov.in"]}),
+        json!({"url": "https://www.sci.gov.in", "extraArgs": ["--allowed-domains=sci.gov.in"]}),
+    ] {
+        assert_eq!(session.refused(&spelling), ALLOWED_DOMAINS);
+    }
+    let open = session.tool_call(&json!({"url": "https://www.sci.gov.in"}));
+    session.passes(&open);
+    session.finish();
+}
+
+/// Stage C's sequence again, should agent-browser's session be stuck on `--allowed-domains`
+/// anyway (the stub's first start answers every call with v0.41.1's refusal, as it did once the
+/// restriction stuck): the `allowedDomains` open is refused by the guard; the first plain open
+/// meets the stuck session, which the guard stops before the reply goes out, keeping the profile,
+/// telling the agent; the next plain open starts a clean agent-browser, which answers it.
+#[test]
+fn a_session_stuck_on_allowed_domains_is_stopped_and_the_next_open_starts_clean() {
+    let mut session = Session::start_with("filter_domain_stuck", &["domain-stuck-once"]);
+    let stage_c = json!({"url": "https://www.sci.gov.in", "allowedDomains": ["sci.gov.in"]});
+    assert_eq!(session.refused(&stage_c), ALLOWED_DOMAINS);
+    let first = session.tool_call(&json!({"url": "https://www.sci.gov.in"}));
+    session.guard.send(&first);
+    let answer = session.guard.read();
+    assert_eq!(answer["id"], first["id"], "{answer}");
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
+    assert_eq!(
+        answer["result"]["content"][0]["text"], RESTARTED,
+        "{answer}"
+    );
+    // The stuck stub got it, and was stopped without a close request.
+    session.forwarded.push(first);
+    let second = session.tool_call(&json!({"url": "https://www.sci.gov.in"}));
+    session.passes(&second);
+    session.finish();
+}
+
+/// The guard takes no agent argument, so Codex's and Claude's entries get the same filter and
+/// the same advertised schema: the tool list's open tool keeps only the keys that pass, and
+/// `allowedDomains` gets the same refusal, whichever client says hello.
+#[test]
+fn codex_and_claude_get_the_same_filter_and_schema() {
+    let mut seen = Vec::new();
+    for client in ["codex-mcp-client", "claude-code"] {
+        let mut session = Session::start(&format!("filter_agents_{client}"));
+        session.passes(&json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": client, "version": "1"}}}));
+        let list = json!({"jsonrpc": "2.0", "id": "list", "method": "tools/list"});
+        session.guard.send(&list);
+        let reply = session.guard.read();
+        session.forwarded.push(list);
+        let tools = reply["result"]["tools"].clone();
+        let open = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "agent_browser_open")
+            .unwrap();
+        // Sorted: a build with serde_json's `preserve_order` (unified on by another crate in the
+        // workspace's build) keeps agent-browser's order, and the key order means nothing.
+        let mut keys: Vec<&String> = open["inputSchema"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        keys.sort();
+        assert_eq!(keys, ["timeoutMs", "url"], "{client}: {reply}");
+        assert!(!reply.to_string().contains("allowedDomains"), "{client}");
+        assert!(
+            !reply.to_string().contains("agent_browser_eval"),
+            "{client}"
+        );
+        let refused = session.refused(&json!({"url": "https://a.example",
+            "allowedDomains": ["a.example"]}));
+        let unknown = session.refused(&json!({"url": "https://a.example", "webmcp": false}));
+        assert_eq!(
+            unknown, "This option is not supported in Clauseo.",
+            "{client}"
+        );
+        seen.push((tools, refused, unknown));
+        session.finish();
+    }
+    assert_eq!(seen[0], seen[1], "Codex and Claude differ");
 }

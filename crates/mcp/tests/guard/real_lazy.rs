@@ -26,12 +26,8 @@ fn chrome_pids(scratch: &Scratch) -> Vec<i32> {
     );
     processes()
         .into_iter()
-        .filter(|pid| {
-            std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                cmd.split(|b| *b == 0)
-                    .any(|arg| arg.starts_with(flag.as_bytes()))
-            })
-        })
+        .filter(|process| process.has_arg_starting(&flag))
+        .map(|process| process.pid)
         .collect()
 }
 
@@ -125,7 +121,7 @@ fn chrome_starts_at_the_first_call_and_stops_when_idle() {
 /// Chrome's second death with the real binaries while the agent floods tool calls: once the
 /// guard's final stop has run, no call starts Chrome again, so once the guard has exited and its
 /// reaper is done, no process of the session runs. Before the fix a full Chrome tree was left
-/// on the claimed port (the review's 4 of 4 rounds).
+/// (the review's 4 of 4 rounds).
 #[test]
 fn calls_after_the_final_stop_start_no_chrome() {
     let Some(binaries) = binaries() else { return };

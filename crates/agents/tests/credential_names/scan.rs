@@ -18,7 +18,18 @@ const CLAUDE_CONFIGS: [&str; 3] = [
     concat!("settings", ".json"),
 ];
 
-/// The one file that may name [`CODEX_FILE`] and [`CLAUDE_FILE`].
+/// Claude Code's default Keychain item on macOS, named only by `signin/reuse.rs`: detection
+/// asks `security` whether it exists (attributes only), and nothing else may address it.
+const KEYCHAIN_SERVICE: &str = concat!("Claude Code", "-credentials");
+
+/// The `security` command detection runs.
+const KEYCHAIN_QUERY: &str = "find-generic-password";
+
+/// The `security` flags that print the secret (`-w`, `-g`) and `-d` (which other `security`
+/// commands take to dump data): never in a file that runs [`KEYCHAIN_QUERY`].
+const SECRET_FLAGS: [&str; 3] = ["\"-w\"", "\"-g\"", "\"-d\""];
+
+/// The one file that may name [`CODEX_FILE`], [`CLAUDE_FILE`] and [`KEYCHAIN_SERVICE`].
 const REUSE: &str = "signin/reuse.rs";
 
 /// What `reuse.rs` may never call: an open or a read. Matched as text anywhere in a line.
@@ -241,8 +252,20 @@ fn copy_char(chars: &[char], i: usize, out: &mut String) -> usize {
 fn violations(rel: &str, code: &str) -> Vec<String> {
     let mut found = Vec::new();
     let lines: Vec<&str> = code.lines().collect();
+    let queries = code.contains(KEYCHAIN_QUERY);
     for (n, line) in lines.iter().copied().enumerate() {
         let at = format!("crates/agents/src/{rel}:{}", n + 1);
+        if rel != REUSE && line.contains(KEYCHAIN_SERVICE) {
+            found.push(format!("{at} names Claude's Keychain item outside {REUSE}"));
+        }
+        for flag in SECRET_FLAGS
+            .iter()
+            .filter(|flag| queries && line.contains(*flag))
+        {
+            found.push(format!(
+                "{at} passes {flag} in a file that runs {KEYCHAIN_QUERY}"
+            ));
+        }
         if escaped_dot(line) {
             found.push(format!("{at} spells a dot with an escape"));
         }
@@ -479,5 +502,30 @@ fn the_scan_catches_claude_s_config_files() {
                 [] as [String; 0]
             );
         }
+    }
+}
+
+/// The Keychain item's name stays in `reuse.rs`, and a file that runs `find-generic-password`
+/// never holds a flag that reads the secret (`-w`, `-g`) or `-d`, on the same line or any
+/// other.
+#[test]
+fn the_keychain_query_stays_in_reuse_and_never_reads_the_secret() {
+    let service = format!("const S: &str = \"{KEYCHAIN_SERVICE}\";");
+    assert_eq!(probe(REUSE, &service), Vec::<String>::new());
+    for rel in ["signin/claude.rs", "signin/detect.rs", "probe.rs"] {
+        assert_eq!(probe(rel, &service).len(), 1, "{rel}");
+    }
+    for flag in SECRET_FLAGS {
+        for rel in [REUSE, "probe.rs"] {
+            let same_line = format!("const A: [&str; 2] = [\"{KEYCHAIN_QUERY}\", {flag}];");
+            assert!(!probe(rel, &same_line).is_empty(), "{flag} in {rel}");
+            let apart = format!("const A: &str = \"{KEYCHAIN_QUERY}\";\nconst B: &str = {flag};");
+            assert!(!probe(rel, &apart).is_empty(), "{flag} apart in {rel}");
+        }
+        // Without the query the flag is someone else's (Claude's own `-w` is never ours).
+        assert_eq!(
+            probe("probe.rs", &format!("const B: &str = {flag};")),
+            Vec::<String>::new()
+        );
     }
 }

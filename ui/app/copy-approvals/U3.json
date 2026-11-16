@@ -232,12 +232,15 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-32)"
   },
   "U3-err-agent.auth_required": {
-    "en": "Sign in to Claude first. Your question is kept.",
-    "hi": "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in with Claude first. Your question is kept.",
+    "hi": "पहले Claude से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-33)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-33)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-agent.unsupported_version": {
     "en": "This version of Claude Code doesn't work with Clauseo.",
@@ -334,28 +337,37 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-42)"
   },
   "U3-err-matter.folder_is_drive": {
-    "en": "A whole drive can't be a matter.",
-    "hi": "पूरी ड्राइव मामला नहीं बन सकती।",
+    "en": "This is the top of a drive. Choose a folder on it.",
+    "hi": "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_is_home": {
-    "en": "Your home folder can't be a matter.",
-    "hi": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
+    "en": "This is your home folder. Choose a folder inside it.",
+    "hi": "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_is_system": {
-    "en": "A system folder can't be a matter.",
-    "hi": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+    "en": "This is a system folder. Choose another folder.",
+    "hi": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_unreadable": {
     "en": "Clauseo can't read that folder.",
@@ -366,20 +378,26 @@
     "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
   },
   "U3-err-matter.folder_is_matter": {
-    "en": "That folder is already a matter's, or inside one.",
-    "hi": "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, folder PR 2: a rare same-folder case; U2-31's approved line, no name"
   },
   "U3-err-matter.folder_in_matters_root": {
-    "en": "That folder holds Clauseo's own data.",
-    "hi": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
+    "en": "That folder is where Clauseo keeps matters. Choose the folder for one matter.",
+    "hi": "उस फ़ोल्डर में Clauseo मामले रखता है। एक मामले का फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, folder PR 2: the matters root only now; ME-04 and ME-05's approved lines, joined"
   },
   "U3-err-matter.folder_network": {
     "en": "ChatGPT can't work on a network drive. Move the matter to this computer.",
@@ -637,12 +655,15 @@
     "note": "Rohan, on the review page (built from U3 635858d3)"
   },
   "U3-err-settings.locked": {
-    "en": "Your organisation manages that setting, so it can't be changed.",
-    "hi": "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+    "en": "Your firm manages that setting, so it can't be changed.",
+    "hi": "यह सेटिंग आपकी फ़र्म प्रबंधित करती है, इसलिए इसे बदला नहीं जा सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 00b64f56)"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "Rohan, on the review page (built from U3 00b64f56); was \"Your organisation manages that setting, so it can't be changed.\" (IT sweep)"
   },
   "U3-err-update.failed": {
     "en": "The update didn't install. Try again.",
@@ -726,16 +747,6 @@
   "U3-err-signin.key_in_use": {
     "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
     "hi": "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
-  },
-  "U3-err-signin.endpoint_in_use": {
-    "en": "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
-    "hi": "Clauseo आपकी फ़र्म का पता इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और पता हटाएँ।",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -963,5 +974,115 @@
     "at": "2026-11-10",
     "by": "app track (provisional; Rohan batch review)",
     "note": "D-050: an answer the lost connection stopped (agent.offline), on the stop line under the answer, with Try again beside Copy; reuses U3-err-agent.install_offline's \"You're offline\" and U3-04's \"The answer so far is kept.\""
+  },
+  "U3-err-matter.folder_in_clauseo_data": {
+    "en": "This folder is part of Clauseo's own data. Choose another folder.",
+    "hi": "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "U3-err-matter.folder_inside_matter": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, folder PR 2: where no name is at hand; U2-31's approved line (the form names a listed matter, ME-11)"
+  },
+  "U3-err-matter.folder_holds_matter": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, folder PR 2: where no name is at hand; U2-31's approved line (the form names a listed matter, ME-12)"
+  },
+  "U3-54": {
+    "en": "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    "hi": "यह {name} के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "A turn ended StopReason::TooLong: the model refused it as too long to read, the question alone or the conversation with it (stops.ts); {name} is the agent as U3-52 names it. Settled for Claude and ChatGPT; another agent's own name fills the same slot"
+  },
+  "U3-55": {
+    "en": "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    "hi": "यह AI के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; the fallback as U3-53's the AI, orchestrator to settle)",
+    "note": "U3-54 where the room knows no agent name (stops.ts), as U3-53; rendered alone"
+  },
+  "U3-err-prompt.too_long": {
+    "en": "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.",
+    "hi": "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "prompt.too_long: a question over MAX_PROMPT_TEXT_BYTES, refused by the composer before it sends (prompt-cost.ts) or by the host, on the working line; on a queued message's edit, under the queue's head. The field keeps the words"
+  },
+  "U3-err-agent.service_error": {
+    "en": "Claude had a problem on its side. Try again.",
+    "hi": "Claude की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-12",
+    "by": "orchestrator",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; Claude's, as U3-err-agent.protocol_error names Claude; ChatGPT's is U6F-19"
+  },
+  "U3-err-agent.quiet": {
+    "en": "Claude stopped answering. Try again.",
+    "hi": "Claude ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): the agent sent nothing for 5 minutes with no tool running and no question waiting, so the host ended the turn; Try again under the answer, never Restart; Claude's, as U3-err-agent.service_error names Claude; ChatGPT's is U6F-22"
+  },
+  "U3-err-matter.folder_backslash": {
+    "en": "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "hi": "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-25"
+  },
+  "U3-err-agent.folder_inaccessible": {
+    "en": "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "hi": "Claude मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-28"
   }
 }

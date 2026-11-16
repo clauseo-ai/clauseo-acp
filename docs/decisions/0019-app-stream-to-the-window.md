@@ -100,10 +100,129 @@ host added later reached the page without anyone deciding it should.
   from the watch's start; after that the probe decides. The window's word alone never makes a
   failed prompt read as offline. So a page that lies can stop only a turn whose agent is
   already silent and whose service the host cannot reach either.
+- **The truth of an offline end (2026-11-15, offline truth):** "You're offline"
+  (`agent.offline`) only while the window says offline when the turn ends **and** the host's
+  probe misses (a launch with nothing to probe counts as a miss then). Any other connection
+  failure (a watch whose probe missed while the window says online, a failed prompt naming a
+  connection failure, Codex giving up on its connection) ends `agent.unreachable` ("Clauseo
+  couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask
+  your firm's IT."): the service, a proxy, a firewall or TLS inspection in front of it, or a
+  LAN with no internet; one message, its detail carrying the probe's fixed fields (`class`,
+  `via`, `status`) for firm IT, on a failed prompt's end as on the watch's. A request that timed out (Claude's "Request
+  timed out.") while the probe reached the service is a slow service: `agent.quiet`. A failed
+  prompt reads the turn's last probe when it is under 30 s old, else its end waits for one fresh
+  probe, at most 8 s (`offline/hold.rs`); one that does not answer by then is a miss. No second,
+  independent probe target: it would send a lawyer's machine's traffic to a third party, and a
+  firm that blocks that target would read as offline, the very lie this removes. The agent's
+  install says "You're offline" only while the window says offline too, else "Setting up can't
+  reach the download right now. It tries again by itself."
 - **The same probe guards an agent's own note** (Codex's "Falling back from WebSockets to HTTPS
   transport", Claude's connection line): after it, 30 s of silence ends the turn only when the
   probe fails, since Codex then retries over HTTPS, which a blip or a proxy that blocks only
   WebSockets lets through. A tool call open after such a note does not extend the wait.
+- **Codex's typed failures arm it too (2026-11-11, stage C):** to a client that advertises notices
+  and the AIR `sessionFailure`, as Clauseo does, codex-acp 2.2.2 sends each of Codex's retries as
+  a `session_info_update` whose `sessionFailure` has category `connection` (its `transport_lost`),
+  Codex's fallback warning as a `notice`, and the end of its retries as the prompt's `end_turn`
+  with a `connection` failure of severity `error`. Codex 0.162 retries a failed connection without
+  end, so only the watch ends such a turn. A `connection` failure arms the watch like the note,
+  and the wait runs from the first note: later retries only replace it, so retries less than
+  30 s apart never put the probe off. The notice is the note and never reaches the transcript,
+  in a turn or outside one (idle, or replayed by `session/load`); answer text outside a turn is
+  never touched. A prompt that ends on a failure Codex gave up on ends with the offline truth's
+  code (`agent.offline` or `agent.unreachable`, below) when a
+  note armed the watch or its title names a connection failure, unless its title says a server
+  answered or the host's last probe got through (an outage of the service, not of the
+  computer); else it fails `agent.protocol_error`, as the same failure over JSON-RPC does, so a
+  cut-off answer never shows as complete.
+- **A blocked upstream behind a live proxy (2026-11-13, D-050 case 2):** stage C's proxy answered
+  every `CONNECT` with 502; Codex's fallback note named the status (not offline), its retries
+  came about a minute apart without end, and the probe, which only TCP-connected to the live
+  proxy, always got through, so the turn said "Answering." for good. Four changes
+  (`offline/probe.rs`, `offline/probe/route.rs`, `offline/quiet.rs`):
+  - **The probe asks the service, not the proxy, where the agent goes** (security review and
+    stage D review, round 1). At each launch the host records on the agent what the probe asks,
+    from the launch's final environment, the one the agent gets (`offline/probe/service.rs`),
+    so no route is looked up when it runs and the 8 s cover only the name's lookup, TCP,
+    `CONNECT` and the hello:
+    - *the service:* a base URL that environment sets (`ANTHROPIC_BASE_URL`, a firm plan's
+      endpoint included; `OPENAI_BASE_URL`); else Codex's `api.openai.com` when its launch
+      passes a key, `chatgpt.com` for Clauseo's own login (the key retry's `Own` rule), and
+      both for the lawyer's reused login, whose kind the host never reads (either answering
+      counts); Claude's `api.anthropic.com`. A Claude on Bedrock, Vertex or Foundry
+      (`CLAUDE_CODE_USE_*`) or a base URL that names no one `http`/`https` host is
+      `unknown_service`;
+    - *the route:* the proxy that environment hands the agent, with its `NO_PROXY`, through the
+      sandbox's `launch_route` (the egress proxy's own reading of a proxy URL and `NO_PROXY`).
+      Desktop's launch puts the route it resolved there (a firm's `network.upstream_proxy`
+      first, then `HTTPS_PROXY`/`ALL_PROXY`, then the OS's, `setup/network.rs`), and what a
+      plan, the agent's entry or the inherited environment set stays as the agent reads it:
+      Claude Code `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY` and both
+      `no_proxy` lists; Codex `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy` and
+      `NO_PROXY`. A proxy a `CONNECT` cannot follow (`https://`, `socks5://`) is
+      `unknown_route`.
+    - *the agent's own settings* (security re-check, round 2): a Claude settings file or a
+      reused Codex config that changes the route or host → no probe; the backstop ends a
+      silent turn. The launch prep reads what Claude Code 2.1.293 copies into its environment
+      (the firm's `managed-settings.json` and `managed-settings.d/*.json` beside
+      `managed-mcp.json`, and in the agent's home `settings.json`, `cowork_settings.json`,
+      `remote-settings.json`, `.config.json` and `.claude.json`), and Clauseo's own
+      `_meta.claudeCode.options` `settings` and `env`: an `env` key `*_PROXY`,
+      `ANTHROPIC_*`, `CLAUDE_CODE_USE_*`, `AWS_*`, `GOOGLE_*` or `VERTEX_*` (any case) is
+      `unknown_service`. So are, for Codex (`rust-v0.162.1`), a `config.toml` (the system one,
+      the legacy `/etc/codex/managed_config.toml`, the home's) setting `model_provider` other
+      than `openai`, `openai_base_url`, `chatgpt_base_url`, a `[model_providers.*]` with a
+      `base_url`, or a `[profiles.*]` with any of them. A file there but unreadable, over
+      1 MiB or not parsing counts the same; an absent one changes nothing. The log names only
+      `reason=settings_env` or `codex_config` (`offline/probe/settings.rs`). Not read: Claude
+      Code's MDM and registry policy tiers and its WSL Windows-side managed folder (a project's
+      `.claude/settings*.json` never loads: `settingSources` is `["user"]`).
+    Either unknown is not probed: for a quiet or a note's watch it counts as reached at once and
+    its line says so, so the watch waits and only the backstop (or the agent's own end) ends a
+    silent turn; for the window's watch it is a miss (stage D round 2: the OS says offline and
+    there is nothing to ask), so the turn ends `agent.offline` after the 30 s wait, as before.
+    Through a proxy it
+    sends `CONNECT`
+    with no credentials: 200 goes on, 407 counts as reached, any other status or no head within
+    the cap is a miss. Then a TLS client hello (straight to the host when there is no proxy):
+    a handshake record back is reached; an alert, other bytes, a close or silence is a miss.
+    No certificate is checked and nothing but the hello is sent, so a firm's TLS-inspecting proxy
+    counts as reached; a hello that cannot be written is a miss (`tls_other`). The whole try
+    has 8 s (a reused Codex login's two hosts side by side). A plain `http` base URL gets the
+    TCP connection only.
+  - **The quiet arm.** Every live turn of Claude or Codex keeps the time of its last model output
+    (answer and thought chunks, tool calls and their updates, plans, compaction updates, an ask),
+    whether or not its service is known; an ask's end restarts it, so the lawyer's time never
+    counts. An agent of no known kind gets no quiet arm. 30 s with no output, no open tool call
+    and no ask arms a quiet watch and probes at once; a probe that gets through waits again, and two
+    misses in a row end the turn (`agent.offline` only while the window says offline, else
+    `agent.unreachable`). An agent's note turns the watch into a note's,
+    which ends at its next miss; the window's `offline` makes it the window's, and `online`
+    leaves it. This is what covers Claude, whose retries reach the client as nothing at all.
+  - **The backstop:** 5 minutes with no output, no open tool call and no ask end the turn
+    `Failed { agent.quiet }` ("… stopped answering. Try again.", the answer so far kept, Try
+    again, the queue held), whatever the probes said; a reached probe never moves it.
+  - **An open tool call** keeps the quiet arm and the backstop off only while the agent sent
+    something (a tool update counts) within `TOOL_LIMIT` (11 min, stage D round 2: a minute
+    past Claude Bash's own 600 s timeout, so a command that times out at 10:00 ends with
+    Claude's report, not `agent.quiet` a moment before); past it the silence counts, so a tool
+    left open with no word for 11 min ends the turn `agent.quiet` then. A window-only watch
+    keeps its own `WORKING_LIMIT` (10 min).
+  - **A compaction in progress** holds the backstop off the same way, up to the same
+    `TOOL_LIMIT` from the agent's last output; past it the backstop applies again. The hold runs
+    from `compaction_update` `in_progress` until `completed`, `failed` or `cancelled` (all
+    three sent by claude-agent-acp 0.89.1, `cancelled` at the turn's end), any other output
+    but its summary, or the turn's end. Its summary chunks count as output, as before; the hold
+    covers the silence while the summary call waits for its first token. The quiet arm's
+    probes run as ever: only a service the probe cannot reach ends such a turn early.
+  - **Gaps the backstop is what ends:** a proxy that asks for credentials (407, counted as reached
+    so a proxy login never reads as offline) and a TLS-inspecting proxy that answers the
+    handshake itself, both in front of a blocked upstream; and a Claude on a cloud provider's
+    login, or behind an `https://` or SOCKS proxy (not probed).
+  - **The probe's line reaches host.log**, at the lifecycle target, with fixed fields only:
+    `reached`, `noted`, `by` (note, window, quiet), `class`, `via`, `status`, `ms`, `misses`;
+    never a host, a proxy or bytes. Stage C's case 1 (proxy killed) had the probe run unseen:
+    host.log keeps INFO from the lifecycle targets only.
 
 ## Status
 

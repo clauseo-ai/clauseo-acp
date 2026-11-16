@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { problems, PLACEHOLDER_ID } from "./check-deploy.mjs";
+import { DEV_CERTS_VAR, problems, PLACEHOLDER_ID } from "./check-deploy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const committed = readFileSync(join(here, "..", "wrangler.toml"), "utf8");
@@ -85,4 +85,35 @@ test("the route is the custom domain alone, and the database the one binding", (
   const twoDatabases = committed + '\n[[d1_databases]]\nbinding = "B"\ndatabase_name = "b"\ndatabase_id = "x"\n';
   assert.notDeepEqual(problems(twoDatabases), []);
   assert.deepEqual(problems("not [toml").length, 1);
+});
+
+test("the R2 binding: required in the committed file, optional in the deploy copy, exact either way", () => {
+  const R2 = '[[r2_buckets]]\nbinding = "CRASH"\nbucket_name = "clauseo-crash"\njurisdiction = "eu"\n';
+  assert.ok(committed.includes(R2));
+  assert.notDeepEqual(problems(edited(R2, "")), [], "the committed file without it");
+  const deployCopy = edited(BUILD, "", edited(PLACEHOLDER_ID, REAL_ID));
+  assert.deepEqual(problems(edited(R2, "", deployCopy), { deployed: true }), [], "a copy without it");
+  for (const [from, to] of [
+    ['jurisdiction = "eu"', 'jurisdiction = "us"'],
+    ['jurisdiction = "eu"\n', ""],
+    ['bucket_name = "clauseo-crash"', 'bucket_name = "other"'],
+    ['binding = "CRASH"', 'binding = "CRASH"\npreview_bucket_name = "x"'],
+  ]) {
+    assert.notDeepEqual(problems(edited(from, to)), [], `${from} -> ${to}`);
+    assert.notDeepEqual(problems(edited(from, to, deployCopy), { deployed: true }), [], `deploy copy: ${from} -> ${to}`);
+  }
+});
+
+test("the dev certificate-URL override is refused in the committed file and the deploy copy", () => {
+  const deployCopy = edited(BUILD, "", edited(PLACEHOLDER_ID, REAL_ID));
+  for (const [from, to] of [
+    ["[observability]\n", `[vars]\n${DEV_CERTS_VAR} = "http://127.0.0.1:9/certs"\n\n[observability]\n`],
+    ["[observability]", `# ${DEV_CERTS_VAR.toLowerCase()}\n[observability]`],
+    ["workers_dev = false", `workers_dev = false\nvars = { ${DEV_CERTS_VAR} = "x" }`],
+  ]) {
+    const committedFound = problems(edited(from, to));
+    assert.ok(committedFound.some((line) => line.startsWith(DEV_CERTS_VAR)), `${to}`);
+    const deployedFound = problems(edited(from, to, deployCopy), { deployed: true });
+    assert.ok(deployedFound.some((line) => line.startsWith(DEV_CERTS_VAR)), `deploy copy: ${to}`);
+  }
 });

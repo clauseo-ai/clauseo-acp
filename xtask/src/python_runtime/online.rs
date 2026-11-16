@@ -1,7 +1,8 @@
 //! `cargo xtask python-runtime check --online`: the nightly re-check. Every pinned wheel must still
 //! be on `PyPI` with the lock's sha256 and size and not yanked, every PBS asset must still have the
 //! lock's sha256 in its release's `SHA256SUMS`, pandoc's release must still give each archive the
-//! lock's sha256 and size (and its source tarball still hash the same), and OSV is asked for
+//! lock's sha256 and size (and its source tarball still hash the same), every tesseract pin
+//! (`tesseract.rs`) must still download with the lock's sha256 and size, and OSV is asked for
 //! advisories against each pinned package version. Advisories are reported (and written as JSON
 //! for the workflow's issue job); they do not fail the check, a changed hash does.
 
@@ -84,6 +85,7 @@ pub(crate) fn run<W: Write>(
         }
     }
     super::pandoc::online(&lock.pandoc, work, &mut problems)?;
+    super::tesseract::online(&lock.tesseract, work, &mut problems)?;
     let found = osv(lock, work)?;
     for advisory in &found {
         out.note(format!(

@@ -371,6 +371,13 @@
     min-width: 0;
     padding: var(--s1-5) 0;
   }
+  /* when a message goes, under its words across the slip: quiet, as the head's line */
+  .queue-when {
+    @apply text-small text-muted;
+    flex: 1 0 100%;
+    margin-top: calc(-1 * var(--s1));
+    padding-bottom: var(--s1);
+  }
   .queue-acts {
     position: relative;
     flex: none;
@@ -509,6 +516,25 @@
   }
   .steer-mark-text {
     @apply text-ui-loose font-accepted text-primary;
+  }
+  /* words the agent hasn't taken in yet: a slip like a queued message's, where the mark would stand */
+  .steer-wait {
+    margin: var(--s1) 0;
+    padding: var(--s1-5) var(--s0-5) var(--s0-5) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .steer-wait-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s0-5) var(--s3);
+  }
+  .steer-wait-when {
+    @apply text-small text-muted;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
   }
   .steer-note {
     max-width: var(--measure);

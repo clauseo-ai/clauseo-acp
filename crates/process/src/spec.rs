@@ -74,8 +74,8 @@ impl LaunchSpec {
 
     /// The same spec, with `secrets` added to what the agent's stderr tail hides, whatever
     /// variable (if any) holds them: a secret the agent reads from a file, such as the case-law
-    /// relay's token (R24). The same length rule as the env's secrets applies. A launcher that
-    /// builds a new spec around this one carries them over ([`Self::redacted`]).
+    /// relay's token (R24). One under 6 bytes is not hidden (an env secret's floor is 8). A
+    /// launcher that builds a new spec around this one carries them over ([`Self::redacted`]).
     #[must_use]
     pub fn with_redacted(mut self, secrets: impl IntoIterator<Item = String>) -> LaunchSpec {
         self.redacted.0.extend(secrets);

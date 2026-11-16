@@ -19,8 +19,9 @@ export type ToolsView =
   | { kind: "downloading"; received: number; total: number; doneMb: number; totalMb: number }
   /** Unpacking and its first run: every byte is in, so the line says the full size. */
   | { kind: "installing"; mb: number }
-  /** Offline, retrying by itself. */
-  | { kind: "waiting" }
+  /** Waiting, retrying by itself. `online`: the window says it is online meanwhile, so the download can't be
+   * reached. */
+  | { kind: "waiting"; online?: boolean }
   | { kind: "failed" }
   /** Windows' app control or AppLocker refused to start it. */
   | { kind: "blocked" };
@@ -60,7 +61,10 @@ export function ToolsLine({
       bar = { received: 1, total: 1 };
       break;
     case "waiting":
-      words = errorWords(lang, "agent.install_offline");
+      words =
+        view.online === true
+          ? w("Clauseo can't reach the download right now. It tries again by itself.")
+          : errorWords(lang, "agent.install_offline");
       break;
     case "failed":
       words = w("Clauseo couldn't download its document tools.");

@@ -411,12 +411,12 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     feed.changed("the try-again read");
 
     refresh(&host, RefreshWhy::Shown);
-    host.clock.advance(Duration::from_secs(299));
+    host.clock.advance(Duration::from_secs(119));
     refresh(&host, RefreshWhy::Shown);
     assert_eq!(
         reads.count(AgentKind::Claude),
         2,
-        "the last read is under 5 minutes old"
+        "the last read is under 2 minutes old (Claude's shown age)"
     );
     host.clock.advance(Duration::from_secs(1));
     refresh(&host, RefreshWhy::Shown);
@@ -424,7 +424,7 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     assert_eq!(
         reads.count(AgentKind::Claude),
         3,
-        "two shown at 5 minutes: one read"
+        "two shown at 2 minutes: one read"
     );
     host.settle();
     assert_eq!(feed.ready(), [], "a throttled shown publishes nothing");

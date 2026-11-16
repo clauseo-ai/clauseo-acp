@@ -28,48 +28,6 @@
     "by": "orchestrator (decided 2026-11-10)",
     "note": "trimmed from \"Limit reached. Reset not given.\" (approved 2026-11-02, Rohan)"
   },
-  "U2-10": {
-    "en": "{path} is a whole drive.",
-    "hi": "{path} पूरी ड्राइव है।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-11": {
-    "en": "A matter is one folder of papers. Choose the folder for one matter.",
-    "hi": "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-12": {
-    "en": "{path} is your home folder.",
-    "hi": "{path} आपका होम फ़ोल्डर है।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-13": {
-    "en": "It holds far more than one matter. Choose the folder for one matter.",
-    "hi": "इसमें एक मामले से कहीं अधिक है। किसी एक मामले का फ़ोल्डर चुनें।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-14": {
-    "en": "{path} is a folder the computer keeps for itself.",
-    "hi": "{path} वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-15": {
-    "en": "Choose the folder that holds the matter's papers.",
-    "hi": "वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
   "U2-16": {
     "en": "Clauseo can't read {path}.",
     "hi": "Clauseo {path} नहीं पढ़ पा रहा।",

@@ -102,6 +102,19 @@ open_unit_enum! {
     test mod revision_kind;
 }
 
+open_unit_enum! {
+    /// Where in a Word file a tracked change is, when it is not in the document's main text.
+    pub enum RevisionPlace {
+        /// A header or a footer: stetdoc reports the two as one place.
+        HeaderFooter,
+        /// A footnote or an endnote.
+        Note,
+        /// The text of a comment.
+        Comment,
+    }
+    test mod revision_place;
+}
+
 /// Accept or reject.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,6 +142,10 @@ pub struct Revision {
     pub at: Option<Timestamp>,
     /// The paragraph it is in, as stetdoc names blocks (`p3` is the third paragraph).
     pub block: String,
+    /// Where it is when that is not the main text: a header or footer, a note or a comment.
+    /// Missing for a change in the main text.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub place: Option<RevisionPlace>,
     /// The text inserted, deleted or moved, at most [`MAX_REVISION_TEXT_CHARS`] characters;
     /// missing for a change with no text (formatting).
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -149,11 +166,14 @@ pub struct RevisionList {
     /// Whether the file holds more than [`MAX_REVISIONS`] changes: `revisions` is then its
     /// first [`MAX_REVISIONS`].
     pub truncated: bool,
+    /// How many changes the file holds, `revisions` and any past the cut.
+    pub total: u32,
 }
 
 /// `HostCommand::DecideRevisions`: accept or reject tracked changes of one Word file. JSON:
 /// `{"decide_revisions": {"matter": "…", "path": "a.docx", "version": "…", "ids": [1, 2],
-/// "decision": "accept"}}`; unknown fields are refused.
+/// "decision": "accept"}}`, or with `"ids": [], "all": true` for every change of that version
+/// (Accept all, Reject all); unknown fields are refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -165,17 +185,31 @@ pub struct DecideRevisions {
     /// The version `ListRevisions` answered; a file whose bytes differ now is
     /// `word.revisions_stale`, and nothing is written.
     pub version: DocVersion,
-    /// The change ids to decide: 1 to [`MAX_REVISIONS`], none twice.
+    /// The change ids to decide: 1 to [`MAX_REVISIONS`], none twice; none when `all`.
     pub ids: Vec<u32>,
     /// Accept or reject them all.
     pub decision: RevisionDecision,
+    /// Every change the file holds at `version`, past [`MAX_REVISIONS`] too: the host reads
+    /// them from the same bytes it checked `version` against, so they are the changes that
+    /// list was read from. `ids` is then empty. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all: bool,
 }
 
 impl DecideRevisions {
-    /// The shape: 1 to [`MAX_REVISIONS`] ids, none repeated. Whether the file is a `.docx` and
-    /// holds the ids is the host's check.
+    /// The shape: 1 to [`MAX_REVISIONS`] ids, none repeated, or none with `all`. Whether the
+    /// file is a `.docx` and holds the ids is the host's check.
     pub(crate) fn check(&self) -> Result<(), Error> {
         const KIND: &str = "DecideRevisions";
+        if self.all {
+            if !self.ids.is_empty() {
+                return Err(Error::Format {
+                    kind: KIND,
+                    rule: "names no change ids when it decides all",
+                });
+            }
+            return Ok(());
+        }
         if self.ids.is_empty() {
             return Err(Error::Format {
                 kind: KIND,
@@ -185,7 +219,7 @@ impl DecideRevisions {
         if self.ids.len() > MAX_REVISIONS {
             return Err(Error::TooLarge {
                 kind: KIND,
-                what: "change ids",
+                what: crate::Measure::ChangeIds,
                 size: self.ids.len(),
                 max: MAX_REVISIONS,
             });

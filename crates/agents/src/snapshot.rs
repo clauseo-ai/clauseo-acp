@@ -23,8 +23,16 @@ use embedded::{PINS_LOCK, PINS_PACKAGE_JSON, build_embedded, embedded_node, embe
 /// npm's registry: every embedded `resolved` URL starts with it.
 pub const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 
-/// Folder names under `<data_dir>/agents` that are not agents.
-pub(crate) const RESERVED_IDS: [&str; 4] = ["runtime", "downloads", "npm-cache", "signin"];
+/// Folder names under `<data_dir>/agents` that are not agents, and the shared lock files'
+/// names (`agents/.lock-node`, `.lock-python`), which an agent's `.lock-<id>` must never be.
+pub(crate) const RESERVED_IDS: [&str; 6] = [
+    "runtime",
+    "downloads",
+    "npm-cache",
+    "signin",
+    "node",
+    "python",
+];
 
 /// One agent the snapshot installs.
 #[derive(Debug, Clone, PartialEq, Eq)]

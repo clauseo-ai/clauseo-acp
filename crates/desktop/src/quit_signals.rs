@@ -17,8 +17,9 @@
 //!   must return at once (the app's asks for the normal quit, `AppHandle::exit(0)`, so
 //!   `RunEvent::ExitRequested` runs `stop_host_then_exit` exactly as for a closed window).
 //! - Second signal, whatever the first stop has reached: `flush` (best effort; the app's flushes
-//!   the host log), then the process exits at once with `128 + signo`, the shell's code for a
-//!   death by that signal. The user insisted; what the stop had not ended yet is left running.
+//!   the host log and marks the run closed, `last_run.rs`), then the process exits at once
+//!   with `128 + signo`, the shell's code for a death by that signal. The user insisted; what the
+//!   stop had not ended yet is left running.
 //! - Windows has no such signals here: the Job Object's kill-on-close ends the agents' trees
 //!   when the process dies, however it dies (`clauseo-process`).
 
@@ -43,7 +44,11 @@ pub(crate) fn quit_on_signals<R: Runtime>(app: AppHandle<R>) {
                 signals
                     .run(
                         |_signal| app.exit(0),
-                        move || crate::host_log::flush_app(&flush),
+                        // A quit the user asked for twice is still a quit (`last_run.rs`).
+                        move || {
+                            crate::host_log::flush_app(&flush);
+                            crate::last_run::closed(&flush);
+                        },
                     )
                     .await;
             }

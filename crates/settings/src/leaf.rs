@@ -151,15 +151,20 @@ pub const POLICY_ONLY_KEYS: [&str; 4] = [
     "browser.allow_when_remote_debugging_disabled",
 ];
 
-/// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
-/// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of
-/// these names, in any case, in `settings.json` or a policy, is left out with a warning; the host
-/// adds its own entry under it, so a firm's or the lawyer's server can never take its place or
-/// inherit what Clauseo grants its own (Claude's pre-allow). Since Claude splits a tool name
-/// `mcp__<server>__<tool>` at `__`, no server name may hold `__` at all ([`mcp_servers`]).
-pub const RESERVED_MCP_SERVERS: [(&str, &str); 2] = [
+/// The MCP server names Clauseo keeps, each with what it is for: `browser` (S27) and `case-law`,
+/// the case-law connector's relay (R24), Clauseo's own tools; and `ide`, `claude-in-chrome` and
+/// `computer-use`, the names Claude Code gives its own built-in servers. An `mcp.servers` entry
+/// of one of these names, in any case, in `settings.json` or a policy, is left out with a
+/// warning; the host adds its own entry under Clauseo's, so a firm's or the lawyer's server can
+/// never take its place or inherit what Clauseo grants its own (Claude's pre-allow), nor pass for
+/// one of Claude Code's. Since Claude splits a tool name `mcp__<server>__<tool>` at `__`, no
+/// server name may hold `__` at all ([`mcp_servers`]).
+pub const RESERVED_MCP_SERVERS: [(&str, &str); 5] = [
     ("browser", "Clauseo's own browser"),
     ("case-law", "Clauseo's case-law connector"),
+    ("ide", "Claude Code's IDE connection"),
+    ("claude-in-chrome", "Claude Code's Chrome extension"),
+    ("computer-use", "Claude Code's computer use"),
 ];
 
 /// The entry of [`RESERVED_MCP_SERVERS`] that `name` is, in any case: the reserved name and what

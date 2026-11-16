@@ -27,7 +27,8 @@
 //!   [`check_protected`] its protected-tree check (matters root, refused trees, on Windows a
 //!   path too deep to start programs in, [`is_too_deep`]);
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
-//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
+//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included),
+//!   and [`names_a_write`] says which places a turn's tool call named count as written by it;
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]),
 //!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
@@ -66,7 +67,7 @@
 //!   sets an environment variable, never runs `git` or any process, never reads or writes a `.git`
 //!   in the folder, and opens repositories isolated from every git config and variable.
 //! - The timeline only moves forward: one ref, each checkpoint a commit whose parent is the ref's
-//!   tip. No empty commits: an unchanged tree reuses the last checkpoint
+//!   tip. No empty commits: an unchanged tree and skip record reuse the last checkpoint
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Every object read from history is checked against its id: blobs as they stream, trees and
@@ -131,6 +132,7 @@ mod checkpoint;
 mod compare;
 mod diff;
 mod error;
+mod first_read;
 mod folder_scan;
 mod fsync;
 mod history;
@@ -146,31 +148,37 @@ mod replace;
 mod restore;
 mod rules;
 mod scan;
+mod skip_record;
 mod stat;
 #[cfg(test)]
 mod test_dir;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 mod trailers;
+mod trash;
 mod types;
 mod undo;
 mod walk;
 mod write;
 mod writeback;
 
+pub use diff::names_a_write;
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
     HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,
     matter_path_in, matter_path_of_resolved,
 };
-pub use matter::{Matter, check_marker, remove_marker_of};
+pub use matter::{
+    Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
+};
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
 pub use rules::is_excluded_path;
 pub use scan::scan;
+pub use trash::{FolderTrash, OsTrash, Removals, Trash, TrashError};
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,

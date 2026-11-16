@@ -309,8 +309,9 @@ fn run_python(python: &str, script: &str, args: &[&str], dir: &Path) -> Result<S
     )
 }
 
-/// Copies `member` of `archive` to `dest` (which must not exist) with `mode`, using `python`.
-fn extract(
+/// Copies each `(member, dest, mode)` of the zip or tar.gz `archive` to `dest` (which must not
+/// exist), using `python`.
+pub(crate) fn extract(
     python: &str,
     archive: &Path,
     pairs: &[(&str, &Path, &str)],

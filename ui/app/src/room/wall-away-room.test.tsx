@@ -136,6 +136,8 @@ test("files only online and a folder not opened show dimmed among the papers, op
     expect(tile.querySelector(".tile-act")).toBeNull();
     expect(tile.id).toMatch(/paper-away-\d$/);
   }
+  // a dimmed file keeps its type's tone beside its dim, so its tab dims with it; a folder has none
+  expect(away.map((tile) => tile.getAttribute("data-file"))).toEqual([null, "pdf", "pdf"]);
   expect(describedBy(away[0]!)).toBe(
     "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.",
   );

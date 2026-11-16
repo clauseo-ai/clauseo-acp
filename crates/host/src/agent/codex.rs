@@ -501,4 +501,6 @@ pub(crate) fn prepare_launch(
 pub(crate) mod prepare;
 
 #[cfg(test)]
+mod code_mode_tests;
+#[cfg(test)]
 mod tests;

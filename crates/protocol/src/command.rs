@@ -25,11 +25,16 @@ use crate::{
 use crate::{FileChoice, MatterPath, RawPayload};
 
 mod connectors;
+mod mcp;
 mod outcome;
 mod requests;
 mod validate;
 
 pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
+pub use mcp::{
+    MAX_MCP_LIST, MAX_MCP_NAME_BYTES, MAX_MCP_TEXT_BYTES, McpCommand, McpSecretEdit,
+    McpSecretValue, McpServerEdit,
+};
 pub use outcome::CommandOutcome;
 pub use requests::{DeliveryRequest, RestoreRequest};
 pub use validate::{
@@ -189,8 +194,9 @@ pub enum HostCommand {
     /// Refused while a turn or an undo holds the matter's writer (`matter.turn_running`); a
     /// folder that is not there is `matter.folder_missing`; one with no marker, an unreadable one
     /// or one naming another matter is `matter.folder_not_a_matter`; a folder import would
-    /// refuse, or one that is, holds or sits inside another matter's folder, is
-    /// `matter.folder_refused`. A refusal changes nothing.
+    /// refuse is `matter.folder_refused`, and one that is, holds or sits inside another
+    /// matter's folder is `matter.folder_is_matter`, `matter.folder_holds_matter` or
+    /// `matter.folder_inside_matter`, as for a new matter. A refusal changes nothing.
     RelocateMatter {
         /// The matter.
         matter: MatterId,
@@ -255,8 +261,8 @@ pub enum HostCommand {
         thread: ThreadId,
         /// The prompt: 1 to [`MAX_PROMPT_BLOCKS`] blocks, no empty `Text` block, at least one
         /// character that shows (as [`check_display_title`](crate::check_display_title) counts
-        /// it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text and
-        /// [`MAX_PROMPT_FILES`] `File` blocks.
+        /// it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text (JSON-escaped
+        /// bytes) and [`MAX_PROMPT_FILES`] `File` blocks.
         content: Vec<PromptBlock>,
         /// How to deliver it while a turn runs; missing means queue, and queue is written as a
         /// missing field. A mode this version does not know is refused when the command decodes.
@@ -271,8 +277,8 @@ pub enum HostCommand {
         turn: TurnId,
         /// The new text: it replaces the prompt's first text block, its other text blocks are
         /// dropped, and every file block stays where it was. At most
-        /// [`MAX_PROMPT_TEXT_BYTES`] UTF-8 bytes. Empty keeps only the files, so the host
-        /// refuses it for a prompt without one (`command.invalid`).
+        /// [`MAX_PROMPT_TEXT_BYTES`] JSON-escaped bytes. Empty keeps only the files, so the
+        /// host refuses it for a prompt without one (`command.invalid`).
         text: String,
     },
     /// Remove a queued prompt; its turn ends cancelled without starting.
@@ -559,4 +565,10 @@ pub enum HostCommand {
         /// Whether the window's `navigator.onLine` says the computer is online.
         online: bool,
     },
+    /// The lawyer's own MCP servers, Settings › Tools (`command/mcp.rs`): add, replace, remove,
+    /// turn on or off, import from another app. Each answers `Done` with a receipt, or a
+    /// refusal; the new list reaches app subscribers as `HostEvent::McpToolsChanged`. A secret
+    /// value it carries encodes as `[redacted]`.
+    /// JSON: `{"mcp": {"remove_server": {"name": "github"}}}`.
+    Mcp(McpCommand),
 }

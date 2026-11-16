@@ -1,6 +1,7 @@
 // The parts copy the protocol's ErrorCode, since ui/components can't import the app. The two unions must hold the same
 // codes: a code on the wire with no words, or words for a code the wire never sends, fails typecheck here, both ways.
-// ERROR_WORDS is a Record over the parts' union, so it then has words for every code on the wire.
+// ERROR_WORDS is a Record over the parts' union less its WordlessCode (retired words, read as "unknown"), so every
+// other code on the wire has words.
 import { expect, test } from "vitest";
 import { ERROR_WORDS, type ErrorCode as WordsCode } from "@clauseo/components/lib/words-errors.ts";
 import type { ErrorCode as WireCode } from "../../transport/protocol.ts";

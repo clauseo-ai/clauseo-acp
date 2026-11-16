@@ -159,9 +159,7 @@ export function EdgePrompt({
           );
   const kept =
     kind === "off"
-      ? w.v(
-          "Outside the Safe workspace, Clauseo can read any file you can open, and asks before changing anything outside this matter's folder.",
-        )
+      ? w.v("Outside the Safe workspace, Clauseo can read any file you can open.")
       : w.v(
           "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
         );

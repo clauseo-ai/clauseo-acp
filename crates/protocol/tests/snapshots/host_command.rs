@@ -157,10 +157,15 @@ golden! { HostCommand::name_of {
             .unwrap(),
         ids: vec![2, 3],
         decision: RevisionDecision::Reject,
+        all: false,
     });
     SetNetwork => set_network: HostCommand::SetNetwork { online: false };
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
+    // Each `McpCommand` has its own golden in `snapshots/mcp.rs`.
+    Mcp => mcp: HostCommand::Mcp(clauseo_protocol::McpCommand::RemoveServer {
+        name: "github".to_owned(),
+    });
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

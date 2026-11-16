@@ -117,7 +117,8 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   answers) is kept for the 64 most recently touched threads and folded again from the log
   otherwise. An answer is assembled as the reducer assembles an agent message (its
   `TextAppended` chunks in seq order, the first chunk's kind and seq), tested against the
-  reducer. A steer's prompt follows the turn its `SteerResolved` names, as the reducer moves it,
+  reducer. A steer's prompt follows the turn its `SteerResolved` names (`NotSent` names none), as
+  the reducer moves it,
   so an undo takes exactly that turn's prompts; a queued prompt taken back before it was sent
   (`RemoveQueuedPrompt`, a turn that ends cancelled without starting) leaves the index. A thread
   whose matter is forgotten writes nothing, even when the fold only learns its matter then.

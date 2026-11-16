@@ -342,6 +342,23 @@ pub(crate) fn drive_form(text: &str) -> Option<String> {
     Some(format!("{}:\\{rest}", drive.to_ascii_uppercase()))
 }
 
+/// `path` for a comparison only, a local drive's verbatim form put in its drive form
+/// (`\\?\C:\x` is `C:\x`, by [`drive_form`]): `dunce::canonicalize` keeps `\\?\` on a path of 260
+/// characters or more, so a long canonical path and a short one (a file and its matter folder)
+/// would differ by their prefix alone. Any other path as it is, `\\?\UNC\…` included. Never
+/// open the result: past 260 characters only the verbatim form opens. Pure text.
+pub(crate) fn comparable(path: &Path) -> std::borrow::Cow<'_, Path> {
+    let local_drive = path.to_str().filter(|text| {
+        text.starts_with(r"\\?\")
+            && text.get(5..6) == Some(":")
+            && matches!(text.get(6..7), None | Some("\\"))
+    });
+    match local_drive.and_then(drive_form) {
+        Some(plain) => std::borrow::Cow::Owned(PathBuf::from(plain)),
+        None => std::borrow::Cow::Borrowed(path),
+    }
+}
+
 /// `localhost\c$\rest` (or `127.0.0.1`, `[::1]`): the drive letter of the share and the rest.
 fn share(text: &str) -> Option<(char, &str)> {
     let (host, rest) = text.split_once('\\')?;

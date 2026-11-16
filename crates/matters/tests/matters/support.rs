@@ -153,11 +153,15 @@ impl PlaceholderProbe for MarkedProbe {
 /// Settings with `root` as the matters root, [`Limits::DEFAULT`], [`Retention::KeepAll`] and
 /// `probe`.
 pub(crate) fn settings(root: impl Into<PathBuf>, probe: Arc<MarkedProbe>) -> Settings {
+    let root = root.into();
+    // Beside the matters root: a test's own trash, never the machine's.
+    let trash = root.with_file_name("trash");
     Settings {
-        matters_root: root.into(),
+        matters_root: root,
         refused_trees: Vec::new(),
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe,
+        trash: Arc::new(clauseo_matters::FolderTrash::new(trash)),
     }
 }

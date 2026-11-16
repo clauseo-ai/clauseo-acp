@@ -86,7 +86,7 @@ gives.
 
 **Refresh.** One read per agent at start, and cached values become `Stale { Aged }`
 (`NotApplicable` stays). A focus, or a meter or the settings page opening, reads when the last read
-started 5 minutes ago or more. A turn end reads after 10 minutes for Claude and 60 seconds for
+started 5 minutes ago or more (2 minutes for Claude and 1 minute for Codex since 2026-11-15). A turn end reads after 10 minutes for Claude and 60 seconds for
 Codex (Claude's 10 minutes became 2 for a turn with no live signal; see the note of
 2026-11-04 under Status). `TurnEnded { read_now: true }` and `TryAgain` read at once. Every age counts from the start
 of the agent's last read, whatever its outcome, so a failed read is not retried on every focus.
@@ -252,6 +252,14 @@ the entry with the newest checked time, so an entry with no time (an API key's `
 lost to the earlier plan account's. A first read with no account held, and a read of the same
 account, send no `Forget`, so the usual read writes nothing more. The host deletes off the loop,
 as it stores, and publishes no event of its own for it: the view goes out again.
+
+2026-11-15: a focus, or a meter or the settings page shown, reads when the last read started 2
+minutes ago or more for Claude and 1 minute for Codex, not 5 minutes (`KindRules::shown_after_ms`).
+While Plan and usage is in view the Settings window sends `Shown` once a minute, so the page
+follows turns as they end. Claude stays at 2 minutes because Anthropic's usage endpoint answers
+429 to polling every 30 to 60 s (claude-code#31637), with no `Retry-After`; 2 minutes is the age
+its turn end already used. Every age still counts from the last read's start whatever its outcome,
+so a refused read is not retried before then, and one read per agent stays the cap.
 
 ## Date
 

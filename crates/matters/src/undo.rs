@@ -1,31 +1,42 @@
 //! Undoing a step: put back, file by file, what the step between two checkpoints changed.
 //! Everything moves forward: the result is a new `undo` checkpoint, so an undo can be undone.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use clauseo_protocol::{
-    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChoice, MatterPath,
+    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChoice, MatterPath, SkippedFile,
+    SkippedFileReason,
 };
 
 use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::diff::content_id;
 use crate::history::{HistoryStore, Oid};
 use crate::no_download::NoDownload;
+use crate::skip_record::SkipRecord;
 use crate::stat::{CacheEntry, EntryState, Stat, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
 use crate::writeback::{self, Names, Op, skipped, writable};
-use crate::{Error, locks};
+use crate::{Error, locks, rules};
 
 /// One changed file of the step, by the path decisions name, and the operations undoing it.
 struct Step {
     path: MatterPath,
     ops: Vec<Op>,
+    /// `Some` for a file that was in the folder before the step but never versioned (skipped
+    /// for this reason, then read changed: `first_read.rs`): there is no earlier copy, so undo
+    /// keeps it as it is. Its `ops` are empty.
+    unversioned: Option<SkippedFileReason>,
 }
 
 /// The step from `before` to `after` as undo operations, sorted by path. A deletion whose
 /// file is there now but over the cap or cloud-only is left out: the checkpoint that saw it
 /// leave the tree reported it as skipped, not deleted, and undo never writes such a file.
+///
+/// Undo deletes a file only when it is known to have been absent when the step began, and never
+/// writes over one the step read for the first time: see [`kept_because`]. A step it may not
+/// undo gets no operation and is kept ([`Step::unversioned`]). Modified and deleted files have
+/// earlier blobs and are put back as ever.
 fn step(
     core: &Core,
     folder: &Path,
@@ -45,7 +56,10 @@ fn step(
         kept.push(change);
     }
     let changes = kept;
+    let there = core.step_reads(before, after).there;
+    let start = core.skip_record(before);
     let before_files = core.files_of(before)?;
+    let moved_out = moved_out_of_excluded(core, before, after)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
             .map(|file| file.blob)
@@ -69,9 +83,92 @@ fn step(
                 return Err(Error::history("undo", "a change of an unknown kind"));
             }
         };
-        steps.push(Step { path, ops });
+        let moved =
+            matches!(change.change(), ChangeKind::Added) && moved_out.contains(path.as_str());
+        let reason = if moved {
+            Some(SkippedFileReason::Unknown)
+        } else {
+            kept_because(&ops, &there, start.as_ref(), &before_files)
+        };
+        if let Some(reason) = reason {
+            steps.push(Step {
+                path,
+                ops: Vec::new(),
+                unversioned: Some(reason),
+            });
+        } else {
+            steps.push(Step {
+                path,
+                ops,
+                unversioned: None,
+            });
+        }
     }
     Ok(steps)
+}
+
+/// The paths the step added that hold the content of a file it took out of a folder the
+/// exclusion rule passes over (`.claude/x` moved to `x`, in a history written before the rule
+/// covered `.claude`): that file was in the folder at the start, so undo keeps it, as it keeps
+/// a file moved from a skipped one. Its diff no longer shows the move: the old path is left out.
+fn moved_out_of_excluded(
+    core: &Core,
+    before: CheckpointId,
+    after: CheckpointId,
+) -> Result<BTreeSet<String>, Error> {
+    let (old, new) = core
+        .history
+        .changed_files(core.timeline.tree(before)?, core.timeline.tree(after)?)?;
+    let still: BTreeSet<&str> = new.iter().map(|file| file.path.as_str()).collect();
+    let gone: BTreeSet<Oid> = old
+        .iter()
+        .filter(|file| rules::is_excluded_path(&file.path) && !still.contains(file.path.as_str()))
+        .map(|file| file.blob)
+        .collect();
+    if gone.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    Ok(new
+        .into_iter()
+        .filter(|file| !rules::is_excluded_path(&file.path) && gone.contains(&file.blob))
+        .map(|file| file.path)
+        .collect())
+}
+
+/// Why undo must leave a step's file as it is, if it must: the reason it had not been versioned.
+/// A path the step read for the first time (`there`: skipped before, or moved from a skipped
+/// file) is never deleted or written, nor written when the step's first checkpoint's skip record
+/// (`start`) has it as cloud-only and not read, its content then unknown. Any other path is
+/// deleted only when that record proves it absent then: recorded (else `Unknown`), and
+/// [`SkipRecord::not_absent`] finds no reason (a folder that did not list at the start makes every
+/// added file unknown: it may have come out of that folder, whatever the folder did later).
+fn kept_because(
+    ops: &[Op],
+    there: &BTreeMap<MatterPath, SkippedFileReason>,
+    start: Option<&SkipRecord>,
+    before_files: &[SizedFile],
+) -> Option<SkippedFileReason> {
+    for op in ops {
+        let target = op.path();
+        if let Some(reason) = there.get(target) {
+            return Some(*reason);
+        }
+        if let (Op::Write(..), Some(start)) = (op, start)
+            && let Some(stale) = start.stale_at(target.as_str())
+        {
+            return Some(stale.reason);
+        }
+        if let Op::Delete(_) = op {
+            let Some(start) = start else {
+                return Some(SkippedFileReason::Unknown);
+            };
+            let in_tree = find(before_files, target.as_str()).is_some();
+            if let Some(reason) = start.not_absent(target.as_str(), in_tree) {
+                return Some(reason);
+            }
+        }
+    }
+    None
 }
 
 fn find<'a>(files: &'a [SizedFile], path: &str) -> Option<&'a SizedFile> {
@@ -98,11 +195,20 @@ pub(crate) fn edited_since(
     after: CheckpointId,
 ) -> Result<Vec<MatterPath>, Error> {
     let changes = core.changes_between(before, after)?;
+    // The files `step` keeps are never undone, so never edited since for this.
+    let kept: BTreeSet<MatterPath> = step(core, folder, settings, before, after)?
+        .into_iter()
+        .filter(|step| step.unversioned.is_some())
+        .map(|step| step.path)
+        .collect();
     let mut edited = Vec::new();
     let mut names = Names::default();
     let guard = NoDownload::begin(settings.probe.as_ref());
     for change in &changes {
         let path = change.path();
+        if kept.contains(path) {
+            continue;
+        }
         // Each path undoing the change writes or deletes, with what `after` holds there.
         let targets: Vec<(&MatterPath, Option<&ContentId>)> = match change.change() {
             ChangeKind::Added | ChangeKind::Modified => vec![(path, change.after())],
@@ -187,7 +293,18 @@ pub(crate) fn undo(
     let choices = choices(&steps, request)?;
     let mut acting: Vec<&Step> = Vec::new();
     let mut kept: Vec<MatterPath> = Vec::new();
+    let mut unversioned: Vec<SkippedFile> = Vec::new();
     for (step, choice) in steps.iter().zip(&choices) {
+        if let Some(reason) = step.unversioned {
+            if *choice == FileChoice::Undo {
+                unversioned.push(SkippedFile {
+                    path: step.path.clone(),
+                    reason,
+                });
+            }
+            kept.push(step.path.clone());
+            continue;
+        }
         let mut ok = *choice == FileChoice::Undo;
         if ok {
             for op in &step.ops {
@@ -259,7 +376,10 @@ pub(crate) fn undo(
         }
     }
     let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
-    let deleted = writeback::apply(core, folder, &ops)?;
+    let writeback::Deleted {
+        paths: deleted,
+        removals,
+    } = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
     let (checkpoint, resurrected) = take_after_deletes(
         core,
         folder,
@@ -279,9 +399,11 @@ pub(crate) fn undo(
         checkpoint,
         restored,
         kept,
+        unversioned,
         edited_since,
         resurrected,
         deleted: sorted(deleted),
+        removals,
     })
 }
 
@@ -437,5 +559,9 @@ fn keep_respelled(
     }
 }
 
+#[cfg(test)]
+mod hard_rule_tests;
+#[cfg(test)]
+mod old_step_tests;
 #[cfg(test)]
 mod tests;

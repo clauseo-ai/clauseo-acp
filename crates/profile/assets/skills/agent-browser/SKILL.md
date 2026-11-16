@@ -1,9 +1,9 @@
 ---
 name: agent-browser
-description: When this session has a browser, use it for web pages that need a real browser, such as JavaScript-heavy pages, pages behind clicks or forms, and screenshots or PDFs of a page, driven with the `agent-browser` shell command. Covers the snapshot-and-ref loop, reading and extracting page text, clicking and filling, waiting, tabs, iframes, dialogs and downloads, and the rules for using a browser on legal work.
+description: When this session has a browser, use it for web pages that need a real browser, such as JavaScript-heavy pages, pages behind clicks or forms, and screenshots of a page, driven with the `agent-browser` shell command. Covers the snapshot-and-ref loop, reading and extracting page text, clicking and filling, waiting, tabs, iframes, dialogs and downloads, and the rules for using a browser on legal work.
 metadata:
   clauseo:
-    version: 0.41.1+clauseo.2
+    version: 0.41.1+clauseo.3
     author: Clauseo
     tools: [browser]
     tier: builtin
@@ -84,10 +84,7 @@ agent-browser select @e4 "option-value"   # select by value or visible label
 agent-browser select @e4 "a" "b"          # select multiple
 agent-browser scroll down 500             # scroll page (up/down/left/right)
 agent-browser scrollintoview @e1          # scroll element into view
-agent-browser upload @e5 file1.pdf        # upload file(s)
 ```
-
-`upload` sends a file to the website: use it only for files the lawyer named in this conversation.
 
 When refs don't work, use semantic locators, which need no snapshot:
 
@@ -124,19 +121,11 @@ Prefer waiting for a specific element, text or URL. Avoid `wait --load networkid
 agent-browser snapshot -i --json > page.json   # structured snapshot
 agent-browser get text @e5                     # targeted, with refs
 agent-browser get attr @e10 href
-
-cat <<'EOF' | agent-browser eval --stdin
-const rows = document.querySelectorAll("table tbody tr");
-Array.from(rows).map(r => ({
-  name: r.cells[0].innerText,
-  date: r.cells[1].innerText,
-}));
-EOF
 ```
 
-`eval` is read-only: use it to read from the page, never to change the page's data or send it elsewhere. Prefer `eval --stdin` with a heredoc for anything with quotes; inline `agent-browser eval "..."` suits only simple expressions.
+`eval`, `pdf`, `download` and `upload` are off in Clauseo: read a page with `snapshot`, `get text` or `read`, and save a file into the matter with `curl`.
 
-## Screenshots and PDFs
+## Screenshots
 
 ```bash
 agent-browser screenshot                        # temp path, printed on stdout
@@ -144,7 +133,6 @@ agent-browser screenshot page.png               # specific path
 agent-browser screenshot --full full.png        # full scroll height
 agent-browser screenshot --annotate map.png     # numbered labels keyed to snapshot refs
 agent-browser screenshot --if-changed           # skip unchanged images to save tokens
-agent-browser pdf page.pdf                      # save the page as a PDF
 ```
 
 With `--annotate`, each label `[N]` maps to ref `@eN`.

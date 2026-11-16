@@ -2,7 +2,7 @@
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
-{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"acceptEdits","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-click","title":"mcp.browser.agent_browser_click","kind":"other","status":"in_progress","rawInput":{"server":"browser","tool":"agent_browser_click","arguments":{"selector":"@e1"}}}}}
 {"request":{"id":"perm-click","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-click","kind":"execute","status":"pending"},"options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"},{"optionId":"allow_session","name":"Allow for this session","kind":"allow_always"},{"optionId":"cancel","name":"Cancel","kind":"reject_once"}],"_meta":{"is_mcp_tool_approval":true}}}}

@@ -5,7 +5,8 @@ import { toolCall } from "../../testing/stream-script.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { doneOf, timeOf } from "./steps.ts";
 import { doingOf, plainOf, siteQuery, thoughtText, titleOf } from "./step-names.ts";
-import { inMatter, taskOf, whyOf } from "./task-words.ts";
+import { mainPartsOf } from "../../testing/main-parts.ts";
+import { inMatter, programsIn, programsOf, taskOf, whyOf } from "./task-words.ts";
 
 const FOLDER = "Documents/Clauseo/Sharma";
 const ROOT = `/Users/lawyer/${FOLDER}`;
@@ -58,6 +59,129 @@ test("a title is the command only when it reads as one; with nothing, a task as 
     command: null,
   });
   expect(doneOf("en", task(null))).toBe("Ran a task.");
+});
+
+test("a chained command is counted, not named by its first program; its command kept whole for the fold", () => {
+  const ps = {
+    command: [
+      "powershell",
+      "-c",
+      "New-Item -ItemType Directory drafts; Copy-Item notice.docx drafts | Out-Null",
+    ],
+  };
+  const t = taskOf(task(ps));
+  expect(t).toMatchObject({ program: "New-Item", count: 3 });
+  expect(t.command).toBe(
+    "New-Item -ItemType Directory drafts; Copy-Item notice.docx drafts | Out-Null",
+  );
+  expect(doneOf("en", task(ps))).toBe("Ran 3 tasks.");
+  expect(doneOf("en", task(ps, { status: "failed" }))).toBe("Tried to run 3 tasks.");
+  expect(doingOf("en", task(ps, { status: "in_progress" }))).toBe("Running 3 tasks.");
+  expect(doneOf("hi", task(ps))).toBe("3 काम चलाए गए।");
+  expect(doneOf("hi", task(ps, { status: "failed" }))).toBe("3 काम चलाने की कोशिश की गई।");
+  expect(doingOf("hi", task(ps, { status: "in_progress" }))).toBe("3 काम चल रहे हैं।");
+  expect(doneOf("en", task({ command: "mkdir out && pandoc a.md -o out/a.docx" }))).toBe(
+    "Ran 2 tasks.",
+  );
+  // a cd, a quoted or escaped separator and 2>&1 chain nothing: one program, named as before
+  expect(doneOf("en", task({ command: "cd papers && wc -l notes.txt" }))).toBe(
+    "Ran wc on notes.txt.",
+  );
+  expect(doneOf("en", task({ command: `python3 -c "a = 1; print(a)" 2>&1` }))).toBe("Ran python3.");
+  expect(taskOf(task({ command: "find . -name '*.tmp' -exec rm {} \\;" })).count).toBe(1);
+  expect(taskOf(task({ command: "find . -name x -exec rm {} \\;" })).count).toBe(1);
+  // a backslash is a Windows path's: it escapes nothing
+  expect(doneOf("en", task({ command: "Get-ChildItem C:\\m\\; Remove-Item papers" }))).toBe(
+    "Ran 2 tasks.",
+  );
+  expect(doneOf("en", task({ command: "cd C:\\matter\\; Remove-Item -Recurse papers" }))).toBe(
+    "Ran Remove-Item.",
+  );
+  expect(taskOf(task({ command: "grep -c 'a|b' notes.txt || true" })).count).toBe(2);
+  // the agent's own words still lead
+  expect(doneOf("en", task({ ...ps, description: "Copy the notice into drafts" }))).toBe(
+    "Copy the notice into drafts.",
+  );
+});
+
+test.each([
+  ["echo 'it'\\''s' ; rm -rf papers", ["echo", "rm"]],
+  ['echo "a \\" b" ; rm -rf papers', ["echo", "rm"]],
+  ['echo `"; Remove-Item papers', ["echo", "Remove-Item"]],
+  ["Write-Output \\; Remove-Item papers", ["Write-Output", "Remove-Item"]],
+  ['echo "abc ; rm -rf papers', ["echo", "rm"]],
+  ["echo 'abc ; rm -rf papers", ["echo", "rm"]],
+  // a path's backslash before a quote or a semicolon, in PowerShell
+  ['echo C:\\m\\"x" ; Remove-Item papers ; echo "y"', ["echo", "Remove-Item", "echo"]],
+  ["Write-Output -ok C:\\m\\; Remove-Item papers", ["Write-Output", "Remove-Item"]],
+  ["find . -exec x {}\\; Remove-Item papers", ["find", "Remove-Item"]],
+  // sh's escaped quote inside double quotes, and PowerShell's backtick
+  ['echo "x\\"" ; rm -rf papers ; echo "y"', ["echo", "rm", "echo"]],
+  ['echo `" ; rm x ; echo "y"', ["echo", "rm", "echo"]],
+])("no quote or backslash hides a chained task: %s", (line, programs) => {
+  expect(programsOf(line)).toEqual(programs);
+  const n = String(programs.length);
+  expect(taskOf(task({ command: line }))).toMatchObject({
+    program: programs[0],
+    count: programs.length,
+  });
+  expect(doneOf("en", task({ command: line }))).toBe(`Ran ${n} tasks.`);
+});
+
+test("find's \\; after an -exec is one task, in every reading", () => {
+  expect(programsOf("find . -exec rm {} \\;")).toEqual(["find"]);
+  expect(programsOf("find . -name x -exec rm {} \\;")).toEqual(["find"]);
+  expect(programsOf("find . -name x -execdir rm {} \\; && ls")).toEqual(["find", "ls"]);
+});
+
+/** A seeded PRNG (mulberry32), so a failing line comes back on every run. */
+function prng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const PIECES = [
+  "echo",
+  "rm",
+  "Remove-Item",
+  "ls",
+  "find",
+  "x",
+  "papers",
+  "'",
+  '"',
+  "`",
+  "\\",
+  ";",
+  "|",
+  "&&",
+  " ",
+  " ",
+  "C:\\m\\",
+  "C:\\matter\\x.txt",
+  "-exec rm {} \\;",
+  "-ok",
+  "{}\\;",
+  "''",
+  "2>&1",
+  "\\;",
+];
+
+test("no line counts fewer tasks than main's reading did (2000 seeded lines)", () => {
+  const next = prng(1110);
+  let failing: string | null = null;
+  for (let n = 0; n < 2000 && failing === null; n++) {
+    const length = 1 + Math.floor(next() * 14);
+    let line = "";
+    for (let k = 0; k < length; k++) line += PIECES[Math.floor(next() * PIECES.length)]!;
+    if (programsOf(line).length < programsIn(mainPartsOf(line)).length) failing = line;
+  }
+  expect(failing, `first line counted below main: ${failing}`).toBeNull();
 });
 
 test("paths inside the matter read from the matter, through the home folder or a whole path", () => {

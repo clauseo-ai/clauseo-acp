@@ -8,6 +8,8 @@ expression: "(ParagraphChange::ALL, RunKind::ALL)"
     "changed",
     "added",
     "removed",
+    "formatted",
+    "not_shown",
     "unknown"
   ],
   [

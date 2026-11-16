@@ -4,7 +4,7 @@
 use clauseo_protocol::{
     AgentId, CheckpointKind, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice,
     FileDecision, HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, QueryResult,
-    StopReason, StreamId, ThreadId,
+    RestoreRequest, StopReason, StreamId, ThreadId,
 };
 
 use crate::support::{
@@ -246,6 +246,65 @@ fn undo_step_and_note_reach_agent() {
     );
     host.shutdown();
     versions::assert_every_checkpoint_has_its_row(&dir, matter, &logged);
+}
+
+/// D-sweep: Undo removes the turn's note, then a Versions restore brings it back. The next
+/// prompt tells both, in order (`undo-restore-note`), so the agent knows the note is back.
+#[test]
+fn a_restore_after_an_undo_reaches_agent_after_the_undo_note() {
+    let dir = Dir::new(
+        "a_restore_after_an_undo_reaches_agent_after_the_undo_note",
+        &[(FAKE, Scenario::Local("undo-restore-note"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "m",
+        &[(
+            "brief.txt",
+            "Clause 4 draft
+",
+        )],
+        FAKE,
+    );
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Write a note.");
+    let ended = events.until_turn_ended(first);
+    assert_eq!(ended.stop, StopReason::EndTurn);
+    let after = ended.checkpoint_after.expect("turn 1 wrote notes/a.txt");
+
+    let note = MatterPath::new("notes/a.txt").unwrap();
+    host.ok(HostCommand::UndoStep {
+        thread,
+        turn: first,
+        files: vec![FileDecision {
+            path: note.clone(),
+            choice: FileChoice::Undo,
+        }],
+    });
+    assert!(!folder.join("notes/a.txt").exists(), "the undo left it");
+    let outcome = host.ok(HostCommand::RestoreVersion {
+        matter,
+        checkpoint: after,
+        scope: RestoreRequest::Files { paths: vec![note] },
+        undoes: None,
+        thread: Some(thread),
+    });
+    assert!(
+        matches!(outcome, CommandOutcome::VersionRestored { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("notes/a.txt")).unwrap(),
+        "Alpha\n"
+    );
+
+    // The scenario expects the note's two lines; a prompt without them fails the turn.
+    let (second, _) = host.prompt(thread, "Carry on.");
+    let ended = events.until_turn_ended(second);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.shutdown();
 }
 
 /// An undo of a step whose file Word has open (its owner file `~$a.txt` beside it) is refused

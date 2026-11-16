@@ -922,6 +922,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -1071,6 +1072,7 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "unicode-normalization",
  "url",
  "uuid",
  "windows",
@@ -1093,6 +1095,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "async-io",
+ "base64 0.22.1",
  "caseless",
  "clauseo-acp",
  "clauseo-blocklist",
@@ -1115,19 +1118,22 @@ dependencies = [
  "flate2",
  "futures",
  "getrandom 0.3.4",
+ "icu_properties",
  "libc",
- "memchr",
  "nix",
  "notify",
+ "plist",
  "proptest",
  "quick-xml",
  "rusqlite",
  "rustix",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "socket2",
  "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
@@ -1168,12 +1174,14 @@ dependencies = [
  "dunce",
  "gix",
  "nix",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
  "unicode-normalization",
  "windows",
+ "windows-core",
 ]
 
 [[package]]
@@ -1181,10 +1189,18 @@ name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
  "clauseo-mcp",
+ "getrandom 0.3.4",
  "libc",
  "nix",
  "serde",
  "serde_json",
+ "windows",
+]
+
+[[package]]
+name = "clauseo-pdf"
+version = "0.0.0"
+dependencies = [
  "windows",
 ]
 
@@ -1230,6 +1246,7 @@ name = "clauseo-protocol"
 version = "0.1.0"
 dependencies = [
  "compact_str",
+ "include_dir",
  "insta",
  "proptest",
  "pulldown-cmark",
@@ -1331,10 +1348,12 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
  "windows",
+ "zeroize",
 ]
 
 [[package]]
@@ -1353,6 +1372,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tracing",
  "zstd",
 ]
 
@@ -3736,6 +3756,25 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]

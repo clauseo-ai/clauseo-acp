@@ -61,6 +61,15 @@ pub enum Error {
         /// Why.
         reason: &'static str,
     },
+    /// A change to the lawyer's MCP servers breaks one of their rules (`McpRefusal`), or names a
+    /// server that is not there. Nothing was written. It names the server's key, never a value.
+    #[error("{key}: {refusal}")]
+    Mcp {
+        /// The dotted key, such as `mcp.servers.github`.
+        key: String,
+        /// Which rule.
+        refusal: crate::mcp::McpRefusal,
+    },
     /// The OS gave no path for a folder this crate needs.
     #[error("the OS gives no {folder} folder")]
     NoFolder {

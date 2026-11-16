@@ -46,7 +46,19 @@ export type ToolRowRoom = {
 };
 
 const POLICY: ToolsKey =
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.";
+/** On Windows the host passes over a browser its own policy blocks, so these show only when every browser installed
+ * is, naming those: the firm's settings don't let apps control them, which only its IT can change (Clauseo's own
+ * setting can't: such a browser refuses Clauseo anyway). */
+const POLICY_BOTH: ToolsKey =
+  "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+const POLICY_EDGE: ToolsKey =
+  "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+const POLICY_CHROME: ToolsKey =
+  "Your firm's settings don't let apps control Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+/** Windows: the only Chrome is installed for this user alone, which Clauseo's browser can't start. */
+const PER_USER: ToolsKey =
+  "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.";
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 
@@ -60,7 +72,11 @@ const INSTALL_WINDOWS: ToolsKey =
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
   if (state === "browser_not_installed")
     return tw(lang, platform === "windows" ? INSTALL_WINDOWS : INSTALL_MAC);
-  if (state === "browser_blocked_by_policy") return tw(lang, POLICY);
+  if (state === "browser_blocked_by_policy")
+    return tw(lang, platform === "windows" ? POLICY_BOTH : POLICY);
+  if (state === "browser_blocked_edge") return tw(lang, POLICY_EDGE);
+  if (state === "browser_blocked_chrome") return tw(lang, POLICY_CHROME);
+  if (state === "browser_per_user_chrome_only") return tw(lang, PER_USER);
   if (state === "browser_policy_unreadable") return tw(lang, UNREADABLE);
   return null;
 }

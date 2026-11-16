@@ -300,10 +300,13 @@ fn a_python_retry_while_another_agent_installs_starts_nothing_and_pauses_nothing
     assert_eq!(python_requests(&fx).len(), 1);
 }
 
+/// Installing B while A's job fetches Python stops nothing (decision 0033, "Two installs at
+/// once"): B installs to `Ready` beside it and ends there, since A's job has Python, which goes
+/// on downloading and is fetched once.
 #[test]
-fn a_switch_pauses_python_not_the_agent_and_the_next_job_resumes_it_by_range() {
+fn installing_b_while_a_s_job_fetches_python_leaves_python_going() {
     let bytes = fake_python("echo 3.13.18");
-    let fx = with_python("py-switch", &bytes);
+    let fx = with_python("py-beside", &bytes);
     let path = format!("/py/{}", archive_name(1));
     fx.registry.then(&path, Behaviour::Stall);
     let (agents, events) = fx.start();
@@ -314,26 +317,31 @@ fn a_switch_pauses_python_not_the_agent_and_the_next_job_resumes_it_by_range() {
     events
         .until_python(|s| matches!(s, PythonState::Downloading { received, .. } if *received > 0));
     agents.install(&agent_b());
-    events.until_python(|s| matches!(s, PythonState::Missing { .. }));
-    assert!(matches!(
-        agents.state(&agent_a()),
-        Some(InstallState::Ready { .. })
-    ));
-    fx.registry.release();
     let (seen, last) = events.until_end(&agent_b());
     assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
     assert!(
         !states_of(&seen, &agent_a()).contains(&InstallState::Paused),
         "the agent stays Ready"
     );
-    let (_, last) = events.until_python_end();
+    assert!(
+        matches!(agents.python_state(), PythonState::Downloading { .. }),
+        "{:?}",
+        agents.python_state()
+    );
+    fx.registry.release();
+    let (seen, last) = events.until_python_end();
     assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
-    let half = bytes.len() / 2;
+    assert!(
+        !seen
+            .iter()
+            .any(|s| matches!(s, PythonState::Missing { .. })),
+        "{seen:?}"
+    );
     let ranges: Vec<_> = python_requests(&fx)
         .into_iter()
         .map(|request| request.range)
         .collect();
-    assert_eq!(ranges, [None, Some(format!("bytes={half}-"))]);
+    assert_eq!(ranges, [None], "fetched once, never paused");
 }
 
 #[test]

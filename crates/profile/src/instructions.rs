@@ -7,8 +7,24 @@
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// R22's legal part, appended after the tools part. It holds `{work_folder}` and
-/// `{matter_notes}`, which the host fills per session.
+/// `{matter_notes}`, which the host fills per session, and `{plan}`, which the profile fills per
+/// agent ([`PLAN`]).
 pub const LEGAL: &str = include_str!("../assets/instructions/legal.md");
+
+/// The token the profile fills with [`plan_name`] of the agent the text is for, in the identity
+/// rule (decision record 0058): the assistant is Clauseo, working through the lawyer's `Claude`
+/// or `ChatGPT` account. It is not the host's: the profile knows the agent when it builds Claude's
+/// options and Codex's keys (`ClauseoProfile::instructions_for`).
+pub const PLAN: &str = "{plan}";
+
+/// The plan an agent of `kind` works through, as the app names it to the lawyer (the window's
+/// `agent.ts` `PLAN`): `Claude` for Claude, `ChatGPT` for Codex.
+pub fn plan_name(kind: clauseo_protocol::AgentKind) -> &'static str {
+    match kind {
+        clauseo_protocol::AgentKind::Claude => "Claude",
+        clauseo_protocol::AgentKind::Codex => "ChatGPT",
+    }
+}
 
 /// The connectors paragraph (R24): what a session with the `case-law` entry is told about the
 /// case-law tools. At most 80 words. The host puts it in place of `{connectors}` through
@@ -37,8 +53,10 @@ pub fn connectors_part(with_case_law: bool) -> &'static str {
 /// [`browser_part`].
 pub const BROWSER: &str = include_str!("../assets/instructions/browser.txt");
 
-/// What a session without the browser is told when the lawyer or the firm turned it off, or the
-/// firm's browser policy left it out.
+/// What a session without the browser is told when the lawyer or the firm turned it off, the
+/// firm's browser policy left it out, or it is a Claude session on macOS or Linux, where Claude
+/// has no browser for launch (`servers::no_browser`): Claude then reads pages with its web fetch
+/// tool and `curl`.
 pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.txt");
 
 /// What a session without the browser is told when no supported browser is installed: one plain
@@ -55,8 +73,36 @@ pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-cod
 /// services and Apple events (codex 0.162.1 `seatbelt_base_policy.sbpl`). Measured on a Mac:
 /// `mdls` is denied (`com.apple.metadata.mds`), `mdfind` finds nothing, `open -R` opens no
 /// window, `qlmanage` fails to start, and `osascript` runs but cannot drive another app, while
-/// `textutil` and `sips` work. Claude runs unsandboxed and never gets it ([`codex_shell`]).
+/// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
 pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
+
+/// The line every Codex session gets after the instructions, whatever its browser: Clauseo
+/// declines a Codex shell command that needs the internet (the host's
+/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Claude never gets it.
+pub const CODEX_SHELL_OFFLINE: &str =
+    include_str!("../assets/instructions/codex-shell-offline.txt");
+
+/// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
+/// without web search ([`codex_shell_offline`]).
+pub const CODEX_SHELL_SEARCH: &str = "Use your web search and web fetch tools instead.";
+
+/// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
+/// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.
+pub fn codex_shell_offline(web_search: bool) -> &'static str {
+    let line = CODEX_SHELL_OFFLINE.trim();
+    if web_search {
+        return line;
+    }
+    line.strip_suffix(CODEX_SHELL_SEARCH)
+        .map_or(line, str::trim_end)
+}
+
+/// The line every Codex session gets after [`CODEX_SHELL_OFFLINE`]: Codex's refusals reach the
+/// lawyer only through its answer. A command its sandbox refuses at once, or a write the
+/// pre-write guard blocks, sends Clauseo no step at all (codex 0.162.1 and codex-acp 2.2.2), so
+/// unless the answer says so, the lawyer never learns it. Copy id UC-710. Claude never gets it:
+/// its refused steps reach the window as steps.
+pub const CODEX_REFUSAL: &str = include_str!("../assets/instructions/codex-refusal.txt");
 
 /// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
 /// the commands it names are macOS's own.
@@ -64,10 +110,72 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
 }
 
-/// What a Codex session on Windows is told, which has no browser for this agent there
-/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation.
-pub const BROWSER_CLAUDE_ONLY: &str =
-    include_str!("../assets/instructions/browser-claude-only.txt");
+/// The line a Codex session's instructions end with where Clauseo's own `pdftoppm` is on its
+/// `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as the
+/// folder, `setup/hook.rs`): Codex has no PDF input and its image viewer reads PNG, JPEG, GIF
+/// and WebP only, so it renders pages into `{work_folder}`, which its sandbox may write and the
+/// host fills. [`ClauseoProfile`](crate::ClauseoProfile)'s own instructions never hold it.
+/// Claude gets none: its Read runs that `pdftoppm` itself for a PDF over 10 pages.
+pub const CODEX_PDF: &str = include_str!("../assets/instructions/codex-pdf.txt");
+
+/// [`CODEX_PDF`], trimmed.
+pub fn codex_pdf() -> &'static str {
+    CODEX_PDF.trim()
+}
+
+/// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
+/// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off
+/// and no way out (`allowUnsandboxedCommands: false`), and its Mach list has no Spotlight or
+/// Quick Look service, so `mdls`, `mdfind`, `open`, `qlmanage` and `osascript` driving
+/// another app fail as they do for Codex ([`CODEX_SHELL_MACOS`]).
+pub const CLAUDE_SHELL_MACOS: &str = include_str!("../assets/instructions/claude-shell-macos.txt");
+
+/// The line a Claude session gets after the instructions on macOS (`macos`), and none
+/// elsewhere: Windows has no sandbox for Claude, and the commands it names are macOS's own.
+pub fn claude_shell(macos: bool) -> Option<&'static str> {
+    macos.then(|| CLAUDE_SHELL_MACOS.trim())
+}
+
+/// Whether Claude's instructions end with the "Working at scale" part ([`claude_scale`]).
+/// Measured setting: arm C2f ran with it.
+pub const SHIP_WORKING_AT_SCALE: bool = true;
+
+/// The "Working at scale" part a Claude session gets at the very end of its instructions (arm
+/// C2f's text, with the readers' digests in their replies rather than in files): when to convert
+/// documents to text, batch steps into one script, and launch `paper-reader` agents
+/// (`crate::subagents`). It holds `{work_folder}`, which the host fills. Codex gets no such part.
+///
+/// Its conversion script names `pypdf` and `python-docx`: Clauseo's Python runtime bundles both
+/// (`python-runtime/lock.toml`'s requirements, imported by its smoke test at every build; a
+/// profile test reads the lock). Linux has no runtime, and on macOS and Windows it installs after
+/// the agent, so a session can start before it is there: the part then says to convert with
+/// `textutil` or `stetdoc` instead and never to install packages.
+pub const SCALE_CLAUDE: &str = include_str!("../assets/instructions/scale-claude.txt");
+
+/// Whether [`SCALE_CLAUDE`] gains [`SCALE_RESEARCH`] in a session that keeps the `researcher`
+/// agent (`crate::subagents::RESEARCHER_ARM`, web search on): the host adds it then. Measured
+/// setting: off, so the researcher is defined and available but no text tells Claude to
+/// delegate research first.
+pub const SHIP_RESEARCH_TEXT: bool = false;
+
+/// The research bullets [`SCALE_CLAUDE`] gains with [`SHIP_RESEARCH_TEXT`] and a researcher:
+/// arm RH2's text (`R2.txt`), without its heading, its opening line and its batching bullet,
+/// which [`SCALE_CLAUDE`] already holds.
+pub const SCALE_RESEARCH: &str = include_str!("../assets/instructions/scale-research.txt");
+
+/// Claude's "Working at scale" part: [`SCALE_CLAUDE`], then a newline and [`SCALE_RESEARCH`]
+/// when `research`; `None` when [`SHIP_WORKING_AT_SCALE`] is false.
+pub fn claude_scale(research: bool) -> Option<String> {
+    if !SHIP_WORKING_AT_SCALE {
+        return None;
+    }
+    let text = SCALE_CLAUDE.trim();
+    Some(if research {
+        format!("{text}\n{}", SCALE_RESEARCH.trim())
+    } else {
+        text.to_owned()
+    })
+}
 
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,13 +183,11 @@ pub enum BrowserPart {
     /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
     /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
     On,
-    /// Turned off, or left out by policy: [`BROWSER_OFF`].
+    /// Turned off, left out by policy, or no browser for this agent on this OS (Claude anywhere,
+    /// Codex on Windows, `servers::no_browser`): [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,
-    /// No browser for this agent on this computer (Codex on Windows, `servers::no_browser`):
-    /// [`BROWSER_CLAUDE_ONLY`].
-    ClaudeOnly,
 }
 
 /// What the host fills `{browser}` with: a space and the part `part` names. Only this part names
@@ -93,13 +199,10 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_OFF.trim()));
     static NONE: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_NONE.trim()));
-    static CLAUDE_ONLY: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CLAUDE_ONLY.trim()));
     match part {
         BrowserPart::On => &ON,
         BrowserPart::Off => &OFF,
         BrowserPart::NotInstalled => &NONE,
-        BrowserPart::ClaudeOnly => &CLAUDE_ONLY,
     }
 }
 
@@ -118,7 +221,9 @@ pub fn browser_part_for(part: BrowserPart, mcp: bool) -> &'static str {
 
 /// The stetdoc line: what the agents are told when the app found a stetdoc whose `--version`
 /// works, whether or not its skill loaded. The profile puts it in place of `{stetdoc}` through
-/// [`stetdoc_part`].
+/// [`stetdoc_part`]. It also says a new document is made clean with pandoc, from a Markdown file
+/// in `{work_folder}`, which the host fills (decision record 0058): tracked changes only change
+/// a paper that already exists.
 pub const STETDOC_CLI: &str = include_str!("../assets/instructions/stetdoc.txt");
 
 /// The token the profile fills with [`stetdoc_part`]. It is not the host's: the profile knows

@@ -23,6 +23,15 @@
 //!   does as well, a no-op when the theme agrees. `WebView2` also takes the ground from
 //!   [`WEBVIEW2_BACKGROUND_ENV`] ([`ground_in_env`], first in `main`): on a fresh profile in
 //!   the dark theme, the builder's colour alone left `WebView2`'s #121212 for 0.5 to 0.75 s.
+//! - Off Windows the window is built hidden ([`with_ground`]) and shown only once it has the
+//!   ground ([`show_first_frame`], after [`paint_first_frame`] and the frame's own
+//!   `after_build`). Built visible, the Mac ordered the window front inside the build, before
+//!   the ground: its first frames could be `NSWindow`'s own grey and `WKWebView`'s white, which
+//!   draws its background until `drawsBackground` is turned off (wry's `set_background_color`).
+//!   Shown after, the first frame is the window's ground through a webview that draws none, then
+//!   the page's ground (`ui/app/index.html`), in the same OS light that `window.theme()` reads.
+//!   Windows stays visible through the build: the native mark (`native_mark.rs`) shows while
+//!   `WebView2` starts.
 
 use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder};
 
@@ -142,14 +151,33 @@ const fn colour((r, g, b): (u8, u8, u8)) -> tauri::window::Color {
 }
 
 /// `builder` with the ground of Windows' app theme as the window's and the webview's background,
-/// from their first frame. Elsewhere `builder` as it is: the theme cannot be read before the
-/// window without a cost, and [`paint_first_frame`] paints it once built.
+/// from their first frame. Elsewhere `builder` hidden: the theme cannot be read before the
+/// window without a cost, so [`paint_first_frame`] paints it once built and
+/// [`show_first_frame`] shows the window after.
 pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'_, R, M>,
 ) -> WebviewWindowBuilder<'_, R, M> {
     #[cfg(windows)]
     let builder = builder.background_color(colour(ground(windows_theme::apps_dark())));
+    #[cfg(not(windows))]
+    let builder = builder.visible(BUILT_VISIBLE);
     builder
+}
+
+/// Whether [`with_ground`] builds the window visible: on Windows only, where the native mark
+/// shows through `WebView2`'s start; elsewhere the window waits for [`show_first_frame`].
+pub(crate) const BUILT_VISIBLE: bool = cfg!(windows);
+
+/// Shows a window [`with_ground`] built hidden, once [`paint_first_frame`] has given it the
+/// ground, so its first frame is the ground. Nothing on Windows, where it is already shown.
+/// A refused show is logged: the window would stay hidden until the lawyer raises it.
+pub(crate) fn show_first_frame<R: Runtime>(window: &WebviewWindow<R>) {
+    if BUILT_VISIBLE {
+        return;
+    }
+    if let Err(error) = window.show() {
+        tracing::warn!(%error, "a window built hidden for its first frame was not shown");
+    }
 }
 
 /// The variable through which `WebView2` takes its default background before its controller

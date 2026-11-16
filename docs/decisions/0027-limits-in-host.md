@@ -48,7 +48,8 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
   and a fire that comes while nobody watches is ignored. The timer counts monotonic time, which
   stops while the computer sleeps, so every input first sweeps a deadline whose wall time passed.
 - **Focus throttle.** `RefreshWhy::Shown` is throttled by S13's model rule alone: it reads only
-  when the last read started 5 minutes ago or more (`SHOWN_AFTER_MS`, `policy/triggers.rs`). The
+  when the last read started the agent kind's `shown_after_ms` ago or more (2 minutes for Claude,
+  1 minute for Codex since 2026-11-15; `kind_rules`, `policy.rs`). The
   host adds no second number. A throttled `Shown` publishes nothing.
 - **R11 change 1, the close.** When a turn stops `AtLimit` and its limit signal has `resets_at:
   None`, the end commit holds `TurnEnded { AtLimit }` and no `TurnStoppedAtLimit`. The host asks
@@ -130,6 +131,10 @@ Amended 2026-11-03: U12 opened the limits for the Settings window: its Channel f
 2026-11-04: a Claude turn end reads after 2 minutes when no live signal came since the agent's
 last turn end, and after 10 minutes when one did ([0014](0014-limits.md)). The host feeds the
 same `TurnEnded` and `Live` inputs as before; only the model's threshold changed.
+
+2026-11-15: a `Shown` reads past 2 minutes for Claude and 1 minute for Codex, not 5 minutes
+([0014](0014-limits.md)). While Plan and usage is in view in the Settings window, the page sends
+`Shown` for every agent once a minute, so its figures follow the host's reads; no new command.
 
 ## Date
 

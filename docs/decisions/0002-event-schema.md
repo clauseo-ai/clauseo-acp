@@ -121,13 +121,13 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`); host notices only; `text` is the fallback) | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`; host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |
 | `turn_stopped_at_limit` | turn, window?, resets_at?, reason | limits, through the host | yes | T |
 | `turn_ended` | turn, stop, usage?, checkpoint_after? | host | yes | T |
-| `step_undone` | turn, checkpoint, restored, kept | host, matters | yes | T |
+| `step_undone` | turn, checkpoint, restored, kept, unversioned? | host, matters | yes | T |
 | `matter_created` | name, kind, import? | host | yes | M |
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |
@@ -139,6 +139,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `account_limits_changed` (`HostEvent`) | `AccountLimits` | limits, through the host | no | none |
 | `limits_view_changed` (`HostEvent`) | `LimitsView`, the whole view after a change | limits, through the host | no | none; `subscribe_limits` subscribers only |
 | `connectors_changed` (`HostEvent`) | `ConnectorsState`, the whole state after a change (R24) | host | no | none; app subscribers, and every app catch-up |
+| `mcp_tools_changed` (`HostEvent`) | `McpToolsView`, the lawyer's MCP servers (names, never values) and who decides them, whole, after a change (Settings › Tools) | host | no | none; app subscribers, and every app catch-up |
 | `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
 | `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
 | `protection_view_changed` (`HostEvent`) | `ProtectionView`, the whole view after a change (0051, R17 PR-B1) | host | no | none; app subscribers only, no catch-up (`HostQuery::Protection` has it) |
@@ -150,6 +151,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
   `turn_stopped_at_limit` may follow its turn's `turn_ended`, at most once. `files_changed`, when a
   turn changed files, comes before `turn_ended`.
 - `user_message` comes before `turn_queued` or `turn_started`, so a queued turn shows its prompt.
+  An agent-started turn (0011) has no `user_message`: its `turn_queued` behind its own thread,
+  logged as it takes the matter's writer, is its first event.
 - A `tool_call_updated` patch leaves a field `None` when it did not change, so no patch takes a
   field back to absent: a call that has a `tool_name`, `raw_input` or `raw_output` keeps one. A
   new tool-call field touches `ToolCallStarted`, `ToolCallPatch` and the view's `ToolCallEntry`,
@@ -266,8 +269,19 @@ reopen, as for 0018's bump (that note gives the cost: on iris-vm about 31 ms ins
 The queue and steer (H9, 0011's "Queue, send now and steer") fold what was logged but not folded
 before: a prompt waiting behind its own thread (`turn_queued` with `behind` its own thread) is
 `UserMessageStatus::Queued` until its `turn_started` (or a writer wait behind another thread)
-makes it `Sent`; `queued_prompt_edited` replaces its content and sets `edited`;
-`steer_resolved` sets the entry's `steer` and moves it to the outcome's turn, and marks each tool
+makes it `Sent`; one with no prompt and no turn ahead (`behind_turn` absent), while no turn of
+the thread runs, is an agent-started turn opening (added 2026-11-12): the thread is `Starting`
+(`NeedsYou` while the lawyer is asked) until its `turn_started` or its `turn_ended`. A prompt
+queued behind a turn still on its way (`behind_turn` that turn, `Starting` or `Queued`, not
+started; added 2026-11-12) leaves the status, as one behind a running turn does: the turn ahead
+stays the thread's last, so its `turn_started` gives `Running` and its `turn_ended` before it
+starts settles the status (before, the wait settled it to `Idle`, which hid Stop while the turn
+ahead was still starting). With the agent-started turn's open above, this
+changes how events fold, so `REDUCER_SCHEMA_VERSION` goes from 11 to 12: a snapshot folded under
+the old rules (which may show `Idle` where the turn is on its way) is passed over and the
+thread's log is folded once at its next reopen, as for the bumps above; `queued_prompt_edited` replaces its content and sets `edited`;
+`steer_resolved` sets the entry's `steer` and moves it to the outcome's turn (`not_sent`, added
+2026-11-11 for a steer a turn's end left unsent, moves nothing), and marks each tool
 call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the
 update that gives it a final status). `HeaderEntry.steer_joins_turn` is new: from
 `thread_created` it is true for a `claude-acp` agent, then each `agent_session_attached` sets it
@@ -346,10 +360,10 @@ Every limit and rule, with its constant:
 | Where | Rule | Constant |
 |---|---|---|
 | `SendPrompt` `content` | 1 to 100 blocks | `MAX_PROMPT_BLOCKS` |
-| same | at most 256 KiB of text, UTF-8 bytes summed over `Text` blocks, not escaped | `MAX_PROMPT_TEXT_BYTES` |
+| same | at most 6 MiB of text, JSON-escaped bytes (`escaped_len`) summed over `Text` blocks, so the agent's replay of the prompt fits the ACP client's 8 MiB line; over it is `prompt.too_long` | `MAX_PROMPT_TEXT_BYTES` |
 | same | at most 50 `File` blocks | `MAX_PROMPT_FILES` |
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
-| `EditQueuedPrompt.text` | at most 256 KiB, UTF-8 bytes; it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
+| `EditQueuedPrompt.text` | at most 6 MiB, JSON-escaped bytes (`prompt.too_long`); it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |
 | same | a visible character: not only whitespace, `Default_Ignorable_Code_Point` characters, U+2800 and combining marks (a heuristic) | |
@@ -642,7 +656,8 @@ as the room left by the blocks before it allows, so a block past the limit comes
   was frozen, and no test repeats it, since a field added later is rightly absent. The files are
   never edited or regenerated, and insta never touches them: the test pins each file's length
   and FNV-1a hash. A kind, or a variant of an open enum, added without a `schema_version` bump
-  brings its own frozen entries in `corpus/added/`, listed in the test's `ADDED_AFTER_V1`; the
+  brings its own frozen entries in `corpus/added/`, with a `.pin` beside them that pins their
+  lengths and hashes, and the test finds them there; the
   known kinds must be v1's plus the added ones, so a removed kind fails and an added one without
   its entry fails too. A unit value counts for every enum its string decodes as, so a new unit
   variant spelled like a value of another enum that the corpus holds passes unseen. A later
@@ -675,10 +690,10 @@ A new kind:
    accepted (`cargo insta test -p clauseo-protocol --accept`).
 5. Its row in the kind table under Kinds above, Logged `yes` and Stream `T` or `M`, in `KINDS`
    order: `kind_table_matches_record` (tests/events/rules.rs).
-6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/` and
-   its row in `ADDED_AFTER_V1` in `tests/corpus/added_rows.rs`. The ignored
-   `write_the_added_pairs` writes the pair from step 3's example into `target/tmp/corpus-added/`
-   and prints the `mv` commands and the row; `tests/corpus/v1/README.md` (Adding a kind or a
+6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/`
+   and its `<kind>.pin` beside them; no Rust file lists them. The ignored
+   `write_the_added_pairs` writes the three files from step 3's example into
+   `target/tmp/corpus-added/` and prints the `mv` commands; `tests/corpus/v1/README.md` (Adding a kind or a
    variant after v1) gives the command: `the_known_kinds_are_v1_and_the_added_ones`.
 
 A new variant of an open enum:
@@ -695,7 +710,7 @@ A new variant of an open enum:
    holds for a new variant of a closed enum on that list.
 4. If the enum is logged, an example in `tests/support/examples.rs` that holds the variant, and
    its frozen entries: the pair `<kind>-<Variant>.jsonl` and `.msgpack` in `tests/corpus/added/`
-   and its `ADDED_AFTER_V1` row, which `write_the_added_pairs` writes from that example as in
+   and its `.pin`, which `write_the_added_pairs` writes from that example as in
    step 6 of a new kind: `the_corpus_holds_every_variant_of_every_open_enum` (tests/corpus.rs).
    A unit value spelled like one the corpus holds for another enum passes that test unseen, so
    the pair is still added by hand.

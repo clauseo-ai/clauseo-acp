@@ -59,6 +59,19 @@ const LIST: RevisionList = {
     change(4, "format"),
   ],
   truncated: false,
+  total: 4,
+};
+
+/** A list whose changes are outside the main text: in the header, in a footnote, in a comment, one of them formatting. */
+const OUTSIDE: RevisionList = {
+  ...LIST,
+  revisions: [
+    { ...change(5, "insert", "Without prejudice"), place: "header_footer" },
+    { ...change(6, "format"), place: "header_footer" },
+    { ...change(7, "delete", "See the bank's letter of 2 March."), place: "note" },
+    { ...change(8, "insert", "Check the date"), place: "comment" },
+  ],
+  total: 4,
 };
 
 /** The room over a matter whose wall lists one .docx; list_revisions gives `list`, or is refused with that code, and
@@ -125,6 +138,10 @@ export const UC_WORD: Entry[] = [
   ),
   panel("UC-122", readerWords("Formatting changed"), wordHost(LIST)),
   panel("UC-123", readerWords("Moved"), wordHost(LIST)),
+  // where a change outside the main text is, beside its kind's label
+  panel("UC-304", readerWords("In a header or footer"), wordHost(OUTSIDE)),
+  panel("UC-305", readerWords("In a footnote or endnote"), wordHost(OUTSIDE)),
+  panel("UC-306", readerWords("In a comment"), wordHost(OUTSIDE)),
   panel(
     "UC-124",
     errorWords(
@@ -174,6 +191,12 @@ export const UC_WORD: Entry[] = [
       />
     ),
   },
+  // a list that stops short: Accept all and Reject all decide every change, the listed ones and the rest
+  panel(
+    "UC-260",
+    readerWords("The first {shown} are listed here. Accept all and Reject all decide all {n}."),
+    wordHost({ ...LIST, truncated: true, total: 600 }),
+  ),
 ];
 
 /** registry-uc-blackline.tsx's UC_ALL (registry-uc.tsx's UC, then the Word blackline's scenes), then these. */

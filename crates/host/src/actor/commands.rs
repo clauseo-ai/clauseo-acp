@@ -31,7 +31,7 @@ use crate::principal::{Access, authorize};
 pub(crate) struct PendingCommand {
     pub(super) hash: [u8; 32],
     /// Everyone waiting for the answer: the first caller and its duplicates.
-    waiters: Vec<Reply<CommandOutcome>>,
+    pub(super) waiters: Vec<Reply<CommandOutcome>>,
     /// The command, until it runs.
     command: Option<ValidatedCommand>,
     /// A matter being created or imported for it.
@@ -287,6 +287,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         // R24's connector commands: no receipt, ever (decision D2), since nothing here commits,
         // so the API key never reaches the receipts table, not even as a hash.
         HostCommand::Connector(command) => super::connectors::run(actor, ctx, command),
+        HostCommand::Mcp(command) => super::mcp::run(actor, ctx, command),
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),

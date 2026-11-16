@@ -231,6 +231,9 @@ pub(crate) struct SharedTimer {
 /// a tree the OS has not reaped yet costs the test no firing, and the poll's 10 s cap is 10 s of
 /// real time, as in the app (a poll that ended at once would spend the cap before the OS reaps).
 pub(crate) const TREE_POLL: Duration = Duration::from_millis(50);
+/// The poll of a try waiting for another install's `.lock-node` (`install/locks.rs`'s
+/// `LOCK_POLL`): real time too, so a wait for the other install's Node costs the test no firing.
+pub(crate) const LOCK_POLL: Duration = Duration::from_millis(150);
 /// The waits between the retries of a temp folder's removal (`npm.rs`'s `REMOVE_WAITS`): real
 /// time too, so a removal an antivirus holds a moment is retried without the test firing it.
 const REMOVE_WAITS: [Duration; 4] = [
@@ -247,11 +250,12 @@ impl Timer for SharedTimer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(duration);
-        let (manual, real) = if duration == TREE_POLL || REMOVE_WAITS.contains(&duration) {
-            (None, Some(clauseo_process::AsyncIoTimer.after(duration)))
-        } else {
-            (Some(self.manual.after(duration)), None)
-        };
+        let (manual, real) =
+            if duration == TREE_POLL || duration == LOCK_POLL || REMOVE_WAITS.contains(&duration) {
+                (None, Some(clauseo_process::AsyncIoTimer.after(duration)))
+            } else {
+                (Some(self.manual.after(duration)), None)
+            };
         async move {
             if let Some(wait) = manual {
                 wait.await;

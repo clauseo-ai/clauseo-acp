@@ -1,9 +1,14 @@
 //! The reader on stetdoc 0.9.0's real output: the fixture's redline (`view.json`), lines it
-//! printed for the other markup it knows, the escapes, and the failures.
+//! printed for the other markup it knows, the escapes, and what it leaves out. stetdoc 0.9.3's
+//! nested tables, hidden text and long lines, and the partial reads, are in `partial.rs`.
 
-use clauseo_protocol::{BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind};
+use clauseo_protocol::{
+    BlacklineNotice, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind,
+};
 
 use super::{Unreadable, ViewFailure, read_text, read_view};
+
+mod partial;
 
 /// `stetdoc view --all --json` on the fixture's redline (`tests/fixtures/blackline/`).
 const VIEW: &str = include_str!(concat!(
@@ -12,26 +17,37 @@ const VIEW: &str = include_str!(concat!(
 ));
 
 /// A paragraph of `change` with `runs`, each `(kind, text)`.
-fn para(change: ParagraphChange, runs: &[(RunKind, &str)]) -> BlacklineParagraph {
+pub(super) fn para(change: ParagraphChange, runs: &[(RunKind, &str)]) -> BlacklineParagraph {
     BlacklineParagraph {
+        hidden: false,
         change,
         runs: runs
             .iter()
             .map(|&(kind, text)| BlacklineRun {
                 kind,
                 text: text.to_owned(),
+                object: None,
             })
             .collect(),
     }
 }
 
-use ParagraphChange::{Added, Changed, Removed, Same as Kept};
+use ParagraphChange::{Added, Changed, Formatted, Removed, Same as Kept};
+
+/// The paragraph that stands where a line was left out.
+pub(super) fn gap() -> BlacklineParagraph {
+    para(ParagraphChange::NotShown, &[])
+}
 use RunKind::{Del, Ins, Same};
 
 #[test]
 fn the_fixture_reads_paragraph_by_paragraph() {
-    let blackline = read_view(VIEW).unwrap();
+    let read = read_view(VIEW).unwrap();
+    assert_eq!((read.skipped, read.warnings.len()), (0, 0));
+    let blackline = read.blackline;
     assert!(!blackline.truncated);
+    // The footnote changed too, and the view does not mark it.
+    assert_eq!(blackline.notices, [BlacklineNotice::ChangesOutsideText]);
     let expected = vec![
         para(Kept, &[(Same, "Lease Agreement")]),
         para(
@@ -77,7 +93,7 @@ fn the_fixture_reads_paragraph_by_paragraph() {
             ],
         ),
         // A format change only: its text is the same.
-        para(Kept, &[(Same, "This clause is important.")]),
+        para(Formatted, &[(Same, "This clause is important.")]),
         para(Added, &[(Ins, "Notices go by email.")]),
         para(Kept, &[(Same, "Signatures")]),
     ];
@@ -156,14 +172,16 @@ fn the_other_markup_reads_as_its_text() {
         para(Changed, &[(Same, "Logo "), (Del, "line"), (Ins, "row")]),
         para(Kept, &[(Same, "F: res \"a\" }{ b")]),
     ];
-    assert_eq!(read_text(MARKUP).unwrap(), expected);
+    let read = read_text(MARKUP);
+    assert_eq!((read.skipped, read.seen.unknown), (0, false));
+    assert_eq!(read.paragraphs, expected);
 }
 
 #[test]
 fn escaped_markup_is_document_text() {
     let line = r"p1 Odd \{++x++\}\{#3 A\} and \{--{--y--}{#1 RT}{++z++}{#0 RT}--\} and \\ back \{¶+ #1 C\} & tab\there";
     assert_eq!(
-        read_text(line).unwrap(),
+        read_text(line).paragraphs,
         vec![para(
             Changed,
             &[
@@ -176,56 +194,92 @@ fn escaped_markup_is_document_text() {
     );
     // An inserted "C++" ends at the last "++}".
     assert_eq!(
-        read_text("p1 {++C++++}{#1 A}").unwrap(),
+        read_text("p1 {++C++++}{#1 A}").paragraphs,
         vec![para(Changed, &[(Ins, "C++")])]
     );
 }
 
+/// A line that breaks a rule is left out, by its line and rule alone, and the lines around it
+/// are read.
 #[test]
-fn what_the_reader_does_not_know_fails_the_read() {
-    let fails = |text: &str, why: &str| {
-        let error = read_text(text).unwrap_err();
-        assert_eq!(error.why, why, "{text}");
+fn a_line_that_breaks_a_rule_is_left_out() {
+    let skips = |text: &str, why: &str| {
+        let read = read_text(&format!("p1 before\n{text}\np3 after"));
+        assert_eq!(read.skipped, 1, "{text}");
+        assert_eq!(
+            read.first_skip.map(|at| (at.line, at.why)),
+            Some((2, why)),
+            "{text}"
+        );
+        assert_eq!(
+            read.paragraphs,
+            [
+                para(Kept, &[(Same, "before")]),
+                gap(),
+                para(Kept, &[(Same, "after")])
+            ],
+            "{text}"
+        );
     };
-    fails("p1 a {zz} b", "markup the reader does not know");
-    fails("p1 a {#3 C} b", "markup the reader does not know");
-    fails("p1 a {¶+ #1 C} b", "markup the reader does not know");
-    fails("p1 a {rev run #1 C} b", "markup the reader does not know");
-    fails("p1 a } b", "a closing brace that is not escaped");
-    fails(r"p1 a \q b", "an escape the reader does not know");
-    fails("p1 {++new++} after", "a change without its id");
-    fails("p1 {--old--}{note}", "a change without its id");
-    fails(
-        "p1 {++never ends",
+    skips("p2 a } b", "a closing brace that is not escaped");
+    skips(r"p2 a \q b", "an escape the reader does not know");
+    skips("p2 {++new++} after", "a change without its id");
+    skips("p2 {--old--}{note}", "a change without its id");
+    skips(
+        "p2 {++never ends",
         "an insertion or deletion that does not end",
     );
-    fails(
-        "p1 {--a {++b++}{#1 C}--}{#2 C}",
-        "markup the reader does not know",
+    skips("p2 {link \"x\"}a{/link {b}}", "markup inside markup");
+    skips("p2 {field PAGE}", "a field with no result");
+    skips("p2 {hidden}", "a hidden-text marker with no text");
+    skips("p2 a {unclosed", "markup that does not end");
+    skips(
+        "p2 a {\"quoted\"}",
+        "a marker that does not start with a word",
     );
-    fails(
-        "p1 {link \"x\" more}a{/link}",
-        "a link or image marker the reader does not know",
-    );
-    fails("p1 {field PAGE}", "a field with no result");
-    fails(
-        "p1 {§\"1.\" moved} a",
-        "a list number the reader does not know",
-    );
-    fails("p1 a {unclosed", "markup that does not end");
-    fails(
-        "x1 a block of another kind",
+    skips(
+        "x2 a block of another kind",
         "a block of a kind the reader does not know",
     );
-    fails("t1 no marker", "a table or row line without its marker");
-    fails("just text", "a line with no block ref");
-    fails("p1x text", "a line with no block ref");
+    skips("t2 no marker", "a table or row line without its marker");
+    skips("just text", "a line with no block ref");
+    skips("p2x text", "a line with no block ref");
+    skips("r2 {row}", "a row outside a table");
+    skips("{/table}", "a table end with no table open");
+}
+
+/// Markup a newer stetdoc may add: a marker whose first word is not known is left out and
+/// noted, words after the ones a known marker needs are ignored, and nothing else changes.
+#[test]
+fn markup_from_a_newer_stetdoc_is_left_out_or_read_in_part() {
+    let read = read_text(concat!(
+        "p1 a {zz \"secret\"} b\n",
+        "p2 {field REF \"4.2\" ->p57 label} and {field PAGE \"2\" \"the label\" newword}\n",
+        "p3 {§\"1.\" moved} {link \"x\" more}site{/link} {img \"logo\" spin=3}\n",
+        "p4 {style \"Body\" next=\"x\"} {¶+ #1 C later} {++new++}{#1 C move from #3}\n",
+        "t1 {table cols=1 repeat=header}\n",
+        "r1 {row header repeating}\n",
+        "p5 {span 2 wide} {vmerge restart more} cell\n",
+        "r2 {repeat-row #7 C}\n",
+        "{/table}",
+    ));
+    assert_eq!(read.skipped, 0);
+    assert!(read.seen.unknown);
     assert_eq!(
-        read_text("p1 ok\np2 a {zz}").unwrap_err(),
-        Unreadable {
-            line: 2,
-            why: "markup the reader does not know"
-        }
+        read.paragraphs,
+        [
+            para(Kept, &[(Same, "a  b")]),
+            para(Kept, &[(Same, "4.2 and 2")]),
+            para(Kept, &[(Same, "1. site ")]),
+            para(Added, &[(Ins, "new")]),
+            para(Kept, &[(Same, "cell")]),
+        ]
+    );
+    // The known tags and markers alone note nothing.
+    assert!(
+        !read_text("p1 {§\"1.\"} {•} {joins-next} x{c1}{/c1}{fn.}{en2}{page}")
+            .seen
+            .unknown
     );
 }
 
@@ -236,22 +290,19 @@ fn the_json_around_the_text_is_checked() {
             "mode": mode,
             "next": serde_json::from_str::<serde_json::Value>(next).unwrap(),
             "position": {"shown": shown, "total": 4},
-            "text": "p1 a",
+            "text": "{stet 1 view=body mode=redline}\np1 a",
         })
         .to_string()
     };
-    assert!(!read_view(&view("redline", "null", 4)).unwrap().truncated);
+    let truncated = |json: &str| read_view(json).unwrap().blackline.truncated;
+    assert!(!truncated(&view("redline", "null", 4)));
     // stetdoc says the page is partial: fewer blocks shown, or a next page named.
-    assert!(read_view(&view("redline", "null", 3)).unwrap().truncated);
-    assert!(
-        read_view(&view("redline", "\"--after p2\"", 4))
-            .unwrap()
-            .truncated
-    );
+    assert!(truncated(&view("redline", "null", 3)));
+    assert!(truncated(&view("redline", "\"--after p2\"", 4)));
     let not = |json: &str, why: &'static str| {
         assert_eq!(
             read_view(json).unwrap_err(),
-            ViewFailure::Unreadable(Unreadable { line: 0, why })
+            ViewFailure::NotAView(Unreadable { line: 0, why })
         );
     };
     not(&view("final", "null", 4), "the view is not a redline");
@@ -262,11 +313,11 @@ fn the_json_around_the_text_is_checked() {
     not("not json", "the JSON is not a view");
 }
 
-/// A view that warns, as stetdoc 0.9.0 did for a table nested in a cell (content not shown),
-/// fails by its codes alone, however well its text reads; a code that is not a plain word is
-/// logged as `other`.
+/// A view that warns, as stetdoc 0.9.0 did for a table nested in a cell (content not shown), is
+/// read whole, its warnings notices by their codes; a code that is not a plain word is logged as
+/// `other` and says only that the blackline may differ.
 #[test]
-fn a_view_with_a_warning_fails_by_its_codes() {
+fn a_view_with_a_warning_is_read_with_notices() {
     let mut view: serde_json::Value = serde_json::from_str(VIEW).unwrap();
     view["warnings"] = serde_json::json!([
         {
@@ -276,12 +327,48 @@ fn a_view_with_a_warning_fails_by_its_codes() {
             "next": "check the document with the check command",
             "story": "body"
         },
-        {"code": "Secret Text {x}", "message": "x"}
+        {"code": "Secret Text {x}", "message": "x"},
+        {"code": "unreferenced_note", "message": "x"},
+        {"code": "own_text_removed", "message": "x"},
+        {"code": "property_change_folded", "message": "x"}
     ]);
-    let failure = read_view(&view.to_string()).unwrap_err();
+    let read = read_view(&view.to_string()).unwrap();
     assert_eq!(
-        failure,
-        ViewFailure::Warned(vec!["read_anomaly".to_owned(), "other".to_owned()])
+        read.blackline.paragraphs,
+        read_view(VIEW).unwrap().blackline.paragraphs
     );
-    assert_eq!(failure.to_string(), "it warned: read_anomaly, other");
+    // The fixture's footnote change, outside the main text, is noted as before.
+    assert_eq!(
+        read.blackline.notices,
+        [
+            BlacklineNotice::PartNotShown,
+            BlacklineNotice::ChangesOutsideText,
+            BlacklineNotice::MayDiffer
+        ]
+    );
+    assert_eq!(
+        read.warnings,
+        [
+            "read_anomaly",
+            "other",
+            "unreferenced_note",
+            "own_text_removed",
+            "property_change_folded"
+        ]
+    );
+    // `own_text_removed` and `property_change_folded` each say the blackline may differ;
+    // `unreferenced_note` says nothing.
+    for (code, may_differ) in [
+        ("own_text_removed", true),
+        ("property_change_folded", true),
+        ("unreferenced_note", false),
+    ] {
+        view["warnings"] = serde_json::json!([{"code": code, "message": "x"}]);
+        let notices = read_view(&view.to_string()).unwrap().blackline.notices;
+        assert_eq!(
+            notices.contains(&BlacklineNotice::MayDiffer),
+            may_differ,
+            "{code}"
+        );
+    }
 }

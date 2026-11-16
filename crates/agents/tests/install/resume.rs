@@ -388,11 +388,12 @@ fn a_rename_that_never_works_fails_as_setup_failed_not_as_a_download() {
     }
 }
 
-/// Node's archive that downloads and checks but will not unpack (a gzip of no tar): `Installing`
-/// went out before the unpack, and the failure is the set-up's, not the download's.
+/// Node's archive that downloads and checks but will not unpack (a gzip of no tar): Node is
+/// unpacked right after its download, before the agent's packages (so another install waits for
+/// Node alone), and the failure is the set-up's, not the download's; `Installing` never went out.
 #[cfg(unix)]
 #[test]
-fn installing_goes_out_before_node_s_unpack_and_its_failure_is_a_setup_failure() {
+fn node_s_unpack_runs_before_the_packages_and_its_failure_is_a_setup_failure() {
     use std::io::Write as _;
 
     use crate::support::{BASE, node_entry, node_path, snapshot};
@@ -409,16 +410,20 @@ fn installing_goes_out_before_node_s_unpack_and_its_failure_is_a_setup_failure()
     let (agents, events) = fx.start();
     events.first_states();
     agents.install(&agent_a());
-    let seen = events.until(&agent_a(), |state| *state == InstallState::Installing);
-    assert!(
-        !seen
-            .iter()
-            .any(|(_, state)| matches!(state, InstallState::Failed(_))),
-        "{seen:?}"
-    );
     fx.timer.fire_next(BACKOFF_FIRST);
     fx.timer.fire_next(Duration::from_secs(8));
-    let (_, last) = events.until_end(&agent_a());
+    let (seen, last) = events.until_end(&agent_a());
+    assert!(
+        !crate::support::states_of(&seen, &agent_a()).contains(&InstallState::Installing),
+        "{seen:?}"
+    );
+    for name in A_PACKAGES {
+        assert_eq!(
+            fx.requests_for(name),
+            [],
+            "{name}: no package before Node is in place"
+        );
+    }
     let InstallState::Failed(failure) = last else {
         panic!("{last:?}");
     };

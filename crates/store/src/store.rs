@@ -18,8 +18,8 @@ use rusqlite::Connection;
 use crate::read::{self, StreamIds};
 use crate::writer::{WriteRequest, Writer};
 use crate::{
-    CheckpointRow, Commit, Committed, Error, MatterRow, Receipt, Reopen, StoreOptions, ThreadRow,
-    answer, blob, open,
+    CheckpointRow, Commit, Committed, Error, MatterRow, PendingAction, Receipt, Reopen,
+    StoreOptions, ThreadRow, answer, blob, open,
 };
 
 /// Requests each thread's queue holds before `send` waits.
@@ -112,6 +112,9 @@ enum ReadRequest {
     },
     AccountLimits {
         reply: oneshot::Sender<Result<Vec<AccountLimits>, Error>>,
+    },
+    PendingActions {
+        reply: oneshot::Sender<Result<Vec<PendingAction>, Error>>,
     },
     Close {
         reply: oneshot::Sender<Result<(), Error>>,
@@ -315,6 +318,28 @@ impl Store {
             .await
     }
 
+    /// Keeps `action` as its matter's pending action, replacing any earlier one; durable when
+    /// this returns `Ok`.
+    pub async fn put_pending_action(&self, action: PendingAction) -> Result<(), Error> {
+        self.write(|reply| WriteRequest::PutPendingAction {
+            action: Box::new(action),
+            reply,
+        })
+        .await
+    }
+
+    /// Forgets `matter`'s pending action, if any.
+    pub async fn clear_pending_action(&self, matter: MatterId) -> Result<(), Error> {
+        self.write(|reply| WriteRequest::ClearPendingAction { matter, reply })
+            .await
+    }
+
+    /// Every pending action, oldest first: at start, the ones the last run left unfinished.
+    pub async fn pending_actions(&self) -> Result<Vec<PendingAction>, Error> {
+        self.read(|reply| ReadRequest::PendingActions { reply })
+            .await
+    }
+
     /// Stops the reader, checkpoints and truncates the WAL, closes the file, releases the lock
     /// and joins both threads. Every clone's later calls return [`Error::Closed`].
     pub async fn close(self) -> Result<(), Error> {
@@ -493,6 +518,7 @@ fn serve(
         ReadRequest::Threads { matter, reply } => answer(reply, read::threads(conn, matter)),
         ReadRequest::Checkpoint { id, reply } => answer(reply, read::checkpoint(conn, id)),
         ReadRequest::AccountLimits { reply } => answer(reply, read::account_limits(conn)),
+        ReadRequest::PendingActions { reply } => answer(reply, read::pending_actions(conn)),
         #[cfg(feature = "test-support")]
         ReadRequest::Pragma { name, reply } => answer(reply, crate::pragma(conn, name)),
         ReadRequest::Close { reply } => return Some(reply),

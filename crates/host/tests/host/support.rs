@@ -411,3 +411,25 @@ pub(crate) fn matter_with_thread(
 #[path = "support_shutdown.rs"]
 mod shutdown;
 pub(crate) use shutdown::{shutdown_past_cancel, shutdown_stopping};
+
+/// A lawyer's MCP server's `env` as `session/new` carries it: `own`, then the `PATH` the host
+/// gives it (its program's folder first; any value here), under this process's name for it, and
+/// on Windows the variables `case_law::windows_env` adds when this process has them.
+pub(crate) fn lawyer_env(own: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut env = own;
+    let path = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .find(|name| name.eq_ignore_ascii_case("PATH"))
+        .unwrap_or_else(|| "PATH".to_owned());
+    env.push(serde_json::json!({"name": path, "value": "{{any}}"}));
+    if cfg!(windows) {
+        env.push(serde_json::json!({"name": "SystemRoot", "value": "{{any}}"}));
+        env.push(serde_json::json!({"name": "windir", "value": "{{any}}"}));
+        for name in ["TEMP", "TMP", "PATHEXT"] {
+            if std::env::var(name).is_ok() {
+                env.push(serde_json::json!({"name": name, "value": "{{any}}"}));
+            }
+        }
+    }
+    serde_json::Value::Array(env)
+}

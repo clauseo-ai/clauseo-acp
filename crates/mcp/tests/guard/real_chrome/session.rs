@@ -1,13 +1,13 @@
-//! The real-Chrome tests' view of the session's processes, on `/proc`, and of the guard's stderr
-//! when a step fails.
+//! The real-Chrome tests' view of the session's processes (`support::process_table`: `/proc` on
+//! Linux, `ps` on macOS), and of the guard's stderr when a step fails.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::support::{Guard, Scratch, left_in};
+use crate::support::{Guard, Process, Scratch, left_in, process_table};
 
-/// The session's processes: Chrome's process group (its leader found by its profile in
-/// `/proc/*/cmdline`), agent-browser's daemon (its pid file, if it started), and any process
+/// The session's processes: Chrome's process group (its leader found by its profile on its
+/// command line), agent-browser's daemon (its pid file, if it started), and any process
 /// whose command line names the scratch folder (Chrome's crashpad handlers lead groups of their
 /// own).
 pub(crate) struct Session {
@@ -24,18 +24,13 @@ impl Session {
         );
         let chrome = processes()
             .into_iter()
-            .find(|pid| {
-                std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                    cmd.split(|b| *b == 0)
-                        .any(|arg| arg.starts_with(flag.as_bytes()))
-                })
-            })
+            .find(|process| process.has_arg_starting(&flag))
             .expect("Chrome with the session's profile");
         let daemon = crate::support::daemon_pid_file(&scratch.socket_dir())
             .and_then(|file| std::fs::read_to_string(file).ok())
             .and_then(|text| text.trim().parse().ok());
         Self {
-            chrome_group: group_of(chrome).unwrap(),
+            chrome_group: chrome.group,
             daemon,
             scratch: scratch.path().to_owned(),
         }
@@ -45,15 +40,11 @@ impl Session {
     pub(crate) fn left(&self) -> Vec<String> {
         processes()
             .into_iter()
-            .filter_map(|pid| {
-                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-                let (_, rest) = stat.rsplit_once(") ")?;
-                let fields: Vec<&str> = rest.split(' ').collect();
-                let zombie = fields.first() == Some(&"Z");
-                let in_group =
-                    fields.get(2).and_then(|g| g.parse().ok()) == Some(self.chrome_group);
-                (!zombie && (in_group || Some(pid) == self.daemon)).then(|| stat.clone())
+            .filter(|process| {
+                let in_group = process.group == self.chrome_group;
+                !process.zombie && (in_group || Some(process.pid) == self.daemon)
             })
+            .map(|process| describe(&process))
             .chain(left_in(&self.scratch))
             .collect()
     }
@@ -74,29 +65,33 @@ impl Session {
     }
 }
 
-pub(crate) fn processes() -> Vec<i32> {
-    std::fs::read_dir("/proc")
-        .unwrap()
-        .flatten()
-        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
-        .collect()
+/// Every process, zombies too.
+pub(crate) fn processes() -> Vec<Process> {
+    process_table()
 }
 
+/// A process for a failure's message: `<pid> group <group>[ zombie] <command line>`.
+pub(crate) fn describe(process: &Process) -> String {
+    let zombie = if process.zombie { " zombie" } else { "" };
+    format!(
+        "{} group {}{zombie} {}",
+        process.pid, process.group, process.line
+    )
+}
+
+/// The process group of `pid`, a zombie's too; none once it is gone.
 pub(crate) fn group_of(pid: i32) -> Option<i32> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(") ")?.1.split(' ').nth(2)?.parse().ok()
-}
-
-/// Every process in group `group`, zombies too, as `/proc/<pid>/stat` has it.
-pub(crate) fn group_members(group: i32) -> Vec<String> {
     processes()
         .into_iter()
-        .filter_map(|pid| std::fs::read_to_string(format!("/proc/{pid}/stat")).ok())
-        .filter(|stat| {
-            stat.rsplit_once(") ")
-                .and_then(|(_, rest)| rest.split(' ').nth(2)?.parse().ok())
-                == Some(group)
-        })
+        .find(|process| process.pid == pid)
+        .map(|process| process.group)
+}
+
+/// Every process in group `group`, zombies too.
+pub(crate) fn group_members(group: i32) -> Vec<Process> {
+    processes()
+        .into_iter()
+        .filter(|process| process.group == group)
         .collect()
 }
 

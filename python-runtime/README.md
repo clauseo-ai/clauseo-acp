@@ -3,8 +3,9 @@
 Clauseo ships its own Python so that document tools (Word, Excel, PowerPoint, PDF) behave the same
 on every machine and never depend on what the user has installed. This folder pins that runtime:
 CPython from [python-build-standalone](https://github.com/astral-sh/python-build-standalone) (PBS)
-plus a fixed set of document libraries, and [pandoc](https://pandoc.org) from its official release
-archives, each file pinned by sha256.
+plus a fixed set of document libraries, [pandoc](https://pandoc.org) from its official release
+archives, and the [tesseract](https://github.com/tesseract-ocr/tesseract) OCR program, built from
+source with leptonica, with its English and Hindi models, each file pinned by sha256.
 
 The archives are built per target by xtask's `python-runtime build` and published as GitHub
 releases by [.github/workflows/python-runtime.yml](../.github/workflows/python-runtime.yml). The app
@@ -15,7 +16,7 @@ launcher), come in later changes.
 
 | path | what it is | edited by |
 |---|---|---|
-| `lock.toml` | every input: the CPython and PBS release, each target's PBS archive, each package's wheel per target, and pandoc's release archive per target and its source tarball, with sha256 and size | `bump` (only `[runtime]`, `[resolve]` and `[pandoc] version` by hand) |
+| `lock.toml` | every input: the CPython and PBS release, each target's PBS archive, each package's wheel per target, pandoc's release archive per target and its source tarball, and tesseract's and leptonica's source tarballs and the tessdata_fast models, with sha256 and size | `bump` (only `[runtime]`, `[resolve]`, `[pandoc] version` and `[tesseract]`'s `version`, `leptonica`, `tessdata_commit` and `languages` by hand) |
 | `THIRD-PARTY-NOTICES.txt` | every licence text the archives ship, stamped with the lock's sha256; `build` copies it into each archive | `bump` |
 | `smoke/smoke.py`, `smoke/hello.pdf` | the smoke test `build` runs with the finished runtime | hand |
 | `tools/pack.py` | packs the runtime into a deterministic `.tar.gz`, run by the runtime itself | hand |
@@ -41,7 +42,22 @@ with GitHub's signed release attestation: `bump` takes each archive's sha256 fro
 and `build` checks the sha256 and size, then `gh release verify-asset <version> <file> -R
 jgm/pandoc`. pandoc is GPL-2.0-or-later and runs as its own program; the notices carry its
 `COPYING.md` and `COPYRIGHT` (from the tag's source tarball, which the lock pins too) and point at
-that tarball as its complete source. `c<build>` is Clauseo's build number: any change to what goes
+that tarball as its complete source.
+
+tesseract is one program and two models in each archive: `bin/tesseract` and `bin/tessdata/` on
+macOS, `clauseo-bin\tesseract.exe` and `clauseo-bin\tessdata\` on Windows, with `eng` and `hin`
+from tesseract-ocr/tessdata_fast. Neither tesseract nor leptonica publishes a portable binary for
+these targets, so `build` compiles both with CMake and the target's own compiler (Xcode's clang,
+Visual Studio 2022's MSVC, native on each runner) from source tarballs pinned by sha256: leptonica
+with every image codec off, tesseract without training tools, libarchive, libcurl, libtiff or
+OpenCL, all static (`/MT` on Windows), for macOS 13.0. It reads PGM/PNM images only (pages
+rendered by pypdfium2 are written as PGM), links nothing but the system's libraries, and is signed
+ad hoc with the hardened runtime on macOS, as the app's helpers are until there is a Developer ID.
+Callers pass `--tessdata-dir <its folder>/tessdata`; on Windows it also finds the folder beside
+itself unaided, on macOS it does not. tesseract and the models are Apache-2.0, leptonica
+BSD-2-Clause; the notices carry their licence files. See xtask's `python_runtime/tesseract.rs`.
+
+`c<build>` is Clauseo's build number: any change to what goes
 in an archive takes a new one, and a published build is never replaced.
 
 ## Commands
@@ -51,7 +67,8 @@ All run from the repo root.
 - `cargo xtask python-runtime check`: offline. The lock parses and is laid out as `bump` writes
   it; it has all four targets; every package is a wheel (no sdists) whose tags load in CPython
   3.13 on its target; a package with compiled code has a wheel for every target; every licence is
-  in the allowlist (permissive licences only, no GPL/LGPL/AGPL); the packages are exactly the
+  in the allowlist (permissive licences only, no GPL/LGPL/AGPL), tesseract's, leptonica's and the
+  models' too; `[tesseract]` pins every source and model; the packages are exactly the
   closure of the requirements; and the notices were written from this lock. The xtask test
   `real_lock_passes` runs the same check, so `cargo xtask check` runs it too.
 - `cargo xtask python-runtime check --online --advisories advisories.json`: the nightly audit
@@ -59,11 +76,15 @@ All run from the repo root.
   still be on PyPI with the same sha256 and size, not yanked; every PBS archive must still be in
   its release's `SHA256SUMS` with the same sha256; and OSV is asked for advisories against each
   pinned version (reported, not failing). pandoc's release must still be immutable and give each
-  archive the same sha256 and size, and its source tarball must hash the same.
+  archive the same sha256 and size, and its source tarball must hash the same. Every tesseract
+  pin (both source tarballs, the models and tessdata_fast's licence) must download with the same
+  sha256 and size.
 - `cargo xtask python-runtime bump --resolver-python python3 --cache /tmp/pyrt-cache`: re-resolves
   `[resolve] requirements` with pip for each target (binary wheels only), takes every sha256 from
   PBS's `SHA256SUMS`, pip's report and PyPI, takes pandoc's archives for `[pandoc] version` (each
-  sha256 from GitHub's API) and its source tarball, and rewrites `lock.toml` and
+  sha256 from GitHub's API) and its source tarball, hashes tesseract's and leptonica's source
+  tarballs (leptonica's must match GitHub's digest) and each model at `tessdata_commit`, and
+  rewrites `lock.toml` and
   `THIRD-PARTY-NOTICES.txt`. It needs the network, a Python with pip 23.1 or newer (nothing is
   installed into it), and a `tar` that reads zstd (for PBS's licence files). Both flags are
   optional: the resolver defaults to `python3` (`python` on Windows), the cache to a temporary
@@ -73,9 +94,11 @@ All run from the repo root.
   attestation with `gh attestation verify`, and pandoc's release attestation with `gh release
   verify-asset`; gh 2.75 or newer and a token), unpacks PBS, installs the wheels offline with
   `--require-hashes`, runs `pip check`, trims what the runtime does not need, copies the pandoc
-  binary in, checks that every licence file inside (and pandoc's) is in the notices word for
-  word, compiles the bytecode (`unchecked-hash`, so nothing writes `__pycache__` later), runs
-  the smoke test (which also runs `pandoc --version` and a .docx to Markdown and back), packs
+  binary in, compiles leptonica and tesseract from their checked tarballs and puts the program
+  and models in (CMake 3.22 or newer and the target's C++ compiler), checks that every licence
+  file inside (and pandoc's and tesseract's) is in the notices word for word, compiles the bytecode (`unchecked-hash`, so nothing writes `__pycache__` later), runs
+  the smoke test (which also runs `pandoc --version` and a .docx to Markdown and back, and
+  `tesseract --version` and OCR of an English and Hindi page it draws), packs
   the archive and writes `build.json` in the `--out` folder (name, sha256, size, unpacked size).
   `--download-only` stops after the checks, on any machine. `--no-attestation` is for a local try
   without gh; CI never passes it.

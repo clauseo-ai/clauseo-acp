@@ -7,8 +7,9 @@ use serde_json::Value;
 
 use super::profile;
 
-/// agent-browser's rules for Claude: the page subcommands allowed, the options that reach the
-/// lawyer's own browser or swap Clauseo's settings denied, everything else asking. The profile
+/// agent-browser's rules for Claude: the page subcommands allowed; the options that reach the
+/// lawyer's own browser or swap Clauseo's settings, and the commands that read or write a local
+/// file or run page JavaScript, denied; a few options asking. The profile
 /// never sends them, with the browser or without: the host adds them per session.
 #[test]
 fn agent_browser_rules_are_the_hosts_per_session() {
@@ -16,23 +17,28 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         AGENT_BROWSER_ALLOWED, AGENT_BROWSER_DENIED, agent_browser_allowed, agent_browser_denied,
     };
     let allowed: Vec<String> = agent_browser_allowed().collect();
-    assert_eq!(allowed.len(), AGENT_BROWSER_ALLOWED.len());
+    assert_eq!(allowed.len(), 2 * AGENT_BROWSER_ALLOWED.len());
     for rule in [
         "Bash(agent-browser open:*)",
+        "Bash(agent-browser --json snapshot:*)",
         "Bash(agent-browser snapshot:*)",
         "Bash(agent-browser read:*)",
     ] {
         assert!(allowed.iter().any(|a| a == rule), "{rule}");
     }
-    // eval runs page JavaScript, and pdf and download write to a path the agent names: each asks.
+    // eval runs page JavaScript, and pdf and download write to a path the agent names: none is
+    // allowed, each is refused.
     let rules = ["eval", "pdf", "download"].map(|sub| format!("Bash(agent-browser {sub}:*)"));
     let none = rules.iter().all(|rule| !allowed.contains(rule));
     assert!(none, "{rules:?}");
+    let ask: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
     assert_eq!(
-        clauseo_profile::claude::agent_browser_ask().collect::<Vec<_>>(),
+        ask,
         [
-            "Bash(agent-browser wait*-f*)",
-            "Bash(agent-browser get*cdp-url*)"
+            "Bash(agent-browser *--init-script*)",
+            "Bash(agent-browser *--enable*)",
+            "Bash(agent-browser *-p *)",
+            "Bash(agent-browser *file://*)",
         ]
     );
     for asks in [
@@ -44,7 +50,7 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         );
     }
     let denied: Vec<String> = agent_browser_denied().collect();
-    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2);
+    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2 * 2 + 2 * 6 + 8);
     for rule in [
         "Bash(agent-browser *--profile*)",
         "Bash(agent-browser *--auto-connect*)",
@@ -57,6 +63,25 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         "Bash(agent-browser *--extension*)",
         "Bash(agent-browser state*)",
         "Bash(agent-browser connect*)",
+        "Bash(agent-browser --json state*)",
+        "Bash(agent-browser wait*-f*)",
+        "Bash(agent-browser get*cdp-url*)",
+        "Bash(agent-browser eval*)",
+        "Bash(agent-browser --json eval*)",
+        "Bash(agent-browser pdf*)",
+        "Bash(agent-browser --json pdf*)",
+        "Bash(agent-browser download*)",
+        "Bash(agent-browser --json download*)",
+        "Bash(agent-browser upload*)",
+        "Bash(agent-browser * eval*)",
+        "Bash(agent-browser * pdf*)",
+        "Bash(agent-browser * download*)",
+        "Bash(agent-browser * upload*)",
+        "Bash(agent-browser * state load*)",
+        "Bash(agent-browser * state save*)",
+        "Bash(agent-browser * wait *-f*)",
+        "Bash(agent-browser *cdp-url*)",
+        "Bash(agent-browser *--args*)",
     ] {
         assert!(denied.iter().any(|d| d == rule), "{rule}");
     }
@@ -88,24 +113,25 @@ fn only_the_browser_part_names_agent_browser() {
         .unwrap()
     };
     let on = fill(BrowserPart::On);
-    assert!(on.contains("Read web pages with your web fetch tool. For a page that needs a real"));
+    assert!(on.contains("with your web fetch tool. For a page that needs a real"));
+    assert!(on.contains("over 125 characters, use `agent-browser read` or `curl`."));
+    assert!(on.contains("`agent-browser eval`, `pdf` and `download` are off"));
+    // Upload is always refused (`claude.rs`'s deny rules), so the part says nothing of it.
+    assert!(!on.contains("Upload"));
     for rule in [
         "`agent-browser`",
         "`AGENT_BROWSER_SESSION`",
         "`--headed`",
         "`state save`",
-        "named in this conversation",
         "confidential matter text",
         "downloads folder",
+        "chained only with other `agent-browser` commands",
+        "no sandbox options such as allowed domains",
         "`agent-browser close`",
     ] {
         assert!(on.contains(rule), "{rule}");
     }
-    for part in [
-        BrowserPart::Off,
-        BrowserPart::NotInstalled,
-        BrowserPart::ClaudeOnly,
-    ] {
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
         let off = fill(part);
         assert!(!off.contains("agent-browser") && !off.contains("AGENT_BROWSER"));
         assert!(off.contains("You have no browser in this session"));
@@ -118,6 +144,8 @@ fn only_the_browser_part_names_agent_browser() {
         "use your browser tools, the ones from the `browser` MCP server",
         "never a browser command in your shell",
         "confidential matter text",
+        "The eval tool is off",
+        "Save a file from the web by clicking its link in the browser.",
         "close tool",
     ] {
         assert!(codex_on.contains(rule), "{rule}: {codex_on}");
@@ -135,13 +163,27 @@ fn only_the_browser_part_names_agent_browser() {
         browser_part_for(BrowserPart::On, false),
         browser_part(BrowserPart::On)
     );
-    for part in [
-        BrowserPart::Off,
-        BrowserPart::NotInstalled,
-        BrowserPart::ClaudeOnly,
-    ] {
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
         assert_eq!(browser_part_for(part, true), browser_part(part));
         assert!(!browser_part_for(part, true).contains("agent-browser"));
     }
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
+}
+
+/// Every Codex session is told its shell has no internet, whatever its browser part (the line
+/// sits outside `{browser}`): Clauseo declines Codex's downloads in the shell. Claude never is.
+#[test]
+fn every_codex_session_is_told_its_shell_is_offline() {
+    use clauseo_profile::instructions::CODEX_SHELL_OFFLINE;
+    let line = CODEX_SHELL_OFFLINE.trim();
+    assert!(
+        line.contains("curl") && line.contains("web search"),
+        "{line}"
+    );
+    let profile = profile();
+    for macos in [false, true] {
+        let codex = profile.codex_instructions_for(macos);
+        assert_eq!(codex.matches(line).count(), 1, "{codex}");
+        assert!(!profile.claude_instructions_for(macos).contains(line));
+    }
 }

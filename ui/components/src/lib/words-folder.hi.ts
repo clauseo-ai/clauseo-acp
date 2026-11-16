@@ -5,15 +5,9 @@ export const HI = {
   // FR1: the notice's title, then its tooltip and accessible name
   "Clauseo asks before each edit": "Clauseo हर संपादन से पहले पूछता है",
   "Clauseo asks before each edit in this folder": "Clauseo इस फ़ोल्डर में हर संपादन से पहले पूछता है",
-  // FR2: behind FR1's info icon
-  "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.":
-    "आप यहाँ फ़ाइलें बदल सकते हैं, पर इस फ़ोल्डर की अनुमतियाँ नहीं। Claude और ChatGPT को मामले के भीतर रखने के लिए Clauseo को इनकी ज़रूरत है। कुछ संपादन नहीं हो पाएँगे।",
-  // FR3: the notice's button, which opens FR5
-  "What to tell IT": "IT को क्या बताएँ",
-  // FR5: the text to send IT, selected, with Copy; {path} is the matter's folder
-  'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.':
-    'कृपया इस फ़ोल्डर पर मेरे खाते को "Change permissions" दें: {path}। इस मामले के लिए मेरा ऐप Clauseo फ़ोल्डर की अनुमतियों में एक प्रविष्टि जोड़ता है, ताकि वह जिन Claude और ChatGPT को चलाता है, वे केवल इसी फ़ोल्डर के भीतर लिख सकें।',
-  Copy: "कॉपी करें",
+  // FR2: behind FR1's info icon: why it asks, and where it needn't (provisional)
+  "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.":
+    "Clauseo इस फ़ोल्डर में अपनी सुरक्षा नहीं जोड़ सकता, इसलिए हर संपादन से पहले पूछता है। इस कंप्यूटर पर आपके खुद बनाए फ़ोल्डर में, जैसे Documents के किसी फ़ोल्डर में, उसे पूछने की ज़रूरत नहीं होती।",
   // FR12: a network drive's notice: its words, its tooltip and accessible name, and behind its info icon
   "On a network drive.": "नेटवर्क ड्राइव पर।",
   "Claude asks before every change. ChatGPT can't work here.":
@@ -46,4 +40,26 @@ export const HI = {
   // FR20 (provisional): the room's notice for a folder the host couldn't check
   "Clauseo couldn't check this folder, so Claude asks before every change.":
     "Clauseo इस फ़ोल्डर की जाँच नहीं कर सका, इसलिए Claude हर बदलाव से पहले पूछता है।",
+  // FR24 (draft, Rohan to approve; Hindi provisional): New matter's warning and Locate's step for a folder whose path
+  // has a backslash, on macOS and Linux, where Claude can't start: its name, its title, and its body
+  "This folder's name has a backslash": "इस फ़ोल्डर के नाम में बैकस्लैश है",
+  "This folder's name has a backslash (\\).": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है।",
+  "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR24 on Linux, whose file manager has no one name (draft, Rohan to approve; Hindi provisional)
+  "Claude can't work in a folder like this; ChatGPT can. Rename it in your file manager first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR24 when the backslash is in a folder above the one picked, named by {folder} (draft, Rohan to approve; Hindi
+  // provisional): its name, its title, and its body on the Mac and on Linux
+  "A folder in this folder's path has a backslash": "इस फ़ोल्डर के पाथ में किसी फ़ोल्डर के नाम में बैकस्लैश है",
+  'The folder "{folder}" in this folder\'s path has a backslash (\\).':
+    'इस फ़ोल्डर के पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है।',
+  "Claude can't work in a folder like this; ChatGPT can. Rename that folder in Finder first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  "Claude can't work in a folder like this; ChatGPT can. Rename that folder in your file manager first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR25 (draft): Locate's other button, which locates the matter in the folder warned about
+  "Locate anyway": "फिर भी यही फ़ोल्डर चुनें",
+  // FR30 (draft): the first screen's other button, which opens the folder warned about as a matter
+  "Open anyway": "फिर भी खोलें",
 } as const;

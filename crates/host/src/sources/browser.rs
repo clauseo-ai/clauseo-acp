@@ -192,18 +192,16 @@ pub(crate) fn codex_standalone_browser_tool<'a>(
 }
 
 /// Whether the host answers a Codex approval of the `browser` server's `tool` itself: an
-/// `agent_browser_*` name (ASCII lowercase, digits and `_`) other than `agent_browser_eval`,
-/// which runs page JavaScript and is the route to Chrome's debugging port, so the lawyer is asked.
-/// The guard refuses every tool off agent-browser's 29 core tools whatever the answer
-/// (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`), and checks each call's
-/// arguments.
+/// `agent_browser_*` name (ASCII lowercase, digits and `_`). The guard refuses every tool off
+/// its list whatever the answer (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`:
+/// agent-browser's core tools less `agent_browser_eval`), and checks each call's arguments.
 pub(crate) fn auto_allowed_browser_tool(tool: &str) -> bool {
     tool.strip_prefix("agent_browser_").is_some_and(|rest| {
         !rest.is_empty()
             && rest
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-    }) && tool != "agent_browser_eval"
+    })
 }
 
 /// Whether a tool call is the browser's open, by its name or, failing that, its title.

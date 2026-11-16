@@ -25,8 +25,10 @@ import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
+import { LowCreditSlot } from "./low-credit.tsx";
 import { useOlder } from "./older.ts";
 import { RowOf } from "./row-of.tsx";
+import { useRunningTurn } from "./running-turn.ts";
 import { SourcesTransport, webPick } from "./sources.ts";
 import { WebSources } from "./sources.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
@@ -106,6 +108,8 @@ function Sections({
         <section
           className="step step-question"
           ref={latest ? nodes.slot("questionStep") : undefined}
+          // the pinned question's press moves the focus here (thread.tsx); never in the tab order
+          tabIndex={latest ? -1 : undefined}
           aria-label={askedRepeats ? undefined : askedName}
         >
           {question}
@@ -190,8 +194,8 @@ const LiveExchange = memo(
     ids: readonly EntryId[];
     asked: boolean;
     sentNow: EntryId | null;
-    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx) and the
-     * unsafe-site list's notices (site-blocked.tsx). */
+    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx), the
+     * running-low line (low-credit.tsx) and the unsafe-site list's notices (site-blocked.tsx). */
     turn: TurnId | null;
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
@@ -249,6 +253,7 @@ const LiveExchange = memo(
               )}
               <SiteBlockedSlot stream={stream} turn={turn} />
               <CaseLawHintSlot stream={stream} turn={turn} />
+              <LowCreditSlot stream={stream} turn={turn} />
             </>
           )
         }
@@ -306,6 +311,8 @@ export const ThreadList = memo(function ThreadList({
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);
   const asked = latestAsked(exchanges);
+  // the running-low line's turn boundaries (running-turn.ts)
+  useRunningTurn(transport, stream, exchanges.at(-1));
   const words = useQuestionWords(stream, asked, asked === null ? undefined : paged.get(asked));
   // UD2: the first read's prompt never shows, pinned either, by its turn (first-read/marks.ts)
   const pickTurn = useCallback(

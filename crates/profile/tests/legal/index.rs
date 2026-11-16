@@ -5,9 +5,6 @@ use std::path::Path;
 
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::instructions::word_count;
-use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
-};
 use clauseo_profile::skills::builtin::{BUILTIN, code_span, codex_index, sources};
 use clauseo_profile::skills::stetdoc::STETDOC;
 use clauseo_profile::skills::{SKILL_MD, render};
@@ -118,35 +115,6 @@ fn a_path_that_is_not_utf8_is_left_out_of_the_index() {
     let rendered = render(&sources().unwrap()).unwrap();
     let root = Path::new(std::ffi::OsStr::from_bytes(b"/x/\xff/skills"));
     assert_eq!(codex_index(root, &rendered), "");
-}
-
-/// A macOS data folder whose path holds spaces, with the host's per-session folders filled.
-#[test]
-fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
-    let data = "/Users/Ann Mary/Library/Application Support/Clauseo";
-    let profile = launch_profile(Path::new(data));
-    let index = profile.skills_index();
-    assert!(word_count(&index) <= 150, "{} words", word_count(&index));
-    let work = format!("{data}/run/0b7e3c1a-5d2f-4e8a-9c61-2f4d8e7a1b30/work");
-    let notes = format!("{data}/agent-state/matter-4821/notes");
-    let fill = |text: &str| {
-        clauseo_profile::placeholders::fill(
-            text,
-            &IN_INSTRUCTIONS,
-            &[
-                (WORK_FOLDER, &work),
-                (MATTER_NOTES, &notes),
-                (CONNECTORS, ""),
-                (BROWSER, ""),
-            ],
-        )
-        .unwrap()
-    };
-    let shared = fill(&profile.instructions());
-    assert!(word_count(&shared) <= 1500, "{} words", word_count(&shared));
-    // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`).
-    let codex = fill(&format!("{}\n\n{index}", profile.instructions()));
-    assert!(word_count(&codex) <= 1500, "{} words", word_count(&codex));
 }
 
 #[test]

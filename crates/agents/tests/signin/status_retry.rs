@@ -13,10 +13,10 @@ use crate::support::{Fixture, Seen, claude, now};
 #[cfg(unix)]
 use crate::support::{STATUS_LIMIT, eventually};
 
-/// The start-up check's first run's limit (`found::FIRST_LIMIT`).
+/// The start-up check's first run's limit (`found::status_job::FIRST_LIMIT`).
 #[cfg(unix)]
 const FIRST_LIMIT: Duration = Duration::from_secs(15);
-/// The one retry's limit (`found::RETRY_LIMIT`).
+/// The one retry's limit (`found::status_job::RETRY_LIMIT`).
 #[cfg(unix)]
 const RETRY_LIMIT: Duration = Duration::from_secs(20);
 #[cfg(unix)]

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{file_uri, inside, uri_of};
+use super::{file_uri, inside, uri_of, within};
 use crate::write;
 
 #[test]
@@ -54,4 +54,44 @@ fn inside_follows_dots_and_refuses_what_does_not_resolve() {
     assert!(!inside(&root.join("matter2").join("other.txt"), &matter));
     assert!(!inside(&matter.join("gone.txt"), &matter));
     write::remove_dir_all(&root).unwrap();
+}
+
+/// A file of 260 characters or more, which `dunce` leaves in its verbatim form, lies in the
+/// matter folder in its plain form; a share's verbatim form does not.
+#[test]
+fn a_long_verbatim_path_is_inside_its_plain_folder() {
+    let mut folder = String::from(r"C:\Users\a\Documents\Matters\");
+    while folder.len() < 280 {
+        folder.push_str(r"A long folder name\");
+    }
+    let folder = folder.trim_end_matches('\\').to_owned();
+    let verbatim = format!(r"\\?\{folder}");
+    assert!(within(Path::new(&verbatim), Path::new(&folder)));
+    assert!(within(Path::new(&folder), Path::new(&verbatim)));
+    assert!(within(Path::new(&folder), Path::new(&folder)));
+    let share = format!(r"\\?\UNC\server\c$\{}", folder.get(3..).unwrap_or_default());
+    assert!(!within(Path::new(&share), Path::new(&folder)));
+}
+
+/// The bug's own shape on Windows, where `\\?\C:\` is parsed: a deep file `dunce` leaves
+/// verbatim is inside its shorter, plain matter folder, though `Path::starts_with` says not.
+#[cfg(windows)]
+#[test]
+fn a_deep_verbatim_file_is_inside_its_shorter_plain_folder() {
+    let folder = r"C:\Users\a\Documents\Matters\Smith v Jones";
+    let mut file = format!(r"\\?\{folder}\");
+    while file.len() < 300 {
+        file.push_str(r"A long folder name\");
+    }
+    file.push_str("brief.docx");
+    assert!(!Path::new(&file).starts_with(folder));
+    assert!(within(Path::new(&file), Path::new(folder)));
+    assert!(!within(
+        Path::new(&file),
+        Path::new(r"C:\Users\a\Documents\Other")
+    ));
+    assert!(!within(
+        Path::new(&file),
+        Path::new(r"D:\Users\a\Documents\Matters")
+    ));
 }

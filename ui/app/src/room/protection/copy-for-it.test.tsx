@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// "Copy details for IT" on the room's firm-only Safe workspace lines: the Not protected note of a
-// block only the firm can act on, the firm's notice under sandbox.required (a firm-only block, or a
+// "Copy details for IT" on the room's firm-only Safe workspace lines, only while the firm's policy is
+// active: the Not protected note of a block only the firm can act on (here a policy that turns
+// unprotected auto off; without a policy, nothing), the firm's notice under sandbox.required (a firm-only block, or a
 // sandbox.blocked refusal of its set-up), and none for stage C's self-fixes. A press copies the note
 // (it-details.ts) and the button says it copied; a refused clipboard shows the note to copy by hand.
 // The matter's cause carries a matter path beside its reason, and the note never copies it.
@@ -16,6 +17,8 @@ const PATH = "C:\\Users\\asha\\Matters\\Sharma v. State of Delhi\\brief.docx";
 const POLICY = np({ blocked: { reason: "policy", path: PATH } });
 const TOOL = np({ blocked: { reason: "tool_missing", path: PATH } });
 const LEAD = "Clauseo's Safe workspace is blocked on this computer.";
+/** A firm's policy, active: `sandbox.allow_unprotected_auto` off (firmPolicy, blocked.ts). */
+const FIRM: Partial<ProtectionView> = { unprotected_auto_allowed: false };
 
 let h: Harness | null = null;
 let writeText = vi.fn(async (_text: string) => {});
@@ -70,8 +73,8 @@ const copied = (): string => {
   return note;
 };
 
-test("the note of a policy block offers it; a press copies the reason and the version, then says copied", async () => {
-  await mount(POLICY);
+test("the note of a policy block offers it under a firm's policy; a press copies the reason and the version, then says copied", async () => {
+  await mount(POLICY, FIRM);
   await openNote();
   expect(inBody("protection-it")?.textContent).toBe("Copy details for IT");
   await pressIt();
@@ -93,7 +96,7 @@ test.each([
 ])(
   "the note of %s offers it, with its reason, ending with its section",
   async (_c, p, reason, anchor) => {
-    await mount(p);
+    await mount(p, FIRM);
     await openNote();
     await pressIt();
     const note = copied();
@@ -111,10 +114,23 @@ test.each([
   ["admin_copy_missing", PROT.missing],
   ["needs_set_up", PROT.needs],
 ])("the note of %s offers nothing for IT", async (_c, p) => {
+  await mount(p, FIRM);
+  await openNote();
+  expect(inBody("np-note")).not.toBeNull();
+  expect(inBody("protection-it")).toBeNull();
+});
+
+test.each([
+  ["a policy block", POLICY],
+  ["other_account", PROT.otherAccount],
+  ["logon_right", PROT.logon],
+  ["a reason from a newer Clauseo", PROT.blockedNewer],
+])("without a firm's policy, the note of %s offers nothing for IT", async (_c, p) => {
   await mount(p);
   await openNote();
   expect(inBody("np-note")).not.toBeNull();
   expect(inBody("protection-it")).toBeNull();
+  expect(inBody("np-note")?.textContent).not.toMatch(/\bIT\b|[Yy]our firm/);
 });
 
 test("the firm's notice over a policy block copies sandbox.required and the reason", async () => {
@@ -143,7 +159,7 @@ test("the firm's notice offers it once its set-up is refused with sandbox.blocke
 
 test("a refused clipboard shows the note to copy by hand, and nothing says copied", async () => {
   writeText.mockImplementation(() => Promise.reject(new Error("NotAllowedError")));
-  await mount(POLICY);
+  await mount(POLICY, FIRM);
   await openNote();
   await pressIt();
   expect(inBody("protection-it")?.textContent).toBe("Copy details for IT");

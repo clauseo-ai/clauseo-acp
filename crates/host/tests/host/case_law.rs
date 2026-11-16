@@ -20,8 +20,9 @@ use clauseo_protocol::{ClauseoTool, ToolState, ToolsUnavailableReason};
 use serde_json::{Value, json};
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    codex_servers, filled_browser, first_frame_tools, settings, sidecar, template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, claude_servers,
+    codex_lines, codex_servers, filled_browser, first_frame_tools, settings, sidecar, template,
+    tool, turn,
 };
 use crate::support::Dir;
 
@@ -32,17 +33,17 @@ impl RelayEvents for NoEvents {
 }
 
 /// The fake connector, its handle and the app's relays.
-struct Connector {
+pub(crate) struct Connector {
     fake: FakeHandle,
     _scratch: ScratchDir,
     _connectors: Connectors,
     handle: ConnectorHandle,
-    relays: Relays,
+    pub(crate) relays: Relays,
 }
 
 impl Connector {
     /// The connector, `signed_in` with an API key the fake accepts or not added.
-    fn new(signed_in: bool) -> Self {
+    pub(crate) fn new(signed_in: bool) -> Self {
         let fake = FakeConnector::start(FakeOptions::default()).unwrap();
         let scratch = ScratchDir::new("host-case-law").unwrap();
         let config = fake.config(scratch.state_file());
@@ -134,7 +135,7 @@ fn hook() -> Hook {
 }
 
 /// The hook, the proxy and Chrome the browser entry needs, and the relays when given.
-fn wire(config: HostConfig, relays: Option<&Relays>) -> HostConfig {
+pub(crate) fn wire(config: HostConfig, relays: Option<&Relays>) -> HostConfig {
     let config = config
         .with_profile_hook(Box::new(hook()))
         .with_egress_proxy(Arc::new(TestProxy(8123)))
@@ -155,19 +156,34 @@ fn lawyer(dir: &Dir, extra: &Value) -> (Value, Value) {
     }
     let settings = json!({"tools": tools, "mcp": {"servers": {
         "alpha": {"command": bin.join("alpha").display().to_string(), "enabled": true}}}});
-    let entry = json!({"name": "alpha", "command": "{{any}}", "args": [], "env": []});
+    let entry = json!({"name": "alpha", "command": "{{any}}", "args": [],
+        "env": crate::support::lawyer_env(Vec::new())});
     (settings, entry)
 }
 
-/// Claude's `session/new` or `session/load` params with `servers` and, when it got case law,
-/// the pre-allow and the paragraph.
+/// Claude's `session/new` or `session/load` params with `servers`, the allow rule of each of the
+/// lawyer's servers among them (`agent/mcp_trust.rs`) and, when it got case law, the pre-allow
+/// and the paragraph.
 fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
-    let allowed: Vec<&str> = if with_case_law {
-        vec!["mcp__case-law"]
-    } else {
-        Vec::new()
-    };
-    json!({"mcpServers": servers, "_meta": {
+    let mut allowed: Vec<String> = servers
+        .iter()
+        .filter_map(|server| server["name"].as_str())
+        .filter(|name| !["browser", "case-law"].contains(name))
+        .map(|name| format!("mcp__{name}"))
+        .collect();
+    if with_case_law {
+        allowed.extend(
+            [
+                "search_law",
+                "read_document",
+                "citator",
+                "check_citations",
+                "account",
+            ]
+            .map(|tool| format!("mcp__case-law__{tool}")),
+        );
+    }
+    json!({"mcpServers": claude_servers(servers), "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
         "claudeCode": {"options": {"allowedTools": allowed}}}})
 }
@@ -187,7 +203,8 @@ fn case_law(reason: Option<ToolsUnavailableReason>) -> ToolState {
 /// The done-when's profile entry: both agents get `case-law` after the lawyer's server and
 /// `browser`, on `session/new` and then `session/load`; the two sessions have their own token
 /// files and tokens, which their stderr redactors hold and which are gone once the host stops;
-/// Claude pre-allows `mcp__case-law`; both agents' instructions hold the paragraph.
+/// Claude pre-allows case law's search and read tools; both agents' instructions hold the
+/// paragraph.
 #[test]
 fn both_agents_get_case_law_after_the_other_servers() {
     let connector = Connector::new(true);
@@ -222,14 +239,10 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
-    assert_eq!(
-        first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off)),
-            tool(ClauseoTool::Browser, None),
-            case_law(None),
-        ]
-    );
+    // Claude has no browser on any OS (`servers::no_browser`).
+    let web_search = tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off));
+    let expected: Vec<ToolState> = vec![web_search, case_law(None)];
+    assert_eq!(first_frame_tools(&host, thread), expected);
     let seen = launcher.seen();
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();
     assert_eq!(tokens.len(), 2, "one token file per session");
@@ -265,7 +278,7 @@ fn both_agents_get_case_law_after_the_other_servers() {
         &agent_lines(
             "cl-load",
             "session/load",
-            &json!({"sessionId": "sess-1", "mcpServers": servers,
+            &json!({"sessionId": "sess-1", "mcpServers": claude_servers(&servers),
                 "_meta": claude_params(&servers, true)["_meta"]}),
             &[],
         ),

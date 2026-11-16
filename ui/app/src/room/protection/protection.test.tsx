@@ -58,10 +58,7 @@ const railMark = (name = THE_MATTER.name) =>
     .find((r) => r.textContent?.includes(name))
     ?.querySelector(".room-matter-np") ?? null;
 
-const CLAUDE_LINE = tbt(
-  "en",
-  "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
-);
+const CLAUDE_LINE = tbt("en", "Clauseo changes files in this matter without asking.");
 const CODEX_LINE = tbt(
   "en",
   "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
@@ -314,7 +311,7 @@ test("a build without protection (unsupported { why: not_built }) reads calmly: 
   expect(noteText()).toContain(
     pw(
       "en",
-      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.",
     ),
   );
   expect(document.body.querySelector('[data-testid="protection-setup"]')).toBeNull();

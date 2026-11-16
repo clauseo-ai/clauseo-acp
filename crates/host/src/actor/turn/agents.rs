@@ -19,7 +19,8 @@ use super::super::input::Input;
 use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
 use super::{
-    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state, steps,
+    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, offline, session, state,
+    steps,
 };
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
@@ -77,6 +78,9 @@ pub(super) struct Agent {
     pub(super) after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
+    /// Where its shell calls start: the matter's folder, or unknown when Claude Code's policy
+    /// settings may keep the folder from one call to the next (`SettingsRead::shell_carries`).
+    pub(super) shell_start: crate::sent::ShellStart,
     /// Why it is being stopped, which picks the detach a stop logs.
     stop_cause: StopCause,
     /// The attached session.
@@ -104,15 +108,36 @@ pub(super) struct Agent {
     pub(super) preparing: bool,
     /// What a Codex agent's launch recorded; `None` for any other agent.
     pub(super) codex: Option<CodexAgent>,
+    /// The service and route the host's offline probe asks, from its launch's final environment
+    /// (`offline/probe/service.rs`); `None` for an agent of no known kind.
+    pub(super) probe: Option<super::offline::probe::Target>,
     /// The programs of the MCP servers its session was given: a cancelled turn's sweep leaves
     /// a process running one of them (`agent/leftovers.rs`).
     pub(super) mcp_commands: Vec<PathBuf>,
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// The launch's folder check answer, when it ran; read through [`Agent::unprotected`].
+    pub(super) folder_check: Option<crate::agent::folder_support::Answer>,
+    /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
+    /// (`session/claude_mode.rs`).
+    pub(super) auto: session::Auto,
+    /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
+    /// (`queue/confirm.rs`); `None` for any other agent.
+    pub(super) claude_home: Option<PathBuf>,
+    /// The MCP servers Clauseo itself sent this session that may run unasked
+    /// (`agent/mcp_trust.rs`), filled by `profile_loads::session_loads`: the lawyer's trusted
+    /// servers, and `case-law` when our entry went. A server Codex got from anywhere else is
+    /// never answered for. `None` when the launch's folder check would put Claude in forced ask
+    /// (`forced_ask::applies`; for Codex only a failed check, since the other two refuse it):
+    /// then none is, so Codex asks where Claude would.
+    pub(super) mcp_sent: Option<Vec<String>>,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
+    /// Its launch variables that hold a path, for the data fence's `$env:NAME`
+    /// (`data_fence::launch_vars`).
+    pub(super) fence_vars: Vec<(String, String)>,
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
@@ -122,6 +147,15 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
+}
+
+impl Agent {
+    /// The launch's folder check would put Claude in forced ask (`forced_ask::applies`); for
+    /// Codex only a failed check, since the other two refuse it. A Codex agent gets no browser
+    /// auto-answer then (`asks.rs` `browser_tool_to_allow`).
+    pub(super) fn unprotected(&self) -> bool {
+        self.folder_check.is_some_and(agent::forced_ask::applies)
+    }
 }
 
 /// What a Codex agent's launch recorded.
@@ -196,14 +230,20 @@ pub(super) fn launch_now(
     prepared: Prepared,
 ) -> Option<TreeWatch> {
     // Only a Claude launch has a folder answer without a Codex preparation.
-    let forced_ask =
-        prepared.codex.is_none() && prepared.folder.is_some_and(agent::forced_ask::applies);
+    let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
+    let forced_ask = prepared.codex.is_none() && unprotected;
+    let prepared_folder = prepared.folder;
+    let shell_start = if prepared.settings.shell_carries {
+        crate::sent::ShellStart::Unknown
+    } else {
+        crate::sent::ShellStart::Matter
+    };
     if forced_ask {
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -235,6 +275,7 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         folder,
+        shell_start,
         stop_cause: StopCause::Asked,
         session: None,
         rate: RateCap::new(),
@@ -249,9 +290,15 @@ pub(super) fn launch_now(
         replayed: Vec::new(),
         preparing: false,
         codex,
+        probe,
         mcp_commands: Vec::new(),
         forced_ask,
+        folder_check: prepared_folder,
+        auto: session::Auto::default(),
+        claude_home,
+        mcp_sent: (!unprotected).then(Vec::new),
         plan_notes,
+        fence_vars,
         denied_data_folder: 0,
         start_failure: None,
         matter_spellings,
@@ -291,6 +338,66 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
         return false;
     }
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
+    restart_for(actor, thread, turn);
+    true
+}
+
+/// Step 4 for a prompted turn (typed, or taken from the queue) whose agent is marked to relaunch
+/// (`idle::Relaunch`, a Tools change): with nothing else on that agent (no question or call
+/// open, no output held for a turn of its own) it stops and a new one starts for the turn, as
+/// [`restart_if_moved`] does, so the prompt goes with the new inputs. An agent-started turn
+/// that has opened is never cut: it is the current turn then, not this one. A command Claude put
+/// in the background (a steer during a Bash call) that has not reported yet is cut: the host
+/// sees it only when it reports, so the relaunch ends it and its result never comes. A relaunch
+/// within `cap_min_idle` of a turn that closed after a steer during a tool call is logged.
+/// `false` when nothing was restarted.
+pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+    let Some(state) = state(actor, thread) else {
+        return false;
+    };
+    let prompted = state
+        .current
+        .as_ref()
+        .is_some_and(|current| current.turn == turn && current.own.is_none());
+    let held = super::own_turn::output_waits(&state.own_held);
+    let Some(agent) = state.agent.as_deref() else {
+        return false;
+    };
+    let open = !(agent.permissions.is_empty()
+        && agent.elicitations.is_empty()
+        && agent.url_elicitations.is_empty());
+    let up = agent.stage == Stage::Attached && !agent.link.closed();
+    let Some(why) = agent.idle.relaunch else {
+        return false;
+    };
+    if !prompted || held || open || !up || super::idle::calls(agent) > 0 {
+        return false;
+    }
+    let steered_end = agent.idle.steered_end;
+    tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent relaunched for a prompt");
+    let now = actor.now().mono;
+    let window = actor.turn_path.idle.window();
+    if let Some(at) = steered_end
+        && now.saturating_sub(at) <= window
+    {
+        let since_ms = u64::try_from(now.saturating_sub(at).as_millis()).unwrap_or(u64::MAX);
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            since_ms,
+            "agent relaunched soon after a steer during a tool call; a background command may end"
+        );
+    }
+    restart_for(actor, thread, turn);
+    true
+}
+
+/// Stops `thread`'s agent and starts a new one for `turn`, which goes back to step 2 and keeps
+/// the writer (`Restarting`).
+fn restart_for(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.stop_cause = StopCause::Restarting;
@@ -300,7 +407,6 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Launching;
     }
-    true
 }
 
 /// Runs an agent call as a task that posts its result.
@@ -348,7 +454,12 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         agent.stage = Stage::Closed;
     }
     match reply {
-        AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
+        AgentReply::Prompt { turn, result } => {
+            // A failure for the connection may wait for the host's probe first.
+            if let Some(result) = offline::hold_for_probe(actor, thread, turn, result) {
+                end::on_prompt_done(actor, thread, turn, result);
+            }
+        }
         AgentReply::Config { ctx, pick, result } => {
             super::answers::on_config(actor, thread, (ctx, pick), same, result);
         }
@@ -381,7 +492,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             result: Ok(start),
             loaded,
             picked,
-        } => session::on_prepared(actor, thread, start, loaded, &picked),
+            fell_back,
+        } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
         // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..

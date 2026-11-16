@@ -23,10 +23,13 @@ pub(crate) const FEATURES: [&str; 2] = [
     // predictions (content-autofill.googleapis.com).
     "--disable-features=Translate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,\
      PreconnectToSearch,MediaRouter,AutofillServerCommunication",
-    // agent-browser's entries, plus SkipListAccountsWithoutGaiaCookies: no accounts.google.com
-    // ListAccounts without a Google cookie (Chrome 155 and later; earlier Chrome ignores it,
-    // and `--gaia-url` below covers them).
-    "--enable-features=NetworkService,NetworkServiceInProcess,WebMCPTesting,\
+    // agent-browser's entries less NetworkServiceInProcess, the network service in the browser's
+    // process and out of its sandbox (`chrome/sandbox.rs`; current Chrome reads it only as
+    // NetworkServiceInProcess2, `content_features.cc`, so it did nothing there), plus
+    // SkipListAccountsWithoutGaiaCookies: no accounts.google.com ListAccounts without a Google
+    // cookie (Chrome 155 and later; earlier Chrome ignores it, and `--gaia-url` below covers
+    // them).
+    "--enable-features=NetworkService,WebMCPTesting,\
      DevToolsWebMCPSupport,SkipListAccountsWithoutGaiaCookies",
 ];
 
@@ -82,5 +85,8 @@ pub(crate) fn preferences() -> serde_json::Value {
         "browser": {"enable_spellchecking": false},
         "url_keyed_anonymized_data_collection": {"enabled": false},
         "autofill": {"profile_enabled": false, "credit_card_enabled": false},
+        // A PDF link downloads rather than opening in Chrome's viewer, so agent-browser's
+        // `download` gets its download event.
+        "plugins": {"always_open_pdf_externally": true},
     })
 }

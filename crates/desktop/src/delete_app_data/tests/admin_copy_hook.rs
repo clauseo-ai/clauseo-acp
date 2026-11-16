@@ -421,8 +421,8 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
                  Program Files, is the one Clauseo installed and that only administrators can \
                  change it. The Safe workspace's hidden Windows accounts are still on this \
                  computer. Run Clauseo's installer again to restore that program, then uninstall \
-                 Clauseo again. If that doesn't work, Clauseo's notes for IT explain how to remove \
-                 them.\"";
+                 Clauseo again. If that doesn't work, Clauseo's notes on GitHub explain how to \
+                 remove them.\"";
     assert!(english.lines().any(|line| line == words), "{words}");
     let approvals: serde_json::Value =
         serde_json::from_str(&read("../../ui/app/doc-approvals.json")).unwrap();

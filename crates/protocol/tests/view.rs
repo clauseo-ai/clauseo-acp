@@ -164,6 +164,7 @@ fn entry_inline_len_sums_vec_items() {
         checkpoint: checkpoint_id(15),
         restored: vec![path("a.docx")],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     assert_eq!(marker(undone).inline_len(), 0);
     assert_eq!(header().inline_len(), 0);
@@ -363,6 +364,9 @@ fn tool_states_round_trip_in_a_header_with_every_reason() {
             "no_relay",
             "browser_blocked_by_policy",
             "browser_policy_unreadable",
+            "browser_blocked_edge",
+            "browser_blocked_chrome",
+            "browser_per_user_chrome_only",
         ]
     );
 }
@@ -452,6 +456,7 @@ fn step_undo_possible_is_a_checkpoint_not_undone() {
         failure: None,
         files: vec![],
         skipped: vec![],
+        checkpoint_before: None,
         checkpoint_after,
         undone,
         usage: None,

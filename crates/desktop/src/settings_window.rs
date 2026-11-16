@@ -154,7 +154,11 @@ fn build<R: Runtime, M: Manager<R>>(
     // The Windows maximise cover makes a Win32 child window and subclasses this one, which must
     // happen on the window's own thread; `open_settings` builds from an async command's thread.
     let framed = window.clone();
-    window.run_on_main_thread(move || window_frame::after_build(&framed))?;
+    // Off Windows it was built hidden: shown after, in the ground (window_size.rs).
+    window.run_on_main_thread(move || {
+        window_frame::after_build(&framed);
+        window_size::show_first_frame(&framed);
+    })?;
     on_destroyed(&window, built);
     Ok(())
 }

@@ -296,6 +296,11 @@ export function Composer<V extends string = string>({
       // macOS commits a dead key's mark by taking it out and putting it back, in one task: no fit between (#117 L)
       const out = kind === "deleteCompositionText";
       if (!out) fitted.current = a.value;
+      // over the cap, a scroll height past the field's height is its words' own: the field stays, with no diff, no
+      // collapse and no settle. After a 6 MiB paste the diff took 11 ms a key; Backspace's whole fit 149 ms to 108
+      if (one > 0 && a.style.height === `${one * 6}px` && a.style.overflowY === "") {
+        if (a.scrollHeight > a.clientHeight) return;
+      }
       // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
       // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
       // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a

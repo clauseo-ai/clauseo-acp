@@ -3,7 +3,8 @@
 //!
 //! - `compare`: copies its two inputs beside itself as `seen-old.docx` and `seen-new.docx`,
 //!   writes its arguments, one per line, to `args-compare.txt`, writes the `-o` file, and prints
-//!   `{}`; with `compare-exit.txt` beside it, exits with the code in it instead.
+//!   `{}`; with `compare-exit.txt` beside it, exits with the code in it instead, first printing
+//!   `compare-out.json` from beside itself when there is one (stetdoc's JSON error).
 //! - `view`: writes its arguments to `args-view.txt` and prints `view.json` from beside itself;
 //!   `view-mode.txt` may say `hang` (never answers), `big` (prints 9 MiB) or `exit <code>`.
 //!
@@ -39,6 +40,9 @@ fn main() -> ExitCode {
 fn compare(dir: &Path, args: &[String]) -> Option<ExitCode> {
     std::fs::write(dir.join("args-compare.txt"), args.join("\n")).ok()?;
     if let Ok(code) = std::fs::read_to_string(dir.join("compare-exit.txt")) {
+        if let Ok(out) = std::fs::read(dir.join("compare-out.json")) {
+            std::io::stdout().write_all(&out).ok()?;
+        }
         return Some(ExitCode::from(code.trim().parse::<u8>().ok()?));
     }
     let [.., out, old, new] = args else {

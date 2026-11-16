@@ -18,6 +18,13 @@
 # the Tauri desktop crate included, and built a desktop-sized target on every push. CI lints and
 # tests the whole workspace on every PR.
 #
+# fuzz/ is its own cargo workspace with its own Cargo.lock, which a dependency change in a crate often
+# leaves stale; CI's fuzz-check step then fails `cargo check --locked` on it (two PRs on 2026-11-13).
+# So a push that changes a Cargo.toml or Cargo.lock at any depth (the root, `crates/<name>/`, `xtask/`,
+# `fuzz/`) first runs `cargo metadata --locked` on fuzz/Cargo.toml. It reads the lock file and builds
+# nothing, so it takes about a second, and a failure stops the push before the xtask check. A push
+# whose changed paths cannot be listed (no ref on stdin, no origin/main, a git failure) runs it too.
+#
 # The ui steps are about half of the check, so a push that changes no ui path skips them with
 # `--skip-ui` as well; CI runs them whatever the branch. For each pushed ref that is not a delete, the
 # paths it changes since its merge-base with origin/main go to changes.sh (the classifier CI's
@@ -83,6 +90,23 @@ if [ "${#shas[@]}" -gt 0 ]; then
 fi
 
 export CI="${CI:-1}"
+
+# Fails, with one line on stderr, when fuzz/Cargo.lock does not match the workspace. The check runs
+# when a pushed path is a Cargo.toml or Cargo.lock at any depth, and when the paths cannot be listed.
+fuzz_lock_check() {
+  local paths
+  if [ "${#shas[@]}" -gt 0 ] && paths=$(pushed_paths "${shas[@]}" | tr '\0' '\n'); then
+    if ! grep -qE '(^|/)Cargo\.(toml|lock)$' <<< "$paths"; then
+      return 0
+    fi
+  fi
+  if ! cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null; then
+    echo "pre-push: fuzz/Cargo.lock is out of date with the workspace (cargo metadata --locked failed); run: cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null, then commit fuzz/Cargo.lock" >&2
+    exit 1
+  fi
+}
+fuzz_lock_check
+
 args=(--quick --no-tests --no-dependents)
 if [ "$skip_ui" = true ]; then
   echo "pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"

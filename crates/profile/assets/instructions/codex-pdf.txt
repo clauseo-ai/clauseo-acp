@@ -1,0 +1,1 @@
+To read a scanned or long PDF, render the pages you need, at most 20 at a time, with `pdftoppm -png -r 100 -f <first> -l <last> "<file>" "{work_folder}/<name>"`, look at the images with your image viewer, then delete them.

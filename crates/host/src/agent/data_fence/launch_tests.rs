@@ -63,10 +63,12 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
     let dir = layout("launch");
     let root = dir.path();
     let deny = launch(root);
+    // Run folders and matters' state go in groups by the start the own one does not share
+    // (`launch.rs`): `s2` beside the own `s1`, `m2` beside `m1`.
     for target in [
-        "run/s2/**",
+        "run/s2*/**",
         "run.old-1700000000/**",
-        "agent-state/m2/**",
+        "agent-state/m2*/**",
         "agent-state/m1/scratch/**",
         "search.sqlite",
         "search.sqlite-wal",
@@ -86,8 +88,8 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
         );
     }
     let data = text(&root.join("data"));
-    let rules = claude_deny_rules(&deny);
-    for target in ["agent-state/m2/**", "run/s2/**", "search.sqlite-wal"] {
+    let rules = claude_deny_rules(&deny, false);
+    for target in ["agent-state/m2*/**", "run/s2*/**", "search.sqlite-wal"] {
         let base = super::rule_path(&data, cfg!(windows));
         for tool in ["Read", "Edit"] {
             let rule = format!("{tool}({base}/{target})");
@@ -252,9 +254,18 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
             "{file}: {deny:?}"
         );
     }
+    // Another project goes in its group: the shortest start of its key the own project's key
+    // does not share (`-o` beside a Unix `-tmp-…`, `-` beside a Windows `C--…`).
+    let other = "-other-matter";
+    let start = (1..=other.len())
+        .filter_map(|n| other.get(..n))
+        .find(|start| !own.starts_with(start))
+        .unwrap();
     assert!(
-        deny.targets.iter().any(|t| t == &place("-other-matter/**")),
-        "{deny:?}"
+        deny.targets
+            .iter()
+            .any(|t| t == &place(&format!("{start}*/**"))),
+        "{start}: {deny:?}"
     );
     let later = [
         place("-made-later/s-3.jsonl"),
@@ -354,7 +365,7 @@ fn python_and_tools_are_readable_never_editable_and_their_siblings_stay_denied()
         );
     }
     let base = super::rule_path(&text(&data), cfg!(windows));
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     let allow = claude_allow_rules(&deny);
     for place in ["agents/runtime/clauseo-python-*", "tools"] {
         assert!(READ_ONLY.contains(&place));
@@ -403,7 +414,10 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
         assert!(DENIED.contains(&target), "{target}");
     }
     assert!(!DENIED.contains(&"agents/runtime/**"));
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    let rules = claude_deny_rules(
+        &LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]),
+        false,
+    );
     for rule in [
         "Read(//d/run/*/agent-browser/config.json)",
         "Edit(//d/run/*/agent-browser/config.json)",
@@ -431,7 +445,7 @@ fn the_own_agent_browser_folder_is_open_and_another_sessions_is_denied() {
         write::create_dir_all(&own.join("profile")).unwrap();
     }
     let deny = launch(root);
-    assert!(deny.targets.iter().any(|t| t == "run/s2/**"), "{deny:?}");
+    assert!(deny.targets.iter().any(|t| t == "run/s2*/**"), "{deny:?}");
     assert!(
         !deny.targets.iter().any(|t| t.contains("run/s1")),
         "{deny:?}"
@@ -443,4 +457,59 @@ fn the_own_agent_browser_folder_is_open_and_another_sessions_is_denied() {
     }
     let theirs = text(&data.join("run/s2/agent-browser/downloads/a.pdf"));
     assert!(check(root, &[&theirs], None).touches_data(), "{theirs}");
+}
+
+/// The trust roots file (`<data>/tls/roots.pem`, `loads::tls_roots`) is denied to Claude's
+/// Read and Edit, so its Write and Edit tools can't put a root of their own in it, which `curl`
+/// and Python in later sessions would trust; the folder whole, so a file beside it can't stand in.
+#[test]
+fn the_trust_roots_are_denied_to_claudes_file_tools() {
+    assert!(DENIED.contains(&"tls/**"));
+    let [folder, file] = crate::agent::loads::tls_roots::ROOTS_FILE;
+    assert_eq!(folder, "tls");
+    assert_eq!(file, "roots.pem");
+    let rules = claude_deny_rules(
+        &LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]),
+        false,
+    );
+    for rule in ["Read(//d/tls/**)", "Edit(//d/tls/**)"] {
+        assert!(rules.iter().any(|r| r == rule), "{rule}");
+    }
+}
+
+/// In a folder whose entries grow with the matters (`run`, `agent-state`, Claude's projects),
+/// the siblings go in groups by the start no kept name shares: one pattern for all that share
+/// it, never one that names the own folder; a sibling whose name the own one starts with
+/// (`abc-1` beside the own `abc-10`) is named whole.
+#[test]
+fn the_siblings_of_a_growing_folder_go_in_groups() {
+    let dir = crate::pipeline::tests::support::TempDir::new("launch-groups");
+    let data = dir.path().join("data");
+    for name in ["abc-10", "abc-1", "abc-11", "abe", "abz9", "x1", "x2"] {
+        write::create_dir_all(&data.join("run").join(name).join("work")).unwrap();
+    }
+    write::write_file(&data.join("run").join("x3.txt"), b"x").unwrap();
+    let own = [data.join("run").join("abc-10")];
+    let deny = launch_deny(vec![data.clone()], &data, &own, &[]);
+    let run: Vec<&str> = deny
+        .targets
+        .iter()
+        .map(String::as_str)
+        .filter(|target| target.starts_with("run/") && !DENIED.contains(target))
+        .collect();
+    assert_eq!(
+        run,
+        [
+            "run/abc-1/**",
+            "run/abc-11*",
+            "run/abc-11*/**",
+            "run/abe*",
+            "run/abe*/**",
+            "run/abz*",
+            "run/abz*/**",
+            "run/x*",
+            "run/x*/**",
+        ]
+    );
+    assert!(deny.kept.contains(&"run/abc-10".to_owned()), "{deny:?}");
 }

@@ -165,7 +165,7 @@ fn a_connection_note_then_silence_ends_the_turn_offline_and_keeps_the_answer() {
     let kinds = || log.iter().map(kind).collect::<Vec<_>>();
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline)),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable)),
         "{:?}",
         kinds()
     );
@@ -199,7 +199,7 @@ fn a_prompt_failing_on_a_refused_connection_ends_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
@@ -274,14 +274,10 @@ fn a_sign_in_within_the_wait_is_never_offline() {
     let mut rig = Rig::start("offline-signin", &failing_after_note(message));
     rig.actor.wiring.sign_in.again = Some(|text| text.contains("refresh_token_reused"));
     let (thread, turn) = prompting(&mut rig);
-    rig.run_until("the sign-in failure", |actor| {
-        actor.threads[&thread]
-            .turn
-            .current
-            .as_ref()
-            .is_none_or(|current| current.turn != turn || current.phase != TurnPhase::Prompting)
-    });
-    rig.settle_commits();
+    // The whole end, not just the phase leaving `Prompting`: `TurnFailed` rides in step 7's
+    // commit, after the after-turn checkpoint (a matter-worker job) answers, which a slow
+    // machine may not have done when the phase turns `Ending` (private #521, Windows).
+    until_ended(&mut rig, thread);
     let log = rig.log(thread);
     let code = log.iter().find_map(|event| {
         if let DomainEvent::TurnFailed(failed) = event
@@ -340,7 +336,7 @@ fn claude_s_line_is_dropped_when_the_turn_ends_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
@@ -404,7 +400,7 @@ fn a_note_ends_the_turn_offline_even_with_a_tool_call_open() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     rig.finish();
 }
@@ -435,7 +431,7 @@ fn claude_s_line_stays_dropped_when_the_agent_exits_during_an_offline_end() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();

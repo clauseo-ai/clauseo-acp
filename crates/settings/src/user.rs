@@ -209,6 +209,78 @@ pub(crate) fn write_skill_pack(
     save_document(locations, files, &document)
 }
 
+/// Saves one entry of `mcp.servers` in the user's `settings.json`: `previous`'s entry (when it
+/// is another name) goes, and `entry` becomes the entry `name`, or with `None` that entry goes;
+/// every other key stays, as [`write_user_settings`] keeps them, in one write. An `mcp` or
+/// `servers` that is not an object is replaced by one. It checks nothing:
+/// [`crate::Effective::save_mcp_server`] and its siblings do, before they call this.
+pub(crate) fn write_mcp_server(
+    locations: &Locations,
+    files: &dyn Files,
+    previous: Option<&str>,
+    name: &str,
+    entry: Option<Value>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(mcp) = section_mut(&mut document, "mcp")
+        && let Value::Object(servers) = section_mut(mcp, "servers")
+    {
+        if let Some(previous) = previous.filter(|previous| *previous != name) {
+            servers.remove(previous);
+        }
+        match entry {
+            Some(entry) => {
+                servers.insert(name.to_owned(), entry);
+            }
+            None => {
+                servers.remove(name);
+            }
+        }
+    }
+    save_document(locations, files, &document)
+}
+
+/// Sets `enabled` in the entry `name` of `mcp.servers` in the user's `settings.json`, and
+/// nothing else: every other key of the entry stays as the file has it, a key this version does
+/// not read included. Answers `Ok(false)`, with nothing written, when the file has no such entry
+/// as an object. It checks nothing: [`crate::Effective::set_mcp_server_enabled`] does.
+pub(crate) fn write_mcp_enabled(
+    locations: &Locations,
+    files: &dyn Files,
+    name: &str,
+    enabled: bool,
+) -> Result<bool, Error> {
+    let mut document = read_document(locations, files)?;
+    let entry = document
+        .get_mut("mcp")
+        .and_then(|mcp| mcp.get_mut("servers"))
+        .and_then(|servers| servers.get_mut(name))
+        .and_then(Value::as_object_mut);
+    let Some(entry) = entry else {
+        return Ok(false);
+    };
+    entry.insert("enabled".to_owned(), Value::Bool(enabled));
+    save_document(locations, files, &document)?;
+    Ok(true)
+}
+
+/// Adds each of `entries` to `mcp.servers` in the user's `settings.json`, in one write, as
+/// [`write_mcp_server`] adds one: the file holds all of them, or (the write failing) none. It
+/// checks nothing: [`crate::Effective::add_mcp_servers`] does, before it calls this.
+pub(crate) fn write_mcp_servers(
+    locations: &Locations,
+    files: &dyn Files,
+    entries: Vec<(String, Value)>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(mcp) = section_mut(&mut document, "mcp")
+        && let Value::Object(servers) = section_mut(mcp, "servers")
+    {
+        servers.extend(entries);
+    }
+    save_document(locations, files, &document)
+}
+
 /// The user's `settings.json` as one object: empty when the file is missing; an error, with
 /// the file left alone, when it does not parse.
 fn read_document(locations: &Locations, files: &dyn Files) -> Result<Map<String, Value>, Error> {

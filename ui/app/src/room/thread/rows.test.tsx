@@ -95,6 +95,8 @@ test("the answer under a step group stands the reply's space below it; first in 
   }
 });
 
+const TOO_LONG =
+  "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.";
 test("each stop: always a turn-stopped row with its reason, and its line where it has one", async () => {
   h = await mountRoom();
   const stops: [StepEntry["stop"], StepEntry["failure"] | undefined, string][] = [
@@ -115,6 +117,7 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
         { name: "Claude" },
       ),
     ],
+    ["too_long", undefined, th("en", TOO_LONG, { name: "Claude" })],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
     [
       "max_turn_requests",
@@ -178,7 +181,7 @@ test("a paper edited since asks first: Keep current sends nothing, Undo anyway u
   h = await mountRoom(
     previewUndoScript(() => ({ undo_preview: { edited_since: ["Reply.docx"] } })),
   );
-  h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx", true)] })])]);
+  h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx")] })])]);
   const button = (name: string) =>
     [...document.querySelectorAll("button")].find((b) => b.textContent === name);
   // the dialog is its own chunk, loaded on the press (or on reaching Undo): in memory first, as on a real reach
@@ -277,7 +280,8 @@ test("a notice is a quiet line; a marker shows nothing and breaks nothing; a per
           order: 6,
           event: uuid(1, 10),
           level: "warning",
-          text: "Claude Code was updated.",
+          text: "Clauseo's own fallback text.",
+          kind: "context_not_restored",
           ts: 6000,
         },
       },
@@ -301,7 +305,12 @@ test("a notice is a quiet line; a marker shows nothing and breaks nothing; a per
       agentText(9, 1, "Still here"),
     ]),
   ]);
-  expect(h.one("notice")?.textContent).toBe("Claude Code was updated.");
+  expect(h.one("notice")?.textContent).toBe(
+    th(
+      "en",
+      "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+    ),
+  );
   expect(h.one("notice")?.dataset["level"]).toBe("warning");
   expect(h.one("message-agent")?.textContent).toBe("Still here");
   // a permission offering nothing this version knows: its prompt, with no answer to give
@@ -503,7 +512,12 @@ test("a question written in Devanagari takes lang=hi on its own line in the Engl
   expect(asked[1]?.hasAttribute("lang")).toBe(false);
 });
 
-test("a host notice shows the app's line for its kind, not its text; an agent's notice and an unknown kind show their text", async () => {
+/** Codex's own warning after OpenAI refused a key (keypath-proof-vm/log-excerpts.txt), as codex-acp sends it in a
+ * `notice`: the masked key, the address, a cf-ray and a request id (made up here). */
+const CODEX_401 =
+  "Falling back from WebSockets to HTTPS transport. unexpected status 401 Unauthorized: Incorrect API key provided: sk-proj-****************alid. You can find your API key at https://platform.openai.com/account/api-keys., url: wss://api.openai.com/v1/responses, cf-ray: 9f00000000000000-BOM, request id: req_00000000000000000000000000000000, auth error: 401, auth error code: invalid_api_key";
+
+test("a host notice shows the app's line for its kind, not its text; an unknown kind shows the host's text; an agent's notice (Codex's raw 401) shows nothing", async () => {
   h = await mountRoom();
   const text = "Clauseo's own fallback text.";
   h.deliver([
@@ -523,8 +537,8 @@ test("a host notice shows the app's line for its kind, not its text; an agent's 
         notice: {
           order: 7,
           event: uuid(2, 10),
-          level: "info",
-          text: "Claude Code was updated.",
+          level: "warning",
+          text: CODEX_401,
           ts: 7000,
         },
       },
@@ -546,9 +560,12 @@ test("a host notice shows the app's line for its kind, not its text; an agent's 
       "en",
       "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
     ),
-    "Claude Code was updated.",
     "A line from a newer Clauseo.",
   ]);
+  // the agent's free text is nowhere on the screen: not its request id, not the key's masked ending
+  expect(h.host.textContent).not.toContain("req_");
+  expect(h.host.textContent).not.toContain("sk-proj");
+  expect(h.host.textContent).not.toContain("401");
   expect(notices[0]?.textContent).not.toBe(text);
   expect(notices[0]?.getAttribute("dir")).toBe("auto");
   expect(notices[0]?.dataset["level"]).toBe("info");

@@ -12,18 +12,19 @@ use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
-    HostCommand, MatterId, MatterPath, RestoreRequest, StreamId, ThreadId, VersionRestored,
+    HostCommand, InterruptedKind, MatterId, RestoreRequest, StreamId, ThreadId, VersionRestored,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::query::own_versions;
-use super::super::{Actor, Tag, counting};
+use super::super::{Actor, Tag, counting, last_exit};
 use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
+use crate::undo_note::RestoreNote;
 
 mod revisions;
 
@@ -74,13 +75,32 @@ pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostC
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let sent = loaded
-                .and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]))
-                .and_then(|()| send_restore(actor, ask));
-            if let Err(error) = sent {
+            let checked =
+                loaded.and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]));
+            if let Err(error) = checked {
                 give_up(actor, matter, ctx, error);
+                actor.release(stream);
+                return;
             }
-            actor.release(stream);
+            // Recorded first (`last_exit.rs`): sent once the record is durable.
+            let files = match &ask.scope {
+                RestoreRequest::Matter => None,
+                RestoreRequest::Files { paths } => u64::try_from(paths.len()).ok(),
+            };
+            let action = last_exit::action(
+                matter,
+                InterruptedKind::Restore,
+                files,
+                thread,
+                actor.now().wall,
+            );
+            let then = move |actor: &mut Actor, _recorded: Result<(), Error>| {
+                if let Err(error) = send_restore(actor, ask) {
+                    give_up(actor, matter, ctx, error);
+                }
+                actor.release(stream);
+            };
+            last_exit::record(actor, action, Box::new(then));
         }),
     );
 }
@@ -155,8 +175,9 @@ pub(crate) struct RestoreLog {
     ctx: CommandCtx,
     /// The outside-edits checkpoint and its event, the restore checkpoint, `VersionRestored`.
     events: Vec<MatterEvent>,
-    /// The files R8 wrote, for the next prompt's note.
-    written: Vec<MatterPath>,
+    /// The files R8 wrote and removed, for the next prompt's note; `None` for a revisions
+    /// decision.
+    note: Option<RestoreNote>,
     /// The conversation whose stream records the restore, with its `VersionRestored`.
     thread: Option<(ThreadId, VersionRestored)>,
     outcome: CommandOutcome,
@@ -196,6 +217,9 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
     } = restored;
     let mut events = undo::outside_edits_events(outside_edits)?;
     let id = checkpoint.outcome.id();
+    // The log names the files for the agent's note too, so a restart does not lose it.
+    let (written, removed, more) = crate::undo_note::capped(written, removed);
+    let mut created = None;
     if events.is_empty()
         && let CheckpointOutcome::Reused(id) = checkpoint.outcome
         && !known::recorded(actor, ask.matter, id)
@@ -218,17 +242,26 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
             checkpoint: id,
             scope: ask.scope.clone().into(),
             undoes: ask.undoes,
+            written: written.clone(),
+            removed: removed.clone(),
+            more: (more > 0).then_some(more),
         };
+        created = Some(id);
         thread = ask.thread.map(|thread| (thread, restored.clone()));
         events.push(MatterEvent::plain(restored));
     }
-    // The agent hears of the files removed with the files written; its note says it removed some.
-    let mut written = written;
-    written.extend(removed);
+    // The agent hears of the files written and of those removed, as of now.
+    let note = RestoreNote {
+        back: written,
+        removed,
+        more,
+        checkpoint: created,
+        at: actor.now().wall,
+    };
     Ok(RestoreLog {
         ctx: ask.ctx,
         events,
-        written,
+        note: Some(note),
         thread,
         outcome: CommandOutcome::VersionRestored { checkpoint: id },
         feature: Some(Feature::Restore),
@@ -265,7 +298,7 @@ fn log_commit(actor: &mut Actor, matter: MatterId, log: &RestoreLog) -> Result<(
             actor.pipeline.push(
                 &mut draft,
                 StreamId::Thread(*thread),
-                DomainEvent::VersionRestored(restored.clone()),
+                DomainEvent::from(restored.clone()),
                 Some(ctx.id),
                 now,
                 &mut actor.ids,
@@ -323,26 +356,23 @@ pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if let Some(feature) = log.feature {
         counting::feature_used(actor, feature);
     }
-    note_restored(actor, matter, &log.written);
+    note_restored(actor, matter, log.note.as_ref());
     end::pass_writer(actor, matter);
 }
 
-/// Adds `written` to the next prompt's note of every thread of `matter`. Kept in memory only:
-/// `VersionRestored` does not list the files written, so a restart before a thread's next
-/// prompt loses this part of its note. No turn of the matter can start between the restore
-/// and this call (the restore holds the writer), so the note follows the matter's timeline.
-fn note_restored(actor: &mut Actor, matter: MatterId, written: &[MatterPath]) {
-    if written.is_empty() {
+/// Adds the restore to the next prompt's note of every thread of `matter`, after what the note
+/// holds. Its `VersionRestored` lists the files too, so after a restart the note reads them
+/// from the matter's log (`undo_note::inputs`); a restore logged before that list was added is
+/// not told after a restart. A restore whose commit failed is told from here. No turn can start
+/// between the restore and this call (the restore holds the writer), so the note follows the
+/// matter's timeline.
+fn note_restored(actor: &mut Actor, matter: MatterId, note: Option<&RestoreNote>) {
+    let Some(note) = note.filter(|note| !note.back.is_empty() || !note.removed.is_empty()) else {
         return;
-    }
+    };
     for entry in actor.threads.values_mut() {
         if entry.row.matter == matter {
-            let note = &mut entry.turn.restored;
-            for path in written {
-                if !note.contains(path) {
-                    note.push(path.clone());
-                }
-            }
+            entry.turn.note.add_restore(note);
         }
     }
 }
@@ -368,7 +398,7 @@ fn on_failed(actor: &mut Actor, matter: MatterId) {
         .and_then(|entry| entry.turns.restore.take());
     // The files are restored on disk whether or not the log says so: the agent is told.
     if let Some(log) = dropped {
-        note_restored(actor, matter, &log.written);
+        note_restored(actor, matter, log.note.as_ref());
     }
     end::pass_writer(actor, matter);
 }

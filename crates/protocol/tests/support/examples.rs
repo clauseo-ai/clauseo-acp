@@ -100,7 +100,8 @@ pub fn file_changes() -> Vec<FileChange> {
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
 /// corpus writer finds a holder for it: error codes no example turn fails with, the page vias
-/// no example opens a page with, and the stop reasons no example turn ends with.
+/// no example opens a page with, the stop reasons no example turn ends with, and the steer
+/// outcomes no example steer resolves with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
         ThreadRenamed {
@@ -216,6 +217,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(setup::turns())
     .chain(later::notices())
     .chain(later::stops())
+    .chain(later::steers())
     .collect()
 }
 
@@ -446,7 +448,11 @@ fn turn_end_events() -> Vec<DomainEvent> {
             turn,
             checkpoint: checkpoint_id(15),
             restored: vec![path("a.docx")],
-            kept: vec![path("b/new.docx")],
+            kept: vec![path("b/new.docx"), path("Sub/c.docx")],
+            unversioned: vec![SkippedFile {
+                path: path("Sub/c.docx"),
+                reason: SkippedFileReason::UnreadFolder,
+            }],
         }
         .into(),
     ]
@@ -487,6 +493,9 @@ fn matter_events() -> Vec<DomainEvent> {
             scope: RestoreScope::Files {
                 paths: vec![path("a.docx")],
             },
+            written: vec![path("a.docx")],
+            removed: vec![path("b.docx")],
+            more: Some(3),
         }
         .into(),
         MatterRelocated {

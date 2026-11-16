@@ -58,6 +58,19 @@
   --code-constant: oklch(47% 0.11 250); /* #215D96 */
   --code-function: oklch(47% 0.11 290); /* #5B4E94 */
   --code-type: oklch(47% 0.09 60); /* #7F4D20 */
+  /* a file's type on its wall tile (the glyph's tab, file-type.ts's tones): each app's own colour, muted to the
+     concrete and kept off the court's red and green by hue and chroma; 3:1 or more on the flat tile and the ground.
+     Images and every other file keep the quiet ink */
+  --file-word: oklch(50% 0.1 252); /* #35669A */
+  --file-pdf: oklch(50.5% 0.135 25); /* #A43F3B */
+  --file-excel: oklch(50% 0.09 158); /* #2E734F */
+  --file-powerpoint: oklch(54% 0.13 47); /* #AA5220 */
+  /* the same on a dimmed tile, a file only online: half the colour, half the quiet ink, so the tab dims with the tile
+     and keeps its contrast. Declared once: each resolves on the theme's own values */
+  --file-word-away: color-mix(in oklab, var(--file-word) 45%, var(--quiet));
+  --file-pdf-away: color-mix(in oklab, var(--file-pdf) 45%, var(--quiet));
+  --file-excel-away: color-mix(in oklab, var(--file-excel) 45%, var(--quiet));
+  --file-powerpoint-away: color-mix(in oklab, var(--file-powerpoint) 45%, var(--quiet));
   /* the court's three colours keep their meaning on every surface */
   --on-colour: oklch(100% 0 0); /* #FFFFFF: words on green and red, 5.4:1 */
   --faint: rgba(35, 32, 29, 0.38); /* disabled words only */
@@ -171,6 +184,10 @@
   --code-constant: oklch(82% 0.08 250); /* #9DC9F7 */
   --code-function: oklch(82% 0.08 290); /* #C3BCF5 */
   --code-type: oklch(82% 0.08 60); /* #EBB890 */
+  --file-word: oklch(74% 0.085 250); /* #81AFDF */
+  --file-pdf: oklch(72% 0.11 25); /* #E18881 */
+  --file-excel: oklch(74% 0.085 158); /* #7CBB96 */
+  --file-powerpoint: oklch(76% 0.105 58); /* #E3A06C */
   --on-colour: oklch(100% 0 0); /* #FFFFFF: 5.6:1 on night green and night red */
   --faint: rgba(236, 235, 233, 0.38);
   --scrim: rgba(27, 26, 24, 0.82); /* the night ground at 82% */
@@ -412,6 +429,14 @@
   --code-constant: oklch(47% 0.11 250);
   --code-function: oklch(47% 0.11 290);
   --code-type: oklch(47% 0.09 60);
+  --file-word: oklch(50% 0.1 252);
+  --file-pdf: oklch(50.5% 0.135 25);
+  --file-excel: oklch(50% 0.09 158);
+  --file-powerpoint: oklch(54% 0.13 47);
+  --file-word-away: color-mix(in oklab, var(--file-word) 45%, var(--quiet));
+  --file-pdf-away: color-mix(in oklab, var(--file-pdf) 45%, var(--quiet));
+  --file-excel-away: color-mix(in oklab, var(--file-excel) 45%, var(--quiet));
+  --file-powerpoint-away: color-mix(in oklab, var(--file-powerpoint) 45%, var(--quiet));
   --on-colour: oklch(100% 0 0);
   --faint: rgba(35, 32, 29, 0.38);
   --scrim: rgba(229, 226, 220, 0.82);

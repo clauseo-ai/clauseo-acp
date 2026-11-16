@@ -2,8 +2,9 @@
 // pipeline emits: the tags and attributes mdast-util-to-hast produces for CommonMark and GFM (footnotes
 // included), the syntax extras (definition lists, superscript, highlight) and the approved inline tags
 // (inline-tags.ts), and nothing from GitHub's broad global list (`name`, `action`, `tabIndex`, `title`…):
-// the inline tags carry no attribute at all, and headings only their generated id. Protocols: href https, http, mailto and our
-// two reference schemes; src clauseo-file and data, the latter narrowed to raster data:image/ by the image
+// the inline tags carry no attribute at all, and headings only their generated id. Protocols: href https, http, mailto, our
+// two reference schemes, and file and sandbox, which the link component only ever matches to a paper on the wall
+// (PaperLinksContext) and never puts in an href; src clauseo-file and data, the latter narrowed to raster data:image/ by the image
 // component. rehype-sanitize's `user-content-` clobber prefix stays. Our components then decide what is
 // clickable.
 import { defaultSchema } from "hast-util-sanitize";
@@ -19,7 +20,7 @@ export const SCHEMA: Schema = {
   required: defaultSchema.required,
   strip: defaultSchema.strip,
   protocols: {
-    href: ["https", "http", "mailto", "clauseo-cite", "clauseo-paper"],
+    href: ["https", "http", "mailto", "clauseo-cite", "clauseo-paper", "file", "sandbox"],
     src: ["clauseo-file", "data"],
   },
   tagNames: [

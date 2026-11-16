@@ -170,11 +170,11 @@ mod write;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
-#[cfg(feature = "test-support")]
-pub use config::RenameFault;
 pub use config::{
     AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
 };
+#[cfg(feature = "test-support")]
+pub use config::{FreeBytes, RenameFault};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
@@ -184,6 +184,7 @@ pub use receipt::{install_folder, install_root, script_path};
 #[cfg(feature = "test-support")]
 pub use sac::SacForTests;
 pub use sac::SacState;
+pub use signin::keychain_lock::login_keychain_locked;
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,

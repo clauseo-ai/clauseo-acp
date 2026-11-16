@@ -35,4 +35,6 @@ export type QueueTestIds = {
   why?: string;
   /** The resume cue's line, alone when nothing is queued (R20b). */
   resume?: string;
+  /** Each row's line saying when it goes. */
+  when?: string;
 };

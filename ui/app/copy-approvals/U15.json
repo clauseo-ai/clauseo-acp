@@ -481,14 +481,15 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U15-50": {
-    "en": "Your firm's key for Clauseo's case-law service. Kept on this computer.",
-    "hi": "Clauseo की निर्णय-खोज सेवा के लिए आपकी फ़र्म की key। इसी कंप्यूटर पर रखी है।",
+    "en": "Your key for Clauseo's case-law service. Kept on this computer.",
+    "hi": "Clauseo की निर्णय-खोज सेवा के लिए आपकी key। इसी कंप्यूटर पर रखी है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "was \"Your firm's key for Clauseo's case-law service. Kept on this computer.\" (IT sweep)"
   },
   "U15-51": {
     "en": "Add key",
@@ -751,14 +752,15 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U15-77": {
-    "en": "Using your firm's key.",
-    "hi": "आपकी फ़र्म की key इस्तेमाल हो रही है।",
+    "en": "Using your key.",
+    "hi": "आपकी key इस्तेमाल हो रही है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "was \"Using your firm's key.\" (IT sweep)"
   },
   "U15-78": {
     "en": "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",

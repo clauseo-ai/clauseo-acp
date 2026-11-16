@@ -111,9 +111,9 @@ const CODEX_HOME_DENIED: [&str; 4] = [
 /// skill packs' sources, the matters' store, the counts, the Windows sandbox's ledger, the
 /// limits reader's state, the browser's config and every session's browser folder (the guard's
 /// `--cwd`, `<data>/browser/run/<session>`: the guard runs unfenced and writes through it, so
-/// the shell must not plant a link there), and the block list's store and the lawyer's allowed
-/// sites.
-const DATA_DENIED: [&str; 7] = [
+/// the shell must not plant a link there), the block list's store and the lawyer's allowed
+/// sites, and Claude sessions' settings files (`agent::launch_settings`).
+const DATA_DENIED: [&str; 8] = [
     "skill-packs",
     "matters",
     "counts",
@@ -121,6 +121,7 @@ const DATA_DENIED: [&str; 7] = [
     "limits",
     "browser",
     "blocklist",
+    crate::agent::launch_settings::FOLDER,
 ];
 
 /// Under `<data>/agents`, named whether or not they exist: the downloads, npm cache and sign-in

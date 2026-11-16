@@ -21,6 +21,7 @@
 // names a locked key, then settings_changed. Only the settings window sends it (the main window's host refuses it),
 // and this pane is the only place that does. A change applies from the next conversation's start; one already open
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import type { ReactNode } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
@@ -138,8 +139,11 @@ function CountsRow({ ctx }: { ctx: SectionContext }) {
 
 export function Privacy({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
+  const { platform } = useDisplay();
   const { tools } = ctx.settings;
-  const webOff = tools !== undefined && !tools.web_search && !tools.browser;
+  // the browser is off on Windows for launch, its row hidden: it counts as off there too
+  const browserOn = tools?.browser === true && platform !== "windows";
+  const webOff = tools !== undefined && !tools.web_search && !browserOn;
   return (
     <>
       {/* what goes to a plan, said once for every plan, as the group's note */}
@@ -173,13 +177,16 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
               </InfoTip>
             }
           />
-          <ToolRow
-            ctx={ctx}
-            tools={tools}
-            tool="browser"
-            label={w.s("Browser")}
-            note={w.s("Runs on this computer.")}
-          />
+          {/* the row comes back when the Windows browser ships */}
+          {platform !== "windows" && (
+            <ToolRow
+              ctx={ctx}
+              tools={tools}
+              tool="browser"
+              label={w.s("Browser")}
+              note={w.s("ChatGPT uses it. Runs on this computer.")}
+            />
+          )}
         </Group>
       )}
       {ctx.settings.privacy !== undefined && <CountsRow ctx={ctx} />}

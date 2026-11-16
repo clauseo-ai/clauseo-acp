@@ -3,11 +3,11 @@
 //!
 //! # Owns
 //!
-//! `state.sqlite` in the folder the caller passes: schema version 6 and its numbered
+//! `state.sqlite` in the folder the caller passes: schema version 7 and its numbered
 //! migrations (`PRAGMA user_version`; `0002_matter_details.sql` adds a matter's details,
 //! `0003_thread_seen.sql` a thread's seen mark, `0004_thread_title_source.sql` a thread's title
 //! source, `0005_matter_skill_packs.sql` a matter's skill packs, `0006_matter_agent_prefs.sql` its
-//! model and effort picks), the
+//! model and effort picks, `0007_pending_actions.sql` the file action a matter's writer runs), the
 //! pragmas, the stored `MessagePack` envelope, the exclusive lock (`state.sqlite.lock`), the
 //! private file mode, and the mapping of every disk failure to `store.disk_full`,
 //! `store.corrupt` or `store.io`.
@@ -27,8 +27,10 @@
 //! [`Store::account_limits`]; [`Store::put_account_limits`] keeps the last
 //! [`AccountLimits`](clauseo_protocol::AccountLimits) per account, and
 //! [`Store::forget_account_limits`] deletes an agent's, all but one account's or all of them.
-//! [`blob_ref`] and [`command_hash`] are the hashes the host puts in events and receipts.
-//! [`Error`] maps to [`ErrorCode`](clauseo_protocol::ErrorCode) with [`Error::code`].
+//! [`Store::put_pending_action`], [`Store::clear_pending_action`] and [`Store::pending_actions`]
+//! keep the file action holding a matter's writer ([`PendingAction`]), each write synced before
+//! it answers. [`blob_ref`] and [`command_hash`] are the hashes the host puts in events and
+//! receipts. [`Error`] maps to [`ErrorCode`](clauseo_protocol::ErrorCode) with [`Error::code`].
 //! [`Store::close`] checkpoints, closes the file and joins both threads; dropping the last clone
 //! does the same, unreported, and every call still queued then gets [`Error::Closed`]. The
 //! `test-support` feature exports `fixtures::reopen_20k`, the one generator of the 20k-event
@@ -93,8 +95,8 @@ use futures::channel::oneshot;
 pub use blob::blob_ref;
 pub use error::{Error, IoError};
 pub use model::{
-    BlobIn, CheckpointRow, Commit, Committed, MatterRow, RawFrameRetention, Receipt, Reopen,
-    Snapshot, SnapshotIn, StoreOptions, ThreadRow,
+    BlobIn, CheckpointRow, Commit, Committed, MatterRow, PendingAction, RawFrameRetention, Receipt,
+    Reopen, Snapshot, SnapshotIn, StoreOptions, ThreadRow,
 };
 pub use open::{DB_FILE, LOCK_FILE, SCHEMA};
 pub use read::READ_PAGE_MAX;

@@ -67,7 +67,8 @@
 //!     ([`clauseo_matters::held_open_at`], a no-share open that fails) still refuses it, and so
 //!     does the OS's own sharing violation on any write. The agent's own Read tool is not checked.
 //!   - stetdoc and textutil (`names::stetdoc`, read with stetdoc v0.9.1's options and their
-//!     arity, so a flag's value is never taken for the document): `view`, `inspect`, `check`,
+//!     arity by `crate::stetdoc_args`, which the turn's shell writes share, so a flag's value
+//!     is never taken for the document): `view`, `inspect`, `check`,
 //!     `lookup`, `capabilities` and `skills` only read; an output (`-o`, `--output`, `-oX`,
 //!     `--output=X`) naming a held file writes it; with `--in-place` any word naming a held file
 //!     is written; else `--dry-run` writes nothing; else `edit`, `replace` and `comment` write

@@ -462,3 +462,46 @@ test("on Windows the room's caption buttons follow the window and reach it", asy
   await act(async () => minimise?.click());
   expect(controls.minimise).toHaveBeenCalledTimes(1);
 });
+
+/** Runs `check` on the Mac with the screen `taller` px taller than the window, then puts both back. */
+async function onMacScreen(taller: number, check: () => Promise<void>) {
+  vi.stubGlobal("navigator", { platform: "MacIntel", userAgent: "Macintosh" });
+  const screen = vi
+    .spyOn(window.screen, "height", "get")
+    .mockReturnValue(window.innerHeight + taller);
+  try {
+    await check();
+  } finally {
+    vi.unstubAllGlobals();
+    screen.mockRestore();
+  }
+}
+
+const top = () => host?.querySelector(".room-top") ?? null;
+
+test("on a notched Mac the desktop's full screen stands in for the size: the window 32 px under its screen is full screen", async () => {
+  // macOS puts a notched MacBook's full-screen window below the camera band, so the size read says a window
+  await onMacScreen(32, async () => {
+    const transport = fake([NEWER], undefined, "mac");
+    await mount(transport, {}, countingControls());
+    expect(top()?.hasAttribute("data-full-screen")).toBe(false);
+    expect(host?.querySelector(".room-lights[data-native]")).not.toBeNull();
+    await act(async () => transport.fullScreenChanged(true));
+    expect(top()?.hasAttribute("data-full-screen")).toBe(true);
+    expect(host?.querySelector(".room-lights")).toBeNull();
+  });
+});
+
+test("the desktop's word that the window is not full screen keeps the lights' room, whatever the window's size", async () => {
+  // a window as big as its screen reads as full screen by size; the desktop says otherwise
+  await onMacScreen(0, async () => {
+    const transport = fake([NEWER], undefined, "mac");
+    transport.fullScreenChanged(false);
+    await mount(transport, {}, countingControls());
+    expect(top()?.hasAttribute("data-full-screen")).toBe(false);
+    expect(host?.querySelector(".room-lights[data-native]")).not.toBeNull();
+    // and it follows the desktop's next word
+    await act(async () => transport.fullScreenChanged(true));
+    expect(top()?.hasAttribute("data-full-screen")).toBe(true);
+  });
+});

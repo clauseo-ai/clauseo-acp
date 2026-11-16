@@ -107,6 +107,12 @@ pub(in crate::actor::turn) fn says_connection(text: &str) -> bool {
     CONNECTION.iter().any(|words| text.contains(words))
 }
 
+/// Whether `text` names a request that timed out: the service took the connection but did not
+/// answer in time (Claude Code's "Request timed out."), as against a connection never made.
+pub(in crate::actor::turn) fn says_timeout(text: &str) -> bool {
+    text.to_lowercase().contains("request timed out")
+}
+
 /// Whether `text`, an agent's error or note, says it could not reach its service and does not
 /// say a server answered.
 pub(in crate::actor::turn) fn is_offline(text: &str) -> bool {

@@ -1,11 +1,16 @@
 //! stetdoc's environment (`stetdoc_env`): empty off Windows; on Windows `SystemRoot`, `windir`,
-//! `TEMP` and `TMP`, the last two the blackline's own folder.
+//! `TEMP` and `TMP`, the last two the blackline's own folder. And the code a failed run gives
+//! (`error_of`, `refusal_code`).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use super::{author_arg, stetdoc_env};
+use clauseo_protocol::ErrorCode;
+
+use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, WordBlackline};
+
+use super::{author_arg, error_of, note_a_silent_difference, refusal_code, stetdoc_env};
 
 /// A lookup over `pairs`, the name matched in any case.
 fn host(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -81,4 +86,85 @@ fn stetdoc_env_without_a_windows_directory_still_sets_temp() {
 fn an_author_that_starts_with_a_dash_stays_one_argument() {
     assert_eq!(author_arg("-x"), OsString::from("--author=-x"));
     assert_eq!(author_arg("A. Mehta"), OsString::from("--author=A. Mehta"));
+}
+
+/// stetdoc 0.9.3's real answer to a compare whose inner table ends its cell and is removed
+/// (`tests/fixtures/blackline/partial/compare-inner-last.json`).
+const INNER_LAST: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/blackline/partial/compare-inner-last.json"
+));
+
+#[test]
+fn stetdoc_refusals_have_codes_of_their_own() {
+    let (code, message) = error_of(INNER_LAST.as_bytes());
+    assert_eq!(code, "validation_failed");
+    assert_eq!(
+        refusal_code(&code, &message),
+        ErrorCode::BlacklineNestedTable
+    );
+    let code_of = |code: &str| refusal_code(code, "x");
+    assert_eq!(
+        code_of("validation_failed"),
+        ErrorCode::BlacklineCannotCompare
+    );
+    assert_eq!(code_of("unsupported"), ErrorCode::BlacklineCannotCompare);
+    for unread in [
+        "malformed_input",
+        "corrupt_complement",
+        "unsupported_version",
+    ] {
+        assert_eq!(code_of(unread), ErrorCode::BlacklineNotReadable);
+    }
+    assert_eq!(code_of("limit_exceeded"), ErrorCode::BlacklineTooLarge);
+    for other in ["io_error", "internal", "none", "zz_later"] {
+        assert_eq!(code_of(other), ErrorCode::BlacklineFailed);
+    }
+    // No JSON, or a code that is not a plain word: `none`, and no message.
+    assert_eq!(error_of(b"oops"), ("none".to_owned(), String::new()));
+    let odd = br#"{"error":{"code":"a b","message":"m"}}"#;
+    assert_eq!(error_of(odd), ("none".to_owned(), "m".to_owned()));
+}
+
+/// Two files that differ, blacklined with no change shown and nothing said (a link's address
+/// changed, which stetdoc does not mark), say the blackline may differ; the same files, or a
+/// change shown, or a notice that already says part may be missing, add nothing.
+#[test]
+fn a_difference_the_blackline_does_not_show_may_differ() {
+    let blackline = |change| WordBlackline {
+        paragraphs: vec![BlacklineParagraph {
+            change,
+            runs: Vec::new(),
+            hidden: false,
+        }],
+        truncated: false,
+        notices: Vec::new(),
+    };
+    let noted = |mut blackline: WordBlackline, differ| {
+        note_a_silent_difference(&mut blackline, differ);
+        blackline.notices
+    };
+    assert_eq!(
+        noted(blackline(ParagraphChange::Same), true),
+        [BlacklineNotice::MayDiffer]
+    );
+    assert_eq!(noted(blackline(ParagraphChange::Same), false), []);
+    assert_eq!(noted(blackline(ParagraphChange::Changed), true), []);
+    // A notice about something else (the same hidden word in both) does not say they differ.
+    let mut hidden = blackline(ParagraphChange::Same);
+    hidden.notices.push(BlacklineNotice::HiddenText);
+    assert_eq!(
+        noted(hidden.clone(), true),
+        [BlacklineNotice::HiddenText, BlacklineNotice::MayDiffer]
+    );
+    assert_eq!(noted(hidden, false), [BlacklineNotice::HiddenText]);
+    // One that already says part may be missing does.
+    for said in [
+        BlacklineNotice::PartNotShown,
+        BlacklineNotice::ChangesOutsideText,
+    ] {
+        let mut blackline = blackline(ParagraphChange::Same);
+        blackline.notices.push(said);
+        assert_eq!(noted(blackline, true), [said]);
+    }
 }

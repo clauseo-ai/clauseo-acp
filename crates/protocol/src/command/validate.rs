@@ -10,13 +10,17 @@ use crate::title::shows_something;
 use crate::{AgentChoiceId, DeliveryRequest, check_display_title};
 use crate::{
     AllowScope, CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision,
-    MatterPath, PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode,
+    MatterPath, Measure, PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode, escaped_len,
     is_windows_reserved_name,
 };
 
-/// Most prompt text, in UTF-8 bytes summed over the prompt's `Text` blocks (256 KiB). Raw bytes,
-/// not JSON-escaped ones: the lawyer typed them, and the limit guards the agent's input.
-pub const MAX_PROMPT_TEXT_BYTES: usize = 256 * 1024;
+/// Most prompt text (6 MiB), in JSON-escaped bytes summed over the prompt's `Text` blocks, as
+/// [`escaped_len`](crate::escaped_len) counts them. Escaped, not raw: the prompt goes to the
+/// agent as one JSON line, and the agent replays it as one line when a conversation is reopened,
+/// so the bound must hold for the line, which escaping can make up to six times longer than the
+/// text. 6 MiB leaves room for the replayed line's envelope under the 8 MiB the ACP client reads
+/// per line, and is above what Claude or `ChatGPT` accept, so the agent refuses first.
+pub const MAX_PROMPT_TEXT_BYTES: usize = 6 * 1024 * 1024;
 
 /// Most `File` blocks in one prompt.
 pub const MAX_PROMPT_FILES: usize = 50;
@@ -242,6 +246,8 @@ impl HostCommand {
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
+            // Bounds and kinds; names, paths, URLs and what the list holds are the host's.
+            Self::Mcp(command) => command.check(),
             // The ids' count and repeats; the `.docx` name and the ids' existence are state.
             Self::DecideRevisions(decide) => decide.check(),
         }
@@ -300,7 +306,7 @@ fn check_revoke(host: &str, scope: AllowScope, has_matter: bool) -> Result<(), E
     if host.len() > MAX_ALLOWED_HOST_BYTES {
         return Err(too_large(
             KIND,
-            "host in bytes",
+            Measure::HostBytes,
             host.len(),
             MAX_ALLOWED_HOST_BYTES,
         ));
@@ -340,7 +346,7 @@ impl RestoreRequest {
     }
 }
 
-fn too_large(kind: &'static str, what: &'static str, size: usize, max: usize) -> Error {
+fn too_large(kind: &'static str, what: Measure, size: usize, max: usize) -> Error {
     Error::TooLarge {
         kind,
         what,
@@ -359,7 +365,7 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
     if content.len() > MAX_PROMPT_BLOCKS {
         return Err(too_large(
             kind,
-            "prompt blocks",
+            Measure::PromptBlocks,
             content.len(),
             MAX_PROMPT_BLOCKS,
         ));
@@ -376,22 +382,35 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
                 });
             }
             PromptBlock::Text { text } => {
-                text_bytes = text_bytes.saturating_add(text.len());
+                // The first block that crosses the limit decides: the rest is not measured.
+                // Escaping only adds bytes, so a block whose raw bytes cross it is over without
+                // a scan; the size is then its raw count, a lower bound.
+                let raw = text_bytes.saturating_add(text.len());
+                text_bytes = if raw > MAX_PROMPT_TEXT_BYTES {
+                    raw
+                } else {
+                    text_bytes.saturating_add(escaped_len(text))
+                };
+                if text_bytes > MAX_PROMPT_TEXT_BYTES {
+                    return Err(too_large(
+                        kind,
+                        Measure::PromptText,
+                        text_bytes,
+                        MAX_PROMPT_TEXT_BYTES,
+                    ));
+                }
                 visible_text = visible_text || shows_something(text);
             }
             PromptBlock::File { file: _ } => files += 1,
         }
     }
-    if text_bytes > MAX_PROMPT_TEXT_BYTES {
+    if files > MAX_PROMPT_FILES {
         return Err(too_large(
             kind,
-            "prompt text in UTF-8 bytes",
-            text_bytes,
-            MAX_PROMPT_TEXT_BYTES,
+            Measure::FileReferences,
+            files,
+            MAX_PROMPT_FILES,
         ));
-    }
-    if files > MAX_PROMPT_FILES {
-        return Err(too_large(kind, "file references", files, MAX_PROMPT_FILES));
     }
     if !visible_text && files == 0 {
         return Err(Error::Format {
@@ -405,11 +424,17 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
 /// `EditQueuedPrompt`'s text: within `SendPrompt`'s text limit. Whether the edited prompt
 /// still holds something to send depends on its files, which only the host knows.
 fn check_edited_text(text: &str) -> Result<(), Error> {
-    if text.len() > MAX_PROMPT_TEXT_BYTES {
+    // Raw bytes over the limit are over without a scan, as in `check_prompt`.
+    let bytes = if text.len() > MAX_PROMPT_TEXT_BYTES {
+        text.len()
+    } else {
+        escaped_len(text)
+    };
+    if bytes > MAX_PROMPT_TEXT_BYTES {
         return Err(too_large(
             "EditQueuedPrompt",
-            "prompt text in UTF-8 bytes",
-            text.len(),
+            Measure::PromptText,
+            bytes,
             MAX_PROMPT_TEXT_BYTES,
         ));
     }
@@ -427,7 +452,7 @@ fn check_folder_name(name: &Title) -> Result<(), Error> {
     if name.len() > MAX_MATTER_NAME_BYTES {
         return Err(too_large(
             "CreateMatter",
-            "new folder name in UTF-8 bytes",
+            Measure::NewFolderName,
             name.len(),
             MAX_MATTER_NAME_BYTES,
         ));
@@ -478,7 +503,7 @@ fn check_response(response: &ElicitationResponse) -> Result<(), Error> {
     if size > MAX_ELICITATION_VALUES_BYTES {
         return Err(too_large(
             "AnswerElicitation",
-            "values as compact JSON in bytes",
+            Measure::ElicitationValues,
             size,
             MAX_ELICITATION_VALUES_BYTES,
         ));
@@ -534,7 +559,12 @@ fn check_paths<'a>(
     paths: impl ExactSizeIterator<Item = &'a MatterPath>,
 ) -> Result<(), Error> {
     if paths.len() > MAX_FILE_LIST {
-        return Err(too_large(kind, "files named", paths.len(), MAX_FILE_LIST));
+        return Err(too_large(
+            kind,
+            Measure::FilesNamed,
+            paths.len(),
+            MAX_FILE_LIST,
+        ));
     }
     let mut sorted: Vec<&str> = paths.map(MatterPath::as_str).collect();
     let bytes = sorted
@@ -543,7 +573,7 @@ fn check_paths<'a>(
     if bytes > MAX_PATH_LIST_BYTES {
         return Err(too_large(
             kind,
-            "bytes of paths named",
+            Measure::PathBytes,
             bytes,
             MAX_PATH_LIST_BYTES,
         ));

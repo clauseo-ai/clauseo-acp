@@ -10,6 +10,7 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, Timestamp, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
+import { toolCallIdOf } from "../permission-model.ts";
 import { sameIds } from "./ids.ts";
 import {
   asksWords,
@@ -22,6 +23,9 @@ import {
   unsettled,
 } from "./step-names.ts";
 import { taskOf } from "./task-words.ts";
+import { toolNameOf } from "./tool-names.ts";
+import { caseLawDone, skillDone, toolDone } from "./tool-words.ts";
+import { skillOf } from "./skill-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -33,6 +37,7 @@ export type Part = "tool" | "thought" | "alone";
 
 const TOOL = "tool_call:";
 const TEXT = "agent_text:";
+const PERMISSION = "permission:";
 
 /** The answer's rows, in order, with every run of tool calls and thoughts holding a tool call as one group. */
 export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Part): Segment[] {
@@ -59,6 +64,39 @@ export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Par
   return out;
 }
 
+/** `segments` with each answered prompt whose own tool call is in an earlier group, another
+ * group between them, moved back to stand after that group and the prompts already there: an
+ * answered prompt reads only "Allowed once.", so it must follow the step it answered, never the
+ * next one the agent began before asking (`callOf`: an answered prompt row's tool call; null for
+ * a pending prompt, which stays where it came). It never moves ahead of a row that stays (the
+ * agent's words, a notice, a pending prompt), so those keep their order. */
+export function promptsAtTheirCalls(
+  segments: readonly Segment[],
+  callOf: (row: EntryId) => EntryId | null,
+): Segment[] {
+  const out: Segment[] = [];
+  for (const s of segments) {
+    const call = s.row === undefined ? null : callOf(s.row);
+    const at = call === null ? -1 : out.findIndex((o) => o.group?.includes(call) === true);
+    if (at < 0 || !out.slice(at + 1).some((o) => o.group !== undefined)) {
+      out.push(s);
+      continue;
+    }
+    let to = at + 1;
+    while (to < out.length && out[to]?.row !== undefined && callOf(out[to]!.row!) !== null) to += 1;
+    // the last row that stays, at or after `to`: the prompt goes no further back than just after it
+    for (let i = out.length - 1; i >= to; i -= 1) {
+      const kept = out[i]?.row;
+      if (kept !== undefined && callOf(kept) === null) {
+        to = i + 1;
+        break;
+      }
+    }
+    out.splice(to, 0, s);
+  }
+  return out;
+}
+
 /** A row's part from its entry. */
 export function partOfEntry(entry: ViewEntry | undefined): Part {
   if (entry?.tool_call !== undefined) return "tool";
@@ -79,13 +117,15 @@ export function segmentsPick(
     if (ready && seen !== null && sameIds(seen, ids)) return last;
     seen = ids;
     // a row not in yet reads as alone; it comes in with the ids, so this is only a window still filling
-    last = segmentsOf(ids, (id) =>
-      id.startsWith(TOOL)
-        ? "tool"
-        : id.startsWith(TEXT)
-          ? partOfEntry(paged.get(id) ?? v?.entries.get(id))
-          : "alone",
+    const entry = (id: EntryId) => paged.get(id) ?? v?.entries.get(id);
+    const grouped = segmentsOf(ids, (id) =>
+      id.startsWith(TOOL) ? "tool" : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
     );
+    last = promptsAtTheirCalls(grouped, (row) => {
+      const asked = row.startsWith(PERMISSION) ? entry(row)?.permission : undefined;
+      // a pending prompt stays where it came, by the step still running
+      return asked === undefined || asked.state === "pending" ? null : toolCallIdOf(asked);
+    });
     ready = v !== undefined;
     return last;
   };
@@ -99,7 +139,9 @@ const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 function namedOf(lang: Lang, entry: ToolCallEntry): string {
   const p = placeOf(entry);
   const own = p.name ?? (p.query === null ? null : `'${p.query}'`) ?? p.what;
-  const title = titleOf(entry.title);
+  // a tool's name is no words to show (tool-names.ts)
+  const title =
+    toolNameOf(entry.title) === undefined && skillOf(entry) === null ? titleOf(entry.title) : "";
   if (own !== null) return sentenceOf(own);
   return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
 }
@@ -230,10 +272,19 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
+  // a skill is a guide read, never its internal name (skill-words.ts)
+  const guide = skillDone(lang, entry, tried);
+  if (guide !== null) return guide;
+  // a case-law tool says what it did, whatever kind the agent gave it (Claude's other, ChatGPT's execute)
+  const law = caseLawDone(lang, entry.title, tried);
+  if (law !== null) return law;
   const p = placeOf(entry);
   const name = p.name;
   // the agent's own words where nothing else names it: as they are once done, after the attempt once not
+  // a title that is a tool's name is never shown: a known one says what it did, any other reads as the kind's line
+  const tool = toolNameOf(entry.title);
   const titled = (plain: string) => {
+    if (tool !== undefined) return tool.as === null ? plain : toolDone(lang, tool.as, tried);
     const own = titleOf(entry.title);
     return own === "" ? plain : agentWords(own);
   };
@@ -281,7 +332,18 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
       // the agent's own words for the task, else the program and the paper it ran on (D-017)
       const t = taskOf(entry);
       if (t.own !== null) return agentWords(t.own);
-      if (t.program === null) return say("Ran a task.", "Tried to run a task.");
+      if (t.program === null && t.described !== null)
+        return say("Ran {description}.", "Tried to run {description}.", {
+          description: t.described,
+        });
+      if (t.program === null)
+        return tool?.as == null
+          ? say("Ran a task.", "Tried to run a task.")
+          : toolDone(lang, tool.as, tried);
+      // a chained command is counted, not named by its first program ("Ran New-Item." for three); the fold under the
+      // row still shows it whole
+      if (t.count > 1)
+        return say("Ran {n} tasks.", "Tried to run {n} tasks.", { n: String(t.count) });
       return t.paper === null
         ? say("Ran {program}.", "Tried to run {program}.", { program: t.program })
         : say("Ran {program} on {name}.", "Tried to run {program} on {name}.", {

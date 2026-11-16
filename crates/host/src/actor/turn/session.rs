@@ -25,12 +25,16 @@ use super::key_retry;
 use super::out::Out;
 use super::picks::{Pick, Picked};
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
-use crate::agent::{self, codex};
+use crate::agent::{self, codex, launch_settings};
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
 
+mod claude_mode;
 mod named;
+
+use claude_mode::claude_start;
+pub(super) use claude_mode::{Auto, hold_auto_back};
 
 /// The fallback words of the notice a thread gets when its agent starts a new session after
 /// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
@@ -101,6 +105,7 @@ pub(super) fn on_replay_log(
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -116,14 +121,16 @@ pub(super) fn on_replay_log(
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = LoadSession {
             session,
             cwd,
@@ -158,20 +165,23 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = LoadSession {
             session,
             cwd,
@@ -202,20 +212,23 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = NewSession {
             cwd,
             additional_directories,
@@ -231,6 +244,12 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             result,
         }
     });
+}
+
+/// Where `thread`'s run writes Claude's settings for its session calls.
+fn settings_target(actor: &Actor, thread: ThreadId) -> Option<launch_settings::Target> {
+    let run = actor.threads.get(&thread)?.turn.run.as_ref()?;
+    Some(run.launch_settings.clone())
 }
 
 /// `thread`'s matter, for the log of its `.codex` re-check.
@@ -250,17 +269,19 @@ fn session_loads(
     super::profile_loads::session_loads(actor, thread, &matter)
 }
 
-/// The program of each MCP server, which a cancelled turn's sweep leaves running.
+/// The program of each stdio MCP server, which a cancelled turn's sweep leaves running. An
+/// http server runs nowhere on this computer, so it has none.
 fn commands(servers: &[McpServer]) -> Vec<PathBuf> {
     servers
         .iter()
-        .map(|server| match server {
-            McpServer::Stdio { command, .. } => command.clone(),
+        .filter_map(|server| match server {
+            McpServer::Stdio { command, .. } => Some(command.clone()),
+            McpServer::Http { .. } => None,
         })
         .collect()
 }
 
-fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
+pub(super) fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let matter = actor.check_thread(thread)?.row.matter;
     Ok(crate::agent::session_folder(std::path::Path::new(
         &actor.check_matter(matter)?.row.folder_path,
@@ -331,7 +352,10 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         attach(actor, thread, start, loaded);
         return;
     }
-    let ask = switch.then_some(ask);
+    let ask = switch.then_some(Switch {
+        mode: ask,
+        fallback: None,
+    });
     before_attach(actor, thread, (start, loaded), (ask, guard, picks));
 }
 
@@ -340,7 +364,7 @@ fn before_attach(
     actor: &mut Actor,
     thread: ThreadId,
     (start, loaded): (SessionStart, bool),
-    (mode, guard, picks): (Option<AgentChoiceId>, Option<PathBuf>, Vec<Pick>),
+    (mode, guard, picks): (Option<Switch>, Option<PathBuf>, Vec<Pick>),
 ) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
@@ -348,12 +372,13 @@ fn before_attach(
     agent.preparing = true;
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     call(actor, thread, id, async move {
-        let (result, picked) = prepare(&client, start, (mode, guard), picks).await;
+        let (result, picked, fell_back) = prepare(&client, start, (mode, guard), picks).await;
         fence.await;
         AgentReply::Prepared {
             loaded,
             result,
             picked,
+            fell_back,
         }
     });
 }
@@ -361,32 +386,60 @@ fn before_attach(
 /// A session's work before its first prompt, in order: `session/set_mode` to `mode` when given
 /// (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch, and this
 /// covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`], see
-/// [`claude_start`]); then, for Codex, when a hooks object went into `CODEX_CONFIG` (`guard`
-/// is the session's folder), `_codex/hooks/list` once, which must show the guard trusted; then
+/// [`claude_start`], with `acceptEdits` as its fallback when the switch to `auto` fails); then,
+/// for Codex, when a hooks object went into `CODEX_CONFIG` (`guard` is the session's folder),
+/// `_codex/hooks/list` once, which must show the guard trusted; then
 /// the model and effort `picks` (`picks::apply`), whose failures fail nothing. The start comes
-/// back with the mode and options it now has.
+/// back with the mode and options it now has, and whether the mode switch fell back.
 async fn prepare(
     client: &AcpClient,
     mut start: SessionStart,
-    (mode, guard): (Option<AgentChoiceId>, Option<PathBuf>),
+    (mode, guard): (Option<Switch>, Option<PathBuf>),
     picks: Vec<Pick>,
-) -> (Result<SessionStart, Error>, Picked) {
-    if let Err(error) = checks(client, &mut start, (mode, guard)).await {
-        return (Err(error), Picked::default());
-    }
+) -> (Result<SessionStart, Error>, Picked, bool) {
+    let fell_back = match checks(client, &mut start, (mode, guard)).await {
+        Ok(fell_back) => fell_back,
+        Err(error) => return (Err(error), Picked::default(), false),
+    };
     let picked = super::picks::apply(client, &mut start, picks).await;
-    (Ok(start), picked)
+    (Ok(start), picked, fell_back)
 }
 
-/// [`prepare`]'s mode switch and guard check.
+/// A `session/set_mode` before the attach: to `mode`, and, should the agent refuse it, to
+/// `fallback` when there is one (Claude's `acceptEdits` for `auto`), else the launch fails.
+#[derive(Debug)]
+pub(super) struct Switch {
+    pub(super) mode: AgentChoiceId,
+    pub(super) fallback: Option<AgentChoiceId>,
+}
+
+/// [`prepare`]'s mode switch and guard check; `true` when the switch fell back.
 async fn checks(
     client: &AcpClient,
     start: &mut SessionStart,
-    (mode, guard): (Option<AgentChoiceId>, Option<PathBuf>),
-) -> Result<(), Error> {
-    if let Some(mode) = mode {
-        client.set_mode(&start.session, mode.clone()).await?;
-        if let Some(modes) = &mut start.modes {
+    (mode, guard): (Option<Switch>, Option<PathBuf>),
+) -> Result<bool, Error> {
+    let mut fell_back = false;
+    if let Some(Switch { mode, fallback }) = mode {
+        let mode = match (
+            client.set_mode(&start.session, mode.clone()).await,
+            fallback,
+        ) {
+            (Ok(()), _) => Some(mode),
+            (Err(error), None) => return Err(error.into()),
+            (Err(error), Some(fallback)) => {
+                tracing::warn!(error = %Cause(&error), to = %fallback.as_str(), "the agent refused its mode; falling back");
+                fell_back = true;
+                let current = start.modes.as_ref().map(|modes| modes.current.as_str());
+                if current == Some(fallback.as_str()) {
+                    None
+                } else {
+                    client.set_mode(&start.session, fallback.clone()).await?;
+                    Some(fallback)
+                }
+            }
+        };
+        if let (Some(mode), Some(modes)) = (mode, &mut start.modes) {
             modes.current = CompactString::from(mode.as_str());
         }
     }
@@ -396,70 +449,20 @@ async fn checks(
             return Err(codex::guard_untrusted(&answer));
         }
     }
-    Ok(())
+    Ok(fell_back)
 }
 
-/// A Claude agent's session started in another mode than Clauseo's
-/// ([`agent::loads::claude_mode`]: `acceptEdits`, or `default` in forced ask): claude-agent-acp
-/// 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed transcript's
-/// mode), which `_meta` cannot override (see `agent/loads.rs`). So `session/set_mode` goes
-/// first, before any prompt, through [`prepare`]; a failed switch fails the launch, so no
-/// prompt runs in the user's mode. A session already in it attaches now. One that reports no
-/// modes, or offers no such mode, fails the launch ([`claude_no_mode`]): the host could not
-/// tell or change the mode it runs in. On load this also resets a mode the lawyer reached in
-/// the session (see [`agent::loads::CLAUDE_MODE`]).
-fn claude_start(
-    actor: &mut Actor,
-    thread: ThreadId,
-    (start, loaded): (SessionStart, bool),
-    picks: Vec<Pick>,
-) {
-    let forced_ask = state(actor, thread)
-        .and_then(|state| state.agent.as_deref())
-        .is_some_and(|agent| agent.forced_ask);
-    let wanted = agent::loads::claude_mode(forced_ask);
-    let Some(modes) = start.modes.as_ref() else {
-        return claude_no_mode(actor, thread, wanted, "reported no modes");
-    };
-    if modes.current == wanted {
-        if picks.is_empty() {
-            return attach(actor, thread, start, loaded);
-        }
-        return before_attach(actor, thread, (start, loaded), (None, None, picks));
-    }
-    let offered = modes.available.iter().any(|mode| mode.id == wanted);
-    let (true, Ok(mode)) = (offered, AgentChoiceId::new(wanted)) else {
-        return claude_no_mode(actor, thread, wanted, "offered no such mode");
-    };
-    tracing::info!(%thread, from = %modes.current, to = wanted, "switching the Claude session to Clauseo's mode");
-    before_attach(actor, thread, (start, loaded), (Some(mode), None, picks));
-}
-
-/// Fails the launch of a Claude session whose mode the host cannot set to `mode`: `why` says
-/// what the agent's answer lacked.
-fn claude_no_mode(actor: &mut Actor, thread: ThreadId, mode: &str, why: &str) {
-    let error = Error::refused(
-        ErrorCode::AgentProtocolError,
-        format!(
-            "Claude Code {why}, so Clauseo cannot run it in its \"{mode}\" mode and sent no message"
-        ),
-    );
-    tracing::warn!(
-        %thread,
-        error = %Cause(&error),
-        "the Claude session cannot run in Clauseo's mode"
-    );
-    launch_failed(actor, thread, &error);
-}
-
-/// [`prepare`] ended well: the picks' outcome (`picks::after`), then the attach.
+/// [`prepare`] ended well: a Claude switch to `auto` is judged (`claude_mode::prepared`,
+/// before the picks may drop held updates), the picks' outcome (`picks::after`), then the
+/// attach.
 pub(super) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,
     start: SessionStart,
-    loaded: bool,
+    (loaded, fell_back): (bool, bool),
     picked: &Picked,
 ) {
+    claude_mode::prepared(actor, thread, fell_back);
     super::picks::after(actor, thread, picked);
     attach(actor, thread, start, loaded);
 }
@@ -542,6 +545,9 @@ fn attach_commit(
                 kind: Some(NoticeKind::ContextNotRestored),
             },
         )?;
+    }
+    if let Some(notice) = claude_mode::notice(actor, thread) {
+        out.push(actor, notice)?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).
     for notice in super::launch_checks::pack_notices(actor, thread) {

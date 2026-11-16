@@ -481,6 +481,9 @@ pub fn matter_versions() -> Fx<Vec<Envelope>> {
         scope: RestoreScope::Files {
             paths: vec![MatterPath::new("lease.docx")?],
         },
+        written: vec![MatterPath::new("lease.docx")?],
+        removed: Vec::new(),
+        more: None,
     })?;
     Ok(log.into_events())
 }

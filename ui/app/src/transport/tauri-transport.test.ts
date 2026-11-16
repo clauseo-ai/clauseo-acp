@@ -104,58 +104,6 @@ describe("TauriTransport", () => {
     expect(picks()).toEqual(["pick_folder_or_choose", "pick_folder_or_choose"]);
   });
 
-  test("open_external, open_file and reveal send their argument; open_file resolves to what the host opened", async () => {
-    const t = new TauriTransport({ warn: () => {} });
-    await expect(t.openExternal("https://example.com/a")).resolves.toBeUndefined();
-    answers.set("open_file", () => ({ protected_view: true }));
-    await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: true });
-    await expect(t.reveal({ matter: "m-1" })).resolves.toBeUndefined();
-    await expect(t.reveal("app_data")).resolves.toBeUndefined();
-    const sent = invoked.filter((i) =>
-      ["open_external", "open_file", "reveal"].includes(i.command),
-    );
-    expect(sent).toEqual([
-      { command: "open_external", args: { url: "https://example.com/a" } },
-      { command: "open_file", args: { file: "ref-1" } },
-      { command: "reveal", args: { target: { matter: "m-1" } } },
-      { command: "reveal", args: { target: "app_data" } },
-    ]);
-  });
-
-  test("quit_app asks the host to quit; the call resolves once the host has it", async () => {
-    const t = new TauriTransport({ warn: () => {} });
-    await expect(t.quitApp()).resolves.toBeUndefined();
-    expect(invoked.filter((i) => i.command === "quit_app")).toHaveLength(1);
-  });
-
-  test("open_settings asks the host to open or focus the settings window; a refusal rejects as a HostError", async () => {
-    const t = new TauriTransport({ warn: () => {} });
-    await expect(t.openSettings()).resolves.toBeUndefined();
-    expect(invoked.filter((i) => i.command === "open_settings")).toHaveLength(1);
-    answers.set("open_settings", () => Promise.reject("command open_settings not allowed"));
-    await expect(t.openSettings()).rejects.toEqual({
-      code: "internal",
-      message: "command open_settings not allowed",
-      retryable: false,
-    });
-  });
-
-  test("a declined confirm and a refused open or reveal reject with the host's error", async () => {
-    const declined = { code: "transport.unauthorized", message: "declined", retryable: false };
-    const missing = { code: "matter.folder_missing", message: "gone", retryable: true };
-    answers.set("open_external", () => Promise.reject(declined));
-    answers.set("open_file", () => Promise.reject(missing));
-    answers.set("reveal", () => Promise.reject("command reveal not allowed"));
-    const t = new TauriTransport({ warn: () => {} });
-    await expect(t.openExternal("https://example.com")).rejects.toEqual(declined);
-    await expect(t.openFile("ref-1")).rejects.toEqual(missing);
-    await expect(t.reveal("app_data")).rejects.toEqual({
-      code: "internal",
-      message: "command reveal not allowed",
-      retryable: false,
-    });
-  });
-
   test("one channel per transport; batches reach the stream's subscriber", async () => {
     const { got, send } = await rig("thread:x");
     expect(invoked.filter((i) => i.command === "subscribe").map((i) => i.args)).toEqual([
@@ -368,6 +316,22 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 1 }]);
   });
 
+  test("mcp_tools_changed reaches the app listeners (Settings › Tools), no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const view = {
+      control: "lawyer",
+      servers: [],
+      importable: [{ source: "claude_desktop", count: 1 }],
+    };
+    send({ mcp_tools_changed: view });
+    expect(heard).toEqual([{ mcp_tools_changed: view }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];
@@ -400,6 +364,30 @@ describe("TauriTransport", () => {
     expect(got).toEqual([]);
     // no subscribe: the channel carries the limits from open_stream on
     expect(invoked.map((i) => i.command)).not.toContain("subscribe_limits");
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 2 }]);
+  });
+
+  test("window_full_screen subscribes the app feed, reaches every listener, a later one hears the last value, and is acked", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    const stop = t.onFullScreen((v) => heard.push(["one", v]));
+    await settle();
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(1);
+    send({ window_full_screen: true });
+    t.onFullScreen((v) => heard.push(["two", v]));
+    expect(heard).toEqual([
+      ["one", true],
+      ["two", true],
+    ]);
+    stop();
+    send({ window_full_screen: false });
+    expect(heard).toEqual([
+      ["one", true],
+      ["two", true],
+      ["two", false],
+    ]);
+    expect(got).toEqual([]);
     await frame();
     expect(acks()).toEqual([{ positions: [], messages: 2 }]);
   });

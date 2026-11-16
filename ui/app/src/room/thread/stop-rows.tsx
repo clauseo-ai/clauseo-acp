@@ -5,8 +5,8 @@
 // its error line when the open fails, with Show in folder beside it for a path too long for Word, or in a quiet line
 // under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go. A stop macOS kept out of the matter's folder offers Open Privacy settings on the Mac
-// (privacy-settings.tsx).
-import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
+// (privacy-settings.tsx). A folder Claude can't start in (matter.folder_backslash) is said by the matter's folder.
+import { lazy, Suspense, use, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx";
@@ -20,12 +20,19 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
+import { useStreamPart, useViewStore } from "../../store/hooks.ts";
+import type { StreamView } from "../../store/view.ts";
+import { FolderPlaceContext } from "../folder-place.ts";
+import { backslashPlace } from "../folder-backslash.ts";
+import { useMatterFolder } from "../folder-support.ts";
+import { undoneRestoredOf, unversionedOf } from "../undone-marker.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
 import type {
   EntryId,
+  FileChoice,
   HostError,
   LimitStopEntry,
   StepEntry,
@@ -41,12 +48,25 @@ import { SentNowLine } from "./steer-rows.tsx";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
+import { loadVersions } from "../versions/use-versions.ts";
 import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
 
 /** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
 const WordLock = lazy(() =>
   late(import("../versions/versions-chunk.ts")).then((m) => ({ default: m.WordLock })),
 );
+
+/** After an undo, the lines for the files Clauseo had no earlier copy of, from the same chunk. */
+const CantUndo = lazy(() =>
+  late(import("../versions/versions-chunk.ts")).then((m) => ({ default: m.CantUndo })),
+);
+
+/** Each file's choice for an undo_step, or undefined for every file undone. */
+type Chosen = { path: string; choice: FileChoice }[] | undefined;
+
+/** Undo's dialog for a step with a file that may hold the lawyer's own edits: Versions' own, from its chunk, with its
+ * sheet. */
+const ThreadUndo = lazy(() => loadVersions().then((m) => ({ default: m.ThreadUndo })));
 
 const LOCKED = "matter.file_locked";
 
@@ -75,6 +95,24 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [protectedView, setProtectedView] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
+  // undone: the files the host's marker says stayed as they are, Clauseo having no earlier copy of
+  // them, and those it says went back: the note counts those, and says nothing of its own when
+  // none went back
+  const pickKept = useCallback(
+    (v: StreamView | undefined) => unversionedOf(v, entry.turn),
+    [entry.turn],
+  );
+  const kept = useStreamPart(useViewStore(), entry.undone ? stream : null, pickKept);
+  const place = use(FolderPlaceContext);
+  const pickBack = useCallback(
+    (v: StreamView | undefined) => undoneRestoredOf(v, entry.turn),
+    [entry.turn],
+  );
+  const restored = useStreamPart(useViewStore(), entry.undone ? stream : null, pickBack);
+  const back =
+    entry.undone && restored !== null
+      ? restored
+      : papers.filter((p) => !kept.some((f) => f.path === p));
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
   const locked = refused?.code === LOCKED && !entry.undone;
@@ -97,34 +135,51 @@ function Changed({ entry }: { entry: StepEntry }) {
             });
           },
         };
+  // Versions' undo dialog, open for a step with a file that may hold the lawyer's own edits: the files the host said
+  // changed since, as it answered the press
+  const [asking, setAsking] = useState<ReadonlySet<string> | null>(null);
+  // the choices the last Undo sent, which Try again sends again; undefined: every file undone
+  const [chosen, setChosen] = useState<Chosen>(undefined);
   // a refusal again keeps what it said until the host answers: a lock stays a lock, another code replaces it
-  const send = () => {
+  const send = (files: Chosen) => {
     if (pending) return;
     setPending(true);
-    undo(entry)
+    setChosen(files);
+    undo(entry, files)
       .then(
         () => setRefused(null),
         (e: unknown) => setRefused(toHostError(e)),
       )
       .finally(() => setPending(false));
   };
-  const onUndo = () => {
+  const onUndo = (files?: Chosen) => {
     if (pending) return;
     setRefused(null);
     setOpenFailed(null);
     setProtectedView(false);
-    send();
+    send(files);
   };
   // Undo asks about a paper the lawyer edited since Clauseo's change: PreviewUndo says which, on each press, and Undo
-  // waits for it. Where the query fails (an older host, or any error) the flag a file carries decides, as before: it
-  // may ask when nothing changed, and never loses a warning.
-  const askUndo = (): Promise<string | null> => {
-    const flagged = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
-    if (previewUndo === undefined) return Promise.resolve(flagged);
-    return previewUndo(entry).then(
-      (edited) => (edited[0] === undefined ? null : fileNameOf(edited[0])),
-      () => flagged,
-    );
+  // waits for it. A step with a file that may hold the lawyer's own edits (saved during the answer, written by no tool
+  // call of Clauseo's) asks in Versions' undo dialog whatever PreviewUndo says, each such file kept unless the lawyer
+  // says otherwise: unchanged since, it is still not Clauseo's to delete. Where the query fails (an older host, or
+  // any error) that dialog asks too, with nothing known as changed since; with no such file, Undo goes ahead.
+  const askUndo = (): Promise<string | null | false> => {
+    const flagged = entry.files.some((f) => f.may_include_lawyer_edits);
+    const asked =
+      previewUndo === undefined
+        ? Promise.resolve(null)
+        : previewUndo(entry).then(
+            (edited) => edited,
+            () => null,
+          );
+    return asked.then((edited) => {
+      if (flagged) {
+        setAsking(new Set(edited ?? []));
+        return false;
+      }
+      return edited?.[0] === undefined ? null : fileNameOf(edited[0]);
+    });
   };
   // the lines going take Try again with them: focus that was on it, or fell to the page, goes back to Undo, or to
   // the note when Undo isn't back (WordLock takes focus to Try again as the lines come)
@@ -150,29 +205,46 @@ function Changed({ entry }: { entry: StepEntry }) {
   const shown = undoRefusal ?? openFailed;
   return (
     <div data-testid="files-changed" ref={box}>
-      <ChangeNote
-        papers={papers}
-        askUndo={askUndo}
-        state={entry.undone ? "undone" : "changed"}
-        {...(undoable && !locked ? { onUndo } : {})}
-        {...(open === undefined ? {} : { open })}
-        undoDisabled={busy || pending}
-        error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
-        errorAction={
-          shown === "matter.document_path_too_long" && opener !== undefined
-            ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
-            : locatable(shown) && locate !== null
-              ? { label: ui(w.lang, "Locate folder"), onAction: locate }
-              : undefined
-        }
-        testIds={{
-          paper: "file-changed",
-          undo: "undo",
-          error: "error",
-          errorAction: locatable(shown) ? "locate-folder" : "reveal",
-          open: "open-in-word",
-        }}
-      />
+      {(back.length > 0 || kept.length === 0) && (
+        <ChangeNote
+          papers={back}
+          askUndo={askUndo}
+          state={entry.undone ? "undone" : "changed"}
+          {...(undoable && !locked ? { onUndo } : {})}
+          {...(open === undefined ? {} : { open })}
+          undoDisabled={busy || pending}
+          error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
+          errorAction={
+            shown === "matter.document_path_too_long" && opener !== undefined
+              ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
+              : locatable(shown) && locate !== null
+                ? { label: ui(w.lang, "Locate folder"), onAction: locate }
+                : undefined
+          }
+          testIds={{
+            paper: "file-changed",
+            undo: "undo",
+            error: "error",
+            errorAction: locatable(shown) ? "locate-folder" : "reveal",
+            open: "open-in-word",
+          }}
+        />
+      )}
+      {kept.length > 0 && (
+        <Suspense fallback={null}>
+          <CantUndo files={kept} place={place} testId="cant-undo" />
+        </Suspense>
+      )}
+      {asking !== null && (
+        <Suspense fallback={null}>
+          <ThreadUndo
+            step={entry}
+            edited={asking}
+            onClose={() => setAsking(null)}
+            onUndo={onUndo}
+          />
+        </Suspense>
+      )}
       {protectedView && opener !== undefined && shown === null && (
         <p className={QUIET} role="status" data-testid="open-protected-view">
           <Say>{opener.protectedLine}</Say>
@@ -184,7 +256,7 @@ function Changed({ entry }: { entry: StepEntry }) {
             files={wordLocks(LOCKED, lockedFiles(refused ?? { code: LOCKED }, papers))}
             code={LOCKED}
             pending={busy || pending}
-            onRetry={send}
+            onRetry={() => send(chosen)}
             focusOnMount
             testIds={{ block: "word-lock", retry: "word-lock-retry" }}
           />
@@ -211,6 +283,9 @@ export function StepRow({
 }) {
   const w = useWords();
   const plan = useAgentPlan();
+  const { platform } = useDisplay();
+  // matter.folder_backslash's line names the folder above the matter's whose name has the backslash
+  const folder = useMatterFolder();
   const line = sentNow ? null : stopLine(entry, plan);
   return (
     <div
@@ -226,7 +301,7 @@ export function StepRow({
         <p className={QUIET} data-code={line.code}>
           <Say>
             {line.kind === "error"
-              ? errorWords(w.lang, line.code, plan)
+              ? errorWords(w.lang, line.code, plan, backslashPlace(folder, platform))
               : th(w.lang, line.key, line.slots)}
           </Say>
         </p>

@@ -14,7 +14,7 @@ use super::listing::{LIST_WAIT, bounded};
 use super::{Chooser, PickAnswer};
 use crate::bridge::Bridge;
 use crate::dialogs::words::{ConfirmWords, Key};
-use crate::dialogs::{BoxFuture, LastPick, Picker};
+use crate::dialogs::{BoxFuture, LastPick, Owner, Picker};
 use crate::picked::PickedFolder;
 
 #[cfg(test)]
@@ -60,6 +60,8 @@ impl<R: Runtime> FolderConfirm for NativeFolderConfirm<'_, R> {
             let (title, message, ok) = (words.title, words.message, words.ok);
             crate::dialogs::confirm(
                 &self.app,
+                Owner::Main,
+                crate::dialogs::DefaultButton::Cancel,
                 MessageLevel::Info,
                 title,
                 message,
@@ -142,8 +144,9 @@ pub(crate) async fn pick_fixed(
     })
 }
 
-/// Chooses the folder session `chooser` shows: checks it is still a folder and no link (on a
-/// thread, at most `LIST_WAIT`), asks `confirm`, then registers it through
+/// Chooses the folder session `chooser` shows: checks it is still a folder and no link and
+/// spells out its Windows short names (`picked::long_name`; on a thread, at most `LIST_WAIT`),
+/// asks `confirm` with that path, then registers it through
 /// `Bridge::pick_folder`, records it in `last` and closes the session. `None` when the check
 /// fails or the lawyer declines; the session stays open then. `command.invalid` for an unknown,
 /// closed or expired session, or one that shows no folder yet.
@@ -161,15 +164,21 @@ pub(crate) async fn choose_folder(
     let checked = path.clone();
     let check = move || {
         bounded(&outstanding, LIST_WAIT, move || {
-            machine
+            let plain = machine
                 .entry(&checked)
-                .is_some_and(|entry| entry.dir && !entry.link)
+                .is_some_and(|entry| entry.dir && !entry.link);
+            // A long name that is not Unicode keeps the path as typed.
+            plain.then(|| {
+                crate::picked::long_name(Path::new(&checked))
+                    .into_os_string()
+                    .into_string()
+                    .unwrap_or(checked)
+            })
         })
     };
-    let plain = tauri::async_runtime::spawn_blocking(check).await;
-    if !matches!(plain, Ok(Some(true))) {
+    let Ok(Some(Some(path))) = tauri::async_runtime::spawn_blocking(check).await else {
         return Ok(None);
-    }
+    };
     if !confirm.confirm(&path).await {
         return Ok(None);
     }

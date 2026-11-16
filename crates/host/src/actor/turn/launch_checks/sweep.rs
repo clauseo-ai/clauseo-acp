@@ -11,6 +11,8 @@ use super::{browser_run_dir, remove_tree, run_dir};
 /// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
 /// is left as it is, and the launches refuse it. `<data>/browser/run`, the sessions' browser
 /// folders (the guard's `--cwd`), is set aside and deleted the same way, within `<data>/browser`.
+/// The files in `<data>/launch-settings`, earlier runs' Claude settings
+/// (`agent::launch_settings`), are removed there and then, before any launch writes one.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
 
@@ -36,6 +38,7 @@ impl RunSweep {
         let parents = [data.to_owned(), data.join(crate::browser::CONFIG_DIR)];
         set_aside(&run_dir(data), &parents[0]);
         set_aside(&browser_run_dir(data), &parents[1]);
+        crate::agent::launch_settings::sweep(&crate::agent::launch_settings::folder(data));
         let started = std::thread::Builder::new()
             .name("clauseo-run-sweep".to_owned())
             .spawn(move || parents.iter().for_each(|parent| delete_set_aside(parent)));
@@ -91,7 +94,8 @@ fn set_aside(run: &Path, parent: &Path) {
     }
 }
 
-/// Deletes every real `run.old-*` folder in `parent`; a link of that name is left alone.
+/// Deletes every real `run.old-*` folder in `parent`, and the short temp folder each of its
+/// sessions names (`agent::claude_tmp`); a link of that name is left alone.
 fn delete_set_aside(parent: &Path) {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
@@ -103,6 +107,10 @@ fn delete_set_aside(parent: &Path) {
             .to_str()
             .is_some_and(|name| name.starts_with(SET_ASIDE));
         if named && crate::write::is_real_dir(&path) {
+            // A crashed session's short temp folder for Claude goes with its run folder.
+            for session in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+                crate::agent::claude_tmp::remove_claude_tmp(&session.path());
+            }
             remove_tree(&path);
         }
     }

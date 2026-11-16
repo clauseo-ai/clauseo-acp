@@ -299,9 +299,11 @@ test("a link press opens the address through open_external, never the webview", 
   await act(async () => link.dispatchEvent(press));
   await h!.settle();
   expect(press.defaultPrevented).toBe(true);
+  // the link's own words go with it, so the host can ask when they name another site
   expect(h!.transport.only("open_external")).toEqual([
-    { call: "open_external", url: "https://example.com/very/long/path?q=1" },
+    { call: "open_external", url: "https://example.com/very/long/path?q=1", shown: "Long" },
   ]);
+  expect(link.textContent).toBe("Long");
 });
 
 test("an address that isn't http or https sits under no link: a data: page and a file: result are plain text", async () => {
@@ -334,7 +336,7 @@ test("a middle click on a source link is cancelled and opens through open_extern
   await h!.settle();
   expect(press.defaultPrevented).toBe(true);
   expect(h!.transport.only("open_external")).toEqual([
-    { call: "open_external", url: "https://example.com/aux" },
+    { call: "open_external", url: "https://example.com/aux", shown: "Aux" },
   ]);
 });
 

@@ -6,7 +6,7 @@ schema = 1
 
 [runtime]
 python = "3.13.18"
-build = 3
+build = 4
 pbs_release = "20261026"
 
 # What bump resolves: pip resolves `requirements` for cp313 on each target (binary wheels only),
@@ -578,3 +578,27 @@ asset = "pandoc-3.13-windows-x86_64.zip"
 sha256 = "23e1f2e978a3df80db8bf65c9c59534f41a23140480cfb4f783a882ab7dc6a4e"
 size = 42983200
 binary = "pandoc-3.13/pandoc.exe"
+
+# tesseract with leptonica, which build compiles from these source tarballs on each target, and
+# the models from tesseract-ocr/tessdata_fast: edit only `version`, `leptonica`, `tessdata_commit`
+# and `languages` by hand; bump writes the rest.
+[tesseract]
+version = "5.5.4"
+commit = "7e548e6eff172f38f97664afe7f7ce40db36c8d6"
+source_sha256 = "a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4"
+source_size = 1969431
+leptonica = "1.87.0"
+leptonica_sha256 = "c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7"
+leptonica_size = 14802808
+tessdata_commit = "87416418657359cb625c412a48b6e1d6d41c29bd"
+languages = ["eng", "hin"]
+tessdata_licence_sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+tessdata_licence_size = 11358
+
+[tesseract.models.eng]
+sha256 = "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+size = 4113088
+
+[tesseract.models.hin]
+sha256 = "4c73ffc59d497c186b19d1e90f5d721d678ea6b2e277b719bee4e2af12271825"
+size = 1122751

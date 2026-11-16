@@ -21,6 +21,9 @@ const BROWSER: BrowserState[] = [
   "browser_not_installed",
   "browser_blocked_by_policy",
   "browser_policy_unreadable",
+  "browser_blocked_edge",
+  "browser_blocked_chrome",
+  "browser_per_user_chrome_only",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -85,8 +88,11 @@ test("each glyph's state: on as drawn, the firm's lock for locked off and its po
     locked_off: "locked",
     browser_not_installed: "off",
     browser_blocked_by_policy: "locked",
-    // not read is no firm's lock
+    browser_blocked_edge: "locked",
+    browser_blocked_chrome: "locked",
+    // not read is no firm's lock, nor a per-user Chrome
     browser_policy_unreadable: "off",
+    browser_per_user_chrome_only: "off",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -114,11 +120,13 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   );
   expect(label(null, "locked_off")).toBe("Browser: off, managed by firm.");
   expect(label("available", "browser_blocked_by_policy")).toBe(
-    "Web search: on. Browser: off, blocked by your firm.",
+    "Web search: on. Browser: off, blocked by a browser policy.",
   );
   expect(label(null, "browser_policy_unreadable")).toBe(
     "Browser: off, couldn't check browser settings.",
   );
+  expect(label(null, "browser_blocked_edge")).toBe("Browser: off, blocked by a browser policy.");
+  expect(label(null, "browser_per_user_chrome_only")).toBe("Browser: off, can't use your Chrome.");
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
@@ -129,12 +137,25 @@ test("sameTools reads two lists the same only when every tool and state match", 
 });
 
 const POLICY =
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.";
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
 const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
 const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then start a new conversation.";
+
+const POLICY_BOTH =
+  "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. " +
+  "Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+const POLICY_EDGE =
+  "Your firm's settings don't let apps control Microsoft Edge. " +
+  "Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+const POLICY_CHROME =
+  "Your firm's settings don't let apps control Google Chrome. " +
+  "Ask your firm's IT to allow this for Clauseo, then start a new conversation.";
+const PER_USER =
+  "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT " +
+  "to install Google Chrome for everyone on this computer. Then start a new conversation.";
 
 const ROOM: ToolRowRoom = { settings: true, platform: "mac" };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
@@ -147,13 +168,19 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     locked_off: "Managed by firm",
     no_search_on_this_login: "Can't search on this login",
     browser_not_installed: "Install Chrome",
-    browser_blocked_by_policy: "Blocked by your firm",
+    browser_blocked_by_policy: "Blocked by a browser policy",
     browser_policy_unreadable: "Couldn't check browser settings",
+    browser_blocked_edge: "Blocked by a browser policy",
+    browser_blocked_chrome: "Blocked by a browser policy",
+    browser_per_user_chrome_only: "Can't use your Chrome",
   };
   const notes: Record<string, string> = {
     browser_not_installed: INSTALL_MAC,
     browser_blocked_by_policy: POLICY,
     browser_policy_unreadable: UNREADABLE,
+    browser_blocked_edge: POLICY_EDGE,
+    browser_blocked_chrome: POLICY_CHROME,
+    browser_per_user_chrome_only: PER_USER,
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -211,16 +238,71 @@ test("no browser on the computer: what to install, by the OS, and that a new con
   expect(words(missing, { policy: { state: "clear" } }).reason).toBe("Install Chrome");
 });
 
-test("the firm's browser policy blocks every browser, on either OS", () => {
+test("the firm's browser policy blocks every browser: on Windows, ask the firm's IT", () => {
   const blocked: KnownTool = { tool: "browser", state: "browser_blocked_by_policy" };
-  for (const platform of ["mac", "windows"] as const)
+  for (const [platform, note] of [
+    ["mac", POLICY],
+    ["linux", POLICY],
+    ["windows", POLICY_BOTH],
+  ] as const)
     expect(words(blocked, { platform })).toMatchObject({
       glyph: "locked",
-      reason: "Blocked by your firm",
+      reason: "Blocked by a browser policy",
       reasonTip: null,
-      note: POLICY,
+      note,
       settings: false,
     });
+  expect(toolRow("hi", blocked, { ...ROOM, platform: "windows" }).note).toBe(
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge या Google Chrome नियंत्रित नहीं करने देतीं। " +
+      "अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+  );
+});
+
+test("on Windows only the installed browser that is blocked is named", () => {
+  for (const [state, note] of [
+    ["browser_blocked_edge", POLICY_EDGE],
+    ["browser_blocked_chrome", POLICY_CHROME],
+  ] as const)
+    expect(words({ tool: "browser", state }, { platform: "windows" })).toMatchObject({
+      glyph: "locked",
+      reason: "Blocked by a browser policy",
+      note,
+      settings: false,
+      recheck: null,
+    });
+  expect(
+    toolRow(
+      "hi",
+      { tool: "browser", state: "browser_blocked_edge" },
+      { ...ROOM, platform: "windows" },
+    ).note,
+  ).toBe(
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge नियंत्रित नहीं करने देतीं। " +
+      "अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+  );
+});
+
+test("on Windows a per-user Chrome alone says why Clauseo can't use it, not to install Chrome", () => {
+  const perUser: KnownTool = { tool: "browser", state: "browser_per_user_chrome_only" };
+  expect(words(perUser, { platform: "windows" })).toMatchObject({
+    glyph: "off",
+    reason: "Can't use your Chrome",
+    note: PER_USER,
+    settings: false,
+    recheck: null,
+  });
+  const hi = toolRow("hi", perUser, { ...ROOM, platform: "windows" });
+  expect(hi.reason).toBe("आपका Chrome इस्तेमाल नहीं हो सकता");
+  expect(hi.note).toBe(
+    "Clauseo सिर्फ़ आपके लिए इंस्टॉल की गई Google Chrome की कॉपी का उपयोग नहीं कर सकता। " +
+      "Microsoft Edge इंस्टॉल करें, या अपनी फ़र्म की IT टीम से इस कंप्यूटर पर सभी के लिए Google Chrome इंस्टॉल करने को कहें। " +
+      "फिर एक नई बातचीत शुरू करें।",
+  );
+  for (const hindi of [hi.reason, hi.note]) expect(hindi).not.toMatch(/चरण|कदम/);
+});
+
+test("an older app reading a reason it doesn't know says nothing for the browser", () => {
+  expect(knownTools([{ tool: "browser", availability: avail("browser_solar_flare") }])).toEqual([]);
 });
 
 test("a browser policy Clauseo couldn't check says it checks again", () => {
@@ -257,7 +339,7 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   );
   // provisional Hindi, until the app thread writes it
   expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
-    "ब्राउज़र: बंद, आपकी फ़र्म ने रोका है।",
+    "ब्राउज़र: बंद, ब्राउज़र की एक नीति ने रोका है।",
   );
 });
 

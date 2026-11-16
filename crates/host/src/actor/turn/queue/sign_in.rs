@@ -101,6 +101,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
             message,
             content: requeue.content,
             forced: false,
+            host_held: false,
         },
     );
     queue.held = true;

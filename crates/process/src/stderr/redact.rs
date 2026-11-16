@@ -20,6 +20,10 @@ const USERINFO: &str = "***";
 const BEARER: &str = "bearer ";
 /// A shorter value is not redacted: it would hide common words, and guessing it is easy anyway.
 const MIN_SECRET: usize = 8;
+/// The floor for a secret the spec names outright (`LaunchSpec::with_redacted`): the caller
+/// chose it as a secret, so a shorter one than a variable's floor still goes (an MCP header
+/// value of 6 or 7 bytes); one shorter still would hide common words.
+const MIN_NAMED: usize = 6;
 
 /// The rules for one agent, fixed when it starts. It keeps the secret values as long as the
 /// agent's handle lives, to redact its tail; its `Debug` counts them and shows none.
@@ -50,7 +54,7 @@ impl Redactor {
     /// `SECRET` or `PASSWORD`, the password of each proxy variable's URL (`HTTPS_PROXY` and
     /// the like, [`proxy_passwords`]: as written and percent-decoded), and each of `extra`
     /// (secrets the spec names outright, such as a token the agent reads from a file), at least
-    /// 8 bytes long, become `[redacted]`.
+    /// 8 bytes long (6 for `extra`), become `[redacted]`.
     pub(crate) fn new(
         home: Option<&Path>,
         env: &BTreeMap<OsString, OsString>,
@@ -68,7 +72,7 @@ impl Redactor {
             .chain(
                 extra
                     .iter()
-                    .filter(|secret| secret.len() >= MIN_SECRET)
+                    .filter(|secret| secret.len() >= MIN_NAMED)
                     .cloned(),
             )
             .collect();
@@ -326,5 +330,18 @@ mod debug_tests {
         assert!(!shown.contains(KEY), "{shown}");
         assert!(!shown.contains("/home/lawyer"), "{shown}");
         assert!(redactor.redact(KEY).contains(REDACTED));
+    }
+
+    /// A named secret (`with_redacted`) of 6 bytes goes; one of 5 stays, as does a 6-byte value
+    /// of a secret-named variable (whose floor is 8).
+    #[test]
+    fn a_named_secret_of_six_bytes_is_hidden_and_one_of_five_is_not() {
+        let env = BTreeMap::from([(OsString::from("API_KEY"), OsString::from("k6char"))]);
+        let extra = ["h6char".to_owned(), "five5".to_owned()];
+        let redactor = Redactor::new(None, &env, &extra);
+        assert_eq!(
+            redactor.redact("h6char five5 k6char"),
+            format!("{REDACTED} five5 k6char")
+        );
     }
 }

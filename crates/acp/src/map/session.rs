@@ -201,6 +201,7 @@ pub(crate) fn stop_reason(reason: acp::StopReason) -> StopReason {
 /// What `initialize` told. `steering` is `Some` when the agent advertises native steering.
 pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
     let capabilities = response.agent_capabilities;
+    let mcp_http = capabilities.mcp_capabilities.http;
     let prompt = capabilities.prompt_capabilities;
     let session = capabilities.session_capabilities;
     let (name, version, title) = response.agent_info.map_or((None, None, None), |info| {
@@ -232,6 +233,7 @@ pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
             .into_iter()
             .filter_map(auth_method)
             .collect(),
+        mcp_http,
     }
 }
 

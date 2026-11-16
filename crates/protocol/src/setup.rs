@@ -325,6 +325,11 @@ pub enum SignIn {
         source: SignInSource,
         /// When the sign-in was confirmed.
         at: Timestamp,
+        /// When the agent last refused this sign-in's API key (the provider answered that the
+        /// key is not valid); only with `method: ApiKey`; cleared when a key is saved or
+        /// removed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refused: Option<Timestamp>,
     },
     /// The sign-in stopped: a `signin.*` code, `agent.auth_required`, or
     /// `signin.policy_unreadable`.
@@ -370,11 +375,14 @@ pub enum FoundLogin {
     /// Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
     /// nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
     ReuseOff,
+    /// "Use it" (or a later start) found the lawyer's login but the agent could not use it here
+    /// (it may have expired), so reuse is off as with `ReuseOff`; this says why, once.
+    ReuseUnusable,
 }
 
 impl FoundLogin {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ClaudeSettings,
         Self::ClaudeWindowsSandbox,
         Self::CodexKeyring,
@@ -384,6 +392,7 @@ impl FoundLogin {
         Self::CodexLinkSplit,
         Self::NoneFound,
         Self::ReuseOff,
+        Self::ReuseUnusable,
     ];
 }
 

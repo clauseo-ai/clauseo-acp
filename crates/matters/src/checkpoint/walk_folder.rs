@@ -20,7 +20,7 @@
 //! or the file is listed as held with the cache's entry and the walk goes on (a restore and its
 //! preview, which report it locked).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +34,7 @@ use crate::no_download::{NoDownload, not_downloaded};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Progress, Settings};
 use crate::walk::{self, Found, FoundKind};
-use crate::{Error, locks};
+use crate::{Error, locks, rules};
 
 /// The waits before each new look at the files that vanished during a walk, about 300 ms in
 /// all: Word's swap is two renames back to back (on Windows the document is missing between
@@ -97,6 +97,7 @@ pub(super) fn walk_folder(
         progress,
         entries: Vec::with_capacity(listing.files.len()),
         skipped: Vec::new(),
+        reasons: BTreeMap::new(),
         done: Progress { files: 0, bytes: 0 },
         read_any: false,
         on_held,
@@ -125,6 +126,7 @@ pub(super) fn walk_folder(
     let Taker {
         mut entries,
         skipped,
+        reasons,
         read_any,
         mut held,
         ..
@@ -143,6 +145,9 @@ pub(super) fn walk_folder(
         entries,
         skipped,
         read_any,
+        cap,
+        unread: listing.unread,
+        reasons,
         held,
     }))
 }
@@ -161,6 +166,8 @@ struct Taker<'w, 'r> {
     progress: &'w mut dyn FnMut(Progress),
     entries: Vec<CacheEntry>,
     skipped: Vec<SkippedFile>,
+    /// Why each file skipped in this walk was skipped, by path.
+    reasons: BTreeMap<String, SkippedFileReason>,
     done: Progress,
     read_any: bool,
     on_held: OnHeld,
@@ -227,6 +234,7 @@ impl Taker<'_, '_> {
             } else {
                 SkippedFileReason::OverSizeCap
             };
+            self.reasons.insert(file.path.as_str().to_owned(), reason);
             if worth_listing(old, &file.stat) {
                 self.skipped.push(SkippedFile {
                     path: file.path.clone(),
@@ -309,7 +317,8 @@ impl Taker<'_, '_> {
 }
 
 /// Adds to `entries` (sorted) the entries of `cache` under each folder of `unread` that the
-/// walk did not find, as they were, and sorts them again.
+/// walk did not find, as they were, and sorts them again; never one the exclusion rule passes
+/// over (a cache from before the rule covered a `.claude` folder may hold it).
 fn keep_unread(cache: &StatCache, entries: &mut Vec<CacheEntry>, unread: &[String]) {
     let found: BTreeSet<String> = entries
         .iter()
@@ -318,7 +327,9 @@ fn keep_unread(cache: &StatCache, entries: &mut Vec<CacheEntry>, unread: &[Strin
     for dir in unread {
         let prefix = format!("{dir}/");
         let kept = cache.entries.iter().filter(|entry| {
-            entry.path.as_str().starts_with(&prefix) && !found.contains(entry.path.as_str())
+            entry.path.as_str().starts_with(&prefix)
+                && !found.contains(entry.path.as_str())
+                && !rules::is_excluded_path(entry.path.as_str())
         });
         entries.extend(kept.cloned());
     }

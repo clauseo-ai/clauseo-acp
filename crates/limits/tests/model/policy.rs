@@ -161,16 +161,37 @@ fn new_ranks_a_cached_entry_with_no_time_below_a_timed_one() {
 }
 
 #[test]
-fn shown_reads_at_five_minutes_not_before() {
+fn claude_shown_reads_at_two_minutes_not_before() {
     let mut model = idle(CLAUDE);
     assert_eq!(
-        model.input(shown(CLAUDE), at_ms(5 * MINUTE - SECOND)),
+        model.input(shown(CLAUDE), at_ms(2 * MINUTE - SECOND)),
         vec![]
     );
     assert_eq!(
-        model.input(shown(CLAUDE), at(5)),
+        model.input(shown(CLAUDE), at(2)),
         vec![Action::Read(CLAUDE)]
     );
+}
+
+#[test]
+fn codex_shown_reads_at_one_minute_not_before() {
+    let mut model = idle(CODEX);
+    assert_eq!(model.input(shown(CODEX), at_ms(MINUTE - SECOND)), vec![]);
+    assert_eq!(model.input(shown(CODEX), at(1)), vec![Action::Read(CODEX)]);
+}
+
+/// Settings' minute tick sends `Shown` each minute: Claude reads every second tick, and a tick
+/// while a read runs joins it, so ticks never stack reads.
+#[test]
+fn shown_each_minute_reads_claude_every_two_minutes_one_at_a_time() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(model.input(shown(CLAUDE), at(1)), vec![]);
+    assert_eq!(
+        model.input(shown(CLAUDE), at(2)),
+        vec![Action::Read(CLAUDE)]
+    );
+    assert_eq!(model.input(shown(CLAUDE), at(3)), vec![], "a read runs");
+    assert_eq!(model.input(shown(CLAUDE), at(4)), vec![], "a read runs");
 }
 
 #[test]

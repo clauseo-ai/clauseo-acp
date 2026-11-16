@@ -23,9 +23,12 @@
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
+crates/desktop/src/last_run.rs open_lock clippy::disallowed_methods
+crates/desktop/src/last_run.rs sleep clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
+crates/desktop/src/quit/settle.rs sleep clippy::disallowed_methods
 # The uninstaller's --delete-app-data (S20): its only writes, and its tests' links, locks and modes.
 crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
 # S20 follow-up: a linked `sandbox`'s reparse tag read and its delete done on one handle; the
@@ -321,6 +324,7 @@ crates/settings/src/system/tests.rs windows_local_app_data_unchecked clippy::dis
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
 crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
+crates/settings/src/effective/mcp_write.rs Effective clippy::multiple_inherent_impl
 # Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
 # follows the real user id.
 crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods
@@ -329,11 +333,23 @@ crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the
 crates/matters/src/no_download/macos.rs - unsafe_code
 # Added by R20a: matters' calls to GetVolumePathNameW and GetDriveTypeW (a folder on a network drive).
 crates/matters/src/place/windows.rs - unsafe_code
+# matters' Recycle Bin through IFileOperation (COM), its progress sink's implement macro, and the
+# Windows test that puts its thread in the multithreaded apartment first.
+crates/matters/src/trash/windows.rs - unsafe_code
+crates/matters/src/trash/windows/sink.rs - clippy::ref_as_ptr
+crates/matters/src/trash/windows/sink.rs - clippy::inline_always
+crates/matters/src/trash/windows_tests.rs - unsafe_code
 
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
 crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/config/idle.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/config/parts.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
+crates/host/src/actor/query/blackline/parse/tests/partial.rs joining_wrapped_lines_is_linear clippy::disallowed_methods
+crates/host/src/actor/startup.rs open clippy::too_many_lines
 # One match arm per matter job, as actor/query.rs's query has one arm per query; splitting handle into helpers is on the after-launch list.
 crates/host/src/matter_worker.rs handle clippy::too_many_lines
 crates/host/tests/host/blackline.rs stetdoc_on_path clippy::disallowed_methods
@@ -388,6 +404,10 @@ fuzz/fuzz_targets/acp_stdout.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/matters_objects.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/matters_read.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/protocol_decode.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/zip_marks.rs - clippy::disallowed_methods
+# zip_marks compiles the host's revisions/marks.rs as its module marks: the scan's helpers it
+# never calls (Kept, check) are dead there.
+fuzz/fuzz_targets/zip_marks.rs marks dead_code
 fuzz/fuzz_targets/reducer_snapshot.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/settings_parse.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods
@@ -433,13 +453,30 @@ crates/mcp/src/browser_guard/record/scan/macos.rs - unsafe_code
 crates/mcp/src/browser_guard/record/scan.rs Reader::new clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/record/scan.rs Reader::args_of clippy::unused_self
 crates/mcp/src/browser_guard/record/tests.rs group clippy::disallowed_methods
-crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
+# Route 2 W1: the DevTools pipe, the relay's peer check and the guard's own hardening (OS calls),
+# and the items the next PR's seam uses.
+crates/mcp/examples/chrome_stub.rs pipe unsafe_code
+crates/mcp/src/browser_guard/browsers/policy.rs - unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::spawn clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::spawn unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::above unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs win::anonymous_pipe unsafe_code
+crates/mcp/src/browser_guard/devtools/handshake.rs sha1 clippy::many_single_char_names
+crates/mcp/src/browser_guard/devtools/listen.rs loopback unsafe_code
+crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
+crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
+crates/mcp/src/browser_guard/devtools/peer_tests.rs a_child_of_agent_browser_is_let_in_and_another_process_is_not clippy::disallowed_methods
+crates/mcp/src/browser_guard/harden.rs windows_impl unsafe_code
+crates/mcp/src/browser_guard/job/harden_tests.rs - unsafe_code
+crates/mcp/src/browser_guard/job/harden_tests/probe.rs - unsafe_code
+crates/mcp/src/browser_guard/session/browser.rs candidates clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
 crates/mcp/src/write/windows.rs - unsafe_code
 crates/mcp/src/write/mac.rs - unsafe_code
 crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods
 crates/mcp/examples/daemon_stub.rs daemon clippy::disallowed_methods
+crates/mcp/examples/daemon_stub.rs chrome_part clippy::disallowed_methods
 crates/mcp/examples/parent_stub.rs main clippy::disallowed_methods
 crates/mcp/tests/guard/lifecycle.rs within clippy::disallowed_methods
 crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods
@@ -447,6 +484,8 @@ crates/mcp/tests/guard/real_chrome.rs - clippy::disallowed_methods
 # R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
 crates/profile/src/write.rs - clippy::disallowed_methods
 crates/profile/tests/skills/write.rs - clippy::disallowed_methods
+# stetdoc's kill test: a real stetdoc stub on the real clock, polled until its pid is gone.
+crates/profile/tests/skills/stetdoc_kill.rs - clippy::disallowed_methods
 crates/profile/src/packs/windows.rs - unsafe_code
 crates/profile/tests/packs/support.rs - clippy::disallowed_methods
 
@@ -498,12 +537,20 @@ crates/agents/examples/install.rs mb clippy::cast_precision_loss
 crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
 # S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle).
 crates/agents/src/fileid.rs file_id unsafe_code
-# S18: the Codex callback port is a test's own only under test-support; outside it self goes unused.
+# S18: the Codex callback port and the macOS Keychain query program are a test's own only under
+# test-support; outside it self goes unused.
 crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
+crates/agents/src/config.rs SigninConfig::security_program clippy::unused_self
+# Stage D: the macOS login keychain's lock state (SecKeychainGetStatus, prompt-free), no binding
+# for it in the workspace.
+crates/agents/src/signin/keychain_lock.rs login_keychain_locked unsafe_code
+crates/agents/src/signin/keychain_lock/tests.rs the_home_is_the_user_record_s_with_home_set_elsewhere clippy::disallowed_methods
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
 # The case-law connector's env: GetWindowsDirectoryW, the fallback for SystemRoot and windir.
 crates/host/src/agent/loads/case_law.rs windows_directory unsafe_code
+# The offline probe's read of Claude Code's Windows policy tier: RegGetValueW, read-only.
+crates/host/src/actor/turn/offline/probe/settings/os_policy/registry.rs - unsafe_code
 crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
 # The record's owner in Administrators, by SID (NetUserGetLocalGroups), for the removal.
 crates/sandbox/src/windows/setup/admin_member.rs - unsafe_code
@@ -644,3 +691,9 @@ crates/host/src/network_paths/mac.rs - unsafe_code
 crates/host/src/network_paths/windows.rs - unsafe_code
 # Vendored from clauseo_sandbox (stage C, #735) with its exported names; stage E's #764 calls it.
 crates/host/src/network_paths/ascii_fold.rs refused_in_other_matter dead_code
+# clauseo-pdf's launchers (scanned PDFs): the one PATH walk that finds the Python runtime, and
+# the one start of the interpreter (exec on Unix, a wait on Windows).
+crates/pdf/src/lib.rs find_python_with clippy::disallowed_methods
+crates/pdf/src/job.rs - unsafe_code
+crates/pdf/src/lib.rs start clippy::disallowed_methods
+crates/pdf/src/lib.rs start clippy::disallowed_methods

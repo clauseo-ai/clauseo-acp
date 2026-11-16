@@ -2,10 +2,14 @@
 //! whether start-up or shutdown waits for the turn path; whether an update is the live turn's;
 //! and what a thread's turn state holds.
 
+use std::collections::HashSet;
+use std::time::Duration;
+
 use clauseo_protocol::{
-    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, StopReason, ThreadId,
-    TurnId,
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, StopReason, TextKind,
+    ThreadId, TurnId, ViewEntry,
 };
+use clauseo_reducer::ThreadState;
 
 use super::super::{Actor, HostPhase};
 use super::{Current, End, TurnPhase, host_stopping, key_retry};
@@ -74,8 +78,11 @@ impl Current {
             cancelled: false,
             stopped: key_retry::Stopped::default(),
             refused: None,
+            told: Told::default(),
             limit: None,
+            too_long: None,
             tool_paths: crate::sent::TurnPaths::default(),
+            skipped: super::skipped::Skipped::None,
             checkpoint_before: None,
             prompt_call: None,
             case_law_hint: crate::connectors::hint::TurnLooks::Nothing,
@@ -84,6 +91,8 @@ impl Current {
             end: None,
             failure: None,
             offline: None,
+            probe_hold: None,
+            quiet: super::offline::quiet::QuietClock::started(started),
             abort: false,
             store_failed: None,
             detach: None,
@@ -92,6 +101,7 @@ impl Current {
             first_words: None,
             first_update: None,
             withheld: super::withheld::Withheld::default(),
+            own: None,
         }
     }
 
@@ -152,6 +162,106 @@ pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
     })
 }
 
+/// How long after the first answered turn ends an agent's title is still taken. The adapters
+/// make their AI title in the background after `end_turn`, so it can land a while later. The
+/// next prompt closes the window sooner (`prompt_sent`).
+pub(crate) const TITLE_GRACE: Duration = Duration::from_secs(60);
+
+/// Where a thread's name stands for the agent's titles (D-070), in this run of the host. It
+/// opens for the thread's first answered turn: `Grace` from that turn's end, then `Settled`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TitleWindow {
+    /// No answered turn has ended in this run, and the history loaded or unloaded so far has
+    /// none (`history_settles`).
+    #[default]
+    Open,
+    /// The first answered turn ended at this monotonic time: titles are taken until
+    /// `TITLE_GRACE` has passed or the next prompt goes out.
+    Grace(Duration),
+    /// The name is settled: no agent title is taken.
+    Settled,
+}
+
+/// The first answered turn of `thread` ended at `now`: its window opens with the grace.
+pub(super) fn answered_end(actor: &mut Actor, thread: ThreadId, now: Duration) {
+    if let Some(entry) = actor.threads.get_mut(&thread)
+        && entry.turn.title == TitleWindow::Open
+    {
+        entry.turn.title = TitleWindow::Grace(now);
+    }
+}
+
+/// The folded history of `thread`, as its stream loads or unloads: an answered turn that ended
+/// settles an open window, so a restart's titles and the titles after a unload between turns
+/// read the history the store holds (D-070). A grace window is left to run out.
+pub(crate) fn history_settles(actor: &mut Actor, thread: ThreadId, stream: &ThreadState) {
+    if let Some(entry) = actor.threads.get_mut(&thread)
+        && entry.turn.title == TitleWindow::Open
+        && answered_turn_ended(stream)
+    {
+        entry.turn.title = TitleWindow::Settled;
+    }
+}
+
+/// A turn's prompt went out: the next question closes a grace window for good.
+pub(super) fn prompt_sent(actor: &mut Actor, thread: ThreadId) {
+    if let Some(entry) = actor.threads.get_mut(&thread)
+        && let TitleWindow::Grace(_) = entry.turn.title
+    {
+        entry.turn.title = TitleWindow::Settled;
+    }
+}
+
+/// Whether an agent title of `thread` may be taken now (D-070). `idle` says the update came
+/// outside the live turn. The origin turns idle once a prompt's answer is in, before the host
+/// handles the reply, so an idle update during a prompt that has answered counts as after the
+/// answer: the window opens now.
+pub(super) fn title_open(actor: &mut Actor, thread: ThreadId, idle: bool) -> bool {
+    let answered = idle
+        && actor
+            .threads
+            .get(&thread)
+            .and_then(|entry| entry.turn.current.as_deref())
+            .is_some_and(|current| {
+                current.phase == TurnPhase::Prompting && current.first_words.is_some()
+            });
+    if answered {
+        let now = actor.now().mono;
+        answered_end(actor, thread, now);
+    }
+    let now = actor.now().mono;
+    let Some(entry) = actor.threads.get(&thread) else {
+        return false;
+    };
+    match entry.turn.title {
+        TitleWindow::Open => true,
+        TitleWindow::Grace(at) => now.saturating_sub(at) <= TITLE_GRACE,
+        TitleWindow::Settled => false,
+    }
+}
+
+/// Whether the folded thread has a step of a turn that also has non-empty answer text.
+fn answered_turn_ended(stream: &ThreadState) -> bool {
+    let answered: HashSet<TurnId> = stream
+        .entries()
+        .values()
+        .filter_map(|entry| {
+            if let ViewEntry::AgentText(text) = entry
+                && text.kind == TextKind::Answer
+                && !text.text.is_empty()
+            {
+                Some(text.turn)
+            } else {
+                None
+            }
+        })
+        .collect();
+    stream
+        .entries()
+        .values()
+        .any(|entry| matches!(entry, ViewEntry::Step(step) if answered.contains(&step.turn)))
+}
+
 /// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
 pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
     let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
@@ -181,4 +291,13 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
         .matters
         .get(&matter)
         .is_some_and(|entry| entry.turns.holder.is_some())
+}
+
+/// The once-a-turn notes a turn has given, each at most once.
+#[derive(Debug, Default)]
+pub(super) struct Told {
+    /// The agent was told its shell stays offline this turn (`shell_network.rs`).
+    pub(super) offline: bool,
+    /// A data-fence refusal of the turn was told to the lawyer and the agent (`outside.rs`).
+    pub(super) outside: bool,
 }

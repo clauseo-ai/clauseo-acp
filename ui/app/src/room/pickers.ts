@@ -39,6 +39,19 @@ export function pickables(options: readonly ConfigOption[] | undefined): readonl
   return out.length === 0 ? NONE : out;
 }
 
+/** The value of an agent's "Default" row: the agent's own choice, whatever it stands at. */
+export const DEFAULT_VALUE = "default";
+
+/** What an option's "Default" row stands for, when the agent says: claude-agent-acp gives its model's Default row the
+ * resolved model's name as the description ("Opus 5.5", session-model.js), and its effort's Default row none, since
+ * Claude Code settles the effort itself and says nothing of it. Undefined with no Default row (codex-acp's values are
+ * all concrete) or no description. */
+export function resolvedDefault(p: Pickable): string | undefined {
+  const row = p.choices.find((c) => c.value === DEFAULT_VALUE);
+  const name = row?.description?.trim();
+  return name === undefined || name === "" ? undefined : name;
+}
+
 /** Whether the option still offers `value`. */
 export const offers = (p: Pickable, value: string | undefined): value is string =>
   value !== undefined && p.choices.some((c) => c.value === value);

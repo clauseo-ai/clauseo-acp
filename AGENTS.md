@@ -29,7 +29,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/agents`: installs the ACP adapters and Node.
 - `crates/codex_appserver`: Codex app-server types, a JSON-RPC client and the schema drift test.
-- `crates/counts`: the anonymous usage counts: closed schema, install id, queue and sender.
+- `crates/counts`: usage counts. Query them per `docs/counts-worker.md`; never print the Keychain pair.
 - `crates/desktop`: the Tauri shell and the host bridge.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `scenarios/` (README.md).
 - `crates/host`: the session host thread.

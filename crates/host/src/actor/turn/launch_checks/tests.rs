@@ -8,12 +8,14 @@ use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, MatterId, ThreadId, Timestamp};
 
-use super::{RunFolders, RunSweep};
+use super::{RunFolders, RunSweep, SettingsRead};
 use crate::ManualClock;
 use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, PREPARE_WAIT, off_actor_or_undo};
 use crate::config::SessionKey;
 use crate::pipeline::tests::support::id;
 use crate::write;
+
+mod claude_sandbox;
 
 /// A fresh data folder under the temp folder for `test`.
 fn scratch(test: &str) -> PathBuf {
@@ -409,6 +411,7 @@ fn a_late_prep_frees_its_claims() {
         run,
         skills_written: None,
         packs_skipped: Vec::new(),
+        settings: SettingsRead::default(),
     });
     assert!(alive.upgrade().is_none(), "its claims were freed");
     assert_eq!(held.count(), 0, "nothing is held");
@@ -555,6 +558,25 @@ fn the_shell_browser_folders_and_config_are_made_in_the_own_agent_browser_folder
     write::write_file(&run.browser_config, br#"{"provider":"browserbase"}"#).unwrap();
     super::browser::shell_folders(&mut run, &data);
     assert_eq!(std::fs::read(&run.browser_config).unwrap(), b"{}\n");
+    run.remove();
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// The shell tool's profile saves a PDF link rather than opening it: its `Default/Preferences`
+/// holds `always_open_pdf_externally`, and a planted one is replaced at the next launch.
+#[test]
+fn the_shell_profile_saves_a_pdf_link_instead_of_opening_it() {
+    let data = scratch("profile-preferences");
+    let mut run = folders(&data, 1);
+    run.make(&data, &RunSweep::default()).unwrap();
+    run.chrome = Some(PathBuf::from("/opt/chrome"));
+    let file = run.browser_profile.join("Default").join("Preferences");
+    let on = r#"{"plugins":{"always_open_pdf_externally":true}}"#;
+    super::browser::shell_folders(&mut run, &data);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), on);
+    write::write_file(&file, b"{}").unwrap();
+    super::browser::shell_folders(&mut run, &data);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), on);
     run.remove();
     write::remove_dir_all(&data).unwrap();
 }

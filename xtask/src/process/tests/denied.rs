@@ -4,7 +4,7 @@
 //! a stop fail that way, since the window cannot be hit on purpose.
 
 use super::super::running::{Finish, Limits, STOP_HOOK, Stop, StopHook, Tree};
-use super::tree::{Grandchild, SHORT_WAIT, WRAPPER, start};
+use super::tree::{Grandchild, LEFTOVER_REPORTS_SIGTERM, SHORT_WAIT, WRAPPER, start};
 use super::*;
 use nix::errno::Errno;
 
@@ -47,9 +47,11 @@ fn a_stop_denied_before_the_command_exits_is_no_error_once_it_exits() {
 
 #[test]
 fn a_stop_denied_after_the_command_exits_is_no_error() {
-    let script = r#"perl -e '$SIG{TERM} = sub { print "term\n"; exit 0 };
-$| = 1; print getpgrp(), "\n"; sleep 300' &"#;
-    let (finish, rest) = run_with(script, Limits::of(TEST_TIMEOUT), sigterm_denied());
+    let (finish, rest) = run_with(
+        LEFTOVER_REPORTS_SIGTERM,
+        Limits::of(TEST_TIMEOUT),
+        sigterm_denied(),
+    );
     assert!(
         matches!(&finish, Ok(Finish::Exited(status)) if status.success()),
         "{finish:?}"

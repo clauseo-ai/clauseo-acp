@@ -20,6 +20,7 @@ const CHANGES: TrackedChange[] = [
     kind: "insert",
     author: "A. Mehta",
     when: "Today, 9:11 am",
+    place: null,
     text: "within fourteen days",
   },
   {
@@ -28,6 +29,7 @@ const CHANGES: TrackedChange[] = [
     kind: "delete",
     author: "R. Rao",
     when: "Monday 4:05 pm",
+    place: null,
     text: "forthwith",
   },
   {
@@ -36,15 +38,25 @@ const CHANGES: TrackedChange[] = [
     kind: "move",
     author: "A. Mehta",
     when: "",
+    place: null,
     text: "The letter is annexed.",
   },
-  { key: "5", ids: [5], kind: "format", author: "A. Mehta", when: "Today, 9:15 am", text: null },
+  {
+    key: "5",
+    ids: [5],
+    kind: "format",
+    author: "A. Mehta",
+    when: "Today, 9:15 am",
+    place: null,
+    text: null,
+  },
   {
     key: "6",
     ids: [6],
     kind: "unknown",
     author: "A. Mehta",
     when: "Today, 9:16 am",
+    place: null,
     text: "a new kind",
   },
 ];
@@ -53,7 +65,13 @@ let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 
 type Props = Partial<Parameters<typeof WordChanges>[0]>;
-const on = { onBack: vi.fn(), onDecide: vi.fn(), onUndo: vi.fn(), onRetry: vi.fn() };
+const on = {
+  onBack: vi.fn(),
+  onDecide: vi.fn(),
+  onDecideAll: vi.fn(),
+  onUndo: vi.fn(),
+  onRetry: vi.fn(),
+};
 const panel = (p: Props = {}): ReactNode => (
   <WordChanges
     file="Reply to the bank.docx"
@@ -130,16 +148,62 @@ test("each change with its author, its time, its kind's label and its words; no 
   );
 });
 
-test("Accept and Reject hand the change's ids to the app, Accept all and Reject all every listed change's", async () => {
+/** Changes outside the main text: in a header or footer, in a note, in a comment, and in a place this version doesn't
+ * know; one is a formatting change, with no words. */
+const PLACED: TrackedChange[] = [
+  { ...CHANGES[0]!, key: "11", ids: [11], place: "header_footer", text: "inserted" },
+  { ...CHANGES[3]!, key: "12", ids: [12], place: "header_footer" },
+  { ...CHANGES[1]!, key: "13", ids: [13], place: "note", text: "deleted" },
+  { ...CHANGES[0]!, key: "14", ids: [14], place: "comment", text: "added" },
+  { ...CHANGES[4]!, key: "15", ids: [15], place: "unknown", text: null },
+];
+
+test("a change outside the main text says where it is beside its kind, in plain words, and in Hindi", async () => {
+  await mount(panel({ changes: PLACED }));
+  const cards = all(".rd-change");
+  const place = (c: HTMLElement) => c.querySelector(".rd-change-place")?.textContent ?? null;
+  const kind = (c: HTMLElement) =>
+    c.querySelector(".rd-change-kind > span:not(.rd-change-place)")?.textContent ?? null;
+  expect(cards.map(place)).toEqual([
+    "In a header or footer",
+    "In a header or footer",
+    "In a footnote or endnote",
+    "In a comment",
+    // a place this version doesn't know says nothing, and an unknown kind with no words shows no line
+    null,
+  ]);
+  expect(cards.map(kind)).toEqual(["Added", "Formatting changed", "Taken out", "Added", null]);
+  expect(cards[1]?.querySelector(".rd-change-words")?.textContent).toBe(
+    "Formatting changedIn a header or footer",
+  );
+  expect(cards[4]?.querySelector(".rd-change-words")).toBeNull();
+  // the main text's changes name no place
+  await act(async () => root?.render(panel()));
+  expect(all(".rd-change-place")).toEqual([]);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(panel({ changes: PLACED }), "hi");
+  expect(all(".rd-change").map(place)).toEqual([
+    rdt("hi", "In a header or footer"),
+    rdt("hi", "In a header or footer"),
+    rdt("hi", "In a footnote or endnote"),
+    rdt("hi", "In a comment"),
+    null,
+  ]);
+  expect(rdt("hi", "In a comment")).toBe("टिप्पणी में");
+});
+
+test("Accept and Reject hand the change's ids to the app, Accept all and Reject all every change in the file", async () => {
   await mount(panel());
   await click(all(".rd-change")[1]?.querySelector(".rd-accept"));
   expect(on.onDecide).toHaveBeenLastCalledWith([2, 3], "accept");
   await click(all(".rd-change")[0]?.querySelector(".rd-reject"));
   expect(on.onDecide).toHaveBeenLastCalledWith([1], "reject");
   await click(one(".rd-accept-all"));
-  expect(on.onDecide).toHaveBeenLastCalledWith([1, 2, 3, 4, 5, 6], "accept");
+  expect(on.onDecideAll).toHaveBeenLastCalledWith("accept");
   await click(one(".rd-reject-all"));
-  expect(on.onDecide).toHaveBeenLastCalledWith([1, 2, 3, 4, 5, 6], "reject");
+  expect(on.onDecideAll).toHaveBeenLastCalledWith("reject");
+  expect(on.onDecide).toHaveBeenCalledTimes(2);
   await click(one('[data-testid="word-changes-back"]'));
   expect(on.onBack).toHaveBeenCalledTimes(1);
 });
@@ -149,7 +213,23 @@ test("while a decision is on its way every press is held", async () => {
   for (const b of all(".rd-accept, .rd-reject, .rd-accept-all, .rd-reject-all, .rd-undo"))
     await click(b);
   expect(on.onDecide).not.toHaveBeenCalled();
+  expect(on.onDecideAll).not.toHaveBeenCalled();
   expect(on.onUndo).not.toHaveBeenCalled();
+});
+
+test("a list that stops short counts every change and says Accept all and Reject all decide them all", async () => {
+  await mount(panel({ total: 600 }));
+  expect(one(".rd-review-head .rd-review-sub")?.textContent).toBe(
+    "600 changes, each with its author and time, as Word shows them.",
+  );
+  expect(one('[data-testid="word-changes-more"]')?.textContent).toBe(
+    "The first 5 are listed here. Accept all and Reject all decide all 600.",
+  );
+});
+
+test("a whole list says nothing of more", async () => {
+  await mount(panel({ total: 5 }));
+  expect(one('[data-testid="word-changes-more"]')).toBeNull();
 });
 
 test("the latest decision says its time beside Undo, in either language", async () => {

@@ -41,7 +41,7 @@ LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete a
 ; $APPDATA is C:\ProgramData there. Exists: something was already at that path, left as it
 ; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
 LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $APPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
-LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy. Your firm manages this folder on this computer."
+LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy."
 ; removeStillRunning: S15's removal of the Safe workspace (clauseo-sandbox-setup.exe --remove)
 ; was still running when the uninstaller stopped waiting for it, after 2 minutes; it carries on
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
@@ -57,15 +57,15 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe w
 ; installer wrote the admin copy in Program Files, the one launches run, and found it gone when it
 ; tried to start it; the install stays. A details line and exit code 20; a box only interactively,
 ; no code under /P. Provisional (app thread, stage C's fact check, 2026-11-07).
-LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Run Clauseo's installer again to restore that program, then uninstall Clauseo again. If that doesn't work, Clauseo's notes for IT explain how to remove them."
+LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Run Clauseo's installer again to restore that program, then uninstall Clauseo again. If that doesn't work, Clauseo's notes on GitHub explain how to remove them."
 ; removeAdminCopyRefused: the uninstaller found S15's set-up program in Program Files, but a
 ; folder on its way or the file itself can be changed by more than administrators, or its SHA-256
 ; isn't the one the machine's record holds (or either couldn't be read), so it didn't start it.
 ; Said only when the record names a set-up's owner (per user, the uninstalling user), whose
 ; accounts are then still there: a details line, and a box unless /S. Draft, for the app thread
 ; (2026-11-07).
-LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Run Clauseo's installer again to restore that program, then uninstall Clauseo again. If that doesn't work, Clauseo's notes for IT explain how to remove them."
-LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Run this installer again to restore it. If Windows security removes it again, Clauseo's notes for IT say what to allow."
+LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Run Clauseo's installer again to restore that program, then uninstall Clauseo again. If that doesn't work, Clauseo's notes on GitHub explain how to remove them."
+LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Run this installer again to restore it. If Windows security removes it again, open Windows Security, choose Protection history, allow Clauseo, then run this installer again."
 ; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
 ; these lines), needs one UAC prompt at install. Their Hindi is in Hindi.nsh. Provisional (app
 ; thread and stage F, 2026-11-07).
@@ -73,8 +73,8 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 ; publisher "Unknown Publisher" while the installer is unsigned.
 ; adminCopyWorking and adminCopyDone: details-list lines while the set-up runs (it can take a few
 ; minutes) and once it is done.
-; adminCopyDeclined: the prompt was declined; for a standard user, whoever looks after the
-; computer types their password into it. adminCopyBlocked: Windows refused the elevation outright
+; adminCopyDeclined: the prompt was declined; for a standard user, an administrator's password
+; is typed into it. adminCopyBlocked: Windows refused the elevation outright
 ; (error 1260, or 5 under some UAC settings), as for a standard user whom this computer's settings
 ; give no prompt to approve; not a person's No. Provisional (app thread, 2026-11-08).
 ; adminCopyFailed: the set-up ran and failed (or couldn't
@@ -91,11 +91,11 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up the Safe workspace. It will say the publisher is unknown. That's expected: it's this installer asking. Choose Yes."
 LangString adminCopyWorking ${LANG_ENGLISH} "Setting up the Safe workspace. This can take a few minutes."
 LangString adminCopyDone ${LANG_ENGLISH} "The Safe workspace is set up."
-LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because permission was refused when Windows asked. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
-LangString adminCopyBlocked ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because your Windows account isn't allowed to approve this change. To set it up, ask whoever looks after this computer to run this installer with an administrator account, or to install Clauseo for all users."
-LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
+LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because permission was refused when Windows asked. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer."
+LangString adminCopyBlocked ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because your Windows account isn't allowed to approve this change. To set it up, run this installer again from an administrator account, or install Clauseo for all users."
+LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, Settings > Safe workspace in Clauseo says what's stopping it."
 LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
-LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
+LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. Clauseo works without it. Run this installer again to set it up."
 LangString adminCopyNewerKept ${LANG_ENGLISH} "Clauseo kept the newer copy of the Safe workspace's set-up program that's already on this computer."
 LangString adminCopyAppRunning ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because Clauseo is running. Quit Clauseo, then run this installer again."
 LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo may still be setting up the Safe workspace. To see whether it worked, open Clauseo's Settings and look under Safe workspace."

@@ -118,6 +118,8 @@ pub(super) fn start(
         app_version,
         #[cfg(feature = "test-support")]
         fail_close,
+        // Read by start-up before the seams reach here (`last_exit.rs`).
+        last_run_unclean: _,
     } = seams;
     let mut host = UpdateHost {
         updater,

@@ -1,32 +1,42 @@
 //! The agent's asks and signals: permission requests and elicitations (logged `Live` during
-//! the live turn, else answered cancelled with nothing logged) and limit signals (a rejection
+//! the live turn; with no prompt in flight they wait for an agent-started turn, `own_turn.rs`;
+//! else answered cancelled with nothing logged) and limit signals (a rejection
 //! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
-//! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
-//! A Codex approval of one of the guarded `browser` server's tools other than eval is allowed for
-//! the session with nothing logged ([`browser_tool_to_allow`]).
+//! data folder (`agent/data_fence.rs`) is rejected unasked, with a notice (`outside.rs`).
+//! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
+//! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
+//! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
+//! network is refused without asking, told by a notice once a turn (`shell_network.rs`).
 
 use std::path::PathBuf;
 
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
-    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
-    PermissionRequested, PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
+    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
+    PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
+    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
 use super::super::{Actor, limits};
 use super::out::Out;
+use super::shell_network::reject_option;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
+
+mod codex_auto;
+
+use codex_auto::{
+    allow_browser_tool, allow_trusted_tool, browser_tool_to_allow, trusted_tool_to_allow,
+};
 
 /// A permission request from the agent, kept until it is logged.
 #[derive(Debug, Clone)]
@@ -54,11 +64,12 @@ pub(super) struct HeldOpenCheck {
 /// otherwise, or when the check cannot be sent, it is logged `Live` for the lawyer at once. In
 /// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
 /// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
-/// changes nothing else. In the live turn, a Codex approval of a `browser` tool other than eval is
-/// answered `allow_session` at once, unseen ([`browser_tool_to_allow`]).
+/// changes nothing else. In the live turn, a Codex approval of a `browser` tool is answered
+/// `allow_session` at once, unseen ([`browser_tool_to_allow`]).
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
+        origin: _,
         key,
         acp_tool_call_id,
         mut options,
@@ -86,14 +97,27 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         about,
     };
     let Some(turn) = live_turn(actor, thread) else {
-        cancel_outside_turn(actor, thread, &ask.session);
+        super::own_turn::cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
     if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
         allow_browser_tool(actor, thread, ask.key, &tool, option);
         return;
     }
-    let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
+    if let Some((server, option)) = trusted_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
+        allow_trusted_tool(actor, thread, ask.key, &server, option);
+        return;
+    }
+    if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
+        return;
+    }
+    // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
+    // start or updates named it; unknown when none did.
+    let tool_name = current(actor, thread)
+        .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
+        .map(str::to_owned);
+    let shell = data_fence::ShellKind::of_tool(tool_name.as_deref());
+    let fence = fence_check(actor, thread, &paths, raw_input.as_ref(), shell);
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
@@ -131,89 +155,21 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     }
 }
 
-/// The option codex-acp 2.2.2 offers to allow an MCP tool for the session, kind `allow_always`
-/// (`dist/index.js:32663-32708`); answered, Codex gets `ApprovedForSession` and, in its default
-/// `Auto` approval mode, asks no more for that server and tool in the session (codex rust-v0.162.1
-/// `core/src/mcp_tool_call.rs:1730-1751`, `:2126-2163`; codex-acp `dist/index.js:32733-32750`).
-const ALLOW_SESSION: &str = "allow_session";
-
-/// The `browser` tool and the `allow_session` option, when the host answers this request itself:
-/// the thread's agent is Codex, not in forced ask; the request offers `allow_session`; and it
-/// names one of the guarded `browser` server's tools other than eval
-/// (`sources::browser::auto_allowed_browser_tool`). The tool comes only from fields Codex and
-/// codex-acp build, never from model-written text: the title `mcp.browser.<tool>` of the
-/// earlier tool call the request's toolCallId names, which the thread's sources keep
-/// (`sources::browser::CodexTools`), or a standalone request's `serverName` and exact message
-/// (`sources::browser::codex_standalone_browser_tool`). Everything else (shell commands, file
-/// writes, other servers such as `case-law`, eval) goes to the lawyer as before.
-///
-/// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
-/// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.
-fn browser_tool_to_allow(
-    actor: &mut Actor,
-    thread: ThreadId,
-    ask: &PermissionAsk,
-    raw_input: Option<&serde_json::Value>,
-) -> Option<(String, AgentChoiceId)> {
-    let kind = actor
-        .check_thread(thread)
-        .ok()
-        .and_then(|entry| AgentKind::of(&entry.row.agent));
-    if kind != Some(AgentKind::Codex) || agent(actor, thread).is_none_or(|agent| agent.forced_ask) {
-        return None;
-    }
-    let option = ask
-        .options
-        .iter()
-        .find(|option| option.option_id == ALLOW_SESSION)?;
-    let option = AgentChoiceId::new(&option.option_id).ok()?;
-    let standalone =
-        crate::sources::browser::codex_standalone_browser_tool(&ask.acp_tool_call_id, raw_input);
-    let tool = match standalone {
-        Some(tool) => tool.to_owned(),
-        None => super::state(actor, thread)?
-            .sources
-            .codex_browser_tool(&ask.acp_tool_call_id)?
-            .to_owned(),
-    };
-    crate::sources::browser::auto_allowed_browser_tool(&tool).then_some((tool, option))
-}
-
-/// Answers a Codex `browser` tool's approval with `option` (`allow_session`), with nothing
-/// logged on the thread: the lawyer never sees it. `tracing` gets the tool's name, never its
-/// arguments.
-fn allow_browser_tool(
-    actor: &mut Actor,
-    thread: ThreadId,
-    key: PendingKey,
-    tool: &str,
-    option: AgentChoiceId,
-) {
-    let Some(agent) = agent(actor, thread) else {
-        return;
-    };
-    let client = agent.link.client.clone();
-    tracing::info!(%thread, tool, "allowed a browser tool for the session");
-    spawn(actor, async move {
-        if let Err(error) = client.answer_permission(key, option).await {
-            tracing::warn!(error = %Cause(&error), "a browser tool's approval did not reach the agent");
-        }
-    });
-}
-
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
 /// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
 /// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
-/// path and no command, or the thread has no agent.
+/// path and no command, or the thread has no agent. Its command's search folders are read as
+/// `shell`, the shell of the request's tool, would read them.
 fn fence_check(
     actor: &Actor,
     thread: ThreadId,
     paths: &[PathBuf],
     raw_input: Option<&serde_json::Value>,
+    shell: data_fence::ShellKind,
 ) -> Option<Box<FenceCheck>> {
     let paths = data_fence::candidates(paths, raw_input, cfg!(windows));
     let words = data_fence::candidates_words(raw_input, cfg!(windows));
-    let roots = data_fence::candidates_roots(raw_input, cfg!(windows));
+    let roots = data_fence::candidates_roots(raw_input, cfg!(windows), shell);
     if paths.is_empty() && words.is_empty() && roots.is_empty() {
         return None;
     }
@@ -242,6 +198,7 @@ fn fence_check(
         roots,
         words,
         health: actor.protection.data_fence().clone(),
+        vars: agent.fence_vars.clone(),
     }))
 }
 
@@ -263,7 +220,7 @@ fn tool_call_paths(actor: &Actor, thread: ThreadId, ask: &PermissionAsk) -> Vec<
 }
 
 /// The matter thread checked a permission request's paths. Still in the same live turn, a path
-/// in Clauseo's data folder gets the request rejected unseen ([`refuse_data_folder`]), a file
+/// in Clauseo's data folder gets the request rejected unasked (`outside.rs`), a file
 /// held open gets it refused for the lawyer ([`refuse_held_open`]); neither, and the request is
 /// logged for the lawyer. Once that turn is over, that one request is answered
 /// `cancelled` (the others of the session, and any later turn, are left alone).
@@ -291,7 +248,7 @@ pub(super) fn on_held_open(
     }
     let held = match checked {
         PathsChecked::DataFolder => {
-            refuse_data_folder(actor, thread, &ask);
+            super::outside::refuse_data_folder(actor, thread, &ask);
             return;
         }
         PathsChecked::Held(held) => held,
@@ -335,20 +292,6 @@ fn live_turn(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
     current(actor, thread)
         .filter(|current| current.live())
         .map(|current| current.turn)
-}
-
-/// Answers the session's pending permission requests `cancelled`, outside the live turn.
-fn cancel_outside_turn(actor: &mut Actor, thread: ThreadId, session: &AgentSessionId) {
-    if let Some(agent) = agent(actor, thread) {
-        let client = agent.link.client.clone();
-        let session = session.clone();
-        spawn(actor, async move {
-            // `cancel` answers every pending permission of the session `cancelled`.
-            if let Err(error) = client.cancel(&session).await {
-                tracing::debug!(%error, "a permission outside a turn was not cancelled");
-            }
-        });
-    }
 }
 
 /// Logs the request `Live`; the lawyer's answer goes to the agent.
@@ -449,42 +392,6 @@ fn refuse_held_open(
         agent.run = None;
     }
     Ok(())
-}
-
-/// Rejects a request that touches Clauseo's data folder, with nothing logged and the lawyer never
-/// asked: the agent gets the reject-once option, else `cancelled`, and the agent's count for its
-/// `agent ended` line goes up. No path is logged. ACP's answer carries no reason, so the agent
-/// hears its adapter's own words for a refusal. An agent that cancels its turn on it (Codex)
-/// ends the turn `OutsideMatter`, not the lawyer's `Cancelled`.
-fn refuse_data_folder(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
-    let reject =
-        reject_option(&ask.options).and_then(|option| AgentChoiceId::new(&option.option_id).ok());
-    if let Some(current) = current(actor, thread) {
-        current.refused = Some(StopReason::OutsideMatter);
-    }
-    let Some(agent) = agent(actor, thread) else {
-        return;
-    };
-    agent.denied_data_folder = agent.denied_data_folder.saturating_add(1);
-    let client = agent.link.client.clone();
-    let key = ask.key;
-    spawn(actor, async move {
-        let answered = match reject {
-            Some(option) => client.answer_permission(key, option).await,
-            None => client.cancel_permission(key).await,
-        };
-        if let Err(error) = answered {
-            tracing::warn!(error = %Cause(&error), "a data-folder refusal did not reach the agent");
-        }
-    });
-}
-
-/// The option that rejects this request only: the first `RejectOnce`. A `RejectAlways` is
-/// never taken, since it may leave a lasting rule in the agent the lawyer never chose.
-fn reject_option(options: &[PermissionOption]) -> Option<&PermissionOption> {
-    options
-        .iter()
-        .find(|option| option.kind == PermissionKind::RejectOnce)
 }
 
 /// An elicitation: logged during the live turn, else answered `Cancel`.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # local-mac-dmg.sh: release.yml's dry run (MODE=dry) for aarch64-apple-darwin, on a Mac instead of
-# GitHub Actions: the `check`, `blocklist`, `ui` and `build` jobs' steps through "Collect this
-# leg's assets", in order, with the same sidecars, overlays, env, throwaway updater key, ad hoc
-# signing and .app checks. It publishes nothing: no gh release, upload, push or notarisation.
+# GitHub Actions: the `check`, `blocklist` (with release.yml's block-list switch on), `ui` and
+# `build` jobs' steps through "Collect this leg's assets", in order, with the same sidecars,
+# overlays, env, throwaway updater key, ad hoc signing and .app checks. It publishes nothing: no gh release, upload, push or notarisation.
 #
 #   bash .github/scripts/local-mac-dmg.sh [--out DIR] [--plan] [--allow-dirty]
 #
@@ -47,6 +47,12 @@ wf_env() { # a top-level env entry, quotes dropped
   [ -n "$v" ] || die "$WF has no top-level env $1; update this script"
   printf '%s' "$v"
 }
+wf_output() { # an output of the check job set from a literal, quotes dropped
+  local v
+  v=$(sed -nE "s/^      $1: '?([^']*)'?\$/\1/p" "$WF" | head -1)
+  [ -n "$v" ] || die "$WF's check job has no output $1; update this script"
+  printf '%s' "$v"
+}
 wf_matrix() { # a key of this target's matrix row
   local v
   v=$(grep -E "\{ target: $TARGET," "$WF" | sed -nE "s/.* $1: \"?([^,\"}]*)\"?[,} ].*/\1/p" | head -1)
@@ -75,6 +81,16 @@ CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=$(wf_env CARGO_PROFILE_RELEASE_SPLIT_DEBUG
 export SAFE_WORKSPACE TARGET MODE=dry CLAUSEO_RELEASE_MODE=dry VERSION FEATURES="" RUSTFLAGS
 SAFE_WORKSPACE=$(wf_env SAFE_WORKSPACE)
 RUSTFLAGS=$(wf_matrix rustflags)
+# The block-list switch: release.yml's check output bundle_blocklist, 'false' for launch (the Safe
+# workspace sets it to 'true'), read from there so a local DMG matches the release. On, the
+# blocklist step downloads and verifies the snapshot and every build passes blocklist.conf.json;
+# off, neither, and minisign is not needed.
+BUNDLE_BLOCKLIST=$(wf_output bundle_blocklist)
+case $BUNDLE_BLOCKLIST in
+  true) BLOCKLIST_OVERLAY=release/blocklist.conf.json ;;
+  false) BLOCKLIST_OVERLAY="" ;;
+  *) die "$WF's bundle_blocklist is $BUNDLE_BLOCKLIST, not true or false" ;;
+esac
 # cargo and tauri put the build under CARGO_TARGET_DIR when it is set (a Mac's own setting).
 TARGET_DIR=${CARGO_TARGET_DIR:-target}
 case $TARGET_DIR in /*) ;; *) TARGET_DIR=$ROOT/$TARGET_DIR ;; esac
@@ -94,7 +110,7 @@ note() { echo "    # $*"; }
 if $PLAN; then
   echo "local-mac-dmg plan: $ROOT at $SHA9, $TARGET, MODE=dry, version $VERSION"
   echo "DMG: $OUT/$DMG_NAME"
-  echo "env: RUSTFLAGS='$RUSTFLAGS' SAFE_WORKSPACE=$SAFE_WORKSPACE" \
+  echo "env: RUSTFLAGS='$RUSTFLAGS' SAFE_WORKSPACE=$SAFE_WORKSPACE BUNDLE_BLOCKLIST=$BUNDLE_BLOCKLIST" \
     "CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG" \
     "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=$CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO"
 fi
@@ -103,8 +119,8 @@ fi
 step "guards: macOS arm64, a clean tree, the prerequisites"
 if $PLAN; then
   note "refuses unless uname -s/-m is Darwin/arm64; refuses a dirty tree without --allow-dirty"
-  note "needs rustup $TOOLCHAIN + $TARGET, node >=$NODE_MIN, pnpm $PNPM_PIN, jq, minisign,"
-  note "codesign, hdiutil, /usr/libexec/PlistBuddy, shasum"
+  note "needs rustup $TOOLCHAIN + $TARGET, node >=$NODE_MIN, pnpm $PNPM_PIN, jq,"
+  note "codesign, hdiutil, /usr/libexec/PlistBuddy, shasum; minisign with BUNDLE_BLOCKLIST=true"
   [ -z "$(git status --porcelain)" ] || note "warning: this tree is dirty now"
 else
   [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] ||
@@ -129,13 +145,15 @@ else
   need "[ \"\$(pnpm -C ui --version)\" = '$PNPM_PIN' ]" "pnpm $PNPM_PIN (ui/package.json)" \
     "npm install -g pnpm@$PNPM_PIN"
   need "command -v jq" "jq" "brew install jq"
-  need "command -v minisign" "minisign (blocklist step)" "brew install minisign"
+  if [ "$BUNDLE_BLOCKLIST" = true ]; then
+    need "command -v minisign" "minisign (blocklist step)" "brew install minisign"
+  fi
   need "command -v codesign && command -v hdiutil && command -v shasum" \
     "codesign, hdiutil, shasum" "xcode-select --install"
   need "[ -x /usr/libexec/PlistBuddy ]" "/usr/libexec/PlistBuddy" "xcode-select --install"
   [ "$missing" = 0 ] || die "install what is missing above, then run again"
   echo "prerequisites present: rustup $TOOLCHAIN/$TARGET, node $(node -v), pnpm $PNPM_PIN," \
-    "jq, minisign, codesign, hdiutil, PlistBuddy"
+    "jq, $([ "$BUNDLE_BLOCKLIST" = true ] && echo "minisign, ")codesign, hdiutil, PlistBuddy"
 fi
 
 # The throwaway updater key and its password live here only, and go on exit.
@@ -234,7 +252,11 @@ fetch_blocklist() {
   [ "$age" -le 86400 ] || echo "warning: the snapshot is $((age / 3600)) hours old (more than 24)"
 }
 step "blocklist: download clauseo-ai/blocklist's current snapshot, verify it with stage-f.pub"
-run fetch_blocklist
+if [ "$BUNDLE_BLOCKLIST" = true ]; then
+  run fetch_blocklist
+else
+  note "skipped: bundle_blocklist is false in release.yml, where the blocklist job does nothing"
+fi
 
 # ---- ui job, then the build job's installs ----
 step "installs: the ui workspace (frozen lockfile) and the crates (cargo fetch --locked)"
@@ -275,7 +297,7 @@ run node .github/scripts/sidecars.mjs --check "$TARGET"
 
 step "build the app (tauri build --no-bundle with the release overlays)"
 run pnpm -C ui tauri build --ci --target "$TARGET" --no-bundle \
-  --config release/release.conf.json --config release/blocklist.conf.json \
+  --config release/release.conf.json ${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"} \
   --config release/sidecars.generated.json -- --locked
 
 scan() { # scan <what> <form>...: the app binary holds none of the forms (NULs dropped first)
@@ -319,7 +341,7 @@ bundle() {
   TAURI_SIGNING_PRIVATE_KEY=$(cat "$TMP/dry-updater.key")
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$TMP/dry-updater.password")
   export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-  for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc; do
+  for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc Helpers/pdf/pdftoppm Helpers/pdf/pdfinfo; do
     rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
       die "sidecars.generated.json puts nothing at Contents/$key"
     helper=crates/desktop/$rel
@@ -329,7 +351,7 @@ bundle() {
   done
   rm -rf "$RELEASE_DIR/bundle" # a fresh runner has none; an old DMG must not be collected
   pnpm -C ui tauri bundle --ci --target "$TARGET" --bundles app,dmg \
-    --config release/release.conf.json --config release/blocklist.conf.json \
+    --config release/release.conf.json ${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"} \
     --config "$TMP/updater-key.conf.json" --config release/sidecars.generated.json
   macos=$RELEASE_DIR/bundle/macos
   tarball=Clauseo_${VERSION}_${ARCH}.app.tar.gz
@@ -338,7 +360,7 @@ bundle() {
   pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"
 }
 step "bundle the .app and DMG ad hoc (APPLE_SIGNING_IDENTITY=-), sign the updater archive"
-note "codesign --force -s - --options runtime on Contents/Helpers' two files first"
+note "codesign --force -s - --options runtime on Contents/Helpers' four files first"
 run bundle
 
 check_app() {
@@ -352,15 +374,18 @@ check_app() {
   [ "$have" = "$want" ] || die "$app/Contents/MacOS holds $have; it may hold only $want"
   [ -d "$app/Contents/Helpers" ] || die "$app has no Contents/Helpers"
   helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
-  [ "$helpers" = "clauseo-agent-browser stetdoc " ] || die "$app/Contents/Helpers holds $helpers"
+  [ "$helpers" = "clauseo-agent-browser pdf stetdoc " ] || die "$app/Contents/Helpers holds $helpers"
   [ "$(ls -A "$app/Contents/Helpers/stetdoc")" = stetdoc ] ||
     die "$app/Contents/Helpers/stetdoc must hold only stetdoc"
-  for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc"; do
+  [ "$(ls -A "$app/Contents/Helpers/pdf" | LC_ALL=C sort | tr '\n' ' ')" = "pdfinfo pdftoppm " ] ||
+    die "$app/Contents/Helpers/pdf must hold only pdfinfo and pdftoppm"
+  for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc" \
+    "$app/Contents/Helpers/pdf/pdftoppm" "$app/Contents/Helpers/pdf/pdfinfo"; do
     [ -f "$helper" ] && [ -x "$helper" ] || die "$helper is not an executable file"
     codesign --verify --strict --verbose=2 "$helper" || die "codesign --verify --strict fails on $helper"
   done
   codesign --verify --deep --strict --verbose=2 "$app" || die "codesign --verify --deep --strict fails on $app"
-  echo "Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc; signed);" \
+  echo "Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc, pdf/*; signed);" \
     "the .app verifies --deep --strict"
 }
 step "the .app keeps the browser helper in Contents/Helpers, and verifies"

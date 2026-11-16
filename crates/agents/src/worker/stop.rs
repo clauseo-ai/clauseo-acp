@@ -4,7 +4,9 @@
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
+use super::{Shared, Ticket};
 use crate::cancel::Cancel;
+use crate::signin::{SigninCode, SigninState};
 
 /// Set once when a job's thread ends; [`JobEnd::wait`] waits for it.
 #[derive(Debug, Default)]
@@ -52,5 +54,29 @@ impl Stopped {
             self.cancel.cancel();
         }
         ended
+    }
+}
+
+/// Marks a sign-in job's thread ended as it ends, a panic included; after a panic (a dev or test
+/// build; a release build aborts) the job's slot goes too, with `Failed`, so the agent's next
+/// sign-in and another agent's waiting press (desktop's one sign-in at a time) are not held.
+pub(super) struct SigninEnd {
+    pub(super) shared: Arc<Shared>,
+    pub(super) ticket: Ticket,
+    pub(super) ended: Arc<JobEnd>,
+    pub(super) clock: Arc<dyn crate::config::Clock>,
+}
+
+impl Drop for SigninEnd {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            tracing::warn!(agent = %self.ticket.agent, "agent sign-in: the job's thread panicked");
+            let state = SigninState::Failed {
+                code: SigninCode::Failed,
+                at: self.clock.now(),
+            };
+            self.shared.signin.emit_job(&self.ticket, state, true);
+        }
+        self.ended.mark();
     }
 }

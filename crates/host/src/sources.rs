@@ -45,6 +45,9 @@ pub(crate) struct Sources {
     /// A Codex agent's unfinished calls of the `browser` server's tools, for its permission
     /// requests (`actor/turn/asks.rs`); no record comes of them.
     codex_browser: browser::CodexTools,
+    /// A Codex agent's unfinished MCP tool calls of any server, for its permission requests
+    /// (`actor/turn/asks.rs`, `agent/mcp_trust.rs`); no record comes of them.
+    codex_mcp: crate::agent::mcp_trust::CodexCalls,
     calls: calls::Calls,
     /// The case-law calls and the relay's results waiting for them. The host asks it first
     /// (`actor/turn/updates.rs`); a call it claims is not offered to the others.
@@ -94,6 +97,45 @@ impl Sources {
     /// finished, runs (`browser::CodexTools`).
     pub(crate) fn codex_browser_tool(&self, acp_id: &str) -> Option<&str> {
         self.codex_browser.tool(acp_id)
+    }
+
+    /// A tool call started, by `agent`: a Codex MCP call is kept for its permission requests
+    /// (`agent::mcp_trust::CodexCalls`). Asked of every call, case law's included, before any
+    /// source claims it.
+    pub(crate) fn codex_mcp_started(&mut self, agent: &AgentId, call: &ToolCall) {
+        if is_codex(agent) {
+            self.codex_mcp.started(call);
+        }
+    }
+
+    /// An update of the call the agent knows as `acp_id`: a final status forgets its Codex MCP
+    /// call. Asked of every update, before any source claims it.
+    pub(crate) fn codex_mcp_updated(&mut self, acp_id: &str, patch: &ToolCallPatch) {
+        self.codex_mcp.updated(acp_id, patch);
+    }
+
+    /// How many Codex MCP calls are kept.
+    #[cfg(test)]
+    pub(crate) fn codex_mcp_len(&self) -> usize {
+        self.codex_mcp.len()
+    }
+
+    /// The MCP server and tool of the Codex call `acp_id`, started in a live turn and not
+    /// finished (`agent::mcp_trust::CodexCalls`), taken: a second ask finds none.
+    pub(crate) fn take_codex_mcp_call(&mut self, acp_id: &str) -> Option<(String, String)> {
+        self.codex_mcp.take(acp_id)
+    }
+
+    /// Takes the oldest unanswered Codex MCP call of exactly `server` and `tool`
+    /// (`agent::mcp_trust::CodexCalls::take_oldest`); whether one was there.
+    pub(crate) fn take_oldest_codex_mcp_call(&mut self, server: &str, tool: &str) -> bool {
+        self.codex_mcp.take_oldest(server, tool)
+    }
+
+    /// [`Self::take_codex_mcp_call`] without taking it.
+    #[cfg(test)]
+    pub(crate) fn codex_mcp_call(&self, acp_id: &str) -> Option<(&str, &str)> {
+        self.codex_mcp.call(acp_id)
     }
 }
 

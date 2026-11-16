@@ -106,6 +106,10 @@ export type ThreadState = {
   limits?: LimitsView;
   /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
   folder?: FolderSupportKind;
+  /** The matter's folder as the host shows it (folder_display), and the OS display_info reports (Linux when left out):
+   * matter.folder_backslash's line names the folder and the file manager by them. */
+  matterFolder?: string;
+  platform?: "mac" | "linux" | "windows";
   /** The thread's title, as its list row gives it; none by default. */
   title?: string;
   /** The connectors' state on the app feed (U15): the out-of-credit note, the hint's "from" price. With it the room
@@ -175,11 +179,16 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.commands = state.commands ?? [];
   head.header!.agent = agent;
   const transport: FakeTransport = new FakeTransport({
+    ...(state.platform === undefined ? {} : { platform: state.platform }),
     query: (query) => {
       if (query === "list_matters")
         return {
           matters: [
-            state.folder === undefined ? MATTER : { ...MATTER, folder_support: state.folder },
+            {
+              ...MATTER,
+              ...(state.folder === undefined ? {} : { folder_support: state.folder }),
+              ...(state.matterFolder === undefined ? {} : { folder_display: state.matterFolder }),
+            },
           ],
         };
       if (typeof query === "object" && query.list_threads !== undefined)

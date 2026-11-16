@@ -18,10 +18,28 @@ export const HI = {
   "Running a task.": "एक काम चल रहा है।",
   "Running {program} on {name}.": "{name} पर {program} चल रहा है।",
   "Running {program}.": "{program} चल रहा है।",
+  // a chained command, counted rather than named by its first program (UC-301; provisional)
+  "Running {n} tasks.": "{n} काम चल रहे हैं।",
   "Searching {site} for '{query}'.": "{site} पर '{query}' खोजा जा रहा है।",
   "Thinking it through.": "विचार किया जा रहा है।",
   "Working on it.": "काम चल रहा है।",
+  // a step named only by the sandbox's permission for the internet (UC-168; provisional)
+  "Letting a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया जा रहा है।",
+  // a task named by its own title or the text it shows, where it gave no other words (UC-240; provisional)
+  "Running {description}.": "{description} चल रहा है।",
+  // a skill read, as a guide (UC-241 to UC-245; provisional): Clauseo's own by name, any other as a guide; the
+  // guides' names fill "Reading {name}." here and "Read {name}." in words-steps.ts
+  "Reading a guide.": "एक मार्गदर्शिका पढ़ी जा रही है।",
+  "Clauseo's drafting guide": "Clauseo की मसौदा मार्गदर्शिका",
+  "Clauseo's research guide": "Clauseo की शोध मार्गदर्शिका",
+  "Clauseo's matter brief guide": "Clauseo की मामला सारांश मार्गदर्शिका",
+  "Clauseo's browser guide": "Clauseo की ब्राउज़र मार्गदर्शिका",
+  // a step of Clauseo's case-law connector (tool-names.ts, caseLawOf): a search, a judgment read or a citation checked
+  // (UC-475); the lawyer's credits read (UC-478); a payment link got, never a payment (UC-479). Provisional; hi: later
+  "Searching case law.": null,
+  "Checking your case-law credits.": null,
+  "Getting a payment link for case-law credits.": null,
 } as const;
 
-/** Every key, for the banned-words screen in the tests. */
-export const stepLiveWords: Readonly<Record<keyof typeof HI, string>> = HI;
+/** Every key, for the banned-words screen in the tests (null: hi: later). */
+export const stepLiveWords: Readonly<Record<keyof typeof HI, string | null>> = HI;

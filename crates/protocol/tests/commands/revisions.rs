@@ -3,7 +3,7 @@
 
 use clauseo_protocol::{
     CommandOutcome, DecideRevisions, DocVersion, HostCommand, HostQuery, MAX_REVISIONS,
-    QueryResult, Revision, RevisionDecision, RevisionKind, RevisionList, Timestamp,
+    QueryResult, Revision, RevisionDecision, RevisionKind, RevisionList, RevisionPlace, Timestamp,
 };
 
 use super::fixtures::{checkpoint_id, matter_id, path, round_trips};
@@ -18,7 +18,15 @@ fn decide(ids: Vec<u32>) -> HostCommand {
         version: VERSION.parse().unwrap(),
         ids,
         decision: RevisionDecision::Accept,
+        all: false,
     })
+}
+
+fn decide_all(ids: Vec<u32>) -> HostCommand {
+    let HostCommand::DecideRevisions(one) = decide(ids) else {
+        unreachable!("decide makes a DecideRevisions");
+    };
+    HostCommand::DecideRevisions(DecideRevisions { all: true, ..one })
 }
 
 #[test]
@@ -54,6 +62,7 @@ fn list_revisions_and_its_answer_on_the_wire() {
                 author: "C".to_owned(),
                 at: Some(Timestamp::new(1_794_242_630_000).unwrap()),
                 block: "p4".to_owned(),
+                place: None,
                 text: Some("New para.".to_owned()),
             },
             Revision {
@@ -62,10 +71,12 @@ fn list_revisions_and_its_answer_on_the_wire() {
                 author: "C".to_owned(),
                 at: None,
                 block: "p5".to_owned(),
+                place: Some(RevisionPlace::HeaderFooter),
                 text: None,
             },
         ],
         truncated: false,
+        total: 2,
     });
     round_trips(&answer);
     assert_eq!(
@@ -75,21 +86,24 @@ fn list_revisions_and_its_answer_on_the_wire() {
             "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
             r#"","revisions":[{"ids":[2,3],"kind":"insert","author":"C","at":1794242630000,"#,
             r#""block":"p4","text":"New para."},{"ids":[7],"kind":"format","author":"C","#,
-            r#""block":"p5"}],"truncated":false}}"#
+            r#""block":"p5","place":"header_footer"}],"truncated":false,"total":2}}"#
         )
     );
     // A later field still decodes here, and a kind from a newer Clauseo reads as unknown.
     let later = concat!(
         r#"{"revisions":{"path":"a.docx","version":""#,
         "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-        r#"","revisions":[{"ids":[1],"kind":"comment","author":"","block":"p1","x":1}],"#,
-        r#""truncated":true,"more":1}}"#
+        r#"","revisions":[{"ids":[1],"kind":"comment","author":"","block":"p1","x":1,"#,
+        r#""place":"text_box"}],"#,
+        r#""truncated":true,"total":600,"more":1}}"#
     );
     let QueryResult::Revisions(list) = serde_json::from_str::<QueryResult>(later).unwrap() else {
         panic!("not revisions");
     };
     assert_eq!(list.revisions[0].kind, RevisionKind::Unknown);
+    assert_eq!(list.revisions[0].place, Some(RevisionPlace::Unknown));
     assert!(list.truncated);
+    assert_eq!(list.total, 600);
 }
 
 #[test]
@@ -162,4 +176,25 @@ fn decide_revisions_names_one_to_the_most_ids_none_twice() {
     assert!(decide(most).validate().is_ok());
     let over: Vec<u32> = (0..=u32::try_from(MAX_REVISIONS).unwrap()).collect();
     assert!(invalid(&decide(over).validate()));
+}
+
+#[test]
+fn decide_revisions_all_names_no_ids() {
+    let all = decide_all(Vec::new());
+    round_trips(&all);
+    assert!(all.validate().is_ok());
+    assert_eq!(
+        serde_json::to_string(&all).unwrap(),
+        concat!(
+            r#"{"decide_revisions":{"matter":"01900000-0000-7000-8000-000000000001","#,
+            r#""path":"Lease.docx","version":""#,
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+            r#"","ids":[],"decision":"accept","all":true}}"#
+        )
+    );
+    // All with ids named is refused: the host would not know which the lawyer meant.
+    assert!(invalid(&decide_all(vec![1]).validate()));
+    // Without "all", the field is left out and read back as false.
+    let some = serde_json::to_string(&decide(vec![1])).unwrap();
+    assert!(!some.contains("\"all\""));
 }

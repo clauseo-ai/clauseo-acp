@@ -89,6 +89,37 @@ const OWN = {
   "The changes in this document couldn't be marked up.": "इस दस्तावेज़ के बदलाव चिह्नित नहीं किए जा सके।",
   "This document is very long, so only part of it is shown.":
     "यह दस्तावेज़ बहुत लंबा है, इसलिए इसका केवल एक हिस्सा दिखाया गया है।",
+  // what to know about a marked-up document shown in part, or with hidden text (the host's notices); provisional
+  "Part of this document couldn't be marked up. The rest is below.":
+    "इस दस्तावेज़ का एक हिस्सा चिह्नित नहीं किया जा सका। बाकी नीचे है।",
+  "This document has text that Word hides. It's shown here like the rest.":
+    "इस दस्तावेज़ में ऐसा पाठ है जिसे Word छिपाता है। यहाँ वह बाकी पाठ की तरह दिखाया गया है।",
+  "Some numbers here may not match the ones Word shows.":
+    "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
+  "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
+  "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.":
+    "कुछ बदलाव मुख्य पाठ के बाहर हैं, जैसे हेडर या फ़ुटनोट में। वे यहाँ नहीं दिखाए गए हैं।",
+  // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
+  "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",
+  "Hidden in Word": "Word में छिपा हुआ",
+  // in a marked-up paragraph, for a change that holds no text of its own; provisional
+  "[picture]": "[चित्र]",
+  "[chart]": "[चार्ट]",
+  "[shape]": "[आकृति]",
+  "[footnote]": "[फ़ुटनोट]",
+  "[field]": "[फ़ील्ड]",
+  "[object]": "[वस्तु]",
+  // why the Word tool refused to mark a document up, each said over the sheet with no Try again; provisional
+  "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.":
+    "तालिका के अंदर एक तालिका होने के कारण Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+  "Clauseo couldn't compare these two versions. Open both in Word to compare them.":
+    "Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+  "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.":
+    "Clauseo इनमें से एक संस्करण नहीं पढ़ सका। हो सकता है वह खराब हो, या Word दस्तावेज़ न हो।",
+  "This document is too large to mark up. Open both versions in Word to compare them.":
+    "यह दस्तावेज़ चिह्नित करने के लिए बहुत बड़ा है। तुलना के लिए दोनों संस्करण Word में खोलें।",
+  "This version of Clauseo can't mark up these changes. Update Clauseo to see them.":
+    "Clauseo का यह संस्करण इन बदलावों को चिह्नित नहीं कर सकता। इन्हें देखने के लिए Clauseo अपडेट करें।",
   // over the sheet, and saving it as a new draft
   "{paper}, as it stood at {time} on {date}": "{paper}, जैसा {date} को {time} बजे था",
   "{paper}, as it stood at {time} today": "{paper}, जैसा आज {time} बजे था",
@@ -168,6 +199,14 @@ const OWN = {
   "Choose for each document.": "हर दस्तावेज़ के लिए चुनें।",
   "Undid the change at {time}. {papers} went back, and the undo is a version of its own.":
     "{time} बजे का बदलाव पूर्ववत किया गया। {papers} पहले जैसे हो गए, और यह पूर्ववत करना एक अलग संस्करण है।",
+  // after an undo, a file it kept because Clauseo had no earlier copy (Hindi provisional,
+  // 2026-11-11)
+  "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल {service} में था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति {service} के पुराने संस्करणों में है।",
+  "Clauseo can't undo the change to {file}. It was only online before, so there's no earlier copy here. Your cloud service's version history may have the earlier one.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल ऑनलाइन था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति शायद आपकी क्लाउड सेवा के पुराने संस्करणों में हो।",
+  "Clauseo can't undo the change to {file}. It didn't keep a copy of it before, so there's no earlier copy to bring back.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। इसकी कोई प्रति पहले नहीं रखी गई थी, इसलिए वापस लाने के लिए कोई पुरानी प्रति नहीं है।",
   // a version that couldn't be saved
   "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.":
     "Clauseo ने {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",
@@ -200,8 +239,8 @@ const EDGE = {
     "Clauseo इस मामले में सुरक्षित कार्यक्षेत्र के बाहर काम करने की अनुमति माँगता है, ताकि इस कंप्यूटर के एक प्रोग्राम से स्कैन किए गए अनुलग्नक पढ़ सके।",
   "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
-  "Outside the Safe workspace, Clauseo can read any file you can open, and asks before changing anything outside this matter's folder.":
-    "सुरक्षित कार्यक्षेत्र के बाहर Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Outside the Safe workspace, Clauseo can read any file you can open.":
+    "सुरक्षित कार्यक्षेत्र के बाहर Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   Allow: "अनुमति दें",
   "Don't allow": "अनुमति न दें",
   "Keep the Safe workspace": "सुरक्षित कार्यक्षेत्र बनाए रखें",
@@ -259,22 +298,22 @@ const EDGE = {
   "Safe workspace": "सुरक्षित कार्यक्षेत्र",
   "On. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "चालू। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
-  "Off since {time} today. Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
-    "आज {time} बजे से बंद। Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.":
-    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
-    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside the matter's folder.":
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Off since {time} today. Clauseo can read any file you can open on this computer.":
+    "आज {time} बजे से बंद। Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "Couldn't be set up on this computer. Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "Clauseo can read any file you can open on this computer.":
+    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   "Switch off the Safe workspace": "सुरक्षित कार्यक्षेत्र बंद करें",
   "Switch the Safe workspace on": "सुरक्षित कार्यक्षेत्र चालू करें",
   "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
   // not protected
   "This matter is not protected": "यह मामला संरक्षित नहीं है",
-  "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
-    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+  "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
+    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
   "Windows didn't allow the Safe workspace on this computer.":
     "Windows ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
   "macOS didn't allow the Safe workspace on this computer.":
@@ -286,8 +325,8 @@ const EDGE = {
   Understood: "ठीक है",
   // the computer's own dialogs, as edgeDialogWords builds them
   "Switch off the Safe workspace for {matter}?": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद करें?",
-  "If you switch it off, Clauseo can read any file you can open while it works on this matter, and asks before changing anything outside its folder.":
-    "बंद करने पर Clauseo इस मामले पर काम करते समय हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इसके फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "If you switch it off, Clauseo can read any file you can open while it works on this matter.":
+    "बंद करने पर Clauseo इस मामले पर काम करते समय हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   "If you keep it, Clauseo stays inside this matter's folder, and the scanned annexures stay unread.":
     "बनाए रखने पर Clauseo इस मामले के फ़ोल्डर के भीतर रहता है, और स्कैन किए गए अनुलग्नक बिना पढ़े रहते हैं।",
   "You can switch it back on from the line under the question box.":

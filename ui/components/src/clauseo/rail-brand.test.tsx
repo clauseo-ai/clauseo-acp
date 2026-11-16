@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 // Clauseo's lockup at the head of the rail's column: in the toolbar's lead, after the Mac's lights and dragging the
 // window as the lead does; at the top of the rail, above New matter; and in macOS's full screen, the lead keeps no room
-// for the lights macOS has hidden. Which of the two shows is rail-brand.css's, by width and platform.
+// for the lights macOS has hidden and starts at the rail's own left, New matter's. Which of the two shows is rail-brand.css's, by width and platform.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
@@ -103,4 +106,48 @@ test("on the rail the lockup tops the head, above New matter, with the platform 
 test("a rail without brand starts with New matter", async () => {
   await mount(<Rail open groups={[]} testIds={{ newMatter: "new-matter" }} />);
   expect(host?.querySelector(".room-brand")).toBeNull();
+});
+
+/** The lead's padding in macOS's full screen, from shell.css: the rail's own left, where New matter starts. */
+const fullScreenLead = () => {
+  const shell = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "shell.css"), "utf8");
+  const at = shell.indexOf(".room-top[data-full-screen] .room-lead {");
+  return at === -1 ? null : shell.slice(shell.indexOf("{", at) + 1, shell.indexOf("}", at));
+};
+
+test("in macOS's full screen the lead drops the lights' room and starts at New matter's left; a window keeps it", async () => {
+  // the rail's padding (New matter's left) and the full-screen lead's are the same token
+  expect(fullScreenLead()).toMatch(/padding-left: var\(--s3\);/);
+  screenTaller(0);
+  await mount(<RoomToolbar {...toolbar} nativeLights brand />);
+  const top = () => host?.querySelector(".room-top");
+  expect(top()?.hasAttribute("data-full-screen")).toBe(true);
+  screenTaller(100);
+  await act(async () => window.dispatchEvent(new Event("resize")));
+  expect(top()?.hasAttribute("data-full-screen")).toBe(false);
+  expect(host?.querySelector(".room-lights")?.hasAttribute("data-native")).toBe(true);
+});
+
+test("on Windows and Linux a window that fills its screen keeps its lead as it is", async () => {
+  screenTaller(0);
+  await mount(<RoomToolbar {...toolbar} platform="windows" nativeLights brand />);
+  expect(host?.querySelector(".room-top")?.hasAttribute("data-full-screen")).toBe(false);
+  await act(async () =>
+    root?.render(<RoomToolbar {...toolbar} platform="linux" nativeLights brand />),
+  );
+  expect(host?.querySelector(".room-top")?.hasAttribute("data-full-screen")).toBe(false);
+});
+
+test("the host's word on full screen, where given, stands in for the window's size", async () => {
+  screenTaller(100);
+  await mount(<RoomToolbar {...toolbar} nativeLights fullScreen brand />);
+  expect(host?.querySelector(".room-top")?.hasAttribute("data-full-screen")).toBe(true);
+  expect(host?.querySelector(".room-lights")).toBeNull();
+  screenTaller(0);
+  await act(async () => window.dispatchEvent(new Event("resize")));
+  await act(async () =>
+    root?.render(<RoomToolbar {...toolbar} nativeLights fullScreen={false} brand />),
+  );
+  expect(host?.querySelector(".room-top")?.hasAttribute("data-full-screen")).toBe(false);
+  expect(host?.querySelector(".room-lights")).not.toBeNull();
 });

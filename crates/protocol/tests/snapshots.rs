@@ -296,6 +296,10 @@ mod blackline;
 #[path = "snapshots/connectors.rs"]
 mod connectors;
 
+#[cfg(test)]
+#[path = "snapshots/mcp.rs"]
+mod mcp;
+
 mod view_patch {
     use super::*;
 
@@ -474,6 +478,7 @@ mod host_event {
         ConnectorsChanged => connectors_changed: HostEvent::ConnectorsChanged(
             super::connectors::connectors_state(),
         );
+        McpToolsChanged => mcp_tools_changed: HostEvent::McpToolsChanged(super::mcp::tools_view());
         CaseLawHint => case_law_hint: HostEvent::CaseLawHint {
             matter: matter_id(1),
             thread: thread_id(2),

@@ -51,7 +51,7 @@ pub(super) fn work_folder(actor: &Actor, matter: MatterId) -> PathBuf {
 /// Removes `<data>/revisions` with everything in it: the private copies of client documents a
 /// job left when the host stopped mid-way (a crash; a job that ends removes its own). Runs at
 /// start-up, before any job can make a folder there, so it races none. Each job leaves at most
-/// its three files, so it is quick; a failure is logged and start-up goes on.
+/// its four files, so it is quick; a failure is logged and start-up goes on.
 pub(super) fn sweep_leftovers(actor: &Actor) {
     let root = actor.effective.data_dir().join(WORK_FOLDER);
     if let Err(err) = crate::write::remove_tree(&root) {

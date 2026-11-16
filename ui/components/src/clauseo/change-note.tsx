@@ -50,8 +50,9 @@ export function ChangeNote({
   /** A paper edited after Clauseo's change, if one was: Undo asks first. */
   editedSince?: string | null;
   /** Asked on each press of Undo, before anything is undone, and Undo waits while it answers: the paper edited since,
-   * which the dialog asks about, or null to undo straight away. Given, it takes the place of editedSince. */
-  askUndo?: () => Promise<string | null>;
+   * which the dialog asks about, null to undo straight away, or false when the caller asks in a dialog of its own and
+   * undoes from there. Given, it takes the place of editedSince. */
+  askUndo?: () => Promise<string | null | false>;
   /** Given, the host says when the changes are undone; without it, Undo marks them undone itself. */
   state?: ChangeState;
   /** Undo shows only when given. */
@@ -101,6 +102,7 @@ export function ChangeNote({
     setPreviewing(true);
     void askUndo().then((paper) => {
       setPreviewing(false);
+      if (paper === false) return;
       if (paper === null) return undo();
       setAbout(paper);
       setAsked(true);

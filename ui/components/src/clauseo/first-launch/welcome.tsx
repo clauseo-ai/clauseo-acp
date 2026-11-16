@@ -1,7 +1,7 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
 // (U2's form, in place). Both plans stand at the foot where the composer will stand, Claude then ChatGPT, equal: a lead
-// line, then each plan's own working line (its size and "Sign in to {name}" until the lawyer presses it, since nothing
+// line, then each plan's own working line (its size and "Sign in with {name}" until the lawyer presses it, since nothing
 // downloads before then, then its progress, failures and "{name} is ready"), with the fine print under them;
 // and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
 // brief), and so does the Safe workspace's line: no screen names it before UC.
@@ -10,6 +10,7 @@ import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
 import { st } from "../../lib/words-settings.ts";
+import { mt } from "../../lib/words-matters.ts";
 import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
 import { Lockup } from "../lockup.tsx";
@@ -46,7 +47,9 @@ export function Welcome({
   onNewMatter,
   form,
   error,
+  errorAction,
   opening,
+  making = false,
   onWhatsSent,
   testIds = {},
   openRef,
@@ -65,8 +68,12 @@ export function Welcome({
   form?: ReactNode;
   /** A folder refused, said under the question in the language. */
   error?: ReactNode;
+  /** Optional: under the refusal's line, its one way on (Open {name}, for a folder nested with a matter on the list). */
+  errorAction?: ReactNode;
   /** The folder picker is on its way (its pick has run 300 ms): its line shows under the button. */
   opening?: boolean | undefined;
+  /** The folder picked is being made a matter: "Opening the folder…" under the button, which waits until it answers. */
+  making?: boolean | undefined;
   /** What's sent, where the app can show the privacy settings. */
   onWhatsSent?: (() => void) | undefined;
   testIds?: { counts?: string; open?: string; newMatter?: string };
@@ -74,6 +81,7 @@ export function Welcome({
   openRef?: Ref<HTMLButtonElement> | undefined;
 }) {
   const w = useFirstLaunchWords();
+  const { lang } = useDisplay();
   const heading = useId();
   return (
     <>
@@ -103,6 +111,8 @@ export function Welcome({
                   // the words wrap in a narrow column rather than run past it
                   className={cn(WRAP, "min-h-control-large max-w-full py-s2")}
                   onClick={onOpenFolder}
+                  disabled={making}
+                  aria-busy={making ? true : undefined}
                   data-testid={testIds.open}
                   ref={openRef}
                 >
@@ -114,7 +124,13 @@ export function Welcome({
                     {error}
                   </p>
                 )}
+                {errorAction}
                 {opening && <PickerLine />}
+                {making && (
+                  <p role="status" className="text-small text-muted" data-testid="folder-opening">
+                    <Say>{mt(lang, "Opening the folder…")}</Say>
+                  </p>
+                )}
                 <p className="text-small text-muted">
                   <Say>
                     {w(

@@ -22,7 +22,9 @@ Developer ID.
   and by `workflow_dispatch`. Its `check` job sets the mode:
   - `release`: tag `vX.Y.Z` on a commit on `main`. The jobs that sign use the environment `release`;
     `assemble` leaves a draft GitHub Release; `publish` (environment `release-publish`, Rohan as
-    required reviewer) refuses unless every DMG passes `xcrun stapler validate`, then publishes it.
+    required reviewer) refuses unless every DMG passes `xcrun stapler validate` (or the release is
+    an unsigned beta, below), then publishes it with `gh release edit --draft=false --latest`, so
+    it is the latest release explicitly. `latest` then checks it as installed apps read it (below).
   - `test`: tag `test-vX.Y.Z` on a commit of a `release-test/*` branch (a branch from `main` with only
     the version bumped, deleted after the run). Built with the `e2e` feature under the environment
     `release-test`, its updater files signed with the throwaway test key, published as a pre-release,
@@ -34,11 +36,13 @@ Developer ID.
     the run's artifact `dist-assets`. Since a dry run holds nothing secret, it may start from any
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
-  `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
+  `v*` build, a `v*` release's endpoint and version); `custody` (the release key against the pubkey,
+  below); `ui` (the ui built once for every leg, with hidden source maps moved out of
   its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
   last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
-  `SHA256SUMS.txt`, attests every asset, creates the Release); `publish`; `measure-builds` (the
+  `SHA256SUMS.txt`, attests every asset, creates the Release: a draft, or a test run's pre-release
+  with `--latest=false`); `publish`; `latest`; `measure-builds` (the
   `marks` build on macOS and the `e2e` build on Windows for the laptop pass, never on a Release).
 - **Workflow rules:** every action pinned by commit SHA; `permissions:` on every job (none at the
   top); each secret on the one step that uses it; `pnpm install --frozen-lockfile` and `cargo fetch
@@ -86,8 +90,9 @@ Developer ID.
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
   in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`);
-  `blocklist.conf.json` (`bundle.resources`, the block-list snapshot: see "The block-list snapshot"
-  below). `check` fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
+  `blocklist.conf.json` (`bundle.resources`, the block-list snapshot, passed only with the block-list
+  switch on: see "The block-list snapshot" below). `check` fails on any other key in them. Sidecars
+  are in none of them: see "Sidecars" below.
 - **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", after the installs
   and before the app is built (tauri-build checks that every `externalBin` file exists). It runs
   `.github/scripts/sidecars.mjs` for the leg's target ("Sidecars" below). A sidecar task adds a row to
@@ -227,6 +232,106 @@ Developer ID.
   `requireSignedVersion`.
 - The binary is called `Clauseo` only in release builds; dev and CI builds keep `clauseo-desktop`, so
   the other workflows' paths stay as they are.
+
+## The latest release, checked (2026-11-16)
+
+Every installed app reads `https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json`
+(R23), so which release GitHub calls latest is part of the update path, never left to its automatic
+choice. `publish` passes `--latest` when it publishes a `v*` draft; the draft and a test run's
+pre-release are created with `--latest=false`; a dry run publishes nothing.
+
+Before anything builds, `check` refuses a `v*` release unless `plugins.updater.endpoints` is exactly
+that URL (no allowance for an empty list: the pubkey check already refuses a release until R23's
+PR 6 sets both; test and dry runs don't refuse, as an e2e/test build ignores the endpoint), and
+unless its version is above every published app release's (`gh api --paginate .../releases` with
+the job's read token; only releases neither draft nor pre-release and tagged exactly `v<X.Y.Z>`
+count; none yet, the first app release, passes). An equal or lower version would publish a release no installed app takes and make it the one new
+downloads get.
+
+The job `latest` (after `publish`, release mode only, whenever `publish` made the release public:
+its output `public`, set right after `gh release edit --draft=false --latest`, so a later step of
+`publish` that fails, as recording the release, doesn't skip the check) then checks what the apps
+will read: the API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the app's
+own endpoint (`plugins.updater.endpoints[0]`, read from `tauri.conf.json`) (HTTPS only, redirects followed, retried up to six times 20 s apart for the API's and the
+CDN's lag), has the tag's version and every tier 1 platform (`latest-json.mjs`'s
+`tier1Platforms`); and each platform's `url` is an asset of the tag whose downloaded bytes
+minisign verifies against `plugins.updater.pubkey` (base64 of the minisign `.pub` text; the
+`signature` field is base64 of the `.sig` text), with a trusted comment naming that file and
+version. An empty key fails it. It is a job of its own, not a step in `publish`: the pinned
+minisign (the `blocklist` job's tarball and SHA-256, which `latest-json.test.mjs` keeps equal) is
+a Linux build and `publish` runs on macOS for the stapler, and this way the check needs no
+environment, no approval and only a read token, and can be re-run alone. A failure there means the
+release is already public: it is the signal to fix or pull it, not a gate before it.
+
+Only a published `v*` release may hold releases/latest: every other `gh release create` or
+`gh release edit` passes `--latest=false`, and only `publish` passes `--latest`.
+`latest-json.test.mjs` checks every workflow in `.github/workflows`, found by listing the folder so
+a new one is covered: those commands, a write to the releases API without `make_latest=false`, and
+an action that makes releases. On 2026-11-16 releases/latest was `python-runtime-3.13.18-c2`,
+made before `python-runtime.yml` (stage D) passed `--latest=false` (#1133).
+For the same reason `check`'s version bar is the highest published `v<X.Y.Z>` release in the full
+list, never whatever releases/latest names. Until the first `v*` release is published with
+`--latest`, releases/latest stays python-runtime's; no installed copy has the endpoint before R23's
+PR 6, so nothing breaks today.
+
+## Custody of the release key (2026-11-16)
+
+In release mode the job `custody` (environment `release`, read token, after `check`) installs the
+ui workspace (the Tauri CLI from the lock file), then, in its one step with
+`TAURI_SIGNING_PRIVATE_KEY` and its password, signs a scratch file with `tauri signer sign` and
+fails unless `latest-json.mjs --verify` holds the signature under `plugins.updater.pubkey` for that
+file name and version. A wrong key or password fails minutes into the run instead of after every
+leg has built; `assemble` still verifies each signed asset. `build` and `sign-windows` need it.
+In a test or dry run it takes no environment and only says there is nothing to check.
+`custody` also decides the unsigned beta, once, in every mode (below): its outputs `has_apple` and
+`unsigned_beta` are the only way `assemble` and `publish` learn it.
+
+Its approval is one more wave of the `release` environment, since no job in that environment ran
+before the build legs. With ro-hansolo as required reviewer on `release`, a release run needs four
+approvals: `release` three times (`custody`; then the two signing macOS build legs, which start
+together; then the two `sign-windows` legs, after the build matrix) and `release-publish` once.
+
+## The unsigned beta (2026-11-16)
+
+Rohan decided the launch is an unsigned beta: the Mac build signed ad hoc and not notarised,
+Windows unsigned (as above). `publish` lets an unnotarised DMG out only on purpose, never by a
+silent fall-through:
+
+- The switch is the repository variable `CLAUSEO_UNSIGNED_BETA`, exactly `'true'` (a tag push has
+  no inputs). The release is an unsigned beta when it is `'true'` and no Apple secret is set
+  (`APPLE_CERTIFICATE`, `APPLE_ID` or `APPLE_API_KEY`, Tauri's names, read only as a boolean on
+  the step's env).
+- `custody` decides it once, at the start of the run, as two boolean job outputs: `has_apple`
+  (any Apple secret it can see: in release mode the `release` environment's as well as the
+  repository's) and `unsigned_beta` (the variable `'true'` and no Apple secret). `assemble` (the
+  release notes) and `publish` read only those outputs, never the variable or a secret, so a
+  variable flipped mid-run can't publish an ad hoc release without its first-open notes. In a test
+  or dry run `custody` takes no environment, so it sees what `assemble` read before (the
+  repository's variable and secrets) and the notes are as before. `latest-json.test.mjs` fails
+  if the variable or an Apple secret is read anywhere else.
+- Unset, or with any Apple secret: `publish` refuses exactly as before unless every DMG passes
+  `xcrun stapler validate`. The variable never weakens a signed set-up.
+- An unsigned beta: `publish` mounts each DMG and requires its `Clauseo.app` to pass
+  `codesign --verify --deep --strict` and be signed ad hoc (`Signature=adhoc`): Apple silicon runs
+  no unsigned arm64 code, and a real identity's signature means a signed set-up, which must be
+  notarised, so it is refused. The job summary and a warning say the release is an
+  unsigned beta.
+- The updater archive's minisign signature is the same in both: `build` signs it with the mode's
+  updater key whatever the Apple signature, `assemble` and `latest` verify it.
+- Windows: nothing refuses an unsigned installer; the SignPath steps run only with
+  `vars.SIGNPATH_ENABLED` `'true'` on a `v*` tag.
+- The release notes carry the first-open steps (macOS: System Settings, Privacy & Security, Open
+  Anyway, since macOS 15 dropped the right-click Open bypass, and the "damaged" fix
+  `xattr -dr com.apple.quarantine /Applications/Clauseo.app`; Windows: More info, Run anyway, while
+  SignPath is off) only in an unsigned beta, in the words of `docs/install/macos.md` and
+  `windows.md`, which they link. Each line of the block is a copy review string, UC-751 to UC-755
+  (`registry-release-notes.tsx`, English only), approved like any other before a `v*` release
+  ships; `latest-json.test.mjs` fails unless the block, read as GitHub shows it, says exactly the
+  registered strings.
+- Apple secrets kept only in the `release` environment, where `build` would sign, are visible to
+  `custody` in release mode, so they end the beta. Apple secrets kept only in `release-publish`
+  are not: `publish`'s ad hoc check still refuses a DMG signed with a real identity. S20a deletes
+  the variable when the Developer ID arrives.
 
 ## Linux and sizes (S20 follow-up, 2026-11-03)
 
@@ -395,6 +500,23 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
+- **Off for launch (Rohan, 2026-11-11).** The plain build never reads the snapshot: nothing in it
+  enforces the list, so the host starts no block-list thread (0053's status). Bundling it cost
+  installer size and made every release depend on clauseo-ai/blocklist. One switch now governs
+  all of the above: the `check` job's output `bundle_blocklist`, set from one literal in
+  `release.yml`, `'false'` for launch. Off, the `blocklist` job still runs but does nothing: each
+  of its steps is behind the switch, and one step that runs only with it off writes "block-list
+  snapshot not bundled" to the log and the run's summary. It succeeds, so every job that needs it,
+  directly or through another job, runs on exactly the `needs:` and `if:` it had before; a skipped
+  job would have skipped them all (GitHub skips a job below a skipped one unless its `if:` holds
+  a status function), and rewriting the release gate's conditions was not worth that. No leg
+  downloads `blocklist-snapshot` (that step is behind the switch), and no `tauri build` or
+  `tauri bundle` passes `blocklist.conf.json`: each passes
+  `${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"}`, and the job's `BLOCKLIST_OVERLAY` is empty
+  unless the switch is on. The Safe workspace sets it to `'true'`, which restores exactly the
+  behaviour described above; `blocklist.conf.json`, the minisign checks and `crates/blocklist` stay
+  in the repo for that. `latest-json.test.mjs` fails on a break in any of this, and
+  `local-mac-dmg.sh` reads the same switch from `release.yml`.
 
 ## Safe workspace off for launch (Rohan, 2026-11-09)
 

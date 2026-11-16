@@ -252,14 +252,14 @@ fn two_creates_of_the_same_name_while_the_probe_waits_make_one_matter() {
     );
 
     let answers = [first.join().unwrap(), second.join().unwrap()];
-    let made = answers.iter().filter(|answer| answer.is_ok()).count();
-    assert_eq!(made, 1, "{answers:?}");
-    // The second answered finds the first's claim on the actor, before its worker starts.
-    let refused = answers.iter().find_map(|answer| answer.as_ref().err());
-    assert_eq!(
-        refused.map(HostError::code),
-        Some(ErrorCode::MatterFolderIsMatter)
-    );
+    // The second answered finds the first's claim on the actor, before its worker starts, and
+    // joins it: both get the one matter made.
+    assert!(answers[0].is_ok(), "{answers:?}");
+    assert_eq!(answers[0], answers[1], "{answers:?}");
+    assert!(matches!(
+        answers[0],
+        Ok(CommandOutcome::MatterCreated { .. })
+    ));
     assert_eq!(folder_matters(&host), 1);
     block_on(host.shutdown()).unwrap();
     join.join().unwrap();

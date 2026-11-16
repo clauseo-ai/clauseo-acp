@@ -5,8 +5,9 @@
 //! The event envelope and the domain events the log stores; the commands a client sends and
 //! their shape validation; the queries; the view entries and view patches a subscriber receives;
 //! ids and the other small validated values; error codes and `HostError`; account limit types;
-//! the inline cost rules for large payloads (`TextOrBlob`, `escaped_len`, `utf16_len`). Decision
-//! records 0002 (event schema) and 0003 (error codes) freeze the wire form.
+//! the inline cost rules for large payloads (`TextOrBlob`, `escaped_len`, `utf16_len`); the names
+//! a matter never versions or lists (`is_excluded_path`, shared by `clauseo-matters` and the
+//! reducer). Decision records 0002 (event schema) and 0003 (error codes) freeze the wire form.
 //!
 //! # Interface
 //!
@@ -151,10 +152,13 @@ mod envelope;
 mod error;
 mod error_code;
 mod event;
+mod excluded;
 mod ids;
+mod last_exit;
 mod limits;
 mod lists;
 mod matter;
+mod mcp;
 mod number;
 mod open_enum;
 mod patch;
@@ -205,12 +209,15 @@ wire_types! {
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
-    blackline::{BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline},
+    blackline::{
+        BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,
+    },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     browser_policy::{BrowserPolicyState},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
-        HostCommand, MatterSource, RefreshWhy, RestoreRequest,
+        HostCommand, MatterSource, McpCommand, McpSecretEdit, McpSecretValue, McpServerEdit,
+        RefreshWhy, RestoreRequest,
     },
     connectors::{
         Balance, ConnectorErrorKind, ConnectorStatus, ConnectorView, ConnectorsState,
@@ -237,6 +244,7 @@ wire_types! {
         ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
+    last_exit::{InterruptedAction, InterruptedKind, LastExit},
     limits::{
         AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
         BillingKind, BillingProvider, Freshness, LimitMeter, LimitSource, LimitStopReason,
@@ -247,6 +255,10 @@ wire_types! {
     matter::{
         CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
         MatterKind, RestoreScope, SyncService,
+    },
+    mcp::{
+        McpControl, McpImportResult, McpImportSource, McpImportable, McpSecretName,
+        McpServerKind, McpServerView, McpSkipReason, McpSkipped, McpToolsView,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     picks::{AgentPrefs, ConfigPicks},
@@ -304,6 +316,7 @@ wire_types! {
     view::{QueueHoldReason},
     revisions::{
         DecideRevisions, DocVersion, Revision, RevisionDecision, RevisionKind, RevisionList,
+        RevisionPlace,
     },
 }
 
@@ -318,6 +331,9 @@ pub use command::{
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
     MAX_MATTER_NAME_BYTES,
+    MAX_MCP_LIST,
+    MAX_MCP_NAME_BYTES,
+    MAX_MCP_TEXT_BYTES,
     MAX_PATH_LIST_BYTES,
     MAX_PROMPT_BLOCKS,
     MAX_PROMPT_FILES,
@@ -327,6 +343,7 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+pub use mcp::MCP_SKIPPED_MAX;
 // The text a `RedactedString` encodes and prints as.
 pub use connectors::REDACTED_TEXT;
 // How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.
@@ -338,7 +355,8 @@ pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.
 pub use envelope::EnvelopeRead;
 // The crate's error; it never crosses the boundary (`HostError` does).
-pub use error::Error;
+pub use error::{Error, Measure};
+pub use excluded::{is_excluded_name, is_excluded_path};
 pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
 // The most picks a `ConfigPicks` holds: a constant, so outside `wire_types!`.

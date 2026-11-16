@@ -70,8 +70,8 @@ export class AnswerHost implements MarkdownHost {
     this.#listed = listed;
   }
 
-  openExternal(url: string): void {
-    void quietly("open_external", this.#transport.openExternal(url));
+  openExternal(url: string, shown?: string): void {
+    void quietly("open_external", this.#transport.openExternal(url, shown));
   }
 
   openReference(kind: "citation" | "paper", id: string): void {

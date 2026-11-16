@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // The composer's `@` papers in the room over FakeTransport: the papers come from list_papers, asked for by the
 // composer only once `@` opens its menu; a picked paper is a token, and Enter sends its words with one File block per
-// paper its tokens still mention, each once, in order, however it goes: asked, queued while Clauseo works (Enter or the
-// hint's Queue), or steered (Send now). A deleted token sends no File block. The open menu passes axe.
+// paper its tokens still mention, each once, in order, however it goes: asked, steered while Claude works (Enter, where
+// the agent takes words mid-answer), queued (the hint's Queue), or sent now (the hint's Send now). A deleted token sends no File block. The open menu passes axe.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,13 +143,13 @@ async function pickTwo(): Promise<string> {
 }
 const BOTH = [{ file: { file: uuid(2, 8) } }, { file: { file: uuid(1, 8) } }];
 
-test("while Clauseo works, Enter queues the words with their File blocks (send_prompt with no delivery)", async () => {
+test("while Claude works, Enter steers the words with their File blocks (delivery steer)", async () => {
   await room(true);
   const words = await pickTwo();
   expect(h!.sent("send_prompt")).toEqual([]);
   expect(await h!.key({ key: "Enter", keyCode: 13 })).toBe(true);
   expect(h!.sent("send_prompt")).toEqual([
-    { thread: THREAD, content: [{ text: { text: words } }, ...BOTH] },
+    { thread: THREAD, content: [{ text: { text: words } }, ...BOTH], delivery: "steer" },
   ]);
   expect(field().value).toBe("");
 });
@@ -163,12 +163,12 @@ test("the hint's Queue queues the words with their File blocks", async () => {
   ]);
 });
 
-test("the hint's Send now steers the words with their File blocks", async () => {
+test("the hint's Send now sends the words now with their File blocks", async () => {
   await room(true);
   const words = await pickTwo();
   await h!.click(h!.one("steer-send-now"));
   expect(h!.sent("send_prompt")).toEqual([
-    { thread: THREAD, content: [{ text: { text: words } }, ...BOTH], delivery: "steer" },
+    { thread: THREAD, content: [{ text: { text: words } }, ...BOTH], delivery: "send_now" },
   ]);
 });
 

@@ -21,7 +21,7 @@ use futures::StreamExt as _;
 use serde_json::json;
 
 use crate::egress::claude_then;
-use crate::profile_rig::{CLAUDE, Hook, Wired, browser_server, turn};
+use crate::profile_rig::{BROWSING, Hook, Wired, browser_server, turn};
 use crate::settings::decode;
 use crate::support::{Dir, Running, wait};
 
@@ -256,7 +256,7 @@ pub(crate) fn start_host(
 /// A new matter `name` with a Claude session, after one turn, so its proxy is open.
 pub(crate) fn open_session(dir: &Dir, host: &Running, name: &str) -> MatterId {
     let matter = host.create_matter(name, &dir.folder(name, &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(host, thread);
     matter
 }

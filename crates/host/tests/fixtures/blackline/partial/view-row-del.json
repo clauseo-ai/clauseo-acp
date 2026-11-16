@@ -1,0 +1,35 @@
+{
+  "base": "88e422c1428b288a:0:88e422c1428b288a",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Reviewer",
+        "count": 1
+      }
+    ],
+    "count": 1,
+    "first": [
+      {
+        "author": "Reviewer",
+        "block": "r2",
+        "change": 0,
+        "deleted": null,
+        "inserted": null,
+        "kind": "row deleted"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "t1",
+    "remaining_tokens": 0,
+    "scope": "p1..t1",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=88e422c1428b288a:0:88e422c1428b288a mode=redline common-style=\"Normal\" range=p1..t1}\n{authors: R \"Reviewer\"}\n{summary: 1 tracked change (R 1) · 1 section · 2 read-only paragraphs}\np1 Intro.\nt1 {table cols=2}\nr1 {row}\np2 Kept A.\np3 Kept B.\nr2 {row deleted #12 R}\np4 Gone A.\np5 Gone B.\n{/table}\n{position: p1..t1 of p1..t1 (2 of 2 blocks)}\n",
+  "tokens": 92,
+  "warnings": []
+}

@@ -68,10 +68,10 @@
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
 //!   no strict config go: the firm controls MCP there. Every session's `_meta` also turns
 //!   bypass off (`allowDangerouslySkipPermissions: false`), and a Claude session that starts in
-//!   another mode than Clauseo's (`acceptEdits`, or `default` in forced ask; the user's
+//!   another mode than Clauseo's (`auto`, or `default` in forced ask; the user's
 //!   `permissions.defaultMode` or a resumed transcript's mode may differ) gets
-//!   `session/set_mode` to it before its first prompt; a failed switch fails the
-//!   launch.
+//!   `session/set_mode` to it before its first prompt; when auto is not available it runs in
+//!   `acceptEdits` with one notice, and any other failed switch fails the launch.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
 //!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
 //!   `config.toml` of the same switches for app-server's start-up, a
@@ -244,6 +244,7 @@ pub mod browser;
 mod build;
 mod clock;
 mod coalesce;
+pub mod codex_input;
 mod config;
 pub mod connectors;
 mod encode;
@@ -262,8 +263,13 @@ mod rate;
 mod revisions;
 mod search;
 mod sent;
+mod shell_writes;
+pub mod shown;
 mod snapshot;
 mod sources;
+mod stetdoc_args;
+#[cfg(test)]
+mod testing;
 mod undo_note;
 mod update;
 mod view;
@@ -283,12 +289,16 @@ pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
-#[cfg(feature = "test-support")]
-pub use config::TestProxy;
+pub use config::mcp::{
+    McpFileStamp, McpFinder, McpFound, McpHereFinder, McpImportFinder, McpLaunchAsk,
+    McpLaunchConfirm, McpResolver, find_mcp_imports_in, shown as mcp_shown,
+};
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
     NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
 };
+#[cfg(feature = "test-support")]
+pub use config::{TestProxy, WithMatterTrash, WithPlaceholderProbe};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{
@@ -305,3 +315,22 @@ pub use update::{
     CachedDownload, Downloaded, InstallKind, MarkerState, NoUpdater, Offer, Opaque, Progress,
     ProgressSink, UpdateMarker, Updater, UpdaterError, read_update_marker,
 };
+
+/// Where Claude Code, with `home` as its config folder, writes the transcript of `session`
+/// started in the matter folder `stored`: the file whose lines confirm a steer
+/// (`actor/turn/queue/transcript.rs`). For tests that play Claude's part.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn claude_transcript(
+    home: &std::path::Path,
+    stored: &std::path::Path,
+    session: &str,
+) -> std::path::PathBuf {
+    let cwd = session_folder(stored);
+    // A folder whose path is not UTF-8 has no project key; its transcript is never read.
+    let project = agent::data_fence::claude_projects(home, &[&cwd])
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| home.join("projects"));
+    project.join(format!("{session}.jsonl"))
+}

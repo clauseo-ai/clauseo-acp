@@ -1,10 +1,10 @@
 // Plans (UD2, settings.html#plans): one block per plan, Claude's then ChatGPT's, each its sign-in as UD1's parts say
 // it, with what can be done from this window: sign out, stop using a reused login, look for one, add a plan, sign in
-// inline (the main window is not brought forward), and the other ways in (an API key, the firm's address); under the
+// inline (the main window is not brought forward), and a quiet way to an API key (the firm's address is its policy's); under the
 // cards, Clauseo's document tools getting ready, on one quiet line. The state
 // is the setup store's (store/setup.ts), over the window's own setup feed; every press is one setup command, which
 // desktop's allow-list lets the settings window send (crates/desktop/src/setup/admit.rs). Nothing here keeps an API
-// key, a pasted code or an address beyond its field, and nothing runs a timer.
+// key or a pasted code beyond its field, and nothing runs a timer.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import {
@@ -18,6 +18,7 @@ import {
   type SetupState,
 } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
@@ -87,7 +88,8 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
 }
 
 function PlansTools({ state, retry }: { state: SetupState; retry: (agent: AgentId) => void }) {
-  const view = toolsView(state);
+  const online = useOnline();
+  const view = toolsView(state, online);
   if (view === null) return null;
   const through = readyPlan(state);
   return (

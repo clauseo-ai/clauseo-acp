@@ -42,6 +42,9 @@
 ;   uninstall.exe. The guard loses only if that install's main exe and WriteUninstaller both land
 ;   in the instant between cmd's "if" and its "del"; then the new uninstall.exe goes, which a
 ;   reinstall puts back. When the guard holds, the old file stays, which is harmless.
+; - Before the line, the main exe once more (CLAUSEO_UNINSTALL_RETRY_MAIN_EXE): when the
+;   template's Delete of it failed because something held it for a moment, up to 10 more tries
+;   1 s apart, never under /UPDATE and never queued for a restart.
 ; - It starts once. Interactive and /P (both have a window) start it from un.onGUIEnd (block
 ;   "un-gui-end"), after the user closes the window; the section's end would be too early, since
 ;   the window stays on "Completed" until Close. /S has no window, so no un.onGUIEnd: the section
@@ -134,10 +137,38 @@ Var ClauseoSelfDelete
   !endif
 !macroend
 
-; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed.
-; Keeps $0 and $1.
+; The main exe once more when the template's one Delete of it failed: something held it for a
+; moment (an on-access scan of an image just written, for one). The ARM64 install smoke saw it
+; once in about 20 runs: uninstall.exe /S exited 0 with Clauseo.exe, so uninstall.exe (the
+; guard) and the folder, left, and a delete a minute later worked. So, per machine and not under
+; /UPDATE, up to CLAUSEO_MAIN_EXE_RETRIES more deletes 1 s apart while it is there; nothing when
+; it's gone, as it is after a normal uninstall. Nothing is queued for a restart (no /REBOOTOK):
+; a reinstall before the restart writes the same paths, and the restart would delete the new
+; files. Still held after the last try: as before, the folder stays and the reinstall page says
+; unableToUninstall. Never during an update: the updater starts the installer with /UPDATE, the
+; installer passes /UPDATE to the old uninstaller whenever it has it (the template's
+; PageLeaveReinstall), and un.onInit sets $UpdateMode from it; the uninstaller an update runs is
+; the old build's own, behind the same test. Keeps $0.
+!define CLAUSEO_MAIN_EXE_RETRIES 10
+!macro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE
+  ${If} $UpdateMode <> 1
+    Push $0
+    ${For} $0 1 ${CLAUSEO_MAIN_EXE_RETRIES}
+      ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+        ${ExitFor}
+      ${EndIf}
+      Sleep 1000
+      Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${Next}
+    Pop $0
+  ${EndIf}
+!macroend
+
+; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed:
+; first the main exe's retry, then the line. Keeps $0 and $1.
 !macro CLAUSEO_UNINSTALL_SELF_DELETE
   !if "${INSTALLMODE}" == "perMachine"
+    !insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE
     Push $0
     Push $1
     StrCpy $ClauseoSelfDelete ""

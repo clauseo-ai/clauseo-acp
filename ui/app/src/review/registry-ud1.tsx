@@ -8,8 +8,14 @@ import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-lau
 import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { render, type Scene } from "./registry-ud1-scene.tsx";
+import { SIGNING_IN } from "./registry-ud1-signin.tsx";
 import * as T from "./registry-ud1-tools.ts";
-import { errorWords, type WordsRef } from "./words.ts";
+import { errorWords, threadWords, type WordsRef } from "./words.ts";
+import { keyRoom } from "./registry-ud2.tsx";
+import { step } from "../testing/stream-script.ts";
+
+/** A turn that failed with agent.auth_required: the key wasn't accepted (UC-147 and UC-148's rooms). */
+const FAILED = step(4, { stop: "failed", failure: "agent.auth_required" });
 
 const CLAUDE: AgentId = "claude-acp";
 const CODEX: AgentId = "codex-acp";
@@ -150,14 +156,15 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
-  ["Copy details for IT", { first: true, events: [blocked] }, "dl-blocked"],
+  // UD1-15, retired: the blocked download's button reads Copy addresses (UC-144); "Copy details for IT" stays IT's
+  null,
   [
     "Message copied",
     { first: true, events: [blocked], clicks: ['[data-testid="install-ask-it"]'] },
     "dl-blocked",
   ],
   [
-    "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
+    "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.",
     { first: true, events: [blocked] },
     "dl-blocked",
   ],
@@ -202,7 +209,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Sign in", { events: [READY, failed("signin.cancelled")] }, "signin-cancelled"],
   // signed out, the box offers both plans' own Sign in; "Use … instead" stays where a sign-in stopped
   ["Use {name} instead", { events: [READY, failed("signin.cancelled")] }, "plan-chatgpt"],
-  ["Use an API key or my firm's account", GATE, "plan-key"],
+  // UD1-27, retired: the quiet way to the key is "Use an API key instead" (UC-141); the firm's address is its policy's
+  null,
   [
     "Your browser opens when {name} is ready.",
     { events: [DOWNLOADING, signIn(CLAUDE, "queued")] },
@@ -218,13 +226,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     },
     "plan-queued",
   ],
-  ["API key", KEY, "plan-key"],
+  // UD1-30, retired: the key's field names its maker (UC-139, UC-140)
+  null,
   ["Use this key", KEY, "plan-key"],
-  [
-    "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
-    KEY,
-    "plan-key",
-  ],
+  // UD1-32, retired: the key's help names its maker (UC-145; UC-146, ChatGPT's, is shown in Plans)
+  null,
   ["Kept in this Mac's Keychain.", KEY, "plan-key"],
   ["Kept in Windows Credential Manager.", { ...KEY, platform: "windows" }, "plan-key"],
   ["Kept in this computer's keyring.", { ...KEY, platform: "linux" }, "plan-key"],
@@ -234,77 +240,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     "plan-key",
   ],
   ["Sign in with an Anthropic Console account", KEY, "plan-key"],
-  // signing in, in the browser
-  [
-    "Finish signing in with your browser.",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
-    "signin-wait",
-  ],
-  [
-    "Didn't open?",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Got a code instead?",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Paste it",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Code from your browser",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Clauseo passes the code to {name} and keeps no copy.",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Send",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Signed in as {email} · {plan}",
-    signed({ email: "test@example.com", plan: "Claude Max" }),
-    "signin-done",
-  ],
-  ["Signed in as {email}", signed({ email: "test@example.com" }), "signin-done"],
-  ["Signed in to {name}", signed({}), "signin-done"],
-  ["Using an API key, billed to its own account", signed({ method: "api_key" }), "signin-done"],
-  ["Using your firm's account", signed({ method: "firm" }), "signin-done"],
-  [
-    "The sign-in link expired at {time}.",
-    { events: [READY, failed("signin.link_expired")] },
-    "signin-unfinished",
-  ],
-  ["See {name}'s plans", { events: [READY, failed("signin.no_plan")] }, "signin-noplan"],
-  ["Use another account", { events: [READY, failed("signin.no_plan")] }, "signin-noplan"],
-  [
-    "Clauseo works with a Claude Pro or Max plan.",
-    { events: [READY, failed("signin.no_plan")] },
-    "signin-noplan",
-  ],
-  [
-    "Clauseo works with a paid ChatGPT plan.",
-    chatgpt({ failed: { code: "signin.no_plan", at: AT } }),
-    "signin-noplan",
-  ],
+  // UD1-38 to UD1-54: the browser sign-in and how it ends, in registry-ud1-signin.tsx, in its place here
+  ...SIGNING_IN,
   // a login already on this computer
   [
     "Clauseo found your {name} account ({email}) from {app} and will use it here.",
@@ -386,7 +323,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // ChatGPT's device code
   ["Use a code instead", chatgpt({ waiting: { since: AT, nudge: true } }), "signin-nudge"],
   [
-    "Sign in to ChatGPT on that page and enter this code.",
+    "Sign in with ChatGPT on that page and enter this code.",
     chatgpt({
       device_code: {
         url: "https://auth.openai.com/codex/device",
@@ -486,8 +423,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     T.BOTH,
     "welcome-both",
   ],
-  ["Sign in to {name}", T.BOTH, "welcome-both"],
-  ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
+  ["Sign in with {name}", T.BOTH, "welcome-both"],
+  ["Sign in with Claude or ChatGPT to ask about this matter", GATE, "plan"],
   // UD1-96: a plan's row on the first screen, after its name and " · "
   ["needs a download of about {mb} MB", T.BOTH, "welcome-both"],
   // UD1-97: Claude's browser sign-in note, under its first-screen row (also in the matter's gate and Plans' card)
@@ -516,6 +453,16 @@ const REFUSAL: Entry = {
   render: render(KEY_IN_USE),
 };
 
+/** "Use it" pressed, and Claude Code's sign-in didn't work here (it may have expired): stage D's UC block. */
+const REUSE_UNUSABLE: Entry = {
+  id: "UC-647",
+  words: firstLaunchWords(
+    "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.",
+  ),
+  screen: "first-launch/plan-found",
+  render: render(found("reuse_unusable")),
+};
+
 /** The document tools offline: the plans' own offline sentence, in the null SCENES keeps for it. */
 const TOOLS_OFFLINE: Entry = {
   id: "UD1-102",
@@ -523,6 +470,104 @@ const TOOLS_OFFLINE: Entry = {
   screen: "first-launch/tools-waiting",
   render: render(T.TOOLS_WAITING),
 };
+
+/** The key's words named by its maker, and the quiet way to it (UC-139, UC-141 and UC-145; UC-140 and UC-146,
+ * ChatGPT's, are shown in Plans, registry-ud2-plans.tsx), and a blocked download's Copy addresses (UC-144). */
+const UC_KEY: Entry[] = (
+  [
+    { id: "UC-139", key: "Anthropic API key", scene: KEY, screen: "plan-key" },
+    { id: "UC-141", key: "Use an API key instead", scene: GATE, screen: "plan-key" },
+    {
+      id: "UC-144",
+      key: "Copy addresses",
+      scene: { first: true, events: [blocked] },
+      screen: "dl-blocked",
+    },
+    {
+      id: "UC-145",
+      key: "A key from the Anthropic Console. Billed to that account.",
+      scene: KEY,
+      screen: "plan-key",
+    },
+  ] satisfies { id: string; key: FirstLaunchKey; scene: Scene; screen: string }[]
+).map(({ id, key, scene, screen }) => ({
+  id,
+  words: firstLaunchWords(key),
+  screen: `first-launch/${screen}`,
+  render: render(scene),
+}));
+
+/** UC-534 and UC-535: the install waiting (agent.install_offline) while the window says it is online, so the download
+ * can't be reached: the plan's line (the document tools' line says it too), and its queued sign-in (offline truth). */
+const UC_UNREACHABLE: Entry[] = [
+  {
+    id: "UC-534",
+    words: firstLaunchWords(
+      "Clauseo can't reach the download right now. It tries again by itself.",
+    ),
+    screen: "first-launch/dl-offline",
+    render: render({ first: true, events: [offline], online: true }),
+  },
+  {
+    id: "UC-535",
+    words: firstLaunchWords("Your browser opens when setting up can continue."),
+    screen: "first-launch/plan-queued",
+    render: render({ events: [offline, signIn(CLAUDE, "queued")], online: true }),
+  },
+];
+
+/** UC-153: ChatGPT ready while Claude's sign-in is under way, on the first screen: sign-ins go one at a time, so its
+ * row says its browser opens after Claude's (the parallel installs; UC's id, this file's scene). */
+const AFTER_SIGN_IN: Entry = {
+  id: "UC-153",
+  words: firstLaunchWords("Your browser opens for {name} after {other}'s sign-in."),
+  screen: "first-launch/plan-after",
+  render: render({
+    first: true,
+    events: [
+      READY,
+      signIn(CLAUDE, { waiting: { since: AT, nudge: false } }),
+      install(CODEX, { ready: { version: "0.1.0" } }),
+      signIn(CODEX, "queued"),
+    ],
+  }),
+};
+
+/** UC-230: ChatGPT's waiting sign-in cancelled while it downloads, beside Claude's download: desktop drops only the
+ * sign-in, so its row says the download carries on (the parallel installs; UC's id, this file's scene). */
+const STILL_DOWNLOADING: Entry = {
+  id: "UC-230",
+  words: firstLaunchWords(
+    "Sign-in cancelled. {name} is still downloading; sign in when it's ready.",
+  ),
+  screen: "first-launch/plan-cancel-downloading",
+  render: render({
+    first: true,
+    events: [
+      install(CLAUDE, { downloading: { received: 13_000_000, total: 165_000_000 } }),
+      signIn(CLAUDE, "queued"),
+      install(CODEX, { downloading: { received: 90_000_000, total: 139_000_000 } }),
+      signIn(CODEX, "queued"),
+    ],
+    clicks: ['[data-testid="plan-row"][data-agent="codex-acp"] [data-testid="signin-foot-cancel"]'],
+  }),
+};
+
+/** The composer's line while the plan runs on the lawyer's API key, named by its maker (UC-147, UC-148). */
+const UC_KEY_LINE: Entry[] = [
+  {
+    id: "UC-147",
+    words: threadWords("Uses your Anthropic API key"),
+    screen: "room/composer",
+    render: keyRoom("claude-acp", [FAILED]),
+  },
+  {
+    id: "UC-148",
+    words: threadWords("Uses your OpenAI API key"),
+    screen: "room/composer",
+    render: keyRoom("codex-acp", [FAILED]),
+  },
+];
 
 export const UD1: readonly Entry[] = [
   ...SCENES.flatMap((scene, i) =>
@@ -539,4 +584,10 @@ export const UD1: readonly Entry[] = [
   ),
   REFUSAL,
   TOOLS_OFFLINE,
+  REUSE_UNUSABLE,
+  ...UC_KEY,
+  ...UC_UNREACHABLE,
+  AFTER_SIGN_IN,
+  STILL_DOWNLOADING,
+  ...UC_KEY_LINE,
 ];

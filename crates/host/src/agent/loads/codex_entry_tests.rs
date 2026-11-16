@@ -18,6 +18,8 @@ fn codex_server(windows: bool) -> McpServer {
         "/app/agent-browser",
         "--cwd",
         "{browser_dir}",
+        "--downloads",
+        "{matter_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];
@@ -33,7 +35,6 @@ fn codex_server(windows: bool) -> McpServer {
     if !windows {
         env.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}"));
     }
-    env.push(("AGENT_BROWSER_STREAM_PORT", "{stream_port}"));
     McpServer::Stdio {
         name: "browser".to_owned(),
         command: PathBuf::from("/app/clauseo-mcp"),
@@ -69,13 +70,17 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
         assert!(!asks_for_proxy(&server));
         let (servers, state) = hook_servers(vec![server], &no_proxy);
         assert_eq!(reason(state.clone()), None, "windows {windows}: {state:?}");
-        let McpServer::Stdio { args, env, .. } = &servers[0];
+        let McpServer::Stdio { args, env, .. } = &servers[0] else {
+            panic!("expected a stdio server");
+        };
         let mut want_args = vec![
             "browser-guard",
             "--agent-browser",
             "/app/agent-browser",
             "--cwd",
             "/data/run/t-1/browser",
+            "--downloads",
+            "/matters/smith/downloads",
             "--cdp-port",
             "61101",
         ];
@@ -95,7 +100,6 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
                 "/tmp/clauseo-ab-0123456789abcdef",
             ));
         }
-        want_env.push(("AGENT_BROWSER_STREAM_PORT", "61100"));
         let got: Vec<(&str, &str)> = env
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -115,8 +119,8 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
 
 /// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the
 /// session sends none and its header holds no browser state at all, which the app shows as
-/// nothing to act on (no install advice, no switch); Claude on Windows and Codex elsewhere are
-/// untouched. Runs on every OS: the OS is a parameter.
+/// nothing to act on (no install advice, no switch). Claude has no browser on any OS; Codex
+/// elsewhere is untouched. Runs on every OS: the OS is a parameter.
 #[test]
 fn codex_on_windows_gets_no_entry_and_no_browser_state() {
     use clauseo_protocol::AgentKind;
@@ -124,7 +128,8 @@ fn codex_on_windows_gets_no_entry_and_no_browser_state() {
     let chrome = PathBuf::from("/chrome");
     let ready = inputs(&dir, Some(&chrome));
     for windows in [false, true] {
-        assert!(!no_browser(Some(AgentKind::Claude), windows));
+        assert!(no_browser(Some(AgentKind::Claude), windows));
+        assert!(!no_browser(None, windows));
         let none_here = no_browser(Some(AgentKind::Codex), windows);
         assert_eq!(none_here, windows);
         let servers = offered(vec![codex_server(false)], none_here);

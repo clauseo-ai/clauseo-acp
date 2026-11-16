@@ -1,0 +1,121 @@
+# 0058: The assistant says it is Clauseo, answers in the chat, names the files it saves, and makes new documents clean
+
+## Context
+
+Asked "who are you?", a real build answered "I'm ChatGPT, your AI assistant here", while the app
+labels every reply "Clauseo". Nothing in the instructions named the assistant, so each agent fell
+back on its own product name. The orchestrator asked for the change on 2026-11-11: the assistant
+presents itself as Clauseo and, when asked, says which of the lawyer's plans it works through.
+
+In the same session ChatGPT ended a draft with "Download the draft reply…" as a link that led
+nowhere. A file the agent saves is in the matter, and the lawyer opens it from the papers list,
+so a download, `file://` or `sandbox:` link or a full path only gets in the way. The
+orchestrator asked for that rule in the same change.
+
+Asked to draft a new Word document, ChatGPT copied a seed .docx and wrote everything through
+stetdoc, so "Reply to legal notice.docx" opened as a mass of tracked changes. stetdoc 0.9.3 has no
+command that creates a document (`pack --no-track` and `edit --no-track` both need an existing
+.docx). Clauseo's Python runtime ships pandoc 3.13 on the agents' `PATH`, and stage F
+checked on Linux, with the pinned pandoc and stetdoc, that `pandoc -f markdown -o` gives real Heading and numbering styles and no `w:ins` or
+`w:del`. Windows PowerShell 5.1 pipes text to a native program as ASCII, which turns ₹, Hindi and
+curly quotes into "?", so pandoc reads a file, never a pipe.
+
+Stage C's ChatGPT baseline, asked for a 1,200-word memo in plain prose, wrote the whole memo to
+`Acme options memorandum.md` in the matter and gave the chat only a link to it and two sentences.
+
+The first two rules need about 86 words, and 0031's budgets had 7 words left in `legal.md` (1,193 of 1,200)
+and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500).
+
+## Decision
+
+- `legal.md`'s "Identity and audience" section gets a second paragraph after the senior-lawyer
+  one, which is unchanged: "You are Clauseo, working through the lawyer's {plan} account. Only
+  when asked who you are or what AI you run on, say so plainly: "I'm Clauseo. I'm using your
+  {plan} account to work on this matter." Never claim to be another product or hide which account
+  you use."
+- `{plan}` is the profile's token, not the host's (`instructions::PLAN`). The profile fills it
+  when it builds each agent's text (`ClauseoProfile::instructions_for`), with the plan's name as
+  the window shows it (`instructions::plan_name`): `Claude` for Claude, `ChatGPT` for Codex.
+  `ClauseoProfile::instructions` keeps the token, and no agent gets that text.
+- It says "account", not "plan": a lawyer can sign in with an API key or the firm's endpoint
+  instead of a plan, and the app tells an API-key user "Clauseo is using your API key".
+- "Conduct"'s bullet on what never goes in text for the lawyer gains one sentence, for both
+  agents alike: "Name a file you saved or changed plainly ("I saved it as Reply to legal
+  notice.docx in the matter."), with no download link, `file://` or `sandbox:` link or full
+  path: the lawyer opens it from the papers list."
+- The stetdoc line (`instructions::STETDOC_CLI`, `stetdoc.txt`), which the tools part gets when
+  the app found a working stetdoc, points the agent at stetdoc's own skill first ("learn it from
+  `stetdoc skills get core` and `stetdoc <command> --help`": stetdoc 0.9.3's skill text has no
+  frontmatter, so the profile leaves it out, and stage C saw the agent run `stetdoc skills` blind
+  and fail), and gains: "Tracked changes are only for
+  changing a paper that already exists. Make a new document clean: write it as a Markdown file in
+  `{work_folder}`, then run `pandoc "{work_folder}/<file>.md" -o "<Name>.docx"` into the matter.
+  Never pipe into pandoc. Headings and numbered paragraphs in the Markdown become Word styles.
+  Then delete the Markdown file." The command names the folder because the agent's shell starts
+  in the matter (stage E's review).
+  The Word guidance stays in one place, so the rule goes only where stetdoc was found; pandoc
+  itself comes with the Python runtime, which the profile does not see. The saved-file rule then
+  names the new file.
+- "Conduct"'s bullet on the reply gains the deliverable rule, in the legal part so it holds with
+  or without stetdoc: "A memo, letter, reply or other draft is a clean `.docx` in the matter,
+  unless the lawyer names another format: name it in the chat with a short summary. Answers,
+  explanations and analysis go in the chat, however long. Never leave Markdown or scratch files
+  in the matter." Lawyers send memos, letters and drafts on, so a deliverable belongs in Word
+  (the orchestrator's ruling after the laptop test of 2026-11-11, where "write a memo" was read
+  both ways); a first wording, "make a file only when the lawyer asks for one", left that open.
+- 0031's budgets are amended once, to fit these rules, stage E's browser lines that follow
+  (2-4 lines) and about 40 words of headroom, so they need not move with every new line:
+  `legal.md` at most 1,360 words, and the whole instructions at most 1,800, which also caps
+  Codex's text with the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
+  whole now counts the stetdoc line as the app launches with it; before, the budget tests
+  measured a profile without it, so its 17 words were never counted. At this change, rebased
+  on #940 and #999 (estimates): `legal.md` about 1,327 words, the stetdoc line 70, the whole about
+  1,600 with a data folder at `/data`, Claude's on macOS (with its shell line) about 1,655, and
+  Codex's about 1,700 with the long macOS folder. The tools part with the stetdoc line is 276
+  words, under R21's 300.
+
+## Consequences
+
+- Each agent's instructions grow by about 240 tokens.
+- A later per-agent difference in the instructions follows the same path: a profile token filled
+  in `instructions_for`, never a second copy of `legal.md`.
+- `legal.md` has about 17 words of headroom left; the next rule that needs more makes room or
+  amends the budget again.
+
+## Amendment: each agent's whole standing text (#1123, 2026-11-16)
+
+The budgets above measured only the text both agents share. Claude's "Working at scale" part
+(subagents PR #1123, 433 words), its macOS shell line, Codex's offline and refusal lines, its
+macOS line and its skills index were counted against nothing, so Claude's real text was about
+2,200 words under an 1,800-word cap. The review of #1123 asked for caps on everything each agent
+is given as standing text, each at that day's count rounded up to the next 50, and no cap that
+was already there goes down. Counted as the app
+launches (a working stetdoc, the data folder `/Users/Ann Mary/Library/Application Support/Clauseo`,
+the host's folders filled, the case-law paragraph, and the longest browser part the agent can
+get), in `crates/profile/tests/legal/budgets.rs`:
+
+| text | words | cap |
+|---|---|---|
+| `legal.md` | 1,327 | 1,360 (kept; the count rounds up to 1,350) |
+| The text both agents share: tools part with the stetdoc line, `legal.md` | 1,719 | 1,800 (kept; the count rounds up to 1,750) |
+| Claude's `systemPrompt.append` on macOS: tools part with the stetdoc line, `legal.md`, shell line, "Working at scale" | 2,216 | 2,250 (new) |
+| Codex's `developer_instructions` on macOS: tools part with the stetdoc line, `legal.md`, offline line, refusal line, macOS line, built-in skills index | 1,996 | 2,000 (the 1,800 cap counted only the shared text and the index) |
+| The paper reader's prompt (all a helper gets) | 188 | 200 (new) |
+| The researcher's prompt (RH2 629, RH3 649) | 649 | 650 (new) |
+
+The skills index keeps its own 150 words (0031), and a launch's pack lines their 600 (0040).
+"Working at scale" stays arm C2f's text, less the words that sent digests through files (452 to
+433), plus what to do when pypdf or python-docx is missing (444; the shell line lost its claim
+that `python3` has them, 55 to 49): the measurements found no shorter text that did as well
+(arm E, 268 words, was 13% slower and never delegated), and C2f's no-polling line is what prevents the 902-second stall. A rule
+that needs more words makes room or amends these caps; stage E's research rules (about 33 net
+words in `legal.md`) fit `legal.md` (1,360), the shared text (about 1,752) and Claude's (about
+2,249), and leave Codex's text about 29 over, which that change fits.
+
+## Status
+
+accepted
+
+## Date
+
+2026-11-11

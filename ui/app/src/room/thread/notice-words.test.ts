@@ -23,6 +23,75 @@ test("a known kind gives the app's line, in the page's words", () => {
   expect(noticeLine("context_not_restored", en)).toBe(CONTEXT);
 });
 
+test("Claude's auto mode unavailable gives the app's line, in English and Hindi", () => {
+  expect(noticeLine("auto_mode_unavailable", en)).toBe(
+    "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+  );
+  expect(noticeLine("auto_mode_unavailable", words("hi"))).toBe(
+    "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+  );
+});
+
+test("the data-fence refusal's line names the agent as the stop line does", () => {
+  const claude = { kind: "claude", name: "claude-acp" } as const;
+  expect(noticeLine("outside_matter_blocked", en, claude)).toBe(
+    "Clauseo stopped a step: Claude tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", en, { kind: "codex", name: "codex-acp" })).toBe(
+    "Clauseo stopped a step: ChatGPT tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", en, { kind: undefined, name: "my-agent" })).toBe(
+    "Clauseo stopped a step: my-agent tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", words("hi"), claude)).toBe(
+    "Clauseo ने एक काम रोक दिया: Claude ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  );
+});
+
+test("with no agent name known, the data-fence line names the AI", () => {
+  expect(noticeLine("outside_matter_blocked", en)).toBe(
+    "Clauseo stopped a step: the AI tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  );
+});
+
+test("a declined shell download's line names the agent, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine("shell_network_blocked", en, codex)).toBe(
+    "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
+  );
+  expect(noticeLine("shell_network_blocked", words("hi"), codex)).toBe(
+    "Clauseo ने एक काम रोक दिया: ChatGPT ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय ChatGPT वेब खोज का उपयोग कर सकता है।",
+  );
+  expect(noticeLine("shell_network_blocked", en)).toBe(
+    "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.",
+  );
+  expect(noticeLine("shell_network_blocked", words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय यह वेब खोज का उपयोग कर सकता है।",
+  );
+});
+
+test("without web search, the declined download's line offers none, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  const kind = "shell_network_blocked_no_web_search";
+  expect(noticeLine(kind, en, codex)).toBe(
+    "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
+  );
+  expect(noticeLine(kind, words("hi"), codex)).toBe(
+    "Clauseo ने एक काम रोक दिया: ChatGPT ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  );
+  expect(noticeLine(kind, en)).toBe(
+    "Clauseo stopped a step: the AI tried to go online by running a command.",
+  );
+  expect(noticeLine(kind, words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  );
+  // with web search, the line still offers it
+  expect(noticeLine("shell_network_blocked", en, codex)).toMatch(/can use web search instead\.$/);
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

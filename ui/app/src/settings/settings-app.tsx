@@ -10,6 +10,8 @@ import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
+import { useQuitKey } from "../room/quit-key.ts";
+import { useToolsHeard } from "./sections/tools-model.ts";
 import { connectorsStoreOf, useConnectors, useConnectorsHeard } from "../store/connectors.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -60,6 +62,8 @@ export function SettingsApp({
     checked.current = true;
     sendConnector(transport, { check: {} }).catch(() => {});
   }, [transport]);
+  // Settings › Tools: the window follows the MCP view (tools-model.ts), which starts from the empty list
+  useToolsHeard(transport);
   // each plan's sign-in off the setup wire: a plan that isn't set up shows no billing in Plan and usage (D-060)
   const notSetUp = useNotSetUp(transport);
   const ctx = contextOf(
@@ -95,6 +99,8 @@ export function SettingsApp({
     [display.platform, controls],
   );
   const caption = useWindowFrame(wired);
+  // Ctrl+Q quits on Windows, as in the room (quit-key.ts)
+  useQuitKey(transport, display.platform);
   // the window names itself in its language: the page's title for assistive technology, and the native title Windows
   // shows in the taskbar and Alt-Tab
   const title = w.ui("Settings");

@@ -23,8 +23,21 @@ export const HI = {
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help
   // (provisional Hindi, app track final)
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.":
-    "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.":
+    "इस कंप्यूटर पर Chrome या Edge की एक नीति ऐप्स को ब्राउज़र नियंत्रित नहीं करने देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+  // the same on Windows, where the host passes over a browser its own policy blocks, so only every installed one
+  // blocked shows it, naming those: both (UC-550), Edge alone (UC-552), Chrome alone (UC-553); what to do, ask the
+  // firm's IT (provisional Hindi, app track final)
+  "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.":
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge या Google Chrome नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+  "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.":
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+  "Your firm's settings don't let apps control Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.":
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Google Chrome नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+  // Windows, the only Chrome a per-user copy, which Clauseo's browser can't start: what would work instead
+  // (UC-551; provisional Hindi, app track final)
+  "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.":
+    "Clauseo सिर्फ़ आपके लिए इंस्टॉल की गई Google Chrome की कॉपी का उपयोग नहीं कर सकता। Microsoft Edge इंस्टॉल करें, या अपनी फ़र्म की IT टीम से इस कंप्यूटर पर सभी के लिए Google Chrome इंस्टॉल करने को कहें। फिर एक नई बातचीत शुरू करें।",
   // under the browser's reason when Clauseo couldn't read that policy, in full
   // (provisional Hindi, app track final)
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.":

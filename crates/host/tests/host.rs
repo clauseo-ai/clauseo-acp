@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/adopt.rs"]
+mod adopt;
+#[cfg(test)]
 #[path = "host/agent_homes.rs"]
 mod agent_homes;
 #[cfg(test)]
@@ -31,6 +34,9 @@ mod ask_user_question;
 #[cfg(test)]
 #[path = "host/blackline.rs"]
 mod blackline;
+#[cfg(test)]
+#[path = "host/blackline_partial.rs"]
+mod blackline_partial;
 #[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
@@ -65,8 +71,14 @@ mod cancel_leftovers;
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
+#[path = "host/claude_sandbox.rs"]
+mod claude_sandbox;
+#[cfg(test)]
 #[path = "host/clear_env.rs"]
 mod clear_env;
+#[cfg(test)]
+#[path = "host/copied_folder.rs"]
+mod copied_folder;
 #[cfg(test)]
 #[path = "host/start_refused_log.rs"]
 mod start_refused_log;
@@ -77,6 +89,9 @@ mod web_sources;
 #[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
+#[cfg(test)]
+#[path = "host/codex_cap.rs"]
+mod codex_cap;
 #[cfg(test)]
 #[path = "host/codex_fence.rs"]
 mod codex_fence;
@@ -151,6 +166,9 @@ mod allowed_stores;
 #[cfg(all(test, unix))]
 #[path = "host/data_fence.rs"]
 mod data_fence;
+#[cfg(all(test, unix))]
+#[path = "host/data_fence_tool_shell.rs"]
+mod data_fence_tool_shell;
 #[cfg(test)]
 #[path = "host/documents_later.rs"]
 mod documents_later;
@@ -172,6 +190,9 @@ mod egress_wait;
 #[cfg(test)]
 #[path = "host/elicitation_withheld.rs"]
 mod elicitation_withheld;
+#[cfg(test)]
+#[path = "host/first_read.rs"]
+mod first_read;
 #[cfg(test)]
 #[path = "host/folder_query.rs"]
 mod folder_query;
@@ -256,6 +277,9 @@ mod lists;
 #[path = "host/lists_folder.rs"]
 mod lists_folder;
 #[cfg(test)]
+#[path = "host/load_line_cap.rs"]
+mod load_line_cap;
+#[cfg(test)]
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
@@ -274,14 +298,38 @@ mod long_paths;
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
+#[path = "host/max_prompt_reopen.rs"]
+mod max_prompt_reopen;
+#[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
+#[cfg(test)]
+#[path = "host/mcp_import.rs"]
+mod mcp_import;
+#[cfg(test)]
+#[path = "host/mcp_tools.rs"]
+mod mcp_tools;
+#[cfg(test)]
+#[path = "host/mcp_tools_confirm.rs"]
+mod mcp_tools_confirm;
+#[cfg(test)]
+#[path = "host/mcp_tools_failures.rs"]
+mod mcp_tools_failures;
+#[cfg(test)]
+#[path = "host/mcp_trust.rs"]
+mod mcp_trust;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
 #[cfg(all(test, unix))]
 #[path = "host/outside_matter.rs"]
 mod outside_matter;
+#[cfg(all(test, unix))]
+#[path = "host/outside_told.rs"]
+mod outside_told;
+#[cfg(test)]
+#[path = "host/oversize_live.rs"]
+mod oversize_live;
 #[cfg(test)]
 #[path = "host/own_logout.rs"]
 mod own_logout;
@@ -297,8 +345,20 @@ mod packs_timing;
 #[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
+#[cfg(test)]
+#[path = "host/too_long.rs"]
+mod too_long;
+#[cfg(test)]
+#[path = "host/too_long_log.rs"]
+mod too_long_log;
 // Every test here waits for a live folder watch, which Windows does not have (decision record
 // 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
+#[cfg(test)]
+#[path = "host/own_turn.rs"]
+mod own_turn;
+#[cfg(test)]
+#[path = "host/own_turn_cancel.rs"]
+mod own_turn_cancel;
 #[cfg(not(windows))]
 #[cfg(test)]
 #[path = "host/papers_live.rs"]
@@ -379,6 +439,9 @@ mod settings;
 #[path = "host/settings_entries.rs"]
 mod settings_entries;
 #[cfg(test)]
+#[path = "host/shell_offline_owed.rs"]
+mod shell_offline_owed;
+#[cfg(test)]
 #[path = "host/sign_in_hold.rs"]
 mod sign_in_hold;
 #[cfg(test)]
@@ -396,6 +459,15 @@ mod steer;
 #[cfg(test)]
 #[path = "host/steer_at_head.rs"]
 mod steer_at_head;
+#[cfg(test)]
+#[path = "host/steer_confirm.rs"]
+mod steer_confirm;
+#[cfg(test)]
+#[path = "host/steer_grace.rs"]
+mod steer_grace;
+#[cfg(test)]
+#[path = "host/steer_wait.rs"]
+mod steer_wait;
 #[cfg(test)]
 #[path = "host/stop_for.rs"]
 mod stop_for;
@@ -416,8 +488,23 @@ mod tool_switches;
 mod tools;
 
 #[cfg(test)]
+#[path = "host/lawyer_file.rs"]
+mod lawyer_file;
+#[cfg(test)]
+#[path = "host/lawyer_file_log.rs"]
+mod lawyer_file_log;
+#[cfg(test)]
+#[path = "host/lawyer_status.rs"]
+mod lawyer_status;
+#[cfg(test)]
+#[path = "host/shell_folder.rs"]
+mod shell_folder;
+#[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
+#[cfg(test)]
+#[path = "host/titles_restart.rs"]
+mod titles_restart;
 #[cfg(test)]
 #[path = "host/triage.rs"]
 mod triage;
@@ -427,6 +514,12 @@ mod triage_wake;
 #[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;
+#[cfg(test)]
+#[path = "host/undo_note_more.rs"]
+mod undo_note_more;
+#[cfg(test)]
+#[path = "host/undo_note_restart.rs"]
+mod undo_note_restart;
 #[cfg(test)]
 #[path = "host/undo_preview.rs"]
 mod undo_preview;

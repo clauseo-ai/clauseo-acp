@@ -2,8 +2,8 @@
 // why in plain lines: what Clauseo can now reach, and what is still kept. The cause picks the body
 // (UC): protection not set up on this computer yet, the set-up refused or failed, a computer that
 // can't give it, every protected space in use (counts only, never a name), or protection switched
-// off for the matter. The body is the same for both plans: "asks before changing anything outside
-// this matter's folder" is true for Claude and ChatGPT alike. Design B adds a Safe workspace
+// off for the matter. The body is the same for both plans, and it promises no ask before a change outside
+// the matter. Design B adds a Safe workspace
 // something on this computer stops, whose reason's line the caller gives, and the repair: its line,
 // and on a personal install "Get the installer", which opens the installed version's release page
 // (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
@@ -106,32 +106,32 @@ export function NotProtectedNote({
     why === "off"
       ? [
           w.v(
-            "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+            "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
             { matter },
           ),
         ]
       : why === "needs_set_up"
         ? [
             p(
-              "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+              "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
             ),
           ]
         : why === "not_built"
           ? [
               p(
-                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.",
               ),
             ]
           : why === "blocked"
             ? [
                 p(
-                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
                 ),
               ]
             : why === "cant"
               ? [
                   p(
-                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it.",
                   ),
                 ]
               : why === "pool"
@@ -143,7 +143,7 @@ export function NotProtectedNote({
                   ]
                 : [
                     p(
-                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.",
                     ),
                     ...(refused
                       ? [

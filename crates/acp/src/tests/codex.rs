@@ -143,7 +143,10 @@ fn item_plans_by_plan_id() {
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
-            | AcpEvent::Warning { .. }) => panic!("unexpected {other:?}"),
+            | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. }) => panic!("unexpected {other:?}"),
         })
         .collect();
     assert_eq!(

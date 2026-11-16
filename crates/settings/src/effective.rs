@@ -8,6 +8,9 @@
 
 #[cfg(test)]
 mod mcp_tests;
+mod mcp_write;
+#[cfg(test)]
+mod mcp_write_tests;
 #[cfg(test)]
 mod plans_tests;
 #[cfg(test)]
@@ -43,14 +46,14 @@ use crate::lock_reason::{self, LockReason};
 use crate::plans;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::privacy::PrivacyPatch;
-use crate::schema::{AgentLaunch, McpServerLaunch, Plan, Settings};
+use crate::schema::{AgentLaunch, Plan, Settings};
 use crate::skills;
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::update::UpdateChoice;
 use crate::user;
 use crate::warning::{Origin, Warning, WarningKind};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// What [`Effective::set_agent_launch`] did.
@@ -440,22 +443,6 @@ impl Effective {
     /// The agent `id`'s firm plan, if one is set (`plans.<id>`).
     pub fn plan(&self, id: &str) -> Option<&Plan> {
         self.settings.plans.get(id)
-    }
-
-    /// Every MCP server in the settings, on or off, by name. When policy sets `mcp.servers`
-    /// this is the firm's list alone.
-    pub fn mcp_servers(&self) -> &BTreeMap<String, McpServerLaunch> {
-        &self.settings.mcp.servers
-    }
-
-    /// The MCP servers turned on, in name order: the only ones an agent's session gets.
-    pub fn enabled_mcp_servers(&self) -> impl Iterator<Item = (&str, &McpServerLaunch)> {
-        self.settings
-            .mcp
-            .servers
-            .iter()
-            .filter(|(_, server)| server.enabled)
-            .map(|(name, server)| (name.as_str(), server))
     }
 
     /// Where new matters go: `matters.default_location` (user or policy), or else

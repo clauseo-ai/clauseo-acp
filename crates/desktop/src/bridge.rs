@@ -29,6 +29,7 @@ use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
 use crate::settings_window::SETTINGS_WINDOW;
 use crate::setup::Setup;
+use crate::window_events::FullScreen;
 
 mod admit;
 mod permission;
@@ -87,6 +88,8 @@ pub(crate) struct Bridge {
     refreshes: RefreshThrottle,
     /// The `setup` command's path and its events (`setup.rs`, 0048).
     setup: Setup,
+    /// Whether `main` is in the OS's own full screen, for its app feed (`window_events.rs`).
+    full_screen: Arc<FullScreen>,
 }
 
 /// Locks `mutex`, taking the data of one a panicking holder left: every critical section here
@@ -123,7 +126,15 @@ impl Bridge {
             issued: Mutex::new(HashSet::new()),
             refreshes: RefreshThrottle::default(),
             setup,
+            full_screen: Arc::default(),
         }
+    }
+
+    /// Keeps whether `main` is in the OS's own full screen, and sends it on the app feed of
+    /// every window that follows it when it changed (`FullScreen::set`). Returns whether it
+    /// changed.
+    pub(crate) fn window_full_screen(&self, full: bool) -> bool {
+        self.full_screen.set(full)
     }
 
     /// Runs the window `label`'s setup command (`setup.rs`): its allow-list first.
@@ -187,7 +198,8 @@ impl Bridge {
     }
 
     /// A window got focus: `RefreshLimits { agent: None, why: Shown }`, from Rust. The host
-    /// reads only limits older than 5 minutes, so the bridge does not throttle it.
+    /// reads only limits older than the agent kind's `shown_after_ms` (2 minutes for Claude, 1
+    /// for Codex), so the bridge does not throttle it.
     pub(crate) async fn shown(&self) -> Result<CommandOutcome, HostError> {
         let shown = HostCommand::RefreshLimits {
             agent: None,
@@ -259,6 +271,8 @@ impl Bridge {
             | HostQuery::GetSettings
             // The updater's state (0037): both windows show it.
             | HostQuery::GetUpdate
+            // How the last run ended (the room's notice): a flag, kinds, ids and counts.
+            | HostQuery::LastExit
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. }
@@ -303,7 +317,13 @@ impl Bridge {
         let number = self.opens.fetch_add(1, Ordering::Relaxed);
         let host = self.host().await?;
         let app_events = pump::AppEvents::of(label);
-        let window = Window::open(host.clone(), channel, app_events, self.setup.events());
+        let window = Window::open(
+            host.clone(),
+            channel,
+            app_events,
+            self.setup.events(),
+            Arc::clone(&self.full_screen),
+        );
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
         let dead = lock(&self.closed)
@@ -477,9 +497,10 @@ impl Bridge {
     }
 
     /// Asks `picker` for a folder and registers it, with the display `picked::display` gives
-    /// it under `home`; `None` when the lawyer cancelled. Whether the folder may be a matter is
-    /// the host's rule: `CreateMatter` refuses a refused folder with one `matter.folder_*` code
-    /// per reason (decision record 0022).
+    /// it under `home`, both with Windows' short names spelt out (`picked::long_name`), so the
+    /// registry never keeps one; `None` when the lawyer cancelled. Whether the folder may be a
+    /// matter is the host's rule: `CreateMatter` refuses a refused folder with one
+    /// `matter.folder_*` code per reason (decision record 0022).
     pub(crate) async fn pick_folder(
         &self,
         picker: &dyn Picker,
@@ -488,7 +509,9 @@ impl Bridge {
         let Some(path) = picker.pick().await else {
             return Ok(None);
         };
-        let display = picked::display(&path, home, MAIN_SEPARATOR);
+        let path = picked::long_name(&path);
+        let home = home.map(picked::long_name);
+        let display = picked::display(&path, home.as_deref(), MAIN_SEPARATOR);
         let folder = self.host().await?.register_folder(path).await?;
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))

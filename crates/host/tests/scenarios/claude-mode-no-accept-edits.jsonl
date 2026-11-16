@@ -1,4 +1,4 @@
-{"scenario":"claude-mode-no-accept-edits","description":"A claude-acp session/new answered in default with no acceptEdits mode offered: the client must fail the launch and send neither set_mode nor a prompt","on_stdin_close":"exit"}
+{"scenario":"claude-mode-no-accept-edits","description":"A claude-acp session/new answered in default with neither auto nor acceptEdits offered: the client must fail the launch and send neither set_mode nor a prompt","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}

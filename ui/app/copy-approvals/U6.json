@@ -63,5 +63,13 @@
     "at": "2026-11-02",
     "by": "design",
     "note": "U6-06's words, approved; a Find result's jump to a long answer (D-071)"
+  },
+  "U6-10": {
+    "en": "Uses your {name} plan",
+    "hi": "आपके {name} प्लान का उपयोग करता है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design",
+    "note": "U6-06's words, approved; a Find result's jump to words deep in a long answer's table (D-071)"
   }
 }

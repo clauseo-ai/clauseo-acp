@@ -14,8 +14,14 @@
 //! has left agent-browser's group but not yet bound its socket. That process writes its pid to
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
 //! the daemon does. An `agent_browser_wait_for_text` call for the text `stub_hold` is never
-//! answered (a call in flight; a core tool, so the guard's allowlist passes it). Cargo builds it
-//! for the tests; it is never shipped.
+//! answered (a call in flight; a core tool, so the guard's allowlist passes it); a request whose
+//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. Two calls get
+//! agent-browser's own answers ([`chrome_part::stand_in`]): an `open` of a `.pdf` URL, and the
+//! profiles. Each detached process (`--daemon`, `--linger`, `--late`) first closes every file
+//! descriptor above 2 it inherited. Two `open` URLs get agent-browser's errors ([`domain_part`]):
+//! `.../stub-stuck` its refusal of `--allowed-domains` on the guard's Chrome, `.../stub-quoted` a
+//! page's thrown error quoting that refusal; a close whose id starts `stub-stuck` gets the
+//! refusal. Cargo builds it for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -36,6 +42,24 @@ mod daemon {
         let dir = PathBuf::from(std::env::var_os("AGENT_BROWSER_SOCKET_DIR").unwrap_or_default());
         let session = std::env::var("AGENT_BROWSER_SESSION").unwrap_or_default();
         (dir, session)
+    }
+
+    /// Closes every file descriptor above 2 this process inherited, before anything here opens
+    /// one: a detached stub that outlives its test must hold nothing of the test's, such as a
+    /// build queue's lock file the test runner inherited.
+    pub(crate) fn close_inherited() {
+        let fds: Vec<i32> = std::fs::read_dir("/dev/fd")
+            .map(|dir| {
+                dir.flatten()
+                    .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The listing's own descriptor is closed already, so its close fails; nothing else
+        // opened one since.
+        for fd in fds.into_iter().filter(|fd| *fd > 2) {
+            if nix::unistd::close(fd).is_err() {}
+        }
     }
 
     /// The daemon: listens, records its pid, accepts and drops connections until killed.
@@ -149,6 +173,10 @@ fn first_call() -> std::io::Result<()> {
 
 fn main() -> std::io::Result<()> {
     #[cfg(unix)]
+    if let Some("--daemon" | "--linger" | "--late") = std::env::args().nth(1).as_deref() {
+        daemon::close_inherited();
+    }
+    #[cfg(unix)]
     match std::env::args().nth(1).as_deref() {
         Some("--daemon") => return daemon::serve(),
         Some("--linger") => return daemon::linger(),
@@ -176,10 +204,137 @@ fn main() -> std::io::Result<()> {
         {
             continue;
         }
+        if let Some(reply) = domain_part(&message) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+            continue;
+        }
+        if let Some(reply) = chrome_part::stand_in(&message) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+            continue;
+        }
         if let Some(id) = message.get("id") {
-            writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "result": {}}))?;
+            let reply = if id.as_str().is_some_and(|id| id.starts_with("stub-error")) {
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "stub"}})
+            } else {
+                json!({"jsonrpc": "2.0", "id": id, "result": {}})
+            };
+            writeln!(out, "{reply}")?;
             out.flush()?;
         }
     }
     Ok(())
+}
+
+/// agent-browser v0.41.1's refusal of `--allowed-domains` on a Chrome reached over CDP.
+const CDP_REFUSAL: &str = "--allowed-domains is not supported with --cdp because WebRTC \
+                           containment cannot be installed before existing page scripts run";
+
+/// agent-browser's error reply, as the release binary sends it, to an `open` of a URL ending in
+/// `/stub-stuck` (its refusal of `--allowed-domains`, which then stuck on its session) or
+/// `/stub-quoted` (a page's thrown error that quotes that refusal), and to an
+/// `agent_browser_close` whose id starts `stub-stuck` (the same refusal).
+fn domain_part(message: &Value) -> Option<Value> {
+    let id = message.get("id")?;
+    let error = match message.pointer("/params/name").and_then(Value::as_str)? {
+        "agent_browser_open" => {
+            let url = message.pointer("/params/arguments/url")?.as_str()?;
+            if url.ends_with("/stub-stuck") {
+                CDP_REFUSAL.to_owned()
+            } else if url.ends_with("/stub-quoted") {
+                format!("Evaluation error: Error: {CDP_REFUSAL}")
+            } else {
+                return None;
+            }
+        }
+        // A stuck session refuses its close too, as the release binary does.
+        "agent_browser_close" if id.as_str().is_some_and(|id| id.starts_with("stub-stuck")) => {
+            CDP_REFUSAL.to_owned()
+        }
+        _ => return None,
+    };
+    let stdout = json!({"error": error, "success": false}).to_string();
+    Some(json!({"jsonrpc": "2.0", "id": id, "result": {
+        "content": [{"type": "text", "text": error}], "isError": true,
+        "structuredContent": {"exitCode": 1, "response": {"error": error, "success": false},
+            "stderr": "", "stdout": format!("{stdout}\n")}}}))
+}
+
+/// Chrome's part in two calls, played with the files Chrome would write.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test stub plays Chrome: it writes, marks and renames a download in staging"
+)]
+mod chrome_part {
+    use serde_json::{Value, json};
+
+    /// agent-browser v0.41.1's core profile description (`cli/src/mcp.rs:257`).
+    const CORE_PROFILE: &str = "Everyday browser automation with navigation, snapshots, \
+        common interaction, waits, screenshots, basic reads, tab basics, JavaScript eval, close, \
+        and profile discovery.";
+
+    /// agent-browser's answer, with Chrome's part, to two calls. An `agent_browser_open` of a URL
+    /// ending in `.pdf` plays Chrome saving the file (`plugins.always_open_pdf_externally`):
+    /// `<name>.crdownload` appears in the run's staging folder at once, with the OS mark Chrome
+    /// gives it, and is renamed to `<name>` 300 ms later, while the call fails with
+    /// `net::ERR_ABORTED`, as the navigation turned into a download. An
+    /// `agent_browser_tools_profiles` call gets the core profile's description.
+    pub(super) fn stand_in(message: &Value) -> Option<Value> {
+        let id = message.get("id")?;
+        let text = match message.pointer("/params/name").and_then(Value::as_str)? {
+            "agent_browser_open" => {
+                let url = message.pointer("/params/arguments/url")?.as_str()?;
+                let name = url.rsplit('/').next().filter(|name| {
+                    std::path::Path::new(name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+                })?;
+                let staging = staging()?;
+                let partial = staging.join(format!("{name}.crdownload"));
+                std::fs::write(&partial, b"%PDF-1.4 stub judgment").ok()?;
+                mark(&partial);
+                let done = staging.join(name);
+                drop(std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    drop(std::fs::rename(&partial, &done));
+                }));
+                let text = format!("Navigation failed: net::ERR_ABORTED at {url}");
+                return Some(json!({"jsonrpc": "2.0", "id": id,
+                    "result": {"content": [{"type": "text", "text": text}], "isError": true}}));
+            }
+            "agent_browser_tools_profiles" => json!([{"name": "core", "description": CORE_PROFILE,
+                "toolCount": 29, "usage": "agent-browser mcp --tools core"}])
+            .to_string(),
+            _ => return None,
+        };
+        Some(json!({"jsonrpc": "2.0", "id": id,
+            "result": {"content": [{"type": "text", "text": text}]}}))
+    }
+
+    /// The run's staging folder: `<cwd>/chrome-profile-<id>/downloads-staging`, the guard having
+    /// started this stub in its `--cwd`.
+    fn staging() -> Option<std::path::PathBuf> {
+        std::fs::read_dir(".").ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let staging = entry.path().join("downloads-staging");
+            (name.starts_with("chrome-profile-") && staging.is_dir()).then_some(staging)
+        })
+    }
+
+    /// Chrome's OS mark on `file`: Windows' `Zone.Identifier` stream, macOS' quarantine attribute.
+    fn mark(file: &std::path::Path) {
+        if cfg!(windows) {
+            let stream = format!("{}:Zone.Identifier", file.display());
+            drop(std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n"));
+        } else if cfg!(target_os = "macos") {
+            let value = "0081;00000000;Chrome;";
+            drop(
+                std::process::Command::new("/usr/bin/xattr")
+                    .args(["-w", "com.apple.quarantine", value])
+                    .arg(file)
+                    .status(),
+            );
+        }
+    }
 }

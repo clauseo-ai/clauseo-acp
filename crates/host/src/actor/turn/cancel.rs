@@ -1,14 +1,15 @@
 //! Cancel: a turn that has not started is dequeued with `TurnEnded { Cancelled, None }`; a
 //! running one gets one commit closing its pending requests and unfinished tool calls, then
-//! `session/cancel` and the 5 s fallback, after which the agent is stopped. A turn that ends
+//! `session/cancel` and the 5 s fallback, after which the agent is stopped; one whose prompt
+//! already answered, its end waiting for the host's probe, ends at once instead. A turn that ends
 //! cancelled with its agent still attached has what it left running ended (`sweep_leftovers`).
 //! Shutdown cancels every running turn the same way and stops every agent.
 
 use clauseo_process::Cutoff;
 use clauseo_protocol::{
     CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallPatch, ToolCallStatus,
-    ToolCallUpdated, TurnId,
+    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallId, ToolCallPatch,
+    ToolCallStatus, ToolCallUpdated, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -22,7 +23,23 @@ use super::{
 };
 use crate::agent::leftovers;
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
+
+/// Why a turn is cancelled, as the lifecycle log names it.
+pub(super) mod why {
+    /// The lawyer's Stop (`Cancel`).
+    pub(in crate::actor::turn) const STOP: &str = "stop";
+    /// A prompt sent now, or a queued one (or a steer) sent now.
+    pub(in crate::actor::turn) const SEND_NOW: &str = "send_now";
+    /// The agent's sign-in.
+    pub(in crate::actor::turn) const SIGN_IN: &str = "sign_in";
+    /// An update installed now.
+    pub(in crate::actor::turn) const INSTALL: &str = "install";
+    /// A failure of the turn's own (a commit, the network, a refusal).
+    pub(in crate::actor::turn) const FAILURE: &str = "failure";
+    /// The host stops.
+    pub(in crate::actor::turn) const SHUTDOWN: &str = "shutdown";
+}
 
 /// `Cancel { thread }`: stops the thread's current turn only.
 pub(super) fn cancel_command(
@@ -32,12 +49,14 @@ pub(super) fn cancel_command(
 ) -> Result<(), Error> {
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
+    // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
+    super::own_turn::cancel_agent(actor, thread, why::STOP);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             dequeue(actor, Some(ctx), thread, turn)
         }
         Some((TurnPhase::Prompting, false, _)) => {
-            cancel_running(actor, thread, Some(ctx));
+            cancel_running(actor, thread, Some(ctx), why::STOP);
             Ok(())
         }
         Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
@@ -71,11 +90,22 @@ fn done_tag(ctx: CommandCtx) -> Tag {
     }
 }
 
-/// The current turn, for a send now (`queue.rs`): the Cancel path without a command, whatever
-/// its phase.
-pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId) {
+/// The current turn, for a send now (`queue.rs`) and the other stops without a command: the
+/// Cancel path, whatever its phase. A prompt sent now is a forced head, which starts once the
+/// current turn has ended whatever its stop, so every phase leads to it: a turn that has not
+/// started ends now; a prompting one is cancelled; one checkpointing or starting ends before its
+/// prompt is sent; one already cancelled, ending or being stopped ends by itself. With no
+/// current turn, the closing one's end is on its way and moves the queue on.
+pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static str) {
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
+    if let Some((phase, cancelled, turn)) = found
+        && (cancelled || !matches!(phase, TurnPhase::Prompting))
+    {
+        tracing::info!(target: LIFECYCLE, %thread, %turn, ?phase, cancelled, why, "a turn ends without a cancel sent");
+    }
+    // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
+    super::own_turn::cancel_agent(actor, thread, why);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             if let Err(error) = dequeue(actor, None, thread, turn) {
@@ -86,7 +116,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId) {
                 );
             }
         }
-        Some((TurnPhase::Prompting, false, _)) => cancel_running(actor, thread, None),
+        Some((TurnPhase::Prompting, false, _)) => cancel_running(actor, thread, None, why),
         Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
@@ -133,8 +163,14 @@ pub(super) fn dequeue(
 /// The running turn: one commit of `PermissionResolved { Cancelled }` per pending request,
 /// `ElicitationResolved { Cancelled }` per pending elicitation and `Cancelled` for each
 /// unfinished tool call (with the command's receipt when a command asked), then
-/// `session/cancel`, the elicitations answered `Cancel`, and the fallback timer.
-pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<CommandCtx>) {
+/// `session/cancel`, the elicitations answered `Cancel`, and the fallback timer. `why` names the
+/// cancel in the lifecycle log.
+pub(super) fn cancel_running(
+    actor: &mut Actor,
+    thread: ThreadId,
+    ctx: Option<CommandCtx>,
+    why: &'static str,
+) {
     // Updates the rate cap holds came before the cancel.
     updates::flush_rate(actor, thread);
     let Some(running) = current(actor, thread) else {
@@ -152,6 +188,12 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
             actor.finish_command(ctx.id, Err(error));
         }
     }
+    // A prompt that already answered, its end waiting for the probe (`offline/hold.rs`), ends
+    // cancelled now: nothing to cancel and no fallback, so the agent is kept.
+    if super::offline::release_cancelled(actor, thread, turn) {
+        super::super::limits::asking_changed(actor);
+        return;
+    }
     if let Some(agent) = state(actor, thread)
         .and_then(|state| state.agent.as_deref_mut())
         .filter(|agent| agent.stage == Stage::Attached)
@@ -163,6 +205,7 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
             .collect();
         let client = agent.link.client.clone();
         if let Some(session) = agent.session.clone() {
+            tracing::info!(target: LIFECYCLE, %thread, %turn, why, "a cancel was sent");
             spawn(actor, async move {
                 if let Err(error) = client.cancel(&session).await {
                     tracing::debug!(%error, "session/cancel failed");
@@ -179,6 +222,10 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
         }
     }
     super::super::limits::asking_changed(actor);
+    // No prompt answers an agent-started turn: it ends now (`own_turn.rs`).
+    if super::own_turn::cancelled(actor, thread) {
+        return;
+    }
     let timer = actor.arm_timer(
         CANCEL_WAIT,
         TurnTimer {
@@ -226,7 +273,7 @@ pub(super) fn log_cancel(
         };
         out.push(actor, resolved)?;
     }
-    push_tool_cancels(actor, thread, turn, &mut out)?;
+    push_tool_settles(actor, thread, turn, ToolCallStatus::Cancelled, &mut out)?;
     match ctx {
         Some(ctx) => {
             let now = actor.now().wall;
@@ -241,20 +288,33 @@ pub(super) fn log_cancel(
     }
 }
 
-/// `Cancelled` for each tool call of `turn` whose status is not final, as sent.
-pub(super) fn push_tool_cancels(
+/// `status` (`Cancelled`, or `Completed` for a turn the agent ended well) for each tool call
+/// of `turn` whose status is not final, as sent. Only the status changes: a tool call completed
+/// so keeps the content it had, none when its output never came.
+pub(super) fn push_tool_settles(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
+    status: ToolCallStatus,
     out: &mut Out,
 ) -> Result<(), Error> {
     let tools: Vec<_> = actor
         .loaded(StreamId::Thread(thread))
         .map(|loaded| loaded.sent.unfinished_tools(turn).collect())
         .unwrap_or_default();
+    push_statuses(actor, tools, status, out)
+}
+
+/// `status` for each of `tools`, status only.
+pub(super) fn push_statuses(
+    actor: &mut Actor,
+    tools: Vec<ToolCallId>,
+    status: ToolCallStatus,
+    out: &mut Out,
+) -> Result<(), Error> {
     for tool_call in tools {
         let patch = ToolCallPatch {
-            status: Some(ToolCallStatus::Cancelled),
+            status: Some(status),
             ..ToolCallPatch::default()
         };
         out.push(actor, ToolCallUpdated { tool_call, patch })?;
@@ -341,7 +401,9 @@ pub(super) fn shutdown(actor: &mut Actor) {
     for thread in threads {
         let found = current(actor, thread).map(|current| (current.phase, current.cancelled));
         match found {
-            Some((TurnPhase::Prompting, false)) => cancel_running(actor, thread, None),
+            Some((TurnPhase::Prompting, false)) => {
+                cancel_running(actor, thread, None, why::SHUTDOWN);
+            }
             Some((TurnPhase::Checkpointing | TurnPhase::Starting, false)) => {
                 if let Some(current) = current(actor, thread) {
                     current.cancelled = true;

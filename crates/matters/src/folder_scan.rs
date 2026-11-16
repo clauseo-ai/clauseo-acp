@@ -45,14 +45,15 @@ pub enum FolderScan {
     Cancelled,
 }
 
-/// Scans `folder` before it becomes a matter: refuses it as
+/// Scans `folder` before it becomes a matter: refuses it for its place as
 /// [`Matter::import`](crate::Matter::import) would (a drive root, an entry of `refused` or an
 /// ancestor of one, the matters root or a refused tree), then walks it by the import's rules
 /// (the exclusion list, the settings' probe and size cap) under a [`NoDownload`] guard.
 /// `progress` gets the running counts and the file reached after each file. Returns
 /// [`FolderScan::Cancelled`] once `cancel` is set (the walk checks it before each folder, entry
-/// and stat). Opens no file of the folder's own and writes nothing: the refusal checks read only
-/// its `.clauseo/matter.json`, as import does, and a cloud-only file is counted from its metadata.
+/// and stat). A `.clauseo/matter.json` is not read and refuses nothing: the import adopts the
+/// matter it names or sets it aside, and the host names a listed matter's folder itself. Opens no
+/// file of the folder's own and writes nothing; a cloud-only file is counted from its metadata.
 pub fn scan_folder(
     folder: &Path,
     refused: &[PathBuf],
@@ -61,7 +62,7 @@ pub fn scan_folder(
     cancel: &AtomicBool,
 ) -> Result<FolderScan, Error> {
     refuse::check_folder(folder, refused)?;
-    refuse::check_new_matter(folder, settings)?;
+    refuse::check_scanned(folder, settings)?;
     let mut totals = FolderTotals::default();
     let guard = NoDownload::begin(settings.probe.as_ref());
     let walked = walk::walk(
