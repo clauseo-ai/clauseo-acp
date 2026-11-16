@@ -374,6 +374,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
             return;
         }
     }
+    super::note::parts::session_started(actor, thread, loaded);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };

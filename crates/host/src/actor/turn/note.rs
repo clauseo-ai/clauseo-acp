@@ -12,6 +12,8 @@
 //!
 //! A prompt takes the note and it is held aside while its turn runs: once that turn has ended,
 //! the note is dropped if the agent took the prompt (`undo_note::carried`), or put back first.
+//! The instruction parts a Codex agent has not heard yet (`note_parts.rs`) go before it, and are
+//! put back the same way.
 
 use clauseo_protocol::{
     CheckpointId, Envelope, MatterPath, Seq, StreamId, ThreadId, Timestamp, TurnId,
@@ -36,6 +38,8 @@ pub(crate) struct NoteState {
     waiting: Option<Waiting>,
     /// What a prompt took of `told`, until its turn ended and it reached the agent or not.
     sent: Option<(TurnId, Vec<Told>)>,
+    /// What the instruction parts that prompt told held before (`note_parts::told`).
+    parts_before: Vec<(&'static str, Option<String>)>,
 }
 
 /// Where the matter's log is read from for the note's restores (`undo_note::Read`).
@@ -88,9 +92,21 @@ impl NoteState {
     }
 }
 
-/// The notes' text for the next prompt: the owed offline-shell note (`shell_network.rs`), then
-/// the undo note; both stay until [`sent`].
+/// The notes' text for the next prompt: the instruction parts a Codex agent has not heard
+/// (`note_parts.rs`), the owed offline-shell note (`shell_network.rs`), then the undo note; all
+/// stay until [`sent`].
 pub(super) fn text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
+    // A prompt that told parts and did not reach the agent gives them back first.
+    ensure(actor, thread);
+    let parts = parts::changed(actor, thread)
+        .into_iter()
+        .map(|(_, text)| text);
+    let all: Vec<String> = parts.chain(notes_text(actor, thread)).collect();
+    (!all.is_empty()).then(|| all.join("\n"))
+}
+
+/// The owed offline-shell note, then the undo note.
+fn notes_text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure(actor, thread);
     let state = state(actor, thread)?;
     let undo = undo_note::note_text(state.note.told.as_deref().unwrap_or_default());
@@ -107,7 +123,10 @@ pub(super) fn text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
 
 /// The note goes out with `turn`'s prompt: it is held aside until that turn has ended.
 pub(super) fn sent(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let parts = parts::changed(actor, thread);
+    let before = parts::told(actor, thread, parts);
     if let Some(state) = state(actor, thread) {
+        state.note.parts_before = before;
         state.offline_owed = false;
         let note = &mut state.note;
         let told = note.told.replace(Vec::new()).unwrap_or_default();
@@ -137,9 +156,11 @@ fn take_back(actor: &mut Actor, thread: ThreadId) {
     let Some((_, mut told)) = note.sent.take() else {
         return;
     };
+    let parts_before = std::mem::take(&mut note.parts_before);
     if !carried {
         told.extend(note.told.take().unwrap_or_default());
         note.told = Some(told);
+        parts::untold(actor, thread, parts_before);
     }
 }
 
@@ -339,6 +360,9 @@ pub(super) fn on_restores(
         then(actor);
     }
 }
+
+#[path = "note_parts.rs"]
+pub(super) mod parts;
 
 #[cfg(test)]
 mod tests;

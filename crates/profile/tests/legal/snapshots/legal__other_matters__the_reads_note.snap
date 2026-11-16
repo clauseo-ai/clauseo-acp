@@ -1,0 +1,5 @@
+---
+source: crates/profile/tests/legal/other_matters.rs
+expression: "reads_note(&[(\"Jones \\\"Appeal\\\"\", r\"C:\\Users\\l\\Clients\\Jones\")])"
+---
+Clauseo: from now on this conversation may read only these other matters, read-only: "Jones \"Appeal\"" ("C:\\Users\\l\\Clients\\Jones").

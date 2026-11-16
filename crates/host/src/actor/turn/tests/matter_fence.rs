@@ -1,8 +1,9 @@
 //! The fence between matters reaching a live agent (`idle/fence.rs`) with a real `fake_agent`:
 //! an invite stops the idle agent and its next launch reads the other matter (its `Read` deny
-//! gone, a `Read` allow, its `Edit` deny kept); withdrawing it does the same back; a new matter
-//! stops an idle agent; a busy agent is stopped only once its turn ends. Agents' ends are held
-//! (`dispatch_holding`, `hold_next`), never raced with `advance` and `drain`.
+//! gone, a `Read` allow, its `Edit` deny kept, Codex's note naming it); withdrawing it
+//! does the same back; a new matter stops an idle agent; a busy agent is stopped only once its
+//! turn ends. Agents' ends are held (`dispatch_holding`, `hold_next`), never raced with
+//! `advance` and `drain`.
 
 use std::path::Path;
 
@@ -46,6 +47,13 @@ fn agent_end(_: &Actor, input: &Input) -> bool {
             ..
         }
     )
+}
+
+/// The note a Codex agent on the live run is told the matters it may read by
+/// (`outside::fence::codex_reads_note`): it names the invited ones.
+fn reads_note(rig: &Rig, thread: ThreadId) -> String {
+    let run = rig.actor.threads[&thread].turn.run.as_ref().unwrap();
+    super::super::outside::fence::codex_reads_note(run)
 }
 
 /// The live run's Claude rules naming `matter`'s folder: (Read denied, Edit denied, Read allowed).
@@ -105,6 +113,7 @@ fn an_invite_and_its_withdrawal_each_stop_the_idle_agent_and_change_the_relaunch
         (true, true, false),
         "fenced"
     );
+    assert!(!reads_note(&rig, thread).contains("Smith"), "fenced");
 
     stops_idle(
         &mut rig,
@@ -121,6 +130,8 @@ fn an_invite_and_its_withdrawal_each_stop_the_idle_agent_and_change_the_relaunch
         (false, true, true),
         "invited"
     );
+    // Codex hears the invite in its note, made from this relaunch's run.
+    assert!(reads_note(&rig, thread).contains("Smith"), "invited");
 
     until_idle(&mut rig, thread);
     let withdraw = HostCommand::WithdrawMatterRead {
@@ -134,6 +145,7 @@ fn an_invite_and_its_withdrawal_each_stop_the_idle_agent_and_change_the_relaunch
         (true, true, false),
         "fenced again"
     );
+    assert!(!reads_note(&rig, thread).contains("Smith"), "withdrawn");
     rig.finish();
 }
 
