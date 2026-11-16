@@ -15,6 +15,11 @@ use crate::write::secret::{Refused, take};
 const NOT_PLAIN: &str = "CLAUSEO_PROXY_SECRET_FILE must name a plain file with one name, not a \
                          link, a folder or a device";
 
+/// The refusal of a file another program kept open through the guard's wait.
+#[cfg(windows)]
+const BUSY: &str = "CLAUSEO_PROXY_SECRET_FILE names a file another program has open; the guard \
+                    waited and could not take it";
+
 /// The bytes at `file`, read without changing it.
 fn content(file: &Path) -> Vec<u8> {
     std::fs::read(file).unwrap()
@@ -110,17 +115,27 @@ fn a_folder_at_the_name_is_refused() {
     assert!(folder.is_dir());
 }
 
-/// Windows, the review's attack: a file another process holds open without delete sharing
-/// fails the guard's one open (which asks for `DELETE`), so it is neither read nor emptied.
+/// Windows, the link attack's second half: a file another process holds open without delete
+/// sharing (with no sharing at all, or sharing reading and writing) fails the guard's one open,
+/// which asks for `DELETE`, through the whole wait. It is neither read nor emptied, and the
+/// refusal says another program has it open, not that it was planted.
 #[cfg(windows)]
 #[test]
-fn a_file_held_without_delete_sharing_is_refused_and_left() {
-    let scratch = Scratch::new("held");
-    let file = scratch.file("proxy-secret", format!("{SECRET}\n").as_bytes());
-    let held = write::open_unshared(Path::new(&file)).unwrap();
-    assert_eq!(refusal(Os::Windows, &file), super::secret::UNREADABLE);
-    drop(held);
-    assert_eq!(content(Path::new(&file)), format!("{SECRET}\n").as_bytes());
+fn a_file_held_without_delete_sharing_is_refused_as_busy_and_left() {
+    let holders: [fn(&Path) -> std::io::Result<std::fs::File>; 2] =
+        [write::open_unshared, write::open_shared_without_delete];
+    for (n, hold) in holders.into_iter().enumerate() {
+        let scratch = Scratch::new(&format!("held-{n}"));
+        let file = scratch.file("proxy-secret", format!("{SECRET}\n").as_bytes());
+        let held = hold(Path::new(&file)).unwrap();
+        assert_eq!(refusal(Os::Windows, &file), BUSY, "holder {n}");
+        drop(held);
+        assert_eq!(
+            content(Path::new(&file)),
+            format!("{SECRET}\n").as_bytes(),
+            "holder {n}"
+        );
+    }
 }
 
 /// The source with the proxy set and [`VAR`] naming `file`.
