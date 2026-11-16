@@ -130,7 +130,11 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
                 whole.push_str(&entity);
                 add_text(&mut tables, &open, &entity);
             }
-            Event::Eof => return stack.is_empty().then_some((tables, sections, whole)),
+            Event::Eof => {
+                // A table whose every row's deletion is tracked is gone once they are accepted.
+                tables.retain(|table| !table.rows.is_empty());
+                return stack.is_empty().then_some((tables, sections, whole));
+            }
             Event::Text(_)
             | Event::CData(_)
             | Event::Comment(_)

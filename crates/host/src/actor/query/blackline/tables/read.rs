@@ -16,8 +16,8 @@
 //!   and `w14:textId`, a tracked change's old properties (`*PrChange`, `w:tblGridChange`,
 //!   `w:tblPrExChange`), Word's style marks for a row's place (`w:cnfStyle`), and the tracked marks
 //!   (`w:ins`, `w:del`, `w:cellIns`, `w:cellDel`, `w:cellMerge`); a row or cell whose deletion is
-//!   tracked is left out, as accepting it does; and the text of each table, row and cell (its
-//!   `w:t`), by which they are paired;
+//!   tracked is left out, as accepting it does, and so is a table left with no row; and the text
+//!   of each table, row and cell (its `w:t`), by which they are paired;
 //! - what can't be read: a zip that does not open, a part missing, over [`MAX_PART_BYTES`] or
 //!   [`MAX_ALL_BYTES`] in all, or not well-formed XML, gives no package (`None`), never a guess.
 
