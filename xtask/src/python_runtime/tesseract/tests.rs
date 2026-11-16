@@ -1,7 +1,8 @@
 use super::super::lock::Lock;
 use super::super::target::{TARGETS, Target};
 use super::super::tesseract_build::{
-    LEPTONICA_ARGS, TESSERACT_ARGS, foreign_libraries, hardening_args, pe_flag_problems,
+    LEPTONICA_ARGS, TESSERACT_ARGS, foreign_libraries, hardened_line, hardening_args,
+    pe_flag_problems,
 };
 use super::super::{LOCK, NOTICES, notices, rules};
 use super::{bin_dir, exe, leptonica_url, pins, source_url, tessdata_url};
@@ -242,5 +243,22 @@ fn the_pe_check_wants_aslr_dep_cfg_and_cet_on_x64() {
     assert_eq!(
         pe_flag_problems(&pe_image(all, Some(1))[..0x100], Target::WinX64),
         unreadable
+    );
+}
+
+#[test]
+fn the_hardening_log_line_names_what_was_checked() {
+    assert_eq!(
+        hardened_line(Target::WinX64),
+        "tesseract.exe PE flags ok: ASLR(high-entropy) DEP CFG CET"
+    );
+    assert_eq!(
+        hardened_line(Target::WinArm64),
+        "tesseract.exe PE flags ok: ASLR(high-entropy) DEP CFG"
+    );
+    let mac = hardened_line(Target::MacArm64);
+    assert!(
+        mac.contains("-D_FORTIFY_SOURCE=2 -fstack-protector-strong"),
+        "{mac}"
     );
 }
