@@ -15,7 +15,6 @@ use super::super::Actor;
 use super::launch_checks::egress;
 use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
-use super::own_servers;
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
@@ -584,3 +583,5 @@ pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
 pub(super) fn show_tools(actor: &mut Actor, thread: ThreadId) {
     super::super::header_tools::show_held(actor, thread);
 }
+
+mod own_servers;

@@ -37,8 +37,8 @@ pub(crate) enum Versions {
     #[default]
     Absent,
     /// The listener is open and the token file written. Its token is revoked when its entry
-    /// does not go (`actor/turn/own_servers.rs`) and when the session ends ([`end`]); it stops
-    /// when the run folder goes.
+    /// does not go (`actor/turn/profile_loads/own_servers.rs`) and when the session ends
+    /// ([`end`]); it stops when the run folder goes.
     Open(Arc<VersionsListener>),
 }
 

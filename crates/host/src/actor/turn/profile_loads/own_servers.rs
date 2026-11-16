@@ -7,8 +7,8 @@ use std::ffi::OsString;
 use clauseo_acp::McpServer;
 use clauseo_protocol::ThreadId;
 
-use super::super::Actor;
-use super::launch_checks::RunFolders;
+use super::super::super::Actor;
+use super::super::launch_checks::RunFolders;
 use crate::agent::loads::versions::{self, VersionsInputs};
 use crate::agent::loads::{self, case_law};
 use crate::versions::VersionsTool;
@@ -54,7 +54,7 @@ pub(super) fn versions_servers(
     {
         listener.end();
     }
-    if let Some(state) = super::state(actor, thread) {
+    if let Some(state) = super::super::state(actor, thread) {
         state.note.versions = tool(entry.as_ref());
     }
     (rest, entry)
@@ -84,7 +84,8 @@ pub(super) fn note_mcp_sent(
             .flatten()
             .map(|entry| entry.name().to_owned()),
     );
-    if let Some(agent) = super::state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+    if let Some(agent) =
+        super::super::state(actor, thread).and_then(|state| state.agent.as_deref_mut())
         && let Some(slot) = agent.mcp_sent.as_mut()
     {
         *slot = sent;
