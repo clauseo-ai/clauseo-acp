@@ -121,6 +121,7 @@ impl Check<'_> {
         let mut segments = Segments::new(MAX_READ_WORDS);
         shell_segments(command, escape, &mut segments);
         !segments.full()
+            && !segments.cut()
             && segments
                 .iter()
                 .all(|segment| !segment.command || self.segment(segment, depth))

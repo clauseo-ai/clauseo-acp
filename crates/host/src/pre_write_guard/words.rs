@@ -24,6 +24,12 @@ pub(crate) enum Escape {
 /// element of such a word as a name of its own.
 pub(crate) const ARRAY_COMMA: char = '\u{1f}';
 
+/// The most `$(…)` a reading enters one inside another.
+pub(crate) const MAX_NESTING: usize = 32;
+
+/// The most text, in bytes, a reading takes from the bodies of `$(…)` in all.
+pub(crate) const MAX_NESTED_BYTES: usize = 1 << 20;
+
 /// Adds `command`'s words to `segments` until it is full, the simple shell way, with no
 /// expansion:
 ///
@@ -49,7 +55,15 @@ pub(crate) const ARRAY_COMMA: char = '\u{1f}';
 /// unknown ([`Segment::unknown`]); the commands inside a `$(…)` are read too, as segments of
 /// their own after the command's. Under either escape, a quote left open makes the reading
 /// [`Segments::unsure`] and its word unknown.
+///
+/// The bodies of `$(…)` are read at most [`MAX_NESTING`] deep and [`MAX_NESTED_BYTES`] in all;
+/// past either the reading stops and is [`Segments::cut`].
 pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segments) {
+    read_segments(command, escape, segments, 0);
+}
+
+/// [`shell_segments`] for a command read inside `depth` nested `$(…)`.
+fn read_segments(command: &str, escape: Escape, segments: &mut Segments, depth: usize) {
     let escape = match escape {
         Escape::Backslash => '\\',
         Escape::Backtick => '`',
@@ -70,7 +84,11 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
     scanner.run(segments);
     let inner = std::mem::take(&mut scanner.inner);
     for body in inner {
-        shell_segments(&body, Escape::Backtick, segments);
+        if depth >= MAX_NESTING || !segments.take_nested(body.len()) {
+            segments.set_cut();
+            return;
+        }
+        read_segments(&body, Escape::Backtick, segments, depth + 1);
     }
 }
 
@@ -557,6 +575,8 @@ fn element_candidates(word: &str) -> impl Iterator<Item = &str> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_nesting;
 #[cfg(test)]
 mod tests_powershell;
 #[cfg(test)]

@@ -83,11 +83,15 @@ pub(crate) struct Segments {
     count: usize,
     /// The most words kept.
     limit: usize,
-    /// Whether the reading is unsure: a quote, a here-string or a `$(…)` never closed, or a
-    /// redirection with no target.
+    /// Whether the reading is unsure: a quote, a here-string or a `$(…)` never closed, a
+    /// redirection with no target, or a reading [`Self::cut`] short.
     unsure: bool,
     /// How many parentheses are open.
     depth: usize,
+    /// Whether the reading stopped at [`super::MAX_NESTING`] or [`super::MAX_NESTED_BYTES`].
+    cut: bool,
+    /// How many bytes of `$(…)` bodies have been read.
+    nested_bytes: usize,
 }
 
 impl Segments {
@@ -98,6 +102,8 @@ impl Segments {
             limit,
             unsure: false,
             depth: 0,
+            cut: false,
+            nested_bytes: 0,
         }
     }
 
@@ -109,6 +115,30 @@ impl Segments {
     /// Notes the reading as unsure ([`Self::unsure`]).
     pub(super) fn set_unsure(&mut self) {
         self.unsure = true;
+    }
+
+    /// Whether the reading stopped at a `$(…)` nested too deep or past too much nested text
+    /// ([`super::MAX_NESTING`], [`super::MAX_NESTED_BYTES`]): such a reading is also unsure.
+    pub(crate) fn cut(&self) -> bool {
+        self.cut
+    }
+
+    /// Notes the reading as cut, so unsure too ([`Self::cut`]).
+    pub(super) fn set_cut(&mut self) {
+        self.cut = true;
+        self.unsure = true;
+    }
+
+    /// Counts `bytes` more of `$(…)` bodies read; `false`, counting nothing, when that would
+    /// pass [`super::MAX_NESTED_BYTES`].
+    pub(super) fn take_nested(&mut self, bytes: usize) -> bool {
+        match self.nested_bytes.checked_add(bytes) {
+            Some(total) if total <= super::MAX_NESTED_BYTES => {
+                self.nested_bytes = total;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Whether it holds `limit` words.

@@ -62,6 +62,9 @@ pub(super) enum Refusal {
     CodexHome,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
+    /// A shell command nests `$(…)` too deep, or holds too much nested text, to be read
+    /// (`words::MAX_NESTING`, `words::MAX_NESTED_BYTES`).
+    Unread,
 }
 
 impl Refusal {
@@ -83,6 +86,9 @@ impl Refusal {
                 .to_owned(),
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
+                .to_owned(),
+            Self::Unread => "Clauseo can't read this command: it is nested too deep or is too \
+                             long. Split it into smaller commands."
                 .to_owned(),
         }
     }

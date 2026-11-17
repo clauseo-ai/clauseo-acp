@@ -53,6 +53,8 @@ pub(super) fn reaches_codex_home(
     match targets {
         Targets::Named(paths) | Targets::Patch(paths) => inside(paths),
         Targets::Shell { patch, named, .. } => inside(patch) || inside(named),
+        // Refused for that alone (`judge`).
+        Targets::Unread => false,
     }
 }
 
@@ -65,7 +67,7 @@ pub(super) fn names_codex_home(targets: &Targets) -> bool {
         Targets::Shell { text, .. } => {
             names_home_var(text) || text.to_ascii_lowercase().contains(FOLDER_NAME)
         }
-        Targets::Named(_) | Targets::Patch(_) => false,
+        Targets::Named(_) | Targets::Patch(_) | Targets::Unread => false,
     }
 }
 

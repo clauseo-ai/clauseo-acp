@@ -553,3 +553,5 @@ fn skip_heredoc_bodies(chars: &mut Peekable<Chars<'_>>, heredocs: &mut Vec<Hered
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_before;

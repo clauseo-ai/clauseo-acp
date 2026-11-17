@@ -411,6 +411,7 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
         return Some(Refusal::CodexHome);
     }
     let into_codex = match targets {
+        Targets::Unread => return Some(Refusal::Unread),
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
             .iter()
@@ -433,6 +434,7 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
     // spelling, [`names::as_listed`]).
     let listed = |held: Option<MatterPath>| held.map(|path| names::listed_spelling(folder, path));
     match targets {
+        Targets::Unread => Some(Refusal::Unread),
         Targets::Named(paths) | Targets::Patch(paths) => {
             let held = listed(held_at(paths));
             timings::mark("resolve");
@@ -474,6 +476,9 @@ enum Targets {
     Named(Vec<PathBuf>),
     /// The files of a Codex `apply_patch` patch.
     Patch(Vec<PathBuf>),
+    /// A shell command whose reading, or one of its scripts', was cut short
+    /// (`words::Segments::cut`).
+    Unread,
     /// A shell command: the existing files it names (each with the word naming it), the files of
     /// a patch in its text, and whether a word of it has a `.codex` part.
     Shell {
