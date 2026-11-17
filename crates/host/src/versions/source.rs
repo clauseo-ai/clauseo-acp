@@ -1,9 +1,11 @@
-//! The host's [`VersionsSource`]: a read goes to the actor ([`Input::MatterRead`]), which hands
-//! it to the matter's thread as a [`MatterJob::Read`](crate::matter_worker::MatterJob), starting
-//! the thread when the matter has none and following it when a crashed one was replaced. The
-//! log's times and restore sources are read from the store on the calling thread: each
-//! version's `CheckpointRecorded` row, then one read of the matter's stream from the oldest to
-//! just past the newest (a restore's `VersionRestored` follows its `CheckpointRecorded`).
+//! The host's [`VersionsSource`]: a read goes to the actor ([`Input::MatterRead`]), which hands it
+//! to the matter's thread as a [`MatterJob::Read`](crate::matter_worker::MatterJob) only when that
+//! thread is already live (`actor/matters.rs` `read`). It never starts or replaces one, which would
+//! open and could relink the matter: with no live thread the read is answered as not open, and
+//! after a failed send it is not answered and its caller gives up. The log's times and restore
+//! sources are read from the store on the calling thread: each version's `CheckpointRecorded` row,
+//! then one read of the matter's stream from the oldest to just past the newest (a restore's
+//! `VersionRestored` follows its `CheckpointRecorded`).
 
 use std::collections::BTreeSet;
 
