@@ -1,5 +1,5 @@
 {
-  "UC-392": {
+  "UC-949": {
     "en": "Footnote {n}",
     "hi": "फ़ुटनोट {n}",
     "hi_status": "provisional",
@@ -10,7 +10,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a footnote that holds a change ({n} is its number); its paragraphs are marked as the body's (BlacklinePartKind footnote)"
   },
-  "UC-393": {
+  "UC-950": {
     "en": "Endnote {n}",
     "hi": "एंडनोट {n}",
     "hi_status": "provisional",
@@ -21,7 +21,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a endnote that holds a change ({n} is its number) (BlacklinePartKind endnote)"
   },
-  "UC-394": {
+  "UC-951": {
     "en": "Header",
     "hi": "हेडर",
     "hi_status": "provisional",
@@ -32,7 +32,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a header on a section's ordinary pages, or one whose pages the host doesn't name (BlacklinePartKind header, slot default)"
   },
-  "UC-395": {
+  "UC-952": {
     "en": "Header (first page)",
     "hi": "हेडर (पहला पृष्ठ)",
     "hi_status": "provisional",
@@ -43,7 +43,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a header on a section's first page (slot first_page)"
   },
-  "UC-396": {
+  "UC-953": {
     "en": "Header (even pages)",
     "hi": "हेडर (सम पृष्ठ)",
     "hi_status": "provisional",
@@ -54,7 +54,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a header on even pages (slot even_pages)"
   },
-  "UC-397": {
+  "UC-954": {
     "en": "Footer",
     "hi": "फ़ुटर",
     "hi_status": "provisional",
@@ -65,7 +65,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a footer on a section's ordinary pages, or one whose pages the host doesn't name (BlacklinePartKind footer, slot default)"
   },
-  "UC-398": {
+  "UC-955": {
     "en": "Footer (first page)",
     "hi": "फ़ुटर (पहला पृष्ठ)",
     "hi_status": "provisional",
@@ -76,7 +76,7 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a footer on a section's first page (slot first_page)"
   },
-  "UC-399": {
+  "UC-956": {
     "en": "Footer (even pages)",
     "hi": "फ़ुटर (सम पृष्ठ)",
     "hi_status": "provisional",
@@ -96,7 +96,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "a header's or footer's heading ({part}, UC-394 to UC-399) with the first section it is on ({n}), only where two headers or footers that changed would otherwise have the same heading; also inside the table line's place (UC-455, in lower case)"
+    "note": "a header's or footer's heading ({part}, UC-951 to UC-956) with the first section it is on ({n}), only where two headers or footers that changed would otherwise have the same heading; also inside the table line's place (UC-455, in lower case)"
   },
   "UC-451": {
     "en": "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.",
@@ -121,15 +121,15 @@
     "note": "over the blackline sheet in place of UC-391 when the host names the tables whose formatting changed (WordBlackline changed_tables, up to four): {tables} lists each as its place (UC-454 to UC-457), then a colon and what changed (UC-458 to UC-464), the tables apart by semicolons, e.g. 'table 2: borders, shading; table 1 in the header (first page): merged cells'. The item form changed after review round 2 (was 'table 2 (borders, shading)', which gave two brackets in a row after a header's heading)"
   },
   "UC-453": {
-    "en": "Formatting changed in {tables}; and {n} more.",
-    "hi": "{tables}; और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+    "en": "Formatting changed in {tables}, and in {n} more.",
+    "hi": "{tables} में, और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, apart by semicolons, then how many more ({n}: the host's count of every changed table, changed_tables_total, minus the three named). Reworded after review round 2 (was '{tables} and {n} more.'), to match the semicolons"
+    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, apart by semicolons, then how many more ({n}: the host's count of every changed table, changed_tables_total, minus the three named). Reworded after review round 2 (was '{tables} and {n} more.'), then on the app track's review (was '{tables}; and {n} more.', which read as a typo)"
   },
   "UC-454": {
     "en": "table {n}",
@@ -151,7 +151,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in the table line: a table in a header or footer, in the footnotes' form so it can't be read as a body table; {part} is that part's heading (UC-394 to UC-399, with UC-450 where needed) set in lower case in English, e.g. 'table 1 in the header (first page)'. Reworded after review round 2 (was '{part}, table {n}', which in a list read like a body table)"
+    "note": "in the table line: a table in a header or footer, in the footnotes' form so it can't be read as a body table; {part} is that part's heading (UC-951 to UC-956, with UC-450 where needed) set in lower case in English, e.g. 'table 1 in the header (first page)'. Reworded after review round 2 (was '{part}, table {n}', which in a list read like a body table)"
   },
   "UC-456": {
     "en": "table {n} in the footnotes",

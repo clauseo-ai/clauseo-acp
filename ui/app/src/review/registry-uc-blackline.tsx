@@ -1,6 +1,6 @@
 // UC's copy review entries for a Word document's marked-up changes in Versions (UC-113 to UC-116, and its notices and
 // the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391; its parts'
-// headings and the tables whose formatting changed, UC-392 to UC-399 and UC-450 to UC-464), apart from
+// headings and the tables whose formatting changed, UC-949 to UC-956 and UC-450 to UC-464), apart from
 // registry-uc.tsx to keep that file under the size limit: the notice compared with now, over registry-u8.tsx's host,
 // whose word_blackline runs, fails or cuts the document short as each entry asks. UC_ALL is registry-uc.tsx's UC
 // entries, then registry-uc-blocks.tsx's UC_BLOCKS, then these, so registry.tsx lists UC in one place.
@@ -42,7 +42,7 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   [
     "UC-368",
     "changes_outside_text",
-    "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
+    "Some changes aren't shown here, such as in a footnote or header Clauseo couldn't mark up. Open both versions in Word to see them.",
   ],
   [
     "UC-451",
@@ -55,7 +55,7 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
     "text_box_changed",
     "Text in a text box changed. Open both versions in Word to see it.",
   ],
-  ["UC-391", "cell_format_changed", "The formatting of some tables, rows or cells changed."],
+  ["UC-391", "cell_format_changed", "Formatting changed in some tables, rows or cells."],
 ];
 
 /** A part's one changed paragraph: a word out and a word in. */
@@ -74,8 +74,8 @@ const changedPara = (
   ],
 });
 
-/** A notice whose footnote, endnote, and each kind of header and footer changed, in one section (UC-392 to
- * UC-399). */
+/** A notice whose footnote, endnote, and each kind of header and footer changed, in one section (UC-949 to
+ * UC-956). */
 const PARTS: BlacklinePart[] = [
   {
     kind: { footnote: { number: 3 } },
@@ -131,21 +131,21 @@ const SIX_TABLES: ChangedTable[] = [
 
 /** Each part's heading, with its id and the parts that show it. */
 const HEADINGS: [string, VersionKey, BlacklinePart[]][] = [
-  ["UC-392", "Footnote {n}", PARTS],
-  ["UC-393", "Endnote {n}", PARTS],
-  ["UC-394", "Header", PARTS],
-  ["UC-395", "Header (first page)", PARTS],
-  ["UC-396", "Header (even pages)", PARTS],
-  ["UC-397", "Footer", PARTS],
-  ["UC-398", "Footer (first page)", PARTS],
-  ["UC-399", "Footer (even pages)", PARTS],
+  ["UC-949", "Footnote {n}", PARTS],
+  ["UC-950", "Endnote {n}", PARTS],
+  ["UC-951", "Header", PARTS],
+  ["UC-952", "Header (first page)", PARTS],
+  ["UC-953", "Header (even pages)", PARTS],
+  ["UC-954", "Footer", PARTS],
+  ["UC-955", "Footer (first page)", PARTS],
+  ["UC-956", "Footer (even pages)", PARTS],
   ["UC-450", "{part}, section {n}", SECTIONS],
 ];
 
 /** The table line's words, with their ids and the tables that show them. */
 const TABLES: [string, VersionKey, ChangedTable[]][] = [
   ["UC-452", "Formatting changed in {tables}.", FOUR_TABLES],
-  ["UC-453", "Formatting changed in {tables}; and {n} more.", SIX_TABLES],
+  ["UC-453", "Formatting changed in {tables}, and in {n} more.", SIX_TABLES],
   ["UC-454", "table {n}", ONE_TABLE],
   ["UC-455", "table {n} in the {part}", FOUR_TABLES],
   ["UC-456", "table {n} in the footnotes", FOUR_TABLES],
@@ -279,7 +279,7 @@ export const UC_BLACKLINE: Entry[] = [
 
 /**
  * UC's entries: registry-uc.tsx's (UC-01 to UC-78), registry-uc-blocks.tsx's (UC-80 to UC-106), then
- * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-399,
- * UC-450 to UC-464).
+ * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391,
+ * UC-450 to UC-464, UC-949 to UC-956).
  */
 export const UC_ALL: Entry[] = [...UC, ...UC_BLOCKS, ...UC_BLACKLINE];
