@@ -163,10 +163,15 @@ export function noticeLine(
       return w.th(
         "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
       );
+    // the agent's automatic mode is refused for the account: Claude runs in acceptEdits, ChatGPT in workspace-write
     if (kind === "auto_mode_unavailable")
-      return w.th(
-        "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
-      );
+      return agent?.kind === "codex"
+        ? w.th(
+            "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+          )
+        : w.th(
+            "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+          );
     if (kind === "sandbox_off")
       return w.th(
         "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.",

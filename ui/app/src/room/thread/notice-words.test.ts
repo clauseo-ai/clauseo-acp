@@ -41,6 +41,15 @@ test("Claude's sandbox not starting gives one line for its asking and its missin
   );
 });
 
+test("ChatGPT's auto mode unavailable gives ChatGPT's line; Claude's and an unknown agent's stay Claude's", () => {
+  expect(noticeLine("auto_mode_unavailable", en, { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+  );
+  expect(noticeLine("auto_mode_unavailable", en, { kind: "claude", name: "claude-acp" })).toBe(
+    "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+  );
+});
+
 test("the data-fence refusal's line names the agent as the stop line does", () => {
   const claude = { kind: "claude", name: "claude-acp" } as const;
   expect(noticeLine("outside_matter_blocked", en, claude)).toBe(
