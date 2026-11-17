@@ -27,8 +27,8 @@ const MAX_DEPTH: usize = 8;
 const MAX_STRINGS: usize = 512;
 
 /// The paths a permission request may touch, as the agent wrote them: `paths` (its locations
-/// and diffs), then `rawInput`'s `file_path`, `notebook_path`, `path`, `cwd` and each string
-/// of `paths`, then every string anywhere in `rawInput` that looks like a path
+/// and diffs), then `rawInput`'s `file_path`, `notebook_path`, `path`, `cwd`, `workdir` and each
+/// string of `paths`, then every string anywhere in `rawInput` that looks like a path
 /// ([`input_paths`]), then the path tokens of `rawInput.command` ([`command::command_paths`],
 /// over [`command_lines`]). Without repeats.
 pub(crate) fn candidates(
@@ -47,7 +47,7 @@ pub(crate) fn candidates(
         return out;
     };
     let text = |key: &str| input.get(key).and_then(Value::as_str);
-    for key in ["file_path", "notebook_path", "path", "cwd"] {
+    for key in ["file_path", "notebook_path", "path", "cwd", "workdir"] {
         text(key).map(PathBuf::from).into_iter().for_each(&mut add);
     }
     let listed = input

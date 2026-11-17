@@ -171,6 +171,34 @@ fn candidates_read_raw_inputs_path_keys_and_command_arrays() {
     assert_eq!(got, want);
 }
 
+/// A Codex command asked to run in a working folder in Codex's home (`workdir`, or the
+/// request's `cwd`), absolute or taken from the matter, is in the data folder, whatever its own
+/// text names. The last form is read through the key alone: no other string in the request
+/// looks like a path (`sub/…` is no `./` or `../`), and the command names only `config.toml`.
+#[test]
+fn a_command_whose_working_folder_is_codex_home_is_denied() {
+    let dir = layout("workdir");
+    let root = dir.path();
+    let home = root.join("data/agents/codex-acp/home");
+    write::create_dir_all(&home).unwrap();
+    let folders = [
+        text(&home),
+        "../data/agents/codex-acp/home".to_owned(),
+        "sub/../../data/agents/codex-acp/home".to_owned(),
+    ];
+    for key in ["workdir", "cwd"] {
+        for folder in &folders {
+            let input = json!({"command": "echo x > config.toml", key: folder});
+            assert!(
+                check(root, &[], Some(&input)).touches_data(),
+                "{key} {folder}"
+            );
+        }
+    }
+    let matter = json!({"command": "echo x > notes.txt", "workdir": text(&root.join("matter"))});
+    assert!(!check(root, &[], Some(&matter)).touches_data());
+}
+
 /// A Read of a pack's source and a Bash `cat` of it are both in the data folder.
 #[test]
 fn a_read_or_a_cat_of_a_packs_source_is_denied() {

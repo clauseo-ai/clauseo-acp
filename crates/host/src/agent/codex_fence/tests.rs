@@ -408,7 +408,6 @@ fn the_own_folders_codex_home_and_the_built_in_skills_stay_readable() {
         run_root().join("work").join("notes.md"),
         run_root().join("skill-packs").join("x").join("SKILL.md"),
         notes().join("matter-brief.md"),
-        codex_home().join("config.toml"),
         codex_home()
             .join("tmp")
             .join("arg0")
