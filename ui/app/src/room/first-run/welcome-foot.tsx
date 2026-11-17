@@ -18,6 +18,7 @@ import {
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { APP } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
@@ -35,11 +36,12 @@ import {
 import { installActs, planOf } from "./acts.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
-/** The line's presses: the install's, the room gate's Sign in, a found login's Use it, its Cancel, and the other
- * plan's sign-in's Cancel. */
+/** The line's presses: the install's, the room gate's Sign in, a found login's Use it, an unreadable key's Try again,
+ * its Cancel, and the other plan's sign-in's Cancel. */
 export type FootActs = InstallActs & {
   signIn: () => void;
   useFound: () => void;
+  retryKey: () => void;
   cancel: () => void;
   cancelAhead: () => void;
 };
@@ -53,6 +55,9 @@ export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): 
   signIn: () => store.signInTo(agent),
   // a found login's Use it, as the room gate's: use_found_login
   useFound: () => store.command({ use_found_login: { agent } }),
+  // an unreadable key's Try again: the same start_sign_in, which desktop refuses and reads the key again, but no
+  // choice of plan, so the papers line keeps naming both plans (the real-Mac run of #1162 lost "or ChatGPT")
+  retryKey: () => store.signIn(agent, { again: true }),
   cancel: () => store.cancelSignIn(agent),
   cancelAhead: () => store.cancelAhead(agent),
 });
@@ -219,19 +224,24 @@ export function welcomeFoot(
           null,
           "none",
         );
-      // a saved key the keychain didn't give (agent.key_unreadable): the gate's words and Try again
-      // (gate-failed.tsx), never "is ready" with a sign-in (VM row A-K6); desktop refuses the press
+      // a saved key the keychain didn't give (agent.key_unreadable, or agent.key_denied after a Deny, each in its
+      // own words): the gate's words and Try again (gate-failed.tsx; it picks no plan: acts.retryKey), never "is
+      // ready" with a sign-in (VM row A-K6); desktop refuses the press
       // and reads the key again. The note says where the key can be changed; no tick, since the
       // plan can't be used until the key reads. Try again refused in another code says that code's
       // words after it, as the gate's refused line does (the same code is said once)
-      if (view.code === "agent.key_unreadable") {
-        const key = errorWords(lang, "agent.key_unreadable");
+      if (isKeyNotRead(view.code)) {
+        const key = errorWords(lang, view.code);
         const plans = sx(lang, "To change it, open Settings, then Plans.");
         const code = setup?.refused;
         const other = code === undefined || code === view.code ? null : errorWords(lang, code);
         return named(
           noted(
-            line(key, "key-unreadable", { ...signIn, words: fl(lang, "Try again") }),
+            line(key, "key-unreadable", {
+              ...signIn,
+              words: fl(lang, "Try again"),
+              press: acts.retryKey,
+            }),
             other === null ? plans : `${plans} ${other}`,
             other === null ? undefined : `${key} ${other}`,
           ),

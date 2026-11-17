@@ -2,20 +2,21 @@
 //! `HostHandle::set_launch_refused` and `HostConfig::with_launch_refused`), in memory only.
 //!
 //! - The codes come from [`LAUNCH_REFUSALS`]: `signin.policy_unreadable` while an unreadable
-//!   policy blocks the agent, and `agent.keys_loading` while desktop has not finished loading
-//!   the stored API keys (ruling 4: no agent launches without its key). Another code is refused
-//!   with `command.invalid` and changes nothing.
+//!   policy blocks the agent, `agent.keys_loading` while desktop has not finished loading
+//!   the stored API keys (ruling 4: no agent launches without its key), `agent.key_unreadable`
+//!   once this agent's stored key was tried and its read did not answer in time, and
+//!   `agent.key_denied` once the key store answered that read with an error (a denied
+//!   prompt, say). Another code is refused with `command.invalid` and changes nothing.
 //! - A refusal applies to new launches; a running session ends normally.
-//!   `agent.key_unreadable` once this agent's stored key was tried and its read failed or did
-//!   not answer in time.
-//! - `agent.keys_loading` and `agent.key_unreadable` are waited out: a launch either meets
-//!   waits at most [`KEYS_WAIT`] on the host's clock ([`LaunchRefusals::wait`]) and is woken as
-//!   soon as the refusal is lifted or changed, then the launch checks the refusals again.
-//!   Desktop holds the facts and sends the one in force: a policy refusal is never lifted by
-//!   the keys' load.
-//! - A launch meeting `agent.key_unreadable` asks desktop to read that key again
-//!   ([`LaunchRefusals::retry_key`], `HostConfig::with_key_retry`) before its wait: a read
-//!   that succeeds lifts the refusal, so the launch, or the next, goes on with the key.
+//! - `agent.keys_loading`, `agent.key_unreadable` and `agent.key_denied` are waited out: a
+//!   launch meeting one waits at most [`KEYS_WAIT`] on the host's clock
+//!   ([`LaunchRefusals::wait`]) and is woken as soon as the refusal is lifted or changed, then
+//!   the launch checks the refusals again. Desktop holds the facts and sends the one in force:
+//!   a policy refusal is never lifted by the keys' load.
+//! - A launch meeting `agent.key_unreadable` or `agent.key_denied` ([`KEY_NOT_READ`]) asks
+//!   desktop to read that key again ([`LaunchRefusals::retry_key`],
+//!   `HostConfig::with_key_retry`) before its wait: a read that succeeds lifts the refusal, so
+//!   the launch, or the next, goes on with the key.
 //! - `agent.keys_loading` has a bound ([`KEYS_LOAD_BOUND`] from the host's start): past it,
 //!   one still in place counts as `agent.key_unreadable`, so a setup thread that never loads
 //!   the keys (it did not start, or died) never leaves launches "still starting" for good.
@@ -34,22 +35,32 @@ use crate::error::Error;
 
 /// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
 /// launches.
-pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 3] = [
+pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 4] = [
     ErrorCode::SigninPolicyUnreadable,
     ErrorCode::AgentKeysLoading,
     ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentKeyDenied,
 ];
 
 /// The refusals a launch waits out, at most [`KEYS_WAIT`], before it fails with them.
-pub(crate) const WAITED_OUT: [ErrorCode; 2] =
-    [ErrorCode::AgentKeysLoading, ErrorCode::AgentKeyUnreadable];
+pub(crate) const WAITED_OUT: [ErrorCode; 3] = [
+    ErrorCode::AgentKeysLoading,
+    ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentKeyDenied,
+];
+
+/// The refusals of a stored key that could not be read: a launch meeting one asks desktop to
+/// read the key again ([`LaunchRefusals::retry_key`]).
+pub(crate) const KEY_NOT_READ: [ErrorCode; 2] =
+    [ErrorCode::AgentKeyUnreadable, ErrorCode::AgentKeyDenied];
 
 /// How long `agent.keys_loading` may stand from the host's start before it counts as
 /// `agent.key_unreadable`: desktop's own 10 s bound on the first load, and a margin, since
 /// desktop's setup thread starts a little after the host.
 pub(crate) const KEYS_LOAD_BOUND: Duration = Duration::from_secs(12);
 
-/// Desktop's hook for a launch that met `agent.key_unreadable`: read that agent's key again.
+/// Desktop's hook for a launch that met `agent.key_unreadable` or `agent.key_denied`: read
+/// that agent's key again.
 /// Called on the host's actor, so it must not block.
 pub(crate) type KeyRetry = Arc<dyn Fn(&AgentId) + Send + Sync>;
 
@@ -229,6 +240,31 @@ mod tests {
         let error = refusals.set(fake(), Some(ErrorCode::Unknown)).unwrap_err();
         assert_eq!(error.code(), ErrorCode::CommandInvalid);
         assert_eq!(refusals.get(&fake()), Some(ErrorCode::AgentKeyUnreadable));
+    }
+
+    #[test]
+    fn key_denied_is_taken_waited_out_and_a_key_not_read() {
+        let mut refusals = LaunchRefusals::default();
+        refusals
+            .set(fake(), Some(ErrorCode::AgentKeyDenied))
+            .unwrap();
+        assert_eq!(refusals.get(&fake()), Some(ErrorCode::AgentKeyDenied));
+        assert!(WAITED_OUT.contains(&ErrorCode::AgentKeyDenied));
+        assert!(KEY_NOT_READ.contains(&ErrorCode::AgentKeyDenied));
+        let mut waiting: Pin<Box<dyn Future<Output = ()> + Send>> =
+            Box::pin(refusals.wait(&fake(), Box::pin(futures::future::pending())));
+        refusals
+            .set(fake(), Some(ErrorCode::AgentKeyDenied))
+            .unwrap();
+        assert_eq!(poll_once(&mut waiting), Poll::Pending, "the same code");
+        refusals
+            .set(fake(), Some(ErrorCode::AgentKeyUnreadable))
+            .unwrap();
+        assert_eq!(
+            poll_once(&mut waiting),
+            Poll::Ready(()),
+            "the other kind wakes it"
+        );
     }
 
     #[test]

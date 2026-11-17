@@ -1567,7 +1567,8 @@ expression: counts_schema()
         "matter.file_folder_clash",
         "agent.home_failed",
         "matter.file_refused",
-        "matter.file_write_failed"
+        "matter.file_write_failed",
+        "agent.key_denied"
       ],
       "type": "string"
     },

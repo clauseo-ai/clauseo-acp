@@ -112,14 +112,15 @@ export function Failed({
           <Ways>{way(w("Use a code instead"), { act: "device" })}</Ways>
         </>
       );
-    // a saved API key the keychain didn't give (a macOS prompt unanswered or denied): no sign-in failed, so the key's
-    // own words, and Try again, whose press desktop refuses with this code and reads the key again (never a sign-in)
-    // and the way out when Try again can't work (a key that never reads): Plans, where the key
-    // can be removed with no read; the expired card's approved line (UD2), on both surfaces
+    // a saved API key the keychain didn't give (a macOS prompt unanswered, agent.key_unreadable, or denied,
+    // agent.key_denied): no sign-in failed, so the code's own words, and Try again, whose press desktop refuses with
+    // this code and reads the key again (never a sign-in), and the way out when Try again can't work (a key that never
+    // reads): Plans, where the key can be removed with no read; the expired card's approved line (UD2), on both surfaces
     case "agent.key_unreadable":
+    case "agent.key_denied":
       return (
         <Act act={signIn(w("Try again"))}>
-          <Say>{errorWords(lang, "agent.key_unreadable")}</Say>{" "}
+          <Say>{errorWords(lang, view.code)}</Say>{" "}
           <span className="fl-gate-why">
             <Say>{sx(lang, "To change it, open Settings, then Plans.")}</Say>
           </span>

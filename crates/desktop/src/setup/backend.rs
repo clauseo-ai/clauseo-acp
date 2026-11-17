@@ -313,11 +313,11 @@ impl AgentsBackend {
     fn barred(&self, agent: &AgentId) -> Option<HostError> {
         let firm = self.compose.firm_plan(agent);
         let bar = if self.keys.unreadable_for(agent, firm) {
-            SignInBar::KeyUnreadable
+            SignInBar::key_not_read(self.keys.denied(agent))
         } else {
             self.compose.sign_in_bar(agent)?
         };
-        if bar == SignInBar::KeyUnreadable {
+        if bar.reads_key() {
             // On a lifecycle target, so host.log keeps it (`clauseo_host::log_file`).
             tracing::info!(
                 target: TARGET,

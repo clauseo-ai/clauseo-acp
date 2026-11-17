@@ -197,6 +197,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentHomeFailed,
             "Clauseo couldn't prepare Codex's folder.",
         ),
+        failed(
+            ErrorCode::AgentKeyDenied,
+            "a stored API key could not be read: the key store refused the read",
+        ),
     ]
 }
 

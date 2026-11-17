@@ -2,8 +2,9 @@
 //! The refusal in force for an agent ([`wanted`]):
 //!
 //! - `signin.policy_unreadable` while an unreadable policy blocks it;
-//! - else `agent.key_unreadable` while its stored key is marked unreadable (the read failed,
-//!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
+//! - else `agent.key_unreadable` while its stored key is marked unreadable because its read did
+//!   not answer within the first load's bound, or `agent.key_denied` because the keychain
+//!   answered it with its error (`setup/keys/reads.rs`);
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over and the
@@ -38,10 +39,8 @@ pub(crate) fn in_force(
 ) -> Option<ErrorCode> {
     if blocked {
         Some(ErrorCode::SigninPolicyUnreadable)
-    } else if keys.unreadable_for(agent, firm) {
-        Some(ErrorCode::AgentKeyUnreadable)
     } else {
-        None
+        keys.unreadable_code(agent, firm)
     }
 }
 

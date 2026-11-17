@@ -130,4 +130,5 @@ export type ErrorCode =
   | "agent.home_failed"
   | "matter.file_refused"
   | "matter.file_write_failed"
+  | "agent.key_denied"
   | "unknown";

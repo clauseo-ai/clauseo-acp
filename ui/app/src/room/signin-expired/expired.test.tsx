@@ -363,28 +363,37 @@ test("no file under room/ imports Settings' Plans section", () => {
     expect(readFileSync(file, "utf8"), file).not.toMatch(/settings\/sections\/plans/);
 });
 
-test("key unreadable (VM D7, K11): the card names the saved key in its own words, Try again, never the sign-in's", async () => {
-  // the question held for the sign-in while the marked key's read was denied or left unanswered
-  const t = await mount({
-    signIn: { failed: { code: "agent.key_unreadable", at: AT } },
-    reason: "sign_in",
-    refuse: "agent.key_unreadable",
-  });
-  expect(words()).toContain(errorWords("en", "agent.key_unreadable"));
-  expect(words()).toContain("Your question is kept.");
-  expect(words()).not.toContain("Sign-in didn't finish.");
-  const named = card()?.querySelector("[aria-label]")?.getAttribute("aria-label") ?? "";
-  expect(named).toContain(errorWords("en", "agent.key_unreadable"));
-  expect(named).not.toContain("sign-in has expired");
-  // the gate's own button in the card (the rig's press by words looks in the first run's root)
-  const again = [...(card()?.querySelectorAll("button") ?? [])].find(
-    (b) => b.textContent?.trim() === "Try again",
-  );
-  await press(again ?? null);
-  expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
-  // desktop refuses that press with the key's code, and reads the key again: said once, not twice
-  expect(words().split(errorWords("en", "agent.key_unreadable")).length).toBe(2);
-});
+test.each([
+  ["agent.key_unreadable", "agent.key_denied"],
+  ["agent.key_denied", "agent.key_unreadable"],
+] as const)(
+  "%s (VM D7, K11, the real Mac's Deny): the card names the saved key in that code's words, the Plans line, Try again",
+  async (code, other) => {
+    // the question held for the sign-in while the marked key's read was denied or left unanswered
+    const t = await mount({
+      signIn: { failed: { code, at: AT } },
+      reason: "sign_in",
+      refuse: code,
+    });
+    expect(words()).toContain(errorWords("en", code));
+    expect(words()).not.toContain(errorWords("en", other));
+    expect(words()).toContain("To change it, open Settings, then Plans.");
+    expect(words()).toContain("Your question is kept.");
+    expect(words()).not.toContain("Sign-in didn't finish.");
+    const named = card()?.querySelector("[aria-label]")?.getAttribute("aria-label") ?? "";
+    expect(named).toContain(errorWords("en", code));
+    expect(named).not.toContain(errorWords("en", other));
+    expect(named).not.toContain("sign-in has expired");
+    // the gate's own button in the card (the rig's press by words looks in the first run's root)
+    const again = [...(card()?.querySelectorAll("button") ?? [])].find(
+      (b) => b.textContent?.trim() === "Try again",
+    );
+    await press(again ?? null);
+    expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+    // desktop refuses that press with the key's code, and reads the key again: said once, not twice
+    expect(words().split(errorWords("en", code)).length).toBe(2);
+  },
+);
 
 test("a last turn that failed for another reason shows its own line, never the sign-in card, though held for it", async () => {
   // K11: the .mcp item's prompt held launch preparation past its wait; the queue still held for the sign-in
