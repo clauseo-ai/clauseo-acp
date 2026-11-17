@@ -86,6 +86,11 @@ export function useScan(matters: Matters) {
     const at = now.current;
     if (at !== null) put({ ...at, gotIt: true });
   };
+  /** Whether a synced folder's notice is up and not yet "Got it": Create waits for it (settle). */
+  const awaitingGotIt = (): boolean => {
+    const at = now.current;
+    return at !== null && isSynced(at.latest) && !at.gotIt;
+  };
   /** Create's turn: waits for the first event at most PLACE_WAIT_MS, then says whether Create may go on. It may not
    * while a synced folder's notice waits for "Got it" (the notice shows by then). Going on, a running scan is
    * cancelled first. */
@@ -109,5 +114,5 @@ export function useScan(matters: Matters) {
     }
     return true;
   };
-  return { scan, start, clear, gotIt, settle };
+  return { scan, start, clear, gotIt, awaitingGotIt, settle };
 }

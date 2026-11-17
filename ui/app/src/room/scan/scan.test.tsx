@@ -257,3 +257,62 @@ test("keys and readers: the lines, the synced notice and cloud-only are statuses
   expect(document.activeElement).not.toBe(document.body);
   expect(plane?.contains(document.activeElement)).toBe(true);
 });
+
+/** A key pressed on a focused button: the browser clicks it for Enter, so this does the same. */
+async function enter(id: string) {
+  const el = byId<HTMLElement>(id);
+  await act(async () => {
+    el?.focus();
+    el?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    el?.click();
+  });
+  await settle();
+}
+
+test("Create while a synced folder's notice waits: focus moves to Got it, and nothing is created", async () => {
+  const transport = await pick(
+    await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
+  );
+  await press("create-matter");
+  expect(named(transport, "create_matter")).toEqual([]);
+  expect(document.activeElement).toBe(byId("synced-got-it"));
+  // the ring: a focus a press moved draws it as a key's does (base.css)
+  expect(byId("synced-got-it")?.hasAttribute("data-focus-moved")).toBe(true);
+  expect(byId("place-notice")).not.toBeNull();
+  // the notice still waits: a second press moves focus there again, and creates nothing
+  await press("create-matter");
+  expect(named(transport, "create_matter")).toEqual([]);
+  expect(document.activeElement).toBe(byId("synced-got-it"));
+});
+
+test("Create after Got it creates, once; a press on Create before it only moved focus", async () => {
+  const transport = await pick(
+    await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
+  );
+  await press("create-matter");
+  expect(named(transport, "create_matter")).toEqual([]);
+  await press("synced-got-it");
+  expect(byId("place-notice")).toBeNull();
+  await press("create-matter");
+  expect(named(transport, "create_matter")).toEqual([
+    { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
+  ]);
+});
+
+test("keyboard Enter on Create while the notice waits: focus moves to Got it and nothing is created; after Got it, Enter creates", async () => {
+  const transport = await pick(
+    await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
+  );
+  await enter("create-matter");
+  expect(named(transport, "create_matter")).toEqual([]);
+  expect(document.activeElement).toBe(byId("synced-got-it"));
+  await press("synced-got-it");
+  expect(byId("place-notice")).toBeNull();
+  byId("create-matter")?.focus();
+  await enter("create-matter");
+  expect(named(transport, "create_matter")).toEqual([
+    { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
+  ]);
+});

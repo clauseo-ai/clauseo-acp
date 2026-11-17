@@ -267,8 +267,10 @@
   :focus {
     outline: none;
   }
+  /* data-focus-moved: a focus a press moved there (app/src/room/scan/focus-got-it.ts), drawn as a key's is */
   :focus-visible,
-  [data-force~="focus"] {
+  [data-force~="focus"],
+  [data-focus-moved]:focus {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
