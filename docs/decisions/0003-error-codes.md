@@ -52,7 +52,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `command.unknown_matter` | The command names a matter the host does not know. | no | host |
 | `command.unknown_thread` | The command names a thread the host does not know. | no | host |
 | `thread.turn_running` | A turn is running, so the thread refuses this command (archive, restart) for now. | yes | host; acp (guard against a second `session/prompt`) |
-| `thread.interrupted` | The host stopped during the turn; the turn ended without its answer. | no | host (recovery, in `turn_failed`) |
+| `thread.interrupted` | The host stopped during the turn; the turn ended without its answer. | no | host (recovery, in `turn_failed`; and a running turn the host stops while it closes, in `cancel::shutdown`) |
 | `thread.turn_not_queued` | The queued turn an edit, remove or send-now names has already started or ended. | no | host |
 | `thread.queue_full` | The thread already has `MAX_QUEUED_TURNS` queued turns. | yes | host |
 | `permission.not_pending` | The permission request was already answered, expired or never existed. | no | host |

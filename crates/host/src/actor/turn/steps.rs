@@ -351,6 +351,12 @@ pub(super) fn on_before_turn(
         return;
     };
     let (cancelled, store_failed) = (found.cancelled, found.store_failed);
+    // Shutdown's cancel carries its failure (`cancel::shutdown`); the lawyer's carries none.
+    let interrupted = if cancelled {
+        found.failure.take()
+    } else {
+        None
+    };
     let matter = match matter_of(actor, thread) {
         Ok(matter) => matter,
         Err(error) => {
@@ -398,7 +404,11 @@ pub(super) fn on_before_turn(
     }
     if cancelled {
         let checkpoint = Some((matter, checkpoint));
-        end_unstarted(actor, thread, turn, None, StopReason::Cancelled, checkpoint);
+        let (failed, stop) = match interrupted {
+            Some((code, detail)) => (Some(TurnFailed { turn, code, detail }), StopReason::Failed),
+            None => (None, StopReason::Cancelled),
+        };
+        end_unstarted(actor, thread, turn, failed, stop, checkpoint);
         return;
     }
     let before = checkpoint.checkpoint.outcome.id();

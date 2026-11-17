@@ -350,7 +350,10 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   so the reducer shows the thread `Idle`. A turn with `TurnEnded` is never touched, so each
   repair happens once.
 - Shutdown cancels running turns, stops each agent by the ladder, flushes, takes due snapshots,
-  stops the matter threads and closes `store`.
+  stops the matter threads and closes `store`. A turn it cancels ends
+  `TurnFailed { thread.interrupted }` and `TurnEnded { Failed }`, as start-up repair ends a turn
+  a crash cut, with the answer so far kept; a turn the lawyer had already stopped stays
+  `Cancelled`.
 
 ### Saving and showing
 
