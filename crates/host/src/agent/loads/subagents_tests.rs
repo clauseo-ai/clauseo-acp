@@ -32,6 +32,7 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     own_reads: Vec::new(),
     edit_denied: Vec::new(),
     guarded: Vec::new(),
+    guarded_edit: Vec::new(),
     claude_home: None,
 };
 

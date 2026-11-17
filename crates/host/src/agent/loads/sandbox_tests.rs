@@ -16,6 +16,7 @@ static NO_DENY: LaunchDeny = LaunchDeny {
     own_reads: Vec::new(),
     edit_denied: Vec::new(),
     guarded: Vec::new(),
+    guarded_edit: Vec::new(),
     claude_home: None,
 };
 

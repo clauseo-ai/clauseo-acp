@@ -206,6 +206,10 @@ pub const MATTER_FLAG: &str = "--matter";
 /// repeated for each. Claude Code's entry passes them (`agent/loads.rs`).
 pub const PROTECTED_FLAG: &str = protected::FLAG;
 
+/// The argument that names a path only a file tool may not change (`protected.rs`), followed by
+/// it; repeated for each.
+pub const PROTECTED_EDIT_FLAG: &str = protected::EDIT_FLAG;
+
 /// The argument that names Claude's config folder, which a reference to its variable in a shell
 /// word stands for (`protected.rs`), followed by it.
 pub const CLAUDE_HOME_FLAG: &str = protected::HOME_FLAG;
@@ -299,7 +303,8 @@ fn run_timed(
         );
     }
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
-    for line in line.into_iter().chain(timings::finish()) {
+    let skipped = (protected::skipped(args) > 0).then_some(SKIPPED.to_owned());
+    for line in skipped.into_iter().chain(line).chain(timings::finish()) {
         drop(
             errors
                 .write_all(line.as_bytes())
@@ -316,6 +321,10 @@ fn run_timed(
 fn as_codex_hook(args: &[OsString]) -> bool {
     matter_arg(args).is_none()
 }
+
+/// The stderr line, before any other, saying a protected path in the arguments was left out
+/// (not absolute, or a config folder that is not UTF-8): the guard checks the others.
+pub const SKIPPED: &str = "Clauseo's pre-write guard left out a protected path it could not read";
 
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.
 fn matter_arg(args: &[OsString]) -> Option<PathBuf> {

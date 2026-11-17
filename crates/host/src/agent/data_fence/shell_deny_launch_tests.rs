@@ -162,27 +162,27 @@ fn the_vms_denied_commands_now_pass() {
 }
 
 /// The own run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`, as the
-/// launch adds it), is named by the shell rules in both shells, while the run's work folder
-/// stays reachable; and Claude's `Edit` rule covers it, with no `Read` rule.
+/// launch adds it), is named by no shell rule in either shell, so a pack's script runs and a
+/// command may read it, as the run's work folder may; Claude's `Edit` rule covers it, with no
+/// `Read` rule.
 #[test]
-fn the_own_packs_plugin_is_denied_in_both_shells() {
+fn the_own_packs_plugin_runs_in_both_shells_and_is_denied_for_edit() {
     let dir = TempDir::new("shell-deny-packs");
     let mut deny = vm_launch(dir.path(), VM_RUN_A);
     deny.edit_denied.push(format!("run/{VM_RUN_A}/skill-packs"));
     let rules = windows_shell_deny_rules(&deny, &vm_env);
     let data = VM_DATA.replace('\\', "/");
-    let packs = format!("{data}/run/{VM_RUN_A}/skill-packs/skills/nda/SKILL.md");
+    let packs = format!("{data}/run/{VM_RUN_A}/skill-packs/skills/nda/scripts/fill.py");
     let work = format!("{data}/run/{VM_RUN_A}/work/x.md");
     for tool in ["Bash", "PowerShell"] {
         for command in [
-            format!(r#"echo x > "{packs}""#),
-            format!(r#"cp a.md "{packs}""#),
-            format!("Set-Content -Path {} -Value x", packs.replace('/', "\\")),
+            format!(r#"python "{packs}" in.docx"#),
+            format!("python {} in.docx", packs.replace('/', "\\")),
+            format!(r#"grep -n x "{packs}""#),
+            format!(r#"cat "{work}""#),
         ] {
-            assert!(denied_by(&rules, tool, &command), "{tool}: {command}");
+            assert!(!denied_by(&rules, tool, &command), "{tool}: {command}");
         }
-        let read = format!(r#"cat "{work}""#);
-        assert!(!denied_by(&rules, tool, &read), "{tool}: {read}");
     }
     let rules = claude_deny_rules_on(&deny, true, false);
     let place = format!("//c/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop/run/{VM_RUN_A}");

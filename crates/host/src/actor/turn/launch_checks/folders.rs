@@ -162,7 +162,8 @@ pub(super) fn launch_deny(
         }
     }
     if let Some(home) = claude_home {
-        deny.guarded = crate::agent::loads::guard_protected(home, data, &run.skill_packs);
+        deny.guarded = crate::agent::loads::guard_protected(home, data);
+        deny.guarded_edit = vec![run.skill_packs.clone()];
         deny.claude_home = Some(home.to_path_buf());
     }
     deny

@@ -307,6 +307,10 @@ pub(crate) struct GuardHook<'a> {
     /// The paths the guard refuses the agent to change ([`guard_protected`]), each passed after
     /// [`PROTECTED_FLAG`](crate::pre_write_guard::PROTECTED_FLAG); none when empty.
     pub(crate) protected: &'a [PathBuf],
+    /// The paths the guard refuses Claude's file tools alone to change (the run's packs
+    /// plugin), each passed after
+    /// [`PROTECTED_EDIT_FLAG`](crate::pre_write_guard::PROTECTED_EDIT_FLAG).
+    pub(crate) protected_edit: &'a [PathBuf],
     /// Claude's config folder, passed after
     /// [`CLAUDE_HOME_FLAG`](crate::pre_write_guard::CLAUDE_HOME_FLAG).
     pub(crate) home: Option<&'a Path>,
@@ -327,33 +331,34 @@ impl<'a> GuardHook<'a> {
             matter,
             ask_all,
             protected: &deny.guarded,
+            protected_edit: &deny.guarded_edit,
             home,
         }
     }
 }
 
-/// The names in Claude's config folder that load settings, instructions, skills or plugins into
-/// every later session, which the guard refuses the agent to change ([`guard_protected`]).
-pub(crate) const GUARD_PROTECTED_HOME: [&str; 5] = [
-    "settings.json",
-    "settings.local.json",
-    "CLAUDE.md",
-    "skills",
-    "plugins",
-];
+/// The names in Claude's config folder that load settings or instructions into every later
+/// session and that a launch does not remove (`settings.json`, which it rewrites, and
+/// `.claude.json` and `.config.json`, whose `env` Claude Code applies and which hold its own
+/// state), which the guard refuses the agent to change ([`guard_protected`]), with the ones a
+/// launch removes (`agent::home::CLAUDE_HOME_LOADED`).
+pub(crate) const GUARD_PROTECTED_HOME: [&str; 3] =
+    ["settings.json", ".claude.json", ".config.json"];
 
 /// What the pre-write guard refuses a Claude session's agent to change, whatever the matter: in
-/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`]; under the data folder `data`,
-/// the built-in plugin (`data_fence::BUILT_IN_PLUGIN`); and the run's packs plugin
-/// `skill_packs`. Its deny rules name the same (`agent/data_fence.rs`).
-pub(crate) fn guard_protected(home: &Path, data: &Path, skill_packs: &Path) -> Vec<PathBuf> {
+/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`] and of
+/// `agent::home::CLAUDE_HOME_LOADED`; and under the data folder `data`, the built-in plugin
+/// (`data_fence::BUILT_IN_PLUGIN`). Its deny rules name the same (`agent/data_fence.rs`). The
+/// run's packs plugin is refused to the file tools alone (`LaunchDeny::guarded_edit`).
+pub(crate) fn guard_protected(home: &Path, data: &Path) -> Vec<PathBuf> {
     let plugin = crate::agent::data_fence::BUILT_IN_PLUGIN
         .split('/')
         .fold(data.to_path_buf(), |at, name| at.join(name));
     GUARD_PROTECTED_HOME
         .iter()
+        .chain(crate::agent::home::CLAUDE_HOME_LOADED.iter())
         .map(|name| home.join(name))
-        .chain([plugin, skill_packs.to_path_buf()])
+        .chain([plugin])
         .collect()
 }
 
@@ -369,8 +374,9 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
 /// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` after the
-/// folder; then `--claude-home <home>` and `--protected <path>` for each protected path, the
-/// ones that are UTF-8 (a warning names none). The matter folder goes as an argument because the
+/// folder; then `--claude-home <home>`, `--protected <path>` for each protected path and
+/// `--protected-edit <path>` for each one the file tools alone may not change, the ones that are
+/// UTF-8 (a warning names none). The matter folder goes as an argument because the
 /// hook input's `cwd` follows the agent's `cd`. `None`, with a warning, when `program` or
 /// `matter` is no UTF-8 string: JSON cannot carry it, and a lossy copy could run another program
 /// or guard another folder.
@@ -393,6 +399,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         matter,
         ask_all,
         protected,
+        protected_edit,
         home,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
@@ -414,17 +421,17 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         GUARD_MATCHER
     };
     let home = home.and_then(|home| {
-        home.to_str()
-            .map(|home| (crate::pre_write_guard::CLAUDE_HOME_FLAG, home))
+        let named = home.to_str();
+        if named.is_none() {
+            tracing::warn!("Claude's config folder is not UTF-8: the guard hook goes without it");
+        }
+        named.map(|home| (crate::pre_write_guard::CLAUDE_HOME_FLAG, home))
     });
-    let named = protected.iter().filter_map(|path| path.to_str());
-    if named.clone().count() < protected.len() {
-        tracing::warn!("a protected path is not UTF-8: the guard hook goes without it");
-    }
-    for (flag, value) in home
-        .into_iter()
-        .chain(named.map(|path| (crate::pre_write_guard::PROTECTED_FLAG, path)))
-    {
+    let protected = named(protected, crate::pre_write_guard::PROTECTED_FLAG).chain(named(
+        protected_edit,
+        crate::pre_write_guard::PROTECTED_EDIT_FLAG,
+    ));
+    for (flag, value) in home.into_iter().chain(protected) {
         args.extend([flag, value]);
     }
     Some(serde_json::json!({
@@ -436,6 +443,18 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
             "timeout": GUARD_TIMEOUT_SECONDS,
         }],
     }))
+}
+
+/// Each of `paths` that is UTF-8 after `flag`, with a warning when one is not (it goes without).
+fn named<'p>(
+    paths: &'p [PathBuf],
+    flag: &'static str,
+) -> impl Iterator<Item = (&'static str, &'p str)> {
+    let named: Vec<_> = paths.iter().filter_map(|path| path.to_str()).collect();
+    if named.len() < paths.len() {
+        tracing::warn!("a protected path is not UTF-8: the guard hook goes without it");
+    }
+    named.into_iter().map(move |path| (flag, path))
 }
 
 /// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`
