@@ -344,7 +344,8 @@ fn make_home_makes_a_private_folder() {
     write::create_dir_all(&other.join("agents/codex-acp")).unwrap();
     write::write_file(&home_in(&other), b"").unwrap();
     let error = make_home(&other, &home_in(&other)).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert_eq!(error.code(), ErrorCode::AgentHomeFailed);
+    assert!(error.code().is_retryable());
     assert!(
         error
             .to_string()
@@ -396,7 +397,7 @@ fn make_home_refuses_a_link_below_the_data_folder() {
         write::create_dir_all(at.parent().unwrap()).unwrap();
         write::symlink(&elsewhere, &at).unwrap();
         let error = make_home(&data, &home_in(&data)).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::AgentLaunchFailed, "{linked}");
+        assert_eq!(error.code(), ErrorCode::AgentHomeFailed, "{linked}");
         assert_eq!(
             std::fs::read_dir(&elsewhere).unwrap().count(),
             0,

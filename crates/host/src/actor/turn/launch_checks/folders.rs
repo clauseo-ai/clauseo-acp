@@ -13,7 +13,9 @@ use crate::error::Error;
 
 /// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
 /// that, the host's first launch sets aside the `run` folder an earlier run left ([`RunSweep`]).
-/// When one cannot be made, the run folder is taken back. File system calls: off the actor.
+/// When one cannot be made, the run folder is taken back and the launch fails as
+/// `agent.home_failed`: these are the agent's own folders, as its home is. File system calls: off
+/// the actor.
 pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
     sweep.once(data);
     let tmp = crate::agent::temp::temp_dir(&run.root);
@@ -22,7 +24,7 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
         if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
             run.remove();
             return Err(Error::refused(
-                ErrorCode::AgentLaunchFailed,
+                ErrorCode::AgentHomeFailed,
                 format!("cannot make the folder {}: {error}", folder.display()),
             ));
         }
@@ -31,7 +33,7 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
     if let Err((folder, error)) = ready_own(&run.work, &run.notes) {
         run.remove();
         return Err(Error::refused(
-            ErrorCode::AgentLaunchFailed,
+            ErrorCode::AgentHomeFailed,
             format!("cannot ready the folder {}: {error}", folder.display()),
         ));
     }

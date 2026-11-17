@@ -130,8 +130,8 @@ pub(super) fn failures() -> Vec<DomainEvent> {
 }
 
 /// The later agent codes of a turn's end (D-050's offline and quiet, the too-long prompt, the
-/// service's own failure, a folder the agent can't start in), in the order the corpus first saw
-/// them.
+/// service's own failure, a folder the agent can't start in, its own folder not prepared), in the
+/// order the corpus first saw them.
 fn agent_failures() -> Vec<DomainEvent> {
     vec![
         failed(
@@ -185,6 +185,10 @@ fn agent_failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::AgentProgramMissing,
             "could not start node: No such file or directory (os error 2)",
+        ),
+        failed(
+            ErrorCode::AgentHomeFailed,
+            "Clauseo couldn't prepare Codex's folder.",
         ),
     ]
 }

@@ -9,11 +9,11 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_protocol::{AgentKind, StopReason, StreamId, ThreadId, TurnId};
+use clauseo_protocol::{AgentKind, ErrorCode, StopReason, StreamId, ThreadId, TurnId};
 use clauseo_settings::Locations;
 use serde_json::json;
 
-use crate::codex::{Recording, run_turn};
+use crate::codex::{Recording, run_turn, turn_failed};
 use crate::observe::Events;
 use crate::profile_rig::{CLAUDE, CODEX, Seen, Wired};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
@@ -205,4 +205,31 @@ fn a_claude_launch_sets_the_launch_variables_in_its_own_environment() {
         assert_eq!(named.len(), 1, "{name}: {named:?}");
         assert_eq!(named[0].1, value, "{name}");
     }
+}
+
+/// A home Clauseo can't make (a file where `<data>/agents/<id>`, the folder that holds it, goes)
+/// fails the turn as `agent.home_failed`, retryable, for Claude and for Codex, and neither agent
+/// is started.
+#[test]
+fn a_home_that_cannot_be_made_fails_the_turn_as_agent_home_failed() {
+    let dir = three_agents("agent_homes_cannot_make");
+    for kind in [AgentKind::Claude, AgentKind::Codex] {
+        let holder = home_of(&dir, kind).parent().unwrap().to_owned();
+        crate::write::create_dir_all(holder.parent().unwrap());
+        crate::write::write(&holder, b"not a folder");
+    }
+    let wired = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&wired), |config| config);
+    let (matter, claude, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    for thread in [claude, host.create_thread(matter, CODEX)] {
+        let mut events = host.events(StreamId::Thread(thread));
+        let turn = run_turn(&host, &mut events, thread);
+        let failed = turn_failed(&events, turn)
+            .unwrap_or_else(|| panic!("no TurnFailed of {turn}: {}", events.dump()));
+        assert_eq!(failed.code, ErrorCode::AgentHomeFailed, "{}", events.dump());
+        assert!(failed.code.is_retryable());
+        assert_eq!(events.turn_text(turn), "", "the agent answered a prompt");
+    }
+    host.shutdown();
+    assert!(wired.seen().is_empty(), "no agent was started");
 }

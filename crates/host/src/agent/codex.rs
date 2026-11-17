@@ -379,12 +379,13 @@ pub(super) fn home_failed(error: &dyn std::fmt::Display) -> Error {
     agent_home_failed("Codex", error)
 }
 
-/// The failure of `who`'s launch (`Codex`, `Claude Code`) whose home could not be made: the
-/// error's codes go to the log only, never the path (it holds the user's name).
+/// The failure of `who`'s launch (`Codex`, `Claude Code`) whose home could not be made, as
+/// `agent.home_failed`: the error's codes go to the log only, never the path (it holds the
+/// user's name).
 fn agent_home_failed(who: &str, error: &dyn std::fmt::Display) -> Error {
     tracing::warn!(who, %error, "an agent's folder could not be prepared");
     Error::refused(
-        ErrorCode::AgentLaunchFailed,
+        ErrorCode::AgentHomeFailed,
         format!("Clauseo couldn't prepare {who}'s folder."),
     )
 }
