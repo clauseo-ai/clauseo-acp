@@ -274,3 +274,23 @@ fn missing_program_is_program_missing() {
     assert_eq!(source.kind(), io::ErrorKind::NotFound);
     assert_eq!(error.code(), ErrorCode::AgentProgramMissing);
 }
+
+/// A working folder the OS will not enter answers the spawn with permission denied, as a program
+/// it may not run does: that is the folder's, never `agent.program_blocked`.
+#[cfg(unix)]
+#[test]
+fn a_working_folder_that_cannot_be_entered_is_not_the_program() {
+    let dir = RunDir::new();
+    crate::write::set_mode(dir.path(), 0o000).unwrap();
+    let result = launch_program(std::path::PathBuf::from("/bin/sh"), &["-c", "exit 0"], &dir);
+    crate::write::set_mode(dir.path(), 0o755).unwrap();
+    // Some systems enter a folder they can't read: root, and a user namespace whose capabilities
+    // let the spawn's chdir through though `read_dir` fails. There the program starts, so the
+    // launch itself is the probe; the case is a system that refuses, as Clauseo's users' do.
+    let Err(error) = result else {
+        eprintln!("skipped: this system enters a folder it can't read");
+        return;
+    };
+    assert!(matches!(error, Error::Os { .. }), "{error:?}");
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+}

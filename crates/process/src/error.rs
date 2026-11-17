@@ -54,10 +54,12 @@ impl Error {
     }
 }
 
-/// Windows' "blocked by group policy" (`ERROR_ACCESS_DISABLED_BY_POLICY`: allow lists and
-/// software restriction) and its antivirus refusals (`ERROR_VIRUS_INFECTED`,
-/// `ERROR_VIRUS_DELETED`), which have no `io::ErrorKind`.
-const WINDOWS_BLOCKED: [i32; 3] = [1260, 225, 226];
+/// Windows' refusals to run a program that have no `io::ErrorKind`: "blocked by group policy"
+/// (`ERROR_ACCESS_DISABLED_BY_POLICY`, 1260: allow lists and software restriction), its
+/// antivirus refusals (`ERROR_VIRUS_INFECTED` 225, `ERROR_VIRUS_DELETED` 226), and code
+/// integrity: App Control for Business (4551) and Smart App Control (4553 to 4556). The code
+/// integrity numbers are to confirm on win-02.
+const WINDOWS_BLOCKED: [i32; 8] = [1260, 225, 226, 4551, 4553, 4554, 4555, 4556];
 
 /// The code of a spawn the OS answered with `source`, on Windows when `windows`.
 fn spawn_code(source: &io::Error, windows: bool) -> ErrorCode {

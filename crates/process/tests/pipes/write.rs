@@ -15,6 +15,13 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
+/// Sets `path`'s Unix permission bits.
+#[cfg(unix)]
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
 /// `fs::remove_dir_all`.
 pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
     std::fs::remove_dir_all(path)
