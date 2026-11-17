@@ -3,9 +3,11 @@
 //! when it fails. The call is passed in, so the steps after each failure are tested on every OS
 //! with the failure simulated.
 //!
-//! The call is given the backup name `<name>.clauseo-<n>.orig.tmp` ([`crate::matter::backups`]:
-//! never versioned, never swept, and put back when the worker next opens the matter if a crash
-//! left the target missing). By the call's documentation, after a failure:
+//! The call is given the backup name `<name>.clauseo-<n>.orig.tmp`, or
+//! `.clauseo-<hash>-<n>.orig.tmp` for a name too long to take the suffix
+//! ([`crate::matter::backups`]: never versioned, never swept, and put back when the worker next
+//! opens the matter if a crash left the target missing). By the call's documentation, after a
+//! failure:
 //! - 1175 `ERROR_UNABLE_TO_REMOVE_REPLACED`: nothing moved; the target is as it was.
 //! - 1176 `ERROR_UNABLE_TO_MOVE_REPLACEMENT`: with a backup name, both files keep their names.
 //! - 1177 `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`: the old file is under the backup name and the
@@ -21,8 +23,8 @@
 //!
 //! A target missing before the call (a restore of a deleted file) gets the plain rename alone; so
 //! does a target with the read-only attribute, which stays refused as a rename refuses it (the
-//! attribute is kept, not overridden), and a target with no free backup name (a name too long
-//! for one), which loses its metadata as on main.
+//! attribute is kept, not overridden), and a target with no free backup name (all 1000 taken),
+//! which loses its metadata as on main.
 //!
 //! A symlink or junction never reaches this: `writeback::writable` writes only a regular file or
 //! a missing one, and the stat check before the renames fails a target replaced by one since.
@@ -90,7 +92,7 @@ pub(super) fn replace_keeping(
     }
     let backup = match free_backup(target) {
         Ok(backup) => backup,
-        // No backup name to give (too long for the folder, or all taken): the plain rename, over
+        // No backup name to give (all taken, or the folder unreadable): the plain rename, over
         // the old file, whose metadata is lost.
         Err(err) => {
             return rename(temp, target)
@@ -170,7 +172,7 @@ fn there(path: &Path) -> bool {
     !matches!(std::fs::symlink_metadata(path), Err(err) if err.kind() == io::ErrorKind::NotFound)
 }
 
-/// The first backup name of `target` (`<name>.clauseo-<n>.orig.tmp`) with nothing at it.
+/// The first backup name of `target` ([`backup_name`]) with nothing at it.
 fn free_backup(target: &Path) -> io::Result<PathBuf> {
     let name = target.file_name().unwrap_or_default();
     for n in 0..TEMP_TRIES {
