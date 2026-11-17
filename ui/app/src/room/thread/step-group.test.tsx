@@ -200,6 +200,39 @@ test("a failed row's state follows a dot, Failed, with the break icon (DESIGN, t
   }
 });
 
+test("a web fetch the site refused reads as tried and tagged Failed, row and folded line alike", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      ASKED,
+      call(7, 201, "fetch", "completed", {
+        title: "Fetch https://www.sci.gov.in/",
+        tool_name: "WebFetch",
+        raw_input: { inline: JSON.stringify({ url: "https://www.sci.gov.in/" }) },
+        content: [
+          {
+            text: {
+              text: {
+                inline:
+                  "The server returned HTTP 403 Forbidden.\n\nThe response body was not retrieved.",
+              },
+            },
+          },
+        ],
+      }),
+      agentText(8, 2, "The site refused the fetch."),
+    ]),
+  ]);
+  await h.click(lineOf(groups()[0])!);
+  const [row] = h.all("tool-call");
+  expect(row?.querySelector(".step-row-text")?.textContent).toBe(
+    "Tried to read sci.gov.in online. · Failed",
+  );
+  expect(row?.querySelector(".step-row-mark")?.textContent).toBe("Failed");
+  expect(row?.dataset["failed"]).toBe("true");
+  expect(h.one("step-group-trouble")?.textContent).toBe("Tried to read sci.gov.in online.");
+});
+
 test("a failure stays visible on the folded line", async () => {
   h = await mountRoom();
   h.deliver([

@@ -137,6 +137,31 @@ export function segmentsPick(
 /** Whether a step's state is one this version can't read (a newer Clauseo's): neither done nor failed. */
 const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 
+/** The start of a result that says the site refused the fetch: an HTTP 4xx or 5xx. */
+const REFUSED = /^The server returned HTTP [45]\d\d\b/;
+
+/** Whether a web fetch the site refused: a completed WebFetch whose result text starts with REFUSED. Claude Code does
+ * not fail such a fetch; it returns that text as a normal result, so the adapter reports the call completed. Pinned:
+ * the text was read from Claude Code as shipped with `@anthropic-ai/claude-agent-sdk` 0.3.293, under claude-agent-acp
+ * 0.89.1 (the pin in crates/agents/src/snapshot/embedded.rs:215). A pin bump re-checks it. Any other text, another
+ * tool's, or the same words mid-text, is no refusal. */
+export function httpRefused(entry: ToolCallEntry): boolean {
+  if (entry.status !== "completed" || entry.tool_name?.toLowerCase() !== "webfetch") return false;
+  let shown = "";
+  for (const c of entry.content)
+    if (typeof c === "object" && c.text !== undefined) {
+      shown = c.text.text.inline ?? "";
+      break;
+    }
+  return REFUSED.test(shown);
+}
+
+/** A step that finished: completed, and not a fetch the site refused (httpRefused). */
+const finishedOf = (c: ToolCallEntry) => c.status === "completed" && !httpRefused(c);
+
+/** A step that failed: failed, or a fetch the site refused (httpRefused). The Failed tag and the trouble count it. */
+const failedOf = (c: ToolCallEntry) => c.status === "failed" || httpRefused(c);
+
 /** A step in a state this version can't read, in no tense: by its place ("Lease.pdf."), its words searched for, or
  * the agent's own words cut down ("Check the share register."); with none, that its state isn't known. */
 function namedOf(lang: Lang, entry: ToolCallEntry): string {
@@ -245,7 +270,7 @@ export function restOf(
   lang: Lang,
   calls: readonly ToolCallEntry[],
 ): { kinds: string[]; line: string; trouble: string } {
-  const done = calls.filter((c) => c.status === "completed");
+  const done = calls.filter(finishedOf);
   if (done.length > 0)
     return { kinds: iconsOf(done), line: summaryOf(lang, done), trouble: troubleOf(lang, calls) };
   const waiting = [...calls].reverse().find(unsettled);
@@ -257,7 +282,7 @@ export function restOf(
     };
   // a step whose state is not known (a newer Clauseo's) is neither done nor failed, nor running: with nothing tried
   // and not done, the line says the state isn't known, in no tense, with no break
-  const tried = calls.filter((c) => c.status === "failed" || c.status === "cancelled");
+  const tried = calls.filter((c) => failedOf(c) || c.status === "cancelled");
   const unread = calls.filter(unknownState);
   if (tried.length === 0 && unread.length > 0)
     return { kinds: iconsOf(unread), line: steps(lang, "State not known."), trouble: "" };
@@ -277,7 +302,7 @@ export function restOf(
 /** What failed or was stopped in a group with a step that finished or is still to, in words for the folded line; ""
  * when nothing did. A group with every step over and none finished says what it tried instead (restOf). */
 export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  const failed = calls.filter((c) => c.status === "failed").length;
+  const failed = calls.filter(failedOf).length;
   const stopped = calls.filter((c) => c.status === "cancelled").length;
   const out: string[] = [];
   // counted on their own: the line before counts only what finished, so "of them" would point at nothing it named
@@ -301,7 +326,7 @@ export function backgroundLine(lang: Lang, calls: readonly ToolCallEntry[]): str
 
 /** The live line's count of the steps done so far; "" before the first. */
 export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  const n = calls.filter((c) => c.status === "completed").length;
+  const n = calls.filter(finishedOf).length;
   return n === 0 ? "" : counted(lang, ["1 done so far.", "{n} done so far."], n);
 }
 
@@ -310,7 +335,7 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   if (unsettled(entry)) return doingOf(lang, entry);
   if (unknownState(entry)) return namedOf(lang, entry);
-  const tried = entry.status !== "completed";
+  const tried = entry.status !== "completed" || httpRefused(entry);
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
   // a helper's call (helper-words.ts) says the task it was given; cut, the "…" ends the line without the full stop. With
@@ -419,7 +444,7 @@ export function hoverOf(entry: ToolCallEntry): string | null {
 
 /** A row's state where it didn't simply finish. */
 export function markOf(lang: Lang, call: ToolCallEntry): string | null {
-  if (call.status === "failed") return th(lang, "Failed");
+  if (failedOf(call)) return th(lang, "Failed");
   if (call.status === "cancelled") return th(lang, "Stopped");
   if (call.background !== undefined) return mt(lang, "In the background");
   if (call.status === "pending") return steps(lang, "Waiting");
