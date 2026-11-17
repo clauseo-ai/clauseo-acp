@@ -104,7 +104,7 @@ async fn checks(
         if !codex::guard_trusted(&answer) {
             return Err(codex::guard_untrusted(&answer));
         }
-        guard::self_test(guard).await?;
+        guard::self_test(guard, start.session.as_str().to_owned()).await?;
     }
     Ok(fell_back)
 }

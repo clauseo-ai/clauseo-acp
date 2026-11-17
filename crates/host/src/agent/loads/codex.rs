@@ -62,23 +62,27 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// [`FLAG`](crate::pre_write_guard::FLAG) and, with `record`, [`RECORD_FLAG`] and that file
 /// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`) then
 /// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), then
-/// `--sessions` and the ids file beside the record (`pre_write_guard::sessions::file`), before
-/// every tool, trusted by its own `state` entry:
+/// `--sessions` and the ids file beside the record (`pre_write_guard::sessions::file`), then
+/// `--own-folder` and each of the session's own folders `own` (its run folder and its matter's
+/// notes, where a `view_image` is not refused), before every tool, trusted by its own `state`
+/// entry:
 ///
 /// ```json
 /// {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>
-///     --sessions '<ids>'",
+///     --sessions '<ids>' --own-folder '<run>' --own-folder '<notes>'",
 ///   "commandWindows": "$global:LASTEXITCODE = -1; & '<program>' --pre-write-guard --record
-///     '<record>' --record-id '<hex>' --sessions '<ids>'; $c = $LASTEXITCODE; if ($c -eq 0 -or
-///     $c -eq 2) { exit $c }; [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
+///     '<record>' --record-id '<hex>' --sessions '<ids>' --own-folder '<run>' --own-folder
+///     '<notes>'; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
+///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
 /// The hash is for the OS this runs on, as Codex computes it on the same machine, so it changes
 /// with the record file, one per session. `None` when `program` is no UTF-8 string: no hook
 /// rather than one that runs something else. A record file with no UTF-8 spelling, or an
-/// identity of anything but hex digits, goes out of the command alone, the ids file with it: the
+/// identity of anything but hex digits, goes out of the command alone, the ids file and the own
+/// folders with it (an own folder with no UTF-8 spelling is left out alone): the
 /// guard still runs, the lawyer is not told of its refusals, and the launch's self-test
 /// (`pre_write_guard/self_test.rs`), which needs the session check, refuses the launch. The codex
 /// hooks seam (`actor::turn::agents`,
@@ -86,7 +90,11 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 ///
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
 /// [`RECORD_ID_FLAG`]: crate::pre_write_guard::RECORD_ID_FLAG
-pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Option<Value> {
+pub fn codex_hook_config(
+    program: &Path,
+    record: Option<(&Path, &str)>,
+    own: &[&Path],
+) -> Option<Value> {
     let program = program.to_str()?;
     let hex = |id: &&str| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit());
     let record = record.and_then(|(file, id)| Some((file.to_str()?, Some(id).filter(hex)?)));
@@ -103,7 +111,10 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
             .to_str()
             .map(str::to_owned)
     });
-    let sessions_flag = crate::pre_write_guard::sessions::FLAG;
+    let (sessions_flag, own_flag) = (
+        crate::pre_write_guard::sessions::FLAG,
+        crate::pre_write_guard::sessions::OWN_FLAG,
+    );
     if let Some((file, id)) = record {
         command = format!("{command} {flag} {} {id_flag} {id}", posix_quoted(file));
         windows.extend([
@@ -115,6 +126,10 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
         if let Some(sessions) = &sessions {
             command = format!("{command} {sessions_flag} {}", posix_quoted(sessions));
             windows.extend([sessions_flag.to_owned(), ps_quoted(sessions)]);
+            for folder in own.iter().filter_map(|folder| folder.to_str()) {
+                command = format!("{command} {own_flag} {}", posix_quoted(folder));
+                windows.extend([own_flag.to_owned(), ps_quoted(folder)]);
+            }
         }
     }
     let command_windows = ps_command(&windows);
@@ -289,7 +304,8 @@ mod tests {
 
     #[test]
     fn the_config_runs_the_guard_and_trusts_itself() {
-        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
+        let config =
+            codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None, &[]).unwrap();
         let windows = ps_command(&[
             "'/opt/clauseo/clauseo-desktop'".to_owned(),
             "--pre-write-guard".to_owned(),
@@ -331,7 +347,7 @@ mod tests {
             r"'C:\O''Brien & Sons; $x `y 100% (2024)'"
         );
         assert_eq!(ps_quoted("C:\u{2019}x"), "'C:\u{2019}\u{2019}x'");
-        let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None).unwrap();
+        let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None, &[]).unwrap();
         assert!(
             config["PreToolUse"][0]["hooks"][0]["commandWindows"]
                 .as_str()
@@ -361,19 +377,25 @@ mod tests {
     }
 
     /// The session's record file goes after the flag, quoted for each shell, then its identity,
-    /// then the ids file beside it, and the trust hash is the one Codex computes for that whole
-    /// command; an identity of anything but hex digits leaves both commands without them.
+    /// then the ids file beside it, then each own folder, and the trust hash is the one Codex
+    /// computes for that whole command; an identity of anything but hex digits leaves both
+    /// commands without them.
     #[test]
     fn the_record_file_and_its_identity_go_in_the_command_and_its_hash() {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
         let record = Path::new("/data/browser/guard/s 1/guard-blocks.jsonl");
         let id = "00000000000001030000000000000000000000000045c2a9";
-        let config = codex_hook_config(program, Some((record, id))).unwrap();
+        let own = [
+            Path::new("/data/run/s 1"),
+            Path::new("/data/agent-state/m'1/notes"),
+        ];
+        let config = codex_hook_config(program, Some((record, id)), &own).unwrap();
         let hook = &config["PreToolUse"][0]["hooks"][0];
         let posix = format!(
             "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
              '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id} \
-             --sessions '/data/browser/guard/s 1/sessions.json'"
+             --sessions '/data/browser/guard/s 1/sessions.json' --own-folder '/data/run/s 1' \
+             --own-folder '/data/agent-state/m'\\''1/notes'"
         );
         let windows = ps_command(&[
             "'/opt/clauseo/clauseo-desktop'".to_owned(),
@@ -384,6 +406,10 @@ mod tests {
             ps_quoted(id),
             "--sessions".to_owned(),
             "'/data/browser/guard/s 1/sessions.json'".to_owned(),
+            "--own-folder".to_owned(),
+            "'/data/run/s 1'".to_owned(),
+            "--own-folder".to_owned(),
+            "'/data/agent-state/m''1/notes'".to_owned(),
         ]);
         assert_eq!(hook["command"], posix);
         assert_eq!(hook["commandWindows"], windows);
@@ -394,8 +420,16 @@ mod tests {
         };
         let trusted = &entry["trusted_hash"];
         assert_eq!(*trusted, hook_hash("pre_tool_use", "*", effective, 30));
+        // The hash of this exact command, worked out apart from `hook_hash` (keys sorted, compact
+        // JSON, SHA-256), so the own folders' quoting can't drift from what Codex hashes.
+        if !cfg!(windows) {
+            assert_eq!(
+                *trusted,
+                "sha256:de9dc45e8c444df595901be9b612cd3319a08797b702c68bf56af16ce07e9ca7"
+            );
+        }
         let odd = Path::new("/data/100%/guard-blocks.jsonl");
-        let odd = codex_hook_config(program, Some((odd, id))).unwrap();
+        let odd = codex_hook_config(program, Some((odd, id)), &[]).unwrap();
         let odd = &odd["PreToolUse"][0]["hooks"][0];
         assert!(
             odd["commandWindows"]
@@ -408,7 +442,7 @@ mod tests {
              --sessions '/data/100%/sessions.json'"
         )));
         for bad in ["", "12 && calc", "'x'", "00g1"] {
-            let config = codex_hook_config(program, Some((record, bad))).unwrap();
+            let config = codex_hook_config(program, Some((record, bad)), &own).unwrap();
             let hook = &config["PreToolUse"][0]["hooks"][0];
             assert_eq!(
                 hook["command"], "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
@@ -423,14 +457,14 @@ mod tests {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
         let record = Path::new("/data/browser/guard/s1/guard-blocks.jsonl");
         for record in [None, Some((record, "00ff"))] {
-            let config = codex_hook_config(program, record).unwrap();
+            let config = codex_hook_config(program, record, &[]).unwrap();
             assert_eq!(config["PreToolUse"][0]["matcher"], "*");
             assert_eq!(super::CODEX_GUARD_MATCHER, "*");
         }
     }
 
-    /// Codex lets a call run when its hook times out, so the timeout it gets is never under the
-    /// guard's own deadline (with room for a slow start), past which the guard refuses itself.
+    /// The timeout Codex gets for the hook is at least twice the guard's own deadline, past which
+    /// the guard refuses on its own.
     #[test]
     fn codexs_timeout_is_not_under_the_guards_deadline() {
         let deadline = crate::pre_write_guard::sessions::DEADLINE;
@@ -439,7 +473,8 @@ mod tests {
             "timeout {}s, deadline {deadline:?}",
             super::CODEX_GUARD_TIMEOUT_SECONDS
         );
-        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
+        let config =
+            codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None, &[]).unwrap();
         assert_eq!(
             config["PreToolUse"][0]["hooks"][0]["timeout"],
             super::CODEX_GUARD_TIMEOUT_SECONDS

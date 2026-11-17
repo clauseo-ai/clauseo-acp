@@ -82,11 +82,15 @@ pub(super) fn launch(
         .as_ref()
         .map(|(file, id)| (file.clone(), id.hex()));
     let mut test_hooks = None;
+    let run = &prepared.run;
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let record = record
             .as_ref()
             .map(|(file, id)| (file.as_path(), id.as_str()));
-        let hooks = codex_hooks(actor, record)?;
+        // A `view_image` in the session's own folders is not refused
+        // (`pre_write_guard/sessions.rs`).
+        let own = [run.root.as_path(), run.notes.as_path()];
+        let hooks = codex_hooks(actor, record, &own)?;
         let guard = hooks.is_some();
         // The hook's command, for the self-test before the first prompt (`session.rs`).
         test_hooks = hooks.clone().filter(|_| actor.guard_self_test);
@@ -186,15 +190,15 @@ pub(super) fn launch(
 /// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
 /// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
 /// group, the guard's, which records its refusals in the session's `record` file, with that
-/// file's identity, for the lawyer (`updates/guard_blocks.rs`); none when the launch prep made
-/// no record (a Claude session). `None` with no guard program; a program `codex_hook_config`
-/// cannot quote refuses the launch (an error in the log), since Codex would run every call
-/// unchecked. It is read once per launch, which records on the agent
-/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check and its self-test.
+/// file's identity, for the lawyer (`updates/guard_blocks.rs`), and the session's `own` folders;
+/// none when the launch prep made no record (a Claude session). `None` with no guard program; a
+/// program `codex_hook_config` cannot quote refuses the launch (an error in the log). It is read
+/// once per launch, which records on the agent whether one went in (`Agent::guard`); with none
+/// the session start skips the guard's trust check and its self-test.
 fn codex_hooks(
     actor: &Actor,
     record: Option<(&std::path::Path, &str)>,
+    own: &[&std::path::Path],
 ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, Error> {
     if let Some(hooks) = &actor.codex_hooks {
         return Ok(Some(hooks.clone()));
@@ -204,7 +208,7 @@ fn codex_hooks(
     };
     // On Windows the console program beside the app, which PowerShell waits for.
     let program = agent::loads::codex_guard_program(app);
-    let config = agent::loads::codex_hook_config(&program, record);
+    let config = agent::loads::codex_hook_config(&program, record, own);
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::error!(
             "the pre-write guard's path cannot go in Codex's hook command, so Codex is not started"

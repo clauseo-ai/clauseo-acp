@@ -1,6 +1,8 @@
 //! The pre-write guard: the command an agent's `PreToolUse` hook runs before each file edit and
-//! shell command, refusing a write to a document of the matter that Word (or, on Windows, any
-//! program) holds open, in every permission mode.
+//! shell command (before every tool call under Codex's hook), refusing a write to a document of
+//! the matter that Word (or, on Windows, any program) holds open, in every permission mode.
+//! Under Codex's hook with `--sessions` it first answers only the conversation's own sessions
+//! (`sessions.rs`).
 //!
 //! [`run`] reads one hook input object (Claude Code's or Codex's) and finds the files the tool
 //! would write:
@@ -146,17 +148,25 @@
 //! tool it does not refuse but the local reads. An unknown tool, or a known one with nothing held,
 //! is exit 0 with nothing written.
 //!
-//! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
-//! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
-//! `tool_input`, a checked tool without its path field), is exit 0 with one stderr line starting
-//! [`IGNORED`] saying why, naming no input content. Stdin comes from the agent CLI, not the
-//! model, so a model cannot make it malformed; and failing closed would refuse every matched
-//! tool, stopping the agent outright, the day Claude Code or Codex changes its input shape. The
-//! fixtures in `tests/fixtures/pre_write_guard` pin how the guard reads the shapes captured for
+//! Input it cannot read, and shapes it does not know, by entry:
+//!
+//! - Claude Code's entry (`--matter`), a decision (clauseo-acp-private#162): input it cannot
+//!   read (empty, cut short, not JSON), or a shape it does not know (no absolute `cwd` or
+//!   `--matter`, no `tool_name` or `tool_input`, a checked tool without its path field), is
+//!   exit 0 with one stderr line starting [`IGNORED`] saying why, naming no input content.
+//!   Stdin comes from the agent CLI, not the model, so a model cannot make it malformed; and
+//!   refusing would stop the agent outright the day Claude Code changes its input shape.
+//! - Codex's hook (no `--matter`): input that is empty, unreadable or not JSON is refused with
+//!   [`UNCHECKED`]; a shape it does not know is exit 0 with an [`IGNORED`] line, as above.
+//! - Codex's hook with `--sessions` (`sessions.rs`): input it cannot read or place, a session
+//!   not listed, or an ids file it cannot read is refused, before any other check; the guard
+//!   process also refuses on a panic and past its own deadline (`sessions::arm`).
+//!
+//! The fixtures in `tests/fixtures/pre_write_guard` pin how the guard reads the shapes captured for
 //! the agent versions their README names; CI alone does not notice a vendor change, so they are
 //! captured again from the real tool whenever a pinned Claude Code or Codex version moves. In
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
-//! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
+//! acceptEdits and bypassPermissions this guard is the only stop.
 
 mod answers;
 mod ask;
@@ -254,7 +264,8 @@ fn run_timed(
     let outsider = sessions::wanted(args)
         .then(|| {
             let read = read.as_ref().ok().map(|_| bytes.as_slice());
-            sessions::refusal(read, sessions::file_arg(args).as_deref())
+            let own = sessions::own_args(args);
+            sessions::refusal(read, sessions::file_arg(args).as_deref(), &own)
         })
         .flatten();
     let found = match (outsider, read) {

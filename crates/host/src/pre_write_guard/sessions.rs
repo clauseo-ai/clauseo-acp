@@ -7,13 +7,14 @@
 //! the session call returns and before its first prompt, in the guard folder no agent may write.
 //! Any other call is refused with [`REFUSED`], and so is every call when the guard can't tell:
 //! stdin it can't read or parse, no `session_id`, a file that is missing, unreadable, too big or
-//! not a JSON array of ids. Codex blocks a call only on exit 2 with something on stderr and lets
-//! it run on anything else (a crash, a timeout), so with [`FLAG`] the guard process also refuses
-//! on a panic and past its own deadline ([`arm`]).
+//! not a JSON array of ids. A refusal is exit 2 with its reason on stderr, which Codex takes as a
+//! block; with [`FLAG`] the guard process also answers that way on a panic and past its own
+//! deadline ([`arm`]).
 //!
 //! Then, for a listed session, the guard's other checks apply as before, and one more: a
-//! `view_image` of a path in Clauseo's data folder is refused (the data fence's own check,
-//! `agent/data_fence.rs`, with no folder of the session's own allowed).
+//! `view_image` of a path in Clauseo's data folder is refused unless the path, links followed,
+//! lies in one of the session's own folders that the hook names after [`OWN_FLAG`] (its run
+//! folder and its matter's notes); the data fence's own check, `agent/data_fence.rs`.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -26,6 +27,10 @@ use serde_json::Value;
 /// The argument that names the file of the conversation's session ids, followed by the file;
 /// after the record arguments.
 pub(crate) const FLAG: &str = "--sessions";
+
+/// The argument that names one of the session's own folders in the data folder, followed by
+/// the folder; once per folder, after [`FLAG`] and its file. A `view_image` there is not refused.
+pub(crate) const OWN_FLAG: &str = "--own-folder";
 
 /// The ids file's name, in the session's guard folder (`record::folder`).
 pub(crate) const FILE_NAME: &str = "sessions.json";
@@ -44,8 +49,7 @@ const DATA_IMAGE: &str = "Clauseo doesn't let the agent open files in Clauseo's 
 
 /// How long the guard process may take before it refuses on its own ([`arm`]). A normal call
 /// takes milliseconds; a held-open check over a big matter folder on a slow disk takes longer,
-/// so this leaves room for it, well under Codex's own hook timeout
-/// (`agent/loads/codex.rs`), past which Codex would let the call run.
+/// so this leaves room for it, at most half Codex's own hook timeout (`agent/loads/codex.rs`).
 pub const DEADLINE: Duration = Duration::from_secs(15);
 
 /// The longest ids file read; a longer one is refused.
@@ -64,6 +68,16 @@ pub(super) fn file_arg(args: &[OsString]) -> Option<PathBuf> {
         .filter(|file| file.is_absolute())
 }
 
+/// The absolute folders after each [`OWN_FLAG`].
+pub(super) fn own_args(args: &[OsString]) -> Vec<PathBuf> {
+    args.iter()
+        .zip(args.iter().skip(1))
+        .filter(|(flag, _)| *flag == OWN_FLAG)
+        .map(|(_, folder)| PathBuf::from(folder))
+        .filter(|folder| folder.is_absolute())
+        .collect()
+}
+
 /// The ids file in the guard folder `folder`.
 pub fn file(folder: &Path) -> PathBuf {
     folder.join(FILE_NAME)
@@ -75,9 +89,13 @@ fn data_of(file: &Path) -> Option<&Path> {
 }
 
 /// The reason the call in `bytes` (`None`: stdin could not be read) is refused under the session
-/// check with the ids file `file`, if it is: [`REFUSED`] unless its `session_id` is listed,
-/// then the `view_image` rule.
-pub(super) fn refusal(bytes: Option<&[u8]>, file: Option<&Path>) -> Option<&'static str> {
+/// check with the ids file `file` and the session's own folders `own`, if it is: [`REFUSED`]
+/// unless its `session_id` is listed, then the `view_image` rule.
+pub(super) fn refusal(
+    bytes: Option<&[u8]>,
+    file: Option<&Path>,
+    own: &[PathBuf],
+) -> Option<&'static str> {
     let hook = bytes.and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok());
     let id = hook
         .as_ref()
@@ -90,7 +108,7 @@ pub(super) fn refusal(bytes: Option<&[u8]>, file: Option<&Path>) -> Option<&'sta
     if !read(file).is_some_and(|ids| ids.iter().any(|known| known == id)) {
         return Some(REFUSED);
     }
-    view_image_in_data(hook, file).then_some(DATA_IMAGE)
+    view_image_in_data(hook, file, own).then_some(DATA_IMAGE)
 }
 
 /// The ids in `file`: a JSON array of strings, none empty, the file at most [`MAX_FILE`] bytes;
@@ -109,11 +127,41 @@ pub fn read(file: &Path) -> Option<Vec<String>> {
     ids.iter().all(|id| !id.is_empty()).then_some(ids)
 }
 
+/// How many times [`add`] tries the rename that puts the ids file in place, and the pause
+/// between two tries: about half a second in all, for a scanner (Defender on Windows) that holds
+/// the new file for a moment. Harmless elsewhere.
+const RENAME_TRIES: u32 = 5;
+const RENAME_PAUSE: Duration = Duration::from_millis(125);
+
 /// Adds the session `id` to the ids file in the guard folder `folder`, keeping the ids already
 /// there (a fork's new id joins its conversation's), written whole and private
-/// (`write::replace_private_file`). Nothing is written when `id` is listed already. The host's,
-/// off the actor.
+/// (`write::replace_private_file`), the rename tried up to [`RENAME_TRIES`] times
+/// [`RENAME_PAUSE`] apart; the last try's error is the result. Nothing is written when `id` is
+/// listed already. The host's, off the actor.
 pub fn add(folder: &Path, id: &str) -> std::io::Result<()> {
+    add_with(folder, id, &crate::write::rename_file, &pause)
+}
+
+/// Blocks the calling thread for `time`: the pause between two tries of the ids file's rename.
+/// Bound: at most 4 retries after the first try ([`RENAME_TRIES`] 5), each pause
+/// [`RENAME_PAUSE`] 125 ms, so at most 500 ms of pauses in total per [`add`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a pause between two renames, off the actor, in real time: at most 4 retries, 125 ms \
+              apart, 500 ms in total"
+)]
+fn pause(time: Duration) {
+    // At most 4 retries, 125 ms apart, 500 ms in total (RENAME_TRIES, RENAME_PAUSE).
+    std::thread::sleep(time);
+}
+
+/// [`add`] with `rename` in place of `std::fs::rename` and `pause` in place of the real pause.
+fn add_with(
+    folder: &Path,
+    id: &str,
+    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+    pause: &dyn Fn(Duration),
+) -> std::io::Result<()> {
     let file = file(folder);
     let mut ids = read(&file).unwrap_or_default();
     if ids.iter().any(|known| known == id) {
@@ -124,14 +172,28 @@ pub fn add(folder: &Path, id: &str) -> std::io::Result<()> {
     }
     ids.push(id.to_owned());
     let text = serde_json::to_vec(&ids).map_err(std::io::Error::other)?;
-    crate::write::replace_private_file(&file, &text)
+    crate::write::replace_private_file_by(&file, &text, |temp, path| {
+        let mut tries = 1;
+        loop {
+            match rename(temp, path) {
+                Err(error) if tries < RENAME_TRIES => {
+                    tracing::debug!(%error, tries, "the ids file's rename failed; trying again");
+                    pause(RENAME_PAUSE);
+                    tries += 1;
+                }
+                done => return done,
+            }
+        }
+    })
 }
 
 /// Whether the call is a `view_image` whose path, taken from the input's `cwd`, resolves into
-/// the data folder of `file`, by the data fence's check (links followed, case folded as the
-/// file system folds it). A `view_image` with no path string, or no absolute `cwd` for a
-/// relative one, counts as in it; no data folder to compare with counts as in it too.
-fn view_image_in_data(hook: &Value, file: &Path) -> bool {
+/// the data folder of `file` outside the session's own folders `own`, by the data fence's check
+/// (links followed, case folded as the file system folds it; an own folder counts only while it
+/// resolves to its own place, not through a link). A `view_image` with no path string, or no
+/// absolute `cwd` for a relative one, counts as in it; no data folder to compare with counts as
+/// in it too.
+fn view_image_in_data(hook: &Value, file: &Path, own: &[PathBuf]) -> bool {
     if hook.get("tool_name").and_then(Value::as_str) != Some("view_image") {
         return false;
     }
@@ -153,7 +215,7 @@ fn view_image_in_data(hook: &Value, file: &Path) -> bool {
     };
     let check = crate::agent::data_fence::FenceCheck {
         data: data.to_path_buf(),
-        allowed: Vec::new(),
+        allowed: own.to_vec(),
         cwd,
         home: None,
         paths: vec![path],
@@ -203,8 +265,7 @@ pub(super) fn arm_with(deadline: Duration) {
 )]
 fn refuse_now(line: &str) -> ! {
     let mut errors = std::io::stderr();
-    // The exit code still refuses should stderr be gone; Codex then lets the call run, which
-    // nothing here can change.
+    // Nothing more can be done when stderr is gone; the exit code is still 2.
     drop(
         errors
             .write_all(line.as_bytes())
@@ -290,6 +351,9 @@ pub(crate) fn log_decisions<'a>(lines: impl Iterator<Item = &'a [u8]>) {
     }
 }
 
+#[cfg(test)]
+#[path = "sessions/add_tests.rs"]
+mod add_tests;
 #[cfg(test)]
 #[path = "sessions/tests.rs"]
 mod tests;

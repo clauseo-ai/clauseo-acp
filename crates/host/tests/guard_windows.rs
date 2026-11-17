@@ -44,7 +44,7 @@ fn guard_for_app() -> PathBuf {
 /// The `commandWindows` line of the hook `codex_hook_config` builds for `program`.
 #[cfg(test)]
 fn line_for(program: &Path) -> String {
-    let config = clauseo_host::codex_hook_config(program, None).unwrap();
+    let config = clauseo_host::codex_hook_config(program, None, &[]).unwrap();
     config["PreToolUse"][0]["hooks"][0]["commandWindows"]
         .as_str()
         .unwrap()
@@ -232,7 +232,7 @@ fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folde
     assert!(record.as_os_str().len() > 260, "{record:?}");
 
     let guard = guard_for_app();
-    let config = clauseo_host::codex_hook_config(&guard, Some((&record, &id))).unwrap();
+    let config = clauseo_host::codex_hook_config(&guard, Some((&record, &id)), &[]).unwrap();
     let hook = &config["PreToolUse"][0]["hooks"][0];
     let command = hook["commandWindows"].as_str().unwrap();
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));

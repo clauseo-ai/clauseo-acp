@@ -563,14 +563,10 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
         .strip_prefix(&format!("'{shown}' --pre-write-guard --record '"))
         .and_then(|rest| rest.split_once("' --record-id "))
         .unwrap_or_else(|| panic!("{command}"));
-    let (id, sessions) = rest.split_once(' ').unwrap_or_else(|| panic!("{command}"));
+    // The ids file and the own folders after the identity are checked by the whole config below.
+    let (id, _) = rest.split_once(' ').unwrap_or_else(|| panic!("{command}"));
     let record = std::path::PathBuf::from(record);
-    let ids = record.parent().unwrap().join("sessions.json");
-    assert_eq!(
-        sessions,
-        format!("--sessions '{}'", ids.display()),
-        "{command}"
-    );
+    let own = crate::guard_record::own_folders(command);
     let below = crate::guard_record::below_data(&dir, &record);
     let [browser, guard, session, file] = below.as_slice() else {
         panic!("{below:?}");
@@ -582,7 +578,10 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     );
     assert!(!session.is_empty(), "{command}");
     assert_eq!(id.len(), 48, "{command}");
-    let expected = clauseo_host::codex_hook_config(&program, Some((&record, id))).unwrap();
+    let data = record.ancestors().nth(4).unwrap();
+    assert_eq!(own[0], data.join("run").join(session), "{command}");
+    let own: Vec<&std::path::Path> = own.iter().map(std::path::PathBuf::as_path).collect();
+    let expected = clauseo_host::codex_hook_config(&program, Some((&record, id)), &own).unwrap();
     assert_eq!(config["hooks"], expected);
 }
 

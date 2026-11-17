@@ -1,0 +1,52 @@
+{
+  "note": "Recorded from Codex 0.162.1 under codex-acp 2.2.2 with a mock model server, 16 Nov 2026 (stage B): the result of session/new, then the PreToolUse hook input Codex wrote for three Bash calls: the session itself, another thread of the same app-server, and a multi_agent child of the session. Folders shortened and each tool_input replaced by ls; every other field as Codex wrote it.",
+  "session_new": {
+    "sessionId": "01a1e4b4-30ac-7f81-b3fe-c7d36d7f97b5"
+  },
+  "hooks": {
+    "session": {
+      "session_id": "01a1e4b4-30ac-7f81-b3fe-c7d36d7f97b5",
+      "turn_id": "01a1e4b4-30b7-7500-9f53-5325cc168372",
+      "transcript_path": "/data/agents/codex-acp/home/sessions/2026/11/16/rollout-2026-11-16T19-42-56-01a1e4b4-30ac-7f81-b3fe-c7d36d7f97b5.jsonl",
+      "cwd": "/work/Own",
+      "hook_event_name": "PreToolUse",
+      "model": "mock-model",
+      "permission_mode": "default",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "tool_use_id": "call_1"
+    },
+    "other_thread": {
+      "session_id": "01a1e4b4-3233-75d0-93de-ab9057966fe4",
+      "turn_id": "01a1e4b4-324e-7553-aa25-ce9df9ba4def",
+      "transcript_path": null,
+      "cwd": "/work/Own",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-5.6-luna",
+      "permission_mode": "default",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "tool_use_id": "call_3"
+    },
+    "child": {
+      "session_id": "01a1e4b4-30ac-7f81-b3fe-c7d36d7f97b5",
+      "turn_id": "01a1e4b4-3518-7870-b8fa-30851cb27836",
+      "agent_id": "01a1e4b4-34ff-78c1-a27c-95b105c881bf",
+      "agent_type": "default",
+      "transcript_path": "/data/agents/codex-acp/home/sessions/2026/11/16/rollout-2026-11-16T19-42-56-01a1e4b4-30ac-7f81-b3fe-c7d36d7f97b5.jsonl",
+      "cwd": "/work/Own",
+      "hook_event_name": "PreToolUse",
+      "model": "mock-model",
+      "permission_mode": "default",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "tool_use_id": "call_9"
+    }
+  }
+}

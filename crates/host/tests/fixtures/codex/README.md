@@ -24,3 +24,13 @@ the new tag over this file, update the tag, commit and hash above, and run the s
 cp <codex checkout>/codex-rs/core/config.schema.json crates/host/tests/fixtures/codex/
 cargo nextest run -p clauseo-host --features test-support -E 'test(/schema/)'
 ```
+
+# Codex hook input fixture
+
+`hook-session-id.json` is a recording from Codex 0.162.1 under codex-acp 2.2.2 with a mock model
+server (16 Nov 2026): the `sessionId` `session/new` returned, then the `PreToolUse` hook input
+Codex wrote for a `Bash` call of that session, of another thread of the same app-server, and of a
+`multi_agent` child of the session. Folders are shortened and each `tool_input` is replaced by
+`ls`; every other field is as Codex wrote it. `src/pre_write_guard/sessions/tests.rs` reads it to
+pin that the hook's `session_id` is the ACP session id. Record it again when the pinned Codex or
+codex-acp version moves.

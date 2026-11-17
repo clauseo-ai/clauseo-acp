@@ -89,13 +89,20 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     let record = PathBuf::from(record);
     // The ids file sits beside the record, in the session's guard folder.
     let ids = record.parent().unwrap().join("sessions.json");
+    // Then the session's own folders, its run folder and its matter's notes.
+    let own = own_folders(hook["command"].as_str().unwrap());
+    let own_words = own
+        .iter()
+        .map(|folder| format!(" --own-folder '{}'", folder.display()))
+        .collect::<Vec<_>>()
+        .concat();
     assert_eq!(
         sessions,
-        format!("--sessions '{}'", ids.display()),
+        format!("--sessions '{}'{own_words}", ids.display()),
         "{windows}"
     );
     let posix = format!(
-        "'{program}' --pre-write-guard --record '{}' --record-id {id} --sessions '{}'",
+        "'{program}' --pre-write-guard --record '{}' --record-id {id} --sessions '{}'{own_words}",
         record.display(),
         ids.display()
     );
@@ -137,10 +144,44 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
         );
     }
     let guard = clauseo_host::codex_guard_program(Path::new(PROGRAM));
-    let expected = clauseo_host::codex_hook_config(&guard, Some((&record, id)));
+    let command = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    let own = own_folders(command);
+    let data = record.ancestors().nth(4).unwrap();
+    assert_eq!(own[0], data.join("run").join(session), "{command}");
+    let own: Vec<&Path> = own.iter().map(PathBuf::as_path).collect();
+    let expected = clauseo_host::codex_hook_config(&guard, Some((&record, id)), &own);
     assert_eq!(config["hooks"], expected.unwrap());
     host.shutdown();
     assert!(!folder.exists(), "the guard folder goes with the session");
+}
+
+/// The session's own folders in Codex's hook `command`, each after `--own-folder`: its run folder,
+/// then its matter's notes (`<data>/agent-state/<matter>/notes`), and nothing after them.
+pub(crate) fn own_folders(command: &str) -> Vec<PathBuf> {
+    let mut parts = command.split(" --own-folder '");
+    let before = parts.next().unwrap_or_default();
+    assert!(before.contains(" --sessions '"), "{command}");
+    let own: Vec<PathBuf> = parts
+        .map(|part| {
+            let folder = part
+                .strip_suffix('\'')
+                .unwrap_or_else(|| panic!("{command}"));
+            PathBuf::from(folder)
+        })
+        .collect();
+    let [_, notes] = own.as_slice() else {
+        panic!("a run folder and the notes: {command}");
+    };
+    let names: Vec<&str> = notes
+        .iter()
+        .rev()
+        .take(3)
+        .map(|name| name.to_str().unwrap())
+        .collect();
+    assert_eq!([names[0], names[2]], ["notes", "agent-state"], "{command}");
+    own
 }
 
 /// Claude's hook passes no record: its session makes no guard folder and no record file

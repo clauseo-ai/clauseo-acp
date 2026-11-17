@@ -190,8 +190,9 @@ fn single(file: std::fs::File, id: RecordId) -> io::Result<std::fs::File> {
     Ok(file)
 }
 
-/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, and a
-/// rejected `allowed.json` set aside (`blocklist/allowed/integrity.rs`).
+/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, a
+/// rejected `allowed.json` set aside (`blocklist/allowed/integrity.rs`), and the guard's ids
+/// file put in place (`pre_write_guard/sessions.rs`, `add`).
 pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
@@ -300,7 +301,18 @@ pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
 /// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a
 /// data folder) never share one.
 pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    place_private_file(path, bytes, |temp, path| std::fs::rename(temp, path))
+    replace_private_file_by(path, bytes, |temp, path| std::fs::rename(temp, path))
+}
+
+/// [`replace_private_file`] with `rename` moving the temp file over `path` (its first argument
+/// the temp file, its second `path`): a caller's own retry around `std::fs::rename`, or a
+/// test's failing one.
+pub(crate) fn replace_private_file_by(
+    path: &Path,
+    bytes: &[u8],
+    rename: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    place_private_file(path, bytes, rename)
 }
 
 /// Writes `bytes` to the new file `path` atomically: a fresh temp file beside it (0600 on Unix,

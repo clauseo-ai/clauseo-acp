@@ -2,8 +2,7 @@
 //! session check as soon as `session/new`, `session/load` or `session/resume` returns
 //! ([`record_session`], `pre_write_guard/sessions.rs`), and the guard hook's self-test before the
 //! first prompt ([`self_test`], `pre_write_guard/self_test.rs`). Either failing fails the session
-//! start with `agent.guard_selftest_failed`: the guard would refuse every call of the session, or
-//! Codex would run them unchecked.
+//! start with `agent.guard_selftest_failed`: the guard can't answer for the session as it must.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,9 +114,11 @@ pub(super) fn check(
 }
 
 /// The guard hook's self-test (`pre_write_guard/self_test.rs`) when `guard` has one, off the
-/// actor: the session start fails unless the guard refused the self-test's call within its limit.
-/// Its outcome and time go to the log on every OS.
-pub(super) async fn self_test(guard: GuardCheck) -> Result<(), Error> {
+/// actor, for the conversation's session `session` (its id already in the ids file): the session
+/// start fails unless the guard refused the self-test's call from an unknown session and allowed
+/// its harmless call from `session`, each within its limit. Its outcome and time go to the log on
+/// every OS.
+pub(super) async fn self_test(guard: GuardCheck, session: String) -> Result<(), Error> {
     let GuardCheck {
         self_test: Some(test),
         clock,
@@ -130,19 +131,21 @@ pub(super) async fn self_test(guard: GuardCheck) -> Result<(), Error> {
     let job = codex::prepare::Job {
         what: "the guard's self-test",
         matter,
-        // The run kills the guard at its limit; this is the wait for that answer.
-        wait: crate::pre_write_guard::self_test::LIMIT.saturating_add(codex::prepare::PREPARE_WAIT),
+        // Each of its two runs kills the guard at its limit; this is the wait for both answers.
+        wait: crate::pre_write_guard::self_test::LIMIT
+            .saturating_mul(2)
+            .saturating_add(codex::prepare::PREPARE_WAIT),
     };
     let timer = Arc::clone(&clock);
     codex::prepare::off_actor(clock, job, move || {
         let start = timer.now().mono;
-        let result = test.run();
+        let result = test.run(&session);
         let took_ms = timer.now().mono.saturating_sub(start).as_millis();
         match result {
             Ok(()) => {
                 tracing::info!(
                     took_ms,
-                    outcome = "refused",
+                    outcome = "refused and allowed",
                     "the Codex guard hook passed its self-test"
                 );
                 Ok(())
@@ -151,7 +154,7 @@ pub(super) async fn self_test(guard: GuardCheck) -> Result<(), Error> {
                 tracing::error!(
                     took_ms,
                     ?failure,
-                    "the Codex guard hook did not refuse its self-test; the session start fails"
+                    "the Codex guard hook did not pass its self-test; the session start fails"
                 );
                 Err(guard_failed())
             }

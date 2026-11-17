@@ -725,9 +725,10 @@ crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
 crates/host/src/pre_write_guard/sessions.rs arm_with clippy::disallowed_methods
 crates/host/src/pre_write_guard/sessions.rs refuse_now clippy::exit
 crates/host/src/pre_write_guard/sessions.rs now clippy::disallowed_methods
+crates/host/src/pre_write_guard/sessions.rs pause clippy::disallowed_methods
 crates/host/src/pre_write_guard/sessions/tests.rs child clippy::disallowed_methods
 crates/host/src/pre_write_guard/sessions/tests.rs a_guard_past_its_deadline_exits_2_with_a_line clippy::disallowed_methods
 crates/host/src/pre_write_guard/self_test.rs argv_on clippy::disallowed_methods
-crates/host/src/pre_write_guard/self_test.rs run_within clippy::disallowed_methods
+crates/host/src/pre_write_guard/self_test.rs answer_within clippy::disallowed_methods
 crates/host/src/pre_write_guard/self_test/tests.rs a_hung_guard_fails_the_self_test_at_the_limit clippy::disallowed_methods
-crates/host/src/pre_write_guard/self_test/tests.rs the_real_guard_passes_the_self_test clippy::exit
+crates/host/src/pre_write_guard/self_test/tests.rs act_as_guard clippy::exit

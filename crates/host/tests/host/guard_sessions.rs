@@ -2,8 +2,9 @@
 //! the ids file of its guard folder (`<data>/browser/guard/<session>/sessions.json`) once
 //! `session/new`, `session/resume` or `session/load` returns, before the first prompt, so the
 //! guard answers only the conversation's own sessions; then the launch's self-test runs the
-//! hook's command, which must refuse a call from a session no conversation has, or the launch
-//! fails. The ids file goes with the guard folder when the run ends.
+//! hook's command, which must refuse a call from a session no conversation has and allow a
+//! harmless call from the conversation's own, or the launch fails. The ids file goes with the
+//! guard folder when the run ends.
 
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
@@ -35,16 +36,22 @@ fn script(dir: &Dir, name: &str, body: &str) -> PathBuf {
     file
 }
 
-/// A hook command that copies the session's ids file to `log`, then refuses the call (exit 2,
-/// a line on stderr) as the guard refuses a call from a session not listed.
+/// A hook command that copies the session's ids file to `log`, then answers as the guard does
+/// for the self-test's two calls: refuses (exit 2, a line on stderr) the call from the session
+/// no conversation has, and allows (exit 0) any other.
 #[cfg(unix)]
 fn copying_guard(dir: &Dir, log: &Path) -> PathBuf {
-    let body = format!(
-        "/bin/cat '{}'/browser/guard/*/sessions.json > '{}'\necho refused >&2\nexit 2",
+    let file = dir.home().join("copying-guard.sh");
+    let text = format!(
+        "#!/bin/sh\ninput=$(/bin/cat)\n/bin/cat '{}'/browser/guard/*/sessions.json > '{}'\n\
+         case \"$input\" in *'\"session_id\":\"clauseo-self-test\"'*) echo refused >&2; exit 2;; \
+         esac\nexit 0\n",
         dir.data_dir().display(),
         log.display()
     );
-    script(dir, "copying-guard", &body)
+    crate::write::write(&file, text.as_bytes());
+    crate::write::make_executable(&file);
+    file
 }
 
 /// Codex's hooks object with `script` as the one `PreToolUse` command, before every tool.
@@ -269,6 +276,20 @@ fn a_missing_guard_refuses_the_codex_launch() {
 fn a_guard_that_lets_calls_go_refuses_the_codex_launch() {
     let dir = codex_dir("guard_sessions_lets_go", "codex-hook-trusted");
     let hooks = hooks_running(&script(&dir, "lets-go", "exit 0"));
+    let host = dir.start_with(0, |config| {
+        config.with_codex_hooks(hooks).with_guard_self_test(true)
+    });
+    let (_, events, turn) = one_turn(&dir, &host, CODEX);
+    assert_failed_before_prompt(&events, turn, ErrorCode::AgentGuardSelftestFailed);
+    host.shutdown();
+}
+
+/// A hook that refuses every call, the conversation's own harmless one too, fails the launch.
+#[cfg(unix)]
+#[test]
+fn a_guard_that_refuses_every_call_refuses_the_codex_launch() {
+    let dir = codex_dir("guard_sessions_refuses_all", "codex-hook-trusted");
+    let hooks = hooks_running(&script(&dir, "refuses-all", "echo refused >&2\nexit 2"));
     let host = dir.start_with(0, |config| {
         config.with_codex_hooks(hooks).with_guard_self_test(true)
     });

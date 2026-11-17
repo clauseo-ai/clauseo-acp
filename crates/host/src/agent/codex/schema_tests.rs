@@ -176,6 +176,7 @@ fn launch_doc(windows: bool, listed: &Listed, path_folders: bool) -> Value {
     let hooks = crate::agent::loads::codex_hook_config(
         Path::new(PROGRAM),
         Some((&record, "0123456789abcdef")),
+        &[run_root.as_path(), notes.as_path()],
     )
     .and_then(|hooks| hooks.as_object().cloned())
     .expect("the guard's hooks");

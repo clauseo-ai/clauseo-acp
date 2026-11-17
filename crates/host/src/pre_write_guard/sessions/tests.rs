@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::super::{DENY, record, run_timed};
-use super::{DATA_IMAGE, FAILED, FLAG, REFUSED, TOO_LATE, add, data_of, file, read};
+use super::{DATA_IMAGE, FAILED, FLAG, OWN_FLAG, REFUSED, TOO_LATE, add, data_of, file, read};
 use crate::write;
 
 /// The conversation's session id, as Codex's thread ids look.
@@ -128,10 +128,10 @@ fn a_child_of_the_conversations_session_passes() {
     );
 }
 
-/// Every tool reaches the guard (matcher `*`); one it does not check passes for the
+/// Every tool reaches the guard (matcher `*`); one with no path to check passes for the
 /// conversation's session and is refused for any other.
 #[test]
-fn an_unchecked_tool_passes_only_for_the_conversations_session() {
+fn a_tool_with_no_path_passes_only_for_the_conversations_session() {
     let fixture = Fixture::new("tools");
     for (tool, input) in [
         ("spawn_agent", json!({ "message": "x" })),
@@ -301,6 +301,122 @@ fn view_image_of_a_data_folder_file_is_refused() {
     }
 }
 
+/// The session's run folder and its matter's notes in the data folder, as the host lays them out
+/// (`actor/turn/launch_checks.rs`, `RunFolders`), made, with an image in the run's work folder;
+/// and the hook's arguments naming them as the session's own.
+fn own_folders(fixture: &Fixture) -> (PathBuf, Vec<OsString>) {
+    let run = fixture.data().join("run").join("s1");
+    let notes = fixture.data().join("agent-state").join("m1").join("notes");
+    write::create_dir_all(&run.join("work")).unwrap();
+    write::create_dir_all(&notes).unwrap();
+    write::write_file(&run.join("work").join("page-1.png"), b"x").unwrap();
+    write::write_file(&notes.join("chart.png"), b"x").unwrap();
+    let mut args = fixture.args();
+    for folder in [&run, &notes] {
+        args.extend([OsString::from(OWN_FLAG), folder.clone().into_os_string()]);
+    }
+    (run, args)
+}
+
+/// A `view_image` of a page rendered into the session's work folder, or of an image in its
+/// matter's notes, is allowed when the hook names them as its own.
+#[test]
+fn view_image_in_the_sessions_own_folders_is_allowed() {
+    let fixture = Fixture::new("view-own");
+    let (run, args) = own_folders(&fixture);
+    let notes = fixture.data().join("agent-state").join("m1").join("notes");
+    for path in [run.join("work").join("page-1.png"), notes.join("chart.png")] {
+        let hook = fixture.hook(
+            Some(MAIN),
+            "view_image",
+            &json!({ "path": path.to_str().unwrap() }),
+        );
+        assert_eq!(
+            guard(&args, hook.to_string().as_bytes()),
+            (0, String::new()),
+            "{path:?}"
+        );
+        // Without the own folders named, it is refused as before.
+        let (code, err) = guard(&fixture.args(), hook.to_string().as_bytes());
+        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
+    }
+}
+
+/// Another run's work folder, and the rest of the data folder, stay refused for a `view_image`.
+#[test]
+fn view_image_in_another_runs_work_folder_is_refused() {
+    let fixture = Fixture::new("view-other");
+    let (_, args) = own_folders(&fixture);
+    let other = fixture.data().join("run").join("s2").join("work");
+    write::create_dir_all(&other).unwrap();
+    write::write_file(&other.join("page-1.png"), b"x").unwrap();
+    for path in [other.join("page-1.png"), fixture.data().join("store.png")] {
+        let hook = fixture.hook(
+            Some(MAIN),
+            "view_image",
+            &json!({ "path": path.to_str().unwrap() }),
+        );
+        let (code, err) = guard(&args, hook.to_string().as_bytes());
+        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
+    }
+}
+
+/// A link in the session's work folder to elsewhere in the data folder is judged by where it
+/// leads: refused.
+#[cfg(unix)]
+#[test]
+fn view_image_through_a_link_in_the_work_folder_is_refused() {
+    let fixture = Fixture::new("view-link");
+    let (run, args) = own_folders(&fixture);
+    let other = fixture.data().join("run").join("s2").join("work");
+    write::create_dir_all(&other).unwrap();
+    write::write_file(&other.join("page-1.png"), b"x").unwrap();
+    let work = run.join("work");
+    write::symlink(&fixture.data().join("store.png"), &work.join("store.png")).unwrap();
+    write::symlink(&other, &work.join("other")).unwrap();
+    for path in [
+        work.join("store.png"),
+        work.join("other").join("page-1.png"),
+    ] {
+        let hook = fixture.hook(
+            Some(MAIN),
+            "view_image",
+            &json!({ "path": path.to_str().unwrap() }),
+        );
+        let (code, err) = guard(&args, hook.to_string().as_bytes());
+        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
+    }
+}
+
+/// Recorded from Codex 0.162.1 under codex-acp 2.2.2 (`tests/fixtures/codex/README.md`): the
+/// hook's `session_id` for the session's own call, and its `multi_agent` child's, is the
+/// `sessionId` `session/new` returned, which the host lists; another thread's is not.
+#[test]
+fn codexs_hook_session_id_is_the_acp_session_id() {
+    let recorded: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/codex/hook-session-id.json"
+    ))
+    .unwrap();
+    let acp = recorded["session_new"]["sessionId"].as_str().unwrap();
+    let hooks = &recorded["hooks"];
+    for name in ["session", "child"] {
+        assert_eq!(hooks[name]["session_id"], acp, "{name}");
+    }
+    assert_ne!(hooks["other_thread"]["session_id"], acp);
+    let fixture = Fixture::new("recorded");
+    write::remove_file(&fixture.ids()).unwrap();
+    add(&fixture.folder(), acp).unwrap();
+    let call = |name: &str| {
+        // The recorded call, in this test's matter folder.
+        let mut hook = hooks[name].clone();
+        hook["cwd"] = Value::from(fixture.root.join("m").to_str().unwrap());
+        guard(&fixture.args(), hook.to_string().as_bytes())
+    };
+    assert_eq!(call("session"), (0, String::new()));
+    assert_eq!(call("child"), (0, String::new()));
+    assert_refused(call("other_thread"));
+}
+
 /// A fork's new id joins the ids already there; an id already there writes nothing new.
 #[test]
 fn adding_a_session_keeps_the_ones_there() {
@@ -352,8 +468,7 @@ fn child(test: &str) -> (Option<i32>, String, Duration) {
     )
 }
 
-/// A panic inside the guard's process still refuses: exit 2 and [`FAILED`] on stderr (Codex lets
-/// a call run on a crash).
+/// A panic inside the guard's process refuses: exit 2 and [`FAILED`] on stderr.
 #[test]
 fn a_panic_in_the_guard_exits_2_with_a_line() {
     if std::env::var_os(CHILD).is_some() {
@@ -365,8 +480,7 @@ fn a_panic_in_the_guard_exits_2_with_a_line() {
     assert!(err.lines().any(|line| line == FAILED), "{err}");
 }
 
-/// A guard that does not finish in time refuses on its own at its deadline, with [`TOO_LATE`]:
-/// Codex lets a call run when its hook times out.
+/// A guard that does not finish in time refuses on its own at its deadline, with [`TOO_LATE`].
 #[test]
 #[expect(
     clippy::disallowed_methods,
