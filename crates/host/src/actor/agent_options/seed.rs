@@ -1,4 +1,4 @@
-//! The options a Claude or ChatGPT agent's draft pickers show before its first session has
+//! The options a Claude or Codex agent's draft pickers show before its first session has
 //! reported any: [`of`], which `AgentOptions::of` gives while nothing is kept for the agent.
 //!
 //! Each seed is the agent's model option and effort option, in the agent's own ids and
@@ -22,8 +22,9 @@
 //! The option ids are tied to those versions: Claude's `model` and `effort`
 //! (`dist/session-model.js:2`, `dist/session-config-ids.js:4`), Codex's `model` and
 //! `reasoning_effort` (`dist/index.js:38273-38274`). Re-check them on every agent pin bump
-//! (`docs/decisions/0033-agents-installs.md`, Consequences). A seed id the agent no longer uses only refuses a
-//! `SetConfigOption` made before the first session with `command.invalid` until it attaches.
+//! (`docs/decisions/0033-agents-installs.md`, Consequences). A seed id the agent no longer
+//! uses only refuses a `SetConfigOption` made before the first session with `command.invalid`
+//! until it attaches.
 
 use std::sync::LazyLock;
 
@@ -46,7 +47,7 @@ const CLAUDE_AGENT_ACP_0_89_1: SeedIds = SeedIds {
     effort: "effort",
 };
 
-/// ChatGPT's, from codex-acp 2.2.2 (`dist/index.js:38273-38274`, `MODEL_CONFIG_ID` and
+/// Codex's, from codex-acp 2.2.2 (`dist/index.js:38273-38274`, `MODEL_CONFIG_ID` and
 /// `REASONING_EFFORT_CONFIG_ID`). Re-check on every pin bump.
 const CODEX_ACP_2_2_2: SeedIds = SeedIds {
     model: "model",

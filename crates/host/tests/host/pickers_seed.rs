@@ -1,5 +1,5 @@
 //! The draft pickers on a fresh data folder (`actor/agent_options/seed.rs`): before a Claude or
-//! ChatGPT agent's first session, `ListAgents` gives its seed, the model and effort each at the
+//! Codex agent's first session, `ListAgents` gives its seed, the model and effort each at the
 //! seed's one value, the agent's own default; a first conversation started from it sends no
 //! `session/set_config_option` before its first prompt (`pickers-seed`, `pickers-seed-codex`
 //! take the prompt right after the session's start, so a set there is a mismatch), so the agent
@@ -113,7 +113,7 @@ fn a_fresh_claude_shows_its_default_and_runs_it() {
     host.shutdown();
 }
 
-/// ChatGPT on a fresh data folder: the same, in Codex's ids (GPT-6 at medium).
+/// Codex on a fresh data folder: the same, in Codex's ids (GPT-6 at medium).
 #[test]
 fn a_fresh_chatgpt_shows_its_default_and_runs_it() {
     let (_dir, host, matter) = first_conversation(
