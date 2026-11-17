@@ -70,19 +70,13 @@ fn steer_fallback_steering_is_mismatch() {
     ));
     let init = agent.read_line();
     assert_eq!(init["result"]["_meta"]["steering"]["supported"], true);
-    // codex-acp's handshake (common/codex-handshake.jsonl): a session, then the ask mode.
+    // codex-acp's handshake (common/codex-handshake.jsonl): a session in mode agent.
     agent.send(&request(
         1,
         "session/new",
         json!({"cwd": dir.cwd(), "mcpServers": []}),
     ));
     assert_eq!(agent.read_line()["result"]["sessionId"], "sess-1");
-    agent.send(&request(
-        4,
-        "session/set_mode",
-        json!({"sessionId": "sess-1", "modeId": "workspace-write"}),
-    ));
-    agent.expect_line(&result(4, json!({})));
     agent.send(&prompt(2, "Tighten clause 4"));
     agent.expect_line(&chunk("m-answer-1", "The clause "));
     agent.send(&request(

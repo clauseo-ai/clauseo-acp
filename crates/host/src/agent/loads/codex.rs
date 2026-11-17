@@ -169,8 +169,9 @@ pub const GUARD_EXE: &str = "clauseo-guard.exe";
 /// Scope: the program sits in the app's install folder beside `Clauseo.exe` (per user, under
 /// `%LOCALAPPDATA%`; `tauri.conf.json` `installMode`), under the same rules as the app: no fence
 /// of Clauseo's names that folder, and what stands between Codex's shell and either program is
-/// Codex's own sandbox (the ask mode with Windows' unelevated sandbox, `agent/codex.rs`
-/// `ASK_MODE`, `WINDOWS_SANDBOX`), which asks before a write outside the matter. A firm whose
+/// Codex's own sandbox (its mode's `workspace-write` sandbox with Windows' unelevated sandbox,
+/// `agent/codex.rs` `MODE`, `WINDOWS_SANDBOX`), where a write outside the matter goes to Codex's
+/// reviewer. A firm whose
 /// allow rule names only `Clauseo.exe` by path refuses the program, and every Codex step is then
 /// refused.
 pub fn codex_guard_program(app: &Path) -> PathBuf {

@@ -92,7 +92,7 @@ fn scenario(name: &str, steering: bool, search: bool) -> String {
                 "version": "2.2.2"}, "_meta": meta}}}),
         json!({"expect": {"method": "session/new", "as": "new", "params": {"cwd": "{{any}}"}}}),
         json!({"respond": {"to": "new", "result": {"sessionId": "sess-1", "modes": {
-            "currentModeId": "workspace-write", "availableModes": [
+            "currentModeId": "agent", "availableModes": [
                 {"id": "read-only", "name": "Read-only"},
                 {"id": "workspace-write", "name": "Workspace access"},
                 {"id": "agent", "name": "Auto review"}]}}}}),
