@@ -74,16 +74,31 @@ fn failures(rig: &mut Rig, thread: ThreadId) -> Vec<ErrorCode> {
         .collect()
 }
 
-/// A first turn ends, the matter's folder is renamed, then `held` comes between turns, up to ten
-/// times over while the agent is live: one refused agent-started turn, the agent stopped, nothing
-/// held, and the log stops growing.
+/// What makes the next before-turn checkpoint refuse, given the matter's folder; what it returns
+/// is held until the test ends.
+type Refuse = fn(&std::path::Path) -> Option<std::fs::File>;
+
+/// Renames the matter's folder: `matter.folder_missing`.
+fn rename_folder(folder: &std::path::Path) -> Option<std::fs::File> {
+    crate::write::rename(folder, &folder.with_file_name("Scratch (renamed)")).unwrap();
+    None
+}
+
+/// A first turn ends, the folder is renamed, then `held` comes between turns.
 fn refused_once_with(name: &str, held: fn() -> AcpEvent) {
+    refused_once_by(name, held, rename_folder, ErrorCode::MatterFolderMissing);
+}
+
+/// A first turn ends, `refuse` runs, then `held` comes between turns, up to ten times over while
+/// the agent is live: one refused agent-started turn failing with `code`, the agent stopped,
+/// nothing held, and the log stops growing.
+fn refused_once_by(name: &str, held: fn() -> AcpEvent, refuse: Refuse, code: ErrorCode) {
     let mut rig = rig(name, TWO_ANSWERS, "exit");
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
     let folder = std::path::PathBuf::from(&rig.actor.matters[&rig.matter()].row.folder_path);
-    crate::write::rename(&folder, &folder.with_file_name("Scratch (renamed)")).unwrap();
+    let _holding = refuse(&folder);
     // Only a live agent sends: once the refusal has stopped it, nothing more comes.
     for _ in 0..10 {
         if !live(&rig.actor, thread) {
@@ -99,10 +114,7 @@ fn refused_once_with(name: &str, held: fn() -> AcpEvent) {
                 && actor.work.matter_jobs == 0
         });
     }
-    assert_eq!(
-        failures(&mut rig, thread),
-        vec![ErrorCode::MatterFolderMissing]
-    );
+    assert_eq!(failures(&mut rig, thread), vec![code]);
     assert_eq!(own_turn::waiting(&mut rig.actor, thread), 0, "nothing held");
     let events = rig.log(thread).len();
     rig.run_until("the agent stopped", |actor| !live(actor, thread));
@@ -118,6 +130,27 @@ fn a_background_update_between_turns_with_the_folder_gone_fails_once() {
 #[test]
 fn a_helper_card_between_turns_with_the_folder_gone_fails_once_and_is_answered() {
     refused_once_with("refused-once-card", helper_card);
+}
+
+/// A new file in the matter that another program holds open with no sharing at all (share mode
+/// 0): the before-turn checkpoint can't read it and fails, `matter.checkpoint_failed`.
+#[cfg(windows)]
+fn hold_a_file_with_no_sharing(folder: &std::path::Path) -> Option<std::fs::File> {
+    let path = folder.join("Draft – Reply (v3).docx");
+    crate::write::write_file(&path, b"draft").unwrap();
+    let held = crate::write::open_no_share(&path).unwrap();
+    Some(held)
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_held_with_no_sharing_between_turns_fails_once() {
+    refused_once_by(
+        "refused-once-no-share",
+        background_update,
+        hold_a_file_with_no_sharing,
+        ErrorCode::MatterCheckpointFailed,
+    );
 }
 
 /// The belt: agent-started turns refused in a row with the same code stop the agent at the
