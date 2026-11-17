@@ -184,7 +184,7 @@ pub enum BrowserPart {
     /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
     On,
     /// Turned off, left out by policy, or no browser for this agent on this OS (Claude anywhere,
-    /// Codex on Windows, `servers::no_browser`): [`BROWSER_OFF`].
+    /// `servers::no_browser`): [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,

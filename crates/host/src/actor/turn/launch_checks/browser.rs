@@ -338,7 +338,7 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
-    // Codex on Windows, and Claude on every OS, have no browser at all
+    // Claude, on every OS, has no browser at all
     // (`agent::loads::browser::no_browser`).
     let kind = clauseo_protocol::AgentKind::of(agent);
     if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {

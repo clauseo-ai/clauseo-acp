@@ -1,8 +1,7 @@
 //! Whether the host fetches the list at all ([`needed`]): a host with no egress proxy and no
 //! sandbox wired starts no updater and makes no request; an egress proxy on an OS where an agent
-//! has the guarded browser (Codex on macOS and Linux), a sandbox wired, or the seams' test
-//! switch, starts it and it fetches. On Windows, where no agent has the browser yet, a proxy
-//! alone does not.
+//! has the guarded browser (Codex, on every OS), a sandbox wired, or the seams' test switch,
+//! starts it and it fetches.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -95,8 +94,8 @@ fn seams_marked_enforced_start_the_updater_without_a_sandbox() {
 }
 
 /// The desktop's case: an egress proxy set, so Codex's guarded browser entry gets a session
-/// proxy that enforces the list. Needed on macOS and Linux, where Codex has the browser; not on
-/// Windows, where no agent has it yet (`servers::no_browser_on`).
+/// proxy that enforces the list. Needed on every OS, Windows included, where Codex has the
+/// browser (`servers::no_browser_on`).
 #[test]
 fn with_an_egress_proxy_the_list_is_needed_where_the_browser_is_on() {
     let rig = Rig::new("needed-proxy");
@@ -104,11 +103,6 @@ fn with_an_egress_proxy_the_list_is_needed_where_the_browser_is_on() {
     rig.publish(pair("list-newer"));
     let config = config(&rig, seams(&rig), None).with_egress_proxy(Arc::new(TestProxy(9)));
     assert!(needed_on(&config, false), "macOS and Linux");
-    assert!(
-        !needed_on(&config, true),
-        "Windows, no browser for any agent"
-    );
-    if !cfg!(windows) {
-        starts_and_fetches(&rig, &config);
-    }
+    assert!(needed_on(&config, true), "Windows");
+    starts_and_fetches(&rig, &config);
 }

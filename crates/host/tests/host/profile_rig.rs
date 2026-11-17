@@ -26,8 +26,8 @@ pub(crate) const CODEX: &str = "codex-acp";
 /// The agent the browser entry's own tests launch (slots, policy, egress): one with no kind
 /// (`AgentKind::of` gives none), so it may have the browser on every OS. [`Hook`] offers its
 /// servers, the `browser` entry among them, to every agent, where the real profile offers the
-/// entry to Codex alone (`servers::browser_mcp`); and Claude has no browser on macOS and Linux,
-/// Codex none on Windows (`servers::no_browser`).
+/// entry to Codex alone (`servers::browser_mcp`); and Claude has no browser on any OS
+/// (`servers::no_browser`).
 pub(crate) const BROWSING: &str = "browsing-agent";
 
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
@@ -358,7 +358,7 @@ pub(crate) fn filled_browser() -> Value {
 }
 
 /// `servers` as a Codex `session/new` carries them on this OS: without the `browser` entry
-/// where Codex has no browser at all (Windows, `clauseo_profile::servers::no_browser`), else
+/// where Codex has no browser at all (no OS now, `clauseo_profile::servers::no_browser`), else
 /// all of them. Claude's keep it everywhere.
 pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
     let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Codex));

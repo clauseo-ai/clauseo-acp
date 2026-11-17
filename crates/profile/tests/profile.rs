@@ -260,13 +260,9 @@ fn kind_specific_parts_go_only_to_their_kind() {
     );
     assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
-    // `browser` goes to Codex alone (`servers::browser_mcp`), and not on Windows: Claude keeps
-    // the shell command.
-    let codex = if cfg!(windows) {
-        vec!["case-law"]
-    } else {
-        vec!["browser", "case-law"]
-    };
+    // `browser` goes to Codex alone (`servers::browser_mcp`), on every OS: Claude has no
+    // browser.
+    let codex = vec!["browser", "case-law"];
     for (kind, want) in [
         (None, vec!["case-law"]),
         (Some(AgentKind::Claude), vec!["case-law"]),
@@ -275,12 +271,10 @@ fn kind_specific_parts_go_only_to_their_kind() {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
         assert_eq!(names, want, "{kind:?}");
     }
-    if !cfg!(windows) {
-        assert_eq!(
-            profile.servers(Some(AgentKind::Codex))[0],
-            clauseo_profile::servers::browser(profile.paths())
-        );
-    }
+    assert_eq!(
+        profile.servers(Some(AgentKind::Codex))[0],
+        clauseo_profile::servers::browser(profile.paths())
+    );
 }
 
 #[test]
