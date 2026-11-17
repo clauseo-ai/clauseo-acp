@@ -27,6 +27,7 @@ pub(crate) mod folder_access;
 pub(crate) mod folder_name;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
+pub(crate) mod history;
 pub(crate) mod home;
 pub(crate) mod launch_refusals;
 pub(crate) mod launch_settings;
