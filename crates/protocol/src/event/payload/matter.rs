@@ -182,6 +182,10 @@ pub struct VersionRestored {
     /// The files it removed, which the version did not have, kept as `written` is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed: Vec<MatterPath>,
+    /// The files of `removed` deleted for good, since the trash could not take them (Versions
+    /// holds each); the rest went to the trash. Missing from older logs, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<MatterPath>,
     /// How many files it wrote or removed past those two lists; missing when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub more: Option<u32>,

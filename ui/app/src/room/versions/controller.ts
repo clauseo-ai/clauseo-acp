@@ -417,7 +417,7 @@ export class VersionsController {
     const { history } = this.#snap.timeline;
     const i = history.findIndex((v) => v.id === checkpoint);
     const prior = i > 0 ? history[i - 1] : undefined;
-    const file = this.#snap.oneFile.get(checkpoint) ?? null;
+    const file = this.#snap.oneFile.get(checkpoint)?.file ?? null;
     if (prior !== undefined) void this.askRestore(prior.id, checkpoint, file);
   }
 

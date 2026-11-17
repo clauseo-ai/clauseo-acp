@@ -500,6 +500,10 @@ pub enum MarkerKind {
         /// The files it removed, as the event lists them; missing from older logs.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         removed: Vec<MatterPath>,
+        /// The files of `removed` deleted for good, the trash unable to take them, as the event
+        /// lists them; missing from older logs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        deleted: Vec<MatterPath>,
         /// How many files it wrote or removed past those lists; missing when none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         more: Option<u32>,

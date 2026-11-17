@@ -416,10 +416,15 @@ test("a document renamed since comes back at its old name, and the dialog says t
   );
 });
 
-test("an Undo of a one-document restore says what it did to the document, by its preview", async () => {
+test("an Undo of a one-document restore says what it did to the document, by its preview and the host's marker", async () => {
   const { doneLine } = await import("./words.ts");
   const { freshSnapshot } = await import("./state.ts");
-  const s = freshSnapshot(NOON, "UTC");
+  const fresh = freshSnapshot(NOON, "UTC");
+  // the undo's marker, cp5: none yet, the paper put in the bin, or deleted for good
+  const marked = (forGood: boolean | null) =>
+    forGood === null
+      ? fresh
+      : { ...fresh, oneFile: new Map([["cp5", { file: "brief.txt", forGood }]]) };
   const cal = { today: "2026-11-02", words: () => "" } as never;
   const undo = (p: Partial<RestorePreview>) =>
     restoreDone(
@@ -427,15 +432,25 @@ test("an Undo of a one-document restore says what it did to the document, by its
       { kind: "wrote", checkpoint: "cp5" },
       NOON,
     );
-  const said = (p: Partial<RestorePreview>, platform: "mac" | "windows" = "mac") =>
-    doneLine("en", cal, s, undo(p), platform);
+  const removed = { changes: [], removes: ["brief.txt"] };
+  const said = (
+    p: Partial<RestorePreview>,
+    forGood: boolean | null = false,
+    platform: "mac" | "windows" = "mac",
+  ) => doneLine("en", cal, marked(forGood), undo(p), platform);
   expect(said({})).toBe("Undid the restore. '\u2068brief.txt\u2069' is back as it was before.");
-  expect(said({ changes: [], removes: ["brief.txt"] })).toBe(
+  expect(said(removed)).toBe(
     "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo moved it to the Trash.",
   );
-  expect(said({ changes: [], removes: ["brief.txt"] }, "windows")).toBe(
+  expect(said(removed, false, "windows")).toBe(
     "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
   );
+  // the bin couldn't take it, or the host hasn't said yet: removed, with a copy in Versions, never the bin
+  const gone =
+    "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.";
+  expect(said(removed, true)).toBe(gone);
+  expect(said(removed, true, "windows")).toBe(gone);
+  expect(said(removed, null)).toBe(gone);
   expect(said({ changes: [] })).toBe(
     "Nothing was undone: '\u2068brief.txt\u2069' has changed since the restore, so Clauseo left it as it is.",
   );

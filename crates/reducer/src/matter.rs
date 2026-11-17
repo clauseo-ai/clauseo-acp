@@ -66,6 +66,7 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
                 undoes: event.undoes,
                 written: event.written.clone(),
                 removed: event.removed.clone(),
+                deleted: event.deleted.clone(),
                 more: event.more,
             };
             marker(state, envelope, kind, out);

@@ -208,6 +208,7 @@ fn restored(n: u64, checkpoint: CheckpointId, written: &[&str]) -> Envelope {
             .map(|p| MatterPath::new(p).unwrap())
             .collect(),
         removed: Vec::new(),
+        deleted: Vec::new(),
         more: None,
     };
     Envelope::new(

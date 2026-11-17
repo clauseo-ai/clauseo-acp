@@ -150,6 +150,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
                 undoes: event.undoes,
                 written: event.written.clone(),
                 removed: event.removed.clone(),
+                deleted: event.deleted.clone(),
                 more: event.more,
             };
             insert_marker(state, seq, event_id, ts, kind, out);

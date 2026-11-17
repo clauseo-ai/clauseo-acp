@@ -3836,6 +3836,11 @@ export type MarkerKind =
 	written?: MatterPath[],
 	/**  The files it removed, as the event lists them; missing from older logs. */
 	removed?: MatterPath[],
+	/**
+	 *  The files of `removed` deleted for good, the trash unable to take them, as the event
+	 *  lists them; missing from older logs.
+	 */
+	deleted?: MatterPath[],
 	/**  How many files it wrote or removed past those lists; missing when none. */
 	more?: number,
 } }) & { compaction?: never; matter_relocated?: never; step_undone?: never } | 
@@ -7694,6 +7699,11 @@ export type VersionRestored = {
 	written?: MatterPath[],
 	/**  The files it removed, which the version did not have, kept as `written` is. */
 	removed?: MatterPath[],
+	/**
+	 *  The files of `removed` deleted for good, since the trash could not take them (Versions
+	 *  holds each); the rest went to the trash. Missing from older logs, and empty is left out.
+	 */
+	deleted?: MatterPath[],
 	/**  How many files it wrote or removed past those two lists; missing when none. */
 	more?: number,
 };

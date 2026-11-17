@@ -495,6 +495,7 @@ fn matter_events() -> Vec<DomainEvent> {
             },
             written: vec![path("a.docx")],
             removed: vec![path("b.docx")],
+            deleted: vec![path("b.docx")],
             more: Some(3),
         }
         .into(),

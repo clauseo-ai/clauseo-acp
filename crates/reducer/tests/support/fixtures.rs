@@ -483,6 +483,7 @@ pub fn matter_versions() -> Fx<Vec<Envelope>> {
         },
         written: vec![MatterPath::new("lease.docx")?],
         removed: Vec::new(),
+        deleted: Vec::new(),
         more: None,
     })?;
     Ok(log.into_events())

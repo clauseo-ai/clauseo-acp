@@ -151,7 +151,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "host follow-ups (provisional; orchestrator to approve)",
-    "note": "Versions' line after undoing a one-document restore that had brought the paper back (it is in the undo's removes): the undo moved it to the computer's bin; Mac and Linux. Windows: UC-394. The host deletes it for good only when the bin can't take it and the history holds it (writeback.rs)"
+    "note": "Versions' line after undoing a one-document restore that had brought the paper back (it is in the undo's removes), once the undo's marker says the host moved it to the computer's bin (not in VersionRestored.deleted); Mac and Linux. Windows: UC-394. Deleted for good: UC-399"
   },
   "UC-394": {
     "en": "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
@@ -207,5 +207,16 @@
     "at": "2026-11-16",
     "by": "host follow-ups (provisional; orchestrator to approve)",
     "note": "Restore this document's dialog for a paper renamed since (compared as a rename): it comes back at its old name, and the renamed copy {current} stays, so the lawyer has both. A paper removed since keeps UC-320"
+  },
+  "UC-399": {
+    "en": "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.",
+    "hi": "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे हटा दिया। उसकी एक प्रति संस्करणों में रहती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after undoing a one-document restore that removed the paper when the bin couldn't take it, so the host deleted it for good (VersionRestored.deleted names it; Versions holds a copy), and while the undo's marker hasn't said which; never the Trash or Recycle Bin line then. English final (app track)"
   }
 }

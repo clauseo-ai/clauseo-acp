@@ -206,6 +206,8 @@ const OWN = {
     "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Trash में डाल दिया।",
   "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.":
     "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Recycle Bin में डाल दिया।",
+  "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.":
+    "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे हटा दिया। उसकी एक प्रति संस्करणों में रहती है।",
   "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.":
     "कुछ पूर्ववत नहीं हुआ: पुनर्स्थापन के बाद '{paper}' बदल गया है, इसलिए Clauseo ने उसे जैसा है वैसा ही छोड़ दिया।",
   "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.":

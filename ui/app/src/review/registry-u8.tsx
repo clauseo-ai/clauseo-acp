@@ -85,6 +85,7 @@ const restoreMarker = (
   checkpoint: string,
   undoes?: string,
   scope: RestoreScope = "matter",
+  deleted: string[] = [],
 ): ViewEntry => ({
   marker: {
     order,
@@ -96,6 +97,7 @@ const restoreMarker = (
         checkpoint,
         scope,
         ...(undoes === undefined ? {} : { undoes }),
+        ...(deleted.length === 0 ? {} : { deleted }),
       },
     },
   },
@@ -165,6 +167,8 @@ export type Matter = {
   undoChanges?: FileChange[];
   /** restore_version is refused with matter.file_folder_clash, naming this entry in the way. */
   clash?: string;
+  /** An undo of a restore deletes what it removes for good, the bin unable to take it (its marker's deleted). */
+  forGood?: boolean;
 };
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
@@ -301,6 +305,9 @@ export function versionsHost(m: Matter): FakeTransport {
       // the host writes the restore's version and its marker, then answers
       seq += 1;
       const at = seq;
+      const { scope, undoes } = envelope.command.restore_version ?? {};
+      const chosen = typeof scope === "object" ? scope.files.paths : [];
+      const forGood = m.forGood === true && undoes !== undefined ? chosen : [];
       queueMicrotask(() =>
         transport.deliver(
           event(
@@ -308,9 +315,7 @@ export function versionsHost(m: Matter): FakeTransport {
               at,
               [
                 upsert(version(5, "restore", Date.now())),
-                upsert(
-                  restoreMarker(50, to, "cp5", undefined, envelope.command.restore_version?.scope),
-                ),
+                upsert(restoreMarker(50, to, "cp5", undefined, scope, forGood)),
                 // a version gone from the matter's window since: the line can't say its time
                 ...(m.forgets === true ? [{ remove: { entry_id: `version:${to}` } }] : []),
               ],

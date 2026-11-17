@@ -21,6 +21,7 @@ fn restore(n: u64) -> DomainEvent {
         undoes: None,
         written: vec![MatterPath::new("brief.txt").unwrap()],
         removed: Vec::new(),
+        deleted: Vec::new(),
         more: None,
     })
 }

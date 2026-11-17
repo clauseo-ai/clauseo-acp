@@ -342,6 +342,9 @@ pub struct Restored {
     pub written: Vec<MatterPath>,
     /// The files deleted, as [`RestorePlan::removes`].
     pub removed: Vec<MatterPath>,
+    /// The files of `removed` deleted for good, since the trash could not take them (the
+    /// history holds each); the rest went to the trash.
+    pub deleted: Vec<MatterPath>,
     /// As [`RestorePlan::added_since`]: left in place.
     pub added_since: Vec<MatterPath>,
     /// As [`RestorePlan::kept`].
