@@ -84,6 +84,8 @@ pub(crate) struct Bridge {
     closed: Mutex<HashMap<String, u64>>,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
     issued: Mutex<HashSet<FolderRefId>>,
+    /// The paths `pick_skill` returned in this run; `AddSkill` takes no other.
+    pub(super) skills_picked: Mutex<HashSet<String>>,
     /// The settings window's `RefreshLimits`, at most one per agent per 10 s.
     refreshes: RefreshThrottle,
     /// The `setup` command's path and its events (`setup.rs`, 0048).
@@ -124,6 +126,7 @@ impl Bridge {
             builds: Mutex::new(HashMap::new()),
             closed: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
+            skills_picked: Mutex::new(HashSet::new()),
             refreshes: RefreshThrottle::default(),
             setup,
             full_screen: Arc::default(),
@@ -515,6 +518,20 @@ impl Bridge {
         let folder = self.host().await?.register_folder(path).await?;
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))
+    }
+
+    /// Asks `picker` for a skill's folder and records its path, with Windows' short names spelt
+    /// out (`picked::long_name`), so `AddSkill` admits it; `None` when the lawyer cancelled, or
+    /// for a path that is not UTF-8 (the wire carries text; logged without the path). Whether it
+    /// holds a skill is the host's rule (`AddSkill`).
+    pub(crate) async fn pick_skill(&self, picker: &dyn Picker) -> Option<String> {
+        let path = picked::long_name(&picker.pick().await?);
+        let Some(path) = path.to_str().map(str::to_owned) else {
+            tracing::warn!("a skill folder picked has a path that is not UTF-8; not added");
+            return None;
+        };
+        lock(&self.skills_picked).insert(path.clone());
+        Some(path)
     }
 
     /// Tests: the folder refs issued so far.

@@ -407,6 +407,13 @@ error_codes! {
         refused to run the agent's program (permission, Windows policy or antivirus).";
     AgentProgramMissing = "agent.program_missing", retryable: false, meaning: "The OS found no \
         agent program to run (not found), so the agent did not start.";
+    SkillNoSkillMd = "skill.no_skill_md", retryable: false, meaning: "The skill to add has no \
+        `SKILL.md`: the path is neither a folder holding one nor a `SKILL.md` file; nothing was \
+        added.";
+    SkillInvalid = "skill.invalid", retryable: false, meaning: "The skill to add could not be \
+        made a skill pack: it could not be read, it is over 5,000,000 bytes or 200 files, or it \
+        breaks a skill pack rule (no name or description in its `SKILL.md`, a script while \
+        scripts are off, and the like); nothing was added.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

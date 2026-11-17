@@ -81,6 +81,18 @@ impl Admission {
             SkillsExtra::Off => Some(self.extra_locked),
         }
     }
+
+    /// [`Self::refusal`], but a pack the lawyer added on this computer (`added_here`) is
+    /// admitted whatever the lawyer's own `skills.extra` says: only the firm refuses it.
+    pub(in crate::actor) fn refusal_for(&self, id: &str, added_here: bool) -> Option<bool> {
+        self.refusal(id).filter(|by_firm| *by_firm || !added_here)
+    }
+
+    /// Whether the firm, not the lawyer, decides what is admitted (policy locks
+    /// `skills.extra`, or sets `skills.curated` while `curated`).
+    pub(in crate::actor) fn firm_decides(&self) -> bool {
+        self.extra_locked || (self.extra == SkillsExtra::Curated && self.curated_locked)
+    }
 }
 
 /// The answer of a pack's read off the actor, for [`on_read`].
@@ -98,6 +110,8 @@ pub(crate) struct PackRead {
 pub(in crate::actor) struct Hashed {
     pub(in crate::actor) hash: String,
     pub(in crate::actor) scripts: bool,
+    /// Whether it was added on this computer (`AddSkill`).
+    pub(in crate::actor) added_here: bool,
 }
 
 /// `SetSkillPack`: on, the checks and the read off the actor; off, the write.
@@ -108,7 +122,7 @@ pub(in crate::actor) fn set_skill_pack(actor: &mut Actor, ctx: &CommandCtx, id: 
     let started = if on {
         start_on(actor, ctx, id, generation)
     } else {
-        write(actor, ctx, id, None)
+        write(actor, ctx, id, None, false)
     };
     if let Err(error) = started {
         refused(actor, ctx, id, error);
@@ -117,7 +131,9 @@ pub(in crate::actor) fn set_skill_pack(actor: &mut Actor, ctx: &CommandCtx, id: 
 
 /// The checks on the actor, then the read on a thread of its own.
 fn start_on(actor: &Actor, ctx: &CommandCtx, id: &PackId, generation: u64) -> Result<(), Error> {
-    check_on(&actor.effective, id)?;
+    // The lawyer's own `skills.extra` is checked after the read, which tells a pack added on
+    // this computer (admitted whatever it says).
+    check_firm(&actor.effective, id)?;
     let root: PathBuf = actor.effective.data_dir().join(packs::PACKS_DIR);
     let allow_scripts = actor.effective.settings().skills.allow_scripts;
     let hook = actor.wiring.pack_read_hook.clone();
@@ -150,6 +166,7 @@ fn read_hash(
     read_pack(root, id, allow_scripts, hook).map(|pack| Hashed {
         hash: pack.hash().as_str().to_owned(),
         scripts: pack.has_scripts(),
+        added_here: pack.manifest().added_here,
     })
 }
 
@@ -203,7 +220,7 @@ pub(in crate::actor) fn on_read(actor: &mut Actor, answer: PackRead) {
     }
     let result = match read {
         Ok(Ok(hashed)) => recheck(&actor.effective, &id, &hashed)
-            .and_then(|()| write(actor, &ctx, &id, Some(&hashed.hash))),
+            .and_then(|()| write(actor, &ctx, &id, Some(&hashed.hash), false)),
         Ok(Err(error)) => Err(Error::refused(
             ErrorCode::SettingsRefused,
             match error {
@@ -232,7 +249,7 @@ pub(in crate::actor) fn recheck(
     id: &PackId,
     hashed: &Hashed,
 ) -> Result<(), Error> {
-    check_on(effective, id)?;
+    check_on(effective, id, hashed.added_here)?;
     if hashed.scripts && !effective.settings().skills.allow_scripts {
         let code = packs::Refusal::Script.code();
         return Err(Error::refused(
@@ -243,16 +260,22 @@ pub(in crate::actor) fn recheck(
     Ok(())
 }
 
+/// [`check_on`]'s firm half: `settings.locked` while policy locks `skills.enabled` or a firm
+/// decided `id` is not admitted.
+pub(in crate::actor) fn check_firm(effective: &Effective, id: &PackId) -> Result<(), Error> {
+    check_on(effective, id, true)
+}
+
 /// Whether `id` may be turned on: `settings.locked` while policy locks `skills.enabled` or a
 /// firm decided it is not admitted, `settings.refused` when the lawyer's own `skills.extra`
-/// does not admit it.
-fn check_on(effective: &Effective, id: &PackId) -> Result<(), Error> {
+/// does not admit it and it was not added on this computer (`added_here`).
+fn check_on(effective: &Effective, id: &PackId, added_here: bool) -> Result<(), Error> {
     if effective.is_locked(ENABLED) {
         return Err(Error::Settings(clauseo_settings::Error::Locked {
             key: ENABLED.to_owned(),
         }));
     }
-    match Admission::of(effective).refusal(id.as_str()) {
+    match Admission::of(effective).refusal_for(id.as_str(), added_here) {
         None => Ok(()),
         Some(true) => Err(Error::refused(
             ErrorCode::SettingsLocked,
@@ -265,13 +288,14 @@ fn check_on(effective: &Effective, id: &PackId) -> Result<(), Error> {
     }
 }
 
-/// Records `hash` for `id`, or removes its entry, then tells every window when it changed, then
-/// the receipt.
-fn write(
+/// Records `hash` for `id`, or removes its entry, then tells every window when it changed (or
+/// `always`: a skill added or removed changed the list), then the receipt.
+pub(in crate::actor) fn write(
     actor: &mut Actor,
     ctx: &CommandCtx,
     id: &PackId,
     hash: Option<&str>,
+    always: bool,
 ) -> Result<(), Error> {
     let before = actor
         .effective
@@ -283,7 +307,7 @@ fn write(
     actor
         .effective
         .set_skill_pack(&SystemFiles, id.as_str(), hash)?;
-    if before.as_deref() != hash {
+    if always || before.as_deref() != hash {
         tracing::info!(
             pack = id.as_str(),
             on = hash.is_some(),

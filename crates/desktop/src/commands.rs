@@ -30,7 +30,7 @@ use crate::smart_app_control::SmartAppControl;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 26] = [
+pub(crate) const COMMANDS: [&str; 27] = [
     "dispatch",
     "query",
     "open_stream",
@@ -41,6 +41,7 @@ pub(crate) const COMMANDS: [&str; 26] = [
     "answer_permission",
     "pick_folder",
     "pick_folder_or_choose",
+    "pick_skill",
     "chooser_starts",
     "chooser_list",
     "chooser_choose",

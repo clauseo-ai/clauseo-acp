@@ -202,6 +202,10 @@ impl HostCommand {
             | Self::SetToolSettings { patch: _ }
             // The id is checked by its type as it decodes.
             | Self::SetSkillPack { id: _, on: _ }
+            | Self::RemoveSkill { id: _ }
+            // The path is the host's to read: `skill.no_skill_md` for one with no skill, and
+            // desktop admits only a path its own `pick_skill` returned.
+            | Self::AddSkill { path: _ }
             | Self::SetPrivacySettings { patch: _ }
             | Self::FirstAct { counts: _ }
             // The client's name and the date are checked by their types as they decode.

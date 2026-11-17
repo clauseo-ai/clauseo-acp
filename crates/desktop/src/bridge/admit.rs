@@ -50,6 +50,8 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             // Skills (0040, PR-E): turning a pack on or off is a setting; the id is checked
             // by its type, the pack by the host.
             | HostCommand::SetSkillPack { .. }
+            // "Remove" on a skill added on this computer; the host refuses any other pack.
+            | HostCommand::RemoveSkill { .. }
             | HostCommand::RefreshLimits { .. }
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
@@ -62,9 +64,13 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
             | HostCommand::Mcp(_) => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
+            // "Add a skill": the host reads the path it names, so only a path this run's
+            // `pick_skill` returned, as `CreateMatter` takes only a folder ref `pick_folder`
+            // issued.
+            HostCommand::AddSkill { path } => picked_skill(bridge, path),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
+                 set_privacy_settings, set_skill_pack, add_skill, remove_skill, refresh_limits, set_update_mode, \
                  check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
                  the MCP server commands and the connector commands",
             )),
@@ -181,6 +187,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetSkillPack { .. } => Err(invalid(
             "skill packs are turned on and off from the settings window only",
         )),
+        // A skill is added and removed in the Skills pane only, as packs are turned on there.
+        HostCommand::AddSkill { .. } | HostCommand::RemoveSkill { .. } => Err(invalid(
+            "skills are added and removed from the settings window only",
+        )),
         // R24: the room's hint and the balance only; the rest is the settings window's.
         HostCommand::Connector(connector) => connector_main(connector),
         // A lawyer's MCP server is a program that runs with the lawyer's access: added, changed
@@ -246,6 +256,16 @@ pub(super) fn picked_source(bridge: &Bridge, source: &MatterSource) -> Result<()
 }
 
 /// Whether this run's `pick_folder` issued `folder`: `command.invalid` when it did not.
+/// Admits an `AddSkill` whose `path` this run's `pick_skill` returned. The message names no
+/// path (it may hold the lawyer's name).
+fn picked_skill(bridge: &Bridge, path: &str) -> Result<(), HostError> {
+    if lock(&bridge.skills_picked).contains(path) {
+        Ok(())
+    } else {
+        Err(invalid("the skill's path was not picked in this run"))
+    }
+}
+
 fn picked(bridge: &Bridge, folder: FolderRefId) -> Result<(), HostError> {
     if lock(&bridge.issued).contains(&folder) {
         Ok(())

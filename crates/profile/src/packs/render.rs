@@ -230,7 +230,7 @@ fn render_skill(id: &str, skill: &str, mut files: Vec<SkillFile>) -> Result<Pack
 
 /// The top-level `name` of the frontmatter `head` (its text, `---` lines included): bare, or
 /// in single or double quotes.
-fn front_name(head: &str) -> Option<&str> {
+pub(super) fn front_name(head: &str) -> Option<&str> {
     let value = head
         .lines()
         .find_map(|line| line.strip_prefix("name:"))?

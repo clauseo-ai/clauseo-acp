@@ -255,7 +255,7 @@ fn request(ids: &[&str]) -> PackRequest {
             .collect(),
         ..SkillsSettings::default()
     };
-    PackRequest::new(&skills, None)
+    PackRequest::new(&skills, None, false)
 }
 
 #[test]
