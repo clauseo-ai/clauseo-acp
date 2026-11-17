@@ -1,5 +1,6 @@
-//! A launch that failed after the agent started ([`launch_failed`]), and the log line about an
-//! agent that ended before its session was ready ([`log_start_tail`]).
+//! A launch that failed after the agent started ([`launch_failed`]), what waited on a launch that
+//! failed ([`fail_all`]), and the log line about an agent that ended before its session was ready
+//! ([`log_start_tail`]).
 //!
 //! The adapter prints its session-start phases to stderr (claude-agent-acp 0.89.1:
 //! `[session/create] sessionId=… phase=validate-cwd durationMs=1 totalMs=1`, then `settings`,
@@ -16,10 +17,32 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{DetachReason, ErrorCode, ThreadId};
 
-use super::{Stage, fail_waiting, state};
+use super::{Stage, Waiting, state, steps};
 use crate::actor::Actor;
 use crate::error::Error;
 use crate::log_file::Cause;
+
+/// Fails each of `waiting` with `error`.
+pub(in super::super) fn fail_all(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    error: &Error,
+) {
+    for item in waiting {
+        fail_waiting(actor, thread, &item, error);
+    }
+}
+
+pub(super) fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &Error) {
+    match waiting {
+        Waiting::Turn(turn) => steps::on_launch_failed(actor, thread, *turn, error),
+        Waiting::Config(ctx, ..) | Waiting::Mode(ctx, ..) => {
+            let error = Error::refused(error.code(), error.to_string());
+            actor.finish_command(ctx.id, Err(error));
+        }
+    }
+}
 
 /// The most of the stderr summary the log line holds.
 pub(crate) const START_TAIL_BYTES: usize = 2048;

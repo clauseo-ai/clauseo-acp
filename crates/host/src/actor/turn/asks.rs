@@ -17,8 +17,8 @@ use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
-    ElicitationRequest, ElicitationRequested, ElicitationResponse, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, MatterPath, PermissionAbout,
+    PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
     PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 

@@ -55,17 +55,6 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-// The room's first mount loads its chunks (the rail's, Find's results, the thread's): on a cold, busy machine that
-// takes seconds, past a test's 5 s, and a test that times out mid-mount leaves the next ones an empty rail. So the
-// room is mounted once here, under the hook's own timeout, and every test mounts it warm.
-beforeAll(async () => {
-  await mount(today([A, B]));
-  await act(async () => root?.unmount());
-  host?.remove();
-  root = null;
-  host = null;
-});
-
 const SCRATCH: MatterSummary = { matter: uuid(9, 2), name: "Scratch", kind: "scratch" };
 const A: MatterSummary = { matter: uuid(1, 2), name: "Acme Ltd v. State", kind: "folder" };
 const B: MatterSummary = { matter: uuid(2, 2), name: "Sharma v. State of Delhi", kind: "folder" };

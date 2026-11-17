@@ -36,7 +36,8 @@ mod start_failure;
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
-pub(super) use start_failure::launch_failed;
+use start_failure::fail_waiting;
+pub(super) use start_failure::{fail_all, launch_failed};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -583,22 +584,5 @@ fn select(value: &ConfigValue) -> Option<&str> {
     match value {
         ConfigValue::Select(choice) => Some(choice.as_str()),
         ConfigValue::Boolean(_) => None,
-    }
-}
-
-/// Fails each of `waiting` with `error`.
-pub(super) fn fail_all(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, error: &Error) {
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
-    }
-}
-
-fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &Error) {
-    match waiting {
-        Waiting::Turn(turn) => steps::on_launch_failed(actor, thread, *turn, error),
-        Waiting::Config(ctx, ..) | Waiting::Mode(ctx, ..) => {
-            let error = Error::refused(error.code(), error.to_string());
-            actor.finish_command(ctx.id, Err(error));
-        }
     }
 }
