@@ -55,7 +55,8 @@ fn codex_server(windows: bool) -> McpServer {
 /// folder), with the proxy's address and its browser listener's password as variables, the
 /// password in no argument. Every `AGENT_BROWSER_*` value reaches the guard through the entry,
 /// since Codex starts it with codex-acp's `HOME`, not Clauseo's. With no proxy set, or one that
-/// did not open, it is left out (`NoProxy`, or `BlockListNotLoaded` when that was why).
+/// did not open, it is left out (`NoProxy`, or a reason the proxy gave in its place, which the
+/// mapping passes on; the launch gives none today).
 #[test]
 fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
     let dir = PathBuf::from("/data/run/t-1/browser");
@@ -89,7 +90,8 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
             assert_eq!(sent, Vec::<McpServer>::new());
             assert_eq!(reason(state), Some(ToolsUnavailableReason::NoProxy));
         }
-        // A proxy that refused to start with no block list loaded says so.
+        // A reason given in place of `NoProxy` is passed on as given (a protocol value; the
+        // launch no longer produces `BlockListNotLoaded`).
         let no_list = BrowserInputs {
             port: None,
             secret_file: None,

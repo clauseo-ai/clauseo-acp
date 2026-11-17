@@ -7,7 +7,7 @@ use clauseo_blocklist::{Current, Generated, Header, parse_plain};
 use clauseo_protocol::AgentId;
 use clauseo_sandbox::ports::{ListenerFor, TIER_B_PORTS};
 use clauseo_sandbox::{
-    Denial, DenialSink as _, Error, HostRefusal, ProxyConfig, ProxyMode, Upstream, start_proxy,
+    Denial, DenialSink as _, HostRefusal, ProxyConfig, ProxyMode, Upstream, start_proxy,
 };
 
 use super::super::{RunFolders, RunSweep};
@@ -28,7 +28,7 @@ fn config(name: &str) -> ProxyConfig {
     )
 }
 
-/// A loaded list naming one host: open mode starts only with one.
+/// A loaded list naming one host.
 fn loaded() -> Arc<Current> {
     let header = Header {
         generated: Generated::parse("2026-11-07T06:00:00Z").unwrap(),
@@ -39,14 +39,12 @@ fn loaded() -> Arc<Current> {
     ))
 }
 
-/// With no block list loaded the session's proxy, open mode with the browser listener, does not
-/// start (fail closed), so the launch leaves the browser out (`BlockListNotLoaded`).
+/// The session's proxy, open mode with the browser listener, starts with no block list loaded
+/// (nothing blocked, one warning) and with one.
 #[test]
-fn the_session_proxy_does_not_start_without_a_block_list() {
-    assert!(matches!(
-        start_proxy(config("codex-acp")),
-        Err(Error::BlockListNotLoaded)
-    ));
+fn the_session_proxy_starts_with_or_without_a_block_list() {
+    let without = start_proxy(config("codex-acp"));
+    assert!(without.is_ok(), "{without:?}");
     let mut with_list = config("codex-acp");
     with_list.block = loaded();
     assert!(start_proxy(with_list).is_ok());

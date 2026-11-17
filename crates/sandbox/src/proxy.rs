@@ -109,10 +109,10 @@ pub struct ProxyConfig {
     /// The unsafe-site block list (ADR 0053), shared with the host's updater: each request
     /// reads the list in use then, so an update reaches the next request and closes nothing.
     /// Hosts on it are refused with `Denial::Blocked` whatever the allowlist says. Unloaded,
-    /// nothing is blocked, so open mode with the browser listener refuses to start then
-    /// ([`Error::BlockListNotLoaded`]). A loaded list never goes back to unloaded
-    /// (`Current::offer` takes only a list with a time), so the check at start holds for the
-    /// proxy's life.
+    /// nothing is blocked: open mode with the browser listener still starts, with one warning,
+    /// and lets any public site through until a list loads, from when each request is checked
+    /// against it. A loaded list never goes back to unloaded (`Current::offer` takes only a
+    /// list with a time).
     pub block: Arc<clauseo_blocklist::Current>,
     /// The hosts the lawyer allowed despite the block list (ADR 0053, PR 2): the host's live
     /// view for this launch's matter, its `Matter` allows and the `Always` ones, empty while
@@ -338,11 +338,10 @@ pub(crate) fn start_with(
     options: Options,
 ) -> Result<ProxyHandle, Error> {
     // Open mode lets any public site through the browser listener but the listed ones: with no
-    // list it would let every site through, so it does not start (fail closed). The agent
-    // listener keeps its allowlist in both modes.
-    if config.mode == ProxyMode::Open && config.browser && config.block.get().is_unloaded() {
-        return Err(Error::BlockListNotLoaded);
-    }
+    // list loaded yet it lets every public site through until one loads (one warning below).
+    // The agent listener keeps its allowlist in both modes.
+    let open_unlisted =
+        config.mode == ProxyMode::Open && config.browser && config.block.get().is_unloaded();
     let lookup = match options.system {
         Some((env, os, intent)) => {
             let clock = SharedClock(Arc::clone(&options.clock));
@@ -396,7 +395,14 @@ pub(crate) fn start_with(
             })
         })
     });
-    if config.block.first_unloaded_notice() {
+    // One line per start: open mode's warning takes the place of the once-only notice.
+    let noted = config.block.first_unloaded_notice();
+    if open_unlisted {
+        tracing::warn!(
+            "egress: the proxy starts in open mode with no block list, so the browser allows any \
+             public site until a list loads"
+        );
+    } else if noted {
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
     }
     let shared = Arc::new(Shared::new(config.allow, config.mode));
