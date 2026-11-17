@@ -386,6 +386,20 @@ fn every_spelling_of_the_data_folder_is_denied_in_both_shells() {
     }
 }
 
+/// Claude's home's `sessions` folder (Claude Code's per-session files): a command naming a file
+/// or the folder there is denied in both shells, with either separator.
+#[test]
+fn claudes_sessions_folder_is_denied_in_both_shells() {
+    for command in [
+        r"dir C:\Users\Asha\AppData\Local\ai.clauseo.desktop\agents\claude-acp\home\sessions",
+        "cat ~/AppData/Local/ai.clauseo.desktop/agents/claude-acp/home/sessions/4242.json",
+        r"type %LOCALAPPDATA%\ai.clauseo.desktop\agents\claude-acp\home\sessions\4242.json",
+    ] {
+        assert!(denied("Bash", command), "Bash: {command}");
+        assert!(denied("PowerShell", command), "PowerShell: {command}");
+    }
+}
+
 /// A configured folder: its paths and the variable it sits under, never Clauseo's own name nor
 /// `%LOCALAPPDATA%`.
 #[test]

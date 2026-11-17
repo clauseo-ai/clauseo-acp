@@ -31,6 +31,10 @@ fn with_no_hook_the_meta_is_the_switches() {
             "env": {
                 "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
                 "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                "CLAUDE_CODE_DISABLE_CRON": "1",
+                "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
+                "CLAUDE_CODE_HARBOR_KITE": "0",
+                "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
             },
         }}})
     );
@@ -69,6 +73,10 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                         "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
                         "FIRM": "1",
                         "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                        "CLAUDE_CODE_DISABLE_CRON": "1",
+                        "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
+                        "CLAUDE_CODE_HARBOR_KITE": "0",
+                        "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
                     },
                 },
             },

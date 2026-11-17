@@ -242,8 +242,8 @@ fn a_deep_verbatim_path_keys_under_the_shorter_plain_data_folder() {
 }
 
 /// Claude's home's `sessions` folder (Claude Code's per-session files) is denied to its tools:
-/// Read and Edit rules on every system, the shell rules on Windows, and the check of a command or
-/// a tool's path that names a file there.
+/// Read and Edit rules on every system, and the check of a command or a tool's path that names a
+/// file there. Windows' shell rules for it are in `shell_deny_tests.rs`.
 #[test]
 fn claudes_sessions_folder_is_denied() {
     let deny = LaunchDeny::fixed(vec![PathBuf::from("/d")]);
@@ -252,14 +252,6 @@ fn claudes_sessions_folder_is_denied() {
         let rule = format!("{tool}(//d/agents/claude-acp/home/sessions/**)");
         assert!(rules.contains(&rule), "{rule}");
     }
-    let shell = super::windows_shell_deny_rules(&deny, &|_| None);
-    assert!(
-        shell
-            .iter()
-            .any(|rule| rule.contains("agents/claude-acp/home/sessions")
-                || rule.contains(r"agents\claude-acp\home\sessions")),
-        "{shell:?}"
-    );
     let dir = layout("sessions");
     let root = dir.path();
     let sessions = root.join("data/agents/claude-acp/home/sessions");
