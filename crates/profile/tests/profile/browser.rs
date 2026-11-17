@@ -141,7 +141,7 @@ fn only_the_browser_part_names_agent_browser() {
     // shell command or its variables, and never to escalate; Claude never gets Codex's part.
     let codex_on = browser_part_for(BrowserPart::On, true);
     for rule in [
-        "use your browser tools, the ones from the `browser` MCP server",
+        "use the `browser` MCP server's tools",
         "never a browser command in your shell",
         "confidential matter text",
         "The eval tool is off",

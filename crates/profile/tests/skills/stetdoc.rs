@@ -218,11 +218,13 @@ fn the_stetdoc_line_is_in_the_instructions_only_when_stetdoc_was_found() {
     let with = launch.compose_for("", true);
     let without = launch.compose_for("", false);
     assert!(
-        with.contains(&format!("(`python` on Windows). {line} Edit Word files")),
+        with.contains(&format!(
+            "for a Word document, use stetdoc. {line} Edit Word files"
+        )),
         "{with}"
     );
     assert!(
-        without.contains("(`python` on Windows). Edit Word files"),
+        without.contains("for a Word document, use stetdoc. Edit Word files"),
         "{without}"
     );
     assert_eq!(launch.compose(""), without);

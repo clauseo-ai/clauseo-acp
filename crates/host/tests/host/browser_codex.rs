@@ -198,7 +198,7 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_browser() {
     let line = if cfg!(windows) {
         "You have no browser in this session."
     } else {
-        "use your browser tools, the ones from the `browser` MCP server"
+        "use the `browser` MCP server's tools"
     };
     assert!(instructions.contains(line), "{instructions}");
     assert!(!instructions.contains("agent-browser"), "{instructions}");

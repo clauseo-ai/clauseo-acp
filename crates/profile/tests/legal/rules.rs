@@ -150,3 +150,34 @@ fn each_agent_makes_a_new_document_clean_with_pandoc() {
             .contains("pandoc")
     );
 }
+
+/// The sentence both agents are told about a paper the lawyer mentions with "@" (UC-711): once in
+/// each agent's text on every OS, with or without a working stetdoc, and in the reviewed words,
+/// verbatim in `ui/app/src/review/registry-uc-agents.tsx` and provisional in its approvals file.
+#[test]
+fn both_agents_read_a_mentioned_paper_in_the_reviewed_words() {
+    use clauseo_profile::instructions::TOOLS;
+    const LINE: &str = "When the lawyer mentions a paper with @, read it before you answer; for a \
+                        Word document, use stetdoc.";
+    assert_eq!(TOOLS.matches(LINE).count(), 1);
+    let root = std::env::temp_dir().join("rules-mention-read");
+    for stetdoc in [false, true] {
+        let profile = launch_profile(&root).with_stetdoc_cli(stetdoc);
+        for macos in [false, true] {
+            let claude = profile.claude_instructions_for(macos);
+            let codex = profile.codex_instructions_for(macos);
+            assert_eq!(claude.matches(LINE).count(), 1, "{claude}");
+            assert_eq!(codex.matches(LINE).count(), 1, "{codex}");
+        }
+    }
+    let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/app");
+    let registry = std::fs::read_to_string(ui.join("src/review/registry-uc-agents.tsx")).unwrap();
+    assert!(registry.contains("\"UC-711\""));
+    assert!(registry.contains(&serde_json::to_string(LINE).unwrap()));
+    let approvals =
+        std::fs::read_to_string(ui.join("copy-approvals/UC-agents-mention-read.json")).unwrap();
+    let approvals: serde_json::Value = serde_json::from_str(&approvals).unwrap();
+    assert_eq!(approvals["UC-711"]["en"], LINE);
+    assert_eq!(approvals["UC-711"]["status"], "provisional");
+    assert!(approvals["UC-711"]["hi"].is_null());
+}
