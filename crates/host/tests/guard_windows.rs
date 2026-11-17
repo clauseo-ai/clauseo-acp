@@ -458,7 +458,8 @@ fn the_guard_is_a_console_program() {
 /// code (PowerShell sets no `$LASTEXITCODE` for a GUI program), so the tests above would fail for
 /// a GUI target. Both shells were seen passing the GUI program's stderr through (the guard's
 /// reason), but its exit code never reached the line: on every shell a listing doesn't end with
-/// 0, and the held file's output ends with the shared could-not-check line.
+/// 0, and the held file's line ends with 2 and writes the shared could-not-check line. The twin
+/// isn't waited for but holds the line's stderr, so its reason may land before or after that line.
 #[test]
 fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
     let root = tempfile::Builder::new()
@@ -477,6 +478,7 @@ fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
         let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
         let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
         let errors = String::from_utf8_lossy(&output.stderr);
-        assert!(errors.trim_end().ends_with(UNCHECKED), "{shell}: {errors}");
+        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
+        assert!(errors.contains(UNCHECKED), "{shell}: {errors}");
     }
 }
