@@ -68,7 +68,10 @@ fn hooks_running(script: &Path) -> Map<String, Value> {
 #[cfg(unix)]
 fn logged_ids(log: &Path) -> Vec<String> {
     let text = std::fs::read_to_string(log).unwrap_or_else(|_| panic!("no copy at {log:?}"));
-    serde_json::from_str(&text).unwrap_or_else(|_| panic!("not a JSON array: {text:?}"))
+    let file: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|_| panic!("not JSON: {text:?}"));
+    assert_eq!(file["version"], 1, "{text}");
+    serde_json::from_value(file["sessions"].clone()).unwrap_or_else(|_| panic!("{text:?}"))
 }
 
 /// Every `sessions.json` left under `<data>/browser/guard`.

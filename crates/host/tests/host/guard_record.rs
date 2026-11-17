@@ -89,7 +89,7 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     let record = PathBuf::from(record);
     // The ids file sits beside the record, in the session's guard folder.
     let ids = record.parent().unwrap().join("sessions.json");
-    // Then the session's own folders, its run folder and its matter's notes.
+    // Then the session's own folders, its work folder and its matter's notes.
     let own = own_folders(hook["command"].as_str().unwrap());
     let own_words = own
         .iter()
@@ -149,7 +149,11 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
         .unwrap();
     let own = own_folders(command);
     let data = record.ancestors().nth(4).unwrap();
-    assert_eq!(own[0], data.join("run").join(session), "{command}");
+    assert_eq!(
+        own[0],
+        data.join("run").join(session).join("work"),
+        "{command}"
+    );
     let own: Vec<&Path> = own.iter().map(PathBuf::as_path).collect();
     let expected = clauseo_host::codex_hook_config(&guard, Some((&record, id)), &own);
     assert_eq!(config["hooks"], expected.unwrap());
@@ -157,8 +161,8 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     assert!(!folder.exists(), "the guard folder goes with the session");
 }
 
-/// The session's own folders in Codex's hook `command`, each after `--own-folder`: its run folder,
-/// then its matter's notes (`<data>/agent-state/<matter>/notes`), and nothing after them.
+/// The session's own folders in Codex's hook `command`, each after `--own-folder`: its work
+/// folder, then its matter's notes (`<data>/agent-state/<matter>/notes`), and nothing after them.
 pub(crate) fn own_folders(command: &str) -> Vec<PathBuf> {
     let mut parts = command.split(" --own-folder '");
     let before = parts.next().unwrap_or_default();
@@ -172,7 +176,7 @@ pub(crate) fn own_folders(command: &str) -> Vec<PathBuf> {
         })
         .collect();
     let [_, notes] = own.as_slice() else {
-        panic!("a run folder and the notes: {command}");
+        panic!("a work folder and the notes: {command}");
     };
     let names: Vec<&str> = notes
         .iter()

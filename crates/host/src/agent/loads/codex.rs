@@ -63,16 +63,16 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`) then
 /// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), then
 /// `--sessions` and the ids file beside the record (`pre_write_guard::sessions::file`), then
-/// `--own-folder` and each of the session's own folders `own` (its run folder and its matter's
+/// `--own-folder` and each of the session's own folders `own` (its work folder and its matter's
 /// notes, where a `view_image` is not refused), before every tool, trusted by its own `state`
 /// entry:
 ///
 /// ```json
 /// {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>
-///     --sessions '<ids>' --own-folder '<run>' --own-folder '<notes>'",
+///     --sessions '<ids>' --own-folder '<work>' --own-folder '<notes>'",
 ///   "commandWindows": "$global:LASTEXITCODE = -1; & '<program>' --pre-write-guard --record
-///     '<record>' --record-id '<hex>' --sessions '<ids>' --own-folder '<run>' --own-folder
+///     '<record>' --record-id '<hex>' --sessions '<ids>' --own-folder '<work>' --own-folder
 ///     '<notes>'; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
 ///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
@@ -386,7 +386,7 @@ mod tests {
         let record = Path::new("/data/browser/guard/s 1/guard-blocks.jsonl");
         let id = "00000000000001030000000000000000000000000045c2a9";
         let own = [
-            Path::new("/data/run/s 1"),
+            Path::new("/data/run/s 1/work"),
             Path::new("/data/agent-state/m'1/notes"),
         ];
         let config = codex_hook_config(program, Some((record, id)), &own).unwrap();
@@ -394,7 +394,7 @@ mod tests {
         let posix = format!(
             "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
              '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id} \
-             --sessions '/data/browser/guard/s 1/sessions.json' --own-folder '/data/run/s 1' \
+             --sessions '/data/browser/guard/s 1/sessions.json' --own-folder '/data/run/s 1/work' \
              --own-folder '/data/agent-state/m'\\''1/notes'"
         );
         let windows = ps_command(&[
@@ -407,7 +407,7 @@ mod tests {
             "--sessions".to_owned(),
             "'/data/browser/guard/s 1/sessions.json'".to_owned(),
             "--own-folder".to_owned(),
-            "'/data/run/s 1'".to_owned(),
+            "'/data/run/s 1/work'".to_owned(),
             "--own-folder".to_owned(),
             "'/data/agent-state/m''1/notes'".to_owned(),
         ]);
@@ -425,7 +425,7 @@ mod tests {
         if !cfg!(windows) {
             assert_eq!(
                 *trusted,
-                "sha256:de9dc45e8c444df595901be9b612cd3319a08797b702c68bf56af16ce07e9ca7"
+                "sha256:e0c4ddee6217d00a2bd2108ea3bac131be99b068ace1187b0fdd08dc20423e85"
             );
         }
         let odd = Path::new("/data/100%/guard-blocks.jsonl");
@@ -447,6 +447,50 @@ mod tests {
             assert_eq!(
                 hook["command"], "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
                 "{bad:?}"
+            );
+        }
+    }
+
+    /// The session's own folders go after the ids file in both commands, each after
+    /// `--own-folder`, quoted for its shell, in the order given; with no record (so no ids file)
+    /// none goes in, and one with no UTF-8 spelling is left out alone.
+    #[test]
+    fn the_own_folders_follow_the_ids_file_in_both_commands() {
+        let program = Path::new("/opt/clauseo/clauseo-desktop");
+        let record = Path::new("/data/browser/guard/s1/guard-blocks.jsonl");
+        let own = [
+            Path::new("/data/run/s1/work"),
+            Path::new("/data/agent-state/m1/notes"),
+        ];
+        let config = codex_hook_config(program, Some((record, "00ff")), &own).unwrap();
+        let hook = &config["PreToolUse"][0]["hooks"][0];
+        let tail = " --sessions '/data/browser/guard/s1/sessions.json' --own-folder \
+                    '/data/run/s1/work' --own-folder '/data/agent-state/m1/notes'";
+        let command = hook["command"].as_str().unwrap();
+        assert!(command.ends_with(tail), "{command}");
+        let windows = hook["commandWindows"].as_str().unwrap();
+        assert!(
+            windows.contains(&format!("{tail}; $c = $LASTEXITCODE")),
+            "{windows}"
+        );
+        let config = codex_hook_config(program, None, &own).unwrap();
+        let command = config["PreToolUse"][0]["hooks"][0]["command"].as_str();
+        assert_eq!(
+            command,
+            Some("'/opt/clauseo/clauseo-desktop' --pre-write-guard")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt as _;
+            let odd = Path::new(std::ffi::OsStr::from_bytes(b"/data/run/\xff/work"));
+            let own = [odd, Path::new("/data/agent-state/m1/notes")];
+            let config = codex_hook_config(program, Some((record, "00ff")), &own).unwrap();
+            let command = config["PreToolUse"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap();
+            assert!(
+                command.ends_with("sessions.json' --own-folder '/data/agent-state/m1/notes'"),
+                "{command}"
             );
         }
     }

@@ -413,25 +413,6 @@ fn a_guard_that_refuses_every_call_fails_the_self_test() {
     assert_eq!(scratch.test(entry).run("main"), Err(Failed::Refused));
 }
 
-/// The second run passes on exit 0 with nothing or a JSON value on stdout, and fails on any
-/// other answer.
-#[cfg(unix)]
-#[test]
-fn the_second_run_needs_exit_0_and_empty_or_json_stdout() {
-    let scratch = Scratch::new("second-run");
-    for (then, expected) in [
-        ("exit 0", Ok(())),
-        ("echo '{}'; exit 0", Ok(())),
-        ("echo; exit 0", Ok(())),
-        ("echo 'not json'; exit 0", Err(Failed::Refused)),
-        ("exit 1", Err(Failed::Refused)),
-        ("echo no >&2; exit 2", Err(Failed::Refused)),
-    ] {
-        let entry = entry_for(&scratch.guard(&answering(then)));
-        assert_eq!(scratch.test(entry).run("main"), expected, "{then}");
-    }
-}
-
 /// On Windows the self-test runs the hook's `commandWindows` as written: #1186's one PowerShell
 /// line (`$global:LASTEXITCODE = -1; & '<program>' …; exit 2`) under PowerShell. A guard that
 /// refuses passes; one that exits 0 fails; a missing one fails too, though the line
@@ -566,3 +547,7 @@ fn a_wrong_or_unreadable_ids_file_fails_the_self_test() {
     write::create_dir_all(&ids).unwrap();
     assert_eq!(test.run("main-session"), Err(Failed::Refused));
 }
+
+#[cfg(unix)]
+#[path = "answer_tests.rs"]
+mod answer_tests;

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::super::{DENY, record, run_timed};
-use super::{DATA_IMAGE, FAILED, FLAG, OWN_FLAG, REFUSED, TOO_LATE, add, data_of, file, read};
+use super::{DATA_IMAGE, FAILED, FLAG, REFUSED, TOO_LATE, add, data_of, file, read};
 use crate::write;
 
 /// The conversation's session id, as Codex's thread ids look.
@@ -211,14 +211,15 @@ fn a_missing_ids_file_is_refused() {
 fn an_unparsable_ids_file_is_refused() {
     let fixture = Fixture::new("bad-file");
     let hook = fixture.hook(Some(MAIN), "Bash", &bash("ls")).to_string();
-    let big = format!("[\"{MAIN}\", \"{}\"]", "a".repeat(70 * 1024));
+    let listing = |sessions: &str| format!("{{\"version\": 1, \"sessions\": [{sessions}]}}");
+    let big = listing(&format!("\"{MAIN}\", \"{}\"", "a".repeat(70 * 1024)));
     for text in [
         "not json".to_owned(),
-        format!("[\"{MAIN}\""),
+        listing(&format!("\"{MAIN}\"")).replace("]}", "]"),
         format!("{{\"ids\": [\"{MAIN}\"]}}"),
         format!("\"{MAIN}\""),
-        format!("[\"{MAIN}\", \"\"]"),
-        format!("[\"{MAIN}\", 7]"),
+        listing(&format!("\"{MAIN}\", \"\"")),
+        listing(&format!("\"{MAIN}\", 7")),
         big,
     ] {
         write::write_file(&fixture.ids(), text.as_bytes()).unwrap();
@@ -228,6 +229,31 @@ fn an_unparsable_ids_file_is_refused() {
     write::remove_file(&fixture.ids()).unwrap();
     write::create_dir_all(&fixture.ids()).unwrap();
     assert_refused(guard(&fixture.args(), hook.as_bytes()));
+}
+
+/// The ids file is `{"version": 1, "sessions": […]}` and nothing else: a bare array (the earlier
+/// form), another version, or a field more or less is refused, though it lists the session.
+#[test]
+fn an_ids_file_of_another_form_or_version_is_refused() {
+    let fixture = Fixture::new("version");
+    let hook = fixture.hook(Some(MAIN), "Bash", &bash("ls")).to_string();
+    let current = format!("{{\"version\": 1, \"sessions\": [\"{MAIN}\"]}}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.ids()).unwrap(),
+        current.replace(' ', "")
+    );
+    for text in [
+        format!("[\"{MAIN}\"]"),
+        format!("{{\"version\": 2, \"sessions\": [\"{MAIN}\"]}}"),
+        format!("{{\"version\": 1, \"sessions\": [\"{MAIN}\"], \"signed\": true}}"),
+        format!("{{\"sessions\": [\"{MAIN}\"]}}"),
+    ] {
+        write::write_file(&fixture.ids(), text.as_bytes()).unwrap();
+        assert_refused(guard(&fixture.args(), hook.as_bytes()));
+        assert_eq!(read(&fixture.ids()), None, "{text}");
+    }
+    write::write_file(&fixture.ids(), current.as_bytes()).unwrap();
+    assert_eq!(guard(&fixture.args(), hook.as_bytes()), (0, String::new()));
 }
 
 /// Under the session check, stdin the guard cannot read refuses, where without it the guard
@@ -298,93 +324,6 @@ fn view_image_of_a_data_folder_file_is_refused() {
             (0, String::new()),
             "{path}"
         );
-    }
-}
-
-/// The session's run folder and its matter's notes in the data folder, as the host lays them out
-/// (`actor/turn/launch_checks.rs`, `RunFolders`), made, with an image in the run's work folder;
-/// and the hook's arguments naming them as the session's own.
-fn own_folders(fixture: &Fixture) -> (PathBuf, Vec<OsString>) {
-    let run = fixture.data().join("run").join("s1");
-    let notes = fixture.data().join("agent-state").join("m1").join("notes");
-    write::create_dir_all(&run.join("work")).unwrap();
-    write::create_dir_all(&notes).unwrap();
-    write::write_file(&run.join("work").join("page-1.png"), b"x").unwrap();
-    write::write_file(&notes.join("chart.png"), b"x").unwrap();
-    let mut args = fixture.args();
-    for folder in [&run, &notes] {
-        args.extend([OsString::from(OWN_FLAG), folder.clone().into_os_string()]);
-    }
-    (run, args)
-}
-
-/// A `view_image` of a page rendered into the session's work folder, or of an image in its
-/// matter's notes, is allowed when the hook names them as its own.
-#[test]
-fn view_image_in_the_sessions_own_folders_is_allowed() {
-    let fixture = Fixture::new("view-own");
-    let (run, args) = own_folders(&fixture);
-    let notes = fixture.data().join("agent-state").join("m1").join("notes");
-    for path in [run.join("work").join("page-1.png"), notes.join("chart.png")] {
-        let hook = fixture.hook(
-            Some(MAIN),
-            "view_image",
-            &json!({ "path": path.to_str().unwrap() }),
-        );
-        assert_eq!(
-            guard(&args, hook.to_string().as_bytes()),
-            (0, String::new()),
-            "{path:?}"
-        );
-        // Without the own folders named, it is refused as before.
-        let (code, err) = guard(&fixture.args(), hook.to_string().as_bytes());
-        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
-    }
-}
-
-/// Another run's work folder, and the rest of the data folder, stay refused for a `view_image`.
-#[test]
-fn view_image_in_another_runs_work_folder_is_refused() {
-    let fixture = Fixture::new("view-other");
-    let (_, args) = own_folders(&fixture);
-    let other = fixture.data().join("run").join("s2").join("work");
-    write::create_dir_all(&other).unwrap();
-    write::write_file(&other.join("page-1.png"), b"x").unwrap();
-    for path in [other.join("page-1.png"), fixture.data().join("store.png")] {
-        let hook = fixture.hook(
-            Some(MAIN),
-            "view_image",
-            &json!({ "path": path.to_str().unwrap() }),
-        );
-        let (code, err) = guard(&args, hook.to_string().as_bytes());
-        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
-    }
-}
-
-/// A link in the session's work folder to elsewhere in the data folder is judged by where it
-/// leads: refused.
-#[cfg(unix)]
-#[test]
-fn view_image_through_a_link_in_the_work_folder_is_refused() {
-    let fixture = Fixture::new("view-link");
-    let (run, args) = own_folders(&fixture);
-    let other = fixture.data().join("run").join("s2").join("work");
-    write::create_dir_all(&other).unwrap();
-    write::write_file(&other.join("page-1.png"), b"x").unwrap();
-    let work = run.join("work");
-    write::symlink(&fixture.data().join("store.png"), &work.join("store.png")).unwrap();
-    write::symlink(&other, &work.join("other")).unwrap();
-    for path in [
-        work.join("store.png"),
-        work.join("other").join("page-1.png"),
-    ] {
-        let hook = fixture.hook(
-            Some(MAIN),
-            "view_image",
-            &json!({ "path": path.to_str().unwrap() }),
-        );
-        let (code, err) = guard(&args, hook.to_string().as_bytes());
-        assert_eq!((code, err.trim_end()), (DENY, DATA_IMAGE), "{path:?}");
     }
 }
 
@@ -559,3 +498,6 @@ fn each_decision_is_recorded_for_the_log() {
     }
     super::log_decisions(text.lines().map(str::as_bytes));
 }
+
+#[path = "own_tests.rs"]
+mod own_tests;

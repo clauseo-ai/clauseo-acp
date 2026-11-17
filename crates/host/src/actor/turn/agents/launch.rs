@@ -88,8 +88,11 @@ pub(super) fn launch(
             .as_ref()
             .map(|(file, id)| (file.as_path(), id.as_str()));
         // A `view_image` in the session's own folders is not refused
-        // (`pre_write_guard/sessions.rs`).
-        let own = [run.root.as_path(), run.notes.as_path()];
+        // (`pre_write_guard/sessions.rs`): its work folder, where Codex renders a PDF's pages
+        // (`codex-pdf.txt`), and its matter's notes. Not the rest of the run folder: Codex has
+        // no shell browser to put screenshots in its temp folder, and its browser tools return
+        // their images in the reply.
+        let own = [run.work.as_path(), run.notes.as_path()];
         let hooks = codex_hooks(actor, record, &own)?;
         let guard = hooks.is_some();
         // The hook's command, for the self-test before the first prompt (`session.rs`).

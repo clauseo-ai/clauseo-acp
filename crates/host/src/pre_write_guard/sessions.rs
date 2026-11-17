@@ -7,13 +7,13 @@
 //! the session call returns and before its first prompt, in the guard folder no agent may write.
 //! Any other call is refused with [`REFUSED`], and so is every call when the guard can't tell:
 //! stdin it can't read or parse, no `session_id`, a file that is missing, unreadable, too big or
-//! not a JSON array of ids. A refusal is exit 2 with its reason on stderr, which Codex takes as a
-//! block; with [`FLAG`] the guard process also answers that way on a panic and past its own
-//! deadline ([`arm`]).
+//! not version 1 of the ids file ([`IdsFile`]). A refusal is exit 2 with its reason on stderr,
+//! which Codex takes as a block; with [`FLAG`] the guard process also answers that way on a panic
+//! and past its own deadline ([`arm`]).
 //!
 //! Then, for a listed session, the guard's other checks apply as before, and one more: a
 //! `view_image` of a path in Clauseo's data folder is refused unless the path, links followed,
-//! lies in one of the session's own folders that the hook names after [`OWN_FLAG`] (its run
+//! lies in one of the session's own folders that the hook names after [`OWN_FLAG`] (its work
 //! folder and its matter's notes); the data fence's own check, `agent/data_fence.rs`.
 
 use std::ffi::OsString;
@@ -51,6 +51,20 @@ const DATA_IMAGE: &str = "Clauseo doesn't let the agent open files in Clauseo's 
 /// takes milliseconds; a held-open check over a big matter folder on a slow disk takes longer,
 /// so this leaves room for it, at most half Codex's own hook timeout (`agent/loads/codex.rs`).
 pub const DEADLINE: Duration = Duration::from_secs(15);
+
+/// The ids file's format version: [`IdsFile::version`].
+const VERSION: u32 = 1;
+
+/// The ids file: `{"version": 1, "sessions": ["<id>", …]}`, nothing else. Another version, a
+/// field more or less, or another shape is no ids file to the guard ([`read`]).
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IdsFile {
+    /// [`VERSION`].
+    version: u32,
+    /// The conversation's session ids, none empty.
+    sessions: Vec<String>,
+}
 
 /// The longest ids file read; a longer one is refused.
 const MAX_FILE: u64 = 64 * 1024;
@@ -111,8 +125,9 @@ pub(super) fn refusal(
     view_image_in_data(hook, file, own).then_some(DATA_IMAGE)
 }
 
-/// The ids in `file`: a JSON array of strings, none empty, the file at most [`MAX_FILE`] bytes;
-/// `None` for anything else.
+/// The ids in `file`: an [`IdsFile`] of [`VERSION`] whose ids are none empty, the file at most
+/// [`MAX_FILE`] bytes; `None` for anything else, which the guard refuses as an unknown session.
+/// The guard's one reader of the file.
 pub fn read(file: &Path) -> Option<Vec<String>> {
     let mut bytes = Vec::new();
     std::fs::File::open(file)
@@ -123,8 +138,9 @@ pub fn read(file: &Path) -> Option<Vec<String>> {
     if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_FILE) {
         return None;
     }
-    let ids: Vec<String> = serde_json::from_slice(&bytes).ok()?;
-    ids.iter().all(|id| !id.is_empty()).then_some(ids)
+    let parsed: IdsFile = serde_json::from_slice(&bytes).ok()?;
+    let ids = parsed.sessions;
+    (parsed.version == VERSION && ids.iter().all(|id| !id.is_empty())).then_some(ids)
 }
 
 /// How many times [`add`] tries the rename that puts the ids file in place, and the pause
@@ -137,7 +153,7 @@ const RENAME_PAUSE: Duration = Duration::from_millis(125);
 /// there (a fork's new id joins its conversation's), written whole and private
 /// (`write::replace_private_file`), the rename tried up to [`RENAME_TRIES`] times
 /// [`RENAME_PAUSE`] apart; the last try's error is the result. Nothing is written when `id` is
-/// listed already. The host's, off the actor.
+/// listed already. The host's one writer of the file, off the actor.
 pub fn add(folder: &Path, id: &str) -> std::io::Result<()> {
     add_with(folder, id, &crate::write::rename_file, &pause)
 }
@@ -171,7 +187,11 @@ fn add_with(
         return Err(std::io::Error::other("an empty session id"));
     }
     ids.push(id.to_owned());
-    let text = serde_json::to_vec(&ids).map_err(std::io::Error::other)?;
+    let text = serde_json::to_vec(&IdsFile {
+        version: VERSION,
+        sessions: ids,
+    })
+    .map_err(std::io::Error::other)?;
     crate::write::replace_private_file_by(&file, &text, |temp, path| {
         let mut tries = 1;
         loop {

@@ -7,7 +7,8 @@
 //! 1. with a call from a session no conversation has ([`input`]), which the guard must refuse:
 //!    exit 2 with something on stderr, within [`LIMIT`];
 //! 2. with a harmless call from the conversation's own session ([`own_input`]), which the guard
-//!    must allow: exit 0, nothing or a JSON value on stdout, within [`LIMIT`].
+//!    must allow: exit 0 and a stdout Codex reads as no refusal ([`codex_allows`]), within
+//!    [`LIMIT`].
 //!
 //! The launch goes on only when both hold; anything else (no guard at that path, one an antivirus
 //! stops, one that hangs or crashes, one that answers every call the same way, an ids file it
@@ -75,8 +76,8 @@ pub(crate) enum Failed {
     Late,
     /// It answered without refusing: another exit code, or nothing on stderr.
     Answer,
-    /// It did not allow the conversation's own harmless call: another exit code than 0, or
-    /// something on stdout that is not JSON.
+    /// It did not allow the conversation's own harmless call: another exit code than 0, or a
+    /// stdout Codex reads as a refusal or as broken JSON ([`codex_allows`]).
     Refused,
 }
 
@@ -416,18 +417,41 @@ pub(super) fn allows_within(
     limit: Duration,
 ) -> Result<(), Failed> {
     let answer = answer_within(entry, call, limit)?;
-    let quiet = answer.stdout.iter().all(u8::is_ascii_whitespace);
-    let json = quiet || serde_json::from_slice::<Value>(&answer.stdout).is_ok();
-    if answer.code == Some(0) && json {
+    let stdout = codex_allows(&answer.stdout);
+    if answer.code == Some(0) && stdout {
         Ok(())
     } else {
         tracing::warn!(
             code = ?answer.code,
-            stdout_json = json,
+            stdout_allows = stdout,
             "the guard hook's self-test did not allow the conversation's own call"
         );
         Err(Failed::Refused)
     }
+}
+
+/// Whether Codex 0.162.1 reads `stdout`, from a hook that exited 0, as no refusal
+/// (`hooks/src/events/pre_tool_use.rs`, the exit-0 arm): nothing, or plain text, which it
+/// ignores (a shell start-up file that prints something, say); text that looks like JSON
+/// (`output_parser::looks_like_json`: `{` or `[` first) must be a JSON object that neither
+/// blocks (`"decision": "block"`) nor denies (`hookSpecificOutput.permissionDecision` `"deny"`).
+/// Codex reports JSON-looking text that does not parse as a failed hook, so it fails here too.
+pub(super) fn codex_allows(stdout: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stdout);
+    let trimmed = text.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return true;
+    }
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(trimmed) else {
+        return false;
+    };
+    let blocks = object.get("decision").and_then(Value::as_str) == Some("block");
+    let denies = object
+        .get("hookSpecificOutput")
+        .and_then(|output| output.get("permissionDecision"))
+        .and_then(Value::as_str)
+        == Some("deny");
+    !blocks && !denies
 }
 
 /// Reads `pipe` to its end, up to [`MAX_OUTPUT`], on a thread of its own.

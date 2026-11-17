@@ -578,8 +578,8 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     );
     assert!(!session.is_empty(), "{command}");
     assert_eq!(id.len(), 48, "{command}");
-    let data = record.ancestors().nth(4).unwrap();
-    assert_eq!(own[0], data.join("run").join(session), "{command}");
+    let runs = record.ancestors().nth(4).unwrap().join("run");
+    assert_eq!(own[0], runs.join(session).join("work"), "{command}");
     let own: Vec<&std::path::Path> = own.iter().map(std::path::PathBuf::as_path).collect();
     let expected = clauseo_host::codex_hook_config(&program, Some((&record, id)), &own).unwrap();
     assert_eq!(config["hooks"], expected);
