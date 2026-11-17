@@ -73,6 +73,10 @@ pub const MAX_ZIP_BYTES: u64 = 419_430_400;
 /// How long the lawyer's download waits, while offline, before it tries the network again.
 pub const OFFLINE_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How many times in all the lawyer's download tries while the connection fails, before it stops
+/// with `network`: three, as agent-browser's own `install` does.
+pub const OFFLINE_TRIES: u32 = 3;
+
 /// The zip's name inside the working folder.
 const ZIP_NAME: &str = "chrome.zip";
 
@@ -102,14 +106,27 @@ pub struct Failure {
     pub code: BrowserInstallFailure,
     /// For the log only.
     pub message: String,
+    /// Whether the lawyer's download may try again after it ([`run_until_online`]): a
+    /// `network` failure of the connection itself, and nothing else.
+    pub again: bool,
 }
 
 impl Failure {
-    /// A failure with `code` and `message`.
+    /// A failure with `code` and `message`; a `network` one may be tried again.
     pub fn new(code: BrowserInstallFailure, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
+            again: code == BrowserInstallFailure::Network,
+        }
+    }
+
+    /// The same failure, never tried again.
+    #[must_use]
+    pub fn last_try(self) -> Self {
+        Self {
+            again: false,
+            ..self
         }
     }
 
@@ -121,9 +138,15 @@ impl Failure {
         )
     }
 
-    /// A file system call in the browsers folder failed: `unpack`.
+    /// A file system call in the browsers folder failed: `disk_space` when the disk is full,
+    /// else `unpack`.
     fn io(what: &str, error: &std::io::Error) -> Self {
-        Self::new(BrowserInstallFailure::Unpack, format!("{what}: {error}"))
+        let code = if error.kind() == std::io::ErrorKind::StorageFull {
+            BrowserInstallFailure::DiskSpace
+        } else {
+            BrowserInstallFailure::Unpack
+        };
+        Self::new(code, format!("{what}: {error}"))
     }
 }
 
@@ -165,16 +188,23 @@ pub trait InstallTools: Send + Sync {
     fn free_bytes(&self, folder: &Path) -> std::io::Result<u64>;
 
     /// The body of `url`, the version list (at most 1 MiB). `work` is a folder the call may
-    /// use as its working folder.
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure>;
+    /// use as its working folder; `proxy` is `network.upstream_proxy`, when set.
+    fn fetch_versions(
+        &self,
+        url: &str,
+        work: &Path,
+        proxy: Option<&str>,
+        cancel: &Cancel,
+    ) -> Result<Vec<u8>, Failure>;
 
     /// Downloads `url` into the new file `zip`, calling `progress(bytes, total)` as it goes, at
     /// most about four times a second. Returns the response's `Content-Length`, `None` without
-    /// one; the caller compares it with the file.
+    /// one; the caller compares it with the file. `proxy` as for [`Self::fetch_versions`].
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure>;
@@ -203,6 +233,9 @@ pub struct Job {
     pub random: String,
     /// Now, in seconds since the Unix epoch, for the record of Stables seen.
     pub now: i64,
+    /// `network.upstream_proxy` when set, which curl then uses for both fetches; `None`: curl's
+    /// own default.
+    pub proxy: Option<String>,
 }
 
 /// How a run that did not fail ended.
@@ -214,19 +247,23 @@ pub enum Outcome {
     Current,
 }
 
-/// [`run`] again after each `network` failure, reporting `Offline` and waiting `retry` first,
-/// until it gets through or `cancel` is set: the lawyer's download, which waits out a dropped
-/// connection rather than failing.
+/// [`run`] again after each failure of the connection itself, reporting `Offline` and waiting
+/// `retry` first, until it gets through, `cancel` is set, or `tries` runs have failed so (the
+/// last failure is returned): the lawyer's download, which waits out a dropped connection for a
+/// while. Any other failure (TLS, a refused address, an HTTP error, a full disk) is returned at
+/// once.
 pub fn run_until_online(
     job: &Job,
     tools: &dyn InstallTools,
     cancel: &Cancel,
     report: &mut dyn FnMut(BrowserInstallState),
-    retry: std::time::Duration,
+    (retry, tries): (std::time::Duration, u32),
 ) -> Result<Outcome, Failure> {
+    let mut tried = 0;
     loop {
+        tried += 1;
         match run(job, tools, cancel, report) {
-            Err(failure) if failure.code == BrowserInstallFailure::Network => {
+            Err(failure) if failure.again && tried < tries => {
                 tracing::info!(message = %failure.message, "offline; the download tries again");
                 report(BrowserInstallState::Offline);
                 wait(retry, cancel)?;
@@ -273,7 +310,7 @@ pub fn run(
         .map_err(|error| Failure::io("making the browsers folder", &error))?;
     cancel.check()?;
     versions::check_versions_url(VERSIONS_URL)?;
-    let body = tools.fetch_versions(VERSIONS_URL, &browsers, cancel)?;
+    let body = tools.fetch_versions(VERSIONS_URL, &browsers, job.proxy.as_deref(), cancel)?;
     let download = versions::stable_download(&body, platform)?;
     let record = fresh::observe(
         fresh::read_record(&browsers).as_ref(),
@@ -343,7 +380,8 @@ fn in_partial(
             behind,
         });
     };
-    let length = tools.download(&download.url, &zip, cancel, &mut progress)?;
+    let proxy = job.proxy.as_deref();
+    let length = tools.download(&download.url, &zip, proxy, cancel, &mut progress)?;
     check_size(&zip, length)?;
     cancel.check()?;
     report(BrowserInstallState::Unpacking);

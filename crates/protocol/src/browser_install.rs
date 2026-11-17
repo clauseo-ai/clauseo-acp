@@ -50,13 +50,16 @@ open_unit_enum! {
     /// `Unknown`, which the app shows as a plain failure. The app picks its copy by this code,
     /// never from `message`.
     pub enum BrowserInstallFailure {
-        /// The network failed: curl could not connect, the server answered an error, or the
-        /// transfer stalled (slower than 1 byte a second for 60 s).
+        /// The network failed: curl could not connect or resolve the host, the connection broke,
+        /// the server failed (an HTTP 5xx), or the transfer stalled (slower than 1 byte a second
+        /// for 60 s) or ran past its time bound. The lawyer's download tries again a few times
+        /// first, so the app hears it only once those tries are spent.
         Network,
         /// The zip's size did not match its `Content-Length`, the response had none, or it was
         /// larger than the 400 MiB cap.
         SizeMismatch,
-        /// Less than about 1 GB is free in the app data folder.
+        /// Less than about 1 GB is free in the app data folder, or the disk filled up during the
+        /// download or the unpacking.
         DiskSpace,
         /// The version list named a URL or version the host does not accept: not `https`, not
         /// Google's host, or a path that does not match the version and platform.
@@ -72,6 +75,12 @@ open_unit_enum! {
         Unsupported,
         /// The lawyer cancelled, or the app quit, during the download.
         Cancelled,
+        /// The secure connection failed: the server's certificate was not trusted, or TLS could
+        /// not be set up. Not tried again.
+        Tls,
+        /// The server refused the request with an HTTP 4xx (such as 403 or 404). Not tried
+        /// again.
+        ServerRefused,
         /// The firm does not allow it: its Clauseo policy forbids the download
         /// (`browser.allow_download` false, or a policy source that cannot be read), or its
         /// Chrome, Edge or Chromium policy turns Clauseo's browser off.

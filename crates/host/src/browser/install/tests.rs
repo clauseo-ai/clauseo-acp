@@ -22,6 +22,7 @@ fn job(dir: &Path, platform: Platform) -> Job {
         app_data: dir.join("app"),
         random: "r".to_owned(),
         now: 1_700_000_000,
+        proxy: None,
     }
 }
 
@@ -425,24 +426,50 @@ fn content_length_is_the_final_responses() {
     assert_eq!(content_length(""), None);
 }
 
-/// curl's exit 63 (the 400 MiB cap) is `size_mismatch`, 47 (a redirect) `host_refused`; any
-/// other failure `network`.
+/// curl's exit 63 (the 400 MiB cap) is `size_mismatch`, 47 (a redirect) `host_refused`, 22 (an
+/// HTTP error) `server_refused` for a 4xx, 23 (a write error) `disk_space`, a TLS failure
+/// `tls`, none of them tried again; a failed or broken connection, a timeout or an HTTP 5xx is
+/// `network` that may be tried again; any other exit is `network` tried no more.
 #[test]
 fn curl_exits_map_to_codes() {
     curl_exit(Some(0), "").unwrap();
-    assert_eq!(
-        curl_exit(Some(63), "").unwrap_err().code,
-        BrowserInstallFailure::SizeMismatch
-    );
-    assert_eq!(
-        curl_exit(Some(47), "").unwrap_err().code,
-        BrowserInstallFailure::HostRefused
-    );
-    for code in [Some(6), Some(22), Some(28), None] {
+    let failed = |exit, said: &str| curl_exit(exit, said).unwrap_err();
+    let http = |status: u16| format!("curl: (22) The requested URL returned error: {status}");
+    let fixed = [
+        (63, String::new(), BrowserInstallFailure::SizeMismatch),
+        (47, String::new(), BrowserInstallFailure::HostRefused),
+        (22, http(404), BrowserInstallFailure::ServerRefused),
+        (22, http(403), BrowserInstallFailure::ServerRefused),
+        (22, String::new(), BrowserInstallFailure::ServerRefused),
+        (23, String::new(), BrowserInstallFailure::DiskSpace),
+        (35, String::new(), BrowserInstallFailure::Tls),
+        (51, String::new(), BrowserInstallFailure::Tls),
+        (60, String::new(), BrowserInstallFailure::Tls),
+        (77, String::new(), BrowserInstallFailure::Tls),
+    ];
+    for (exit, said, expected) in fixed {
+        let failure = failed(Some(exit), &said);
+        assert_eq!(failure.code, expected, "{exit} {said}");
+        assert!(!failure.again, "{exit} {said} is not tried again");
+    }
+    let mut again: Vec<(i32, String)> = [5, 6, 7, 18, 28, 52, 56]
+        .into_iter()
+        .map(|exit| (exit, String::new()))
+        .collect();
+    again.extend([(22, http(503)), (22, http(500))]);
+    for (exit, said) in again {
+        let failure = failed(Some(exit), &said);
         assert_eq!(
-            curl_exit(code, "x").unwrap_err().code,
-            BrowserInstallFailure::Network
+            failure.code,
+            BrowserInstallFailure::Network,
+            "{exit} {said}"
         );
+        assert!(failure.again, "{exit} {said} may be tried again");
+    }
+    for exit in [Some(1), Some(26), None] {
+        let failure = failed(exit, "x");
+        assert_eq!(failure.code, BrowserInstallFailure::Network, "{exit:?}");
+        assert!(!failure.again, "{exit:?} is not tried again");
     }
 }
 
@@ -457,6 +484,7 @@ fn real_download() {
         app_data: dir.path().to_owned(),
         random: "real".to_owned(),
         now: 1_700_000_000,
+        proxy: None,
     };
     let mut states = Vec::new();
     let result = run(&job, &super::SystemTools, &Cancel::new(), &mut |state| {

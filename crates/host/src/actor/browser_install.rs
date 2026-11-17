@@ -3,15 +3,17 @@
 //! at a time, and posts each state back here, where it goes to every app subscriber as
 //! `HostEvent::BrowserInstall`. The actor never waits on it.
 //!
-//! - `InstallBrowser` first asks the firm: with its Clauseo policy's `browser.allow_download`
-//!   false (or a policy source unreadable, which locks it false) it publishes
-//!   `Failed { firm_forbids }` and starts nothing. Otherwise it starts the thread and answers
+//! - With the firm's Clauseo policy's `browser.allow_download` false (or a policy source
+//!   unreadable, which locks it false), `Failed { firm_forbids }` is the latest state from start,
+//!   so the app never offers the download. `InstallBrowser` then publishes it again and starts
+//!   nothing. Otherwise it starts the thread and answers
 //!   `Done`; the thread reads the firm's Chrome, Edge and Chromium policy first, the launch's
 //!   rule (`browser::rd_policy`), and a block is `firm_forbids` too. While one runs it answers
 //!   `Done` and does nothing, since the running one's events already tell the app. While a
 //!   cancelled one is still ending, it answers `Done` and a new download starts once that one's
 //!   `Failed` is out. Neither command stores a receipt. The lawyer's download waits out a
-//!   dropped connection (`Offline`, then a new try every [`install::OFFLINE_RETRY`]).
+//!   dropped connection (`Offline`, then a new try every [`install::OFFLINE_RETRY`], at most
+//!   [`install::OFFLINE_TRIES`] tries in all). curl uses `network.upstream_proxy` when set.
 //! - The daily check: a timer thread ticks at start (its check waits until the host serves, since
 //!   start-up waits for no download to run) and then once a day while the host runs;
 //!   each tick with a downloaded copy on disk runs the same thread, quietly: it updates the
@@ -141,8 +143,27 @@ fn place(actor: &Actor) -> (Platform, PathBuf) {
     }
 }
 
+/// The state the app hears when the firm forbids the download.
+fn firm_forbids() -> BrowserInstallState {
+    BrowserInstallState::Failed {
+        code: BrowserInstallFailure::FirmForbids,
+        message: "the firm's policy sets browser.allow_download false".to_owned(),
+    }
+}
+
+/// The proxy for the download: `network.upstream_proxy` when set (a firm's policy value over the
+/// lawyer's), as the app's installs and sign-ins use it; `None` leaves curl to its default.
+fn upstream_proxy(actor: &Actor) -> Option<String> {
+    actor.effective.settings().network.upstream_proxy.clone()
+}
+
 /// Starts the sweep of leftover working folders and the daily check's timer, off the actor.
+/// With the firm forbidding the download, its refusal is the latest state from the start, so the
+/// app never offers it.
 pub(super) fn start(actor: &mut Actor) {
+    if !actor.effective.settings().browser.allow_download {
+        actor.browser_install.latest = Some(firm_forbids());
+    }
     let (platform, app_data) = place(actor);
     let browsers = app_data.join(BROWSERS_DIR);
     let swept = {
@@ -199,11 +220,7 @@ pub(super) fn start(actor: &mut Actor) {
 pub(super) fn install(actor: &mut Actor, ctx: &CommandCtx) {
     if !actor.effective.settings().browser.allow_download {
         tracing::info!("the firm's policy forbids the Chrome for Testing download");
-        let state = BrowserInstallState::Failed {
-            code: BrowserInstallFailure::FirmForbids,
-            message: "the firm's policy sets browser.allow_download false".to_owned(),
-        };
-        on_input(actor, Step::State(state));
+        on_input(actor, Step::State(firm_forbids()));
         actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         return;
     }
@@ -256,6 +273,7 @@ fn begin(actor: &mut Actor, quiet: bool) -> Result<(), Error> {
         app_data,
         random: uuid::Uuid::now_v7().simple().to_string(),
         now: actor.now().wall.as_millis().div_euclid(1000),
+        proxy: upstream_proxy(actor),
     };
     let cancel = Cancel::new();
     let quiet = Arc::new(AtomicBool::new(quiet));
@@ -343,7 +361,7 @@ impl ThreadCtx {
                 self.tools.as_ref(),
                 &self.cancel,
                 &mut report,
-                install::OFFLINE_RETRY,
+                (install::OFFLINE_RETRY, install::OFFLINE_TRIES),
             )
         };
         if result.is_ok() {

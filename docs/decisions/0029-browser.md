@@ -1429,12 +1429,17 @@ download waits for it.
 on macOS (no `codesign` since 2026-11-15); `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
 Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::spawn_in_tree`. curl
 gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
---location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
+--location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`),
+then `--max-time 120` for the list (agent-browser's own bound) or `--max-time 3600` for the zip,
+and `--proxy` with `network.upstream_proxy` when it is set (amended 2026-11-17).
 `--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
 47, `host_refused` (a retry would meet the same redirect). HTTPS to Google's host is the whole
 network-side integrity check (no signature on macOS, none enforced on Windows), so a redirect to another https host
 must not replace it; neither URL redirects today (checked 2026-11-04). curl's exit 63 (over
-the 400 MiB cap) is `size_mismatch`, any other failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+the 400 MiB cap) is `size_mismatch`; 22 (an HTTP error) `server_refused` for a 4xx; 23 (a write
+error) `disk_space`; a TLS failure `tls`. A failed or broken connection, a timeout or an HTTP 5xx
+is `network`, the only failure tried again, as agent-browser's `install` does (amended
+2026-11-17). Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
 `InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
 
 **Signature.** None on macOS, by decision (amended 2026-11-15): Chrome for Testing on a Mac is ad
@@ -1477,8 +1482,8 @@ job. The zip comes only from exactly
 - *Old copies.* After each successful run, every copy below the highest goes unless a session
   runs it: the launch prep notes each session's copy against its run folder, under the lock the
   prune takes, and a note counts while that run folder exists.
-- *Offline.* The lawyer's download publishes `Offline` and tries again every 60 s until it gets
-  through or is cancelled. The daily check does not wait: the next tick tries again.
+- *Offline.* The lawyer's download publishes `Offline` and tries again after 60 s, three tries in
+  all (`OFFLINE_TRIES`, agent-browser's count), then fails as `network` (amended 2026-11-17). The daily check does not wait: the next tick tries again.
 
 **Firm policy.** `InstallBrowser` and the daily check need the firm's Clauseo policy
 `browser.allow_download` (default true; policy only; a security key, so an unreadable policy

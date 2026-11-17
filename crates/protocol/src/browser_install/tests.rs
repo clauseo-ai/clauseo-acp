@@ -37,6 +37,8 @@ fn the_failure_codes_are_these_strings() {
             r#""unpack""#,
             r#""unsupported""#,
             r#""cancelled""#,
+            r#""tls""#,
+            r#""server_refused""#,
             r#""firm_forbids""#,
             r#""unknown""#,
         ]

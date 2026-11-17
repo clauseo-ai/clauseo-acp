@@ -51,6 +51,10 @@ pub(super) struct Fake {
     release: Mutex<mpsc::Receiver<()>>,
     /// How many downloads began.
     downloads: AtomicUsize,
+    /// How many version-list fetches began.
+    fetches: AtomicUsize,
+    /// The proxy each fetch and download was given, in order.
+    proxies: Mutex<Vec<Option<String>>>,
 }
 
 /// A fake's handles: its starts, and the sender that releases a blocked download.
@@ -68,6 +72,8 @@ impl Fake {
             started: Mutex::new(started),
             release: Mutex::new(released),
             downloads: AtomicUsize::new(0),
+            fetches: AtomicUsize::new(0),
+            proxies: Mutex::new(Vec::new()),
         };
         (Arc::new(fake), Handles { starts, release })
     }
@@ -82,8 +88,11 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         _work: &Path,
+        proxy: Option<&str>,
         _cancel: &Cancel,
     ) -> Result<Vec<u8>, Failure> {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
         let version = "158.0.6778.85";
         let url = format!(
             "https://storage.googleapis.com/chrome-for-testing-public/{version}/mac-arm64/\
@@ -100,10 +109,12 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
         write::write(zip, &EMPTY_ZIP);
         progress(22, 22);
         self.started.lock().unwrap().send(()).unwrap();
@@ -287,19 +298,26 @@ impl InstallTools for SlowCancel {
         self.inner.free_bytes(folder)
     }
 
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
-        self.inner.fetch_versions(url, work, cancel)
+    fn fetch_versions(
+        &self,
+        url: &str,
+        work: &Path,
+        proxy: Option<&str>,
+        cancel: &Cancel,
+    ) -> Result<Vec<u8>, Failure> {
+        self.inner.fetch_versions(url, work, proxy, cancel)
     }
 
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         if self.inner.downloads.load(Ordering::SeqCst) > 0 {
-            return self.inner.download(url, zip, cancel, progress);
+            return self.inner.download(url, zip, proxy, cancel, progress);
         }
         self.inner.downloads.fetch_add(1, Ordering::SeqCst);
         write::write(zip, &EMPTY_ZIP);

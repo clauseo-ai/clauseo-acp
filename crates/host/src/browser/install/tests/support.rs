@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use clauseo_protocol::BrowserInstallFailure;
+
 use super::super::{Cancel, Failure, InstallTools};
 use crate::browser::chrome::Platform;
 use crate::write;
@@ -155,6 +157,12 @@ pub(super) struct Fake {
     pub(super) cancel_in_download: bool,
     /// How many version-list fetches fail as `network` first (offline), each counting down.
     pub(super) offline: std::sync::atomic::AtomicU32,
+    /// The failure every version-list fetch ends with, after any offline ones.
+    pub(super) fetch_fails: Option<BrowserInstallFailure>,
+    /// The failure every download ends with, after writing half the zip.
+    pub(super) download_fails: Option<BrowserInstallFailure>,
+    /// The proxy each fetch and download was given, in order.
+    pub(super) proxies: Mutex<Vec<Option<String>>>,
     /// Each tool called, in order.
     pub(super) calls: Mutex<Vec<&'static str>>,
 }
@@ -171,12 +179,19 @@ impl Fake {
             signed: Ok(()),
             cancel_in_download: false,
             offline: std::sync::atomic::AtomicU32::new(0),
+            fetch_fails: None,
+            download_fails: None,
+            proxies: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
         }
     }
 
     pub(super) fn calls(&self) -> Vec<&'static str> {
         self.calls.lock().unwrap().clone()
+    }
+
+    pub(super) fn proxies(&self) -> Vec<Option<String>> {
+        self.proxies.lock().unwrap().clone()
     }
 
     fn call(&self, name: &'static str) {
@@ -193,9 +208,11 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         _work: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
     ) -> Result<Vec<u8>, Failure> {
         self.call("fetch_versions");
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
         cancel.check()?;
         let offline = self.offline.try_update(
             std::sync::atomic::Ordering::SeqCst,
@@ -203,10 +220,10 @@ impl InstallTools for Fake {
             |left| left.checked_sub(1),
         );
         if offline.is_ok() {
-            return Err(Failure::new(
-                clauseo_protocol::BrowserInstallFailure::Network,
-                "offline",
-            ));
+            return Err(Failure::new(BrowserInstallFailure::Network, "offline"));
+        }
+        if let Some(code) = self.fetch_fails {
+            return Err(Failure::new(code, "the fetch failed"));
         }
         Ok(self.versions.clone())
     }
@@ -215,10 +232,12 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         self.call("download");
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
         let total = u64::try_from(self.zip.len()).unwrap();
         let half = self.zip.len() / 2;
         write::write_file(zip, &self.zip[..half]).unwrap();
@@ -226,6 +245,9 @@ impl InstallTools for Fake {
         if self.cancel_in_download {
             cancel.cancel();
             return Err(Failure::cancelled());
+        }
+        if let Some(code) = self.download_fails {
+            return Err(Failure::new(code, "the download failed"));
         }
         write::write_file(zip, &self.zip).unwrap();
         progress(total, total);

@@ -8,9 +8,16 @@
 //! `clauseo_process::spawn_in_tree`, in a process tree of its own, and is watched every 250 ms:
 //! a cancel ends its tree and waits for it to exit before the working folder is removed.
 //!
-//! Every curl gets `-q` first (no `.curlrc` may add flags) and [`CURL_FLAGS`]. The zip's
-//! download writes the response headers with `-D`, and the progress comes from polling the
-//! partial file's size against the final response's `Content-Length`.
+//! Every curl gets `-q` first (no `.curlrc` may add flags), [`CURL_FLAGS`], a total time bound
+//! ([`VERSIONS_MAX_SECS`], [`ZIP_MAX_SECS`]) and, when `network.upstream_proxy` is set (the
+//! firm's policy value over the lawyer's), `--proxy` with it. The zip's download writes the
+//! response headers with `-D`, and the progress comes from polling the partial file's size
+//! against the final response's `Content-Length`.
+//!
+//! curl's exit decides the failure ([`curl_exit`]), as agent-browser's own `install` tells its
+//! errors apart: a TLS failure is `tls`, an HTTP 4xx `server_refused`, a write error
+//! `disk_space`, a redirect `host_refused`; only a failed or broken connection, a timeout or an
+//! HTTP 5xx is `network`, which the lawyer's download tries again.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -54,6 +61,31 @@ pub const CURL_FLAGS: [&str; 17] = [
     "1",
 ];
 
+/// The most the version list's fetch may take in all, connecting included: agent-browser's 120 s.
+pub const VERSIONS_MAX_SECS: u32 = 120;
+
+/// The most the zip's download may take in all: an hour, about 200 MB at under 0.5 Mbit/s, where
+/// agent-browser's 120 s would end a download slower than about 13 Mbit/s. A transfer that drips
+/// just above the stall limit ends here.
+pub const ZIP_MAX_SECS: u32 = 3600;
+
+/// curl's exit code for an HTTP error under `--fail`; the status is in its message.
+pub const CURL_HTTP_ERROR: i32 = 22;
+
+/// curl's exit code when it could not write what it received: on this path, a full disk.
+pub const CURL_WRITE_ERROR: i32 = 23;
+
+/// curl's exit codes for a TLS failure: the handshake (35), the peer's certificate (51, 60, 83,
+/// 90, 91), a local certificate or CA store problem (58, 77, 82), the cipher or the crypto engine
+/// (53, 54, 59, 66), the TLS shutdown (80).
+pub const CURL_TLS: [i32; 14] = [35, 51, 53, 54, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91];
+
+/// curl's exit codes for a failed or broken connection, worth another try: the proxy or the
+/// host not resolved (5, 6), no connection (7), HTTP/2 or HTTP/3 errors (16, 92, 95), a partial
+/// transfer (18), a timeout or the stall limit (28), an empty reply (52), sending or receiving
+/// failed (55, 56).
+pub const CURL_CONNECTION: [i32; 11] = [5, 6, 7, 16, 18, 28, 52, 55, 56, 92, 95];
+
 /// curl's exit code when `--max-filesize` stops a transfer.
 pub const CURL_TOO_LARGE: i32 = 63;
 
@@ -78,11 +110,17 @@ impl InstallTools for SystemTools {
         free_bytes(folder)
     }
 
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
+    fn fetch_versions(
+        &self,
+        url: &str,
+        work: &Path,
+        proxy: Option<&str>,
+        cancel: &Cancel,
+    ) -> Result<Vec<u8>, Failure> {
         let curl = tool("curl")?;
         let ran = run_tool(
             &curl,
-            curl_args([url]),
+            versions_args(url, proxy),
             work,
             cancel,
             MAX_VERSIONS_BYTES,
@@ -97,13 +135,14 @@ impl InstallTools for SystemTools {
         &self,
         url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         let curl = tool("curl")?;
         let work = zip.parent().unwrap_or(zip);
         let headers = work.join("headers.txt");
-        let args = download_args(url, &headers, zip);
+        let args = download_args(url, proxy, &headers, zip);
         let mut last = None;
         let mut tick = || {
             let total = std::fs::read_to_string(&headers)
@@ -143,8 +182,13 @@ impl InstallTools for SystemTools {
         if ran.code == Some(0) {
             Ok(())
         } else {
+            let full = ran.stderr.contains("No space left on device");
             Err(Failure::new(
-                BrowserInstallFailure::Unpack,
+                if full {
+                    BrowserInstallFailure::DiskSpace
+                } else {
+                    BrowserInstallFailure::Unpack
+                },
                 format!(
                     "unpacking exited with {:?}: {}",
                     ran.code,
@@ -180,9 +224,24 @@ impl InstallTools for SystemTools {
     }
 }
 
-/// The zip download's curl arguments: the response headers to `headers`, the body to `zip`.
-pub(super) fn download_args(url: &str, headers: &Path, zip: &Path) -> Vec<OsString> {
-    let mut args = curl_args::<&str>([]);
+/// The version list's curl arguments: its time bound, the firm's proxy, then `url`.
+pub(super) fn versions_args(url: &str, proxy: Option<&str>) -> Vec<OsString> {
+    let mut args = curl_args(["--max-time", VERSIONS_MAX_SECS.to_string().as_str()]);
+    args.extend(proxy_args(proxy));
+    args.push(url.into());
+    args
+}
+
+/// The zip download's curl arguments: its time bound, the firm's proxy, the response headers to
+/// `headers`, the body to `zip`.
+pub(super) fn download_args(
+    url: &str,
+    proxy: Option<&str>,
+    headers: &Path,
+    zip: &Path,
+) -> Vec<OsString> {
+    let mut args = curl_args(["--max-time", ZIP_MAX_SECS.to_string().as_str()]);
+    args.extend(proxy_args(proxy));
     args.extend([
         "-D".into(),
         headers.into(),
@@ -191,6 +250,15 @@ pub(super) fn download_args(url: &str, headers: &Path, zip: &Path) -> Vec<OsStri
         url.into(),
     ]);
     args
+}
+
+/// `--proxy` with `network.upstream_proxy` when it is set (an `http` or `https`
+/// address with no user name or password, as the setting allows); nothing otherwise.
+fn proxy_args(proxy: Option<&str>) -> Vec<OsString> {
+    proxy
+        .filter(|proxy| !proxy.is_empty())
+        .map(|proxy| vec!["--proxy".into(), proxy.into()])
+        .unwrap_or_default()
 }
 
 /// curl's arguments: `-q` first, the fixed flags, quiet but for errors, then `rest`.
@@ -204,9 +272,33 @@ fn curl_args<'a, S: Into<OsString> + 'a>(rest: impl IntoIterator<Item = S>) -> V
 }
 
 /// A curl run's exit: 0 is fine, [`CURL_TOO_LARGE`] is `size_mismatch`, [`CURL_REDIRECTED`]
-/// `host_refused` (a retry would meet the same redirect), any other `network`.
+/// `host_refused` (a retry would meet the same redirect), [`CURL_HTTP_ERROR`] `server_refused`
+/// for a 4xx and `network` (tried again) for a 5xx, as agent-browser does, [`CURL_WRITE_ERROR`]
+/// `disk_space`, [`CURL_TLS`] `tls`, and [`CURL_CONNECTION`] `network`, which may be tried
+/// again. Any other exit (or none: a signal) is `network` too, but final: it is no connection
+/// failure, so another try would not help.
 pub fn curl_exit(code: Option<i32>, stderr: &str) -> Result<(), Failure> {
+    let said = |what: &str| format!("{what} (curl exited with {code:?}: {})", stderr.trim());
     match code {
+        Some(CURL_HTTP_ERROR) if http_status(stderr).is_some_and(|status| status >= 500) => Err(
+            Failure::new(BrowserInstallFailure::Network, said("the server failed")),
+        ),
+        Some(CURL_HTTP_ERROR) => Err(Failure::new(
+            BrowserInstallFailure::ServerRefused,
+            said("the server answered with an HTTP error"),
+        )),
+        Some(CURL_WRITE_ERROR) => Err(Failure::new(
+            BrowserInstallFailure::DiskSpace,
+            said("the download could not be written: the disk is likely full"),
+        )),
+        Some(code) if CURL_TLS.contains(&code) => Err(Failure::new(
+            BrowserInstallFailure::Tls,
+            said("the secure connection failed"),
+        )),
+        Some(code) if CURL_CONNECTION.contains(&code) => Err(Failure::new(
+            BrowserInstallFailure::Network,
+            said("the connection failed"),
+        )),
         Some(0) => Ok(()),
         Some(CURL_TOO_LARGE) => Err(Failure::new(
             BrowserInstallFailure::SizeMismatch,
@@ -216,11 +308,18 @@ pub fn curl_exit(code: Option<i32>, stderr: &str) -> Result<(), Failure> {
             BrowserInstallFailure::HostRefused,
             "the server answered with a redirect, which the host does not follow",
         )),
-        code => Err(Failure::new(
-            BrowserInstallFailure::Network,
-            format!("curl exited with {code:?}: {}", stderr.trim()),
-        )),
+        _ => Err(Failure::new(BrowserInstallFailure::Network, said("curl failed")).last_try()),
     }
+}
+
+/// The HTTP status in curl's `--fail` message ("The requested URL returned error: 404").
+fn http_status(stderr: &str) -> Option<u16> {
+    let (_, rest) = stderr.split_once("returned error:")?;
+    rest.trim_start()
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn curl_result(ran: &Ran) -> Result<(), Failure> {
@@ -302,10 +401,11 @@ enum Stop {
 }
 
 impl Stop {
+    /// The failure: a tool that did not start, or said too much, is not tried again.
     fn failure(self, code: BrowserInstallFailure) -> Failure {
         match self {
             Self::Cancelled => Failure::cancelled(),
-            Self::Failed(message) => Failure::new(code, message),
+            Self::Failed(message) => Failure::new(code, message).last_try(),
         }
     }
 }

@@ -9,8 +9,19 @@ use super::{Fake, MAC_BINARY, browsers, start, states, subscribe};
 use crate::support::Dir;
 use crate::write;
 
-/// With the firm's `browser.allow_download` false, `InstallBrowser` answers `Done`, the app hears
-/// `Failed { firm_forbids }`, and nothing downloads.
+fn forbids(state: &BrowserInstallState) -> bool {
+    matches!(
+        state,
+        BrowserInstallState::Failed {
+            code: BrowserInstallFailure::FirmForbids,
+            ..
+        }
+    )
+}
+
+/// With the firm's `browser.allow_download` false, the app hears `Failed { firm_forbids }` in its
+/// first catch-up, before anyone asks, so it never offers the download; `InstallBrowser` answers
+/// `Done` and the app hears the refusal again. Nothing is fetched: neither the list nor a zip.
 #[test]
 fn the_firms_setting_forbids_the_download() {
     let dir = Dir::new("browser_install_forbidden", &[]);
@@ -18,23 +29,53 @@ fn the_firms_setting_forbids_the_download() {
     let (tools, _handles) = Fake::new(false);
     let host = start(&dir, std::sync::Arc::clone(&tools));
     let mut sub = subscribe(&host);
+    let first = states(&mut sub);
+    assert!(
+        matches!(first.as_slice(), [state] if forbids(state)),
+        "the catch-up, before any ask: {first:?}"
+    );
     assert_eq!(
         host.ok(HostCommand::InstallBrowser {}),
         CommandOutcome::Done
     );
     let heard = states(&mut sub);
     assert!(
-        matches!(
-            heard.as_slice(),
-            [BrowserInstallState::Failed {
-                code: BrowserInstallFailure::FirmForbids,
-                ..
-            }]
-        ),
+        matches!(heard.as_slice(), [state] if forbids(state)),
         "{heard:?}"
     );
     assert_eq!(tools.downloads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(tools.fetches.load(std::sync::atomic::Ordering::SeqCst), 0);
     host.shutdown();
+}
+
+/// `network.upstream_proxy`, the firm's policy value or the lawyer's own, reaches both the
+/// version list's fetch and the zip's download.
+#[test]
+fn the_upstream_proxy_reaches_the_download() {
+    let dir = Dir::new("browser_install_firm_proxy", &[]);
+    dir.set_policy(r#"{"network": {"upstream_proxy": "http://proxy.firm.example:3128"}}"#);
+    let (tools, _handles) = Fake::new(false);
+    let host = start(&dir, std::sync::Arc::clone(&tools));
+    let mut sub = subscribe(&host);
+    host.ok(HostCommand::InstallBrowser {});
+    assert_eq!(states(&mut sub).last(), Some(&BrowserInstallState::Done));
+    host.shutdown();
+    let firm = Some("http://proxy.firm.example:3128".to_owned());
+    assert_eq!(*tools.proxies.lock().unwrap(), [firm.clone(), firm]);
+
+    let dir = Dir::new("browser_install_lawyer_proxy", &[]);
+    dir.set_settings(
+        &[],
+        serde_json::json!({"network": {"upstream_proxy": "http://proxy.lawyer.example:8080"}}),
+    );
+    let (tools, _handles) = Fake::new(false);
+    let host = start(&dir, std::sync::Arc::clone(&tools));
+    let mut sub = subscribe(&host);
+    host.ok(HostCommand::InstallBrowser {});
+    assert_eq!(states(&mut sub).last(), Some(&BrowserInstallState::Done));
+    host.shutdown();
+    let lawyer = Some("http://proxy.lawyer.example:8080".to_owned());
+    assert_eq!(*tools.proxies.lock().unwrap(), [lawyer.clone(), lawyer]);
 }
 
 /// A copy two Stable releases behind: the check at start downloads the new one with `behind`

@@ -178,7 +178,7 @@ fn the_lawyers_download_waits_while_offline() {
         &tools,
         &Cancel::new(),
         &mut |state| states.push(state),
-        Duration::from_millis(1),
+        (Duration::from_millis(1), u32::MAX),
     );
     assert!(matches!(result.unwrap(), Outcome::Installed(_)));
     let offline = states
@@ -205,7 +205,90 @@ fn the_lawyers_download_waits_while_offline() {
                 cancel.cancel();
             }
         },
-        Duration::from_millis(1),
+        (Duration::from_millis(1), u32::MAX),
     );
     assert_eq!(result.unwrap_err().code, BrowserInstallFailure::Cancelled);
+}
+
+/// The lawyer's download stops trying once its tries are spent, with `network`: three tries,
+/// two `Offline` waits between them, never an endless refetch.
+#[test]
+fn the_lawyers_download_stops_after_its_tries() {
+    let dir = TempDir::new("cft-guard-tries");
+    let tools = Fake::working();
+    tools
+        .offline
+        .store(u32::MAX, std::sync::atomic::Ordering::SeqCst);
+    let mut states = Vec::new();
+    let result = run_until_online(
+        &job(dir.path(), Platform::MacArm64),
+        &tools,
+        &Cancel::new(),
+        &mut |state| states.push(state),
+        (Duration::from_millis(1), super::super::OFFLINE_TRIES),
+    );
+    assert_eq!(result.unwrap_err().code, BrowserInstallFailure::Network);
+    assert_eq!(super::super::OFFLINE_TRIES, 3);
+    assert_eq!(tools.calls(), ["fetch_versions"; 3]);
+    assert_eq!(
+        states,
+        [BrowserInstallState::Offline, BrowserInstallState::Offline]
+    );
+}
+
+/// A TLS failure, a refused address, an HTTP error and a full disk end the lawyer's download at
+/// once, each with its own code: no `Offline`, no second try, nothing left behind.
+#[test]
+fn tls_refusals_and_a_full_disk_are_not_tried_again() {
+    let cases = [
+        (Some(BrowserInstallFailure::Tls), None, 1),
+        (Some(BrowserInstallFailure::HostRefused), None, 1),
+        (Some(BrowserInstallFailure::ServerRefused), None, 1),
+        (None, Some(BrowserInstallFailure::ServerRefused), 2),
+        (None, Some(BrowserInstallFailure::DiskSpace), 2),
+        (None, Some(BrowserInstallFailure::Tls), 2),
+    ];
+    for (n, (fetch_fails, download_fails, calls)) in cases.into_iter().enumerate() {
+        let dir = TempDir::new(&format!("cft-guard-final-{n}"));
+        let tools = Fake {
+            fetch_fails,
+            download_fails,
+            ..Fake::working()
+        };
+        let mut states = Vec::new();
+        let result = run_until_online(
+            &job(dir.path(), Platform::MacArm64),
+            &tools,
+            &Cancel::new(),
+            &mut |state| states.push(state),
+            (Duration::from_millis(1), 10),
+        );
+        let expected = fetch_fails.or(download_fails).unwrap();
+        assert_eq!(result.unwrap_err().code, expected, "case {n}");
+        assert_eq!(tools.calls().len(), calls, "case {n}: {:?}", tools.calls());
+        assert!(!states.contains(&BrowserInstallState::Offline), "case {n}");
+        assert!(browsers(dir.path()).is_empty(), "case {n}");
+    }
+}
+
+/// The firm's proxy reaches both the version list's fetch and the zip's download; without one,
+/// neither gets a proxy.
+#[test]
+fn the_firms_proxy_reaches_both_fetches() {
+    let dir = TempDir::new("cft-guard-proxy");
+    let tools = Fake::working();
+    let job = super::super::Job {
+        proxy: Some("http://proxy.firm.example:3128".to_owned()),
+        ..job(dir.path(), Platform::MacArm64)
+    };
+    let result = run(&job, &tools, &Cancel::new(), &mut |_| {});
+    assert!(matches!(result.unwrap(), Outcome::Installed(_)));
+    let firm = Some("http://proxy.firm.example:3128".to_owned());
+    assert_eq!(tools.proxies(), [firm.clone(), firm]);
+
+    let dir = TempDir::new("cft-guard-no-proxy");
+    let tools = Fake::working();
+    let (result, _) = outcome(dir.path(), &tools);
+    assert!(matches!(result.unwrap(), Outcome::Installed(_)));
+    assert_eq!(tools.proxies(), [None, None]);
 }
