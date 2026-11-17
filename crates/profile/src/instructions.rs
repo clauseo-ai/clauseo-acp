@@ -117,8 +117,7 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
 }
 
 /// The line a Codex session's instructions end with where Clauseo's own `pdftoppm`, `pdftotext`
-/// and `pdfinfo`
-/// are on its `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as
+/// and `pdfinfo` are on its `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as
 /// the folder, `setup/hook.rs`), on macOS and Windows alike: Codex has no PDF input, and reading
 /// one any other way (stage C's census saw `mdls` and `swift`) meets its sandbox and raises a
 /// "run outside the sandbox" card that can never be always-approved, so the line sends every PDF

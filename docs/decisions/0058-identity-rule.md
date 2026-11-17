@@ -130,9 +130,10 @@ page, never retry with a browser user-agent or any other disguise; tell the lawy
 refused and give the link to open." on its own line after the instructions. Codex gets "If a page
 cannot be opened or the site refuses, never retry by posing as a person's browser; use Clauseo's
 browser if available, otherwise tell the lawyer which refused and give the link." inside its
-offline line. Measured on main `252931ba2` with both amendments' lines in: Claude 2,263 words;
-Codex 2,139 on macOS and 2,091 on Windows. Claude's cap goes from 2,250 to 2,285 for the
-browser-refusal rule, and Codex's from 2,040 to 2,160 for that rule and the PDF line, each the
+offline line. Measured on main `b3f1cf95c` (with #1184's `pdftotext` sentence, which the PDF line now follows,
+its own `pdftoppm` and pypdf words dropped as duplicates) with both amendments' lines in: Claude
+2,263 words; Codex 2,173 on macOS and 2,125 on Windows. Claude's cap goes from 2,250 to 2,285 for the
+browser-refusal rule, and Codex's from 2,040 to 2,195 for that rule and the PDF line, each the
 measured worst plus at most 25.
 
 ## Status

@@ -30,10 +30,10 @@ const CLAUDE_MAX: usize = 2285;
 /// Codex's whole `developer_instructions`, the worst case on each OS: the tools part with the
 /// stetdoc line, the legal part, the offline line, the refusal line, the shell line (macOS), the
 /// built-in skills index and the PDF line the desktop adds with Clauseo's PDF tools on its `PATH`.
-/// Measured worst 2139 (macOS; 2091 on Windows); the room over main's 2040 is for the PDF line
+/// Measured worst 2173 (macOS; 2125 on Windows); the room over main's 2040 is for the PDF line
 /// and the browser-refusal rule (0058, amended).
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-const CODEX_MAX: usize = 2160;
+const CODEX_MAX: usize = 2195;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
