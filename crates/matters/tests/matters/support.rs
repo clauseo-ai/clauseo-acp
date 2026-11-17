@@ -107,10 +107,22 @@ pub(crate) fn folder_link(target: &Path, link: &Path) {
     }
 }
 
-/// A Unix socket at `path`, there while the listener lives.
+/// A Unix socket at `path`, there while the listener lives. A socket's path must be short (under
+/// 104 bytes on macOS, 108 on Linux) and test folders can be deeper, so it binds through a short
+/// link to the socket's folder in `/tmp`, removed once bound: the socket is made in the folder.
 #[cfg(unix)]
 pub(crate) fn socket(path: impl AsRef<Path>) -> std::os::unix::net::UnixListener {
-    std::os::unix::net::UnixListener::bind(path).unwrap()
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let path = path.as_ref();
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        panic!("no folder or name in {}", path.display());
+    };
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let link = Path::new("/tmp").join(format!("clauseo-sock-{}-{n}", std::process::id()));
+    std::os::unix::fs::symlink(dir, &link).unwrap();
+    let bound = std::os::unix::net::UnixListener::bind(link.join(name));
+    std::fs::remove_file(&link).unwrap();
+    bound.unwrap()
 }
 
 /// `fs::remove_dir_all`.
