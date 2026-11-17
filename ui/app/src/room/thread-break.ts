@@ -20,13 +20,15 @@ import type { RestartHost } from "./host-next.ts";
 import { questionText } from "./thread/live.ts";
 import { askedAs } from "./thread/steer.ts";
 
-/** The codes Restart can mend, once the host has it: a restart can't mend a protocol error or an unsupported version. */
+/** The codes Restart can mend, once the host has it: a restart can't mend a protocol error or an unsupported version.
+ * agent.home_failed is a launch that stopped before the agent started, as agent.launch_failed is. */
 export const RESTARTS = new Set<string>([
   "agent.exited",
   "agent.launch_failed",
   "agent.start_offline",
   "agent.program_missing",
   "agent.program_blocked",
+  "agent.home_failed",
   "thread.interrupted",
 ]);
 

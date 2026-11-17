@@ -127,4 +127,5 @@ export type ErrorCode =
   | "blackline.format_unknown"
   | "word.too_large"
   | "matter.file_folder_clash"
+  | "agent.home_failed"
   | "unknown";

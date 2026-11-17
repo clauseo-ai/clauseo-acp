@@ -275,6 +275,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Versions' Restore of one paper whose name is now a folder, or whose folder is now a file: nothing was written
   "matter.file_folder_clash":
     "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed. Rename or move that folder or file, then try again.",
+  // Clauseo couldn't prepare the agent's own folder (its home) before starting it: Try again under the turn, and
+  // Restart where agent.launch_failed has it. App-track English; copy review pending, Hindi later
+  "agent.home_failed":
+    "Claude didn't start, because Clauseo couldn't set up the folder it keeps for Claude on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -405,6 +409,15 @@ const PLANNED: Partial<
       "Clauseo couldn't reach {name}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
     nameless:
       "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+  },
+  // the agent's own folder not prepared (see ERROR_WORDS); the same words on every platform. Hindi later
+  "agent.home_failed": {
+    chatgpt:
+      "ChatGPT didn't start, because Clauseo couldn't set up the folder it keeps for ChatGPT on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    named:
+      "{name} didn't start, because Clauseo couldn't set up the folder it keeps for {name} on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    nameless:
+      "The AI didn't start, because Clauseo couldn't set up the folder it keeps for the AI on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
   },
 };
 

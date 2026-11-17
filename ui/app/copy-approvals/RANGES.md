@@ -43,5 +43,5 @@ When a thread runs out of its block, it asks the app track, which hands out a su
 
 - The other prefixes (`U1` to `U17`, `U4B`, `U6F`, `U8`, `UBL`, `UD1`, `UD2`, `UEP`, `UET`, `UTC`, `AR`, `C117`, `FC`, `FR`, `H11`, `IT`, `ME`, `MN`, `ND`, `NM`, `PK`, `PL`, `R23`, `RO`, `SAC`, `TF`, `TN`, `WA`, `WEB`, …) are closed to new ids. They stay only for strings already on main, or already in an open pull request on 2026-11-15.
 - If an unmerged branch picked a new id under one of those prefixes and another open pull request uses the same id, the later branch moves its string into its own UC block.
-- `U3-err-<code>` is the one exception: it's made from the error code's name, one per `ErrorCode` (`registry.tsx`), so there's nothing to hand out. A new error code gets its entry under that id, in the branch's own file.
+- `U3-err-<code>` is the one exception: it's made from the error code's name, one per `ErrorCode` (`registry.tsx`), so there's nothing to hand out. A new error code gets its entry under that id, in the branch's own file. A new code whose line names the agent puts its other plans' lines under the same id with a suffix, `U3-err-<code>.chatgpt`, `.named` and `.nameless` (`agent.home_failed`, `registry-home-failed.tsx`).
 - No new prefixes.
