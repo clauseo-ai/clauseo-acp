@@ -103,6 +103,12 @@ pub(crate) const LOOKUPS_PER_JOB: usize = 10;
 /// on the matter's thread, so a larger one is refused by its size before any read.
 pub(crate) const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
 
+/// The line and paragraph separators (U+2028, U+2029), which `MatterPath` allows but a reader
+/// may take for a line break: `read_version` refuses a path holding one (`Refusal::BadPath`),
+/// and `list_versions` writes each as the text `\u{2028}` or `\u{2029}`, so every item stays
+/// on its line. Such a file cannot be read through the tool.
+pub(crate) const LINE_SEPARATORS: [char; 2] = ['\u{2028}', '\u{2029}'];
+
 /// The largest Word file `read_version` reads, refused by its size before any copy, and the
 /// copy's own cap: each read streams the file from history into a copy on the matter's thread,
 /// up to [`MAX_DOCX_RUNS_PER_TURN`] a turn. Above [`MAX_TEXT_BYTES`], since a `.docx` is a zip

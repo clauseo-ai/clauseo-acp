@@ -15,7 +15,10 @@ use serde_json::{Map, Value};
 
 use super::mcp::Outcome;
 use super::texts::Refusal;
-use super::{Backend, DEFAULT_LIMIT, MAX_FILES_PER_VERSION, MAX_LIMIT, VERSIONS_PER_JOB, utc_time};
+use super::{
+    Backend, DEFAULT_LIMIT, LINE_SEPARATORS, MAX_FILES_PER_VERSION, MAX_LIMIT, VERSIONS_PER_JOB,
+    utc_time,
+};
 
 /// The tool's name.
 pub(super) const NAME: &str = "list_versions";
@@ -212,7 +215,8 @@ fn files_of(
 }
 
 /// One file's lines: `  <change>: <path>`, and for a rename `    from: <old path>` after it. A
-/// path holds no line break (`MatterPath` refuses control characters), so each is one line.
+/// path holds no line break (`MatterPath` refuses control characters, and [`shown`] writes the
+/// line and paragraph separators as text), so each is one line.
 fn file_lines(lines: &mut Vec<String>, (path, change): &(MatterPath, ChangeKind)) {
     let name = match change {
         ChangeKind::Added => "added",
@@ -221,10 +225,18 @@ fn file_lines(lines: &mut Vec<String>, (path, change): &(MatterPath, ChangeKind)
         ChangeKind::Renamed { .. } => "renamed",
         ChangeKind::Unknown { .. } => "unknown",
     };
-    lines.push(format!("  {name}: {}", path.as_str()));
+    lines.push(format!("  {name}: {}", shown(path)));
     if let ChangeKind::Renamed { from } = change {
-        lines.push(format!("    from: {}", from.as_str()));
+        lines.push(format!("    from: {}", shown(from)));
     }
+}
+
+/// `path` as the list writes it: each of [`LINE_SEPARATORS`] as the text `\u{2028}` or
+/// `\u{2029}`.
+fn shown(path: &MatterPath) -> String {
+    path.as_str()
+        .replace(LINE_SEPARATORS[0], "\\u{2028}")
+        .replace(LINE_SEPARATORS[1], "\\u{2029}")
 }
 
 /// The kind's name in the tool's answer.

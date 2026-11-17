@@ -403,3 +403,22 @@ fn a_word_file_over_the_cap_is_refused_by_its_size_before_any_copy() {
         Refusal::WordFailed.text()
     );
 }
+
+/// A path holding a line or paragraph separator (U+2028, U+2029) is refused as a bad path,
+/// though the version holds the file: such a file is not read through the tool.
+#[test]
+fn a_path_with_a_line_or_paragraph_separator_is_a_bad_path() {
+    let mut fixture = Fixture::new("versions-read-separators");
+    for name in ["line\u{2028}break.txt", "para\u{2029}break.txt"] {
+        fixture.put(name, b"text");
+    }
+    let v2 = fixture.checkpoint(2);
+    let backend = fixture.backend();
+    for name in ["line\u{2028}break.txt", "para\u{2029}break.txt"] {
+        assert_eq!(
+            refused(&read(&backend, v2, name)),
+            Refusal::BadPath.text(),
+            "{name:?}"
+        );
+    }
+}

@@ -35,7 +35,7 @@ use super::docx::{self, Copied};
 use super::mcp::Outcome;
 use super::texts::Refusal;
 use super::window::{Page, PastEnd, Window, page_of};
-use super::{Backend, MAX_DOCX_BYTES, MAX_TEXT_BYTES, Opened, lock, utc_time};
+use super::{Backend, LINE_SEPARATORS, MAX_DOCX_BYTES, MAX_TEXT_BYTES, Opened, lock, utc_time};
 use crate::log_file::Cause;
 
 /// The tool's name.
@@ -111,6 +111,9 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
         Some(_) | None => return Err(Refusal::BadVersion),
     };
     let path = match args.get("path") {
+        Some(Value::String(text)) if text.contains(LINE_SEPARATORS) => {
+            return Err(Refusal::BadPath);
+        }
         Some(Value::String(text)) => MatterPath::new(text).ok(),
         Some(_) | None => return Err(Refusal::BadPath),
     };

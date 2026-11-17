@@ -179,3 +179,20 @@ fn each_version_says_when_what_who_and_its_files() {
     assert_eq!(import["by"], "lawyer");
     assert_eq!(import["id"], id(1));
 }
+
+/// A path holding a line or paragraph separator is listed with each written as the text
+/// `\u{2028}` or `\u{2029}`, so the list keeps one line per item.
+#[test]
+fn a_line_or_paragraph_separator_in_a_path_is_written_as_text() {
+    let mut fixture = Fixture::new("versions-list-separators");
+    fixture.put("line\u{2028}break.txt", b"one");
+    fixture.put("para\u{2029}break.txt", b"two");
+    fixture.checkpoint(2);
+    let backend = fixture.backend();
+    let answer = call(&backend, "list_versions", json!({}));
+    ok(&answer);
+    let text = answer["content"][0]["text"].as_str().unwrap();
+    assert!(!text.contains(['\u{2028}', '\u{2029}']), "{text}");
+    assert!(text.contains("  added: line\\u{2028}break.txt"), "{text}");
+    assert!(text.contains("  added: para\\u{2029}break.txt"), "{text}");
+}
