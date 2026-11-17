@@ -23,7 +23,8 @@
 //!   `allowed.json.rejected-<UTC time>` beside it (a counter after a taken name), without ever
 //!   replacing a file, and logged with the reason and the new name; only the latest
 //!   [`KEEP_REJECTED`] are kept. The temp-file sweep (`.clauseo-*.new`) never takes them, and
-//!   the agent's fence denies the whole folder. A move that fails writes nothing, as above.
+//!   Claude's fence denies the whole folder, where Codex's sandboxed shell has no writable
+//!   root. A move that fails writes nothing, as above.
 
 use std::fmt::Write as _;
 use std::io;

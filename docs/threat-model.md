@@ -285,8 +285,10 @@ anything the agent starts.
   in it stays too. Seatbelt and the host's auto-deny resolve links, and a launch replaces a link
   or file in the work folder's place with a new folder and removes a `.claude` in the work and
   notes folders
-- `built` (macOS, Windows): ChatGPT's commands run as the lawyer. On a Mac, Clauseo denies them
-  its own data folder; on Windows, see the tier C bullet above (S15).
+- `built` (macOS, Windows): ChatGPT's commands run as the lawyer. On a Mac, a sandboxed command
+  writes only the matter folder, the conversation's run, work and notes folders and `/tmp`, and
+  reads the rest; a command Codex's reviewer approves runs unsandboxed, as in plain Codex
+  ([0030](decisions/0030-launch-profile.md)); on Windows, see the tier C bullet above (S15).
 - `built` (Windows): Codex's sandbox puts an explicit `(OI)(CI)(M)` entry with a SID of its own on
   each work and notes folder it is given, one SID per folder. Clauseo never removes it: it stays
   until the folder is deleted by hand, and deleting the folder removes it. Checked on Windows 11

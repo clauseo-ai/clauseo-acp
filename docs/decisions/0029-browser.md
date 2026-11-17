@@ -1790,7 +1790,7 @@ Record 0030 has the entry; this is the browser's side of it.
   - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
     temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
     (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
-    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`, removed 2026-11-17: decision record 0030), so the shell
     cannot plant a link the guard would write through. The folder goes with the run folder at the
     session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
     the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also
@@ -1888,7 +1888,8 @@ stayed without a browser until "Claude on Windows too" (below).
   unreadable, and now agent-browser's socket folders, every session's, are denied too:
   `/tmp/clauseo-ab-*` in `denyRead`, and with `/private/tmp/clauseo-ab-*` in `denyRead` and
   `denyWrite` on macOS (`agent/loads/sandbox.rs` `SOCKET_DIRS`; Linux skips a glob write path,
-  and `/tmp` is not writable there). Codex's fence denies the same folder by exact path.
+  and `/tmp` is not writable there). Codex's fence denied the same folder by exact path until
+  2026-11-17, when Codex's profile lost its deny entries (decision record 0030).
 - **Sandbox off: no browser, and one notice** (decision 4). When Claude's sandbox falls back
   off on macOS or Linux (`Off::NoTemp`, `Off::NotUtf8`, `Off::Wildcard`; `Off::drops_browser`),
   its shell could reach the debugging port and the daemon, so the session gets no entry, no

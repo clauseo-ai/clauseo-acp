@@ -12,8 +12,9 @@
 //! `Default` between the check and the write would redirect it. In the plain client the guard
 //! runs outside any sandbox, with the user's rights, so that window is closed by where the
 //! profile lives instead: the host puts the guard's `--cwd` in `<data>/browser/run/<session>`,
-//! which Codex's shell fence denies whole, read and write (`codex_fence.rs`; decision record
-//! 0030). A process that could swap a link there could write anywhere the user can anyway.
+//! where Codex's sandboxed shell has no writable root (`codex_fence.rs`; decision record 0030).
+//! A process that could swap a link there (a Codex command its reviewer approved runs
+//! unsandboxed) could write anywhere the user can anyway.
 
 use std::io;
 use std::path::Path;
