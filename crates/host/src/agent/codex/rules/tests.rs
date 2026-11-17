@@ -75,7 +75,7 @@ fn the_launch_removes_a_linked_rules_or_a_file_without_following() {
     write::create_dir_all(&elsewhere).unwrap();
     write::write_file(&elsewhere.join("default.rules"), b"x\n").unwrap();
     let rules = home.join("rules");
-    write::symlink(&elsewhere, &rules).unwrap();
+    write::folder_link(&elsewhere, &rules).unwrap();
     prepare_launch(&any_check(), &matter, &data, &home).unwrap();
     assert!(std::fs::symlink_metadata(&rules).is_err());
     assert!(elsewhere.join("default.rules").is_file());
@@ -90,12 +90,11 @@ fn the_launch_removes_a_linked_rules_or_a_file_without_following() {
     write::remove_dir_all(&root).unwrap();
 }
 
-/// A `rules` that cannot be removed (a folder in it the user may not change) refuses the
-/// launch with Clauseo's plain words for a home it could not prepare, and no path; Codex is
-/// not started (the caller stops at the error), and `config.toml` is not written.
+/// A `rules` that cannot be removed (a folder in it the user may not change) is set aside, as
+/// the launch's clearing does, and the launch goes on: Codex finds no `rules` to load.
 #[cfg(unix)]
 #[test]
-fn the_launch_refuses_when_rules_cannot_be_removed() {
+fn rules_that_cannot_be_removed_are_set_aside_and_the_launch_goes_on() {
     let (root, data, matter, home) = launch_root("rules-stuck");
     let locked = home.join("rules").join("locked");
     write::create_dir_all(&locked).unwrap();
@@ -107,19 +106,16 @@ fn the_launch_refuses_when_rules_cannot_be_removed() {
         write::remove_dir_all(&root).unwrap();
         return;
     }
-    let error = prepare_launch(&any_check(), &matter, &data, &home).unwrap_err();
-    write::set_mode(&locked, 0o700).unwrap();
-    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
-    assert!(
-        error
-            .to_string()
-            .ends_with("Clauseo couldn't prepare Codex's folder."),
-        "{error}"
-    );
-    assert!(
-        !error.to_string().contains(&*root.to_string_lossy()),
-        "{error}"
-    );
-    assert!(!home.join("config.toml").exists());
+    let launched = prepare_launch(&any_check(), &matter, &data, &home);
+    let gone = std::fs::symlink_metadata(home.join("rules")).is_err();
+    for entry in std::fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path.join("locked").is_dir() {
+            write::set_mode(&path.join("locked"), 0o700).unwrap();
+        }
+    }
+    launched.unwrap();
+    assert!(gone, "rules was set aside");
+    assert!(home.join("config.toml").exists());
     write::remove_dir_all(&root).unwrap();
 }

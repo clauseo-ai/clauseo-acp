@@ -469,6 +469,23 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_dir(target, link)
 }
 
+/// Makes `link` a link to the folder `target` that a test of a link never followed can use as
+/// any user: a symbolic link, or on Windows, where a standard user may not make one (OS error
+/// 1314 without Developer Mode), a directory junction, which any user may make.
+#[cfg(test)]
+pub(crate) fn folder_link(target: &Path, link: &Path) -> io::Result<()> {
+    let made = symlink(target, link);
+    #[cfg(windows)]
+    if made
+        .as_ref()
+        .is_err_and(|error| error.raw_os_error() == Some(1314))
+    {
+        let target = dunce::canonicalize(target)?;
+        return clauseo_sandbox::windows::test_junction::junction(link, &target);
+    }
+    made
+}
+
 /// Makes `link` a symbolic link to the file `target`; fails without the right to make links
 /// (Developer Mode or an elevated token). For unit tests: a link at the guard's record.
 #[cfg(all(test, windows))]

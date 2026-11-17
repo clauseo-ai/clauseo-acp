@@ -107,9 +107,14 @@ libc = { workspace = true }
 # The native crash handler's unhandled-exception filter (src/crash/native/win.rs):
 # Diagnostics_Debug, and Kernel, which SetUnhandledExceptionFilter and EXCEPTION_POINTERS need.
 # The check of Codex's sandbox SIDs against this process's token (agent/codex/cap_sid.rs):
-# Security, Security_Authorization and System_Threading.
+# Security, Security_Authorization and System_Threading. An entry of Codex's home its own
+# permissions keep from the usual rename, set aside through a delete-only handle
+# (agent/codex/home_clear/by_handle.rs): NtCreateFile and NtSetInformationFile relative to
+# the home's handle (Wdk_Foundation, Wdk_Storage_FileSystem, System_IO).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Authorization",
@@ -117,6 +122,7 @@ windows = { workspace = true, features = [
   "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
   "Win32_System_Diagnostics_Debug",
+  "Win32_System_IO",
   "Win32_System_Kernel",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",

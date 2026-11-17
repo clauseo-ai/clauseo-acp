@@ -184,7 +184,7 @@ fn a_linked_skills_folder_is_removed_without_following() {
     let elsewhere = root.join("elsewhere");
     write::create_dir_all(&elsewhere).unwrap();
     write::write_file(&elsewhere.join("SKILL.md"), b"x\n").unwrap();
-    write::symlink(&elsewhere, &home.join("skills")).unwrap();
+    write::folder_link(&elsewhere, &home.join("skills")).unwrap();
     prepare_launch(&any_check(), &matter, &data, &home).unwrap();
     assert!(std::fs::symlink_metadata(home.join("skills")).is_err());
     assert!(elsewhere.join("SKILL.md").is_file());

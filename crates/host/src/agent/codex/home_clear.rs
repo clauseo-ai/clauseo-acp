@@ -75,9 +75,17 @@ pub(crate) fn clear_home(home: &Path) -> Result<(), Error> {
         moved = moved.saturating_add(1);
         if remove_entry(&aside).is_err() {
             left = left.saturating_add(1);
+            // The one limit: an entry (a folder its own permissions keep from being listed, say)
+            // set aside but not emptied. Its name only, never a path.
+            tracing::warn!(
+                name,
+                "an entry Codex would load was set aside but not emptied: it stays in Codex's \
+                 home under a .clauseo-aside- name, where Codex loads nothing"
+            );
         }
     }
     if moved > 0 || left > 0 {
+        // `left`: entries set aside, now or by an earlier launch, that are still there.
         tracing::warn!(moved, left, "cleared what Codex would load from its home");
     }
     Ok(())
@@ -85,8 +93,77 @@ pub(crate) fn clear_home(home: &Path) -> Result<(), Error> {
 
 /// Renames `home`'s entry `name` to a fresh [`ASIDE`] name there and gives that name; none when
 /// nothing is there (or another launch moved it first). Also how a `cap_sid` that is not
-/// Codex's own goes (`super::cap_sid`).
+/// Codex's own, and the `rules` folder, go (`super::cap_sid`, `super::rules`). On Windows
+/// (`windows_retry`) an entry whose own permissions refuse the usual rename is renamed through
+/// a handle opened for delete alone (`by_handle::rename_aside`), no permission changed; and an
+/// entry in use (another conversation's Codex running its sandbox helper from `.sandbox-bin`,
+/// say) is tried again after each of `IN_USE_WAITS`, 1.55 s in all, before the launch is
+/// refused.
 pub(super) fn set_aside(home: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+    #[cfg(windows)]
+    {
+        windows_retry(home, name)
+    }
+    #[cfg(not(windows))]
+    {
+        rename_aside(home, name)
+    }
+}
+
+/// The waits, in milliseconds, before each new try of a rename that met an entry in use.
+#[cfg(windows)]
+const IN_USE_WAITS: [u64; 5] = [50, 100, 200, 400, 800];
+
+/// [`set_aside`] on Windows: the usual rename, and when the entry's own permissions refuse it
+/// (or the look at it), the rename through a delete-only handle ([`by_handle_aside`]); then,
+/// while the answer is an entry in use (a sharing or lock violation, or a refusal still: a
+/// folder that holds an open file), it waits [`IN_USE_WAITS`] in turn and tries again. Nothing
+/// here changes a permission, so a try again is harmless.
+#[cfg(windows)]
+fn windows_retry(home: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+    use crate::clock::Clock as _;
+    let denied = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
+    let attempt = || match rename_aside(home, name) {
+        Err(error) if denied(&error) => by_handle_aside(home, name),
+        other => other,
+    };
+    // ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION, and a refusal the delete-only handle
+    // met too.
+    let in_use = |answer: &std::io::Result<Option<PathBuf>>| {
+        answer
+            .as_ref()
+            .is_err_and(|error| matches!(error.raw_os_error(), Some(32 | 33)) || denied(error))
+    };
+    let mut answer = attempt();
+    for wait in IN_USE_WAITS {
+        if !in_use(&answer) {
+            break;
+        }
+        futures::executor::block_on(
+            crate::clock::SystemClock.after(std::time::Duration::from_millis(wait)),
+        );
+        answer = attempt();
+    }
+    answer
+}
+
+/// `home`'s entry `name` renamed to a fresh [`ASIDE`] name through a delete-only handle
+/// (`by_handle::rename_aside`); a file there is deleted on that handle as well. None when
+/// nothing is there.
+#[cfg(windows)]
+fn by_handle_aside(home: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+    let aside = fresh_aside(home)?;
+    let Some(aside_name) = aside.file_name().and_then(|name| name.to_str()) else {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    };
+    match by_handle::rename_aside(home, name, aside_name) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        other => other.map(|()| Some(aside)),
+    }
+}
+
+/// [`set_aside`]'s rename, once.
+fn rename_aside(home: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
     let path = home.join(name);
     let meta = match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -125,15 +202,30 @@ fn sweep_aside(home: &Path) -> usize {
     };
     let mut left = 0_usize;
     for entry in entries.flatten() {
-        let aside = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(ASIDE));
-        if aside && remove_entry(&entry.path()).is_err() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str().filter(|name| name.starts_with(ASIDE)) else {
+            continue;
+        };
+        let removed = remove_entry(&entry.path()).is_ok() || deleted_by_handle(home, name);
+        if !removed {
             left = left.saturating_add(1);
         }
     }
     left
+}
+
+/// On Windows, whether `home`'s file `name`, which its own permissions keep from the usual
+/// removal, is deleted through a delete-only handle (`by_handle::delete`), as it was set aside.
+fn deleted_by_handle(home: &Path, name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        by_handle::delete(home, name).is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _unused = (home, name);
+        false
+    }
 }
 
 /// Removes `path` whatever it is: a real folder with all it holds, else (a file, a link, a
@@ -163,5 +255,7 @@ fn clear_failed(error: &std::io::Error) -> Error {
     home_failed(&Cause(error))
 }
 
+#[cfg(windows)]
+mod by_handle;
 #[cfg(test)]
 mod tests;

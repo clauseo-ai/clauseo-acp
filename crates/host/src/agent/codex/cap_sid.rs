@@ -60,10 +60,14 @@ pub(crate) fn check(home: &Path) -> Result<(), Error> {
         return Ok(());
     };
     let removed = super::home_clear::remove_entry(&aside).is_ok();
-    tracing::warn!(
-        removed,
-        "Codex's sandbox SIDs file was not Codex's own and was set aside"
-    );
+    if removed {
+        tracing::warn!("Codex's sandbox SIDs file was not Codex's own and was set aside");
+    } else {
+        tracing::warn!(
+            "Codex's sandbox SIDs file was not Codex's own and was set aside but not emptied: it \
+             stays under a .clauseo-aside- name, where Codex loads nothing"
+        );
+    }
     Ok(())
 }
 

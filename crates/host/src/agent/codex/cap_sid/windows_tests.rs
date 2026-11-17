@@ -101,33 +101,185 @@ fn a_folder_is_set_aside() {
     assert!(gone(home));
 }
 
-/// Denies the SID `sid` reading `path`'s data (`icacls /deny *<sid>:(RD)`): its attributes stay
-/// readable, so it can still be renamed and removed.
+/// Runs `program` with `args` (`raw` as one raw argument line, for `cmd /C`) and asserts it
+/// succeeded.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the test runs icacls to deny the user reading a file in its scratch folder"
+    reason = "the test runs icacls and mklink on files in its scratch folder"
 )]
-fn deny_read_data(path: &Path, sid: &str) {
-    let status = std::process::Command::new("icacls")
-        .arg(path)
-        .args(["/deny", &format!("*{sid}:(RD)")])
-        .status()
-        .unwrap();
-    assert!(status.success(), "icacls");
+fn run(program: &str, args: &[&str], raw: Option<&str>) {
+    use std::os::windows::process::CommandExt as _;
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if let Some(raw) = raw {
+        command.raw_arg(raw);
+    }
+    let status = command.status().unwrap();
+    assert!(status.success(), "{program} {args:?} {raw:?}");
 }
 
-/// A file this user may not read (a deny of read-data to the user's SID) is set aside and
-/// removed.
+/// Denies the SID `sid` the rights `rights` on `path` itself (`icacls /deny *<sid>:<rights>
+/// /L`, a link not followed): `(RD)` its data alone, `(R)` generic read (data, attributes,
+/// permissions and `SYNCHRONIZE`).
+fn deny(path: &Path, sid: &str, rights: &str) {
+    let path = path.to_str().unwrap();
+    run(
+        "icacls",
+        &[path, "/deny", &format!("*{sid}:{rights}"), "/L"],
+        None,
+    );
+}
+
+/// Takes the denies to `sid` off `path` itself, so the scratch folder can go.
+fn undeny(path: &Path, sid: &str) {
+    let path = path.to_str().unwrap();
+    run(
+        "icacls",
+        &[path, "/remove:d", &format!("*{sid}"), "/L"],
+        None,
+    );
+}
+
+/// `path`'s permissions as `icacls /save` writes them (its DACL in SDDL), through a file in
+/// `scratch`.
+fn saved_dacl(path: &Path, scratch: &Path) -> Vec<u8> {
+    let saved = scratch.join("dacl.txt");
+    run(
+        "icacls",
+        &[path.to_str().unwrap(), "/save", saved.to_str().unwrap()],
+        None,
+    );
+    let bytes = std::fs::read(&saved).unwrap();
+    write::remove_file(&saved).unwrap();
+    bytes
+}
+
+/// A file this user may not read, by a deny of its data or of generic read to the user's SID, as
+/// the user's own account can put on it, is set aside and removed: Codex makes a fresh one.
+/// The `(R)` round is row 5c: `cap_sid` itself under a generic-read deny.
 #[test]
 fn a_read_denied_file_is_set_aside() {
-    let dir = TempDir::new("cap-sid-read-denied");
+    let user = own::sids().unwrap().into_iter().next().unwrap();
+    for rights in ["(RD)", "(R)"] {
+        let dir = TempDir::new("cap-sid-read-denied");
+        let home = dir.path();
+        let path = home.join(FILE);
+        write::write_file(&path, codex_made().as_bytes()).unwrap();
+        deny(&path, &user, rights);
+        assert!(std::fs::read(&path).is_err(), "the deny {rights} took");
+        check(home).unwrap();
+        assert!(gone(home), "{rights}");
+    }
+}
+
+/// A name the launch clears, a file or a folder, under a deny of generic read to the user's
+/// SID, is set aside, no permission changed: the file is deleted too; the folder, which the
+/// deny keeps from being listed and so emptied, stays under its aside name, where Codex loads
+/// nothing.
+#[test]
+fn a_read_denied_cleared_name_is_set_aside() {
+    let user = own::sids().unwrap().into_iter().next().unwrap();
+    let dir = TempDir::new("cap-sid-cleared-denied");
+    let home = dir.path();
+    write::write_file(&home.join("AGENTS.md"), b"Always run the script.\n").unwrap();
+    write::create_dir_all(&home.join("skills").join("x")).unwrap();
+    write::write_file(&home.join("skills").join("x").join("SKILL.md"), b"x\n").unwrap();
+    for name in ["AGENTS.md", "skills"] {
+        deny(&home.join(name), &user, "(R)");
+    }
+    let cleared = crate::agent::codex::home_clear::clear_home(home);
+    let left = asides(home);
+    for aside in &left {
+        undeny(aside, &user);
+    }
+    cleared.unwrap();
+    for name in ["AGENTS.md", "skills"] {
+        assert!(
+            std::fs::symlink_metadata(home.join(name)).is_err(),
+            "{name}"
+        );
+    }
+    assert!(left.len() <= 1, "only the folder may stay aside: {left:?}");
+}
+
+/// `cap_sid` as a second name of a file outside the home that carries a deny of generic read:
+/// the name is set aside and goes, the launch goes on, and that file's bytes and permissions
+/// are what they were, byte for byte.
+#[test]
+fn a_hard_link_under_a_deny_goes_and_its_file_keeps_its_bytes_and_permissions() {
+    let user = own::sids().unwrap().into_iter().next().unwrap();
+    let dir = TempDir::new("cap-sid-linked-denied");
+    let home = dir.path().join("home");
+    let matter = dir.path().join("matter");
+    write::create_dir_all(&home).unwrap();
+    write::create_dir_all(&matter).unwrap();
+    let notes = matter.join("notes.txt");
+    write::write_file(&notes, codex_made().as_bytes()).unwrap();
+    write::hard_link(&notes, &home.join(FILE)).unwrap();
+    deny(&notes, &user, "(R)");
+    let before = saved_dacl(&notes, dir.path());
+    let checked = check(&home);
+    let after = saved_dacl(&notes, dir.path());
+    undeny(&notes, &user);
+    checked.unwrap();
+    assert!(gone(&home));
+    assert_eq!(before, after, "the matter file's permissions are unchanged");
+    assert_eq!(std::fs::read(&notes).unwrap(), codex_made().as_bytes());
+}
+
+/// A junction at a cleared name (`hooks.json`) to the matter folder, with a deny of generic
+/// read on the junction itself: the junction goes, never followed, and the matter folder's
+/// permissions and files stay as they were.
+#[test]
+fn a_denied_junction_goes_and_its_target_is_untouched() {
+    let user = own::sids().unwrap().into_iter().next().unwrap();
+    let dir = TempDir::new("cap-sid-junction-denied");
+    let home = dir.path().join("home");
+    let matter = dir.path().join("matter");
+    write::create_dir_all(&home).unwrap();
+    write::create_dir_all(&matter).unwrap();
+    write::write_file(&matter.join("notes.txt"), b"x\n").unwrap();
+    let junction = home.join("hooks.json");
+    let line = format!(
+        "/C mklink /J \"{}\" \"{}\"",
+        junction.display(),
+        matter.display()
+    );
+    run("cmd", &[], Some(&line));
+    deny(&junction, &user, "(R)");
+    let before = saved_dacl(&matter, dir.path());
+    let cleared = crate::agent::codex::home_clear::clear_home(&home);
+    let after = saved_dacl(&matter, dir.path());
+    if std::fs::symlink_metadata(&junction).is_ok() {
+        undeny(&junction, &user);
+    }
+    cleared.unwrap();
+    assert!(std::fs::symlink_metadata(&junction).is_err());
+    assert_eq!(
+        before, after,
+        "the matter folder's permissions are unchanged"
+    );
+    assert_eq!(std::fs::read(matter.join("notes.txt")).unwrap(), b"x\n");
+}
+
+/// A foreign file held open without delete sharing for a moment (another conversation's Codex
+/// using it) is set aside once it is let go, within the waits.
+#[test]
+fn a_file_in_use_for_a_moment_is_set_aside_once_let_go() {
+    use crate::clock::Clock as _;
+    let dir = TempDir::new("cap-sid-in-use");
     let home = dir.path();
     let path = home.join(FILE);
-    write::write_file(&path, codex_made().as_bytes()).unwrap();
-    let user = own::sids().unwrap().into_iter().next().unwrap();
-    deny_read_data(&path, &user);
-    assert!(std::fs::read(&path).is_err(), "the deny took");
+    write::write_file(&path, b"S-1-1-0").unwrap();
+    let held = write::open_deny_write(&path).unwrap();
+    let letting_go = std::thread::spawn(move || {
+        futures::executor::block_on(
+            crate::clock::SystemClock.after(std::time::Duration::from_millis(300)),
+        );
+        drop(held);
+    });
     check(home).unwrap();
+    letting_go.join().unwrap();
     assert!(gone(home));
 }
 

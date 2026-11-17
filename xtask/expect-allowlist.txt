@@ -566,8 +566,12 @@ crates/host/src/browser/install/windows.rs - unsafe_code
 crates/host/src/agent/loads/case_law.rs windows_directory unsafe_code
 # Codex's sandbox SIDs check: the process token's user and group SIDs (GetTokenInformation).
 crates/host/src/agent/codex/cap_sid.rs own unsafe_code
-# Codex's launch tests: icacls denies a test file's read on Windows; chflags locks one on macOS.
-crates/host/src/agent/codex/cap_sid/windows_tests.rs deny_read_data clippy::disallowed_methods
+# An entry of Codex's home its own permissions keep from the usual rename, set aside through a
+# delete-only handle: NtCreateFile and NtSetInformationFile relative to the home's handle.
+crates/host/src/agent/codex/home_clear/by_handle.rs - unsafe_code
+# Codex's launch tests: icacls and mklink plant denies and a junction on Windows; chflags locks a
+# file on macOS.
+crates/host/src/agent/codex/cap_sid/windows_tests.rs run clippy::disallowed_methods
 crates/host/src/agent/codex/home_clear/tests.rs chflags clippy::disallowed_methods
 # The offline probe's read of Claude Code's Windows policy tier: RegGetValueW, read-only.
 crates/host/src/actor/turn/offline/probe/settings/os_policy/registry.rs - unsafe_code

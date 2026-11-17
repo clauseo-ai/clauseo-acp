@@ -17,15 +17,17 @@ pub(crate) const RULES_FOLDER: &str = "rules";
 /// more (`agent/codex_options.rs`), and this drops those an earlier build's "Always" left,
 /// from this launch on. Whatever is there goes: a folder with all it holds, a plain file of
 /// that name, and a link, which is removed and never followed (`symlink_metadata`;
-/// `remove_dir_all` does not follow links inside either). Nothing there is fine. A removal
-/// that fails refuses the launch, as a home that cannot be made does ([`home_failed`]): Codex
-/// would otherwise start with the rules. `tracing` gets a warning with the entries' names
-/// (never their contents, never the path) and how many `.rules` files went.
+/// `remove_dir_all` does not follow links inside either). Nothing there is fine. `tracing` gets
+/// a warning with the entries' names (never their contents, never the path) and how many
+/// `.rules` files went. A `rules` that can't be looked at or removed is set aside instead, as
+/// the launch's clearing does (`home_clear::set_aside`), and removed best-effort; only one that
+/// can't be renamed either refuses the launch, as a home that cannot be made does
+/// ([`home_failed`]): Codex would otherwise start with the rules.
 pub(crate) fn remove_rules(home: &Path) -> Result<(), Error> {
     let rules = home.join(RULES_FOLDER);
     let meta = match std::fs::symlink_metadata(&rules) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(rules_failed(&error)),
+        Err(error) => return set_rules_aside(home, &error),
         Ok(meta) => meta,
     };
     let kind = meta.file_type();
@@ -53,13 +55,37 @@ pub(crate) fn remove_rules(home: &Path) -> Result<(), Error> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         other => other,
     };
-    removed.map_err(|error| rules_failed(&error))?;
+    if let Err(error) = removed {
+        return set_rules_aside(home, &error);
+    }
     tracing::warn!(
         shape,
         rule_files,
         ?names,
         "removed the rules an earlier approval left in Codex's home"
     );
+    Ok(())
+}
+
+/// Sets `<home>/rules` aside after `error` stopped its removal (`home_clear::set_aside`), then
+/// removes it best-effort; a rename that fails too refuses the launch ([`rules_failed`]).
+fn set_rules_aside(home: &Path, error: &std::io::Error) -> Result<(), Error> {
+    let aside =
+        super::home_clear::set_aside(home, RULES_FOLDER).map_err(|failed| rules_failed(&failed))?;
+    let removed = aside.is_none_or(|aside| super::home_clear::remove_entry(&aside).is_ok());
+    let error_kind = error.kind();
+    if removed {
+        tracing::warn!(
+            ?error_kind,
+            "the rules in Codex's home were set aside and removed"
+        );
+    } else {
+        tracing::warn!(
+            ?error_kind,
+            "the rules in Codex's home were set aside but not emptied: they stay under a \
+             .clauseo-aside- name, where Codex loads nothing"
+        );
+    }
     Ok(())
 }
 
