@@ -1,9 +1,11 @@
-//! The start's bound: an agent whose session is not ready [`START_WAIT`] after its launch
-//! (`initialize` through `session/new`, `session/load` or `session/resume`, and a Codex or
-//! Claude session's checks before its attach) has failed to start. It is stopped through the
-//! shutdown ladder and what waits for it fails `agent.launch_failed`, its question kept; the
-//! offline probe may make that `agent.start_offline` (`offline/start.rs`). Without the bound a
-//! start that never answers left the turn starting until the lawyer pressed Stop.
+//! The start's bound: an agent silent for [`START_WAIT`] while it starts (`initialize` through
+//! `session/new`, `session/load` or `session/resume`, and a Codex or Claude session's checks
+//! before its attach) has failed to start; each update or answer it sends counts the wait from
+//! then, and time the computer spent asleep is left out ([`TICK`], [`SLACK`]). It is stopped
+//! through the shutdown ladder and what waits for it fails `agent.launch_failed`, its question
+//! kept; the offline probe may make that `agent.start_offline` or `agent.start_unreachable`
+//! (`offline/start.rs`). Without the bound a start that never answers left the turn starting
+//! until the lawyer pressed Stop.
 //!
 //! The limit: the slowest start measured in the repo is Codex's cold start on a Windows VM,
 //! 3.7 s (`agents/src/signin/codex.rs`); claude-agent-acp 0.89.1's session-start phases total
@@ -28,10 +30,15 @@ pub(crate) const START_WAIT: Duration = Duration::from_secs(120);
 /// `offline/start.rs` reads it to ask the probe.
 pub(crate) const START_TIMED_OUT: &str = "the agent said nothing for 120 s while it was starting";
 
-/// A timer that fires more than this late was held up by the computer's sleep (Windows timers
-/// may count time asleep), not by the agent: the bound starts again instead of failing a start
-/// the lawyer's closed lid interrupted.
-const SLEPT: Duration = START_WAIT;
+/// How often the bound looks while the agent starts: often enough that a sleep shows as a late
+/// look, whenever it falls.
+pub(crate) const TICK: Duration = Duration::from_secs(5);
+
+/// A look more than this late was held up by the computer's sleep, not by the agent: Windows'
+/// clock runs on while the computer sleeps (a Mac's stops), so the time asleep is left out of
+/// the agent's silence. Without it a lid closed mid-start failed the start on waking, or cut
+/// the agent's waking time short when the sleep ended before the bound was due.
+const SLACK: Duration = Duration::from_secs(5);
 
 /// A starting agent's bound: when it was last heard from and when its timer is due, on the
 /// host's monotonic clock. Kept in `TurnPath::start_bounds` by agent id until its timer fires
@@ -46,12 +53,12 @@ pub(in super::super) struct Bound {
 pub(in super::super) fn launched(actor: &mut Actor, thread: ThreadId) -> u64 {
     let id = super::next_agent_id();
     let now = actor.now().mono;
-    let due = now.saturating_add(START_WAIT);
+    let due = now.saturating_add(TICK);
     actor
         .turn_path
         .start_bounds
         .insert(id, Bound { heard: now, due });
-    arm_for(actor, thread, id, START_WAIT);
+    arm_for(actor, thread, id, TICK);
     id
 }
 
@@ -90,8 +97,9 @@ fn starting(actor: &mut Actor, thread: ThreadId) -> Option<&mut super::Agent> {
 }
 
 /// The timer of `thread`'s agent `id` fired. An agent attached, stopping or gone meanwhile is
-/// left as it is; one heard from within [`START_WAIT`] gets the rest of its wait; a timer held
-/// up by sleep starts the wait again; an agent silent for the whole wait has failed to start.
+/// left as it is. A look held up by sleep leaves the time asleep out of the silence; an agent
+/// silent for [`START_WAIT`] has failed to start; else the next look is due in [`TICK`], or at
+/// the bound when that comes first.
 pub(in super::super) fn on_timer(actor: &mut Actor, thread: ThreadId, id: u64) {
     let now = actor.now().mono;
     let still = starting(actor, thread).is_some_and(|agent| agent.id == id);
@@ -100,18 +108,14 @@ pub(in super::super) fn on_timer(actor: &mut Actor, thread: ThreadId, id: u64) {
         actor.turn_path.start_bounds.remove(&id);
         return;
     };
-    let silent = now.saturating_sub(bound.heard);
     let late = now.saturating_sub(bound.due);
-    let wait = if late > SLEPT {
-        tracing::info!(%thread, late_s = late.as_secs(), "the start's bound waits again after sleep");
-        bound.heard = now;
-        START_WAIT
-    } else if silent < START_WAIT {
-        START_WAIT.saturating_sub(silent)
-    } else {
-        Duration::ZERO
-    };
-    if !wait.is_zero() {
+    if late > SLACK {
+        tracing::info!(%thread, late_s = late.as_secs(), "the start's bound leaves out time asleep");
+        bound.heard = bound.heard.saturating_add(late).min(now);
+    }
+    let silent = now.saturating_sub(bound.heard);
+    if silent < START_WAIT {
+        let wait = TICK.min(START_WAIT.saturating_sub(silent));
         bound.due = now.saturating_add(wait);
         arm_for(actor, thread, id, wait);
         return;

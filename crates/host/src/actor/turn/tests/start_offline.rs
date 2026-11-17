@@ -16,7 +16,7 @@ use crate::actor::turn::offline::start::start_code;
 use crate::pipeline::tests::support::TempDir;
 
 /// Claude Code's line for a refused connection, as claude-agent-sdk 0.3.293 writes it.
-const REFUSED: &str = "API Error: Unable to connect to API (ECONNREFUSED)";
+pub(super) const REFUSED: &str = "API Error: Unable to connect to API (ECONNREFUSED)";
 
 /// A rig whose agent plays `steps` (scenario lines, no header, no handshake); its kind for the
 /// probe `kind`, its probe `probe`.
@@ -40,7 +40,12 @@ pub(super) fn start_rig(
 }
 
 /// A rig whose agent answers `initialize`, then `session/new` with -32603 and `message`.
-fn failing_start(test: &str, message: &str, kind: Option<AgentKind>, probe: ReachProbe) -> Rig {
+pub(super) fn failing_start(
+    test: &str,
+    message: &str,
+    kind: Option<AgentKind>,
+    probe: ReachProbe,
+) -> Rig {
     let steps = format!(
         r#"{{"expect":{{"method":"initialize","as":"init","params":{{"protocolVersion":1}}}}}}
 {{"respond":{{"to":"init","result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":false}},"authMethods":[],"agentInfo":{{"name":"fake_agent","version":"0.0.0"}}}}}}}}

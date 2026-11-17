@@ -3,8 +3,8 @@
 //! `agent.launch_failed`, or `agent.start_unreachable` when the host's probe cannot reach the
 //! agent's service while the window says online. Driven by the manual clock; the agent's end is
 //! held (`hold_next`), never drained, so the deadline's stop and the agent's exit cannot race the
-//! test (#1050). The bound counts silence: an agent that keeps sending outlasts it; a timer held
-//! up by sleep waits again.
+//! test (#1050). The bound counts silence: an agent that keeps sending outlasts it, and time the
+//! computer spent asleep (a look at the bound held up past its time) is left out of it.
 
 use std::time::Duration;
 
@@ -18,12 +18,12 @@ use super::start_offline::start_rig;
 use crate::actor::Actor;
 use crate::actor::input::Input;
 use crate::actor::turn::agents::Stage;
-use crate::actor::turn::agents::start_timer::START_WAIT;
+use crate::actor::turn::agents::start_timer::{START_WAIT, TICK};
 use crate::actor::turn::offline::probe::ReachProbe;
 use crate::agent::{AgentInput, Ended};
 
 /// Reads `initialize` and never answers it; waits on stdin, and exits once it closes.
-const SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+pub(super) const SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 "#;
 
@@ -55,7 +55,7 @@ const STEP: Duration = Duration::from_secs(70);
 const MS: Duration = Duration::from_millis(1);
 
 /// Sends a prompt and runs to the agent's launch.
-fn launched(rig: &mut Rig) -> (ThreadId, TurnId) {
+pub(super) fn launched(rig: &mut Rig) -> (ThreadId, TurnId) {
     let thread = rig.thread();
     let turn = send_prompt(rig, 10, thread);
     rig.run_until("the agent's launch", |actor| {
@@ -69,7 +69,7 @@ fn launched(rig: &mut Rig) -> (ThreadId, TurnId) {
 }
 
 /// `thread`'s agent's stage.
-fn stage(rig: &Rig, thread: ThreadId) -> Option<Stage> {
+pub(super) fn stage(rig: &Rig, thread: ThreadId) -> Option<Stage> {
     rig.actor.threads[&thread]
         .turn
         .agent
@@ -95,15 +95,29 @@ fn paced_updates(rig: &mut Rig) {
     }
 }
 
-/// The agent stays silent: just short of the bound it still starts; at the bound it is stopped
-/// through the ladder and its turn fails. Gives the code it failed with.
-fn fails_after_silence(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<ErrorCode> {
-    // A timer already due waits behind the held updates: handle it at its time, not after the
-    // jump below, which would read as sleep.
+/// Lets `time` pass in steps of at most [`TICK`], each step's looks handled at their time, so
+/// none reads as late (sleep). Nothing may stop meanwhile: draining races nothing then.
+pub(super) fn pass(rig: &mut Rig, time: Duration) {
+    let mut left = time;
+    while !left.is_zero() {
+        let step = left.min(TICK);
+        rig.clock.advance(step);
+        rig.drain();
+        left = left.saturating_sub(step);
+    }
+}
+
+/// The agent stays silent for the `left` of its bound: just short of it it still starts; at it
+/// it is stopped through the ladder and its turn fails. Gives the code it failed with.
+pub(super) fn fails_after(
+    rig: &mut Rig,
+    thread: ThreadId,
+    turn: TurnId,
+    left: Duration,
+) -> Option<ErrorCode> {
+    // A look already due waits behind the held updates: handle it now, at its time.
     rig.drain();
-    rig.clock.advance(START_WAIT.checked_sub(MS).unwrap());
-    // Nothing stops before the bound, so draining the re-armed timers races nothing.
-    rig.drain();
+    pass(rig, left.checked_sub(MS).unwrap());
     assert!(
         matches!(
             stage(rig, thread),
@@ -142,8 +156,17 @@ fn fails_after_silence(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<
     code
 }
 
+/// [`fails_after`] the whole bound.
+pub(super) fn fails_after_silence(
+    rig: &mut Rig,
+    thread: ThreadId,
+    turn: TurnId,
+) -> Option<ErrorCode> {
+    fails_after(rig, thread, turn, START_WAIT)
+}
+
 /// Runs a prompt to the silent agent's launch and lets the bound run out.
-fn timed_out(rig: &mut Rig) -> Option<ErrorCode> {
+pub(super) fn timed_out(rig: &mut Rig) -> Option<ErrorCode> {
     let (thread, turn) = launched(rig);
     fails_after_silence(rig, thread, turn)
 }
@@ -213,12 +236,15 @@ fn a_start_that_goes_silent_after_sending_fails_at_the_bound() {
     rig.finish();
 }
 
-/// A timer held up far past its time (the computer slept) waits again instead of failing.
+/// A lid closed 10 s into a start and opened 3 minutes later, on a clock that ran on while the
+/// computer slept (Windows'): the look due at 15 s comes 175 s late, so that time is left out.
+/// The start goes on, and fails only once the agent was silent 120 s awake: 105 s after waking.
 #[test]
-fn a_bound_held_up_by_sleep_waits_again() {
+fn a_long_sleep_mid_start_is_left_out_of_the_silence() {
     let mut rig = start_rig("start-slept", SILENT, None, ReachProbe::fixed(true));
     let (thread, turn) = launched(&mut rig);
-    rig.clock.advance(START_WAIT * 3);
+    pass(&mut rig, Duration::from_secs(10));
+    rig.clock.advance(Duration::from_secs(180));
     rig.drain();
     assert_eq!(
         stage(&rig, thread),
@@ -226,7 +252,23 @@ fn a_bound_held_up_by_sleep_waits_again() {
         "failed on waking"
     );
     assert_eq!(
-        fails_after_silence(&mut rig, thread, turn),
+        fails_after(&mut rig, thread, turn, Duration::from_secs(105)),
+        Some(ErrorCode::AgentLaunchFailed)
+    );
+    rig.finish();
+}
+
+/// A sleep from 10 s to 100 s, over before the bound was due: the look due at 15 s comes 85 s
+/// late, so the agent keeps its waking time and fails at 205 s, not at 120 s.
+#[test]
+fn a_short_sleep_over_before_the_bound_is_left_out_too() {
+    let mut rig = start_rig("start-slept-short", SILENT, None, ReachProbe::fixed(true));
+    let (thread, turn) = launched(&mut rig);
+    pass(&mut rig, Duration::from_secs(10));
+    rig.clock.advance(Duration::from_secs(90));
+    rig.drain();
+    assert_eq!(
+        fails_after(&mut rig, thread, turn, Duration::from_secs(105)),
         Some(ErrorCode::AgentLaunchFailed)
     );
     rig.finish();
