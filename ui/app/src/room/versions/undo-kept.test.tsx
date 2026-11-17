@@ -38,7 +38,7 @@ test("the three lines, in English and Hindi, by why the file was kept and the fo
   const words = (lang: "en" | "hi", reason: SkippedFile["reason"], place?: FolderPlace) =>
     plain(cantUndoWords(lang, ANNEX, reason, place));
   expect(words("en", "cloud_only", ONE_DRIVE)).toBe(
-    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive's version history has the earlier one.",
+    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive may still have an earlier version.",
   );
   // a folder no named service syncs, or one not synced at all, or a service with no name to show
   const unknown =
@@ -52,13 +52,14 @@ test("the three lines, in English and Hindi, by why the file was kept and the fo
   expect(words("en", "unknown", ONE_DRIVE)).toBe(noCopy);
   // a folder Clauseo couldn't read: the cloud line where the folder syncs, else no copy kept
   expect(words("en", "unread_folder", ONE_DRIVE)).toBe(
-    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive's version history has the earlier one.",
+    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive may still have an earlier version.",
   );
   expect(words("en", "unread_folder", { synced: { service: "other" } })).toBe(unknown);
   expect(words("en", "unread_folder", "local")).toBe(noCopy);
   expect(words("en", "unread_folder")).toBe(noCopy);
+  // its Hindi is still to come (U8-37, hi: later): the Hindi interface shows its English
   expect(words("hi", "cloud_only", ONE_DRIVE)).toBe(
-    "Clauseo Annexure 3.pdf में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल OneDrive में था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति OneDrive के पुराने संस्करणों में है।",
+    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive may still have an earlier version.",
   );
   expect(words("hi", "cloud_only", "network")).toBe(
     "Clauseo Annexure 3.pdf में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल ऑनलाइन था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति शायद आपकी क्लाउड सेवा के पुराने संस्करणों में हो।",
@@ -137,7 +138,7 @@ test("one kept file, only in OneDrive before: the band names it apart, never as 
     tone: "failed",
     text: plain(cantUndoWords("en", ANNEX, "cloud_only", ONE_DRIVE)),
   });
-  expect(lines[1]?.text).toContain("OneDrive's version history has the earlier one.");
+  expect(lines[1]?.text).toContain("OneDrive may still have an earlier version.");
   // the thread's note counts the one that went back, and says why the other stayed
   await vi.waitFor(() => expect(h?.all("cant-undo")).toHaveLength(1));
   expect(noteLines()).toContain("You undid Clauseo's changes to 1 paper.");

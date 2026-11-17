@@ -215,15 +215,28 @@ export function programsOf(command: string): string[] {
   return best!.programs;
 }
 
+/** A string's escape for a new line, a tab or a return (`\n`, `\t`, `\r`): a lone backslash's, never a doubled
+ * one's (`C:\\matter\\new.docx` in a script). */
+const ESCAPE = /(?<!\\)(?:\\\\)*\\[ntr]/;
+/** A Windows path, whose single backslashes are its folders' (`C:\matter\notes\new.docx`). */
+const WINDOWS = /^(?:[A-Za-z]:\\|\\\\)/;
+/** Whether a word holds a string's escape, so it is a script's text (`'## Findings\nNotice.docx read'`) and no path. */
+const escaped = (w: string): boolean => !WINDOWS.test(w) && ESCAPE.test(w);
+
 /** The first paper a command names, by its file name: a quoted or bare word ending in a paper's extension,
- * searched in quoted runs too, so a script's own strings (`open("…/Legal notice.pdf")`) count. */
+ * searched in quoted runs too, so a script's own strings (`open("…/Legal notice.pdf")`) count. A word that holds a
+ * string's escape (escaped) is a script's text, never a paper. */
 function paperOf(command: string): string | null {
   for (const m of command.matchAll(/"([^"\n]+)"|'([^'\n]+)'|(\S+)/g)) {
     const w = (m[1] ?? m[2] ?? m[3]!).replace(/[),;:]+$/, "");
-    if (PAPER.test(w)) return baseName(w);
+    if (PAPER.test(w) && !escaped(w)) return baseName(w);
     // a word inside a quoted script: its own runs
-    const inner = /[\w./\\~-][^"'`]*?\.(pdf|docx?|rtf|odt|txt|xlsx?|csv|pptx?|eml|msg)\b/i.exec(w);
-    if (inner !== null) return baseName((inner[0].split(/[("'`=]/).pop() ?? inner[0]).trim());
+    for (const inner of w.matchAll(
+      /[\w./\\~-][^"'`]*?\.(pdf|docx?|rtf|odt|txt|xlsx?|csv|pptx?|eml|msg)\b/gi,
+    )) {
+      const run = (inner[0].split(/[("'`=]/).pop() ?? inner[0]).trim();
+      if (!escaped(run)) return baseName(run);
+    }
   }
   return null;
 }

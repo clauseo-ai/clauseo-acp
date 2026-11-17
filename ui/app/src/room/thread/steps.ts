@@ -220,13 +220,74 @@ export function iconsOf(calls: readonly ToolCallEntry[]): string[] {
   );
 }
 
+/** The tools that list a folder rather than read a paper (Claude's LS and Glob, Gemini's list_directory and the like),
+ * by their name in lower case. */
+const LISTERS: ReadonlySet<string> = new Set([
+  "ls",
+  "glob",
+  "list",
+  "list_dir",
+  "listdir",
+  "list_directory",
+  "list_files",
+  "read_folder",
+  "readfolder",
+]);
+
+/** Whether a read step lists a folder: a lister's tool (LISTERS), a title that runs one (`ls papers`, `Glob **` or
+ * Codex's "List papers", which names no file), or a path that ends in a folder's separator. */
+function listingOf(call: ToolCallEntry): boolean {
+  if (call.tool_name !== undefined && LISTERS.has(call.tool_name.toLowerCase())) return true;
+  const title = call.title.trim().replace(/^`+/, "");
+  if (/^(?:ls|glob|dir|tree)(?:\s|$)/i.test(title)) return true;
+  if (/^list\b/i.test(title) && !/\.\w{1,5}`?$/.test(title)) return true;
+  const raw = rawPathOf(call);
+  return raw !== null && /[/\\]$/.test(raw);
+}
+
+/** A step's path as its locations or its input give it, as it came (a folder's trailing separator kept), or null. */
+function rawPathOf(call: ToolCallEntry): string | null {
+  const at = call.locations.find((l) => typeof l === "object");
+  if (typeof at === "object") return at.inside?.path ?? at.outside?.display ?? null;
+  const text = call.raw_input?.inline;
+  if (text === undefined || text.length > 16_384 || !text.startsWith("{")) return null;
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>;
+    const p = v["file_path"] ?? v["path"] ?? v["filePath"] ?? v["dir_path"];
+    return typeof p === "string" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** How many papers a group's read steps read: each paper once, however often it was read; a read of a guide
+ * (skill-words.ts) or a folder's listing (listingOf) not at all; a read that names no paper once, as each did before. */
+export function papersRead(calls: readonly ToolCallEntry[]): number {
+  const papers = new Set<string>();
+  let unnamed = 0;
+  for (const c of calls) {
+    if (groupKindOf(c) !== "read" || skillOf(c) !== null || listingOf(c)) continue;
+    const p = placeOf(c);
+    if (p.name === null) unnamed += 1;
+    else papers.add(`${p.where ?? ""}/${p.name}`);
+  }
+  return papers.size + unnamed;
+}
+
 /** The most kinds the folded line names; the rest are "And 3 more.". */
 const NAMED = 3;
 
 /** The folded line's summary: one sentence for each of the three kinds done most, "4 papers read. Searched 2 times.
  * Ran 1 task.", the rest counted as "And 3 more.". */
 export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  const kinds = kindsOf(calls);
+  // reads count papers (papersRead), not steps; with no paper among them (only guides or listings) the read sentence
+  // is left out, unless it is all the line has, when it counts the steps as before
+  const all = kindsOf(calls);
+  const papers = papersRead(calls);
+  const counts = all
+    .map((k) => (k.kind === "read" ? { kind: k.kind, n: papers } : k))
+    .filter((k) => k.n > 0);
+  const kinds = counts.length > 0 ? counts : all;
   const out = kinds
     .slice(0, NAMED)
     .map(({ kind, n }) =>

@@ -147,6 +147,23 @@ describe("the folded line", () => {
     expect(summaryOf("en", [call("search")])).toBe("Searched once.");
   });
 
+  test("papers read counts each paper once, never a guide or a listing; their rows stay as they were", () => {
+    const lease = () => call("read", "completed", raw({ path: "papers/Lease deed.pdf" }));
+    // one paper read three times is one paper
+    expect(summaryOf("en", [lease(), lease(), lease()])).toBe("1 paper read.");
+    const guide = call("read", "completed", raw({ path: "/x/skills/legal-drafting/SKILL.md" }));
+    const listing = call("read", "completed", { tool_name: "LS", ...raw({ path: "papers/" }) });
+    const ls = call("read", "completed", { title: "ls papers" });
+    const notice = call("read", "completed", raw({ path: "papers/2019/Notice.pdf" }));
+    const calls = [lease(), guide, notice, listing, lease(), ls];
+    expect(summaryOf("en", calls)).toBe("2 papers read.");
+    // the rows themselves are unchanged
+    expect(doneOf("en", guide)).toBe("Read Clauseo's drafting guide.");
+    expect(kindsOf(calls)).toEqual([{ kind: "read", n: 6 }]);
+    // a read that names no paper counts once, as before
+    expect(summaryOf("en", [lease(), call("read"), call("read")])).toBe("3 papers read.");
+  });
+
   test("every kind has its words", () => {
     const kinds: ToolKind[] = ["edit", "delete", "move", "fetch", "think", "other"];
     expect(kinds.map((k) => summaryOf("en", [call(k), call(k)]))).toEqual([

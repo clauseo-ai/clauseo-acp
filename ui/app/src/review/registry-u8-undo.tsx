@@ -40,7 +40,7 @@ export const U8_UNDO: Entry[] = [
   undoneTurn(
     "U8-37",
     versionWords(
-      "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.",
+      "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service} may still have an earlier version.",
     ),
     UNDO_KEEPS,
   ),
