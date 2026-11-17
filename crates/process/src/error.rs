@@ -54,7 +54,7 @@ impl Error {
     }
 }
 
-/// Windows' "blocked by group policy" (`ERROR_ACCESS_DISABLED_BY_POLICY`, AppLocker and
+/// Windows' "blocked by group policy" (`ERROR_ACCESS_DISABLED_BY_POLICY`: allow lists and
 /// software restriction) and its antivirus refusals (`ERROR_VIRUS_INFECTED`,
 /// `ERROR_VIRUS_DELETED`), which have no `io::ErrorKind`.
 const WINDOWS_BLOCKED: [i32; 3] = [1260, 225, 226];
