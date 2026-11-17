@@ -88,23 +88,30 @@ const SQLITE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
 
 /// Codex's databases in its home (`codex-rs/state/src/sqlite.rs:34-39`): thread metadata with
 /// each thread's first message (`codex-rs/state/src/extract.rs:186`), logs, goals, memories, the
-/// queue and the thread history, every matter's.
-const CODEX_DATABASES: [&str; 6] = [
+/// queue and the thread history, every matter's, and the second memories database
+/// (`codex-rs/state/src/sqlite.rs:107-111`).
+const CODEX_DATABASES: [&str; 7] = [
     "state_5.sqlite",
     "logs_2.sqlite",
     "goals_1.sqlite",
     "memories_1.sqlite",
+    "memories_v2_1.sqlite",
     "queue_1.sqlite",
     "thread_history_1.sqlite",
 ];
 
 /// What of Codex's home is denied: its login, its transcripts and its prompt history
-/// (`codex-rs/message-history/src/lib.rs:52`), every matter's, with [`CODEX_DATABASES`].
-const CODEX_HOME_DENIED: [&str; 4] = [
+/// (`codex-rs/message-history/src/lib.rs:52`), every matter's, with [`CODEX_DATABASES`]; and
+/// what Codex loads settings, rules, instructions or code from, which no command needs: its
+/// `config.toml`, its `rules` and every name each launch removes (`codex::home_clear::LOADED`),
+/// so neither an ordinary nor an approved command reads or writes them, however it names them.
+const CODEX_HOME_DENIED: [&str; 6] = [
     "auth.json",
     "sessions",
     "archived_sessions",
     "history.jsonl",
+    "config.toml",
+    crate::agent::codex::rules::RULES_FOLDER,
 ];
 
 /// The folders under `<data>` no Codex shell needs that no `Locations` accessor names: the
@@ -331,7 +338,10 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
     if let Some(codex) = codex_home.parent() {
         denied.extend(["login-source", "no-reuse"].map(|name| codex.join(name)));
     }
-    denied.extend(CODEX_HOME_DENIED.iter().map(|name| codex_home.join(name)));
+    let home_denied = CODEX_HOME_DENIED
+        .iter()
+        .chain(&crate::agent::codex::home_clear::LOADED);
+    denied.extend(home_denied.map(|name| codex_home.join(name)));
     for database in CODEX_DATABASES {
         for suffix in SQLITE_SUFFIXES {
             denied.push(codex_home.join(format!("{database}{suffix}")));
@@ -457,3 +467,6 @@ mod listed_tests;
 #[cfg(test)]
 #[path = "codex_fence/tests.rs"]
 pub(crate) mod tests;
+#[cfg(test)]
+#[path = "codex_fence/writable_tests.rs"]
+mod writable_tests;

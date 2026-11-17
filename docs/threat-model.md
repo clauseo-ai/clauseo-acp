@@ -224,6 +224,23 @@ anything the agent starts.
   command; a firm rule that allows only `Clauseo.exe` by path refuses every Codex step. The
   program's folder is the app's: no Clauseo fence names it, and Codex's own sandbox, which asks
   before a write outside the matter, covers both programs alike
+- `built` (tier C, every OS): Codex's home (`CODEX_HOME`) is in none of Codex's writable roots.
+  On macOS and Linux Codex's sandbox also denies every command, ordinary or approved, its
+  `config.toml`, its `rules` and what each launch removes. The pre-write guard recognises the
+  folder's own path and the variable's name; the sandbox, the approval auto-deny and the launch
+  removal stand behind it. Each launch removes what Codex loads instructions, settings or code
+  from there (`AGENTS.md`, `AGENTS.override.md`, `skills`, `agents`, `.env`, `environments.toml`,
+  `models_cache.json`, `cloud-config-bundle-cache.json`, `hooks.json`, `memories`,
+  `memories_v2`, `memories_extensions`, `.sandbox-bin`; `rules` already;
+  `agent/codex/home_clear.rs`), and on Windows a sandbox SIDs file that is not Codex's own
+  (`agent/codex/cap_sid.rs`), never the sign-in, the conversations, the history or Codex's
+  databases and logs. Scope: an approved command that runs outside the sandbox on Windows can
+  change what the sandbox reaches; the launch check does not undo that. Scope: Codex's cloud
+  config cache is among them, so a business, education or enterprise sign-in fetches its cloud
+  settings at each start, waits at most 20 s, and fails the session start when the fetch fails:
+  a firm's cloud settings are never skipped, offline included. Scope: Codex's home; what Codex
+  loads from elsewhere (`$HOME/.agents/skills`, `/etc/codex`, macOS managed preferences) is
+  handled elsewhere
 
 ## Egress proxy
 
