@@ -224,11 +224,11 @@ pub(crate) fn writable(
 /// is no clash ([`writable`] refuses a link).
 pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<Option<MatterPath>, Error> {
     let mut at = folder.to_owned();
-    let mut end = 0;
+    let mut seen: Vec<&str> = Vec::new();
     let mut parts = path.as_str().split('/').peekable();
     while let Some(part) = parts.next() {
         at.push(part);
-        end += part.len();
+        seen.push(part);
         let kind = match std::fs::symlink_metadata(&at) {
             Ok(metadata) => metadata.file_type(),
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -241,11 +241,10 @@ pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<Option<MatterPat
         // a folder where the file goes, or anything but a folder (a file, a pipe, a socket)
         // where one of its folders goes
         if (last && kind.is_dir()) || (!last && !kind.is_dir()) {
-            let in_way = MatterPath::new(&path.as_str()[..end])
-                .map_err(|err| Error::history("clash", err))?;
+            let in_way =
+                MatterPath::new(&seen.join("/")).map_err(|err| Error::history("clash", err))?;
             return Ok(Some(in_way));
         }
-        end += 1;
     }
     Ok(None)
 }
@@ -304,6 +303,8 @@ pub(crate) struct Deleted {
     pub(crate) removals: Removals,
     /// What the write-back left for the lawyer to hear about, by name.
     pub(crate) unfinished: Unfinished,
+    /// The files deleted for good, the trash unable to take them (the history holds each).
+    pub(crate) for_good: Vec<MatterPath>,
 }
 
 /// Why [`apply_or_partial`] failed, and whether the folder had changed by then.
@@ -364,10 +365,11 @@ pub(crate) fn apply_or_partial(
     unfinished.owner_only.sort();
     unfinished.left_behind.sort();
     let result = match result {
-        Ok((paths, removals)) => Ok(Deleted {
+        Ok((paths, removals, for_good)) => Ok(Deleted {
             paths,
             removals,
             unfinished,
+            for_good,
         }),
         Err((error, changed)) => Err(Failed {
             error,
@@ -394,8 +396,11 @@ impl Unfinished {
     }
 }
 
-/// [`apply_or_partial`]'s steps: the deletions made and their count, or the error and whether
-/// the folder changed. `dirs` gets each folder a write stages into; `owner_only` each file
+/// The deletions [`write_all`] made, their count and the files deleted for good.
+type Written = (Vec<MatterPath>, Removals, Vec<MatterPath>);
+
+/// [`apply_or_partial`]'s steps: the deletions made, their count and those deleted for good, or
+/// the error and whether the folder changed. `dirs` gets each folder a write stages into; `owner_only` each file
 /// renamed into place whose step after the rename failed. Every staged file is renamed or
 /// dropped (its temp file removed) when it returns.
 fn write_all(
@@ -405,7 +410,7 @@ fn write_all(
     ops: &[&Op],
     dirs: &mut std::collections::BTreeSet<PathBuf>,
     owner_only: &mut Vec<MatterPath>,
-) -> Result<(Vec<MatterPath>, Removals), (Error, bool)> {
+) -> Result<Written, (Error, bool)> {
     let unchanged = |error| (error, false);
     let changed = |error| (error, true);
     let mut made = Vec::new();
@@ -497,7 +502,11 @@ fn write_all(
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
     fsync::full_flush_dir(folder).map_err(|err| changed(Error::io("sync", folder, err)))?;
-    Ok((deleted, removing.removals))
+    Ok((
+        deleted,
+        removing.removals,
+        std::mem::take(&mut removing.for_good),
+    ))
 }
 
 /// How many attributes of the replaced files (permissions, extended attributes, ACLs, Windows

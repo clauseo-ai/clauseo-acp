@@ -26,9 +26,13 @@ export type MatterRead = {
   versions: readonly VersionEntry[];
   /** Each restore's checkpoint, to the checkpoint it restored from. */
   restores: ReadonlyMap<string, string>;
-  /** Each restore of one file (Versions' Restore this document), to that file. */
-  oneFile: ReadonlyMap<string, string>;
+  /** Each restore of one file (Versions' Restore this document), to that file, and whether the restore deleted it
+   * for good (an undo that removed it, the trash unable to take it). */
+  oneFile: ReadonlyMap<string, OneFile>;
 };
+
+/** The one file a restore put back, or an undo of one removed: deleted for good when the trash couldn't take it. */
+export type OneFile = { file: string; forGood: boolean };
 
 /** Reads entries, oldest first: older pages first, then the view's window. */
 export function readMatter(view: StreamView | undefined, older: readonly ViewEntry[]): MatterRead {
@@ -38,7 +42,7 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
       : null;
   const versions: VersionEntry[] = [];
   const restores = new Map<string, string>();
-  const oneFile = new Map<string, string>();
+  const oneFile = new Map<string, OneFile>();
   const seen = new Set<string>();
   const take = (e: ViewEntry) => {
     if (e.version !== undefined) {
@@ -49,7 +53,9 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
       const r = e.marker.kind.version_restored;
       restores.set(r.checkpoint, r.from);
       const paths = typeof r.scope === "object" ? r.scope.files.paths : [];
-      if (paths.length === 1 && paths[0] !== undefined) oneFile.set(r.checkpoint, paths[0]);
+      const file = paths.length === 1 ? paths[0] : undefined;
+      if (file !== undefined)
+        oneFile.set(r.checkpoint, { file, forGood: (r.deleted ?? []).includes(file) });
     }
   };
   for (const e of older) take(e);

@@ -19,6 +19,9 @@ expression: "event(\"version_restored\")"
     "removed": [
       "b.docx"
     ],
+    "deleted": [
+      "b.docx"
+    ],
     "more": 3
   }
 }

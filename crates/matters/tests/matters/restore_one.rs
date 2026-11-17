@@ -230,3 +230,38 @@ fn a_link_at_the_chosen_file_is_kept() {
     );
     assert_no_temp_files(&fx.folder);
 }
+
+/// Undoing a one-file restore that brought a file back removes it: into the trash, or, when the
+/// trash can't take it (its folder is a file here), deleted for good since the history holds
+/// it; `deleted` names it then, and only then.
+#[test]
+fn undoing_a_restore_that_brought_a_file_back_says_whether_it_went_for_good() {
+    for blocked in [false, true] {
+        let name = if blocked {
+            "restore-one-undo-for-good"
+        } else {
+            "restore-one-undo-trashed"
+        };
+        let (fx, mut matter) = versioned(name);
+        support::remove_file(fx.file("b.txt"));
+        let chosen = only("b.txt");
+        matter
+            .restore(&restore_request(3, RestoreFiles::Only(&chosen), 4, 5))
+            .unwrap();
+        assert_eq!(fx.read("b.txt"), b"bee, edited");
+        if blocked {
+            support::write(
+                fx.root().with_file_name("trash"),
+                "a file, not a trash folder",
+            );
+        }
+
+        let mut back = restore_request(4, RestoreFiles::Only(&chosen), 6, 7);
+        back.undoes = Some(cid(5));
+        let undone = matter.restore(&back).unwrap();
+        assert_eq!(undone.removed, chosen);
+        assert!(!fx.exists("b.txt"));
+        let for_good: &[MatterPath] = if blocked { &chosen } else { &[] };
+        assert_eq!(undone.deleted, for_good, "blocked: {blocked}");
+    }
+}

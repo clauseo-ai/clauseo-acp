@@ -220,12 +220,17 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
         checkpoint,
         written,
         removed,
+        deleted,
         ..
     } = restored;
     let mut events = undo::outside_edits_events(outside_edits)?;
     let id = checkpoint.outcome.id();
     // The log names the files for the agent's note too, so a restart does not lose it.
     let (written, removed, more) = crate::undo_note::capped(written, removed);
+    // the files of those removed that went for good, the trash unable to take them: the done
+    // line says so, and never that they went to the trash
+    let mut deleted = deleted;
+    deleted.retain(|path| removed.contains(path));
     let mut created = None;
     if events.is_empty()
         && let CheckpointOutcome::Reused(id) = checkpoint.outcome
@@ -251,6 +256,7 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
             undoes: ask.undoes,
             written: written.clone(),
             removed: removed.clone(),
+            deleted,
             more: (more > 0).then_some(more),
         };
         created = Some(id);

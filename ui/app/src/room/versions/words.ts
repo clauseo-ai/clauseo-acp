@@ -322,13 +322,15 @@ export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
   };
 }
 
-/** What undoing a one-file restore did to that paper, by its preview: put it back, moved it to the computer's bin (it
- * wasn't in the matter before the restore), or nothing (it changed since the restore). */
+/** What undoing a one-file restore did to that paper, by its preview: put it back, removed it (it wasn't in the matter
+ * before the restore), or nothing (it changed since the restore). A removed paper names the computer's bin (binned:
+ * its platform) only when the host says it went there; one deleted for good, the bin unable to take it, or one the
+ * host hasn't said of yet, is removed with a copy in Versions, which is true either way. */
 function undidFileLine(
   lang: Lang,
   paper: string,
   undid: FileUndid | undefined,
-  platform: Platform,
+  binned: Platform | null,
 ) {
   if (undid === "none")
     return vt(
@@ -338,7 +340,13 @@ function undidFileLine(
     );
   if (undid !== "removed")
     return vt(lang, "Undid the restore. '{paper}' is back as it was before.", { paper });
-  return platform === "windows"
+  if (binned === null)
+    return vt(
+      lang,
+      "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.",
+      { paper },
+    );
+  return binned === "windows"
     ? vt(
         lang,
         "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
@@ -398,7 +406,12 @@ export function doneLine(
           });
     }
     case "undidRestore":
-      if (done.file !== null) return undidFileLine(lang, fileName(done.file), done.undid, platform);
+      if (done.file !== null) {
+        // the bin only once the undo's marker says the paper went there, not deleted for good
+        const mark = done.checkpoint === undefined ? undefined : s.oneFile.get(done.checkpoint);
+        const binned = mark !== undefined && !mark.forGood;
+        return undidFileLine(lang, fileName(done.file), done.undid, binned ? platform : null);
+      }
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),
       });

@@ -11,6 +11,7 @@ import type {
   ThreadStatus,
   Timestamp,
 } from "../../transport/protocol.ts";
+import type { OneFile } from "../matter-stream.ts";
 import type { Timeline } from "./timeline.ts";
 
 /** Where the room stands: at now (id: the newest version, a turn's, picked on the timeline for its Undo), or looking
@@ -76,7 +77,14 @@ export type Done =
   /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter; undid:
    * for that file, what the undo did to it, by its preview: put it back (back), removed it, as the restore had brought
    * it back (removed), or nothing, as it changed since the restore (none). */
-  | { kind: "undidRestore"; at: Timestamp; file: string | null; undid?: FileUndid }
+  | {
+      kind: "undidRestore";
+      at: Timestamp;
+      file: string | null;
+      undid?: FileUndid;
+      /** The version the undo wrote, whose marker says whether a removed file went to the trash. */
+      checkpoint?: string;
+    }
   | {
       kind: "undidChange";
       of: Timestamp;
@@ -109,7 +117,8 @@ export function restoreDone(
       : preview.changes.length > 0
         ? "back"
         : "none";
-    return { kind: "undidRestore", at, file, undid };
+    const checkpoint = outcome.kind === "wrote" ? { checkpoint: outcome.checkpoint } : {};
+    return { kind: "undidRestore", at, file, undid, ...checkpoint };
   }
   if (file === null) return { kind: "restored", to: ask.id, n: preview.changes.length, outcome };
   const moved = ask.moved === true && outcome.kind === "wrote";
@@ -180,8 +189,9 @@ export type Snapshot = {
   titles: ReadonlyMap<ThreadId, string>;
   /** Each restore the matter's stream has a marker for, to the version it restored. */
   restores: ReadonlyMap<string, string>;
-  /** Each restore of one file the matter's stream has a marker for, to that file. */
-  oneFile: ReadonlyMap<string, string>;
+  /** Each restore of one file the matter's stream has a marker for, to that file (and whether it deleted it for
+   * good). */
+  oneFile: ReadonlyMap<string, OneFile>;
   now: Timestamp;
   zone: string;
 };

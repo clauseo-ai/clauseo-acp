@@ -462,6 +462,7 @@ pub(crate) fn restore(
             },
             written: restored,
             removed: Vec::new(),
+            deleted: Vec::new(),
             added_since: plan.added_since,
             kept: plan.kept,
         });
@@ -471,7 +472,7 @@ pub(crate) fn restore(
     clashed_since(folder, &plan.writes)?;
     let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
-    writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
+    let deleted = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?.for_good;
     // 6. The restore checkpoint.
     let checkpoint = core.take(
         folder,
@@ -483,6 +484,7 @@ pub(crate) fn restore(
         checkpoint,
         written: restored,
         removed: plan.removes,
+        deleted,
         added_since: plan.added_since,
         kept: plan.kept,
     })

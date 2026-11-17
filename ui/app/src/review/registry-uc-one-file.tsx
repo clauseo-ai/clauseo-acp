@@ -1,4 +1,4 @@
-// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-392 to UC-398, and UC-428): Restore
+// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-392 to UC-399, and UC-428): Restore
 // this document beside the
 // documents that differ from now, the restore dialog it opens for that document alone, and the line once it is done,
 // in the room with Versions open over registry-u8.tsx's host, after the presses that bring each state. The English
@@ -122,6 +122,15 @@ export const UC_ONE_FILE: Entry[] = [
     ),
     // said with the review's platform set to Windows; on the Mac this cell shows UC-393
     { ...BROUGHT_BACK, platform: "windows" },
+    UNDOING_TODAY,
+  ),
+  // the bin couldn't take it (a network drive, say), so it went for good: Versions keeps a copy
+  state(
+    "UC-399",
+    versionWords(
+      "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.",
+    ),
+    { ...BROUGHT_BACK, forGood: true },
     UNDOING_TODAY,
   ),
   state(

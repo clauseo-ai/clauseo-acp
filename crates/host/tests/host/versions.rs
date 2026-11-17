@@ -14,6 +14,11 @@ use crate::permissions::{PERM, until_first_request};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 use crate::write;
 
+// restores tested on their own, beside these, to keep host.rs under the size limit
+#[cfg(test)]
+#[path = "restore_for_good.rs"]
+mod restore_for_good;
+
 /// The matter's events, read until caught up.
 pub(crate) fn matter_events(host: &Running, matter: MatterId) -> Events {
     let mut events = host.events(StreamId::Matter(matter));

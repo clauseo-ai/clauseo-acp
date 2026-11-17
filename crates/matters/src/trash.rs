@@ -156,6 +156,8 @@ pub struct Removals {
 pub(crate) struct Removing<'a> {
     trash: &'a dyn Trash,
     pub(crate) removals: Removals,
+    /// The files deleted for good, in the order removed.
+    pub(crate) for_good: Vec<MatterPath>,
     fell_back: usize,
     first_failure: Option<String>,
 }
@@ -165,6 +167,7 @@ impl<'a> Removing<'a> {
         Self {
             trash,
             removals: Removals::default(),
+            for_good: Vec::new(),
             fell_back: 0,
             first_failure: None,
         }
@@ -204,6 +207,7 @@ impl<'a> Removing<'a> {
             self.removals.trashed += 1;
         } else {
             self.removals.deleted += 1;
+            self.for_good.push(path.clone());
         }
         if let Some(failure) = failure {
             self.fell_back += 1;

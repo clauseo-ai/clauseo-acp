@@ -235,9 +235,6 @@ fn matter_query(
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let checked = loaded
-                .and_then(|()| own_versions(actor, matter, &versions))
-                .and_then(|()| actor.matter_worker(matter));
             // an undo's preview lists what the undo writes: that restore's files alone, if it
             // put back chosen files (as `turn/restore.rs` restores them)
             let mut job = job;
@@ -246,6 +243,9 @@ fn matter_query(
             {
                 *scope = undone;
             }
+            let checked = loaded
+                .and_then(|()| own_versions(actor, matter, &versions))
+                .and_then(|()| actor.matter_worker(matter));
             match checked {
                 // A refused send drops the tag and with it `reply`: the caller sees the host
                 // closed.
@@ -409,17 +409,19 @@ pub(super) fn undone_scope(
 ) -> Option<RestoreRequest> {
     let undoes = undoes?;
     let state = actor.loaded(StreamId::Matter(matter))?.state.as_matter()?;
-    state.entries().values().find_map(|entry| match entry {
-        ViewEntry::Marker(marker) => match &marker.kind {
-            MarkerKind::VersionRestored {
+    state.entries().values().find_map(|entry| {
+        if let ViewEntry::Marker(marker) = entry
+            && let MarkerKind::VersionRestored {
                 checkpoint,
                 scope: RestoreScope::Files { paths },
                 ..
-            } if *checkpoint == undoes => Some(RestoreRequest::Files {
+            } = &marker.kind
+            && *checkpoint == undoes
+        {
+            return Some(RestoreRequest::Files {
                 paths: paths.clone(),
-            }),
-            _ => None,
-        },
-        _ => None,
+            });
+        }
+        None
     })
 }

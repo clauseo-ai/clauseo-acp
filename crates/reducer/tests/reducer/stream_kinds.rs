@@ -106,6 +106,7 @@ fn version_restored_on_a_thread_stream_folds_to_its_marker() {
             undoes: Some(undone),
             written: vec![MatterPath::new("brief.txt").unwrap()],
             removed: Vec::new(),
+            deleted: Vec::new(),
             more: None,
         })
         .unwrap();
@@ -121,6 +122,7 @@ fn version_restored_on_a_thread_stream_folds_to_its_marker() {
             undoes: Some(undone),
             written: vec![MatterPath::new("brief.txt").unwrap()],
             removed: Vec::new(),
+            deleted: Vec::new(),
             more: None,
         },
         ts: envelope.ts,
