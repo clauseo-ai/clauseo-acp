@@ -87,12 +87,17 @@ mod tests {
 
     #[test]
     fn only_a_program_named_git_does_nothing() {
-        for exe in [
-            "/data/tools/no-git/git",
-            "C:\\data\\tools\\no-git\\git.exe",
-            "/x/GIT",
-            "git",
-        ] {
+        // A Windows path names a folder only on Windows; on Unix its `\` is part of one name,
+        // and `current_exe` there never gives one.
+        let windows: &[&str] = if cfg!(windows) {
+            &["C:\\data\\tools\\no-git\\git.exe"]
+        } else {
+            &[]
+        };
+        for exe in ["/data/tools/no-git/git", "/x/GIT", "git"]
+            .iter()
+            .chain(windows)
+        {
             assert!(requested(Some(Path::new(exe)), None), "{exe}");
             assert!(requested(None, Some(OsStr::new(exe))), "{exe}");
         }
