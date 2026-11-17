@@ -220,14 +220,14 @@
     "note": "Versions' line after undoing a one-document restore that removed the paper when the bin couldn't take it, so the host deleted it for good (VersionRestored.deleted names it; Versions holds a copy), and while the undo's marker hasn't said which; never the Trash or Recycle Bin line then. English final (app track)"
   },
   "UC-341": {
-    "en": "Nothing was restored: Clauseo left '{paper}' as it is.",
-    "hi": "कुछ पुनर्स्थापित नहीं हुआ: Clauseo ने '{paper}' को जैसा है वैसा ही छोड़ दिया।",
+    "en": "Nothing was restored: Clauseo couldn't safely bring back that version of '{paper}', so it left it as it is.",
+    "hi": "कुछ पुनर्स्थापित नहीं हुआ: Clauseo '{paper}' का वह संस्करण सुरक्षित रूप से वापस नहीं ला सका, इसलिए उसे जैसा है वैसा ही छोड़ दिया।",
     "hi_status": "provisional",
     "hi_at": "2026-11-17",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-17",
     "by": "host follow-ups (provisional; orchestrator to approve)",
-    "note": "Versions' line after a one-document restore that wrote nothing: the host answered with no marker, or one not listing the paper as written (it changed as Restore was pressed, say). Draft; app track to word"
+    "note": "Versions' line after a one-document restore that wrote nothing: the host answered with no marker, or one not listing the paper as written (it changed as Restore was pressed, say). English final (app track)"
   }
 }

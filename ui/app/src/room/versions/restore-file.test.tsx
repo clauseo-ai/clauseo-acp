@@ -527,7 +527,7 @@ test("saved in Word as Restore was pressed: the host writes nothing and no marke
   await h.click(h.one("dialog-confirm"));
   await h.settle();
   expect(doneText()).toContain(
-    "Nothing was restored: Clauseo left '\u2068brief.txt\u2069' as it is.",
+    "Nothing was restored: Clauseo couldn't safely bring back that version of '\u2068brief.txt\u2069', so it left it as it is.",
   );
   expect(doneText()).not.toMatch(/^Restored/m);
 });
