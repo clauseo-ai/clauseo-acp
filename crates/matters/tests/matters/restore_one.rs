@@ -266,15 +266,17 @@ fn undoing_a_restore_that_brought_a_file_back_says_whether_it_went_for_good() {
     }
 }
 
-/// A folder made where the chosen file goes after the plan checked it (here, as the plan asks
-/// whether the file is cloud-only, after the walk asked once) refuses the restore as the clash
-/// it is, at the last check before writing: after the outside-edits version was kept (so not by
-/// the plan), and never as `matter.file_locked`. Nothing is written.
+/// A folder made where the chosen file goes after the plan checked it refuses the restore as the
+/// clash it is, at the last check before writing: after the outside-edits version was kept (so
+/// not by the plan), and never as `matter.file_locked`. Nothing is written. The probe is asked
+/// about the file three times: by the walk's stat, by the walk's read of the open file (the hand
+/// edit is read), then by the plan's `writable`, after its clash check; the swap comes at the
+/// third.
 #[test]
 fn a_folder_made_after_the_plan_is_refused_as_a_clash_before_writing() {
     let (fx, mut matter) = versioned("restore-one-folder-after-plan");
     fx.write("a.txt", "three, by hand");
-    fx.probe.swap_for_folder(fx.file("a.txt"), 2);
+    fx.probe.swap_for_folder(fx.file("a.txt"), 3);
     let chosen = only("a.txt");
 
     let err = matter
