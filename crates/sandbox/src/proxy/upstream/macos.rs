@@ -66,7 +66,7 @@ unsafe extern "C-unwind" {
     /// A null `store` asks through a temporary session. Returns an owned array of the keys that
     /// match the regular expression `pattern`, or null.
     fn SCDynamicStoreCopyKeyList(store: *const c_void, pattern: &CFString) -> *mut CFArray;
-    /// The status of this thread's last SystemConfiguration call (`kSCStatusNoKey` when a key
+    /// The status of this thread's last `SystemConfiguration` call (`kSCStatusNoKey` when a key
     /// was not there).
     fn SCError() -> std::ffi::c_int;
 }
