@@ -20,8 +20,8 @@ use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_protocol::{AgentChoiceId, ElicitationResponse, ErrorCode, ThreadId};
 
 use super::super::super::Actor;
+use super::super::asks::reject_option;
 use super::super::inputs::AgentReply;
-use super::super::shell_network::reject_option;
 use super::super::{agents, state, updates};
 use super::is_own;
 
