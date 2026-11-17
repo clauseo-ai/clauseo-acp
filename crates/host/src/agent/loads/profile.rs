@@ -292,9 +292,8 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
 /// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
 /// and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
-/// and reading (`data_fence::claude_allow_rules`) and the `git` reads of this matter's history
-/// (`data_fence::history_allow_rules`, held to the history by `history_deny_rules`), each after
-/// any the hook put there. The own
+/// and reading (`data_fence::claude_allow_rules`) and this matter's history (`history_rules`),
+/// each after any the hook put there. The own
 /// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
 /// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
 /// another type is replaced. With no spelling (a unit test's keys) nothing changes.
@@ -308,13 +307,12 @@ fn deny_data_folder(
     }
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
-    let history = data_fence::history_deny_rules(data, cfg!(windows));
-    for rule in [data_fence::claude_deny_rules(data, sandboxed), history].concat() {
+    let (history_allow, history_deny) = data_fence::history_rules(data, cfg!(windows));
+    for rule in [data_fence::claude_deny_rules(data, sandboxed), history_deny].concat() {
         push_new(&mut deny, &rule);
     }
     let mut allow = take_array(&mut permissions, "allow");
-    let history = data_fence::history_allow_rules(data, cfg!(windows));
-    for rule in [data_fence::claude_allow_rules(data), history].concat() {
+    for rule in [data_fence::claude_allow_rules(data), history_allow].concat() {
         push_new(&mut allow, &rule);
     }
     if cfg!(windows) {
