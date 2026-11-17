@@ -46,8 +46,12 @@ stetdoc-slow-test = []
 # The real-Mac browser-download row's build (clauseo-host's test-browser-search), never on by
 # default and never in a release (release.yml refuses it and scans the shipped binary for its
 # variable): CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS=1 hides the browsers installed on the machine
-# from the browser search, so the test Mac's Chrome stays installed and the offer still shows.
-test-browser-search = ["clauseo-host/test-browser-search"]
+# from the browser search, so the test Mac's Chrome stays installed and the offer still shows. It
+# also turns on CLAUSEO_TEST_POLICY_FILE, a test policy file (clauseo-settings's test-browser-search).
+test-browser-search = [
+  "clauseo-host/test-browser-search",
+  "clauseo-settings/test-browser-search",
+]
 
 [build-dependencies]
 tauri-build.workspace = true
