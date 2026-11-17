@@ -15,6 +15,8 @@ const CONTEXT =
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.";
 const AUTO_UNAVAILABLE =
   "Claude's automatic mode isn't available for this account, so Claude asks before running commands.";
+const AUTO_MODEL_LINE =
+  "Claude's automatic mode isn't available with {model}, so Claude asks before running commands. To use it, start a new conversation with another model.";
 const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.";
 const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
@@ -71,6 +73,11 @@ const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
 const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
 /** Claude's auto mode isn't available, so the session runs in acceptEdits. */
 const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
+/** Claude's auto mode is off for the session's model, so it asks (UC-969, "Haiku 4.5"). */
+const AUTO_MODEL_NOTICE = notice(6, {
+  text: AUTO_MODEL_LINE.replace("{model}", "Haiku 4.5"),
+  kind: { auto_mode_unavailable_for_model: { model: "Haiku 4.5" } },
+});
 const BLOCKED = "Clauseo stopped a step: {name} tried to reach outside this matter.";
 const BLOCKED_ALONE = "Clauseo stopped a step: the AI tried to reach outside this matter.";
 /** Clauseo's data fence refused, unasked, a request of the agent's (once a turn). */
@@ -169,6 +176,12 @@ export const TN: Entry[] = [
     words: threadWords(AUTO_UNAVAILABLE),
     screen: "room/thread",
     render: thread(AUTO_NOTICE),
+  },
+  {
+    id: "UC-969",
+    words: threadWords(AUTO_MODEL_LINE),
+    screen: "room/thread",
+    render: thread(AUTO_MODEL_NOTICE),
   },
   {
     id: "TN-11",

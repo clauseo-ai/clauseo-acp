@@ -1,7 +1,7 @@
 // The app's own line for a host notice, by its kind (NoticeEntry.kind): the words the lawyer reads in place of the
 // host's text. An agent's notice has no kind; a kind this version doesn't know (a newer host's, arriving as some other
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
-import { fileName, listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
+import { fileName, isolate, listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
@@ -112,6 +112,18 @@ function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): stri
       );
 }
 
+/** The model's display name an auto_mode_unavailable_for_model notice names: a non-empty string,
+ * or null (a malformed value from a newer host, or another kind). */
+function autoModelOf(kind: NoticeKind | undefined | null): string | null {
+  const auto =
+    typeof kind === "object" && kind !== null && "auto_mode_unavailable_for_model" in kind
+      ? (kind.auto_mode_unavailable_for_model as unknown)
+      : undefined;
+  if (typeof auto !== "object" || auto === null || !("model" in auto)) return null;
+  const { model } = auto;
+  return typeof model === "string" && model.trim() !== "" ? model : null;
+}
+
 /** The name of the file a download_outside_matter notice is about: one plain file name, as the host sends it; null
  * for any other kind, or for one whose name is not a non-empty string (a malformed value from a newer host). */
 export function downloadNameOf(kind: NoticeKind | undefined | null): string | null {
@@ -189,6 +201,12 @@ export function noticeLine(
     return w.th(
       "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.",
       { file: fileName(download) },
+    );
+  const model = autoModelOf(kind);
+  if (model !== null)
+    return w.th(
+      "Claude's automatic mode isn't available with {model}, so Claude asks before running commands. To use it, start a new conversation with another model.",
+      { model: isolate(model) },
     );
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);

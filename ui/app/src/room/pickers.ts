@@ -21,9 +21,19 @@ export type Pickable = {
 
 const NONE: readonly Pickable[] = [];
 
-/** The options the pickers show, model first: the first select option of each picked category that has a value to
- * choose. None for no options, and none for an option with no values, so no menu is ever empty. */
-export function pickables(options: readonly ConfigOption[] | undefined): readonly Pickable[] {
+/** Whether a model choice takes an effort (its `takes_effort`); a missing flag means it does. */
+export const takesEffort = (choice: ConfigChoice | undefined): boolean =>
+  choice?.takes_effort !== false;
+
+/** The options the pickers show, model first: the first select option of each picked category
+ * that has a value to choose. None for no options, and none for an option with no values, so no
+ * menu is ever empty. The effort is left out while the model shown takes none. `modelShown`
+ * gives the value the model's menu shows: the agent's current value by default; a draft's pick,
+ * else the remembered, else that. */
+export function pickables(
+  options: readonly ConfigOption[] | undefined,
+  modelShown: (model: Pickable) => string = (model) => model.current,
+): readonly Pickable[] {
   if (options === undefined || options.length === 0) return NONE;
   const out: Pickable[] = [];
   for (const category of PICKED_CATEGORIES) {
@@ -36,7 +46,11 @@ export function pickables(options: readonly ConfigOption[] | undefined): readonl
       break;
     }
   }
-  return out.length === 0 ? NONE : out;
+  const model = out.find((p) => p.category === "model");
+  const takes =
+    model === undefined || takesEffort(model.choices.find((c) => c.value === modelShown(model)));
+  const kept = takes ? out : out.filter((p) => p.category !== "thought_level");
+  return kept.length === 0 ? NONE : kept;
 }
 
 /** The value of an agent's "Default" row: the agent's own choice, whatever it stands at. */
@@ -94,7 +108,7 @@ export function draftConfig(
   picks: ConfigPicks | undefined,
   remembered: ConfigPicks | undefined,
 ): ConfigPicks | undefined {
-  const shown = pickables(options);
+  const shown = draftShown(options, picks, remembered);
   const picked = (p: Pickable) => offers(p, picks?.[p.id]) && picks?.[p.id] !== AGENT_DEFAULT_VALUE;
   if (picks === undefined || !shown.some(picked)) return undefined;
   const config: ConfigPicks = {};
@@ -104,6 +118,16 @@ export function draftConfig(
   }
   return config;
 }
+
+/** The pickers a draft shows, over its picks and the matter's remembered ones: the effort is
+ * left out while the draft's model takes none, so a pick or a remembered effort for it is never
+ * sent. */
+export const draftShown = (
+  options: readonly ConfigOption[] | undefined,
+  picks: ConfigPicks | undefined,
+  remembered: ConfigPicks | undefined,
+): readonly Pickable[] =>
+  pickables(options, (m) => draftValue(m, picks?.[m.id], remembered?.[m.id]));
 
 /** The command a pick in a conversation sends: the host checks the option's category, sets it, and keeps it in the
  * matter's remembered picks. */
