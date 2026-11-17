@@ -43,9 +43,10 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
 /// (`claude`), whose hook passes none (`updates/guard_blocks.rs`): the session's guard folder,
 /// create-new, then the file in it with `O_EXCL`
 /// ([`record::make`](crate::pre_write_guard::record::make)), and keeps the file and the identity
-/// it read from it in [`RunFolders::guard`]. It sits in `<data>/browser`, which no agent's shell
-/// or patch tool may write (Codex's fence denies it, `agent/codex_fence.rs` `DATA_DENIED`;
-/// Claude's deny rules, `Read` and `Edit` of `browser/**`), so only the host makes it. Anything
+/// it read from it in [`RunFolders::guard`]. It sits in `<data>/browser`, which no agent's
+/// sandboxed shell or patch tool may write (Codex's sandbox names no writable root there,
+/// `agent/codex_fence.rs`; Claude's deny rules, `Read` and `Edit` of `browser/**`), so only
+/// the host makes it; a Codex command its reviewer approves runs unsandboxed. Anything
 /// already at the session's guard folder (a folder, a file, a symlink or a junction) refuses the
 /// launch, the run folder taken back, as [`make`] does. File system calls: off the actor.
 pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Result<(), Error> {
@@ -119,10 +120,10 @@ pub(super) fn run_dir(data: &Path) -> PathBuf {
 }
 
 /// `<data>/browser/run`: the parent of every session's browser folder, the guard's `--cwd`
-/// (`RunFolders::browser`). It sits in `<data>/browser`, which Codex's shell fence denies
-/// whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so a sandboxed shell cannot
-/// plant a link where the unfenced guard writes. Swept at start like `<data>/run`
-/// (`sweep.rs`).
+/// (`RunFolders::browser`). It sits in `<data>/browser`, where Codex's sandbox names no
+/// writable root (`agent/codex_fence.rs`), so a sandboxed shell cannot plant a link where the
+/// unfenced guard writes; a command Codex's reviewer approves runs unsandboxed. Swept at start
+/// like `<data>/run` (`sweep.rs`).
 pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
     data.join(crate::browser::CONFIG_DIR).join("run")
 }

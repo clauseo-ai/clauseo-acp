@@ -136,11 +136,6 @@ pub(crate) const SHARED: [(&str, &str); 1] = [(
      its skills (legal-drafting's section-checklists.md)",
 )];
 
-/// The prefix of the folder name of each build of Clauseo's Python runtime under
-/// `<data>/agents/runtime` (`clauseo_agents`' `python.rs`, `FOLDER_PREFIX`):
-/// `clauseo-python-3.13.18-c4-macos-arm64`, one per pinned build.
-pub(crate) const PYTHON_RUNTIME_PREFIX: &str = "clauseo-python-";
-
 /// What of `<data>` every session may read and run, never write, as rule patterns of folders
 /// under it (a final `*` is any rest of the name): the commands the app copies for the agents
 /// (`<data>/tools`, the shell browser's `agent-browser`), and each build of Clauseo's Python
@@ -148,15 +143,9 @@ pub(crate) const PYTHON_RUNTIME_PREFIX: &str = "clauseo-python-";
 /// same for every matter. Claude gets `Edit` denied ([`claude_deny_rules`]) and `Read` allowed
 /// ([`claude_allow_rules`]) for each and all under it; the launch's enumeration leaves out
 /// each real folder that fits, and denies its siblings (`launch.rs`). Codex's profile reaches
-/// them without a rule (`agent::codex_fence`, `RuntimeDeny`). The host's auto-deny still
+/// them without a rule (`agent::codex_fence`). The host's auto-deny still
 /// refuses a request that names them: neither agent needs to.
 pub(crate) const READ_ONLY: [&str; 2] = ["tools", "agents/runtime/clauseo-python-*"];
-
-/// Whether `name` is a build of Clauseo's Python runtime's folder name ([`PYTHON_RUNTIME_PREFIX`]
-/// and something after it).
-pub(crate) fn is_python_runtime(name: &str) -> bool {
-    name.len() > PYTHON_RUNTIME_PREFIX.len() && name.starts_with(PYTHON_RUNTIME_PREFIX)
-}
 
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),

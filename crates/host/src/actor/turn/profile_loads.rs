@@ -82,14 +82,11 @@ pub(super) fn launch_keys(
             .profile
             .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
-        // The data-folder fence (`agent::codex_fence`), in every Codex session.
+        // Codex's permission profile (`agent::codex_fence`), in every Codex session.
         let session = crate::agent::codex_fence::Session {
             run_root: &prepared.run.root,
             work: &prepared.run.work,
             notes: &prepared.run.notes,
-            codex_home: &codex.home,
-            listed: &prepared.run.codex_listed,
-            socket_dir: socket_dir(&prepared.run),
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
@@ -420,21 +417,6 @@ fn browser_inputs<'a>(
     }
 }
 
-/// The session's browser socket folder, for Codex's fence (`agent::codex_fence::Session`): the
-/// folder as made, when the session holds a browser claim (macOS and Linux).
-fn socket_dir(run: &RunFolders) -> Option<&Path> {
-    let session = run.browser_session.as_deref()?;
-    #[cfg(unix)]
-    {
-        Some(session.socket_dir.path())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = session;
-        None
-    }
-}
-
 /// Whether the profile hook offers `agent` the `browser` MCP entry (Codex and Claude, on
 /// every OS: `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
@@ -553,9 +535,9 @@ fn recheck_managed(actor: &Actor, run: &mut RunFolders) {
 
 /// Codex's ACP `additionalDirectories`: the run folder (its pack plugin), the work folder and the
 /// notes; codex-acp makes each turn's `workspaceWrite` roots from them, the matter folder and tmp
-/// (codex-acp 2.2.2 `dist/index.js:35598-35612, 35878-35885`). Under the fence's profile Codex
-/// reads no `CODEX_CONFIG` `writable_roots`; these and its `write` entries (`agent::codex_fence`)
-/// reopen them under its deny of `<data>/run` and `<data>/agent-state`.
+/// (codex-acp 2.2.2 `dist/index.js:35598-35612, 35878-35885`). Under Codex's permission profile
+/// it reads no `CODEX_CONFIG` `writable_roots`; these and the profile's `write` entries
+/// (`agent::codex_fence`) are what Codex may write in the data folder.
 pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
     vec![run.root.clone(), run.work.clone(), run.notes.clone()]
 }
