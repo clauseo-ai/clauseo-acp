@@ -40,12 +40,16 @@
       "adminCopyNewerKept",
       "adminCopyAppRunning",
       "adminCopyStillRunning",
-      "adminCopySkippedSilent"
+      "adminCopySkippedSilent",
+      "appRunningOkKill",
+      "appRunning",
+      "failedToKillApp"
     ],
     "slots": {
       "$R9": "the data folder",
       "$R8": "the folder it kept",
-      "$APPDATA": "C:\\ProgramData"
+      "$APPDATA": "C:\\ProgramData",
+      "${PRODUCTNAME}": "Clauseo"
     }
   },
   "crates/desktop/windows/nsis/Hindi.nsh": {

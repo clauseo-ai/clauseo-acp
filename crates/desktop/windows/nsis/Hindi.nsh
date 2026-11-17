@@ -88,23 +88,26 @@ LangString clauseoAppRemovedByAv ${LANG_HINDI} "इंस्टॉल होत�
 ; only; the install goes on. Provisional (2026-11-09).
 LangString webview2TooOld ${LANG_HINDI} "इस कंप्यूटर पर WebView2 का संस्करण Clauseo की ज़रूरत से पुराना है। Windows इसे अपने-आप अपडेट करता है। अपडेट होने के बाद Clauseo फिर से खोलें।"
 
+; appRunning, appRunningOkKill and failedToKillApp: Tauri's CheckIfAppIsRunning box and status
+; lines, for an install and an uninstall alike (English.nsh says when each shows and what is kept).
+; Clauseo's own words, no longer Tauri's. Provisional Hindi, to be reviewed (2026-11-17): the
+; words follow the app's Hindi for a stopped answer (words-thread.hi.ts: उत्तर, प्रश्न, रखे गए).
+LangString appRunning ${LANG_HINDI} "रुक गया, क्योंकि ${PRODUCTNAME} अभी भी खुला है। ${PRODUCTNAME} बंद करें, फिर दोबारा प्रयास करें।"
+LangString appRunningOkKill ${LANG_HINDI} "${PRODUCTNAME} खुला है। इसे बंद करके आगे बढ़ने के लिए OK पर क्लिक करें, या इसे खुला छोड़कर यहीं रुकने के लिए Cancel पर क्लिक करें। आपकी बातचीत रखी जाएगी। अगर ${PRODUCTNAME} कोई उत्तर लिख रहा है, तो वह उत्तर रुक जाएगा, और आपका प्रश्न और अब तक का उत्तर रखे जाएँगे। जो प्रश्न आपने लिखा है पर भेजा नहीं है, वह नहीं रखा जाएगा, इसलिए पहले उसे कॉपी कर लें।"
+LangString failedToKillApp ${LANG_HINDI} "रुक गया, क्योंकि ${PRODUCTNAME} बंद नहीं हो सका। ${PRODUCTNAME} बंद करें, फिर दोबारा प्रयास करें।"
+
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
-; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
-; Tauri writes {{product_name}} in appRunning, appRunningOkKill and failedToKillApp, which NSIS
-; shows as it is (language files are included, not rendered); here they use ${PRODUCTNAME}. On a
-; Tauri upgrade, copy that file's lines here again and keep the fix; a key missing here has no
-; English text.
+; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), less the keys Clauseo words itself:
+; deleteAppData, and appRunning, appRunningOkKill and failedToKillApp (above). On a Tauri upgrade,
+; copy that file's other lines here again; a key missing here has no English text.
 LangString addOrReinstall ${LANG_HINDI} "घटक जोड़ें/फिर से इंस्टॉल करें"
 LangString alreadyInstalled ${LANG_HINDI} "पहले से इंस्टॉल है"
 LangString alreadyInstalledLong ${LANG_HINDI} "${PRODUCTNAME} ${VERSION} पहले से इंस्टॉल है। आप क्या करना चाहते हैं, चुनें और जारी रखने के लिए आगे पर क्लिक करें।"
-LangString appRunning ${LANG_HINDI} "${PRODUCTNAME} चल रहा है। कृपया पहले इसे बंद करें, फिर से प्रयास करें।"
-LangString appRunningOkKill ${LANG_HINDI} "${PRODUCTNAME} चल रहा है।$\nइसे बंद करने के लिए OK पर क्लिक करें"
 LangString chooseMaintenanceOption ${LANG_HINDI} "आप क्या करना चाहते हैं, चुनें।"
 LangString choowHowToInstall ${LANG_HINDI} "चुनें कि आप ${PRODUCTNAME} कैसे इंस्टॉल करना चाहते हैं।"
 LangString createDesktop ${LANG_HINDI} "डेस्कटॉप शॉर्टकट बनाएँ"
 LangString dontUninstall ${LANG_HINDI} "अनइंस्टॉल न करें"
 LangString dontUninstallDowngrade ${LANG_HINDI} "अनइंस्टॉल न करें (इस इंस्टॉलर में अनइंस्टॉल किए बिना पुराना संस्करण इंस्टॉल नहीं किया जा सकता)"
-LangString failedToKillApp ${LANG_HINDI} "${PRODUCTNAME} बंद नहीं हो सका। कृपया पहले इसे बंद करें, फिर से प्रयास करें"
 LangString installingWebview2 ${LANG_HINDI} "WebView2 इंस्टॉल हो रहा है..."
 LangString newerVersionInstalled ${LANG_HINDI} "${PRODUCTNAME} का नया संस्करण पहले से इंस्टॉल है। पुराना संस्करण इंस्टॉल न करें। अगर आपको यही पुराना संस्करण चाहिए, तो पहले मौजूदा संस्करण अनइंस्टॉल कर लें। आप क्या करना चाहते हैं, चुनें और जारी रखने के लिए आगे पर क्लिक करें।"
 LangString older ${LANG_HINDI} "पुराना"
