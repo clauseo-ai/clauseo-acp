@@ -6,12 +6,31 @@
 use std::fmt::Write as _;
 
 use clauseo_protocol::TableFormat::{Alignment, Shading};
-use clauseo_protocol::{BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, TablePlace};
+use clauseo_protocol::{
+    BlacklineNotice, BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, TablePlace,
+    WordBlackline,
+};
 
 use super::super::read::{Where, read_package};
 use super::super::{TablesCompared, compare};
 use super::{COLS, REL, SHADED, W, body, cell, docx_with, grid, p, row, table};
 use crate::actor::query::blackline::parse::story::{Story, read_story};
+use crate::actor::query::blackline::run::note_tables;
+
+/// The notices the comparison of `old` and `new` gives on a blackline that shows no part.
+fn notices_of(old: &[u8], new: &[u8]) -> Vec<BlacklineNotice> {
+    let mut blackline = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: Vec::new(),
+        changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
+        changed_tables_total: 0,
+    };
+    note_tables(&mut blackline, compare(old, new), &[]);
+    blackline.notices
+}
 
 /// A header's table, its header found by the section's reference.
 #[test]
@@ -121,6 +140,7 @@ fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
             // not be stetdoc's.
             may_differ: true,
             lone_header_texts: vec!["Coverheader.".to_owned()],
+            lone_header_unseen: false,
         }
     );
 }
@@ -170,11 +190,38 @@ fn a_header_text_one_version_only_has_is_listed() {
         compare(&old, &edited).lone_header_texts,
         ["Mainheader,revised.", "Mainheader."]
     );
+    // A header with no text lists none, and is said not compared.
     let blank = sectioned(&[hdr(&p("Main header.")), hdr("")], "Two years.");
+    let found = compare(&old, &blank);
+    assert_eq!(found.lone_header_texts, Vec::<String>::new());
+    assert!(found.lone_header_unseen);
+}
+
+/// A section added with a header that is only a picture (a letterhead logo) has no text to find,
+/// so it is said not compared.
+#[test]
+fn a_lone_header_that_is_only_a_picture_is_said_not_compared() {
+    let old = sectioned(&[hdr(&p("Main header."))], "One year.");
+    let logo = hdr("<w:p><w:r><w:drawing/></w:r></w:p>");
+    let new = sectioned(&[logo, hdr(&p("Main header."))], "Two years.");
     assert_eq!(
-        compare(&old, &blank).lone_header_texts,
-        Vec::<String>::new()
+        notices_of(&old, &new),
+        [BlacklineNotice::HeaderOrFooterNotCompared]
     );
+}
+
+/// Two headers with one text, and a third with it in the newer version: the parts are counted,
+/// so the extra one is said not compared.
+#[test]
+fn an_extra_header_with_a_text_another_has_is_said_not_compared() {
+    let draft = || hdr(&p("Draft."));
+    let old = sectioned(&[draft(), draft()], "One year.");
+    let new = sectioned(&[draft(), draft(), draft()], "Two years.");
+    assert_eq!(
+        notices_of(&old, &new),
+        [BlacklineNotice::HeaderOrFooterNotCompared]
+    );
+    assert_eq!(notices_of(&old, &old), []);
 }
 
 /// A header's text reads entity and character references as the characters they stand for, and

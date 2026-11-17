@@ -23,8 +23,12 @@ enum Frame {
 }
 
 /// What one XML part holds: its tables, in the order they start, (for the main document,
-/// `main`) its sections' references, and its whole text.
-type PartRead = (Vec<Table>, Vec<SectionRefs>, String);
+/// `main`) its sections' references, its whole text, and whether it holds a picture.
+type PartRead = (Vec<Table>, Vec<SectionRefs>, String, bool);
+
+/// The elements that hold a picture, a shape or an embedded object (`w:drawing`, `w:pict`,
+/// `w:object`), which hold no text of the part's own.
+const PICTURES: [&str; 3] = ["drawing", "pict", "object"];
 
 /// One XML part read ([`PartRead`]); `None` when it does not read.
 pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
@@ -34,7 +38,7 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
     let mut open: Vec<usize> = Vec::new();
     let mut stack: Vec<Frame> = Vec::new();
     let mut sections: Vec<SectionRefs> = Vec::new();
-    let mut whole = String::new();
+    let (mut whole, mut picture) = (String::new(), false);
     loop {
         buf.clear();
         let (resolved, event) = reader.read_resolved_event_into(&mut buf).ok()?;
@@ -45,6 +49,7 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
         match event {
             Event::Start(element) => {
                 let name = element.local_name();
+                picture |= word && PICTURES.contains(&name.as_ref());
                 let name = if word { name.as_ref() } else { "" };
                 let top = stack.last().copied();
                 let table = open.last().copied();
@@ -106,6 +111,7 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
             }
             Event::Empty(element) => {
                 let name = element.local_name();
+                picture |= word && PICTURES.contains(&name.as_ref());
                 if main && word && name.as_ref() == "sectPr" {
                     sections.push(Vec::new());
                 }
@@ -135,7 +141,9 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
             Event::Eof => {
                 // A table whose every row's deletion is tracked is gone once they are accepted.
                 tables.retain(|table| !table.rows.is_empty());
-                return stack.is_empty().then_some((tables, sections, whole));
+                return stack
+                    .is_empty()
+                    .then_some((tables, sections, whole, picture));
             }
             Event::Text(_)
             | Event::CData(_)

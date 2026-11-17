@@ -98,12 +98,14 @@ pub(crate) struct Package {
     pub(crate) sections: Vec<SectionParts>,
 }
 
-/// A header or footer part: where it is, its tables, and its whole text (every `w:t`).
+/// A header or footer part: where it is, its tables, its whole text (every `w:t`), and whether
+/// it holds a picture, a shape or an object.
 #[derive(Debug)]
 pub(crate) struct HeaderPart {
     pub(crate) place: Where,
     pub(crate) tables: Vec<Table>,
     pub(crate) text: String,
+    pub(crate) picture: bool,
 }
 
 /// One section's header and footer parts, a kind of page it has none for taking the one before
@@ -142,7 +144,7 @@ pub(crate) fn read_package(bytes: &[u8]) -> Option<Package> {
         None => Vec::new(),
     };
     let document = read_part(&mut zip, &main, &mut left)?;
-    let (body, sections, _) = tables_of(&document, true)?;
+    let (body, sections, _, _) = tables_of(&document, true)?;
     let mut package = Package::default();
     package.parts.push((Where::Body, body));
     let (mut uses, effective) = uses_of(&sections, &rels);
@@ -159,13 +161,14 @@ pub(crate) fn read_package(bytes: &[u8]) -> Option<Package> {
             _ => continue,
         };
         let xml = read_part(&mut zip, &rel.target, &mut left)?;
-        let (tables, _, text) = tables_of(&xml, false)?;
+        let (tables, _, text, picture) = tables_of(&xml, false)?;
         match place {
             Where::Header(_) | Where::Footer(_) => {
                 let part = HeaderPart {
                     place,
                     tables,
                     text,
+                    picture,
                 };
                 package.headers.insert(rel.target.clone(), part);
             }

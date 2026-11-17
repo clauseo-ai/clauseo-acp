@@ -23,7 +23,9 @@
 //! - which headers and footers were not compared at all: the texts of the parts one version has
 //!   and the other does not ([`TablesCompared::lone_header_texts`]); stetdoc's compare does not
 //!   compare a header of a section it pairs with none, and does not warn of it, so `run.rs`
-//!   says so when no part the blackline shows has that text;
+//!   says so when no part the blackline shows has that text, and always for such a part with
+//!   no text or a picture ([`TablesCompared::lone_header_unseen`]). The parts are counted, so
+//!   two parts with one text are not taken for one;
 //! - what is never silent: where both sides have tables, rows or cells left between two pairs
 //!   and not as many of them, what changed there can't be put on a table, so the part may differ
 //!   ([`TablesCompared::may_differ`]); and so may the whole document when a version can't be
@@ -35,7 +37,7 @@
 
 use clauseo_protocol::{ChangedTable, TableFormat, TablePlace};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use read::{Package, Prop, Table, Where, read_package};
 
@@ -54,8 +56,13 @@ pub(crate) struct TablesCompared {
     /// Whether the blackline may differ (the module doc).
     pub(crate) may_differ: bool,
     /// The texts of the headers and footers some section uses that only one version has, each
-    /// with its white space taken out ([`squeezed`]), once, sorted; an empty text left out.
+    /// with its white space taken out ([`squeezed`]), once, sorted. The parts are counted, so a
+    /// text one version has on more parts than the other is listed too. A part with no text or
+    /// with a picture is not listed: it sets [`TablesCompared::lone_header_unseen`] instead.
     pub(crate) lone_header_texts: Vec<String>,
+    /// Whether a header or footer only one version has holds no text or a picture (a letterhead
+    /// logo): no shown text can stand for it, so `run.rs` says it was not compared.
+    pub(crate) lone_header_unseen: bool,
 }
 
 /// The tables' formatting of `old` and `new`, two .docx files' bytes, compared.
@@ -96,19 +103,28 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
     // section added or removed, a header with tables may pair with the wrong one.
     let tabled = |package: &Package| package.headers.values().any(|part| !part.tables.is_empty());
     found.may_differ |= old.sections.len() != new.sections.len() && (tabled(&old) || tabled(&new));
-    let texts = |package: &Package| -> BTreeSet<String> {
-        package
-            .headers
-            .values()
-            .map(|part| squeezed(&part.text))
-            .filter(|text| !text.is_empty())
-            .collect()
-    };
-    let (old_texts, new_texts) = (texts(&old), texts(&new));
-    found.lone_header_texts = old_texts
-        .symmetric_difference(&new_texts)
-        .cloned()
-        .collect();
+    // Each header and footer part by its text and whether it holds a picture, counted: the
+    // newer version's count less the older's. A part one version has more of is lone.
+    let mut counts: BTreeMap<(String, bool), i64> = BTreeMap::new();
+    for (package, step) in [(&old, -1), (&new, 1)] {
+        for part in package.headers.values() {
+            *counts
+                .entry((squeezed(&part.text), part.picture))
+                .or_default() += step;
+        }
+    }
+    let mut lone = BTreeSet::new();
+    for ((text, picture), count) in counts {
+        if count == 0 {
+            continue;
+        }
+        if text.is_empty() || picture {
+            found.lone_header_unseen = true;
+        } else {
+            lone.insert(text);
+        }
+    }
+    found.lone_header_texts = lone.into_iter().collect();
     // The body, the notes, then the headers and the footers; each part's tables by number.
     found.changed.sort_by_key(|table| place_rank(&table.place));
     found
