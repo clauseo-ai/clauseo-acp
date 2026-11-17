@@ -242,7 +242,7 @@ const HISTORY_DENIED: [&str; 4] = ["--no-index", "--output", "--exec", "--remote
 /// `$VAR` form did not). Bash's off Windows; PowerShell's on Windows, which matches a command
 /// with its quotes dropped, so its rules come with and without them. No other matter's.
 pub(crate) fn history_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
-    history_rules(deny, windows, |head| {
+    prefix_rules(deny, windows, |head| {
         HISTORY_READS
             .iter()
             .map(|read| join(&[head, &text(&format!(" {read} ")), &[Piece::Any]]))
@@ -254,7 +254,7 @@ pub(crate) fn history_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Strin
 /// Code's classifier would: the same prefix with any of [`HISTORY_DENIED`] after it
 /// (`git --git-dir="<history>" *--output*`). A deny beats an allow; no other command is touched.
 pub(crate) fn history_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
-    history_rules(deny, windows, |head| {
+    prefix_rules(deny, windows, |head| {
         HISTORY_DENIED
             .iter()
             .map(|option| {
@@ -270,8 +270,16 @@ pub(crate) fn history_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec<String
     })
 }
 
+/// [`history_allow_rules`] and [`history_deny_rules`] for one launch's settings.
+pub(crate) fn history_rules(deny: &LaunchDeny, windows: bool) -> (Vec<String>, Vec<String>) {
+    (
+        history_allow_rules(deny, windows),
+        history_deny_rules(deny, windows),
+    )
+}
+
 /// The rules `tails` makes from each spelling of the prefix `git --git-dir="<history>"`.
-fn history_rules(
+fn prefix_rules(
     deny: &LaunchDeny,
     windows: bool,
     tails: impl Fn(&[Piece]) -> Vec<Vec<Piece>>,
