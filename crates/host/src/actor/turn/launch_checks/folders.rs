@@ -81,8 +81,7 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
 /// `agent.launch_failed`: the folder may hold what Claude Code would load in every matter. No
 /// run folder is made yet. File system calls: off the actor.
 pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten>, Error> {
-    // The error names a path in the folder, which may be a planted file's: not logged.
-    let unmatched = |_: clauseo_profile::ProfileError| {
+    let unmatched = || {
         tracing::warn!("the built-in plugin folder could not be made to hold only Clauseo's files");
         Error::refused(
             ErrorCode::AgentLaunchFailed,
@@ -100,7 +99,11 @@ pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten
                 "the profile's skills were not written; the agent starts with what the folder holds"
             ),
         }
-        let removed = clauseo_profile::match_plugin(write).map_err(unmatched)?;
+        let removed = match clauseo_profile::match_plugin(write) {
+            Ok(removed) => removed,
+            // The error names a path in the folder, which may be a planted file's: not logged.
+            Err(_unlogged) => return Err(unmatched()),
+        };
         if removed > 0 {
             tracing::warn!(
                 removed,

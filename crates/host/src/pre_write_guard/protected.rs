@@ -23,10 +23,10 @@ use super::{Place, Reach, Refusal, Targets, lexical, names};
 use crate::network_paths::name_folds_to;
 
 /// The argument that names a protected path, followed by it; repeated for each.
-pub const FLAG: &str = "--protected";
+pub(super) const FLAG: &str = "--protected";
 
 /// The argument that names Claude's config folder, followed by it.
-pub const HOME_FLAG: &str = "--claude-home";
+pub(super) const HOME_FLAG: &str = "--claude-home";
 
 /// The ways a shell word refers to Claude's config folder's variable
 /// (`agent::home::CLAUDE_CONFIG_VAR`), longest first.
@@ -101,7 +101,7 @@ impl Protected {
 /// Whether `path` is `root` or lies under it, part by part; with `fold`, two names are the same
 /// in any ASCII case (and each code point a case-insensitive volume folds to an ASCII letter)
 /// and with trailing dots and spaces off.
-pub(super) fn within(path: &Path, root: &Path, fold: bool) -> bool {
+fn within(path: &Path, root: &Path, fold: bool) -> bool {
     let mut parts = path.components();
     root.components().all(|want| {
         parts
@@ -133,7 +133,7 @@ fn same_name(got: &OsStr, want: &OsStr, fold: bool) -> bool {
 /// `any_case` (Windows, whose variables ignore case), else as written. A form without braces or
 /// `%` counts only when no letter, digit or `_` follows it (`$CLAUDE_CONFIG_DIRS` is another
 /// variable).
-pub(super) fn expand_variable<'a>(word: &'a str, value: &str, any_case: bool) -> Cow<'a, str> {
+fn expand_variable<'a>(word: &'a str, value: &str, any_case: bool) -> Cow<'a, str> {
     if !word.contains(['$', '%']) {
         return Cow::Borrowed(word);
     }
