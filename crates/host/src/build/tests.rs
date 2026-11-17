@@ -99,6 +99,7 @@ fn tool_entry(
         finished_at: None,
         background: None,
         web: None,
+        charge: None,
     }))
 }
 

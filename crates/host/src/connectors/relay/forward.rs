@@ -18,6 +18,7 @@
 //!
 //! [`MAX_REPLY_BYTES`]: super::super::limits::MAX_REPLY_BYTES
 
+mod credits;
 mod found;
 mod reply;
 
@@ -39,7 +40,8 @@ struct Call {
     spend: Option<Spend>,
     /// For a `tools/call`, what was counted, for a refund.
     taken: Option<Taken>,
-    /// For a `search_law` or `read_document` call, what the sources join keys its result by.
+    /// For a `search_law`, `read_document`, `citator` or `check_citations` call, what the host
+    /// joins its result (sources, charge) to the agent's tool call by.
     join: Option<found::Join>,
 }
 

@@ -95,6 +95,43 @@ fn a_duplicate_top_level_key_or_an_oversized_id_answers_nothing() {
     assert_eq!(agent.recv()["error"]["message"], texts::NO_ANSWER);
 }
 
+/// The live server's `_meta` credits, its keys in any order: the answer passes byte for byte;
+/// the balance goes to the host before the paid result (so the read it starts comes after the
+/// epoch moved), and the charge rides on the call's `CaseLawFound`. A `citator` call is joined
+/// too. With no balance (an error that leaves it out), only the charge.
+#[test]
+fn the_meta_credits_go_to_the_host_and_the_answer_passes_as_sent() {
+    let rig = rig();
+    rig.add_api_key();
+    let mut agent = rig.agent();
+    let sent = r#"{"jsonrpc":"2.0","id":1,"result":{"content":[],"isError":false,"_meta":{"chat.clauseo/credits":{"balance_credits":4915,"charged_credits":20}}}}"#;
+    answer_next(&rig, sent);
+    agent.send_value(&call(1, "citator"));
+    assert_eq!(agent.recv_line().unwrap(), sent.as_bytes());
+    let events = rig.events.take();
+    let [
+        RelayEvent::BalanceReported {
+            balance_credits: 4915,
+            ..
+        },
+        RelayEvent::PaidResult { .. },
+        RelayEvent::CaseLawFound { found, .. },
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!((found.charged, found.failed), (Some(20), false));
+    let refused = r#"{"jsonrpc":"2.0","id":2,"result":{"content":[],"isError":true,"_meta":{"chat.clauseo/credits":{"charged_credits":0}}}}"#;
+    answer_next(&rig, refused);
+    agent.send_value(&call(2, "search_law"));
+    assert_eq!(agent.recv_line().unwrap(), refused.as_bytes());
+    let events = rig.events.take();
+    let [RelayEvent::CaseLawFound { found, .. }] = events.as_slice() else {
+        panic!("{events:?}");
+    };
+    assert_eq!((found.charged, found.failed), (Some(0), true));
+}
+
 #[test]
 fn an_oversized_structured_content_is_another_error() {
     let captured = Captured::default();
@@ -114,7 +151,12 @@ fn an_oversized_structured_content_is_another_error() {
     );
     agent.send_value(&call(1, "search_law"));
     assert_eq!(agent.recv()["result"]["isError"], true);
-    assert_eq!(rig.events.take(), Vec::new());
+    // No out-of-credit report; only the failed call, for its step.
+    let events = rig.events.take();
+    let [RelayEvent::CaseLawFound { found, .. }] = events.as_slice() else {
+        panic!("{events:?}");
+    };
+    assert!(found.failed, "{found:?}");
     let log = captured.text();
     assert!(log.contains("too large to read"), "{log}");
 }

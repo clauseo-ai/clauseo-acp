@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"tool_call_charged\")"
+---
+{
+  "tool_call_charged": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "tool_call": "01900000-0000-7000-8000-000000000004",
+    "credits": 40,
+    "refused": false
+  }
+}

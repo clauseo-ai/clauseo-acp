@@ -104,6 +104,7 @@ pub(super) fn links(tool: CaseLawTool, content: &RawValue) -> Vec<FoundLink> {
         let list = match tool {
             CaseLawTool::SearchLaw => lists.hits,
             CaseLawTool::ReadDocument => lists.documents,
+            CaseLawTool::Citator | CaseLawTool::CheckCitations => return Vec::new(),
         };
         if let Some(list) = list {
             json_entries(list, &mut found);

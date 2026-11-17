@@ -115,6 +115,9 @@ mod commands;
 #[path = "host/case_law.rs"]
 mod case_law;
 #[cfg(test)]
+#[path = "host/case_law_cost.rs"]
+mod case_law_cost;
+#[cfg(test)]
 #[path = "host/case_law_hint.rs"]
 mod case_law_hint;
 #[cfg(test)]

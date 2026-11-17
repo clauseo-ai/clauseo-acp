@@ -474,6 +474,13 @@ impl FakeHandle {
         self.lock().oauth.issued.clone()
     }
 
+    /// Whether the paid tools' and `account`'s results carry `_meta["chat.clauseo/credits"]`
+    /// (`charged_credits`, `balance_credits`), as the live Indian Kanoon server's do; off (the
+    /// default), they have none, as an older server's. Queued results are answered as queued.
+    pub fn report_credits(&self, on: bool) {
+        self.lock().api.report_credits = on;
+    }
+
     /// The next `tools/call` of `name` answers `fixture` (a result object, or a raw HTTP
     /// answer); calls queue up per tool and take precedence over the balance.
     pub fn push_tool_result(&self, name: &str, fixture: Fixture) {

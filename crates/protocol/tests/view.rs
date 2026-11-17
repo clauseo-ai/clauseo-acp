@@ -100,6 +100,7 @@ fn tool_call() -> ToolCallEntry {
         finished_at: None,
         background: None,
         web: None,
+        charge: None,
     }
 }
 

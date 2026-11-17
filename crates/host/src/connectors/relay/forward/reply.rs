@@ -9,6 +9,9 @@
 //! - a `tools/call`'s `result.isError` and, only when it is `true`, its `structuredContent` up to
 //!   [`MAX_STRUCTURED_BYTES`] (a larger one is `OtherError`, logged), which
 //!   [`classify_tool_result_for`] reads from a small value rebuilt around it;
+//! - a case-law tool's `result._meta["chat.clauseo/credits"]`, its two integers only
+//!   (`credits.rs`): the balance goes to the host (`BalanceReported`), the charge rides on the
+//!   call's `CaseLawFound`;
 //! - a `recharge` call's `result.structuredContent.status`, `recharge_id` and `balance_credits`,
 //!   borrowed, and its `resumed.balance_credits` or else `resumed.charge_lines` (small), so a
 //!   paid recharge refreshes the balance (`RechargePaid`) with what the call it resumed spent.
@@ -166,8 +169,18 @@ pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
     let Some((raw, envelope)) = answer_to(session, id, &raws) else {
         return vec![texts::failure(id, call.tools_call(), texts::NO_ANSWER)];
     };
+    // The `_meta` credits of a case-law tool's result; `recharge`'s balance is read below.
+    let credits = envelope
+        .result
+        .filter(|_| call.spend.is_some_and(|spend| spend != Spend::Recharge))
+        .and_then(super::credits::credits);
     if let Some(result) = envelope.result {
-        read_result(conn, call, result);
+        read_result(
+            conn,
+            call,
+            result,
+            credits.and_then(|credits| credits.balance),
+        );
     }
     if raw.get().len() > MAX_REPLY_BYTES {
         tracing::info!(session = %session.key.id(), method = call.log_method(), "case-law relay: the reply was too large");
@@ -178,7 +191,8 @@ pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
         )];
     }
     if let (Some(join), Some(result)) = (&call.join, envelope.result)
-        && let Some(found) = super::found::found(join, result)
+        && let Some(found) =
+            super::found::found(join, result, credits.and_then(|credits| credits.charged))
     {
         session.hub.events.event(RelayEvent::CaseLawFound {
             session: session.key,
@@ -244,8 +258,9 @@ pub(super) fn same_id(theirs: &RawValue, id: &Value) -> bool {
 }
 
 /// Reads a response's raw `result`: `initialize`'s protocol version, and a `tools/call`
-/// result's meaning.
-fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
+/// result's meaning. `balance` is the result's `_meta` balance, told to the host first, so the
+/// out-of-credit state the outcome then sets is not ended by it.
+fn read_result(conn: &Conn, call: &Call, result: &RawValue, balance: Option<i64>) {
     let session = &conn.session;
     if call.method.as_deref() == Some("initialize") {
         let version = object::<InitializeResult<'_>>(result)
@@ -262,6 +277,16 @@ fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
         return;
     };
     let hub = &session.hub;
+    if let Some(balance_credits) = balance {
+        // The connectors crate's account copy is from before this call's charge: dropped first,
+        // so the read the paid result starts (after the event) asks the connector, never the
+        // copy, which would bring back the higher balance this one replaces.
+        hub.connector.forget_account();
+        hub.events.event(RelayEvent::BalanceReported {
+            session: session.key,
+            balance_credits,
+        });
+    }
     match tool_outcome(session, result) {
         ToolOutcome::OutOfCredit(payment) => hub.events.event(RelayEvent::OutOfCredit {
             session: session.key,

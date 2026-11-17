@@ -105,9 +105,15 @@ fn out_of_credit_passes_the_result_on_and_reports_the_payment() {
         "insufficient_credits"
     );
     let events = rig.events.take();
-    let [RelayEvent::OutOfCredit { session, payment }] = events.as_slice() else {
+    // The out-of-credit report, then the failed call for its step (no `_meta`: no charge).
+    let [
+        RelayEvent::OutOfCredit { session, payment },
+        RelayEvent::CaseLawFound { found, .. },
+    ] = events.as_slice()
+    else {
         panic!("{events:?}");
     };
+    assert!(found.failed && found.charged.is_none(), "{found:?}");
     assert_eq!(*session, rig.key);
     let PaymentRef { recharge_id, url } = payment;
     let id = recharge_id.clone().unwrap();

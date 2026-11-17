@@ -412,6 +412,30 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   }
 }
 
+/** A case-law step's cost, said after its done or tried line ("Searched case law. · 40 credits"): the credits the
+ * connector reported in that call's own result ("· 1 credit" for one), or "· nothing charged" for a call it refused
+ * or that failed with nothing charged. The host sets `charge` only on a case-law call that finished and whose result
+ * said so, so the words key on that and compose with whatever done line the row has; a free call, a result with no
+ * report (an older connector) and a call the host couldn't match show none (null), as does a row not done or tried.
+ * A folded group never sums these. */
+export function chargeOf(lang: Lang, entry: ToolCallEntry): string | null {
+  const charge = entry.charge;
+  if (charge === undefined || (entry.status !== "completed" && entry.status !== "failed"))
+    return null;
+  if (charge.refused) return steps(lang, "· nothing charged");
+  if (charge.credits === 0) return null;
+  return charge.credits === 1
+    ? steps(lang, "· 1 credit")
+    : steps(lang, "· {n} credits", { n: charge.credits });
+}
+
+/** A row's words with its cost after them, joined with a space (chargeOf); the words alone with none. */
+export function rowTextOf(lang: Lang, entry: ToolCallEntry): string {
+  const done = doneOf(lang, entry);
+  const cost = chargeOf(lang, entry);
+  return cost === null ? done : `${done} ${cost}`;
+}
+
 /** A row's hover: where the paper is, the folder within the matter or the place outside it; null with none. */
 export function hoverOf(entry: ToolCallEntry): string | null {
   return placeOf(entry).where;

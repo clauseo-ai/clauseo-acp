@@ -24,7 +24,7 @@ pub(super) fn text_result(text: &str) -> Value {
 }
 
 pub(super) fn links(name: &str, result: &Value) -> Vec<FoundLink> {
-    found(&join(name), &raw(result)).unwrap().links
+    found(&join(name), &raw(result), None).unwrap().links
 }
 
 /// A golden fixture's links, as (title, link) pairs.
@@ -35,7 +35,7 @@ pub(super) fn golden(name: &str, fixture: &str) -> Vec<(String, String)> {
     );
     let text = std::fs::read_to_string(path).unwrap();
     let result = RawValue::from_string(text.trim_end().to_owned()).unwrap();
-    found(&join(name), &result)
+    found(&join(name), &result, None)
         .unwrap()
         .links
         .into_iter()
@@ -298,7 +298,8 @@ fn the_structured_lists_win_and_are_never_merged() {
 #[test]
 fn an_error_result_finds_nothing_in_its_text() {
     let result = json!({"content": [{"type": "text", "text": "d1 \"T\" · SC"}], "isError": true});
-    assert!(found(&join("search_law"), &raw(&result)).is_none());
+    let failed = found(&join("search_law"), &raw(&result), None).unwrap();
+    assert!(failed.failed && failed.links.is_empty());
     for odd in [
         json!({"content": "d1 \"T\" · SC"}),
         json!({"content": [{"type": "text", "text": 7}, {"type": "image", "text": "d1 \"T\" · SC"}]}),

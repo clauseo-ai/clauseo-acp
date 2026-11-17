@@ -31,14 +31,11 @@ fn the_join_is_keyed_by_the_tool_and_its_arguments() {
     assert_eq!(search.key, join_key(CaseLawTool::SearchLaw, &args));
     let none = Join::of("read_document", Some(&json!({"name": "read_document"}))).unwrap();
     assert_eq!(none.key, join_key(CaseLawTool::ReadDocument, &json!({})));
-    for other in [
-        "citator",
-        "check_citations",
-        "account",
-        "recharge",
-        "Search_law",
-    ] {
+    for other in ["account", "recharge", "Search_law"] {
         assert!(Join::of(other, None).is_none(), "{other}");
+    }
+    for charged in ["citator", "check_citations"] {
+        assert!(Join::of(charged, None).is_some(), "{charged}");
     }
 }
 
@@ -47,6 +44,7 @@ fn the_fixtures_lists_are_read() {
     let search = found(
         &join("search_law", &json!({})),
         &raw(&fixture("search-law-result.json")),
+        None,
     )
     .unwrap();
     assert_eq!(search.tool, CaseLawTool::SearchLaw);
@@ -66,18 +64,47 @@ fn the_fixtures_lists_are_read() {
     let read = found(
         &join("read_document", &json!({"doc_id": "1939993"})),
         &raw(&fixture("read-document-result.json")),
+        None,
     )
     .unwrap();
     assert_eq!(read.links.len(), 1);
     assert_eq!(read.links[0].url, "https://indiankanoon.org/doc/1939993/");
 }
 
+/// An error result is told to the host as failed, with no links and the charge it carried; a
+/// non-boolean `isError` is no error; a result that is not an object is not told at all.
 #[test]
-fn an_error_result_finds_nothing() {
+fn an_error_result_is_failed_with_no_links() {
     let search = join("search_law", &json!({}));
-    assert!(found(&search, &raw(&fixture("insufficient-credits-result.json"))).is_none());
-    assert!(found(&search, &raw(&json!({"isError": "yes"}))).is_none());
-    assert!(found(&search, &raw(&json!([1, 2]))).is_none());
+    let out = found(
+        &search,
+        &raw(&fixture("insufficient-credits-result.json")),
+        Some(0),
+    )
+    .unwrap();
+    assert!(out.failed);
+    assert_eq!((out.links.len(), out.charged), (0, Some(0)));
+    // Only `true` is an error, as the relay's outcome reads it: `null` or a string is a success,
+    // so a charge of 0 on it shows nothing rather than "nothing charged".
+    for odd in [
+        json!({"isError": "yes"}),
+        json!({"isError": null}),
+        json!({}),
+    ] {
+        let read = found(&search, &raw(&odd), Some(0)).unwrap();
+        assert!(!read.failed, "{odd}");
+    }
+    assert!(found(&search, &raw(&json!([1, 2])), None).is_none());
+}
+
+/// A `citator` answer that looks like a search's is still no sources: only its charge counts.
+#[test]
+fn a_citator_result_has_only_its_charge() {
+    let citator = join("citator", &json!({"doc_id": "257876"}));
+    let out = found(&citator, &raw(&fixture("search-law-result.json")), Some(12)).unwrap();
+    assert_eq!(out.tool, CaseLawTool::Citator);
+    assert!(!out.failed);
+    assert_eq!((out.links.len(), out.charged), (0, Some(12)));
 }
 
 /// A list over 50 keeps its first 50; entries that are not objects or have no string link are
@@ -90,7 +117,7 @@ fn the_lists_are_read_leniently() {
         .map(|n| json!({"title": format!("T{n}"), "url": format!("https://indiankanoon.org/doc/{n}/"), "snippet": [1, 2]}))
         .collect();
     let result = json!({"structuredContent": {"results": many}, "isError": false});
-    let links = found(&search, &raw(&result)).unwrap().links;
+    let links = found(&search, &raw(&result), None).unwrap().links;
     assert_eq!(links.len(), 50);
     assert_eq!(links[49].title, "T49");
     let mixed = json!({"structuredContent": {"results": [
@@ -100,7 +127,7 @@ fn the_lists_are_read_leniently() {
         {"title": 12, "link": "https://indiankanoon.org/doc/1/"},
         null
     ]}});
-    let links = found(&search, &raw(&mixed)).unwrap().links;
+    let links = found(&search, &raw(&mixed), None).unwrap().links;
     assert_eq!(
         links,
         [FoundLink {
@@ -114,7 +141,11 @@ fn the_lists_are_read_leniently() {
         json!({"structuredContent": {"documents": [{"url": "https://x.example/"}]}}),
         json!({"structuredContent": "text"}),
     ] {
-        assert_eq!(found(&search, &raw(&result)).unwrap().links, [], "{result}");
+        assert_eq!(
+            found(&search, &raw(&result), None).unwrap().links,
+            [],
+            "{result}"
+        );
     }
 }
 
@@ -138,7 +169,7 @@ fn a_link_the_record_would_drop_is_not_kept() {
         .map(|_| json!({"title": "T".repeat(16_000), "url": long}))
         .collect();
     let result = json!({"structuredContent": {"results": many}});
-    let links = found(&search, &raw(&result)).unwrap().links;
+    let links = found(&search, &raw(&result), None).unwrap().links;
     assert!(held(&links) <= 1_000, "{} bytes held", held(&links));
     assert_eq!(links, []);
     let odd = json!({"structuredContent": {"results": [
@@ -146,7 +177,7 @@ fn a_link_the_record_would_drop_is_not_kept() {
         {"title": "No scheme", "url": "indiankanoon.org/doc/1/"},
         {"title": "Bidi", "url": "https://a.example/\u{202e}1"},
     ]}});
-    let links = found(&search, &raw(&odd)).unwrap().links;
+    let links = found(&search, &raw(&odd), None).unwrap().links;
     assert_eq!(links.len(), 1, "{links:?}");
     assert!(
         links[0].title.starts_with("A case xxx"),
@@ -172,7 +203,7 @@ fn a_link_is_kept_in_its_logged_form() {
         .map(|n| json!({"title": "T", "url": if n % 2 == 0 { &fragment } else { &query }}))
         .collect();
     let result = json!({"structuredContent": {"results": many}});
-    let links = found(&search, &raw(&result)).unwrap().links;
+    let links = found(&search, &raw(&result), None).unwrap().links;
     assert!(held(&links) <= 130_000, "{} bytes held", held(&links));
     assert_eq!(links.len(), 50);
     assert_eq!(links[0].url, "https://indiankanoon.org/doc/1/");
@@ -191,7 +222,7 @@ fn a_case_law_link_must_be_https() {
         {"title": "Shouted", "url": "HTTP://example.com/b"},
         {"title": "Secure", "url": "HTTPS://indiankanoon.org/doc/2/"},
     ]}});
-    let links = found(&search, &raw(&result)).unwrap().links;
+    let links = found(&search, &raw(&result), None).unwrap().links;
     assert_eq!(
         links,
         [FoundLink {

@@ -140,6 +140,7 @@ fn thread_entries() -> Vec<ViewEntry> {
                     via: PageVia::Browser,
                 }],
             })),
+            charge: None,
         })),
     ]
 }

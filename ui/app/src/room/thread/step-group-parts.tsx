@@ -12,7 +12,7 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { tr } from "@clauseo/components/lib/words-tool-result.ts";
 import type { EntryId, ToolCallEntry } from "../../transport/protocol.ts";
 import { isoOf, stamp } from "./clock.ts";
-import { doneOf, drawnKindOf, hoverOf, markOf, timeOf } from "./steps.ts";
+import { drawnKindOf, hoverOf, markOf, rowTextOf, timeOf } from "./steps.ts";
 import { resultOf } from "./tool-result/eligible.ts";
 import { ResultBlock } from "./tool-result/result-load.ts";
 import { useMatterFolder } from "../folder-support.ts";
@@ -47,7 +47,7 @@ export const CallRow = memo(function CallRow({
       toolCall={call.tool_call}
       status={call.status}
       kind={drawnKindOf(call)}
-      text={doneOf(lang, call)}
+      text={rowTextOf(lang, call)}
       hover={hoverOf(call)}
       mark={failed ? th(lang, "Failed") : markOf(lang, call)}
       background={call.background !== undefined}

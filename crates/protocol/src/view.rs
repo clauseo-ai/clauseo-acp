@@ -23,8 +23,8 @@ mod tools;
 pub use entry::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, ElicitationEntry, ElicitationState,
     HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry, NoticeEntry,
-    PermissionEntry, PermissionState, StepEntry, ToolCallEntry, ToolCallPage, ToolCallSearch,
-    ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
+    PermissionEntry, PermissionState, StepEntry, ToolCallCharge, ToolCallEntry, ToolCallPage,
+    ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
 };
 pub use hold::QueueHoldReason;
 pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
