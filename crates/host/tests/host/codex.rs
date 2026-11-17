@@ -548,8 +548,7 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
-    // The guard's record and no-copy list sit in the session's own `<data>/browser/guard/<id>`,
-    // which no agent's shell may write; it opens only the file whose identity follows each.
+    // The record and no-copy list sit in `<data>/browser/guard/<id>`, closed to agents' shells.
     let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
     // On Windows the hook names the console program beside the app (`codex_guard_program`).
     let program = clauseo_host::codex_guard_program(std::path::Path::new(PROGRAM));

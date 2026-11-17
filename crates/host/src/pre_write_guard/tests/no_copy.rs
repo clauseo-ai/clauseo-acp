@@ -4,8 +4,8 @@
 //! agent's read downloaded may be edited); a read or a write elsewhere goes on. The list is trusted
 //! only as the regular file with one link the host made (its identity in the arguments): a hard
 //! link, a symlink, another file, a missing one or none at all reads as an empty list, and the
-//! guard still refuses a file it can see has no copy itself (here one over the size cap), so a bad
-//! list never opens the gate.
+//! guard still refuses a file it can see has no copy itself (here one over the size cap): a bad
+//! list reads as no list, and only that live check holds.
 
 use std::path::{Path, PathBuf};
 
@@ -62,6 +62,15 @@ fn refused(path: &str, why: SkippedFileReason) -> String {
     format!(
         "{}\n",
         reason(&MatterPath::new(path).unwrap(), why, Act::Delete)
+    )
+}
+
+/// The exact stderr line refusing a delete of `path`, a file the list does not name, for `why`
+/// as the guard sees it now.
+fn refused_now(path: &str, why: SkippedFileReason) -> String {
+    format!(
+        "{}\n",
+        reason(&MatterPath::new(path).unwrap(), why, Act::DeleteNow)
     )
 }
 
@@ -230,11 +239,38 @@ fn the_refusal_words_say_what_is_true_and_promise_nothing() {
         "Contract.docx can't be brought back if it is overwritten: Clauseo keeps no copy of it, \
          because it is larger than 512 MB. Write to a new file instead, and tell the lawyer."
     );
-    for text in [&delete, &overwrite, &reason(&path, CLOUD, Act::Overwrite)] {
+    // A listed file over the cap at this answer's start may have shrunk since.
+    assert_eq!(
+        reason(&path, LARGE, Act::Delete),
+        "Contract.docx can't be brought back if it is deleted: Clauseo keeps no copy of it, \
+         because it was larger than 512 MB when this answer began. Clauseo does not let you \
+         delete it. Tell the lawyer; they can delete it themselves."
+    );
+    // A file the list does not name, refused by what the guard sees of it now.
+    let now = reason(&path, CLOUD, Act::DeleteNow);
+    assert_eq!(
+        now,
+        "Contract.docx can't be brought back if it is deleted: Clauseo keeps no copy of it, \
+         because it is only online, a cloud file not downloaded to this computer. Clauseo does \
+         not let you delete it. Tell the lawyer; they can delete it themselves."
+    );
+    assert_eq!(
+        reason(&path, LARGE, Act::DeleteNow),
+        "Contract.docx can't be brought back if it is deleted: Clauseo keeps no copy of it, \
+         because it is larger than 512 MB. Clauseo does not let you delete it. Tell the lawyer; \
+         they can delete it themselves."
+    );
+    for text in [
+        &delete,
+        &overwrite,
+        &now,
+        &reason(&path, CLOUD, Act::Overwrite),
+    ] {
         assert!(!text.contains("Ask the lawyer"), "{text}");
         assert!(!text.contains("moved"), "{text}");
     }
     assert!(!delete.contains("not downloaded"));
+    assert!(!now.contains("when this answer began"));
 }
 
 /// F2: a matter kept on a network share is never touched (`network_paths::touchable` refuses
@@ -362,7 +398,7 @@ fn untrusted_but_shut(fx: &Fixture, file: &Path, id: &str) {
     );
     assert_eq!(
         guard_with(&codex, rm("Big.bin").as_bytes()),
-        refused("Big.bin", LARGE)
+        refused_now("Big.bin", LARGE)
     );
     assert_eq!(std::fs::read(fx.path("m/Free.docx")).unwrap(), b"x");
 }
@@ -379,7 +415,7 @@ fn the_list_the_host_made_is_trusted() {
 }
 
 #[test]
-fn a_hard_link_at_the_lists_place_never_opens_the_gate() {
+fn a_hard_link_at_the_lists_place_reads_as_no_list() {
     let fx = Fixture::new("no-copy-hard-link");
     let target = PathBuf::from(fx.path("planted.txt"));
     write::write_file(&target, format!("{HEADER}{LINES}").as_bytes()).unwrap();
@@ -391,7 +427,7 @@ fn a_hard_link_at_the_lists_place_never_opens_the_gate() {
 
 #[cfg(unix)]
 #[test]
-fn a_symlink_at_the_lists_place_never_opens_the_gate() {
+fn a_symlink_at_the_lists_place_reads_as_no_list() {
     let fx = Fixture::new("no-copy-symlink");
     let target = PathBuf::from(fx.path("planted.txt"));
     write::write_file(&target, format!("{HEADER}{LINES}").as_bytes()).unwrap();
@@ -404,7 +440,7 @@ fn a_symlink_at_the_lists_place_never_opens_the_gate() {
 /// token; without either the test says so and passes, the hard link test still covering links.
 #[cfg(windows)]
 #[test]
-fn a_symlink_at_the_lists_place_never_opens_the_gate() {
+fn a_symlink_at_the_lists_place_reads_as_no_list() {
     let fx = Fixture::new("no-copy-symlink");
     let target = PathBuf::from(fx.path("planted.txt"));
     write::write_file(&target, format!("{HEADER}{LINES}").as_bytes()).unwrap();
@@ -417,7 +453,7 @@ fn a_symlink_at_the_lists_place_never_opens_the_gate() {
 }
 
 #[test]
-fn another_file_at_the_lists_place_never_opens_the_gate() {
+fn another_file_at_the_lists_place_reads_as_no_list() {
     let fx = Fixture::new("no-copy-replaced");
     let (file, id) = list(&fx, LINES);
     // The same text in a new file: the identity the host pinned is gone.
@@ -428,7 +464,7 @@ fn another_file_at_the_lists_place_never_opens_the_gate() {
 }
 
 #[test]
-fn a_missing_list_or_none_at_all_never_opens_the_gate() {
+fn a_missing_list_or_none_at_all_reads_as_no_list() {
     let fx = Fixture::new("no-copy-missing");
     let missing = PathBuf::from(fx.path("no-copy.txt"));
     untrusted_but_shut(&fx, &missing, "1-2");
@@ -447,7 +483,7 @@ fn a_missing_list_or_none_at_all_never_opens_the_gate() {
     ] {
         assert_eq!(
             guard_with(&args, rm.as_bytes()),
-            refused("Big.bin", LARGE),
+            refused_now("Big.bin", LARGE),
             "{args:?}"
         );
     }

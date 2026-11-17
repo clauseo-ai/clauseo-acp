@@ -158,11 +158,9 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
             "hooks": {"PreToolUse": [{"matcher": "Read", "hooks": []}]},
         },
     }}});
-    let program = Path::new("/app/clauseo");
-    let matter = Path::new("/m");
     let guard = Some(GuardHook {
-        program,
-        matter,
+        program: Path::new("/app/clauseo"),
+        matter: Path::new("/m"),
         ask_all: false,
         no_copy: None,
     });
