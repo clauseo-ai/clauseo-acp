@@ -16,8 +16,8 @@ use crate::clock::Clock;
 
 /// The most a launch waits for the first load: about the bundled snapshot's read and verify on
 /// a slow disk. Past it the launch goes on with the list in use, with one warning; with none
-/// loaded, its open-mode proxy does not start and the browser is left out
-/// (`BlockListNotLoaded`) until a later launch finds a list. 4 s, so no other host timer has
+/// loaded, its open-mode proxy starts with an empty list (one more warning) and enforces the
+/// list from the request after it loads. 4 s, so no other host timer has
 /// its delay (the tests find it by delay).
 pub(crate) const FIRST_LOAD_WAIT: Duration = Duration::from_secs(4);
 

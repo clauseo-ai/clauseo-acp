@@ -152,14 +152,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let clock = Arc::new(TestClock::default());
     let records = Arc::new(Records::default());
     let kept = Arc::clone(&records);
-    // Open mode with the browser listener needs a loaded list (`Error::BlockListNotLoaded`): a
-    // rig given none gets one naming a host no test asks for.
-    let unloaded = setup.block.get().is_unloaded();
-    let block = if setup.mode == ProxyMode::Open && setup.browser && unloaded {
-        super::blocked::placeholder()
-    } else {
-        setup.block
-    };
+    let block = setup.block;
     let config = ProxyConfig {
         mode: setup.mode,
         allow: list(&setup.allow),

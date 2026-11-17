@@ -10,9 +10,9 @@
 //! profile hook offers a `browser` entry that asks for the proxy (`{proxy_port}`, which Codex's
 //! entry holds; [`super::browser::BrowserPrep::wanted`]), and then only once its sidecars,
 //! Chrome and ports were found, so a `BrowserNotInstalled` session holds no proxy. A proxy that
-//! does not open leaves the browser out (`NoProxy`), with a log line; the launch goes on. One
-//! that refuses to start in open mode because no block list is loaded leaves it out with
-//! `BlockListNotLoaded` (fail closed, ADR 0053): the next session launched gets it back. Both
+//! does not open leaves the browser out (`NoProxy`), with a log line; the launch goes on. With
+//! no block list loaded the proxy still opens in open mode, with an empty list and one warning
+//! line, and the list is enforced from the request after it loads (ADR 0053). Both
 //! listeners bind outside Windows' 100-port tier-B range (`ListenerFor::Other`: a port the OS
 //! picks), so that range does not bound how many sessions have a proxy.
 //!
@@ -254,10 +254,9 @@ impl EgressPrep {
     /// proxy at all: nothing would go through it. The jail
     /// (R17 PR-D) opens one for every session, with `browser` false for those. Starts a thread
     /// and binds loopback listeners: off the actor. The second value is the browser's reason
-    /// when the proxy did not open for one with its own words: `BlockListNotLoaded`, when open
-    /// mode refused to start with no block list loaded (the bundled snapshot failed its check,
-    /// or none was bundled and no fetch succeeded yet). The next session launched finds the
-    /// list the updater loaded since and gets the browser; a running session keeps none.
+    /// when the proxy did not open for one with its own words; no failure has its own words
+    /// now (a missing block list no longer stops the proxy), so it is always `None`, kept for
+    /// the reason's plumbing to the browser entry.
     pub(super) fn open(
         self,
         key: SessionKey,
@@ -293,31 +292,26 @@ impl EgressPrep {
             }
             Err(error) => {
                 // The kind only: a config error's text names the host it refused.
-                let (why, reason) = if matches!(error, clauseo_sandbox::Error::BlockListNotLoaded) {
-                    (
-                        "no block list is loaded",
-                        Some(ToolsUnavailableReason::BlockListNotLoaded),
-                    )
-                } else if matches!(error, clauseo_sandbox::Error::ProxyStart(_)) {
-                    ("the proxy did not start", None)
+                let why = if matches!(error, clauseo_sandbox::Error::ProxyStart(_)) {
+                    "the proxy did not start"
                 } else {
-                    ("the proxy's config was refused", None)
+                    "the proxy's config was refused"
                 };
                 tracing::warn!(
                     session = %key.id(),
                     why,
                     "the session's egress proxy did not open; the session has no browser"
                 );
-                (None, reason)
+                (None, None)
             }
         }
     }
 }
 
 /// The proxy config for `agent`'s session, its refusals counted in `denials` (see the module
-/// header), refusing the hosts on `block` (an empty list when `None`) but those on `allowed`
-/// (the session's matter's live view, `AllowedSites::for_matter`), with the browser listener
-/// when the launch offers the browser (`browser`).
+/// header), refusing the hosts on `block` (an empty, never-loaded list when `None`) but those
+/// on `allowed` (the session's matter's live view, `AllowedSites::for_matter`), with the
+/// browser listener when the launch offers the browser (`browser`).
 pub(crate) fn proxy_config(
     agent: &AgentId,
     denials: Arc<CountDenials>,
@@ -334,7 +328,8 @@ pub(crate) fn proxy_config(
     ProxyConfig {
         allow: builtin.union(hosts(SEED_SITES.iter().copied())),
         silent: hosts(DENY_HOSTS.iter().map(|deny| deny.host)),
-        // The shared list the updater swaps (0053), read per request; none loaded without seams.
+        // The shared list the updater swaps (0053), read per request; an empty one, never loaded,
+        // without seams (open mode then blocks nothing).
         block: block.unwrap_or_default(),
         // Held by the proxy, and with it its revoke watcher, for the session's life: the proxy
         // lives until `EgressGuard` closes it at the run's removal.

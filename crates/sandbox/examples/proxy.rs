@@ -210,8 +210,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
         allow: args.allow,
         silent: Allowlist::default(),
-        // No list loaded without --block: the proxy logs once that nothing is blocked, and open
-        // mode refuses to start (`Error::BlockListNotLoaded`).
+        // No list loaded without --block: the proxy logs once that nothing is blocked (in open
+        // mode with the browser listener, that it lets any public site through).
         block: Arc::new(block_list(&args.block)?),
         allowed: Arc::default(),
         upstream: args.upstream.map_or(Upstream::System, Upstream::Fixed),

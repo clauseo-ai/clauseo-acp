@@ -3,8 +3,8 @@
 //! real browser listener and tells the app (`SiteBlocked`, `site_blocked.rs`'s rule: one event per
 //! refusal, the same `block_id` with the count one higher for the same site in a turn); a swap
 //! of the list reaches the next connection; with no list loaded (no seams, a bundled snapshot
-//! whose signature fails, a first load still running) the proxy does not open and the browser
-//! is left out (`BlockListNotLoaded`) until a later launch finds a list. Every request
+//! whose signature fails, a first load still running) the proxy still opens, with an empty list,
+//! and the browser lets any public site through until a list loads. Every request
 //! carries the listener's password (`ProxyHandle::browser_credential`), as the guard's Chrome
 //! does: one without it is answered 407, and nothing is reported.
 
@@ -20,7 +20,6 @@ use clauseo_blocklist::{BlockList, Current, Generated, Header, parse_plain};
 use clauseo_host::{
     AppSubscription, BlockListSeams, BlockListUpdate, EgressProxy, ManualClock, SessionKey,
 };
-use clauseo_protocol::ToolsUnavailableReason::BlockListNotLoaded;
 use clauseo_protocol::{
     BlockedSiteId, ClauseoTool, HostEvent, MatterId, Principal, SiteTag, ToolAvailability,
     ToolsUnavailableReason,
@@ -422,23 +421,23 @@ fn a_list_swap_reaches_the_next_connection() {
 }
 
 /// With no block-list seams no list is ever loaded: the session's proxy (open mode, with the
-/// browser listener) does not start, so the browser is left out with `BlockListNotLoaded` and
-/// no proxy is open to let any site through.
+/// browser listener) still opens, with an empty list, so the session has the browser and any
+/// public site passes.
 #[test]
-fn without_a_loaded_list_the_browser_is_left_out() {
+fn without_a_loaded_list_the_browser_is_offered_in_open_mode() {
     let dir = Dir::new("egress_block_none", &[]);
     let proxy = real_proxy(None);
     any_servers(&dir);
     let (host, _sub) = launch_host(&dir, &proxy, 0, None, |_clock| {});
-    assert_eq!(browser_reason(&dir, &host, "m"), Some(BlockListNotLoaded));
-    assert!(proxy.open.lock().unwrap().is_empty(), "no proxy is open");
+    assert_eq!(browser_reason(&dir, &host, "m"), None);
+    assert_eq!(proxy.connect(LISTED), 200, "nothing is blocked");
     host.shutdown();
 }
 
 /// A bundled snapshot whose signature fails (signed by key A, checked with key B) loads nothing,
-/// and no fetch succeeds: the browser is left out with `BlockListNotLoaded`.
+/// and no fetch succeeds: the session still has the browser, with nothing blocked.
 #[test]
-fn a_bundled_list_with_a_bad_signature_leaves_the_browser_out() {
+fn a_bundled_list_with_a_bad_signature_still_offers_the_browser() {
     let dir = Dir::new("egress_block_bad_signature", &[]);
     let current = Arc::new(Current::default());
     let proxy = real_proxy(Some(Arc::clone(&current)));
@@ -447,12 +446,12 @@ fn a_bundled_list_with_a_bad_signature_leaves_the_browser_out() {
     let seams = bundled_seams(&dir, Arc::clone(&current), held, "key-b.pub");
     any_servers(&dir);
     let (host, _sub) = launch_host(&dir, &proxy, FIXTURE_RUN, Some(seams), |_clock| {});
-    assert_eq!(browser_reason(&dir, &host, "m"), Some(BlockListNotLoaded));
+    assert_eq!(browser_reason(&dir, &host, "m"), None);
     assert!(
         current.get().is_unloaded(),
         "the bad snapshot was not put in use"
     );
-    assert!(proxy.open.lock().unwrap().is_empty(), "no proxy is open");
+    assert_eq!(proxy.connect(LISTED), 200, "nothing is blocked");
     host.shutdown();
 }
 
@@ -554,11 +553,10 @@ fn a_launch_during_a_slow_first_load_gets_the_list() {
 }
 
 /// A first load that does not end within the wait: the launch goes on, on the host clock, with
-/// no list, so its proxy does not open and the browser is left out (`BlockListNotLoaded`). Once
-/// the list loads, the next session launched gets the browser, and its proxy refuses a site on
-/// the list; the running session keeps what it had.
+/// no list, so its proxy opens with nothing blocked and the session has the browser. Once the
+/// list loads, the running session's proxy refuses a site on it and the app is told.
 #[test]
-fn a_list_that_loads_late_reaches_the_next_session() {
+fn a_list_that_loads_late_reaches_the_running_session() {
     let dir = Dir::new("egress_block_first_load_late", &[]);
     let current = Arc::new(Current::default());
     let proxy = real_proxy(Some(Arc::clone(&current)));
@@ -569,14 +567,10 @@ fn a_list_that_loads_late_reaches_the_next_session() {
         until_the_launch_waits(&clock);
         clock.advance(FIRST_LOAD_WAIT);
     });
-    assert_eq!(
-        browser_reason(&dir, &host, "first"),
-        Some(BlockListNotLoaded)
-    );
-    assert!(proxy.open.lock().unwrap().is_empty(), "no proxy is open");
+    assert_eq!(browser_reason(&dir, &host, "first"), None);
+    assert_eq!(proxy.connect(LISTED), 200, "nothing is blocked yet");
     release.send(()).unwrap();
     until_loaded(&current);
-    assert_eq!(browser_reason(&dir, &host, "second"), None);
     assert_eq!(proxy.connect("evil.example"), 403);
     let (_id, site, count) = next_notice(&mut sub);
     assert_eq!((site.as_str(), count), ("evil.example", 1));

@@ -26,10 +26,9 @@ pub enum Error {
     /// the token, or its thread did not start.
     #[error("egress proxy did not start: {0}")]
     ProxyStart(#[source] io::Error),
-    /// The egress proxy did not start because it would run in open mode
-    /// ([`ProxyMode::Open`](crate::ProxyMode::Open)) with its browser listener while no block
-    /// list is loaded: that listener would let every public site through. The host leaves the
-    /// browser out (`BlockListNotLoaded`) until a later launch finds a list.
+    /// Open mode ([`ProxyMode::Open`](crate::ProxyMode::Open)) with the browser listener and no
+    /// block list loaded. Kept for the public API: `start_proxy` no longer returns it, and
+    /// starts in that state with one warning instead.
     #[error("egress proxy did not start: open mode needs a loaded block list")]
     BlockListNotLoaded,
     /// Windows tier B can't prepare a folder it would grant on, or a folder it must close to
