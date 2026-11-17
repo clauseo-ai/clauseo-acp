@@ -508,8 +508,10 @@ pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(),
 /// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
 /// the `.codex` refusal, the matter's folder check `check` (`agent/folder_support.rs`: Codex is
 /// refused on a network drive or a drive without permissions), the home made under `data`,
-/// its `rules` removed ([`rules::remove_rules`]), then `config.toml`. The resolved folder
-/// comes back, with the folder check's answer.
+/// its `rules` removed ([`rules::remove_rules`]) and what else Codex loads from it
+/// ([`home_clear::clear_home`]) and, on Windows, a sandbox SIDs file that is not Codex's own
+/// (`cap_sid.rs`), then `config.toml`. The resolved folder comes back, with the folder check's
+/// answer.
 pub(crate) fn prepare_launch(
     check: &FolderCheck,
     stored: &Path,
@@ -521,10 +523,16 @@ pub(crate) fn prepare_launch(
     let support = check.refuse_unsupported(&folder)?;
     make_home(data, home)?;
     rules::remove_rules(home)?;
+    home_clear::clear_home(home)?;
+    #[cfg(windows)]
+    cap_sid::check(home)?;
     write_home_config(home)?;
     Ok((folder, support))
 }
 
+#[cfg(any(windows, test))]
+pub(crate) mod cap_sid;
+pub(crate) mod home_clear;
 pub(crate) mod prepare;
 pub(crate) mod rules;
 
