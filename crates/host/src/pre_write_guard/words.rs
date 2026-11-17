@@ -50,6 +50,19 @@ pub(crate) const ARRAY_COMMA: char = '\u{1f}';
 /// their own after the command's. Under either escape, a quote left open makes the reading
 /// [`Segments::unsure`] and its word unknown.
 pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segments) {
+    let first = scan(command, escape, segments);
+    // The commands inside each `$(…)`, in order, each body's own before the next body: a list,
+    // not a call per nesting level, however deep they nest.
+    let mut pending: Vec<String> = first.into_iter().rev().collect();
+    while let Some(body) = pending.pop() {
+        let inner = scan(&body, Escape::Backtick, segments);
+        pending.extend(inner.into_iter().rev());
+    }
+}
+
+/// Adds `command`'s own segments to `segments` ([`shell_segments`]); returns the bodies of its
+/// `$(…)`s, in order.
+fn scan(command: &str, escape: Escape, segments: &mut Segments) -> Vec<String> {
     let escape = match escape {
         Escape::Backslash => '\\',
         Escape::Backtick => '`',
@@ -68,10 +81,7 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
     };
     segments.split();
     scanner.run(segments);
-    let inner = std::mem::take(&mut scanner.inner);
-    for body in inner {
-        shell_segments(&body, Escape::Backtick, segments);
-    }
+    scanner.inner
 }
 
 /// The state of [`shell_segments`]. The escape character says the shell: `\` a POSIX one (with

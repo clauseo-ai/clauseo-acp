@@ -9,31 +9,32 @@ use super::{Segment, Sep, Word};
 
 /// The words of the segment being read, and where the word being read goes.
 #[derive(Default)]
-pub(super) struct Reader {
-    pub(super) out: Vec<Segment>,
-    pub(super) segment: Segment,
-    pub(super) word: String,
+struct Reader {
+    out: Vec<Segment>,
+    segment: Segment,
+    word: String,
     /// A word has begun (an empty quoted word counts).
-    pub(super) started: bool,
-    /// It holds no expansion, glob or `~` so far.
-    pub(super) unclear: bool,
+    started: bool,
+    /// It holds an expansion, a glob or `~` so far.
+    unclear: bool,
     /// It is a redirect's target.
-    pub(super) redirect: bool,
+    redirect: bool,
     /// How many parentheses are open.
-    pub(super) depth: usize,
+    depth: usize,
 }
 
 impl Reader {
-    pub(super) fn push(&mut self, c: char) {
+    fn push(&mut self, c: char) {
         self.started = true;
         self.word.push(c);
     }
 
-    pub(super) fn end_word(&mut self) {
+    fn end_word(&mut self) {
         if self.started {
             let word = Word {
                 text: std::mem::take(&mut self.word),
                 clear: !self.unclear,
+                list: false,
             };
             if self.redirect {
                 self.segment.redirects.push(word);
@@ -47,7 +48,7 @@ impl Reader {
     }
 
     /// Ends the segment being read at `sep` (`Sep::End` at the command's end).
-    pub(super) fn end_segment(&mut self, sep: Sep) {
+    fn end_segment(&mut self, sep: Sep) {
         self.end_word();
         self.redirect = false;
         let mut segment = std::mem::take(&mut self.segment);
@@ -163,7 +164,7 @@ pub(super) fn segments(script: &str) -> Vec<Segment> {
 }
 
 /// The separator `c` (doubled: `&&`, `||`).
-pub(super) fn sep_of(c: char, double: bool) -> Sep {
+fn sep_of(c: char, double: bool) -> Sep {
     match (c, double) {
         ('&', true) => Sep::And,
         ('&', false) => Sep::Background,
@@ -177,7 +178,7 @@ pub(super) fn sep_of(c: char, double: bool) -> Sep {
 
 /// A heredoc opened on a line: its delimiter word, and whether `<<-` strips leading tabs.
 struct Heredoc {
-    pub(super) word: String,
+    word: String,
     strip_tabs: bool,
 }
 

@@ -1,69 +1,87 @@
-//! What a delete or a move takes from the matter, read the same way for every caller: the paths
-//! `rm`, `rmdir` and `unlink` delete, and PowerShell's `Remove-Item` with its aliases (`del`,
-//! `erase`, `ri`, `rd`, `rm`, `rmdir`); and a move's SOURCES apart from its DESTINATION: `mv`,
-//! `git mv`, PowerShell's `Move-Item` (`mi`, `move`, `mv`) and `Rename-Item` (`rni`, `ren`), and
-//! `cmd /c` `move`, `ren`, `del`, `erase`, `rd`. A file a turn's shell deletes or moves away is
-//! the agent's change, as one it writes is (`clauseo_matters::Matter::after_turn_named` credits a
-//! deleted or renamed file named here, or under a folder named here).
+//! What a delete or a move takes, read the same way for every caller: the paths `rm`, `rmdir`
+//! and `unlink` delete, and PowerShell's `Remove-Item` with its aliases (`del`, `erase`, `ri`,
+//! `rd`, `rm`, `rmdir`); and a move's SOURCES apart from its DESTINATION: `mv`, `git mv`,
+//! PowerShell's `Move-Item` (`mi`, `move`, `mv`) and `Rename-Item` (`rni`, `ren`), and `cmd /c`
+//! or `/k` with `move`, `ren`, `rename`, `del`, `erase`, `rd` and `rmdir`.
 //!
-//! Options are left out (`-rf`, `-Force`, `-Recurse`, `cmd`'s `/Y`), and so is the value of an
-//! option that takes a pattern or a setting rather than a path (`-Filter`, `-Include`,
-//! `-Exclude`, `-Credential`, `-Stream`; `mv -S`/`--suffix`); after `--` every word is a path.
-//! A move's destination is its last path (`mv a b`), the folder `-t DIR` names (each source's
-//! name in it), PowerShell's `-Destination` or second position, or, for a rename, the new name
+//! The paths are the words that are not options; after `--` every word is a path. A POSIX `mv`
+//! reads `-t DIR`, `-tDIR` (in a cluster too: `-vt DIR`), `--target-directory DIR` and
+//! `--target-directory=DIR` as the folder its sources go in, `-T` as naming the source's new
+//! path, and `-S`/`--suffix` as taking a value. A cmdlet's parameters are bound as PowerShell
+//! binds them ([`cmdlet`]): by name, unique prefix or alias, a value after a blank or after the
+//! name's colon (`-Path:a.docx`), `-Path`/`-LiteralPath` and `-Destination`/`-NewName` as paths,
+//! and positions for what is left. A move's destination is its last path (`mv a b`), the folder
+//! `-t` names, PowerShell's `-Destination` or second position, or, for a rename, the new name
 //! beside its source (`Rename-Item Drafts\a.docx b.docx` is `Drafts\b.docx`). A destination
 //! ending in a separator, or one that takes several sources, is a folder: each source's name in
-//! it. A target that is unclear (an expansion, a glob, an array) is the caller's to drop.
+//! it.
+//!
+//! Each path is given as where it lies among the arguments ([`Arg`]): the caller reads the word
+//! there, a PowerShell array (`a.docx, b.docx`) as each of its elements.
 
 use super::Dialect;
 
-/// The deleting programs, lower case, without `.exe`: every path they name goes.
-const DELETERS: [&str; 8] = [
-    "rm",
-    "unlink",
-    "remove-item",
-    "del",
-    "erase",
-    "ri",
-    "rd",
-    "rmdir",
-];
+mod cmdlet;
 
-/// Options whose value is no path.
-const VALUED: [&str; 7] = [
-    "-filter",
-    "-include",
-    "-exclude",
-    "-credential",
-    "-stream",
-    "-s",
-    "--suffix",
-];
+/// The programs that delete every path they name, in a POSIX shell (PowerShell's aliases are
+/// `Remove-Item`'s, [`cmdlet`]), lower case, without `.exe`.
+const DELETERS: [&str; 6] = ["rm", "unlink", "rmdir", "del", "erase", "rd"];
 
-/// What one command deletes and moves, as indexes into its arguments.
+/// A path among a command's arguments: the argument at `at`, from its byte `from` on
+/// (`-Path:a.docx` is its argument from byte 6, `-tArchive` from byte 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Arg {
+    pub(crate) at: usize,
+    pub(crate) from: usize,
+}
+
+impl Arg {
+    /// The whole argument at `at`.
+    pub(crate) const fn whole(at: usize) -> Self {
+        Self { at, from: 0 }
+    }
+}
+
+/// Whether a command deletes or moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Act {
+    Delete,
+    Move,
+}
+
+/// What one command deletes and moves, as places among its arguments.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Taken {
+    /// Whether it deletes or moves (`None`: neither).
+    pub(crate) act: Option<Act>,
     /// The paths it deletes.
-    pub(crate) deleted: Vec<usize>,
+    pub(crate) deleted: Vec<Arg>,
     /// The paths it moves away (a move's or a rename's sources).
-    pub(crate) sources: Vec<usize>,
+    pub(crate) sources: Vec<Arg>,
     /// Where they go, when the command says.
     pub(crate) to: Option<To>,
+    /// A parameter or option that names what it takes has no value after it (`-Path` last).
+    pub(crate) unclear: bool,
+    /// It names no path it deletes or moves itself: a cmdlet then takes its paths from
+    /// elsewhere (a pipeline's input).
+    pub(crate) input: bool,
 }
 
 /// Where a move puts its sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum To {
-    /// The path at this index: the moved file's new path (or a folder the rule cannot tell).
-    Path(usize),
-    /// The folder at this index: each source goes in it under its own name.
-    Folder(usize),
-    /// The new name at this index, beside each source.
-    Beside(usize),
+    /// This path: the moved file's new path, or a folder it goes in under its own name.
+    Path(Arg),
+    /// This path, the moved file's or folder's new path (`mv -T`).
+    New(Arg),
+    /// This folder: each source goes in it under its own name.
+    Folder(Arg),
+    /// This new name, beside each source.
+    Beside(Arg),
 }
 
 /// `program`'s last part, lower case, without `.exe`.
-fn name_of(program: &str) -> String {
+pub(super) fn name_of(program: &str) -> String {
     let name = program
         .rsplit(['/', '\\'])
         .next()
@@ -94,12 +112,17 @@ pub(crate) fn taken<W: AsRef<str>>(program: &str, args: &[W], dialect: Dialect) 
             };
             offset(cmd(&name_of(inner), rest), at + 2)
         }
-        "move-item" | "mi" => cmdlet_move(&texts, false),
-        "rename-item" | "rni" => cmdlet_move(&texts, true),
-        "mv" | "move" if powershell => cmdlet_move(&texts, false),
-        "ren" if powershell => cmdlet_move(&texts, true),
+        "remove-item" | "ri" => cmdlet::taken(&texts, cmdlet::Cmdlet::Remove),
+        "move-item" | "mi" => cmdlet::taken(&texts, cmdlet::Cmdlet::Move),
+        "rename-item" | "rni" => cmdlet::taken(&texts, cmdlet::Cmdlet::Rename),
+        "rm" | "rmdir" | "del" | "erase" | "rd" if powershell => {
+            cmdlet::taken(&texts, cmdlet::Cmdlet::Remove)
+        }
+        "mv" | "move" if powershell => cmdlet::taken(&texts, cmdlet::Cmdlet::Move),
+        "ren" if powershell => cmdlet::taken(&texts, cmdlet::Cmdlet::Rename),
         "mv" => posix_move(&texts),
         _ if DELETERS.contains(&name.as_str()) => Taken {
+            act: Some(Act::Delete),
             deleted: paths(&texts),
             ..Taken::default()
         },
@@ -107,219 +130,186 @@ pub(crate) fn taken<W: AsRef<str>>(program: &str, args: &[W], dialect: Dialect) 
     }
 }
 
-/// `taken` with every index moved on by `by` (the words before the inner command).
+/// `taken` with every place moved on by `by` (the words before the inner command).
 fn offset(taken: Taken, by: usize) -> Taken {
+    let on = |arg: Arg| Arg {
+        at: arg.at + by,
+        from: arg.from,
+    };
     let shift = |to: To| match to {
-        To::Path(at) => To::Path(at + by),
-        To::Folder(at) => To::Folder(at + by),
-        To::Beside(at) => To::Beside(at + by),
+        To::Path(arg) => To::Path(on(arg)),
+        To::New(arg) => To::New(on(arg)),
+        To::Folder(arg) => To::Folder(on(arg)),
+        To::Beside(arg) => To::Beside(on(arg)),
     };
     Taken {
-        deleted: taken.deleted.into_iter().map(|at| at + by).collect(),
-        sources: taken.sources.into_iter().map(|at| at + by).collect(),
+        deleted: taken.deleted.into_iter().map(on).collect(),
+        sources: taken.sources.into_iter().map(on).collect(),
         to: taken.to.map(shift),
+        ..taken
     }
 }
 
-/// The indexes of the paths among `args`: no option, no option's value ([`VALUED`]), every word
-/// after `--`.
-fn paths(args: &[&str]) -> Vec<usize> {
+/// The paths among `args`: every word but an option (`-rf`), every word after `--`.
+fn paths(args: &[&str]) -> Vec<Arg> {
     let mut out = Vec::new();
     let mut options = true;
-    let mut skip = false;
     for (i, arg) in args.iter().enumerate() {
-        if std::mem::take(&mut skip) {
-            continue;
-        }
         if options && *arg == "--" {
             options = false;
-        } else if options && arg.starts_with('-') && arg.len() > 1 {
-            skip = VALUED.contains(&arg.to_ascii_lowercase().as_str());
-        } else {
-            out.push(i);
+        } else if !(options && arg.starts_with('-') && arg.len() > 1) {
+            out.push(Arg::whole(i));
         }
     }
     out
 }
 
-/// A POSIX `mv` (or `git mv`): the last path the destination, unless `-t DIR` names the folder.
+/// What the next word of a POSIX `mv` is, after an option that takes it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Next {
+    /// The folder the sources go in (`-t`).
+    Folder,
+    /// A value that is no path (`-S`).
+    Value,
+}
+
+/// A POSIX `mv` (or `git mv`): the last path the destination, unless `-t` names the folder.
 fn posix_move(args: &[&str]) -> Taken {
-    let target = args.iter().enumerate().find_map(|(i, arg)| {
-        if *arg == "-t" || *arg == "--target-directory" {
-            Some((i, i + 1))
-        } else if arg.starts_with("-t") || arg.starts_with("--target-directory=") {
-            Some((i, i))
+    let mut found = Vec::new();
+    let mut folder = None;
+    let mut no_folder = false;
+    let mut options = true;
+    let mut next = None;
+    for (i, arg) in args.iter().enumerate() {
+        if let Some(wanted) = next.take() {
+            if wanted == Next::Folder {
+                folder = Some(Arg::whole(i));
+            }
+        } else if !options || *arg == "-" || !arg.starts_with('-') {
+            found.push(Arg::whole(i));
+        } else if *arg == "--" {
+            options = false;
+        } else if let Some(long) = arg.strip_prefix("--") {
+            // GNU takes a unique prefix of a long option's name.
+            let (name, value) = long
+                .split_once('=')
+                .map_or((long, None), |(n, v)| (n, Some(v)));
+            let is = |whole: &str, least: usize| name.len() >= least && whole.starts_with(name);
+            if is("target-directory", 1) {
+                match value {
+                    Some(value) => {
+                        folder = Some(Arg {
+                            at: i,
+                            from: arg.len() - value.len(),
+                        });
+                    }
+                    None => next = Some(Next::Folder),
+                }
+            } else if is("suffix", 2) && value.is_none() {
+                next = Some(Next::Value);
+            } else if is("no-target-directory", 4) {
+                no_folder = true;
+            }
         } else {
-            None
+            // A cluster of short options (`-fv`): `-t` and `-S` take the rest of the word as
+            // their value, else the next word.
+            for (at, c) in arg.char_indices().skip(1) {
+                if c == 'T' {
+                    no_folder = true;
+                } else if c == 't' || c == 'S' {
+                    let from = at + 1;
+                    if from < arg.len() {
+                        if c == 't' {
+                            folder = Some(Arg { at: i, from });
+                        }
+                    } else {
+                        next = Some(if c == 't' { Next::Folder } else { Next::Value });
+                    }
+                    break;
+                }
+            }
         }
-    });
-    let mut found = paths(args);
-    if let Some((flag, value)) = target {
-        // `-tDIR`, `--target-directory=DIR`: the folder is part of the option's word, which
-        // the caller cannot split, so the destination stays unknown.
-        found.retain(|at| *at != value && *at != flag);
-        let to = (value != flag).then_some(To::Folder(value));
+    }
+    let unclear = next == Some(Next::Folder);
+    if let Some(dir) = folder {
         return Taken {
+            act: Some(Act::Move),
+            to: (!found.is_empty()).then_some(To::Folder(dir)),
             sources: found,
-            to,
+            unclear,
             ..Taken::default()
         };
     }
-    let Some(last) = found.pop() else {
-        return Taken::default();
+    let last = found.pop();
+    let Some(last) = last.filter(|_| !found.is_empty()) else {
+        return Taken {
+            act: Some(Act::Move),
+            unclear,
+            ..Taken::default()
+        };
     };
-    if found.is_empty() {
-        return Taken::default();
-    }
-    let into = args
-        .iter()
-        .any(|arg| *arg == "-T" || *arg == "--no-target-directory");
-    let folder = !into && (found.len() > 1 || ends_in_separator(args, last));
+    let into_folder = !no_folder && (found.len() > 1 || ends_in_separator(args, last));
     Taken {
-        to: Some(if folder {
+        act: Some(Act::Move),
+        to: Some(if no_folder {
+            To::New(last)
+        } else if into_folder {
             To::Folder(last)
         } else {
             To::Path(last)
         }),
         sources: found,
+        unclear,
         ..Taken::default()
     }
 }
 
-/// Whether `args[at]` ends in a folder separator.
-fn ends_in_separator(args: &[&str], at: usize) -> bool {
-    args.get(at).is_some_and(|arg| arg.ends_with(['/', '\\']))
+/// Whether the path at `arg` ends in a folder separator.
+fn ends_in_separator(args: &[&str], arg: Arg) -> bool {
+    args.get(arg.at)
+        .and_then(|text| text.get(arg.from..))
+        .is_some_and(|text| text.ends_with(['/', '\\']))
 }
 
-/// `cmd /c`'s `move` and `ren` (`/Y`-style options left out), and its deletes.
+/// `cmd /c`'s `move`, `ren` and `rename` (`/Y`-style options left out), and its deletes.
 fn cmd(name: &str, args: &[&str]) -> Taken {
-    let found: Vec<usize> = args
+    let found: Vec<Arg> = args
         .iter()
         .enumerate()
         .filter(|(_, arg)| !(arg.starts_with('/') && arg.len() <= 3))
-        .map(|(i, _)| i)
+        .map(|(i, _)| Arg::whole(i))
         .collect();
-    let (sources, last) = match found.split_last() {
-        Some((last, sources)) if !sources.is_empty() => (sources.to_vec(), *last),
-        _ if matches!(name, "del" | "erase" | "rd" | "rmdir") => {
-            return Taken {
-                deleted: found,
-                ..Taken::default()
-            };
-        }
-        _ => return Taken::default(),
-    };
-    match name {
-        "move" => Taken {
-            to: Some(if sources.len() > 1 || ends_in_separator(args, last) {
-                To::Folder(last)
-            } else {
-                To::Path(last)
-            }),
-            sources,
-            ..Taken::default()
-        },
-        "ren" | "rename" => Taken {
-            to: Some(To::Beside(last)),
-            sources,
-            ..Taken::default()
-        },
-        "del" | "erase" | "rd" | "rmdir" => Taken {
+    if matches!(name, "del" | "erase" | "rd" | "rmdir") {
+        return Taken {
+            act: Some(Act::Delete),
             deleted: found,
             ..Taken::default()
-        },
-        _ => Taken::default(),
+        };
     }
-}
-
-/// The slot a `Move-Item` or `Rename-Item` parameter fills.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Slot {
-    Path,
-    To,
-    /// A parameter whose value is no path.
-    Valued,
-    /// A switch (`-Force`, `-PassThru`).
-    Switch,
-}
-
-/// The slot of the parameter `name` (lower case, no `-`), for a rename (`-NewName`) or a move
-/// (`-Destination`), as PowerShell takes a unique prefix.
-fn slot(name: &str, rename: bool) -> Slot {
-    let prefix = |whole: &str, least: usize| name.len() >= least && whole.starts_with(name);
-    if prefix("literalpath", 1) || prefix("path", 3) || name == "lp" || name == "pspath" {
-        Slot::Path
-    } else if (rename && prefix("newname", 1)) || (!rename && prefix("destination", 3)) {
-        Slot::To
-    } else if ["filter", "include", "exclude", "credential"]
-        .iter()
-        .any(|whole| prefix(whole, 2))
-    {
-        Slot::Valued
+    let rename = matches!(name, "ren" | "rename");
+    if !rename && name != "move" {
+        return Taken::default();
+    }
+    let Some((last, sources)) = found
+        .split_last()
+        .filter(|(_, sources)| !sources.is_empty())
+    else {
+        return Taken {
+            act: Some(Act::Move),
+            ..Taken::default()
+        };
+    };
+    let to = if rename {
+        To::Beside(*last)
+    } else if sources.len() > 1 || ends_in_separator(args, *last) {
+        To::Folder(*last)
     } else {
-        Slot::Switch
-    }
-}
-
-/// PowerShell's `Move-Item` (or `Rename-Item`, `rename`): `-Path`/`-LiteralPath` or the first
-/// position, `-Destination`/`-NewName` or the second, `-Name:value` too.
-fn cmdlet_move(args: &[&str], rename: bool) -> Taken {
-    let mut sources = Vec::new();
-    let mut to = None;
-    // Whether `-Path` or `-Destination` was named, which takes its position away.
-    let (mut path_named, mut to_named) = (false, false);
-    let mut positional = Vec::new();
-    let mut words = args.iter().enumerate();
-    while let Some((i, arg)) = words.next() {
-        let Some(name) = arg.strip_prefix('-').filter(|name| !name.is_empty()) else {
-            positional.push(i);
-            continue;
-        };
-        // `-Path:x` holds its value: the caller cannot split it, so it stays unknown.
-        let (name, inline) = match name.split_once(':') {
-            Some((name, _)) => (name, true),
-            None => (name, false),
-        };
-        let slot = slot(&name.to_ascii_lowercase(), rename);
-        if slot == Slot::Switch {
-            continue;
-        }
-        let value = if inline {
-            None
-        } else {
-            words.next().map(|(at, _)| at)
-        };
-        match slot {
-            Slot::Path => {
-                path_named = true;
-                sources.extend(value);
-            }
-            Slot::To => {
-                to_named = true;
-                to = to.or(value);
-            }
-            Slot::Valued | Slot::Switch => {}
-        }
-    }
-    let mut open = positional.into_iter();
-    if !path_named {
-        sources.extend(open.next());
-    }
-    if !to_named {
-        to = open.next();
-    }
-    let to = to.map(|at| {
-        if rename {
-            To::Beside(at)
-        } else if ends_in_separator(args, at) {
-            To::Folder(at)
-        } else {
-            To::Path(at)
-        }
-    });
+        To::Path(*last)
+    };
     Taken {
-        sources,
-        to,
+        act: Some(Act::Move),
+        sources: sources.to_vec(),
+        to: Some(to),
         ..Taken::default()
     }
 }

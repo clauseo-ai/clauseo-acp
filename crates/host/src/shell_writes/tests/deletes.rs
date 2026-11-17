@@ -1,20 +1,38 @@
 //! What a delete or a move takes (`shell_writes::deletes`), through each reading: the paths a
 //! delete names ([`add_deleted_input`]), a move's sources alone ([`add_moved_input`]), and both
 //! sides with every write ([`add_changed_input`]); [`add_input`] keeps neither. POSIX and
-//! PowerShell, quoted paths, spaces, apostrophes and Windows paths; options and pattern values
-//! never count.
+//! PowerShell, quoted paths, spaces, apostrophes and Windows paths; an option is no path, nor is
+//! the value of one that takes a pattern or a setting.
 
 use std::collections::BTreeSet;
 
-use super::super::deletes::{Taken, To, taken};
+use super::super::deletes::{Act, Arg, Taken, To, taken};
 use super::super::{
-    Dialect, Kind, add_changed_input, add_deleted_input, add_input, add_moved_input, add_script_as,
+    Dialect, Kind, Out, add_changed_input, add_deleted_input, add_input, add_moved_input,
+    add_script_as,
 };
 
+/// What `script`, run in `cwd`, gives through the reading `kind`: its paths, those matched only
+/// whole, and whether a delete or a move in it names a target that is no path here.
+pub(super) fn reading(
+    script: &str,
+    dialect: Dialect,
+    kind: Kind,
+    cwd: Option<&str>,
+) -> (Vec<String>, Vec<String>, bool) {
+    let (mut paths, mut exact) = (BTreeSet::new(), BTreeSet::new());
+    let mut out = Out::new(&mut paths, Some(&mut exact));
+    add_script_as(&mut out, cwd, script, dialect, kind);
+    let unclear = out.unclear;
+    (
+        paths.into_iter().collect(),
+        exact.into_iter().collect(),
+        unclear,
+    )
+}
+
 fn read(script: &str, dialect: Dialect, kind: Kind) -> Vec<String> {
-    let mut out = BTreeSet::new();
-    add_script_as(&mut out, Some(""), script, dialect, kind);
-    out.into_iter().collect()
+    reading(script, dialect, kind, Some("")).0
 }
 
 fn deleted(script: &str) -> Vec<String> {
@@ -69,7 +87,11 @@ fn rm_and_unlink_name_what_they_delete() {
 #[test]
 fn mv_moves_its_sources_to_its_destination() {
     assert_eq!(moved("mv a.docx b.docx"), ["a.docx"]);
-    assert_eq!(changed("mv a.docx b.docx"), ["a.docx", "b.docx"]);
+    // `b.docx` may be the new name or a folder `a.docx` goes in.
+    assert_eq!(
+        changed("mv a.docx b.docx"),
+        ["a.docx", "b.docx", "b.docx/a.docx"]
+    );
     assert_eq!(
         moved(r#"mv -f "Draft v1.docx" "Archive/Draft v1.docx""#),
         ["Draft v1.docx"]
@@ -95,7 +117,11 @@ fn mv_moves_its_sources_to_its_destination() {
     );
     assert_eq!(
         changed("git mv 'Old name.docx' 'New name.docx'"),
-        ["New name.docx", "Old name.docx"]
+        [
+            "New name.docx",
+            "New name.docx/Old name.docx",
+            "Old name.docx"
+        ]
     );
     // A delete is no move; one source alone moves nothing.
     assert_eq!(moved("rm a.docx"), none());
@@ -133,6 +159,7 @@ fn powershell_move_item_and_rename_item_move_their_paths() {
         ps_changed(&script),
         [
             "Archive/O'Brien Lease.docx",
+            "Archive/O'Brien Lease.docx/O'Brien Lease.docx",
             "Sharma v State 2024/O'Brien Lease.docx"
         ]
     );
@@ -142,7 +169,7 @@ fn powershell_move_item_and_rename_item_move_their_paths() {
     );
     assert_eq!(
         ps_changed("Move-Item -Path a.docx -Destination b.docx"),
-        ["a.docx", "b.docx"]
+        ["a.docx", "b.docx", "b.docx/a.docx"]
     );
     // Positions, a named destination first, aliases, any case.
     assert_eq!(ps_moved("move-item a.docx b.docx"), ["a.docx"]);
@@ -204,32 +231,55 @@ fn powershell_remove_item_and_del_delete_their_paths() {
 #[test]
 fn the_input_readings_split_sources_from_destinations() {
     let input = r#"{"command":"mv \"Sharma v State 2024/Big.mp4\" Archive/","cwd":"Matters"}"#;
-    let run = |add: fn(&mut BTreeSet<String>, &str, Dialect, Option<&str>)| {
-        let mut out = BTreeSet::new();
-        add(&mut out, input, Dialect::Posix, Some(""));
-        out.into_iter().collect::<Vec<_>>()
-    };
+    let list = |set: BTreeSet<String>| set.into_iter().collect::<Vec<_>>();
+    let mut moved = BTreeSet::new();
+    assert!(!add_moved_input(
+        &mut moved,
+        input,
+        Dialect::Posix,
+        Some("")
+    ));
+    assert_eq!(list(moved), ["Matters/Sharma v State 2024/Big.mp4"]);
+    let (mut changed, mut exact) = (BTreeSet::new(), BTreeSet::new());
+    add_changed_input(&mut changed, &mut exact, input, Dialect::Posix, Some(""));
     assert_eq!(
-        run(add_moved_input),
-        ["Matters/Sharma v State 2024/Big.mp4"]
-    );
-    assert_eq!(
-        run(add_changed_input),
+        list(changed),
         [
             "Matters/Archive/Big.mp4",
             "Matters/Sharma v State 2024/Big.mp4"
         ]
     );
-    assert_eq!(run(add_deleted_input), none());
-    assert_eq!(run(add_input), none());
+    assert_eq!(list(exact), none());
+    let mut deleted = BTreeSet::new();
+    assert!(!add_deleted_input(
+        &mut deleted,
+        input,
+        Dialect::Posix,
+        Some("")
+    ));
+    assert_eq!(list(deleted), none());
+    let mut written = BTreeSet::new();
+    add_input(&mut written, input, Dialect::Posix, Some(""));
+    assert_eq!(list(written), none());
+    // A delete whose target is a glob says so.
+    let glob = r#"{"command":"Remove-Item *.docx"}"#;
+    let mut deleted = BTreeSet::new();
+    assert!(add_deleted_input(
+        &mut deleted,
+        glob,
+        Dialect::PowerShell,
+        Some("")
+    ));
+    assert_eq!(list(deleted), none());
 }
 
 #[test]
-fn the_reader_gives_the_paths_index_by_index() {
+fn the_reader_gives_the_paths_place_by_place() {
     let posix = |program: &str, args: &[&str]| taken(program, args, Dialect::Posix);
-    assert_eq!(posix("rm", &["-rf", "a", "b"]).deleted, [1, 2]);
-    assert_eq!(posix("RM.EXE", &["a"]).deleted, [0]);
-    assert_eq!(posix(r"C:\Windows\del", &["a"]).deleted, [0]);
+    let whole = |places: &[usize]| places.iter().map(|at| Arg::whole(*at)).collect::<Vec<_>>();
+    assert_eq!(posix("rm", &["-rf", "a", "b"]).deleted, whole(&[1, 2]));
+    assert_eq!(posix("RM.EXE", &["a"]).deleted, whole(&[0]));
+    assert_eq!(posix(r"C:\Windows\del", &["a"]).deleted, whole(&[0]));
     assert_eq!(
         taken(
             "Remove-Item",
@@ -237,23 +287,42 @@ fn the_reader_gives_the_paths_index_by_index() {
             Dialect::PowerShell
         )
         .deleted,
-        [2]
+        whole(&[2])
+    );
+    assert_eq!(
+        taken("Remove-Item", &["-Path:a.docx"], Dialect::PowerShell).deleted,
+        [Arg { at: 0, from: 6 }]
     );
     assert_eq!(posix("cat", &["a"]), Taken::default());
     assert_eq!(
         posix("mv", &["a", "b", "d/"]),
         Taken {
-            sources: vec![0, 1],
-            to: Some(To::Folder(2)),
+            act: Some(Act::Move),
+            sources: whole(&[0, 1]),
+            to: Some(To::Folder(Arg::whole(2))),
             ..Taken::default()
         }
     );
     assert_eq!(
         posix("git", &["mv", "-f", "a", "b"]),
         Taken {
-            sources: vec![2],
-            to: Some(To::Path(3)),
+            act: Some(Act::Move),
+            sources: whole(&[2]),
+            to: Some(To::Path(Arg::whole(3))),
             ..Taken::default()
         }
     );
+    assert_eq!(
+        posix("mv", &["-tArchive", "a"]).to,
+        Some(To::Folder(Arg { at: 0, from: 2 }))
+    );
+    assert_eq!(
+        posix("mv", &["--target-directory=Archive", "a"]).to,
+        Some(To::Folder(Arg { at: 0, from: 19 }))
+    );
+    // A parameter with no value after it; a cmdlet that names no path.
+    assert!(taken("Remove-Item", &["-Path"], Dialect::PowerShell).unclear);
+    assert!(posix("mv", &["a", "-t"]).unclear);
+    assert!(taken("Remove-Item", &["-Recurse"], Dialect::PowerShell).input);
+    assert!(!taken("Remove-Item", &["a"], Dialect::PowerShell).input);
 }
