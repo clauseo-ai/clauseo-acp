@@ -40,6 +40,7 @@ use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 use super::Walked;
 use crate::history::Oid;
 use crate::no_download::{NoDownload, not_downloaded};
+use crate::stamps::CARRY_FORWARD_NS;
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Progress, Settings};
 use crate::walk::{self, Found, FoundKind};
@@ -166,12 +167,12 @@ fn cancelled(cancel: Option<&AtomicBool>) -> bool {
 }
 
 /// The blob of a file found cloud-only with `stat` whose cache entry `old` read it with the
-/// same size and modification time, not racily clean: the content it holds is still that blob.
+/// same size and modification time (within `stamps::CARRY_FORWARD_NS`), not racily clean: the
+/// content it holds is still that blob.
 fn carried(cache: &StatCache, old: &CacheEntry, stat: &Stat) -> Option<Oid> {
     match old.state {
         EntryState::Read(blob)
-            if old.stat.size == stat.size
-                && old.stat.mtime == stat.mtime
+            if crate::stamps::same(old.stat.size, old.stat.mtime, stat, CARRY_FORWARD_NS)
                 && old.stat.mtime != crate::stat::FileTime::default()
                 && !cache.is_racy(&old.stat) =>
         {
