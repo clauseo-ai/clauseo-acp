@@ -43,13 +43,38 @@
       "adminCopySkippedSilent",
       "appRunningOkKill",
       "appRunning",
-      "failedToKillApp"
+      "failedToKillApp",
+      "alreadyInstalled",
+      "chooseMaintenanceOption",
+      "choowHowToInstall",
+      "alreadyInstalledLong",
+      "addOrReinstall",
+      "uninstallApp",
+      "olderOrUnknownVersionInstalled",
+      "uninstallBeforeInstalling",
+      "dontUninstall",
+      "dontUninstallDowngrade",
+      "newerVersionInstalled",
+      "unableToUninstall",
+      "silentDowngrades",
+      "createDesktop",
+      "webview2Downloading",
+      "webview2DownloadSuccess",
+      "webview2DownloadError",
+      "installingWebview2",
+      "webview2InstallSuccess",
+      "webview2InstallError",
+      "webview2AbortError"
     ],
     "slots": {
       "$R9": "the data folder",
       "$R8": "the folder it kept",
       "$APPDATA": "C:\\ProgramData",
-      "${PRODUCTNAME}": "Clauseo"
+      "${PRODUCTNAME}": "Clauseo",
+      "${VERSION}": "the version",
+      "$R4": "older or unknown",
+      "$0": "the download's error",
+      "$1": "the exit code"
     }
   },
   "crates/desktop/windows/nsis/Hindi.nsh": {

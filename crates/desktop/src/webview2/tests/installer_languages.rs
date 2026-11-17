@@ -73,9 +73,11 @@ fn the_installer_language_files_name_the_product_through_nsis() {
 }
 
 #[test]
-fn the_installer_language_files_hold_tauris_24_messages_and_clauseos_32_once_each() {
-    // Tauri's 24, the three lines of Tauri's CheckIfAppIsRunning that Clauseo words itself
-    // (appRunning, appRunningOkKill and failedToKillApp), the eight lines windows/hooks.nsh shows
+fn the_installer_language_files_hold_tauris_3_messages_and_clauseos_53_once_each() {
+    // Tauri's 3 (deleteAppData, in Clauseo's words, older and unknown), the three lines of
+    // Tauri's CheckIfAppIsRunning that Clauseo words itself (appRunning, appRunningOkKill and
+    // failedToKillApp), the 21 of Tauri's that Clauseo words itself, the reinstall page's and the
+    // WebView2 section's (installer_stock_words.rs), the eight lines windows/hooks.nsh shows
     // after the app deletes its data or about S15's removal (deleteAppDataFailed,
     // deleteAppDataKept, deleteAppDataKeptFailed, deleteAppDataFailedUnnamed, removeStillRunning,
     // removeSkippedSilent, removeExeMissing and removeAdminCopyRefused), which tests there hold to

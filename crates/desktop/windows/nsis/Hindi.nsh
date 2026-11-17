@@ -82,6 +82,32 @@ LangString nativeArm64Notice ${LANG_HINDI} "इस कंप्यूटर म�
 ; Security's own Hindi screen may name it differently.
 LangString clauseoAppRemovedByAv ${LANG_HINDI} "इंस्टॉल होते समय Windows Security ने Clauseo का एक हिस्सा रोक दिया, इसलिए Clauseo नहीं खुल सकता। Windows Security खोलें, सुरक्षा इतिहास (Protection history) चुनें, Clauseo को अनुमति दें, फिर Clauseo दोबारा इंस्टॉल करें।"
 
+; The reinstall page's and the WebView2 section's words, which were Tauri's stock messages
+; (English.nsh says where each shows). Provisional Hindi, to be reviewed (2026-11-17): Next is
+; आगे, as the stock Hindi had it, and Cancel रद्द करें, unchecked against the installer's own Hindi
+; buttons (check in a shot); $0 stays English (the download's own result).
+LangString alreadyInstalled ${LANG_HINDI} "${PRODUCTNAME} पहले से इंस्टॉल है"
+LangString chooseMaintenanceOption ${LANG_HINDI} "${PRODUCTNAME} फिर से इंस्टॉल करें, या इसे अनइंस्टॉल करके दोबारा इंस्टॉल करें।"
+LangString choowHowToInstall ${LANG_HINDI} "चुनें कि पहले दूसरा संस्करण अनइंस्टॉल करना है या नहीं।"
+LangString alreadyInstalledLong ${LANG_HINDI} "${PRODUCTNAME} ${VERSION} पहले से इस कंप्यूटर पर है। चुनें कि क्या करना है, फिर आगे पर क्लिक करें।"
+LangString addOrReinstall ${LANG_HINDI} "${PRODUCTNAME} फिर से इंस्टॉल करें"
+LangString uninstallApp ${LANG_HINDI} "पहले ${PRODUCTNAME} अनइंस्टॉल करें, फिर दोबारा इंस्टॉल करें"
+LangString olderOrUnknownVersionInstalled ${LANG_HINDI} "इस कंप्यूटर पर ${PRODUCTNAME} का $R4 संस्करण है। चुनें कि पहले इसे अनइंस्टॉल करना है या नहीं, फिर आगे पर क्लिक करें।"
+LangString uninstallBeforeInstalling ${LANG_HINDI} "पहले दूसरा संस्करण अनइंस्टॉल करें"
+LangString dontUninstall ${LANG_HINDI} "दूसरे संस्करण के ऊपर इंस्टॉल करें"
+LangString dontUninstallDowngrade ${LANG_HINDI} "नए संस्करण के ऊपर इंस्टॉल करें (संभव नहीं)"
+LangString newerVersionInstalled ${LANG_HINDI} "इस कंप्यूटर पर ${PRODUCTNAME} का नया संस्करण है। यह पुराना संस्करण इंस्टॉल करने के लिए पहले नया संस्करण अनइंस्टॉल किया जाएगा। आगे बढ़ने के लिए आगे पर क्लिक करें, या नया संस्करण रखने के लिए रद्द करें पर क्लिक करें।"
+LangString unableToUninstall ${LANG_HINDI} "इस कंप्यूटर पर मौजूद ${PRODUCTNAME} का संस्करण अनइंस्टॉल नहीं हो सका। फिर से चुनें, या यह इंस्टॉलर बंद करके बाद में प्रयास करें।"
+LangString silentDowngrades ${LANG_HINDI} "${PRODUCTNAME} इंस्टॉल नहीं हुआ, क्योंकि इस कंप्यूटर पर पहले से नया संस्करण है। यह पुराना संस्करण इंस्टॉल करने के लिए यह इंस्टॉलर /S या /P के बिना चलाएँ, और यह पहले नया संस्करण अनइंस्टॉल कर देगा।$\n"
+LangString createDesktop ${LANG_HINDI} "डेस्कटॉप पर शॉर्टकट जोड़ें"
+LangString webview2Downloading ${LANG_HINDI} "Microsoft से WebView2 डाउनलोड हो रहा है।"
+LangString webview2DownloadSuccess ${LANG_HINDI} "WebView2 डाउनलोड हो गया।"
+LangString webview2DownloadError ${LANG_HINDI} "WebView2 डाउनलोड नहीं हो सका: $0"
+LangString installingWebview2 ${LANG_HINDI} "WebView2 इंस्टॉल हो रहा है, जिसकी ${PRODUCTNAME} को ज़रूरत है।"
+LangString webview2InstallSuccess ${LANG_HINDI} "WebView2 इंस्टॉल हो गया है।"
+LangString webview2InstallError ${LANG_HINDI} "WebView2 का इंस्टॉलर एरर कोड $1 के साथ रुक गया।"
+LangString webview2AbortError ${LANG_HINDI} "${PRODUCTNAME} को WebView2 की ज़रूरत है, जो इंस्टॉल नहीं हो सका। देखें कि आप इंटरनेट से जुड़े हैं, फिर दोबारा प्रयास करें।"
+
 ; webview2TooOld: a per-user install found WebView2 older than Clauseo needs and, so as never to
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block
 ; webview2-no-elevation); the per-machine installer says it when its update fails. Details list
@@ -100,28 +126,8 @@ LangString failedToKillApp ${LANG_HINDI} "रुक गया, क्यों�
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), less the keys Clauseo words itself:
-; deleteAppData, and appRunning, appRunningOkKill and failedToKillApp (above). On a Tauri upgrade,
-; copy that file's other lines here again; a key missing here has no English text.
-LangString addOrReinstall ${LANG_HINDI} "घटक जोड़ें/फिर से इंस्टॉल करें"
-LangString alreadyInstalled ${LANG_HINDI} "पहले से इंस्टॉल है"
-LangString alreadyInstalledLong ${LANG_HINDI} "${PRODUCTNAME} ${VERSION} पहले से इंस्टॉल है। आप क्या करना चाहते हैं, चुनें और जारी रखने के लिए आगे पर क्लिक करें।"
-LangString chooseMaintenanceOption ${LANG_HINDI} "आप क्या करना चाहते हैं, चुनें।"
-LangString choowHowToInstall ${LANG_HINDI} "चुनें कि आप ${PRODUCTNAME} कैसे इंस्टॉल करना चाहते हैं।"
-LangString createDesktop ${LANG_HINDI} "डेस्कटॉप शॉर्टकट बनाएँ"
-LangString dontUninstall ${LANG_HINDI} "अनइंस्टॉल न करें"
-LangString dontUninstallDowngrade ${LANG_HINDI} "अनइंस्टॉल न करें (इस इंस्टॉलर में अनइंस्टॉल किए बिना पुराना संस्करण इंस्टॉल नहीं किया जा सकता)"
-LangString installingWebview2 ${LANG_HINDI} "WebView2 इंस्टॉल हो रहा है..."
-LangString newerVersionInstalled ${LANG_HINDI} "${PRODUCTNAME} का नया संस्करण पहले से इंस्टॉल है। पुराना संस्करण इंस्टॉल न करें। अगर आपको यही पुराना संस्करण चाहिए, तो पहले मौजूदा संस्करण अनइंस्टॉल कर लें। आप क्या करना चाहते हैं, चुनें और जारी रखने के लिए आगे पर क्लिक करें।"
+; deleteAppData, appRunning, appRunningOkKill and failedToKillApp, and the reinstall page's
+; and the WebView2 section's 21 (above). On a Tauri upgrade, copy that file's other lines here
+; again; a key missing here has no English text.
 LangString older ${LANG_HINDI} "पुराना"
-LangString olderOrUnknownVersionInstalled ${LANG_HINDI} "आपके कंप्यूटर पर ${PRODUCTNAME} का $R4 संस्करण इंस्टॉल है। इंस्टॉल करने से पहले मौजूदा संस्करण अनइंस्टॉल कर लें। आप क्या करना चाहते हैं, चुनें और जारी रखने के लिए आगे पर क्लिक करें।"
-LangString silentDowngrades ${LANG_HINDI} "इस इंस्टॉलर में पुराना संस्करण इंस्टॉल नहीं किया जा सकता, इसलिए साइलेंट इंस्टॉल आगे नहीं बढ़ सकता। कृपया सामान्य इंस्टॉलर इस्तेमाल करें।$\n"
-LangString unableToUninstall ${LANG_HINDI} "अनइंस्टॉल नहीं हो सका।"
-LangString uninstallApp ${LANG_HINDI} "${PRODUCTNAME} अनइंस्टॉल करें"
-LangString uninstallBeforeInstalling ${LANG_HINDI} "इंस्टॉल करने से पहले अनइंस्टॉल करें"
 LangString unknown ${LANG_HINDI} "अज्ञात"
-LangString webview2AbortError ${LANG_HINDI} "WebView2 इंस्टॉल नहीं हो सका। इसके बिना ऐप नहीं चल सकता। इंस्टॉलर फिर से शुरू करके देखें।"
-LangString webview2DownloadError ${LANG_HINDI} "त्रुटि: WebView2 डाउनलोड नहीं हो सका - $0"
-LangString webview2DownloadSuccess ${LANG_HINDI} "WebView2 बूटस्ट्रैपर डाउनलोड हो गया"
-LangString webview2Downloading ${LANG_HINDI} "WebView2 बूटस्ट्रैपर डाउनलोड हो रहा है..."
-LangString webview2InstallError ${LANG_HINDI} "त्रुटि: WebView2 इंस्टॉल नहीं हो सका, एग्ज़िट कोड $1"
-LangString webview2InstallSuccess ${LANG_HINDI} "WebView2 इंस्टॉल हो गया"
