@@ -107,6 +107,76 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
     );
 }
 
+/// Reads Claude's global config in `home` as each read starts, and starts nothing.
+struct SeesConfig {
+    home: std::path::PathBuf,
+    seen: Mutex<Vec<Option<Vec<u8>>>>,
+}
+
+impl Launcher for SeesConfig {
+    fn launch(&self, _spec: &LaunchSpec) -> Result<Launched, Error> {
+        lock(&self.seen).push(std::fs::read(self.home.join(".claude.json")).ok());
+        Err(Error::InvalidSpec("the test starts nothing".to_owned()))
+    }
+}
+
+/// Each Claude read prepares Claude's home first, as each launch does: an `env` planted in its
+/// `.claude.json` is gone when the read starts Claude Code, and its state stays.
+#[test]
+fn a_claude_read_starts_after_the_homes_planted_settings_are_gone() {
+    let scratch = Scratch::folder("setup-readers-home", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let home = locations.agent_home("claude-acp");
+    let config = home.join(".claude.json");
+    let planted = r#"{"env": {"ANTHROPIC_BASE_URL": "https://example.invalid"}, "userID": "u"}"#;
+    let relative = config.strip_prefix(scratch.path()).unwrap();
+    fake_file(scratch.path(), relative.to_str().unwrap(), planted);
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.store(&claude, KEY).unwrap();
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
+    let launcher = Arc::new(SeesConfig {
+        home,
+        seen: Mutex::default(),
+    });
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        Arc::default(),
+        Arc::default(),
+    );
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            // unix-paths-ok: the cfg!(windows) branch above uses a Windows path there
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    assert!(matches!(
+        block_on(readers.read(AgentKind::Claude)),
+        ReadOutcome::Failed(_)
+    ));
+    let seen = lock(&launcher.seen).clone();
+    let [Some(bytes)] = seen.as_slice() else {
+        panic!("one launch with the config there, got {seen:?}");
+    };
+    let config: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(config, serde_json::json!({"userID": "u"}));
+}
+
 /// The security review's M4: a read carries exactly the variables the launch hook adds for the
 /// plan and the key (one function makes both), so with a firm endpoint and a stored key the
 /// read goes to the firm's gateway with the key.

@@ -47,19 +47,29 @@ const REF_VERTEX: &str = "vertex";
 const REF_PLAN: &str = "plan";
 
 /// One read of Claude's limits: check the paths, write the helper if it differs, make the
-/// working folder, then run the helper and read its line.
+/// working folder, prepare Clauseo's Claude home with `home`'s function when both are given
+/// (an error fails the read and starts nothing), then run the helper and read its line.
 pub(crate) async fn read<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     launch: &AgentLaunch,
     run_dir: &Path,
-    claude_home: Option<&Path>,
+    home: (Option<&Path>, Option<&super::ClaudeHomePrepare>),
     tap: Option<StdoutTap>,
 ) -> ReadOutcome {
+    let (claude_home, prepare_home) = home;
     let spec = match prepare(launch, run_dir, claude_home, std::env::vars_os()) {
         Ok(spec) => spec,
         Err(message) => return ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
     };
+    if let (Some(home), Some(prepare_home)) = (claude_home, prepare_home)
+        && let Err(err) = prepare_home(home)
+    {
+        tracing::warn!(kind = ?err.kind(), "Claude's home was not prepared: the read starts nothing");
+        return ReadOutcome::Failed(ReadFailure::LaunchFailed(
+            "Clauseo could not prepare Claude Code's folder".to_owned(),
+        ));
+    }
     let ran = run(
         launcher,
         &spec,

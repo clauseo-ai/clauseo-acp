@@ -130,8 +130,14 @@ pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
 /// its global config's configuration go as at a launch (`clear::clear_settings`): the sign-in
 /// jobs run it before each Claude Code process they start
 /// (`clauseo_agents::SigninConfig::claude_settings`), so a login, a status check or a logout
-/// reads only the user settings Clauseo ships. File system calls: off the host thread.
+/// reads only the user settings Clauseo ships; the limits reader runs it before each Claude read
+/// too. A home that does not exist yet holds nothing to clear or keep out: nothing is done.
+/// File system calls: off the host thread.
 pub fn write_claude_home_settings(home: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(home) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        _ => {}
+    }
     clear::clear_settings(home)?;
     write_claude_settings(home)
 }

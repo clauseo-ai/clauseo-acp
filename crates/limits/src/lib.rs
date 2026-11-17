@@ -75,7 +75,7 @@ pub use policy::{Action, Input, Limits};
 #[doc(hidden)]
 pub use readers::StdoutTap;
 pub use readers::{
-    AccountRead, CODEX_OVERRIDES, HoldGuard, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome,
-    parse_rfc3339,
+    AccountRead, CODEX_OVERRIDES, ClaudeHomePrepare, HoldGuard, ProcessReaders, ReadFailure,
+    ReadLimits, ReadOutcome, parse_rfc3339,
 };
 pub use words::{claude_plan, codex_plan};

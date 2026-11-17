@@ -3,7 +3,9 @@
 //! (decision record 0048, the plan's ruling 7):
 //!
 //! - built over the host's launcher, with Clauseo's own homes forced (`CODEX_HOME` and, through
-//!   `ProcessReaders::with_claude_home`, `CLAUDE_CONFIG_DIR`, ruling 6), and at each read the
+//!   `ProcessReaders::with_claude_home`, `CLAUDE_CONFIG_DIR`, ruling 6), Claude's home prepared
+//!   before each Claude read as before each launch (`clauseo_host::write_claude_home_settings`,
+//!   through `ProcessReaders::with_claude_home_prepare`), and at each read the
 //!   variables the launch hook adds (`with_launch_env` over `hook::setup_vars`): the stored key
 //!   from the [`KeySlot`], the firm plan's routing from the [`Plans`] snapshot (the security
 //!   review's M4) and the proxy and CA variables from the [`NetworkSlot`], so a read goes where
@@ -108,7 +110,8 @@ impl SwappableReaders {
             launcher,
             AsyncIoTimer,
         )
-        .with_claude_home(locations.agent_home(AgentKind::Claude.id()));
+        .with_claude_home(locations.agent_home(AgentKind::Claude.id()))
+        .with_claude_home_prepare(Arc::new(clauseo_host::write_claude_home_settings));
         let vars = Arc::clone(&keys);
         let firm_plans = Arc::clone(&plans);
         let readers = readers.with_launch_env(move |kind| read_vars(&vars, &plans, &network, kind));
