@@ -213,7 +213,11 @@ pub(crate) fn remove_entry(path: &Path) -> Result<(), ProfileError> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(err) => std::fs::remove_dir(path).map_err(|_| ProfileError::io("remove", path, err)),
+        // The file's error says more than the folder's.
+        Err(err) => match std::fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            Err(_not_a_link) => Err(ProfileError::io("remove", path, err)),
+        },
     }
 }
 
