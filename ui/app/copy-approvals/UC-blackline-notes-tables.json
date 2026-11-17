@@ -122,25 +122,25 @@
   },
   "UC-452": {
     "en": "Formatting changed in {tables}.",
-    "hi": "{tables} में फ़ॉर्मैटिंग बदल गई है।",
+    "hi": "फ़ॉर्मैटिंग बदल गई है: {tables}।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "over the blackline sheet in place of UC-391 when the host names the tables whose formatting changed (WordBlackline changed_tables, up to four): {tables} lists each as its place (UC-454 to UC-457), then a colon and what changed (UC-458 to UC-464), the tables apart by semicolons, e.g. 'table 2: borders, shading; table 1 in the header (first page): merged cells'. The item form changed after review round 2 (was 'table 2 (borders, shading)', which gave two brackets in a row after a header's heading)"
+    "note": "over the blackline sheet in place of UC-391 when the host names the tables whose formatting changed (WordBlackline changed_tables, up to four): {tables} lists each as its place (UC-454 to UC-457), then a colon and what changed (UC-458 to UC-464), the tables apart by semicolons, e.g. 'table 2: borders, shading; table 1 in the header (first page): merged cells'. The item form changed after review round 2 (was 'table 2 (borders, shading)', which gave two brackets in a row after a header's heading). Hindi, on the app track's review: the verb first, then the list after a colon (was '{tables} में फ़ॉर्मैटिंग बदल गई है।'), so 'में' doesn't attach to the last table's groups"
   },
   "UC-453": {
     "en": "Formatting changed in {tables}, and in {n} more.",
-    "hi": "{tables} में, और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+    "hi": "फ़ॉर्मैटिंग बदल गई है: {tables}। बाकी {n} में भी।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, apart by semicolons, then how many more ({n}: the host's count of every changed table, changed_tables_total, minus the three named). Reworded after review round 2 (was '{tables} and {n} more.'), then on the app track's review (was '{tables}; and {n} more.', which read as a typo)"
+    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, apart by semicolons, then how many more ({n}: the host's count of every changed table, changed_tables_total, minus the three named). Reworded after review round 2 (was '{tables} and {n} more.'), then on the app track's review (was '{tables}; and {n} more.', which read as a typo). Hindi, on the app track's review: the verb first and the count as a sentence of its own, 'बाकी {n} में भी', which reads the same for any number (was '{tables} में, और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।', where 'में' attached to the last table's groups)"
   },
   "UC-454": {
     "en": "table {n}",
