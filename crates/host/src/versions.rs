@@ -20,8 +20,8 @@
 //!   an old `.claude` file or anything outside the folder is never read; unless
 //!   [`DELETED_FILES_READABLE`], the file stayed in the matter from that version on
 //!   (`continuity.rs`) and is in the folder now (`clauseo_matters::holds_now`); its format is
-//!   text (UTF-8, no NUL, at most [`MAX_TEXT_BYTES`]) or Word (`.docx`, as `stetdoc view`
-//!   shows it, `docx.rs`).
+//!   text (UTF-8, no NUL, at most [`MAX_TEXT_BYTES`]) or Word (`.docx`, at most
+//!   [`MAX_DOCX_BYTES`], as `stetdoc view` shows it, `docx.rs`).
 //! - The matter is read only when its thread already holds it open: a read never opens or
 //!   relinks it. One job per session is on the matter's thread at a time (`flight.rs`), and a
 //!   job whose caller gave up does nothing. One stetdoc run per session at a time.
@@ -102,6 +102,13 @@ pub(crate) const LOOKUPS_PER_JOB: usize = 10;
 /// The largest text file `read_version` reads: each page streams the whole file from history
 /// on the matter's thread, so a larger one is refused by its size before any read.
 pub(crate) const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The largest Word file `read_version` reads, refused by its size before any copy, and the
+/// copy's own cap: each read streams the file from history into a copy on the matter's thread,
+/// up to [`MAX_DOCX_RUNS_PER_TURN`] a turn. Above [`MAX_TEXT_BYTES`], since a `.docx` is a zip
+/// whose pictures can outweigh its text many times over; a size the matter's own cap could reach
+/// would let one turn copy that much again and again.
+pub(crate) const MAX_DOCX_BYTES: u64 = 25 * 1024 * 1024;
 
 /// How long a call waits for the matter's thread, its own earlier job included, before it is
 /// refused as unavailable.

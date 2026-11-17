@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use super::Fixture;
 use crate::versions::texts::{LIST_DESCRIPTION, READ_DESCRIPTION, Refusal};
 use crate::versions::{
-    DEFAULT_LIMIT, MAX_CALLS_PER_TURN, MAX_DOCX_RUNS_PER_TURN, MAX_FILES_PER_VERSION, MAX_LIMIT,
-    MAX_TEXT_BYTES, PAGE_BYTES, SERVER_NAME,
+    DEFAULT_LIMIT, MAX_CALLS_PER_TURN, MAX_DOCX_BYTES, MAX_DOCX_RUNS_PER_TURN,
+    MAX_FILES_PER_VERSION, MAX_LIMIT, MAX_TEXT_BYTES, PAGE_BYTES, SERVER_NAME,
 };
 
 fn ask(method: &str, params: Value) -> Value {
@@ -98,6 +98,9 @@ fn the_limits_the_texts_name_are_the_ones_in_force() {
     let mib = format!("{} MiB", MAX_TEXT_BYTES / (1024 * 1024));
     assert!(READ_DESCRIPTION.contains(&format!("up to {mib}")));
     assert!(Refusal::TooLarge.text().contains(&mib));
+    let word_mib = format!("{} MiB", MAX_DOCX_BYTES / (1024 * 1024));
+    assert!(READ_DESCRIPTION.contains(&format!("files (up to {word_mib})")));
+    assert!(Refusal::WordTooLarge.text().contains(&word_mib));
     // True on every path: a Latin-1 text file is text, but not UTF-8; a bucket between turns
     // started after the lawyer's last message.
     assert!(Refusal::Unsupported.text().contains("saved as UTF-8"));

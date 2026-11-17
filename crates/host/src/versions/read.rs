@@ -11,9 +11,10 @@
 //!    file from that version on (`continuity.rs`) and the folder holds it now under the name it
 //!    ends with (`clauseo_matters::holds_now`), checked in the job that reads it; else
 //!    [`Refusal::Deleted`];
-//! 4. its format: a `.pdf` is [`Refusal::Unsupported`]; a `.docx` (any case) needs stetdoc and a
-//!    stetdoc run left this turn, both settled (the run reserved) before anything is copied,
-//!    unless its text is kept from an earlier page; any other file must be at most
+//! 4. its format: a `.pdf` is [`Refusal::Unsupported`]; a `.docx` (any case) must be at most
+//!    [`MAX_DOCX_BYTES`] by its size in history and needs stetdoc and a stetdoc run left this
+//!    turn, both settled (the run reserved) before anything is copied, unless its text is kept
+//!    from an earlier page; any other file must be at most
 //!    [`MAX_TEXT_BYTES`] by its size in history, then streams through a [`Window`] and is text
 //!    only when all of it is UTF-8 with no NUL.
 //!
@@ -34,7 +35,7 @@ use super::docx::{self, Copied};
 use super::mcp::Outcome;
 use super::texts::Refusal;
 use super::window::{Page, PastEnd, Window, page_of};
-use super::{Backend, MAX_TEXT_BYTES, Opened, lock, utc_time};
+use super::{Backend, MAX_DOCX_BYTES, MAX_TEXT_BYTES, Opened, lock, utc_time};
 use crate::log_file::Cause;
 
 /// The tool's name.
@@ -201,6 +202,7 @@ fn plan<'a>(backend: &'a Backend, file: &VersionFile) -> Plan<'a> {
         Format::Pdf => Plan::Refuse(Refusal::Unsupported),
         Format::Text if file.size > MAX_TEXT_BYTES => Plan::Refuse(Refusal::TooLarge),
         Format::Text => Plan::Text,
+        Format::Docx if file.size > MAX_DOCX_BYTES => Plan::Refuse(Refusal::WordTooLarge),
         Format::Docx => {
             if let Some(text) = backend.docx.get(&file.content) {
                 Plan::Kept(text)
@@ -240,7 +242,7 @@ fn finish_read(
             version,
             path,
             dir,
-            opened.cap,
+            opened.cap.min(MAX_DOCX_BYTES),
         )?)),
         Finish::Text { offset } => {
             let mut window = Window::new(offset);

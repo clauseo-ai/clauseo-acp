@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::{Fixture, call, checkpoint, ok, path, read, refused, snapshot, v7};
 use crate::versions::texts::Refusal;
-use crate::versions::{DELETED_FILES_READABLE, MAX_TEXT_BYTES, PAGE_BYTES};
+use crate::versions::{DELETED_FILES_READABLE, MAX_DOCX_BYTES, MAX_TEXT_BYTES, PAGE_BYTES};
 
 #[test]
 fn a_version_of_another_matter_is_refused_as_a_made_up_one_is() {
@@ -374,4 +374,32 @@ fn a_text_file_over_the_cap_is_refused_by_its_size_and_one_at_it_reads() {
     );
     let page = read(&backend, v2, "at-cap.txt");
     assert_eq!(ok(&page)["total_bytes"], MAX_TEXT_BYTES);
+}
+
+/// A Word file over the cap is refused by its size in history before any copy or stetdoc run;
+/// one at the cap gets past the size, to stetdoc (here one that cannot start).
+#[test]
+fn a_word_file_over_the_cap_is_refused_by_its_size_before_any_copy() {
+    let mut fixture = Fixture::new("versions-read-large-docx");
+    let at_cap = usize::try_from(MAX_DOCX_BYTES).unwrap();
+    fixture.put("at-cap.docx", &vec![b'a'; at_cap]);
+    fixture.put("over-cap.DOCX", &vec![b'b'; at_cap + 1]);
+    let v2 = fixture.checkpoint(2);
+    let stetdoc = super::caps::missing_stetdoc(&fixture);
+    let backend = crate::versions::VersionsBackend::new(fixture.config(Some(stetdoc)));
+    assert_eq!(
+        refused(&read(&backend, v2, "over-cap.DOCX")),
+        Refusal::WordTooLarge.text()
+    );
+    assert_eq!(crate::versions::lock(&backend.inner.caps).docx_runs(), 0);
+    let tmp = fixture.data().join("tmp");
+    assert!(
+        !std::fs::read_dir(&tmp).is_ok_and(|mut entries| entries.next().is_some()),
+        "a copy was made in {}",
+        tmp.display()
+    );
+    assert_eq!(
+        refused(&read(&backend, v2, "at-cap.docx")),
+        Refusal::WordFailed.text()
+    );
 }

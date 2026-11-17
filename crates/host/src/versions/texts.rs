@@ -16,11 +16,12 @@ pub(super) const READ_DESCRIPTION: &str = "Read-only. Returns one file as an ear
 this matter held it, as text: a header line (version, at, format, offset, next_offset or end, \
 total_bytes, path), a blank line, then the file's text, 64 KiB a page from offset; pass \
 next_offset as offset for the next page. Text files saved as UTF-8 (up to 16 MiB) come back as \
-they are; Word (.docx) files as the text Clauseo's Word tool shows. PDFs and other files are not \
-read. Covers only this matter. Earlier versions of a file the matter has held ever since can be \
-read, including text the lawyer later removed from it. A file that was deleted is listed by \
-list_versions, but its earlier versions cannot be read, even when a file with its name is there \
-again, unless the lawyer brought it back with Undo or from Versions. Changes nothing.";
+they are; Word (.docx) files (up to 25 MiB) as the text Clauseo's Word tool shows. PDFs and \
+other files are not read. Covers only this matter. Earlier versions of a file the matter has held \
+ever since can be read, including text the lawyer later removed from it. A file that was deleted \
+is listed by list_versions, but its earlier versions cannot be read, even when a file with its \
+name is there again, unless the lawyer brought it back with Undo or from Versions. Changes \
+nothing.";
 
 /// Why a call was refused; [`Refusal::text`] is what the agent reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,8 @@ pub(super) enum Refusal {
     NotOpen,
     /// A text file over [`super::MAX_TEXT_BYTES`].
     TooLarge,
+    /// A Word file over [`super::MAX_DOCX_BYTES`].
+    WordTooLarge,
     /// No stetdoc for a Word file.
     NoWordTool,
     /// The check that the file is in the matter now failed.
@@ -69,7 +72,7 @@ pub(super) enum Refusal {
 impl Refusal {
     /// Every refusal (tests).
     #[cfg(test)]
-    pub(super) const ALL: [Self; 19] = [
+    pub(super) const ALL: [Self; 20] = [
         Self::UnknownVersion,
         Self::NotInVersion,
         Self::Deleted,
@@ -79,6 +82,7 @@ impl Refusal {
         Self::Unavailable,
         Self::NotOpen,
         Self::TooLarge,
+        Self::WordTooLarge,
         Self::NoWordTool,
         Self::NotChecked,
         Self::NotRead,
@@ -128,6 +132,9 @@ impl Refusal {
             }
             Self::TooLarge => {
                 "That file is over 16 MiB, too large to read from an earlier version."
+            }
+            Self::WordTooLarge => {
+                "That Word file is over 25 MiB, too large to read from an earlier version."
             }
             Self::NoWordTool => {
                 "Word files can't be read from earlier versions here, because Clauseo's Word tool \
