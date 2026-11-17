@@ -21,7 +21,7 @@ use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::lawyer;
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
-use crate::browser::seed_sites::SEED_SITES;
+use crate::browser::seed_sites::WEB_FETCH_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 
@@ -209,7 +209,7 @@ pub(super) fn session_loads(
         web_search,
         login,
         folders,
-        seed_sites: SEED_SITES,
+        seed_sites: WEB_FETCH_SITES.as_slice(),
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),

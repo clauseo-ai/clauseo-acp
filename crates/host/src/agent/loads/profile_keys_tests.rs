@@ -12,7 +12,7 @@ use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options, fill_meta, web_search_state};
 use super::profile_tests::{LOCKED_OFF, OFF, ON, reason};
 use super::{CLAUDE_SHELL_FOLDER_VAR, GuardHook, McpControl, session_meta};
-use crate::browser::seed_sites::SEED_SITES;
+use crate::browser::seed_sites::WEB_FETCH_SITES;
 
 pub(super) fn folders() -> Folders<'static> {
     Folders {
@@ -35,7 +35,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         web_search,
         login,
         folders: folders(),
-        seed_sites: SEED_SITES,
+        seed_sites: WEB_FETCH_SITES.as_slice(),
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
@@ -59,7 +59,8 @@ fn strings(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// R21's "Permissions": the profile's allow list, `WebSearch`, bare `WebFetch`, the seed sites.
+/// R21's "Permissions": the profile's allow list, `WebSearch`, the seed sites, and no bare
+/// `WebFetch` (decision record 0030, "Claude's web fetches").
 #[test]
 fn the_allow_list_is_exactly_the_permissions_list() {
     let hook = json!({"allowedTools": [
@@ -79,15 +80,161 @@ fn the_allow_list_is_exactly_the_permissions_list() {
         "Bash(stetdoc lookup:*)".to_owned(),
         "Bash(stetdoc capabilities:*)".to_owned(),
         "WebSearch".to_owned(),
-        "WebFetch".to_owned(),
     ];
     expected.extend(
-        SEED_SITES
+        WEB_FETCH_SITES
             .iter()
             .map(|site| format!("WebFetch(domain:{site})")),
     );
     assert_eq!(strings(&options["allowedTools"]), expected);
+    assert!(!strings(&options["allowedTools"]).contains(&"WebFetch"));
     assert_eq!(options.get("disallowedTools"), None);
+}
+
+/// A hook's bare `WebFetch`, any form Claude Code reads as one, or a `WebFetch` rule holding `*`,
+/// would let every host through unasked: dropped while web search is on. A hook's named host
+/// stays.
+#[test]
+fn a_hooks_open_webfetch_rules_are_dropped() {
+    let hook = json!({"allowedTools": [
+        "WebFetch",
+        "WebFetch()",
+        "WebFetch(*)",
+        " WebFetch",
+        "WebFetch ",
+        "Read,WebFetch",
+        "Read WebFetch",
+        "WebFetch(domain:x",
+        "WebFetch(domain:FIRM.example)",
+        "WebFetch(domain:*)",
+        "WebFetch(domain:*.in)",
+        "WebFetch(domain:firm.example)",
+        "mcp__browser",
+    ]});
+    for login in [Login::FirstParty, Login::Bedrock, Login::OtherCloud] {
+        let options = options(&hook, &keys(ON, login));
+        let allowed = strings(&options["allowedTools"]);
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| *rule != "WebFetch" && !rule.contains('*')),
+            "{allowed:?}"
+        );
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| rule.starts_with("WebFetch(domain:")
+                    || rule.starts_with("WebSearch")
+                    || rule.starts_with("mcp__")),
+            "{allowed:?}"
+        );
+        assert_eq!(
+            allowed[..2],
+            ["WebFetch(domain:firm.example)", "mcp__browser"]
+        );
+        assert!(allowed.contains(&"WebFetch(domain:www.sci.gov.in)"));
+    }
+}
+
+/// One row per form the reviewer named: each is dropped on its own, whatever else the hook sent.
+#[test]
+fn each_bare_webfetch_form_is_dropped_alone() {
+    for form in [
+        "WebFetch()",
+        "WebFetch(*)",
+        " WebFetch",
+        "WebFetch ",
+        "Read,WebFetch",
+        "Read WebFetch",
+        "WebFetch(domain:x",
+    ] {
+        let hook = json!({"allowedTools": [form, "Bash(git status)"]});
+        let options = options(&hook, &keys(ON, Login::FirstParty));
+        let allowed = strings(&options["allowedTools"]);
+        assert!(!allowed.contains(&form), "{form:?}: {allowed:?}");
+        assert!(
+            allowed.contains(&"Bash(git status)"),
+            "{form:?}: {allowed:?}"
+        );
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| !rule.contains(',') && rule.trim() == *rule),
+            "{form:?}: {allowed:?}"
+        );
+    }
+}
+
+/// Hook `allowedTools` entries must be plain one-rule strings of tool-name characters: an entry
+/// that is no string, or holds any other character outside its parentheses, is dropped alone,
+/// and a plain rule beside it stays. In `disallowedTools` only a non-string is dropped; a string
+/// stays as it is.
+#[test]
+fn hook_entries_that_are_not_plain_rule_strings_are_dropped_alone() {
+    let odd = [
+        json!(["WebFetch"]),
+        json!(["Read", ["WebFetch"]]),
+        json!(7),
+        json!(null),
+        json!({"tool": "WebFetch"}),
+        json!("\u{FEFF}WebFetch"),
+        json!("WebFetch\u{FEFF}"),
+        json!("\u{A0}WebFetch"),
+        json!("Read\u{2028}WebFetch"),
+        json!("\tWebFetch"),
+        json!("Read\tWebFetch"),
+        json!("Bash(a (b) WebFetch)"),
+        json!("Read(x)WebFetch"),
+    ];
+    for entry in odd {
+        let hook = json!({
+            "allowedTools": [entry.clone(), "Bash(git status)"],
+            "disallowedTools": [entry.clone(), "Task"],
+        });
+        for (search, login) in [(ON, Login::FirstParty), (LOCKED_OFF, Login::OtherCloud)] {
+            let options = options(&hook, &keys(search, login));
+            let allowed = options["allowedTools"].as_array().unwrap();
+            let disallowed = options["disallowedTools"].as_array().unwrap();
+            assert!(!allowed.contains(&entry), "{entry}: {allowed:?}");
+            assert_eq!(
+                disallowed.contains(&entry),
+                entry.is_string(),
+                "{entry}: {disallowed:?}"
+            );
+            assert!(allowed.iter().all(Value::is_string), "{entry}: {allowed:?}");
+            assert!(
+                disallowed.iter().all(Value::is_string),
+                "{entry}: {disallowed:?}"
+            );
+            assert!(
+                allowed.contains(&json!("Bash(git status)")),
+                "{entry}: {allowed:?}"
+            );
+            assert!(
+                disallowed.contains(&json!("Task")),
+                "{entry}: {disallowed:?}"
+            );
+        }
+    }
+}
+
+/// A hook deny written as two rules in one string survives whole (the CLI splits it into two
+/// denies); a non-string beside it is dropped.
+#[test]
+fn a_hooks_comma_deny_survives_and_a_non_string_deny_is_dropped() {
+    let hook = json!({"disallowedTools": ["Read,Write", ["Bash"], 3, "Task"]});
+    for search in [ON, LOCKED_OFF] {
+        let options = options(&hook, &keys(search, Login::FirstParty));
+        let disallowed = strings(&options["disallowedTools"]);
+        assert_eq!(disallowed[..2], ["Read,Write", "Task"]);
+        assert!(
+            options["disallowedTools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(Value::is_string)
+        );
+    }
 }
 
 #[test]
@@ -109,7 +256,7 @@ fn a_bedrock_login_keeps_webfetch_and_skips_the_preflight() {
     let options = options(&json!({}), &keys(ON, Login::Bedrock));
     let allowed = strings(&options["allowedTools"]);
     assert!(!allowed.contains(&"WebSearch"));
-    assert!(allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
+    assert!(!allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options["settings"]["skipWebFetchPreflight"], json!(true));
     assert_eq!(options.get("disallowedTools"), None);
     let other = self::options(&json!({}), &keys(ON, Login::OtherCloud));
