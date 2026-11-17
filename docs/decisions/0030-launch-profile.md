@@ -379,10 +379,11 @@ two dependencies, `profile` and `tracing`.
   Tools change marks one (`Relaunch::ProfileChanged`, `ProfileHook::generation` and
   `changed`, `turn/idle.rs`, 2026-11-15 to 2026-11-17). Its next question relaunches it on
   the new profile and resumes its session. The mark has no grace of its own: with no question,
-  the agent stops at the idle limit (300 s) as any idle agent does, never mid-turn, so the
-  idle stop does not cut a background command or helper of its last turn. The next question
-  can: it relaunches the agent unless background work of its last turn may still run
-  (`background_may_run`, `turn/idle.rs`), and then it goes to the agent as it is. Today the
+  the agent stops at the idle limit (300 s) as any idle agent does, never mid-turn, so a
+  background command or helper of its last turn is cut no sooner than any idle agent's stop,
+  300 s after its last event. The next question can cut it sooner: it relaunches the agent
+  unless background work of its last turn may still run (`background_may_run`,
+  `turn/idle.rs`), and then it goes to the agent as it is. Today the
   host knows of that work only when the last turn closed after a steer during a tool call,
   within `cap_min_idle` (60 s). So, as scope for now, a question after a profile change still
   cuts (a) a command or helper the agent put in the background on its own, without the lawyer
