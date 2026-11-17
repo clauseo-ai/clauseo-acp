@@ -3,6 +3,7 @@
 // place: a synced folder's notice with "Got it" (place-notice.tsx), and files kept only online. A network folder adds
 // nothing here: U2's warning says it (folder-warning.tsx). No end estimate. Part of New matter's chunk.
 import "./scan.css";
+import type { RefObject } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { fileName } from "@clauseo/components/lib/words-core.ts";
 import { sc } from "@clauseo/components/lib/words-scan.ts";
@@ -37,10 +38,13 @@ export function ScanLines({
   scan,
   onStop,
   onGotIt,
+  gotItRef,
 }: {
   scan: Scan;
   onStop: () => void;
   onGotIt: () => void;
+  /** Create's press moves focus to Got it through this (place-notice.tsx). */
+  gotItRef?: RefObject<HTMLButtonElement | null> | undefined;
 }) {
   const { lang } = useWords();
   const s = scan.latest;
@@ -82,7 +86,7 @@ export function ScanLines({
         )}
       </p>
       {service !== null && !scan.gotIt && (
-        <PlaceNotice service={service} onGotIt={away(".scan-place", onGotIt)} />
+        <PlaceNotice service={service} gotItRef={gotItRef} onGotIt={away(".scan-place", onGotIt)} />
       )}
       {cloud !== null && (
         <p className="scan-line" role="status" data-testid="scan-cloud-only">

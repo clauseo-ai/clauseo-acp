@@ -18,6 +18,7 @@ import type { NextMatterSource } from "./host-next.ts";
 import { backslashAt } from "./folder-backslash.ts";
 import { FolderWarning, type Warned } from "./folder-warning.tsx";
 import type { Matters } from "./matters.ts";
+import { focusGotIt } from "./scan/focus-got-it.ts";
 import { ScanLines } from "./scan/scan-lines.tsx";
 import { useScan } from "./scan/use-scan.ts";
 import { usePickWait } from "./picker-wait.ts";
@@ -63,6 +64,8 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   // undefined while the check runs
   const [answer, setAnswer] = useState<Answer | undefined>(null);
   const scan = useScan(matters);
+  // the synced notice's Got it: Create's press moves focus there while the notice waits
+  const gotIt = useRef<HTMLButtonElement>(null);
   // the picker's line while a pick is slow
   const wait = usePickWait();
   // bumped as Stop drops the pick, so the form drops the folder Change showed (matter-form.tsx's unpick)
@@ -126,7 +129,11 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     }
     if (said !== null && "warn" in said && !(shown != null && "warn" in shown)) return null;
     // the scan's first event says where the folder lives: a synced one waits for "Got it"
-    if (!(await scan.settle())) return null;
+    if (!(await scan.settle())) {
+      // a synced folder's notice waits for "Got it": Create says so by focus, and goes ahead after it
+      if (scan.awaitingGotIt()) focusGotIt(gotIt.current);
+      return null;
+    }
     return found;
   };
   const warned: Warned | null =
@@ -144,7 +151,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     /** The scan's lines under the folder line, for the existing folder picked. */
     scan:
       scanned === null ? undefined : (
-        <ScanLines scan={scanned} onStop={stop} onGotIt={scan.gotIt} />
+        <ScanLines scan={scanned} onStop={stop} onGotIt={scan.gotIt} gotItRef={gotIt} />
       ),
     unpick,
     opening: wait.opening,
