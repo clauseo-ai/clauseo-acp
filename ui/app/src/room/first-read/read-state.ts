@@ -28,7 +28,8 @@ export function fileOf(tool: ToolCallEntry): string | null {
 }
 
 /** Where the read stands, when the thread's latest question is a first-read turn; null otherwise, or when its turn
- * failed (U10's line says that). */
+ * failed (U10's line says that). A turn Clauseo's closing or a crash cut (failed `thread.interrupted`) is stopped,
+ * as the lawyer's Stop is: its Restart stays. */
 export function readStateOf(
   view: StreamView | undefined,
   turns: readonly TurnId[],
@@ -53,6 +54,8 @@ export function readStateOf(
     if (id.startsWith(STEP) && entry?.step?.turn === turn) {
       const stop = entry.step.stop;
       if (stop === "cancelled") return { kind: "stopped" };
+      if (stop === "failed" && entry.step.failure === "thread.interrupted")
+        return { kind: "stopped" };
       if (stop === "failed" || stop === "at_limit") return null;
       return { kind: "read" };
     }

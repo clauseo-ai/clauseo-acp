@@ -2,9 +2,11 @@
 // words, which never carry a quote the agent's command had round its path (D-019); and the working line's words for the
 // same read (step-names.ts), whose quoted path may hold a space.
 import { expect, test } from "vitest";
-import type { ToolCallEntry } from "../../transport/protocol.ts";
+import { entryIdOf, type StreamView } from "../../store/view.ts";
+import { step, userMessage } from "../../testing/stream-script.ts";
+import type { StepEntry, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { doingOf, titleOf } from "../thread/step-names.ts";
-import { fileOf, readLine, readLineParts } from "./read-state.ts";
+import { fileOf, readLine, readLineParts, readStateOf } from "./read-state.ts";
 
 const read = (title: string, locations: ToolCallEntry["locations"] = []): ToolCallEntry => ({
   order: 3,
@@ -78,4 +80,23 @@ test("the line's parts cut the file's name out at its isolates, for the one-line
     after: "",
   });
   expect(readLineParts("en", { kind: "read" }, 4).name).toBeNull();
+});
+
+/** A first-read thread whose turn ended with `over`. */
+const ended = (over: Partial<StepEntry>) => {
+  const entries: ViewEntry[] = [userMessage(1, 1, "Read the matter."), step(2, over)];
+  const view = {
+    ids: entries.map(entryIdOf),
+    entries: new Map(entries.map((e) => [entryIdOf(e), e])),
+  } as unknown as StreamView;
+  const turn = entries[0]!.user_message!.turn;
+  return readStateOf(view, [turn]);
+};
+
+test("a first read Clauseo's closing or a crash cut is stopped, as the lawyer's Stop is; other failures say nothing", () => {
+  expect(ended({ stop: "cancelled" })).toEqual({ kind: "stopped" });
+  expect(ended({ stop: "failed", failure: "thread.interrupted" })).toEqual({ kind: "stopped" });
+  expect(ended({ stop: "failed", failure: "agent.exited" })).toBeNull();
+  expect(ended({ stop: "failed" })).toBeNull();
+  expect(ended({ stop: "end_turn" })).toEqual({ kind: "read" });
 });
