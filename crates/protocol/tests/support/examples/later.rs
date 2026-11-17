@@ -329,33 +329,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
         },
     ];
-    notices.extend(
-        [
-            (
-                NotKeptReason::NoRule,
-                "Clauseo can't keep \u{201c}Always\u{201d} for this kind of request.",
-            ),
-            (
-                NotKeptReason::Refused,
-                "Clauseo keeps \u{201c}Always\u{201d} only for one exact command, site or file.",
-            ),
-            (
-                NotKeptReason::OutsideMatter,
-                "Clauseo keeps \u{201c}Always\u{201d} only for files in this matter's folder.",
-            ),
-            (
-                NotKeptReason::Full,
-                "This matter keeps as many permissions as it can. Remove some from Kept \
-                 permissions to keep more.",
-            ),
-        ]
-        .into_iter()
-        .map(|(reason, words)| Notice {
-            level: NoticeLevel::Info,
-            text: format!("Allowed this once only: {words}"),
-            kind: Some(NoticeKind::AlwaysNotKept { reason }),
-        }),
-    );
+    notices.extend(not_kept_notices());
     notices.extend(
         [
             (
@@ -387,6 +361,35 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         .map(|(reason, words)| skill_pack_notice(reason, words)),
     );
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// A host notice of kind `AlwaysNotKept` for each `NotKeptReason`, with its fallback text.
+fn not_kept_notices() -> impl Iterator<Item = Notice> {
+    [
+        (
+            NotKeptReason::NoRule,
+            "Clauseo can't keep \u{201c}Always\u{201d} for this kind of request.",
+        ),
+        (
+            NotKeptReason::Refused,
+            "Clauseo keeps \u{201c}Always\u{201d} only for one exact command, site or file.",
+        ),
+        (
+            NotKeptReason::OutsideMatter,
+            "Clauseo keeps \u{201c}Always\u{201d} only for files in this matter's folder.",
+        ),
+        (
+            NotKeptReason::Full,
+            "This matter keeps as many permissions as it can. Remove some from Kept \
+             permissions to keep more.",
+        ),
+    ]
+    .into_iter()
+    .map(|(reason, words)| Notice {
+        level: NoticeLevel::Info,
+        text: format!("Allowed this once only: {words}"),
+        kind: Some(NoticeKind::AlwaysNotKept { reason }),
+    })
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.
