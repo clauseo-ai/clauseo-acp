@@ -68,6 +68,9 @@ mod cancel;
 #[path = "host/cancel_leftovers.rs"]
 mod cancel_leftovers;
 #[cfg(test)]
+#[path = "host/claude_folders_fenced.rs"]
+mod claude_folders_fenced;
+#[cfg(test)]
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
