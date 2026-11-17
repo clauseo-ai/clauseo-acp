@@ -156,6 +156,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         matter: &matter,
         ask_all: false,
         protected: &[],
+        protected_edit: &[],
         home: None,
     });
     let entry = json!({
@@ -179,12 +180,13 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         "hooks": {"PreToolUse": [firm], "Stop": []},
     }}}}));
     let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, guard, None));
+    let change = super::config_change_entry(&program).unwrap();
     assert_eq!(
         meta["claudeCode"]["options"]["settings"],
         json!({
             "syncClaudeAiPlugins": false,
             "disableAllHooks": false,
-            "hooks": {"PreToolUse": [firm, entry], "Stop": []},
+            "hooks": {"PreToolUse": [firm, entry], "Stop": [], "ConfigChange": [change]},
         })
     );
     for hook in [
@@ -200,7 +202,10 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         ));
         assert_eq!(
             meta["claudeCode"]["options"]["settings"],
-            json!({"disableAllHooks": false, "hooks": {"PreToolUse": [entry]}}),
+            json!({
+                "disableAllHooks": false,
+                "hooks": {"PreToolUse": [entry], "ConfigChange": [change]},
+            }),
             "{hook}"
         );
     }
@@ -208,25 +213,83 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
+/// The `ConfigChange` entry as the session gets it: the guard program in its config-change
+/// mode, matching the user, project and local settings and the skills, not a firm's managed
+/// settings; its exact command refuses a user settings change (exit 2, the reason on stderr)
+/// and lets a managed settings change through.
+#[test]
+fn the_config_change_entry_refuses_its_selftest_input_and_lets_managed_settings_through() {
+    let program = std::env::temp_dir().join("clauseo-desktop");
+    let matter = std::env::temp_dir().join("Matters").join("Smith v Jones");
+    let guard = Some(GuardHook {
+        program: &program,
+        matter: &matter,
+        ask_all: true,
+        protected: &[],
+        protected_edit: &[],
+        home: None,
+    });
+    let meta = Value::Object(session_meta(None, McpControl::Managed, guard, None));
+    let entries = &meta["claudeCode"]["options"]["settings"]["hooks"][super::CONFIG_CHANGE];
+    let [entry] = entries.as_array().unwrap().as_slice() else {
+        panic!("{entries}");
+    };
+    assert_eq!(
+        entry["matcher"],
+        json!("user_settings|project_settings|local_settings|skills")
+    );
+    let hook = &entry["hooks"][0];
+    assert_eq!(hook["command"], json!(program.to_str().unwrap()));
+    let args: Vec<std::ffi::OsString> = hook["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap().into())
+        .collect();
+    assert_eq!(
+        args.first().and_then(|arg| arg.to_str()),
+        Some(crate::pre_write_guard::FLAG)
+    );
+    let run = |input: &[u8]| {
+        let mut errors = Vec::new();
+        let code = crate::pre_write_guard::run(&args[1..], input, Vec::new(), &mut errors);
+        (code, String::from_utf8(errors).unwrap())
+    };
+    let input = crate::pre_write_guard::config_change::selftest_input();
+    let reason = format!("{}\n", crate::pre_write_guard::config_change::REASON);
+    assert_eq!(run(&input), (crate::pre_write_guard::DENY, reason));
+    let managed = json!({"hook_event_name": "ConfigChange", "source": "policy_settings"});
+    assert_eq!(run(managed.to_string().as_bytes()), (0, String::new()));
+}
+
 /// Claude's entry passes its config folder and each protected path after the matter, and after
-/// `--ask-all` in forced ask: Claude's settings, instructions, skills and plugins in its home
-/// and both plugin folders (`guard_protected`).
+/// `--ask-all` in forced ask: Claude's settings, its own state and every name a launch removes
+/// from its home, and the built-in plugin (`guard_protected`); then the run's packs plugin,
+/// which only a file tool may not change.
 #[test]
 fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
     let home = std::path::Path::new("/d/agents/claude-acp/home");
-    let packs = std::path::Path::new("/d/run/r/skill-packs");
-    let protected = super::guard_protected(home, std::path::Path::new("/d"), packs);
+    let packs = [std::path::PathBuf::from("/d/run/r/skill-packs")];
+    let protected = super::guard_protected(home, std::path::Path::new("/d"));
     let want: Vec<std::path::PathBuf> = [
-        "/d/agents/claude-acp/home/settings.json",
-        "/d/agents/claude-acp/home/settings.local.json",
-        "/d/agents/claude-acp/home/CLAUDE.md",
-        "/d/agents/claude-acp/home/skills",
-        "/d/agents/claude-acp/home/plugins",
-        "/d/profile/claude-plugin",
-        "/d/run/r/skill-packs",
+        "settings.json",
+        ".claude.json",
+        ".config.json",
+        "CLAUDE.md",
+        "skills",
+        "commands",
+        "agents",
+        "rules",
+        "output-styles",
+        "plugins",
+        "hooks",
+        "workflows",
+        "agent-memory",
+        "settings.local.json",
     ]
     .iter()
-    .map(std::path::PathBuf::from)
+    .map(|name| home.join(name))
+    .chain([std::path::PathBuf::from("/d/profile/claude-plugin")])
     .collect();
     assert_eq!(protected, want);
     for ask_all in [false, true] {
@@ -235,6 +298,7 @@ fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
             matter: std::path::Path::new("/m"),
             ask_all,
             protected: &protected,
+            protected_edit: &packs,
             home: Some(home),
         })
         .unwrap();
@@ -246,6 +310,7 @@ fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
         for path in &protected {
             args.extend(["--protected", path.to_str().unwrap()]);
         }
+        args.extend(["--protected-edit", "/d/run/r/skill-packs"]);
         assert_eq!(entry["hooks"][0]["args"], json!(args), "{ask_all}");
     }
 }
@@ -263,6 +328,7 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         matter,
         ask_all: false,
         protected: &[],
+        protected_edit: &[],
         home: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);

@@ -169,6 +169,7 @@
 mod answers;
 mod ask;
 mod codex;
+pub mod config_change;
 mod names;
 mod protected;
 mod reach;
@@ -261,8 +262,15 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// the phase timings (`timings.rs`).
 /// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
-/// `output` (`ask.rs`); otherwise `output` stays empty.
+/// `output` (`ask.rs`); otherwise `output` stays empty. With [`config_change::FLAG`] first, it
+/// is the `ConfigChange` hook instead ([`config_change`]).
 pub fn run(args: &[OsString], input: impl Read, output: impl Write, errors: impl Write) -> i32 {
+    if args
+        .first()
+        .is_some_and(|first| first == config_change::FLAG)
+    {
+        return config_change::run(input, errors);
+    }
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
     run_timed(args, input, (output, errors), on)
 }

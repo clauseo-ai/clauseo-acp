@@ -1,7 +1,41 @@
 use serde_json::{Value, json};
 
-use super::{CLAUDE_SETTINGS_FILE, write_claude_settings};
+use super::{CLAUDE_SETTINGS_FILE, claude_launch_env, write_claude_settings};
 use crate::write;
+
+/// A Claude launch's environment holds `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` whatever the
+/// inherited environment, the agent's settings or the profile hook pass (`0`, `false`, in any
+/// case of the name), so nothing turns Claude Code's auto-memory back on over the flag settings.
+#[test]
+fn a_claude_launch_keeps_auto_memory_off_whatever_is_inherited() {
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
+    let var = crate::agent::loads::memory::AUTO_MEMORY_OFF_VAR;
+    let agent = clauseo_settings::AgentLaunch {
+        command: "claude-acp".to_owned(),
+        args: Vec::new(),
+        env: BTreeMap::from([(var.to_ascii_lowercase(), "false".to_owned())]),
+    };
+    let hook = BTreeMap::from([(OsString::from(var), OsString::from("0"))]);
+    let home = std::env::temp_dir().join("clauseo-claude-home-env");
+    let inherited = [(OsString::from(var), OsString::from("false"))];
+    let env = crate::agent::launch_env(
+        &agent,
+        hook,
+        claude_launch_env(&home),
+        &[],
+        inherited.into_iter(),
+        &[],
+    );
+    let named: Vec<_> = env
+        .iter()
+        .filter(|(name, _)| {
+            name.to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(var))
+        })
+        .collect();
+    assert_eq!(named, [(&OsString::from(var), &OsString::from("1"))]);
+}
 
 fn read(path: &std::path::Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()

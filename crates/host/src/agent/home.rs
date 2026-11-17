@@ -21,12 +21,21 @@ use serde_json::{Map, Value};
 /// notes (`<CLAUDE_CONFIG_DIR>/plans`) and its own skills and hooks.
 pub(crate) const CLAUDE_CONFIG_VAR: &str = "CLAUDE_CONFIG_DIR";
 
-/// What the host forces on a Claude agent's launch: `home` as `CLAUDE_CONFIG_DIR`.
+/// What the host forces on a Claude agent's launch: `home` as `CLAUDE_CONFIG_DIR`, and
+/// `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (`loads::memory::AUTO_MEMORY_OFF_VAR`), over any inherited,
+/// settings or hook value: `0` or `false` there would turn Claude Code's auto-memory on over the
+/// flag settings' `autoMemoryEnabled: false`.
 pub(crate) fn claude_launch_env(home: &Path) -> BTreeMap<OsString, OsString> {
-    BTreeMap::from([(
-        OsString::from(CLAUDE_CONFIG_VAR),
-        home.as_os_str().to_owned(),
-    )])
+    BTreeMap::from([
+        (
+            OsString::from(CLAUDE_CONFIG_VAR),
+            home.as_os_str().to_owned(),
+        ),
+        (
+            OsString::from(crate::agent::loads::memory::AUTO_MEMORY_OFF_VAR),
+            OsString::from("1"),
+        ),
+    ])
 }
 
 /// Claude Code's user settings file in its config folder.

@@ -20,11 +20,14 @@ mod codex;
 mod codex_entry_tests;
 #[cfg(test)]
 mod codex_layering_tests;
+mod config_change;
+pub(crate) use config_change::{CONFIG_CHANGE, config_change_entry};
 pub(crate) mod lawyer;
 #[cfg(test)]
 mod lawyer_tests;
 #[cfg(test)]
 mod layering_tests;
+pub(crate) mod memory;
 pub(crate) mod profile;
 #[cfg(test)]
 mod profile_keys_tests;
@@ -196,9 +199,12 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
 /// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
 ///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
-///   [`subagents::subagent_meta`], which settles `agents` and the append's last part.
+///   [`subagents::subagent_meta`], which settles `agents` and the append's last part; and at the
+///   end, in the flag settings, [`memory::memory_settings`] (no `CLAUDE.md` or `rules` from
+///   Claude's home, no auto-memory).
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
-///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
+///   `claudeCode.options.settings.hooks.PreToolUse`, and [`config_change_entry`] to
+///   `…hooks.ConfigChange`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
 ///   cannot turn it off: `--settings` outranks user settings (Claude Code's settings
 ///   precedence). It also turns the user's own hooks back on when their `disableAllHooks` had
@@ -239,7 +245,9 @@ pub(crate) fn session_meta(
         profile::claude_options(&mut options, keys);
         subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
     }
-    if let Some(entry) = guard.and_then(guard_entry) {
+    if let Some(guard) = guard
+        && let Some(entry) = guard_entry(guard)
+    {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
         let mut pre_tool_use = match hooks.remove("PreToolUse") {
@@ -248,11 +256,19 @@ pub(crate) fn session_meta(
         };
         pre_tool_use.push(entry);
         hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
+        if let Some(entry) = config_change_entry(guard.program) {
+            let mut config_change = match hooks.remove(CONFIG_CHANGE) {
+                Some(Value::Array(entries)) => entries,
+                _ => Vec::new(),
+            };
+            config_change.push(entry);
+            hooks.insert(CONFIG_CHANGE.to_owned(), Value::Array(config_change));
+        }
         settings.insert("hooks".to_owned(), Value::Object(hooks));
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
-    if keys.is_some() {
+    if let Some(keys) = keys {
         // Claude Code applies a settings `env` over the process env, so the variable goes in
         // the flag settings too: a user's or project's settings `env` cannot undo it.
         let mut settings = take_object(&mut options, "settings");
@@ -260,6 +276,11 @@ pub(crate) fn session_meta(
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
         super::one_shell::meta_env(&mut settings_env, cfg!(windows));
         settings.insert("env".to_owned(), Value::Object(settings_env));
+        memory::memory_settings(
+            &mut settings,
+            keys.data.claude_home.as_deref(),
+            &keys.data.spellings,
+        );
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
