@@ -302,6 +302,57 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// The paths the guard refuses the agent to change ([`guard_protected`]), each passed after
+    /// [`PROTECTED_FLAG`](crate::pre_write_guard::PROTECTED_FLAG); none when empty.
+    pub(crate) protected: &'a [PathBuf],
+    /// Claude's config folder, passed after
+    /// [`CLAUDE_HOME_FLAG`](crate::pre_write_guard::CLAUDE_HOME_FLAG).
+    pub(crate) home: Option<&'a Path>,
+}
+
+impl<'a> GuardHook<'a> {
+    /// The hook of a launch with `program`, `matter` and forced ask (`ask_all`), its protected
+    /// paths and Claude's config folder from the launch's deny set `deny`.
+    pub(crate) fn of(
+        program: &'a Path,
+        matter: &'a Path,
+        ask_all: bool,
+        deny: &'a super::data_fence::LaunchDeny,
+    ) -> Self {
+        let home = deny.claude_home.as_deref();
+        Self {
+            program,
+            matter,
+            ask_all,
+            protected: &deny.guarded,
+            home,
+        }
+    }
+}
+
+/// The names in Claude's config folder that load settings, instructions, skills or plugins into
+/// every later session, which the guard refuses the agent to change ([`guard_protected`]).
+pub(crate) const GUARD_PROTECTED_HOME: [&str; 5] = [
+    "settings.json",
+    "settings.local.json",
+    "CLAUDE.md",
+    "skills",
+    "plugins",
+];
+
+/// What the pre-write guard refuses a Claude session's agent to change, whatever the matter: in
+/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`]; under the data folder `data`,
+/// the built-in plugin (`data_fence::BUILT_IN_PLUGIN`); and the run's packs plugin
+/// `skill_packs`. Its deny rules name the same (`agent/data_fence.rs`).
+pub(crate) fn guard_protected(home: &Path, data: &Path, skill_packs: &Path) -> Vec<PathBuf> {
+    let plugin = crate::agent::data_fence::BUILT_IN_PLUGIN
+        .split('/')
+        .fold(data.to_path_buf(), |at, name| at.join(name));
+    GUARD_PROTECTED_HOME
+        .iter()
+        .map(|name| home.join(name))
+        .chain([plugin, skill_packs.to_path_buf()])
+        .collect()
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -315,10 +366,12 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
-/// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
-/// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
-/// carry it, and a lossy copy could run another program or guard another folder.
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` after the
+/// folder; then `--claude-home <home>` and `--protected <path>` for each protected path, the
+/// ones that are UTF-8 (a warning names none). The matter folder goes as an argument because the
+/// hook input's `cwd` follows the agent's `cd`. `None`, with a warning, when `program` or
+/// `matter` is no UTF-8 string: JSON cannot carry it, and a lossy copy could run another program
+/// or guard another folder.
 ///
 /// It goes in Claude Code's flag settings (`options.settings`), which load whatever the
 /// `settingSources`. It uses the exec form (`command` plus `args`): Claude Code spawns
@@ -337,6 +390,8 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        protected,
+        home,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -356,6 +411,20 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
     } else {
         GUARD_MATCHER
     };
+    let home = home.and_then(|home| {
+        home.to_str()
+            .map(|home| (crate::pre_write_guard::CLAUDE_HOME_FLAG, home))
+    });
+    let named = protected.iter().filter_map(|path| path.to_str());
+    if named.clone().count() < protected.len() {
+        tracing::warn!("a protected path is not UTF-8: the guard hook goes without it");
+    }
+    for (flag, value) in home
+        .into_iter()
+        .chain(named.map(|path| (crate::pre_write_guard::PROTECTED_FLAG, path)))
+    {
+        args.extend([flag, value]);
+    }
     Some(serde_json::json!({
         "matcher": matcher,
         "hooks": [{

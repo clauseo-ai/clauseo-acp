@@ -125,7 +125,8 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and
 /// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`);
-/// and the run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`).
+/// and the run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`); and for
+/// Claude, what its guard hook refuses the agent to change (`LaunchDeny::guarded`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
@@ -145,6 +146,10 @@ pub(super) fn launch_deny(
         if !deny.edit_denied.contains(&place) {
             deny.edit_denied.push(place);
         }
+    }
+    if let Some(home) = claude_home {
+        deny.guarded = crate::agent::loads::guard_protected(home, data, &run.skill_packs);
+        deny.claude_home = Some(home.to_path_buf());
     }
     deny
 }

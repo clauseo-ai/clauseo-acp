@@ -99,6 +99,11 @@ pub(crate) struct LaunchDeny {
     /// has it, the session's own packs plugin (`<run>/skill-packs`). Reads stay as they were;
     /// the Windows shell rules name them as targets (`super::windows_shell_deny_rules`).
     pub(crate) edit_denied: Vec<String>,
+    /// What the pre-write guard refuses Claude's agent to change, whatever the matter
+    /// (`agent::loads::guard_protected`), and Claude's config folder: the guard hook's arguments.
+    /// None before the launch prep has them.
+    pub(crate) guarded: Vec<PathBuf>,
+    pub(crate) claude_home: Option<PathBuf>,
 }
 
 /// The built-in plugin's folder under `<data>` (`clauseo_profile`'s `claude_plugin`), as a
@@ -128,6 +133,8 @@ impl LaunchDeny {
             kept,
             own_reads: Vec::new(),
             edit_denied: vec![BUILT_IN_PLUGIN.to_owned()],
+            guarded: Vec::new(),
+            claude_home: None,
         }
     }
 }

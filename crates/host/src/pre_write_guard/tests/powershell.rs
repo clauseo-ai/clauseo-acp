@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use super::super::protected::Protected;
 use super::super::reach::Reach;
 use super::super::shell::shell_targets;
 use super::super::{Escape, Targets, bash_escape};
@@ -38,7 +39,7 @@ fn path_layer(fx: &Fixture, command: &str) -> Vec<PathBuf> {
         Some(&Value::String(command.to_owned())),
         &matter,
         Escape::Backtick,
-        &reach,
+        (&reach, &Protected::default()),
     ) {
         Ok(Targets::Shell { files, .. }) => files.into_iter().map(|(path, _)| path).collect(),
         _ => Vec::new(),
