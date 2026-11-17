@@ -239,6 +239,37 @@ Var ClauseoPlaceTry
 Var ClauseoPlaceHandle
 ; 1 while the reinstall page's preflight runs (block reinstall-preflight), else 0.
 Var ClauseoPlacePage
+; The preflight's read-only bookkeeping: how many paths it cleared the read-only bit on (each
+; pushed on the stack), and the attributes and path it is working on.
+Var ClauseoPlaceCleared
+Var ClauseoPlaceAttr
+Var ClauseoPlaceAttrFile
+; Puts the read-only bit back on every file the preflight cleared it on, so a stopped run leaves
+; the attributes as they were; nothing to do in the copy loop, which runs with none cleared.
+!macro CLAUSEO_PLACE_RESTORE
+  ${Do}
+    ${If} $ClauseoPlaceCleared = 0
+      ${ExitDo}
+    ${EndIf}
+    Pop $ClauseoPlaceAttrFile
+    System::Call 'kernel32::GetFileAttributesW(w "$ClauseoPlaceAttrFile") i .s'
+    Pop $ClauseoPlaceAttr
+    IntOp $ClauseoPlaceAttr $ClauseoPlaceAttr | 1
+    System::Call 'kernel32::SetFileAttributesW(w "$ClauseoPlaceAttrFile", i $ClauseoPlaceAttr)'
+    IntOp $ClauseoPlaceCleared $ClauseoPlaceCleared - 1
+  ${Loop}
+!macroend
+; A preflight that found every file free: its cleared paths come off the stack, the bits stay
+; cleared (the copy loop clears the attributes anyway).
+!macro CLAUSEO_PLACE_FREED
+  ${Do}
+    ${If} $ClauseoPlaceCleared = 0
+      ${ExitDo}
+    ${EndIf}
+    Pop $ClauseoPlaceAttrFile
+    IntOp $ClauseoPlaceCleared $ClauseoPlaceCleared - 1
+  ${Loop}
+!macroend
 ; A file still held after the last try: say so (the box, none under /S), then stop. In Section
 ; Install: exit code 29 and Abort, which ends the section as failed. On the reinstall page,
 ; before the old uninstaller: interactive, Abort keeps the lawyer on the page with nothing
@@ -248,6 +279,7 @@ Var ClauseoPlacePage
   DetailPrint "$(clauseoFileInUse)"
   DetailPrint "${_CLAUSEO_FILE}"
   MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(clauseoFileInUse)" /SD IDOK
+  !insertmacro CLAUSEO_PLACE_RESTORE
   ${If} $ClauseoPlacePage = 1
     ${If} $PassiveMode = 1
       SetErrorLevel ${CLAUSEO_EXIT_FILE_IN_USE}
@@ -281,13 +313,24 @@ Var ClauseoPlacePage
 ; OPEN_ALWAYS and FILE_SHARE_READ (NSIS script.cpp TOK_FILEOPEN, util.c myOpenFile), the share mode
 ; File's own open uses: it fails on the same holders, keeps the contents, and with nothing
 ; written leaves the last-write time as it was. OPEN_ALWAYS would create a missing file, hence
-; the FileExists test. The attributes are reset first, as placing does, or a read-only file
-; would fail here and not there.
+; the FileExists test. A read-only file refuses the write access "a" asks for (CreateFile:
+; ERROR_ACCESS_DENIED), so its read-only bit, and only that bit, is cleared first and the path
+; remembered (CLAUSEO_PLACE_RESTORE sets it back if the run stops). Hidden and system don't block
+; it: CreateFile refuses those only with CREATE_ALWAYS or TRUNCATE_EXISTING, and myOpenFile passes
+; the file's own attributes anyway.
 !macro CLAUSEO_PLACE_FREE _CLAUSEO_FILE
   ${If} ${FileExists} "${_CLAUSEO_FILE}"
+    System::Call 'kernel32::GetFileAttributesW(w "${_CLAUSEO_FILE}") i .s'
+    Pop $ClauseoPlaceAttr
+    IntOp $ClauseoPlaceTry $ClauseoPlaceAttr & 1
+    ${If} $ClauseoPlaceTry = 1
+      IntOp $ClauseoPlaceAttr $ClauseoPlaceAttr & -2
+      System::Call 'kernel32::SetFileAttributesW(w "${_CLAUSEO_FILE}", i $ClauseoPlaceAttr)'
+      Push "${_CLAUSEO_FILE}"
+      IntOp $ClauseoPlaceCleared $ClauseoPlaceCleared + 1
+    ${EndIf}
     StrCpy $ClauseoPlaceTry 1
     ${Do}
-      SetFileAttributes "${_CLAUSEO_FILE}" NORMAL
       ClearErrors
       FileOpen $ClauseoPlaceHandle "${_CLAUSEO_FILE}" a
       ${IfNot} ${Errors}
@@ -485,6 +528,7 @@ Function PageLeaveReinstall
     ; can and leaves a held file, which would leave no working Clauseo once the install stopped
     ; at that file. A held one: the box, then back to this page (passive: exit 29, Quit).
     StrCpy $ClauseoPlacePage 1
+    StrCpy $ClauseoPlaceCleared 0
     !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\${MAINBINARYNAME}.exe"
     {{#each resources}}
       !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this.[1]}}"
@@ -492,6 +536,7 @@ Function PageLeaveReinstall
     {{#each binaries}}
       !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this}}"
     {{/each}}
+    !insertmacro CLAUSEO_PLACE_FREED
     StrCpy $ClauseoPlacePage 0
     ; <<< clauseo: reinstall-preflight
     HideWindow
@@ -858,6 +903,7 @@ Section Install
   ; File (CLAUSEO_PLACE_FREE): a held one stops the install with the folder as it was. The
   ; per-file loop stays for a file taken between this and its File.
   StrCpy $ClauseoPlacePage 0
+  StrCpy $ClauseoPlaceCleared 0
   !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\${MAINBINARYNAME}.exe"
   {{#each resources}}
     !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this.[1]}}"
@@ -865,6 +911,7 @@ Section Install
   {{#each binaries}}
     !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this}}"
   {{/each}}
+  !insertmacro CLAUSEO_PLACE_FREED
   ; <<< clauseo: place-preflight
   ; >>> clauseo: place-main-exe
   ; No file skipped, no NSIS box (block place-file). AllowSkipFiles off as well, for the rest of

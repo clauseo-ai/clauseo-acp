@@ -2,7 +2,8 @@
 //! names in `Machine::found`, `Delete` (which fails on a path in `Machine::locked`) and
 //! `RMDir /r`, each said. `FindClose` does nothing, in `Machine::line`. Also the template's
 //! place-file lines: `File` and `FileOpen` (which fail while `Machine::held` counts down),
-//! `FileClose`, `SetFileAttributes` and `Sleep`.
+//! `FileClose`, `SetFileAttributes` and `Sleep`, and the preflight's two `System::Call`s,
+//! `GetFileAttributesW` (pushes the file's attributes) and `SetFileAttributesW` (said).
 
 use super::Machine;
 
@@ -41,11 +42,15 @@ pub(super) fn file_line(machine: &mut Machine, parts: &[&str]) -> bool {
             let path = machine.expand(path);
             machine.error |= !machine.files.contains(&path);
         }
-        // The preflight's open for writing: fails while `held` counts down, as File does.
+        // The preflight's open for writing: fails while `held` counts down, as File does, and
+        // always on a path in `locked` (a file in use).
         ["FileOpen", var, path, "a"] => {
             let path = machine.expand(path);
             machine.said.push(format!("FileOpen {path}"));
-            if machine.held > 0 {
+            if machine.locked.contains(&path) {
+                machine.error = true;
+                machine.set(var, String::new());
+            } else if machine.held > 0 {
                 machine.held -= 1;
                 machine.error = true;
                 machine.set(var, String::new());
@@ -73,4 +78,33 @@ fn find(machine: &mut Machine, var: &str) {
         let name = machine.found.remove(0);
         machine.set(var, name);
     }
+}
+
+/// The preflight's `System::Call`s on `Machine::attributes`: `GetFileAttributesW` pushes the
+/// file's attributes (`i .s`), `SetFileAttributesW` sets them and is said. False for any other
+/// line, for `Machine::line`.
+pub(super) fn system_line(machine: &mut Machine, line: &str) -> bool {
+    if let Some(rest) = line.strip_prefix("System::Call 'kernel32::GetFileAttributesW(w \"") {
+        let path = rest
+            .strip_suffix("\") i .s'")
+            .expect("GetFileAttributesW's result on the stack");
+        let path = machine.expand(path);
+        let value = machine.attributes.get(&path).copied().unwrap_or(32);
+        machine.stack.push(value.to_string());
+        return true;
+    }
+    if let Some(rest) = line.strip_prefix("System::Call 'kernel32::SetFileAttributesW(w \"") {
+        let (path, value) = rest
+            .strip_suffix(")'")
+            .and_then(|rest| rest.split_once("\", i "))
+            .expect("SetFileAttributesW(w \"path\", i value)");
+        let path = machine.expand(path);
+        let value: i64 = machine.expand(value).parse().unwrap();
+        machine
+            .said
+            .push(format!("SetFileAttributesW {path} {value}"));
+        machine.attributes.insert(path, value);
+        return true;
+    }
+    false
 }

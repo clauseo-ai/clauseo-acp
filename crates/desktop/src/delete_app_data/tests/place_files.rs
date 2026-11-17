@@ -6,7 +6,7 @@
 //! anything is replaced), then set `SetOverwrite try`, under which NSIS never shows its own box,
 //! and wrap every `File` in a loop. Both try three times, 2 s apart, then say `clauseoFileInUse`
 //! (no box under `/S`), set exit code 29 and abort before the uninstaller and the registry are
-//! written. The lines are read from the template and run by `nsis_run` on a fake machine.
+//! written; `nsis_run` runs the template's lines on a fake machine.
 
 use std::collections::HashMap;
 
@@ -18,7 +18,7 @@ use super::template::{TEMPLATE, block_code, split_blocks};
 const EXE: &str = r"C:\Users\a\AppData\Local\Clauseo\Clauseo.exe";
 
 /// The `place-file` block's code lines, as owned strings for `macro_body`.
-fn place_code() -> Vec<String> {
+pub(super) fn place_code() -> Vec<String> {
     let (blocks, _) = split_blocks(&read(TEMPLATE));
     block_code(&blocks, "place-file")
         .into_iter()
@@ -28,8 +28,22 @@ fn place_code() -> Vec<String> {
 
 /// The lines of the macro `name` for `EXE`, `CLAUSEO_PLACE_FAILED` inserted in place (its
 /// parameter has the same name, so the same define stands for both).
-fn place_lines(code: &[String], name: &str, defines: &HashMap<String, String>) -> Vec<String> {
-    let failed = preprocess(&macro_body(code, "CLAUSEO_PLACE_FAILED")[1..], defines);
+pub(super) fn place_lines(
+    code: &[String],
+    name: &str,
+    defines: &HashMap<String, String>,
+) -> Vec<String> {
+    let restore = preprocess(&macro_body(code, "CLAUSEO_PLACE_RESTORE")[1..], defines);
+    let failed: Vec<String> = preprocess(&macro_body(code, "CLAUSEO_PLACE_FAILED")[1..], defines)
+        .into_iter()
+        .flat_map(|line| {
+            if line == "!insertmacro CLAUSEO_PLACE_RESTORE" {
+                restore.clone()
+            } else {
+                vec![line]
+            }
+        })
+        .collect();
     preprocess(&macro_body(code, name)[1..], defines)
         .into_iter()
         .flat_map(|line| {
@@ -361,6 +375,7 @@ fn the_preflight_checks_every_target_the_place_loop_writes_before_the_first_file
         block_code(&blocks, "place-preflight"),
         [
             "StrCpy $ClauseoPlacePage 0",
+            "StrCpy $ClauseoPlaceCleared 0",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\${MAINBINARYNAME}.exe\"",
             "{{#each resources}}",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\\\{{this.[1]}}\"",
@@ -368,6 +383,7 @@ fn the_preflight_checks_every_target_the_place_loop_writes_before_the_first_file
             "{{#each binaries}}",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\\\{{this}}\"",
             "{{/each}}",
+            "!insertmacro CLAUSEO_PLACE_FREED",
         ]
     );
 }
@@ -417,6 +433,7 @@ fn the_reinstall_page_checks_the_same_files_before_either_old_uninstaller_runs()
         block_code(&blocks, "reinstall-preflight"),
         [
             "StrCpy $ClauseoPlacePage 1",
+            "StrCpy $ClauseoPlaceCleared 0",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\${MAINBINARYNAME}.exe\"",
             "{{#each resources}}",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\\\{{this.[1]}}\"",
@@ -424,6 +441,7 @@ fn the_reinstall_page_checks_the_same_files_before_either_old_uninstaller_runs()
             "{{#each binaries}}",
             "!insertmacro CLAUSEO_PLACE_FREE \"$INSTDIR\\\\{{this}}\"",
             "{{/each}}",
+            "!insertmacro CLAUSEO_PLACE_FREED",
             "StrCpy $ClauseoPlacePage 0",
         ]
     );
@@ -458,8 +476,7 @@ fn a_held_file_on_the_reinstall_page_goes_back_to_it_or_quits_with_29_when_passi
     let machine = run_free_on_page(true);
     let mut said = tries.to_vec();
     said.extend(["SetErrorLevel 29".to_owned(), "Quit".to_owned()]);
-    // Quit ends the installer there; the fake, which doesn't stop at Quit, reaches the Abort
-    // after it, which NSIS never runs.
+    // Quit ends the installer; the fake doesn't stop at Quit and reaches the Abort after it.
     said.push("Abort".to_owned());
     assert_eq!(machine.said, said);
 }
