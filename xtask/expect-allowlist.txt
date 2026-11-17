@@ -719,5 +719,5 @@ crates/host/src/crash/native/win.rs - unsafe_code
 crates/desktop/src/counts/crashes/win.rs - unsafe_code
 crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
-# The version-history tool's backend, until its transport wires it (agent-versions-tool).
+# The version-history tool's Word test runs the pinned stetdoc it finds on PATH.
 crates/host/src/versions/tests/docx.rs stetdoc_on_path clippy::disallowed_methods
