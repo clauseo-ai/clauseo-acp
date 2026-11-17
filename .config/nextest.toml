@@ -73,6 +73,14 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-host) & test(/::many_devanagari_names_beside_an_owner_file_/)'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# host's Windows guard test for a held file under a Devanagari name runs Codex's hook line fifty
+# times under each PowerShell, about a hundred shell and guard starts: 22.1 s alone on win-02, and
+# on win-01 28.5 s to over 30 s under the gate's load (#1186's round), about 0.2 to 0.3 s a start,
+# so no single call came near the hook's own 30 s. 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-host) & binary(guard_windows) & test(=a_held_file_with_a_devanagari_name_is_refused_with_its_name_byte_for_byte)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The sandbox's elevated set-up exe test makes a fresh pool, 8 users since the top-up (#609), and
 # each user's first logon makes its profile: 12 to 15 s each on the windows-2025 runner (CI run
 # 42339880668), so about 2 min with the removal after; 30 s killed it. 300 s still ends a hung one.
