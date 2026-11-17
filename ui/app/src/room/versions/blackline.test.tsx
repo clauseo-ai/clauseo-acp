@@ -9,11 +9,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
 import type {
   BlacklinePart,
+  ChangedTable,
   FileChange,
   HostQuery,
   QueryResult,
   ViewEntry,
 } from "../../transport/protocol.ts";
+import { tablesLine } from "./blackline-words.ts";
 import { file, mountVersions, NOON, stepEntry, version, type VersionsHarness } from "./testing.ts";
 
 let h: VersionsHarness | null = null;
@@ -379,6 +381,21 @@ test("the table notice names each table and what changed in it; past four, the f
   expect(lines()).toEqual([
     "Formatting changed in table 2: borders, shading; table 1 in the header (first page): merged cells; table 1 in the footnotes: row height, and in 3 more.",
   ]);
+});
+
+test("in Hindi the table line says formatting changed first, then the tables after a colon, and how many more as a sentence of its own", () => {
+  const tables: ChangedTable[] = [
+    { place: "body", number: 2, formats: ["borders", "shading"] },
+    { place: "body", number: 1, formats: ["widths", "alignment"] },
+    { place: "footnotes", number: 1, formats: ["row_height"] },
+    { place: "endnotes", number: 2, formats: ["other"] },
+    { place: "body", number: 3, formats: ["shading"] },
+    { place: "body", number: 4, formats: ["borders"] },
+  ];
+  expect(tablesLine("hi", tables.slice(0, 1), [])).toBe("फ़ॉर्मैटिंग बदल गई है: तालिका 2: बॉर्डर, शेडिंग।");
+  expect(tablesLine("hi", tables, [])).toBe(
+    "फ़ॉर्मैटिंग बदल गई है: तालिका 2: बॉर्डर, शेडिंग; तालिका 1: चौड़ाई, संरेखण; फ़ुटनोट में तालिका 1: पंक्ति की ऊँचाई। बाकी 3 में भी।",
+  );
 });
 
 test("past the host's cap the table line counts every changed table: 60 changed, 50 named, says the first three and 57 more", async () => {

@@ -112,8 +112,8 @@ const OWN = {
     "कुछ तालिकाओं, पंक्तियों या सेल में फ़ॉर्मैटिंग बदल गई है।",
   // which tables' formatting changed, and how (UC-452 to UC-464); {tables} lists them apart by semicolons, each with its
   // groups after a colon; provisional
-  "Formatting changed in {tables}.": "{tables} में फ़ॉर्मैटिंग बदल गई है।",
-  "Formatting changed in {tables}, and in {n} more.": "{tables} में, और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+  "Formatting changed in {tables}.": "फ़ॉर्मैटिंग बदल गई है: {tables}।",
+  "Formatting changed in {tables}, and in {n} more.": "फ़ॉर्मैटिंग बदल गई है: {tables}। बाकी {n} में भी।",
   "table {n}": "तालिका {n}",
   "table {n} in the {part}": "{part} में तालिका {n}",
   "table {n} in the footnotes": "फ़ुटनोट में तालिका {n}",
