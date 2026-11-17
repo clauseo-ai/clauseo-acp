@@ -7,7 +7,13 @@
 // and every other file on the sheet it had.
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
-import type { FileChange, HostQuery, QueryResult, ViewEntry } from "../../transport/protocol.ts";
+import type {
+  BlacklinePart,
+  FileChange,
+  HostQuery,
+  QueryResult,
+  ViewEntry,
+} from "../../transport/protocol.ts";
 import { file, mountVersions, NOON, stepEntry, version, type VersionsHarness } from "./testing.ts";
 
 let h: VersionsHarness | null = null;
@@ -296,6 +302,29 @@ test("a footnote and a first-page header that changed are shown after the body, 
   // the body comes first, as before, and keeps its own marks
   expect(page()?.querySelector(".page-paras")?.closest(".ver-part")).toBeNull();
   expect(page()?.querySelector(".ver-del")?.textContent).toBe("first");
+  expect(lines()).toEqual([]);
+});
+
+test("a part of a kind this version doesn't know, a newer host's, stands under its own heading with its paragraphs marked", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      parts: [
+        { kind: "text_box", paragraphs: [swap("Pune", "Mumbai")] },
+        { kind: { footnote: { number: 2 } }, paragraphs: [swap("a", "b")] },
+        // a newer host's kind as an object whose key this version has no type for
+        {
+          kind: { comment: { number: 1 } } as unknown as BlacklinePart["kind"],
+          paragraphs: [swap("c", "d")],
+        },
+      ],
+    },
+  }));
+  expect(partsShown()).toEqual([
+    { heading: "Another part of the document", ins: ["Mumbai"], del: ["Pune"], barred: 1 },
+    { heading: "Footnote 2", ins: ["b"], del: ["a"], barred: 1 },
+    { heading: "Another part of the document", ins: ["d"], del: ["c"], barred: 1 },
+  ]);
   expect(lines()).toEqual([]);
 });
 
