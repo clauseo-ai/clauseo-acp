@@ -898,6 +898,13 @@ Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns remote deb
 Clauseo checks your Chrome, Edge and Chromium policy itself, before it starts any browser,
 whichever browser it would pick.
 
+The agent can't click or type past a certificate warning in Clauseo's browser: Clauseo's own
+profile for it turns the warning's "Proceed" off. A managed `SSLErrorOverrideAllowed` (set to
+allow) or `SSLErrorOverrideAllowedForOrigins` policy outranks that profile setting and brings
+"Proceed" back on that computer: the registry's `SOFTWARE\Policies\Google\Chrome` or
+`SOFTWARE\Policies\Microsoft\Edge` (HKLM or HKCU), macOS managed preferences, or
+`/etc/opt/chrome/policies/managed` on Linux.
+
 **What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
 in Chrome's, Edge's and Chromium's policy locations. It takes the same values Chrome does:
 
@@ -984,7 +991,9 @@ The agents' hosts are Clauseo's starting list for its egress proxy (`builtin_all
 `crates/sandbox/src/proxy/allowlist.rs`), inferred and not yet measured. The proxy chains to
 your firm's proxy: it reads `HTTPS_PROXY` and `HTTP_PROXY`, then the OS's proxy settings, PAC
 included, and stores no proxy password ([decision 0039](decisions/0039-egress-proxy.md),
-"Upstream").
+"Upstream"). A firm that inspects TLS traffic must put its root certificate in the operating
+system's certificate store: Clauseo's proxy is a plain tunnel and adds no certificate of its own,
+so Chrome, Edge and the agents check certificates against the OS's store.
 
 Coming:
 

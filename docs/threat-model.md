@@ -185,8 +185,10 @@ any ACP message, including permission requests with misleading text.
   `thisisunsafe`, reload, history, new tabs and an `http://` redirect. A condition of switching
   on Claude's unguarded shell-browser path (`agent/loads/browser.rs:322-347`, `shell_env`; off
   today; there the agent runs agent-browser in its own shell and could pass
-  `--ignore-https-errors`): that path must get the same protection first. Not yet run on Edge
-  (Windows)
+  `--ignore-https-errors`): that path must get the same protection first. Scope: a firm's managed
+  `SSLErrorOverrideAllowed` or `SSLErrorOverrideAllowedForOrigins` policy (registry, macOS managed
+  preferences, or `/etc/opt/chrome/policies/managed`) outranks the profile setting and brings
+  "Proceed" back on that computer. Not yet run on Edge (Windows)
 
 ## Sandbox
 
