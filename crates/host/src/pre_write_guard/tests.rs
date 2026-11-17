@@ -556,5 +556,6 @@ mod fixtures;
 mod gaps;
 mod nesting;
 mod powershell;
+mod protected;
 mod record;
 mod timings;

@@ -31,6 +31,7 @@ fn shell(command: &str) -> FenceCheck {
         words: candidates_words(Some(&raw), true),
         health: DataFenceHealth::default(),
         vars: Vec::new(),
+        shared_own: true,
     }
 }
 
@@ -118,6 +119,7 @@ fn under_home(command: &str) -> FenceCheck {
         words: candidates_words(Some(&raw), true),
         health: DataFenceHealth::default(),
         vars: vars.map(|(n, v)| (n.to_owned(), v.to_owned())).to_vec(),
+        shared_own: true,
     }
 }
 

@@ -353,3 +353,34 @@ fn a_changed_pack_is_skipped_as_changed_and_nothing_is_written() {
     );
     write::remove_dir_all(&root).unwrap();
 }
+
+/// Each launch writes its own copy of the packs, in its own run folder: a change planted in one
+/// launch's copy is not in the next launch's, which holds the pack's own bytes again. A copy
+/// left at the place a launch writes to is never written over, and that launch offers no packs
+/// plugin (no token).
+#[test]
+fn a_change_planted_in_one_launch_copy_of_the_packs_is_not_in_the_next() {
+    let root = with_pack("prep-fresh");
+    let skill = |run: &str| {
+        root.join("run")
+            .join(run)
+            .join("skill-packs")
+            .join("skills")
+            .join("nda-kit--nda-review")
+            .join("SKILL.md")
+    };
+    let first = root.join("run").join("s-1").join("skill-packs");
+    assert!(prep(&root).run(&first).0.is_some());
+    let shipped = std::fs::read(skill("s-1")).unwrap();
+    write::write_file(
+        &skill("s-1"),
+        b"---\nname: x\ndescription: x\n---\n@outside.md\n",
+    )
+    .unwrap();
+    let second = root.join("run").join("s-2").join("skill-packs");
+    assert!(prep(&root).run(&second).0.is_some());
+    assert_eq!(std::fs::read(skill("s-2")).unwrap(), shipped);
+    let (written, _) = prep(&root).run(&first);
+    assert!(written.is_none());
+    write::remove_dir_all(&root).unwrap();
+}

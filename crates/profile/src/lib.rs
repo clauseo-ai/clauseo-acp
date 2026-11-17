@@ -25,6 +25,7 @@ pub mod instructions;
 pub mod packs;
 pub mod paths;
 pub mod placeholders;
+mod plugin_match;
 pub mod servers;
 pub mod skills;
 pub mod subagents;
@@ -46,6 +47,7 @@ pub use error::ProfileError;
 pub use instructions::Instructions;
 pub use packs::{PackEntry, PackWrite, PacksWritten, write_packs};
 pub use paths::{BrowserSidecars, ProfilePaths};
+pub use plugin_match::match_plugin;
 pub use servers::ProfileServer;
 pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
 
@@ -474,8 +476,9 @@ impl SkillWrite {
 const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 
 /// Writes `skills` (and the plugin manifest, when there is one) as [`skills::write_rendered`]
-/// does, under the same process-wide lock, and through no symlink. Reads and writes files: on
-/// the launch-prep thread, never the host's.
+/// does, under the same process-wide lock, and through no symlink. With a plugin, the plugin
+/// folder and its parent are first made real folders ([`match_plugin`]'s check). Reads and
+/// writes files: on the launch-prep thread, never the host's.
 ///
 /// Then the retired built-ins ([`skills::builtin::RETIRED_BUILTINS`]) go from the folder
 /// ([`skills::retire`]), and so does each optional skill `skills` does not carry: the
@@ -484,12 +487,14 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// wrote would otherwise stay in Claude's plugin, which Claude reads whole. Their files are
 /// reported as removed.
 ///
-/// The host logs an error from here as a warning and never fails a launch on it: the agent then
-/// runs with the skills the folder already holds, or none, and a Codex agent gets
-/// [`ClauseoProfile::codex_keys_without_index`].
+/// For a write without a plugin (Codex's own folder), the host logs an error from here as a
+/// warning and starts the agent with the skills the folder already holds, or none, and a Codex
+/// agent gets [`ClauseoProfile::codex_keys_without_index`]. For a write with one, the host runs
+/// [`match_plugin`], then writes once more, and refuses the launch when that fails too.
 pub fn write_skills(skills: &SkillWrite) -> Result<SkillsWritten, ProfileError> {
     let _held = skills::write_lock();
     if let Some(plugin) = &skills.plugin {
+        plugin_match::real_folders(plugin)?;
         skills::no_links(plugin, &PLUGIN_MANIFEST_PATH)?;
         skills::no_links(plugin, &["skills"])?;
         let [folder, file] = PLUGIN_MANIFEST_PATH;

@@ -225,7 +225,7 @@ pub(super) fn check_root(folder: &Path) -> Result<(), Refusal> {
 
 /// Whether `meta` carries `FILE_ATTRIBUTE_REPARSE_POINT`.
 #[cfg(windows)]
-pub(super) fn is_reparse(meta: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse(meta: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
     /// `FILE_ATTRIBUTE_REPARSE_POINT`.
     const REPARSE_POINT: u32 = 0x400;
@@ -234,7 +234,7 @@ pub(super) fn is_reparse(meta: &std::fs::Metadata) -> bool {
 
 /// No reparse points off Windows.
 #[cfg(not(windows))]
-pub(super) fn is_reparse(_meta: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse(_meta: &std::fs::Metadata) -> bool {
     false
 }
 

@@ -69,6 +69,7 @@ pub(super) fn check_as(
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
         vars: Vec::new(),
+        shared_own: true,
     }
 }
 
@@ -109,8 +110,10 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         // The relay token files (R24), the proxy's password files (ADR 0053) and the shell
         // browser's config files are the only things under `run` denied; the run folders
         // themselves never are.
+        // The built-in plugin is denied for `Edit` alone; a Read of it stays.
         let named = |r: &&String| {
             r.contains(kept)
+                && r.as_str() != "Edit(//d/ata/profile/claude-plugin/**)"
                 && !r.ends_with("/run/*/relay-token)")
                 && !r.ends_with("/run/*/proxy-secret)")
                 && !r.ends_with("/run/*/agent-browser/config.json)")
@@ -122,6 +125,70 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         false,
     );
     assert_eq!(both.len(), rules.len() * 2);
+}
+
+/// What Claude Code loads from the data folder is denied for `Edit` (which covers `Write`,
+/// `MultiEdit` and `NotebookEdit`): the whole built-in plugin, whose skills stay readable, and
+/// Claude's local settings file in its home, for Read too.
+#[test]
+fn the_built_in_plugin_and_claudes_local_settings_are_denied_for_edit() {
+    let deny = LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]);
+    let rules = claude_deny_rules(&deny, false);
+    for rule in [
+        "Edit(//d/ata/profile/claude-plugin/**)",
+        "Read(//d/ata/agents/claude-acp/home/settings.local.json)",
+        "Edit(//d/ata/agents/claude-acp/home/settings.local.json)",
+        "Edit(//d/ata/agents/claude-acp/home/settings.json)",
+        "Edit(//d/ata/agents/claude-acp/home/CLAUDE.md)",
+        "Edit(//d/ata/agents/claude-acp/home/skills/**)",
+        "Edit(//d/ata/agents/claude-acp/home/plugins/**)",
+    ] {
+        assert!(rules.iter().any(|r| r == rule), "{rule} in {rules:?}");
+    }
+    assert!(
+        !rules.iter().any(|r| r.starts_with("Read(//d/ata/profile")),
+        "{rules:?}"
+    );
+    let allow = super::claude_allow_rules(&deny);
+    assert!(
+        allow.contains(&"Read(//d/ata/profile/claude-plugin/skills/**)".to_owned()),
+        "{allow:?}"
+    );
+}
+
+/// A request naming the built-in plugin is refused unseen for Codex, whose sandbox reads it
+/// unasked, so its request is for a write: a shipped skill, a new file there, by a location, a
+/// `rawInput` path and a command. For Claude, whose Read of a built-in skill may ask, it goes on.
+#[test]
+fn a_codex_request_into_the_built_in_plugin_is_refused() {
+    let dir = layout("plugin-codex");
+    let root = dir.path();
+    let plugin = root.join("data").join("profile").join("claude-plugin");
+    let skill = plugin
+        .join("skills")
+        .join("legal-drafting")
+        .join("SKILL.md");
+    write::create_dir_all(skill.parent().unwrap()).unwrap();
+    write::write_file(&skill, b"x").unwrap();
+    let planted = text(&plugin.join("skills").join("planted").join("SKILL.md"));
+    let shipped = text(&skill);
+    let requests = [
+        (vec![shipped], None),
+        (vec![planted.clone()], None),
+        (Vec::new(), Some(json!({"path": planted}))),
+        (
+            Vec::new(),
+            Some(json!({"command": format!("cp a.md '{planted}'")})),
+        ),
+    ];
+    for (paths, raw) in &requests {
+        let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let mut codex = check(root, &paths, raw.as_ref());
+        codex.shared_own = false;
+        assert!(codex.touches_data(), "Codex: {paths:?} {raw:?}");
+        let claude = check(root, &paths, raw.as_ref());
+        assert!(!claude.touches_data(), "Claude: {paths:?} {raw:?}");
+    }
 }
 
 /// On Windows a path's separators become `/` and its drive `/c`; glob characters are escaped.

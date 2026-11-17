@@ -1457,3 +1457,8 @@ deny").
 
 ADMX and ADML templates, a firm bundle zip, an MSI and a `.pkg` for Jamf come when a firm asks. Claude
 Code's and Codex's own managed settings are the vendors' (their business plans), not Clauseo's.
+Claude Code fetches a firm's remote settings afresh at each start; Clauseo keeps no cached copy
+between sessions. If that fetch fails, the session runs without the firm's remote settings until
+a later fetch in the session succeeds. A firm that needs its remote settings in force at every
+start sets `forceRemoteSettingsRefresh` in its managed settings; Claude Code then does not start
+without them.

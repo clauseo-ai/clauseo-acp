@@ -20,6 +20,10 @@
 //!
 //! In every case the login's child, its pollers and its URL file are gone before the last state
 //! is sent, so no status process runs after it.
+//!
+//! Before each Claude Code process (a login, a status check, a logout) the host's write of
+//! Claude Code's user settings runs on the home ([`settings_written`]); when it fails, that run
+//! does not start.
 
 use std::path::Path;
 use std::pin::pin;
@@ -71,13 +75,31 @@ enum First {
     Confirmed(Identity),
 }
 
+/// Runs [`crate::SigninConfig::claude_settings`] on the job's home, when set; whether the run
+/// may start. A failure is a warning that names no path.
+fn settings_written<T: Timer + Send + Sync>(job: &SigninJob<T>) -> bool {
+    let Some(write) = job.config.signin.claude_settings.as_ref() else {
+        return true;
+    };
+    let written = write(&job.home);
+    if let Err(error) = &written {
+        tracing::warn!(
+            error_kind = ?error.kind(),
+            "Claude's settings were not written: the sign-in run does not start"
+        );
+    }
+    written.is_ok()
+}
+
 /// A login run, start to end; gives the last state.
 pub(crate) async fn sign_in<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     console: bool,
     paste: Option<async_channel::Receiver<PasteCode>>,
 ) -> SigninState {
-    if crate::write::create_private_dirs_under(&job.config.data_dir, &job.home).is_err() {
+    if crate::write::create_private_dirs_under(&job.config.data_dir, &job.home).is_err()
+        || !settings_written(job)
+    {
         return job.failed(SigninCode::Failed);
     }
     let url_file = match url_file(job) {
@@ -253,6 +275,9 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> Option<(Option<i32>, Option<ClaudeStatus>)> {
+    if !settings_written(job) {
+        return None;
+    }
     let limit = job.status_limit(STATUS_LIMIT);
     let mut spec = job.spec(STATUS, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
@@ -283,6 +308,9 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         || super::found::is_reused(job)
     {
         return super::found::check(job).await;
+    }
+    if !settings_written(job) {
+        return Some(job.failed(SigninCode::Failed));
     }
     let env = job.env(RunKind::Own { home: &job.home }, None);
     let spec = job.spec(LOGOUT, env, LOGOUT_LIMIT);

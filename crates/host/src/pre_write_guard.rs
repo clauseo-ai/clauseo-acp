@@ -140,6 +140,12 @@
 //!
 //! And Codex's own home, when its hook names it with [`CODEX_HOME_FLAG`]: see `codex.rs`.
 //!
+//! One rule for Claude Code's writes: the paths its entry names with [`PROTECTED_FLAG`] (Claude's
+//! own settings, instructions, skills and plugins in its config folder, the built-in plugin and
+//! the run's packs plugin) are refused to its file tools, and to a shell command that names one
+//! in either reading and does more than read, a reference to the config folder's variable read
+//! as the folder ([`CLAUDE_HOME_FLAG`]), in a folder change too (`protected.rs`).
+//!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
 //! (Codex's hook), one line in that file for the host to show the lawyer (`record.rs`); stdout
@@ -163,7 +169,9 @@
 mod answers;
 mod ask;
 mod codex;
+pub mod config_change;
 mod names;
+mod protected;
 mod reach;
 pub(crate) mod record;
 mod shell;
@@ -183,6 +191,7 @@ use codex::{
     codex_home_arg, has_codex_part, in_codex_folder, names_codex_home, patch_targets,
     reaches_codex_home,
 };
+use protected::Protected;
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::{Reach, existing_resolved, lexical};
@@ -202,6 +211,18 @@ pub const MATTER_FLAG: &str = "--matter";
 /// The argument that names Codex's home (`CODEX_HOME`), followed by the folder: Codex's hook
 /// passes it (`agent/loads/codex.rs`), and a target in that folder is refused ([`run`]).
 pub const CODEX_HOME_FLAG: &str = "--codex-home";
+
+/// The argument that names a path the agent may not change (`protected.rs`), followed by it;
+/// repeated for each. Claude Code's entry passes them (`agent/loads.rs`).
+pub const PROTECTED_FLAG: &str = protected::FLAG;
+
+/// The argument that names a path only a file tool may not change (`protected.rs`), followed by
+/// it; repeated for each.
+pub const PROTECTED_EDIT_FLAG: &str = protected::EDIT_FLAG;
+
+/// The argument that names Claude's config folder, which a reference to its variable in a shell
+/// word stands for (`protected.rs`), followed by it.
+pub const CLAUDE_HOME_FLAG: &str = protected::HOME_FLAG;
 
 /// The argument that names the file each refusal the lawyer is told about is recorded in
 /// (`record.rs`), followed by the file.
@@ -230,7 +251,9 @@ pub const DENY: i32 = 2;
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
 
 /// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none, then
-/// [`RECORD_FLAG`] and its file and [`RECORD_ID_FLAG`] and its identity, or none); one hook
+/// [`RECORD_FLAG`] and its file and [`RECORD_ID_FLAG`] and its identity, or none; Claude Code's
+/// entry adds [`PROTECTED_FLAG`] and a path for each protected one and [`CLAUDE_HOME_FLAG`] and
+/// its folder); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read, but as Codex's hook (no `--matter`) [`DENY`] with [`UNCHECKED`] when
@@ -239,8 +262,15 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// the phase timings (`timings.rs`).
 /// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
-/// `output` (`ask.rs`); otherwise `output` stays empty.
+/// `output` (`ask.rs`); otherwise `output` stays empty. With [`config_change::FLAG`] first, it
+/// is the `ConfigChange` hook instead ([`config_change`]).
 pub fn run(args: &[OsString], input: impl Read, output: impl Write, errors: impl Write) -> i32 {
+    if args
+        .first()
+        .is_some_and(|first| first == config_change::FLAG)
+    {
+        return config_change::run(input, errors);
+    }
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
     run_timed(args, input, (output, errors), on)
 }
@@ -259,7 +289,7 @@ fn run_timed(
         Ok(_) => {
             timings::mark("read");
             let home = codex_home_arg(args);
-            refusal(&bytes, matter_arg(args).as_deref(), home.as_deref())
+            refusal(&bytes, matter_arg(args).as_deref(), home.as_deref(), args)
         }
         Err(_) => Err(Ignored::Unreadable),
     };
@@ -291,7 +321,8 @@ fn run_timed(
         );
     }
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
-    for line in line.into_iter().chain(timings::finish()) {
+    let skipped = (protected::skipped(args) > 0).then_some(SKIPPED.to_owned());
+    for line in skipped.into_iter().chain(line).chain(timings::finish()) {
         drop(
             errors
                 .write_all(line.as_bytes())
@@ -309,6 +340,10 @@ fn as_codex_hook(args: &[OsString]) -> bool {
     matter_arg(args).is_none()
 }
 
+/// The stderr line, before any other, saying a protected path in the arguments was left out
+/// (not absolute, or a config folder that is not UTF-8): the guard checks the others.
+pub const SKIPPED: &str = "Clauseo's pre-write guard left out a protected path it could not read";
+
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.
 fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
     match args {
@@ -324,12 +359,14 @@ fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
 /// hook, a `Bash` command whose text names that home ([`names_codex_home`], with the home
 /// argument or without), a patch target in
 /// the matter's `.codex` folder, or under Codex's hook (no `matter`) a `Bash` word with a
-/// `.codex` part, else the first target that lies in the matter folder and is held open.
+/// `.codex` part, else the first target that lies in the matter folder and is held open; the
+/// paths `args` protects first (`protected.rs`).
 /// [`Ignored`] when the input cannot be read or has a shape the guard does not know.
 fn refusal(
     bytes: &[u8],
     matter: Option<&Path>,
     codex_home: Option<&Path>,
+    args: &[OsString],
 ) -> Result<Option<Refusal>, Ignored> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Err(Ignored::Empty);
@@ -347,6 +384,7 @@ fn refusal(
         .ok_or(Ignored::NoFolder)?;
     let base = cwd.unwrap_or_else(|| folder.clone());
     let reach = Reach::new(&folder);
+    let protected = Protected::of(args, &reach);
     let tool = hook
         .get("tool_name")
         .and_then(Value::as_str)
@@ -361,6 +399,7 @@ fn refusal(
         codex_bash: matter.is_none() && tool == "Bash",
         codex_home,
         held: &held,
+        protected: &protected,
     };
     // Under Codex's hook on Windows a `Bash` command is read as PowerShell and as Bash: a
     // refusal by either refuses.
@@ -371,7 +410,7 @@ fn refusal(
         &[bash]
     };
     for escape in readings {
-        let Some(targets) = targets(tool, input, &base, &reach, *escape)? else {
+        let Some(targets) = targets(tool, input, (&base, &reach, &protected), *escape)? else {
             return Ok(None);
         };
         timings::mark("targets");
@@ -384,8 +423,8 @@ fn refusal(
 
 /// Where a tool's targets are judged: the matter `folder`, the `base` its relative paths start
 /// from, the walk that resolves them, whether it is a `Bash` call under Codex's hook, Codex's
-/// home when the hook named it, and the matter's held files ([`names::held_files`]), listed on
-/// first need.
+/// home when the hook named it, the matter's held files ([`names::held_files`]), listed on
+/// first need, and the protected paths.
 struct Place<'a> {
     folder: &'a Path,
     base: &'a Path,
@@ -393,10 +432,15 @@ struct Place<'a> {
     codex_bash: bool,
     codex_home: Option<&'a Path>,
     held: &'a std::cell::OnceCell<Vec<names::Held>>,
+    /// The paths the agent may not change (`protected.rs`).
+    protected: &'a Protected,
 }
 
 /// Why `targets` are refused at `place`, if they are ([`refusal`]).
 fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
+    if let Some(refusal) = protected::refusal(targets, place) {
+        return Some(refusal);
+    }
     let Place {
         folder,
         base,
@@ -404,6 +448,7 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
         codex_bash,
         codex_home,
         held,
+        ..
     } = *place;
     if codex_home.is_some_and(|home| reaches_codex_home(targets, home, base, reach))
         || (codex_bash && names_codex_home(targets))
@@ -493,18 +538,19 @@ enum Targets {
         /// The command as one shell line (an argument list's parts quoted, joined by spaces).
         line: String,
         escape: Escape,
+        /// The words naming a protected path (`protected.rs`).
+        protected: Vec<String>,
     },
 }
 
 /// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
 /// check; a shell command's words are files when they exist, taken from `base`, a `Bash` one's
-/// read with `bash`'s escape ([`bash_escape`]). A checked tool whose input lacks the field its
-/// paths come from is ignored.
+/// read with `bash`'s escape ([`bash_escape`]), and those naming one of `protected` noted. A
+/// checked tool whose input lacks the field its paths come from is ignored.
 fn targets(
     tool: &str,
     input: &Value,
-    base: &Path,
-    reach: &Reach,
+    (base, reach, protected): (&Path, &Reach, &Protected),
     bash: Escape,
 ) -> Result<Option<Targets>, Ignored> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
@@ -518,8 +564,13 @@ fn targets(
                 return Err(Ignored::Shape("file_path, notebook_path or command string"));
             }
         }
-        "Bash" => shell_targets(input.get("command"), base, bash, reach)?,
-        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick, reach)?,
+        "Bash" => shell_targets(input.get("command"), base, bash, (reach, protected))?,
+        "PowerShell" => shell_targets(
+            input.get("command"),
+            base,
+            Escape::Backtick,
+            (reach, protected),
+        )?,
         _ => return Ok(None),
     };
     Ok(Some(targets))

@@ -6,6 +6,7 @@
 //! `<data>/profile/claude-plugin`, Codex's `<agent home>/skills`), and in them only the folders
 //! of the skills a render is given, their manifest and the plugin's `plugin.json`; and for the
 //! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`;
+//! what Claude's plugin holds beyond what the profile ships, which goes (`crate::plugin_match`);
 //! and the agents' shell commands in `<data>/tools` ([`crate::tools`]).
 
 #![expect(
@@ -203,6 +204,67 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
         .open(path)
         .and_then(|mut file| file.write_all(bytes))
         .map_err(|err| ProfileError::io("write", path, err))
+}
+
+/// Removes the entry at `path` itself, never what it leads to: a file or a symlink, or on
+/// Windows a link to a folder or a junction, which only `fs::remove_dir` takes. A missing one
+/// is no error.
+pub(crate) fn remove_entry(path: &Path) -> Result<(), ProfileError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        // The file's error says more than the folder's.
+        Err(err) => match std::fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            Err(_not_a_link) => Err(ProfileError::io("remove", path, err)),
+        },
+    }
+}
+
+/// `fs::rename` of `from` to `to`, which must not exist: the entry itself, never what a link
+/// at `from` leads to.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Removes the entry at `path` with all it holds: a real folder by `fs::remove_dir_all`, which
+/// never follows a link inside, anything else by [`remove_entry`]. A missing one is no error.
+pub(crate) fn remove_any(path: &Path) -> Result<(), ProfileError> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(ProfileError::io("read", path, err)),
+    };
+    if meta.is_dir() && !crate::packs::read::is_reparse(&meta) {
+        return match std::fs::remove_dir_all(path) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => {
+                Err(ProfileError::io("remove", path, err))
+            }
+            _ => Ok(()),
+        };
+    }
+    #[cfg(windows)]
+    if meta.is_file() && meta.permissions().readonly() {
+        // A plain file Windows will not remove while it is read-only; never a link's target.
+        let mut permissions = meta.permissions();
+        #[expect(
+            clippy::permissions_set_readonly_false,
+            reason = "Windows: clears the read-only attribute alone, no Unix mode bits"
+        )]
+        permissions.set_readonly(false);
+        let _cleared = std::fs::set_permissions(path, permissions);
+    }
+    remove_entry(path)
+}
+
+/// `fs::remove_dir` of a folder that must be empty; a missing one is no error.
+pub(crate) fn remove_dir(path: &Path) -> Result<(), ProfileError> {
+    match std::fs::remove_dir(path) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => {
+            Err(ProfileError::io("remove", path, err))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `fs::remove_dir_all`, which never follows a symlink inside; a missing folder is no error,

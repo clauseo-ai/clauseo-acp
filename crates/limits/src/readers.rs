@@ -15,7 +15,7 @@ mod time;
 
 use std::future::Future;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -92,6 +92,12 @@ pub enum ReadFailure {
 /// The variables a read of an agent adds over its entry's, asked at each read: the stored API
 /// key and the firm plan's variables, as the caller's launch hook adds them. Zeroed when dropped.
 type LaunchEnv = Arc<dyn Fn(AgentKind) -> Vec<(String, Zeroizing<String>)> + Send + Sync>;
+
+/// What runs on Clauseo's Claude home before each Claude read starts Claude Code
+/// ([`ProcessReaders::with_claude_home_prepare`]): desktop gives the host's own, which clears
+/// what Claude Code would read settings from there that Clauseo does not write and writes its
+/// user settings, as before every launch. An error fails the read and starts nothing.
+pub type ClaudeHomePrepare = Arc<dyn Fn(&Path) -> std::io::Result<()> + Send + Sync>;
 
 /// One read's entry, with the read's variables in: its variables, the stored API key among
 /// them, are zeroed when it drops, a read that is dropped mid-way included.
@@ -185,6 +191,8 @@ pub struct ProcessReaders<T> {
     /// Clauseo's own Claude home, which the Claude reader forces as `CLAUDE_CONFIG_DIR`;
     /// `None` leaves the entry's and the inherited variable as they are.
     claude_home: Option<PathBuf>,
+    /// What runs on `claude_home` before each Claude read; `None` runs nothing.
+    claude_prepare: Option<ClaudeHomePrepare>,
     /// G16's copy of each reader's stdout; `None` everywhere but its live tests.
     tap: Option<tap::StdoutTap>,
     /// Each agent's stored key, asked at each read; `None` for no key source.
@@ -232,6 +240,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
             run_dir: effective.data_dir().join("limits").join("run"),
             codex_home,
             claude_home: None,
+            claude_prepare: None,
             tap: None,
             launch_env: None,
             claude_gate: Arc::default(),
@@ -263,6 +272,15 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     #[must_use]
     pub fn with_claude_home(mut self, claude_home: PathBuf) -> ProcessReaders<T> {
         self.claude_home = Some(claude_home);
+        self
+    }
+
+    /// These readers, running `prepare` on the Claude home ([`Self::with_claude_home`]) before
+    /// each Claude read starts Claude Code there, as the host prepares it before every launch;
+    /// when it fails, the read fails and starts nothing.
+    #[must_use]
+    pub fn with_claude_home_prepare(mut self, prepare: ClaudeHomePrepare) -> ProcessReaders<T> {
+        self.claude_prepare = Some(prepare);
         self
     }
 
@@ -301,6 +319,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
             run_dir: self.run_dir.clone(),
             codex_home: self.codex_home.clone(),
             claude_home: self.claude_home.clone(),
+            claude_prepare: self.claude_prepare.clone(),
             tap: self.tap.clone(),
             launch_env: self.launch_env.clone(),
             claude_gate: Arc::clone(&self.claude_gate),
@@ -346,6 +365,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let timer = self.timer.clone();
                 let run_dir = self.run_dir.clone();
                 let claude_home = self.claude_home.clone();
+                let prepare = self.claude_prepare.clone();
                 let tap = self.tap.clone();
                 let gate = Arc::clone(&self.claude_gate);
                 Box::pin(async move {
@@ -354,7 +374,8 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                         return no_entry(CLAUDE_ID);
                     };
                     let home = claude_home.as_deref();
-                    claude::read(&*launcher, &timer, &launch, &run_dir, home, tap).await
+                    let prepare = prepare.as_ref();
+                    claude::read(&*launcher, &timer, &launch, &run_dir, (home, prepare), tap).await
                 })
             }
             AgentKind::Codex => {

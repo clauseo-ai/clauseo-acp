@@ -93,11 +93,46 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
+    /// Folders denied to Claude for `Edit` alone, as patterns in the same form (no final
+    /// `/**`; the rule covers all under each): places the launch otherwise keeps that hold what
+    /// Claude Code loads, the built-in plugin ([`BUILT_IN_PLUGIN`]) and, once the launch prep
+    /// has it, the session's own packs plugin (`<run>/skill-packs`). Reads stay as they were,
+    /// and the Windows shell rules do not name them (`super::windows_shell_deny_rules`): the
+    /// built-in plugin is in a shared place they name already, and a pack's scripts run.
+    pub(crate) edit_denied: Vec<String>,
+    /// What the pre-write guard refuses Claude's agent to change, whatever the matter
+    /// (`agent::loads::guard_protected`), and Claude's config folder: the guard hook's arguments.
+    /// None before the launch prep has them.
+    pub(crate) guarded: Vec<PathBuf>,
+    /// What the guard refuses Claude's file tools alone to change (`--protected-edit`): the
+    /// run's packs plugin, whose scripts a command runs. None before the launch prep has it.
+    pub(crate) guarded_edit: Vec<PathBuf>,
+    pub(crate) claude_home: Option<PathBuf>,
 }
+
+/// Whether `plans` is a plans folder in one of Clauseo's agents' homes under `data`
+/// (`<data>/agents/<agent id>/home/plans`, `Locations::agent_home`), where Claude Code writes
+/// its plan note (`agent/plan_note.rs`) when its home is Clauseo's.
+pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
+    let Ok(place) = plans.strip_prefix(data) else {
+        return false;
+    };
+    let names: Vec<_> = place.components().collect();
+    matches!(
+        names.as_slice(),
+        [Component::Normal(agents), Component::Normal(_), Component::Normal(home), Component::Normal(folder)]
+            if *agents == "agents" && *home == "home" && *folder == "plans"
+    )
+}
+
+/// The built-in plugin's folder under `<data>` (`clauseo_profile`'s `claude_plugin`), as a
+/// pattern: in [`SHARED`]'s `profile`, readable by every session, written only by the launch.
+pub(crate) const BUILT_IN_PLUGIN: &str = "profile/claude-plugin";
 
 impl LaunchDeny {
     /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`]
-    /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`).
+    /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`), and `Edit` of the
+    /// built-in plugin ([`BUILT_IN_PLUGIN`]).
     pub(crate) fn fixed(spellings: Vec<PathBuf>) -> Self {
         let home = super::claude_home::CLAUDE_HOME
             .iter()
@@ -116,6 +151,10 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
+            edit_denied: vec![BUILT_IN_PLUGIN.to_owned()],
+            guarded: Vec::new(),
+            guarded_edit: Vec::new(),
+            claude_home: None,
         }
     }
 }

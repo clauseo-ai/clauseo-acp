@@ -258,6 +258,12 @@ anything the agent starts.
   a firm's cloud settings are never skipped, offline included. Scope: Codex's home; what Codex
   loads from elsewhere (`$HOME/.agents/skills`, `/etc/codex`, macOS managed preferences) is
   handled elsewhere
+- `built` (Windows, tier C): Scope: with no sandbox, Claude's command-text deny rules and the
+  pre-write guard are the only layers between the agent's shell and Claude's own settings, skills
+  and plugins and Clauseo's plugin folders. Both read a command's text and the paths it names (the
+  guard also follows its folder changes and Claude's config-folder variable); each launch
+  rewrites Claude's settings file and the built-in plugin to what Clauseo ships and removes what
+  Claude Code would load from its home
 
 ## Egress proxy
 

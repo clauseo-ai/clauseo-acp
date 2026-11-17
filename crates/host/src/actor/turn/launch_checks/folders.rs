@@ -1,15 +1,18 @@
 //! The data-fence and folder helpers of a launch: the deny rules Claude's data folder gets
 //! (`agent/data_fence.rs`), the paths a session's folders sit at under the data folder, their
-//! making ([`make`], [`make_guard`]) and the removal of a launch's run
-//! folder. The callers in `launch_checks` call them off the actor.
+//! making ([`make`], [`make_guard`]), the skills write with the built-in plugin's match
+//! ([`write_skills`]) and the removal of a launch's run folder. The callers in `launch_checks`
+//! call them off the actor.
 
 use std::path::{Path, PathBuf};
 
+use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{ErrorCode, MatterId};
 
 use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
 /// that, the host's first launch sets aside the `run` folder an earlier run left ([`RunSweep`]).
@@ -69,6 +72,59 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
     }
 }
 
+/// Writes `writes` in order, on the launch-prep thread, and returns the first write's token
+/// when it succeeded: the one the launch's Codex keys may take the index from. A write without
+/// a plugin (Codex's own folder) that fails is a warning; the agent starts with the skills the
+/// folder holds. After each write with a plugin (Claude's, which Codex's index names too),
+/// written or not, the plugin folder is made to hold only what Clauseo ships, byte for byte
+/// (`clauseo_profile::match_plugin`); what went is logged as a count. When that write had
+/// failed, it is made once more. When the match or that second write fails, the launch is
+/// refused with `agent.launch_failed`: the folder may hold what Claude Code would load in every
+/// matter. No run folder is made yet. File system calls: off the actor.
+pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten>, Error> {
+    let unmatched = || {
+        tracing::warn!("the built-in plugin folder could not be made to hold only Clauseo's files");
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            "Clauseo's built-in skills folder holds files Clauseo did not put there, and they \
+             could not be removed",
+        )
+    };
+    let mut first = None;
+    for (at, write) in writes.iter().enumerate() {
+        let written = clauseo_profile::write_skills(write);
+        let plugin = write.plugin().is_some();
+        if plugin {
+            let removed = match clauseo_profile::match_plugin(write) {
+                Ok(removed) => removed,
+                // The error names a path in the folder, which may be a planted file's: not
+                // logged.
+                Err(_unlogged) => return Err(unmatched()),
+            };
+            if removed > 0 {
+                tracing::warn!(
+                    removed,
+                    "entries Clauseo did not ship left the built-in plugin folder"
+                );
+            }
+        }
+        let written = match written {
+            Err(_first_try) if plugin => clauseo_profile::write_skills(write),
+            other => other,
+        };
+        match written {
+            Ok(written) if at == 0 => first = Some(written),
+            Ok(_) => {}
+            Err(_unlogged) if plugin => return Err(unmatched()),
+            Err(error) => tracing::warn!(
+                error = %Cause(&error),
+                "the profile's skills were not written; the agent starts with what the folder holds"
+            ),
+        }
+    }
+    Ok(first)
+}
+
 /// The data folder canonicalised, then as configured when that differs; as configured alone
 /// when it does not resolve (the data-folder refusal has refused that launch already).
 fn data_spellings(data: &Path) -> Vec<PathBuf> {
@@ -82,7 +138,9 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and
-/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`).
+/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`);
+/// and the run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`); and for
+/// Claude, what its guard hook refuses the agent to change (`LaunchDeny::guarded`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
@@ -96,6 +154,18 @@ pub(super) fn launch_deny(
     });
     let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    // The own run folder is left out above; its packs plugin, which Claude Code loads, is
+    // still denied for `Edit`.
+    for place in data_fence::own_reads(data, &[&run.skill_packs]) {
+        if !deny.edit_denied.contains(&place) {
+            deny.edit_denied.push(place);
+        }
+    }
+    if let Some(home) = claude_home {
+        deny.guarded = crate::agent::loads::guard_protected(home, data);
+        deny.guarded_edit = vec![run.skill_packs.clone()];
+        deny.claude_home = Some(home.to_path_buf());
+    }
     deny
 }
 
@@ -117,6 +187,21 @@ fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> V
 /// `<data>/run`.
 pub(super) fn run_dir(data: &Path) -> PathBuf {
     data.join("run")
+}
+
+/// The last change to Claude's home `home` (none for Codex) before the agent starts: what
+/// Claude Code would load from it goes (`agent::home::clear_home`), so the folders it watches
+/// do not exist at its start. When that fails, `run`'s folders are taken back and the launch is
+/// refused with its error. File system calls: off the actor.
+pub(super) fn clear_claude_home(
+    run: &RunFolders,
+    data: &Path,
+    home: Option<&Path>,
+) -> Result<(), Error> {
+    let Some(home) = home else {
+        return Ok(());
+    };
+    crate::agent::home::clear_home(data, home).inspect_err(|_| run.remove())
 }
 
 /// `<data>/browser/run`: the parent of every session's browser folder, the guard's `--cwd`

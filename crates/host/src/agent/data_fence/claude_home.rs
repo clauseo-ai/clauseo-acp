@@ -20,7 +20,7 @@
 //! (`super::DENIED`): its tool results are large outputs the model must Read back.
 
 /// The names under Claude's config folder, as rule patterns under it (a folder as `name/**`).
-pub(crate) const CLAUDE_HOME: [&str; 73] = [
+pub(crate) const CLAUDE_HOME: [&str; 75] = [
     ".claude.json*",
     ".config.json",
     ".credentials.json",
@@ -38,6 +38,8 @@ pub(crate) const CLAUDE_HOME: [&str; 73] = [
     "chrome/**",
     "commands/**",
     "cowork_plugins/**",
+    // The user settings file in place of `settings.json` when its cowork mode is on.
+    "cowork_settings.json",
     "daemon/**",
     "daemon.json",
     "daemon.log",
@@ -68,7 +70,8 @@ pub(crate) const CLAUDE_HOME: [&str; 73] = [
     // With its signature files (`policy-limits.json.signature.json`, …).
     "policy-limits.json*",
     "remote-control/**",
-    "remote-settings.json",
+    // With its signature files (`remote-settings.json.signature.json`, …).
+    "remote-settings.json*",
     "remote-settings-consent.json",
     "remote-settings-helper-consent",
     "remote-settings-helper-consent/**",
@@ -79,6 +82,7 @@ pub(crate) const CLAUDE_HOME: [&str; 73] = [
     "session-env/**",
     "sessions/**",
     "settings.json",
+    "settings.local.json",
     "shares/**",
     "shell-snapshots/**",
     "skills/**",

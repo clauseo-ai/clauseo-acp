@@ -28,6 +28,10 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     targets: Vec::new(),
     kept: Vec::new(),
     own_reads: Vec::new(),
+    edit_denied: Vec::new(),
+    guarded: Vec::new(),
+    guarded_edit: Vec::new(),
+    claude_home: None,
 };
 
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
@@ -303,6 +307,9 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
         program: Path::new("/app/clauseo"),
         matter: Path::new("/matters/a"),
         ask_all: false,
+        protected: &[],
+        protected_edit: &[],
+        home: None,
     };
     let keys = keys(OFF, Login::Bedrock);
     let meta = Value::Object(session_meta(
@@ -326,6 +333,38 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
     let entry = &settings["hooks"]["PreToolUse"][0];
     assert_eq!(entry["hooks"][0]["args"][1], json!("--matter"));
     assert_eq!(entry["hooks"][0]["args"][2], json!("/matters/a"));
+}
+
+/// In both MCP control modes, a Claude session's flag settings exclude `CLAUDE.md` and `rules`
+/// in Claude's home and turn auto-memory off, in the settings and their `env`.
+#[test]
+fn the_flag_settings_keep_the_homes_memory_out_in_both_mcp_modes() {
+    let data = std::path::PathBuf::from(crate::testing::abs("/data"));
+    let mut deny = crate::agent::data_fence::LaunchDeny::fixed(vec![data.clone()]);
+    let home = data.join("agents").join("claude-acp").join("home");
+    deny.claude_home = Some(home.clone());
+    let home = home.to_str().unwrap().to_owned();
+    for control in [McpControl::Clauseo, McpControl::Managed] {
+        let keys = ClaudeKeys {
+            data: &deny,
+            ..keys(OFF, Login::Bedrock)
+        };
+        let meta = Value::Object(session_meta(None, control, None, Some(&keys)));
+        let settings = &meta["claudeCode"]["options"]["settings"];
+        let excludes = strings(&settings["claudeMdExcludes"]);
+        for pattern in [format!("{home}/CLAUDE.md"), format!("{home}/rules/**")] {
+            assert!(
+                excludes.contains(&pattern.as_str()),
+                "{control:?}: {excludes:?}"
+            );
+        }
+        assert_eq!(settings["autoMemoryEnabled"], json!(false), "{control:?}");
+        assert_eq!(
+            settings["env"][super::memory::AUTO_MEMORY_OFF_VAR],
+            json!("1"),
+            "{control:?}"
+        );
+    }
 }
 
 /// No kind, no Claude keys: only the switches every agent gets.

@@ -18,11 +18,16 @@ pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
 mod codex_entry_tests;
+#[cfg(test)]
+mod codex_layering_tests;
+mod config_change;
+pub(crate) use config_change::{CONFIG_CHANGE, config_change_entry};
 pub(crate) mod lawyer;
 #[cfg(test)]
 mod lawyer_tests;
 #[cfg(test)]
 mod layering_tests;
+pub(crate) mod memory;
 pub(crate) mod profile;
 #[cfg(test)]
 mod profile_keys_tests;
@@ -194,9 +199,12 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
 /// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
 ///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
-///   [`subagents::subagent_meta`], which settles `agents` and the append's last part.
+///   [`subagents::subagent_meta`], which settles `agents` and the append's last part; and at the
+///   end, in the flag settings, [`memory::memory_settings`] (no `CLAUDE.md` or `rules` from
+///   Claude's home, no auto-memory).
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
-///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
+///   `claudeCode.options.settings.hooks.PreToolUse`, and [`config_change_entry`] to
+///   `…hooks.ConfigChange`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
 ///   cannot turn it off: `--settings` outranks user settings (Claude Code's settings
 ///   precedence). It also turns the user's own hooks back on when their `disableAllHooks` had
@@ -237,7 +245,9 @@ pub(crate) fn session_meta(
         profile::claude_options(&mut options, keys);
         subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
     }
-    if let Some(entry) = guard.and_then(guard_entry) {
+    if let Some(guard) = guard
+        && let Some(entry) = guard_entry(guard)
+    {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
         let mut pre_tool_use = match hooks.remove("PreToolUse") {
@@ -246,11 +256,19 @@ pub(crate) fn session_meta(
         };
         pre_tool_use.push(entry);
         hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
+        if let Some(entry) = config_change_entry(guard.program) {
+            let mut config_change = match hooks.remove(CONFIG_CHANGE) {
+                Some(Value::Array(entries)) => entries,
+                _ => Vec::new(),
+            };
+            config_change.push(entry);
+            hooks.insert(CONFIG_CHANGE.to_owned(), Value::Array(config_change));
+        }
         settings.insert("hooks".to_owned(), Value::Object(hooks));
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
-    if keys.is_some() {
+    if let Some(keys) = keys {
         // Claude Code applies a settings `env` over the process env, so the variable goes in
         // the flag settings too: a user's or project's settings `env` cannot undo it.
         let mut settings = take_object(&mut options, "settings");
@@ -258,6 +276,11 @@ pub(crate) fn session_meta(
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
         super::one_shell::meta_env(&mut settings_env, cfg!(windows));
         settings.insert("env".to_owned(), Value::Object(settings_env));
+        memory::memory_settings(
+            &mut settings,
+            keys.data.claude_home.as_deref(),
+            &keys.data.spellings,
+        );
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
@@ -302,6 +325,63 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// The paths the guard refuses the agent to change ([`guard_protected`]), each passed after
+    /// [`PROTECTED_FLAG`](crate::pre_write_guard::PROTECTED_FLAG); none when empty.
+    pub(crate) protected: &'a [PathBuf],
+    /// The paths the guard refuses Claude's file tools alone to change (the run's packs
+    /// plugin), each passed after
+    /// [`PROTECTED_EDIT_FLAG`](crate::pre_write_guard::PROTECTED_EDIT_FLAG).
+    pub(crate) protected_edit: &'a [PathBuf],
+    /// Claude's config folder, passed after
+    /// [`CLAUDE_HOME_FLAG`](crate::pre_write_guard::CLAUDE_HOME_FLAG).
+    pub(crate) home: Option<&'a Path>,
+}
+
+impl<'a> GuardHook<'a> {
+    /// The hook of a launch with `program`, `matter` and forced ask (`ask_all`), its protected
+    /// paths and Claude's config folder from the launch's deny set `deny`.
+    pub(crate) fn of(
+        program: &'a Path,
+        matter: &'a Path,
+        ask_all: bool,
+        deny: &'a super::data_fence::LaunchDeny,
+    ) -> Self {
+        let home = deny.claude_home.as_deref();
+        Self {
+            program,
+            matter,
+            ask_all,
+            protected: &deny.guarded,
+            protected_edit: &deny.guarded_edit,
+            home,
+        }
+    }
+}
+
+/// The names in Claude's config folder that load settings into every later session and that a
+/// launch does not remove (`settings.json`, which it rewrites, and `.claude.json`, whose `env`
+/// Claude Code applies and which holds its own state), which the guard refuses the agent to
+/// change ([`guard_protected`]), with the ones a launch removes
+/// (`agent::home::CLAUDE_HOME_SETTINGS_FILES` and `agent::home::CLAUDE_HOME_LOADED`).
+pub(crate) const GUARD_PROTECTED_HOME: [&str; 2] = ["settings.json", ".claude.json"];
+
+/// What the pre-write guard refuses a Claude session's agent to change, whatever the matter: in
+/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`],
+/// `agent::home::CLAUDE_HOME_SETTINGS_FILES` and `agent::home::CLAUDE_HOME_LOADED`; and under
+/// the data folder `data`, the built-in plugin (`data_fence::BUILT_IN_PLUGIN`). Its deny rules
+/// name the same (`agent/data_fence.rs`). The run's packs plugin is refused to the file tools
+/// alone (`LaunchDeny::guarded_edit`).
+pub(crate) fn guard_protected(home: &Path, data: &Path) -> Vec<PathBuf> {
+    let plugin = crate::agent::data_fence::BUILT_IN_PLUGIN
+        .split('/')
+        .fold(data.to_path_buf(), |at, name| at.join(name));
+    GUARD_PROTECTED_HOME
+        .iter()
+        .chain(crate::agent::home::CLAUDE_HOME_SETTINGS_FILES.iter())
+        .chain(crate::agent::home::CLAUDE_HOME_LOADED.iter())
+        .map(|name| home.join(name))
+        .chain([plugin])
+        .collect()
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -315,10 +395,13 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
-/// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
-/// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
-/// carry it, and a lossy copy could run another program or guard another folder.
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` after the
+/// folder; then `--claude-home <home>`, `--protected <path>` for each protected path and
+/// `--protected-edit <path>` for each one the file tools alone may not change, the ones that are
+/// UTF-8 (a warning names none). The matter folder goes as an argument because the
+/// hook input's `cwd` follows the agent's `cd`. `None`, with a warning, when `program` or
+/// `matter` is no UTF-8 string: JSON cannot carry it, and a lossy copy could run another program
+/// or guard another folder.
 ///
 /// It goes in Claude Code's flag settings (`options.settings`), which load whatever the
 /// `settingSources`. It uses the exec form (`command` plus `args`): Claude Code spawns
@@ -337,6 +420,9 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        protected,
+        protected_edit,
+        home,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -356,6 +442,20 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
     } else {
         GUARD_MATCHER
     };
+    let home = home.and_then(|home| {
+        let named = home.to_str();
+        if named.is_none() {
+            tracing::warn!("Claude's config folder is not UTF-8: the guard hook goes without it");
+        }
+        named.map(|home| (crate::pre_write_guard::CLAUDE_HOME_FLAG, home))
+    });
+    let protected = named(protected, crate::pre_write_guard::PROTECTED_FLAG).chain(named(
+        protected_edit,
+        crate::pre_write_guard::PROTECTED_EDIT_FLAG,
+    ));
+    for (flag, value) in home.into_iter().chain(protected) {
+        args.extend([flag, value]);
+    }
     Some(serde_json::json!({
         "matcher": matcher,
         "hooks": [{
@@ -365,6 +465,18 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
             "timeout": GUARD_TIMEOUT_SECONDS,
         }],
     }))
+}
+
+/// Each of `paths` that is UTF-8 after `flag`, with a warning when one is not (it goes without).
+fn named<'p>(
+    paths: &'p [PathBuf],
+    flag: &'static str,
+) -> impl Iterator<Item = (&'static str, &'p str)> {
+    let named: Vec<_> = paths.iter().filter_map(|path| path.to_str()).collect();
+    if named.len() < paths.len() {
+        tracing::warn!("a protected path is not UTF-8: the guard hook goes without it");
+    }
+    named.into_iter().map(move |path| (flag, path))
 }
 
 /// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`

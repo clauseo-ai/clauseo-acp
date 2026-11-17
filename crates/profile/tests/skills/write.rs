@@ -51,3 +51,30 @@ pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
 pub(crate) fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
+
+/// A directory junction at `link` (which must not exist) to the folder `target`, made with
+/// `mklink /J`, which needs no privilege. Both paths go to `cmd` with backslashes only (it reads
+/// a `/` as a switch) and in quotes, as one raw argument.
+#[cfg(windows)]
+pub(crate) fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+    use std::os::windows::process::CommandExt as _;
+    let native = |path: &Path| path.components().collect::<std::path::PathBuf>();
+    let line = format!(
+        "/C mklink /J \"{}\" \"{}\"",
+        native(link).display(),
+        native(target).display()
+    );
+    let made = std::process::Command::new("cmd").raw_arg(&line).status()?;
+    if made.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("cmd {line}: {made}")))
+    }
+}
+
+/// Sets the read-only flag of the file at `path`.
+pub(crate) fn set_readonly(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)
+}

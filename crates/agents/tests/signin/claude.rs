@@ -2,6 +2,9 @@
 //! nudge, Cancel, expiry, the paste route, the exits before sign-in, `--console`, sign-out, the
 //! calls refused, and no status run after the end.
 
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
 use clauseo_agents::testing::write_file;
 use clauseo_agents::{Found, Method, PasteCode, SigninCode, SigninError, SigninState, Source};
 
@@ -417,4 +420,45 @@ fn a_panicking_sign_in_job_frees_its_slot() {
     agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
     let (_, last) = events.until_end();
     assert_eq!(last, signed_in());
+}
+
+/// Before each Claude Code process a sign-in starts (its status checks and its login), the
+/// settings write runs on Clauseo's home for the agent; when it fails, no process starts and
+/// the sign-in fails.
+#[test]
+fn the_settings_write_runs_before_each_claude_run_and_a_failed_one_starts_none() {
+    let homes = Arc::new(Mutex::new(Vec::new()));
+    let mut fx = Fixture::new("signin-settings", "ok-after:0");
+    let seen = Arc::clone(&homes);
+    fx.config.signin.claude_settings = Some(Arc::new(move |home: &Path| {
+        crate::support::lock(&seen).push(home.to_path_buf());
+        Ok(())
+    }));
+    let (agents, events) = fx.start();
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
+    let home = fx.config.signin.homes[&claude()].clone();
+    let written = crate::support::lock(&homes).clone();
+    assert!(written.len() >= fx.launches().len(), "{written:?}");
+    assert!(written.iter().all(|at| *at == home), "{written:?}");
+
+    let mut fx = Fixture::new("signin-settings-fail", "ok-after:0");
+    fx.config.signin.claude_settings = Some(Arc::new(|_: &Path| {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    }));
+    let (agents, events) = fx.start();
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert!(
+        matches!(
+            last,
+            SigninState::Failed {
+                code: SigninCode::Failed,
+                ..
+            }
+        ),
+        "{last:?}"
+    );
+    assert_eq!(fx.launches().len(), 0, "no Claude Code process started");
 }

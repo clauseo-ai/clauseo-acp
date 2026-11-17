@@ -7,7 +7,7 @@
 //! (`clauseo_profile::paths::codex_skills`, from [`AgentKind::id`]), and Claude's plan notes are
 //! marked against it (`agent/plan_note.rs` reads the launch's merged environment, which holds
 //! this variable by then). Each Claude launch also writes Claude Code's user settings there
-//! ([`write_claude_settings`]).
+//! ([`write_claude_settings`]), or is refused.
 //!
 //! [`AgentKind::id`]: clauseo_protocol::AgentKind::id
 
@@ -21,12 +21,21 @@ use serde_json::{Map, Value};
 /// notes (`<CLAUDE_CONFIG_DIR>/plans`) and its own skills and hooks.
 pub(crate) const CLAUDE_CONFIG_VAR: &str = "CLAUDE_CONFIG_DIR";
 
-/// What the host forces on a Claude agent's launch: `home` as `CLAUDE_CONFIG_DIR`.
+/// What the host forces on a Claude agent's launch: `home` as `CLAUDE_CONFIG_DIR`, and
+/// `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (`loads::memory::AUTO_MEMORY_OFF_VAR`), over any inherited,
+/// settings or hook value: `0` or `false` there would turn Claude Code's auto-memory on over the
+/// flag settings' `autoMemoryEnabled: false`.
 pub(crate) fn claude_launch_env(home: &Path) -> BTreeMap<OsString, OsString> {
-    BTreeMap::from([(
-        OsString::from(CLAUDE_CONFIG_VAR),
-        home.as_os_str().to_owned(),
-    )])
+    BTreeMap::from([
+        (
+            OsString::from(CLAUDE_CONFIG_VAR),
+            home.as_os_str().to_owned(),
+        ),
+        (
+            OsString::from(crate::agent::loads::memory::AUTO_MEMORY_OFF_VAR),
+            OsString::from("1"),
+        ),
+    ])
 }
 
 /// Claude Code's user settings file in its config folder.
@@ -37,32 +46,121 @@ pub(crate) const CLAUDE_SETTINGS_FILE: &str = "settings.json";
 /// account's claude.ai skills nor loads them in a Clauseo session. No switch turns it back on.
 pub(crate) const CLAUDE_HOME_SETTINGS: [(&str, bool); 1] = [("syncClaudeAiSkills", false)];
 
-/// Writes [`CLAUDE_HOME_SETTINGS`] into `<home>/settings.json`, keeping every other key a JSON
-/// object there holds; a file that is not one is replaced. Nothing is written when the file
-/// already has them. The file is replaced atomically, a link there replaced and never followed
-/// for the write. File system calls: off the actor.
+/// The keys Claude Code 2.1.293 writes to its user file itself that a launch keeps, each only
+/// with a value of the kind it writes; none loosens a permission or loads anything:
+///
+/// - `model`, a string: its model picker and `/model`. Clauseo names the model per session, so
+///   this only keeps a lawyer's last choice in Claude's own picker as it was.
+/// - `fastMode`, a bool: its fast-mode toggle, a preference of the lawyer's.
+/// - `skipAutoPermissionPrompt`, a bool: the answer to its auto-mode opt-in dialog, so the
+///   dialog is not asked again at every launch.
+///
+/// Not `permissions` (Claude Code writes `permissions.defaultMode` from its auto-mode nudge):
+/// the flag settings pin the mode (`loads::pinned`), so it counts for nothing, and the same key
+/// could hold rules.
+pub(crate) const CLAUDE_OWN_KEYS: [&str; 3] = ["model", "fastMode", "skipAutoPermissionPrompt"];
+
+/// The longest model name a launch keeps; Claude Code's model names and aliases are far shorter.
+const MAX_MODEL: usize = 128;
+
+/// Whether `value` is of the kind Claude Code writes at `key`, one of [`CLAUDE_OWN_KEYS`]: a
+/// model a short name of letters, digits and `-._:/[]@`, the rest a bool.
+fn own_value(key: &str, value: &Value) -> bool {
+    match key {
+        "model" => value.as_str().is_some_and(|model| {
+            !model.is_empty()
+                && model.len() <= MAX_MODEL
+                && model
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-._:/[]@".contains(c))
+        }),
+        "fastMode" | "skipAutoPermissionPrompt" => value.is_boolean(),
+        _ => false,
+    }
+}
+
+/// Writes `<home>/settings.json` as exactly what Clauseo ships: [`CLAUDE_HOME_SETTINGS`], and of
+/// what the file held before (a plain file that reads and whose JSON is an object; a link is
+/// not read) only [`CLAUDE_OWN_KEYS`] with a value of their kind. Every other key goes. Nothing
+/// is written when the file already says exactly that. The file is replaced atomically, a link
+/// there replaced and never followed; what cannot be replaced (a folder at the name, a file
+/// Windows will not let go) is renamed aside ([`clear::set_aside`]) and the file written fresh.
+/// An error (that rename or the fresh write failing too, a full disk) is the caller's to refuse
+/// the launch on. File system calls: off the actor.
 pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
     let path = home.join(CLAUDE_SETTINGS_FILE);
-    let mut settings = match std::fs::read(&path) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-            Ok(Value::Object(settings)) => settings,
-            _ => Map::new(),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
-        Err(error) => return Err(error),
+    let plain = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
+    let held = plain.then(|| std::fs::read(&path).ok()).flatten();
+    let before = match held.map(|bytes| serde_json::from_slice::<Value>(&bytes)) {
+        Some(Ok(Value::Object(settings))) => Some(settings),
+        _ => None,
     };
-    let set = CLAUDE_HOME_SETTINGS
-        .iter()
-        .all(|(key, value)| settings.get(*key) == Some(&Value::Bool(*value)));
-    if set {
-        return Ok(());
+    let mut settings = Map::new();
+    if let Some(before) = &before {
+        for key in CLAUDE_OWN_KEYS {
+            if let Some(value) = before.get(key).filter(|value| own_value(key, value)) {
+                settings.insert(key.to_owned(), value.clone());
+            }
+        }
     }
     for (key, value) in CLAUDE_HOME_SETTINGS {
         settings.insert(key.to_owned(), Value::Bool(value));
     }
+    if before.as_ref() == Some(&settings) {
+        return Ok(());
+    }
     let bytes = serde_json::to_vec_pretty(&Value::Object(settings))?;
-    crate::write::replace_private_file(&path, &bytes)
+    // A file that cannot be replaced (a folder at the name, a file Windows will not let go) is
+    // moved aside and written fresh; only when that fails too is it the caller's error.
+    match crate::write::replace_private_file(&path, &bytes) {
+        Ok(()) => Ok(()),
+        Err(first) => match clear::set_aside(home, CLAUDE_SETTINGS_FILE) {
+            Ok(Some(aside)) => {
+                if clear::remove_entry(&aside).is_err() {
+                    tracing::warn!("Claude's old settings file stays aside for now");
+                }
+                crate::write::replace_private_file(&path, &bytes)
+            }
+            Ok(None) | Err(_) => Err(first),
+        },
+    }
+}
+
+/// [`write_claude_settings`] for the app, after the files Claude Code reads settings from and
+/// its global config's configuration go as at a launch (`clear::clear_settings`): the sign-in
+/// jobs run it before each Claude Code process they start
+/// (`clauseo_agents::SigninConfig::claude_settings`), so a login, a status check or a logout
+/// reads only the user settings Clauseo ships; the limits reader runs it before each Claude read
+/// too. A home that does not exist yet holds nothing to clear or keep out: nothing is done.
+/// File system calls: off the host thread.
+pub fn write_claude_home_settings(home: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(home) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        _ => {}
+    }
+    clear::clear_settings(home)?;
+    write_claude_settings(home)
+}
+
+/// The launch's refusal when [`write_claude_settings`] failed, with a warn line naming the
+/// cause, never the path: a settings file left as it was could loosen the session, so the agent
+/// is not started.
+pub(crate) fn settings_unwritten(error: &std::io::Error) -> crate::error::Error {
+    tracing::warn!(
+        error = %crate::log_file::Cause(error),
+        "Claude's home settings were not written: the launch fails"
+    );
+    crate::error::Error::refused(
+        clauseo_protocol::ErrorCode::AgentLaunchFailed,
+        "Clauseo could not write Claude's settings file.",
+    )
 }
 
 #[cfg(test)]
 mod tests;
+
+mod claude_json;
+mod clear;
+pub(crate) use clear::{
+    LOADED as CLAUDE_HOME_LOADED, SETTINGS as CLAUDE_HOME_SETTINGS_FILES, clear_home,
+};

@@ -65,6 +65,10 @@ pub(super) enum Refusal {
     /// A shell command nests `$(…)` too deep, or holds too much nested text, to be read
     /// (`words::MAX_NESTING`, `words::MAX_NESTED_BYTES`).
     Unread,
+    /// A file tool writes, or a shell command that does more than read names, one of the
+    /// protected paths (`protected.rs`): Claude's own settings, instructions, skills and plugins,
+    /// or a plugin folder of Clauseo's.
+    Protected,
 }
 
 impl Refusal {
@@ -89,6 +93,9 @@ impl Refusal {
                 .to_owned(),
             Self::Unread => "Clauseo can't read this command: it is nested too deep or is too \
                              long. Split it into smaller commands."
+                .to_owned(),
+            Self::Protected => "Clauseo doesn't let the agent change Claude's own settings or \
+                                Clauseo's plugin files."
                 .to_owned(),
         }
     }

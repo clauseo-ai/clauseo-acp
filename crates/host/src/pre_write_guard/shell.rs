@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use super::codex::{patch_targets, text_has_codex_part};
 use super::words::{Escape, Segments, candidates, shell_segments};
-use super::{Ignored, MAX_WORDS, Reach, Targets, existing_resolved, lexical};
+use super::{Ignored, MAX_WORDS, Protected, Reach, Targets, existing_resolved, lexical};
 
 /// The most folders [`Folders`] keeps; past it, the folder is unknown.
 const MAX_FOLDERS: usize = 16;
@@ -55,11 +55,15 @@ struct Part<'a> {
 /// backstop for changes the guard misreads, at the cost of a rare refusal of a write that lands
 /// elsewhere. Each path counts as spelled and resolved ([`walked_resolutions`]). A command of
 /// another JSON type is ignored.
+///
+/// With `protected` paths, a word is first read with Claude's config folder for a reference to
+/// its variable ([`Protected::expand`]), for its paths and for a folder change, and each word
+/// one of whose paths, existing or not, is or lies under a protected path is noted.
 pub(super) fn shell_targets(
     command: Option<&Value>,
     cwd: &Path,
     escape: Escape,
-    reach: &Reach,
+    (reach, protected): (&Reach, &Protected),
 ) -> Result<Targets, Ignored> {
     let mut segments = Segments::new(MAX_WORDS);
     let mut text = String::new();
@@ -118,6 +122,7 @@ pub(super) fn shell_targets(
         .iter()
         .any(|part| part.words.iter().any(|word| change(word).is_some()));
     let mut files: Vec<(PathBuf, String)> = Vec::new();
+    let mut named_protected: Vec<String> = Vec::new();
     let mut names_codex = false;
     let mut named: Vec<PathBuf> = Vec::new();
     let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -129,15 +134,23 @@ pub(super) fn shell_targets(
         linear_pushed: Vec::new(),
     };
     for part in &parts {
-        for word in part.words {
-            for candidate in candidates(word) {
+        let spelled: Vec<Cow<'_, str>> = part.words.iter().map(|w| protected.expand(w)).collect();
+        for (word, read) in part.words.iter().zip(&spelled) {
+            for candidate in candidates(read) {
                 names_codex |= text_has_codex_part(candidate);
                 let candidate = native(candidate, part.escape);
                 for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
                     if seen.insert(path.clone()) {
                         named.push(path.clone());
                     }
-                    for path in walked_resolutions(&path, reach) {
+                    let walked = walked_resolutions(&path, reach);
+                    if !protected.is_empty()
+                        && !named_protected.contains(word)
+                        && protected.covers_shell(&path, &walked)
+                    {
+                        named_protected.push(word.clone());
+                    }
+                    for path in walked {
                         if seen.insert(path.clone()) {
                             named.push(path.clone());
                         }
@@ -153,7 +166,12 @@ pub(super) fn shell_targets(
             }
         }
         if part.command {
-            moved(&mut folders, part.words, part.escape, reach);
+            if spelled.iter().any(|word| matches!(word, Cow::Owned(_))) {
+                let words: Vec<String> = spelled.iter().map(ToString::to_string).collect();
+                moved(&mut folders, &words, part.escape, reach);
+            } else {
+                moved(&mut folders, part.words, part.escape, reach);
+            }
         }
     }
     Ok(Targets::Shell {
@@ -164,6 +182,7 @@ pub(super) fn shell_targets(
         text,
         line,
         escape,
+        protected: named_protected,
     })
 }
 

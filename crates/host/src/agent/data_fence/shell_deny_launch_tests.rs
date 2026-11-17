@@ -161,6 +161,41 @@ fn the_vms_denied_commands_now_pass() {
     }
 }
 
+/// The own run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`, as the
+/// launch adds it), is named by no shell rule in either shell, so a pack's script runs and a
+/// command may read it, as the run's work folder may; Claude's `Edit` rule covers it, with no
+/// `Read` rule.
+#[test]
+fn the_own_packs_plugin_runs_in_both_shells_and_is_denied_for_edit() {
+    let dir = TempDir::new("shell-deny-packs");
+    let mut deny = vm_launch(dir.path(), VM_RUN_A);
+    deny.edit_denied.push(format!("run/{VM_RUN_A}/skill-packs"));
+    let rules = windows_shell_deny_rules(&deny, &vm_env);
+    let data = VM_DATA.replace('\\', "/");
+    let packs = format!("{data}/run/{VM_RUN_A}/skill-packs/skills/nda/scripts/fill.py");
+    let work = format!("{data}/run/{VM_RUN_A}/work/x.md");
+    for tool in ["Bash", "PowerShell"] {
+        for command in [
+            format!(r#"python "{packs}" in.docx"#),
+            format!("python {} in.docx", packs.replace('/', "\\")),
+            format!(r#"grep -n x "{packs}""#),
+            format!(r#"cat "{work}""#),
+        ] {
+            assert!(!denied_by(&rules, tool, &command), "{tool}: {command}");
+        }
+    }
+    let rules = claude_deny_rules_on(&deny, true, false);
+    let place = format!("//c/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop/run/{VM_RUN_A}");
+    assert!(
+        rules.contains(&format!("Edit({place}/skill-packs/**)")),
+        "{rules:?}"
+    );
+    assert!(
+        !rules.contains(&format!("Read({place}/skill-packs/**)")),
+        "{rules:?}"
+    );
+}
+
 /// The spellings of `<data>` a command may use, each with its separator: the VM's.
 fn spellings() -> Vec<(String, &'static str)> {
     let back = VM_DATA.to_owned();

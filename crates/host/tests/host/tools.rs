@@ -434,11 +434,12 @@ fn stetdoc_goes_first_on_both_agents_path() {
     }
 }
 
-/// A Codex launch's keys carry the skills index only from that launch's own write (0031):
-/// after a failed write its instructions have no index, and it never gets an earlier launch's
-/// token.
+/// A Codex launch's keys carry the skills index from that launch's own write (0031). The
+/// built-in plugin's skills folder swapped for a file between two launches is repaired by the
+/// second launch's plugin match, whose write then succeeds: that launch's keys carry the index
+/// again, from its own token.
 #[test]
-fn a_failed_skills_write_gives_codex_no_index_and_no_earlier_token() {
+fn a_skills_folder_swapped_for_a_file_is_repaired_and_codex_gets_its_own_index() {
     let dir = Dir::new("tools_skills_token", &[]);
     let codex = template(&dir, "token-codex", &codex_lines("token-codex", &json!({})));
     settings(&dir, agents(&[(CODEX, &codex, json!({}))]), json!({}));
@@ -457,7 +458,7 @@ fn a_failed_skills_write_gives_codex_no_index_and_no_earlier_token() {
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, CODEX));
-    // The skills folder made a file: the next launch's write fails.
+    // The skills folder made a file: the next launch's first write fails, its match repairs it.
     let skills = dir
         .data()
         .join("profile")
@@ -467,6 +468,10 @@ fn a_failed_skills_write_gives_codex_no_index_and_no_earlier_token() {
     write::write(&skills, b"not a folder");
     turn(&host, host.create_thread(matter, CODEX));
     host.shutdown();
+    assert!(
+        skills.is_dir(),
+        "the plugin's skills folder is a folder again"
+    );
     let instructions: Vec<String> = launcher
         .seen()
         .iter()
@@ -480,7 +485,10 @@ fn a_failed_skills_write_gives_codex_no_index_and_no_earlier_token() {
         .collect();
     assert_eq!(instructions.len(), 2);
     assert!(instructions[0].contains(&index), "{}", instructions[0]);
-    assert!(!instructions[1].contains(&index), "{}", instructions[1]);
+    assert!(instructions[1].contains(&index), "{}", instructions[1]);
     let tokens = tokens.lock().unwrap();
-    assert!(matches!(tokens.as_slice(), [Some(_), None]), "{tokens:?}");
+    assert!(
+        matches!(tokens.as_slice(), [Some(_), Some(_)]),
+        "{tokens:?}"
+    );
 }

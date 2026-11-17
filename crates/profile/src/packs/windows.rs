@@ -144,6 +144,13 @@ impl Folder {
     }
 }
 
+/// How many hard links the file at `path` has, from a handle opened as [`open`] does; none when
+/// it cannot be opened or read (`crate::plugin_match` then replaces the file).
+pub(crate) fn link_count(path: &Path) -> Option<u32> {
+    let handle = open(path).ok()?;
+    information(&handle).ok().map(|info| info.nNumberOfLinks)
+}
+
 /// `path` opened for reading, never through a reparse point at it
 /// (`FILE_FLAG_OPEN_REPARSE_POINT`), a folder too (`FILE_FLAG_BACKUP_SEMANTICS`), sharing read,
 /// write and delete so no other program is blocked.

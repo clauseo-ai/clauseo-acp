@@ -176,6 +176,9 @@ fn rules(
         .map(|place| parse(place).0)
         .collect();
     let mut targets: Vec<String> = deny.targets.clone();
+    // Not the folders denied for `Edit` alone (`LaunchDeny::edit_denied`): the built-in plugin
+    // is in a shared place already, and the run's packs plugin holds the scripts a pack's
+    // skill runs (decision record 0040).
     for place in &shared {
         let target = format!("{place}/**");
         if !targets.contains(&target) {

@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -240,6 +240,11 @@ pub struct SigninConfig {
     /// map here instead of changing its process's environment. `Debug` prints only how many
     /// names it holds: values can be secrets.
     pub base_env: BTreeMap<OsString, OsString>,
+    /// What runs before each Claude Code process a sign-in job starts (a login, a status
+    /// check, a logout), given the agent's home: the host's write of Claude Code's user settings
+    /// there (`clauseo_host::write_claude_home_settings`), so the process reads only what
+    /// Clauseo ships. When it fails, that run does not start. None: nothing runs (tests).
+    pub claude_settings: Option<ClaudeSettings>,
     /// Tests only: the port Codex's browser sign-in probes in place of 1455, so tests that hold
     /// "the" callback port run side by side. `Some(0)` is a port that is always free. Outside
     /// `test-support` the field does not exist, so the probe is always `127.0.0.1:1455`.
@@ -266,12 +271,17 @@ pub struct SigninConfig {
 /// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
 pub(crate) const CODEX_CALLBACK_PORT: u16 = 1455;
 
+/// [`SigninConfig::claude_settings`]: writes Claude Code's user settings in the home it is
+/// given.
+pub type ClaudeSettings = Arc<dyn Fn(&Path) -> std::io::Result<()> + Send + Sync>;
+
 impl SigninConfig {
     /// This process's environment as the base, and no agent homes.
     pub fn from_env() -> SigninConfig {
         SigninConfig {
             homes: BTreeMap::new(),
             base_env: std::env::vars_os().collect(),
+            claude_settings: None,
             #[cfg(feature = "test-support")]
             callback_port: None,
             #[cfg(feature = "test-support")]
