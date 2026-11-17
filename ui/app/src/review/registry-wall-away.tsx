@@ -26,7 +26,7 @@ const room = (
   return () => <RoomOver host={() => roomHost([MATTER], listed, away)} />;
 };
 
-const STATES = {
+export const STATES = {
   windows: room(
     papers("Plaint.pdf", "Reply.docx", "Written statement.pdf"),
     { place: ONE_DRIVE, skipped: only("Lease deed.pdf", "Vakalatnama.pdf"), unread: ["Annexures"] },
@@ -68,14 +68,6 @@ export const WALL_AWAY: Entry[] = [
     render: STATES.windows,
   },
   {
-    id: "WA-02",
-    words: roomWords(
-      "Not on this computer, so Clauseo doesn't open it or save new versions of it.",
-    ),
-    screen: "room/wall-away",
-    render: STATES.windows,
-  },
-  {
     id: "WA-03",
     words: roomWords(
       "To keep it here, right-click it in File Explorer and choose Always keep on this device.",
@@ -90,12 +82,6 @@ export const WALL_AWAY: Entry[] = [
     render: STATES.windows,
   },
   {
-    id: "WA-05",
-    words: matterWords("{n} more are only in {service}."),
-    screen: "room/wall-away",
-    render: STATES.windows,
-  },
-  {
     id: "WA-06",
     words: roomWords(
       "To keep it here, Control-click it in Finder and choose Always Keep on This Device.",
@@ -104,20 +90,8 @@ export const WALL_AWAY: Entry[] = [
     render: STATES.mac,
   },
   {
-    id: "WA-07",
-    words: matterWords("1 more is only in {service}."),
-    screen: "room/wall-away",
-    render: STATES.mac,
-  },
-  {
     id: "WA-08",
     words: roomWords("Only online"),
-    screen: "room/wall-away",
-    render: STATES.other,
-  },
-  {
-    id: "WA-09",
-    words: roomWords("Download it to this computer to change that."),
     screen: "room/wall-away",
     render: STATES.other,
   },

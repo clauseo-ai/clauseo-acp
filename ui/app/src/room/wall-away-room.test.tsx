@@ -142,14 +142,14 @@ test("files only online and a folder not opened show dimmed among the papers, op
     "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.",
   );
   expect(describedBy(away[1]!)).toBe(
-    "Not on this computer, so Clauseo doesn't open it or save new versions of it. " +
+    "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it. " +
       "To keep it here, right-click it in File Explorer and choose Always keep on this device.",
   );
   // the papers' tiles still open
   expect(tiles()[2]?.querySelector(".tile-face")?.getAttribute("aria-disabled")).toBeNull();
   // the count adds the two files only online; the folder isn't counted
   expect(line()).toBe(
-    `${mt("en", "A new conversation. It reads this matter's {n} papers.", { n: 2 })} 2 more are only in OneDrive.`,
+    `${mt("en", "A new conversation. It reads this matter's {n} papers.", { n: 2 })} 2 more are only in OneDrive. Reading them downloads them to this computer.`,
   );
 });
 
@@ -164,7 +164,7 @@ test("on the Mac, in a folder no named service syncs, the tile says online and i
     ),
   );
   expect(shown()).toEqual(["Lease.pdf (Only online)", "Plaint.pdf"]);
-  expect(describedBy(tiles()[0]!)).toContain("Download it to this computer to change that.");
+  expect(describedBy(tiles()[0]!)).toContain("Reading it in a conversation downloads it.");
   expect(line()).toBe(
     `${mt("en", "A new conversation. It reads this matter's one paper.")} 1 more is only online.`,
   );
@@ -233,7 +233,9 @@ test("a file downloaded turns into a paper's tile and the count drops; a folder 
   };
   const transport = scripted(folder);
   await mount(transport);
-  expect(line()).toContain("2 more are only in OneDrive.");
+  expect(line()).toContain(
+    "2 more are only in OneDrive. Reading them downloads them to this computer.",
+  );
 
   // Lease deed downloaded: a paper now, with an opener
   folder.papers = [paper(2, "Lease deed.pdf"), paper(1, "Plaint.pdf")];
@@ -246,7 +248,7 @@ test("a file downloaded turns into a paper's tile and the count drops; a folder 
     "Vakalatnama.pdf (Only in OneDrive)",
   ]);
   expect(tiles()[1]?.querySelector(".tile-face")?.getAttribute("data-testid")).toBe("open-file");
-  expect(line()).toContain("1 more is only in OneDrive.");
+  expect(line()).toContain("1 more is only in OneDrive. Reading it downloads it to this computer.");
 
   // the last one downloaded, and the folder opened: its papers in its tile's place, and no more to count
   folder.papers = [
@@ -271,7 +273,10 @@ test("in Hindi the tiles and the count say it in Hindi, the OS's menu names in E
     "केवल OneDrive में",
   ]);
   expect(describedBy(away[1]!)).toContain("Always keep on this device चुनें।");
-  expect(line()).toContain("2 और दस्तावेज़ केवल OneDrive में हैं।");
+  // UC-914's Hindi is later: its English stays
+  expect(line()).toContain(
+    "2 more are only in OneDrive. Reading them downloads them to this computer.",
+  );
 });
 
 test("in Hindi a matter with nothing to read says so where a new conversation starts", async () => {

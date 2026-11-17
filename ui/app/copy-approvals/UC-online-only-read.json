@@ -1,0 +1,29 @@
+{
+  "UC-913": {
+    "en": "1 more is only in {service}. Reading it downloads it to this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "online words (provisional; Rohan's review page, item 52)",
+    "note": "The new conversation's clause for one paper only in a named sync service (iCloud Drive, OneDrive and so on), after U6-07's line. Replaces WA-07 (retired), which said nothing of whether reading the paper downloads it; Claude and ChatGPT download such a paper when asked, and this says Clauseo's reads do too. With no named service the clause stays WA-11"
+  },
+  "UC-914": {
+    "en": "{n} more are only in {service}. Reading them downloads them to this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "online words (provisional; Rohan's review page, item 52)",
+    "note": "The same clause for several papers only in a named sync service, after U6-05's line. Replaces WA-05 (retired). With no named service the clause stays WA-10"
+  },
+  "UC-915": {
+    "en": "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "online words (provisional; Rohan's review page, item 52)",
+    "note": "The tip of a dimmed tile for a file only online, its first two sentences. Replaces WA-02 and WA-09 (both retired): \"Not on this computer, so Clauseo doesn't open it or save new versions of it.\" and \"Download it to this computer to change that.\" On OneDrive, the keep-on-this-device sentence (WA-03 on Windows, WA-06 on the Mac) follows it"
+  }
+}
