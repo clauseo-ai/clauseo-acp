@@ -126,23 +126,37 @@ LangString clauseoAppRemovedByAv ${LANG_ENGLISH} "Windows Security stopped part 
 ; only; the install goes on. Provisional (2026-11-09).
 LangString webview2TooOld ${LANG_ENGLISH} "WebView2 on this computer is older than Clauseo needs. Windows updates it by itself. Open Clauseo again once it's updated."
 
+; appRunning, appRunningOkKill and failedToKillApp: Tauri's CheckIfAppIsRunning (its utils.nsh,
+; which installer.nsi includes), first in the installer's Section Install and the uninstaller's
+; Section Uninstall (and NSIS_HOOK_PREUNINSTALL's step 0), when Restart Manager lists a process
+; using $INSTDIR\Clauseo.exe. appRunningOkKill is its OK/Cancel box, interactive only: /S and /P
+; (the updater runs the installer passive, after the app exits) close Clauseo without asking. OK
+; closes it with Restart Manager (RmShutdown, RmForceShutdown), which sends its window
+; WM_ENDSESSION: tao's handler runs the app's quit (the running answer cancelled, its text committed, at
+; most SESSION_END_WAIT), and the agents end with it (their Job Objects kill on close); a turn
+; left open ends thread.interrupted at the next start, with the question and the answer so far,
+; as the app says it (words-errors.ts STOPPED). An unsent draft lives only in the window
+; (room.tsx), so it is lost. appRunning: the status line after Cancel, and under /S the console
+; line when the close failed. failedToKillApp: the status line when the close failed. All three
+; read for an install and an uninstall alike: the same strings serve both. Tauri wrote them as
+; "... is running! Click OK to kill it"; these are Clauseo's own, so a Tauri upgrade must not
+; copy its lines back (a key twice fails the tests). Provisional (2026-11-17).
+LangString appRunning ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} is still open. Quit ${PRODUCTNAME}, then try again."
+LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is open. Click OK to close it and continue, or Cancel to leave it open and stop here. Your conversations are kept. If ${PRODUCTNAME} is writing an answer, the answer stops, and your question and the answer so far are kept. A question you've typed but not sent isn't kept, so copy it first."
+LangString failedToKillApp ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} couldn't be closed. Quit ${PRODUCTNAME}, then try again."
+
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
-; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
-; Tauri writes {{product_name}} in appRunning, appRunningOkKill and failedToKillApp, which NSIS
-; shows as it is (language files are included, not rendered); here they use ${PRODUCTNAME}. On a
-; Tauri upgrade, copy that file's lines here again and keep the fix; a key missing here has no
-; English text.
+; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), less the keys Clauseo words itself:
+; deleteAppData, and appRunning, appRunningOkKill and failedToKillApp (above). On a Tauri upgrade,
+; copy that file's other lines here again; a key missing here has no English text.
 LangString addOrReinstall ${LANG_ENGLISH} "Add/Reinstall components"
 LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
 LangString alreadyInstalledLong ${LANG_ENGLISH} "${PRODUCTNAME} ${VERSION} is already installed. Select the operation you want to perform and click Next to continue."
-LangString appRunning ${LANG_ENGLISH} "${PRODUCTNAME} is running! Please close it first then try again."
-LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is running!$\nClick OK to kill it"
 LangString chooseMaintenanceOption ${LANG_ENGLISH} "Choose the maintenance option to perform."
 LangString choowHowToInstall ${LANG_ENGLISH} "Choose how you want to install ${PRODUCTNAME}."
 LangString createDesktop ${LANG_ENGLISH} "Create desktop shortcut"
 LangString dontUninstall ${LANG_ENGLISH} "Do not uninstall"
 LangString dontUninstallDowngrade ${LANG_ENGLISH} "Do not uninstall (Downgrading without uninstall is disabled for this installer)"
-LangString failedToKillApp ${LANG_ENGLISH} "Failed to kill ${PRODUCTNAME}. Please close it first then try again"
 LangString installingWebview2 ${LANG_ENGLISH} "Installing WebView2..."
 LangString newerVersionInstalled ${LANG_ENGLISH} "A newer version of ${PRODUCTNAME} is already installed! It is not recommended that you install an older version. If you really want to install this older version, it's better to uninstall the current version first. Select the operation you want to perform and click Next to continue."
 LangString older ${LANG_ENGLISH} "older"
