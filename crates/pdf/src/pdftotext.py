@@ -28,6 +28,7 @@ MAX_SIDE = 20_000  # px a side, under tesseract's 32,767: a 1e9 x 1e-4 pt page p
 LANGS = ("eng", "eng+hin")
 # C0 and C1 controls but \t, \n and \f: a ToUnicode map can name ESC or BEL.
 CONTROLS = dict.fromkeys(c for c in range(160) if c < 32 and c not in (9, 10, 12) or c > 126)
+PAGE = {**CONTROLS, 12: 10}  # in a page's text \f is a line break: \f is the page separator
 NOISE = ("Error in pix", "Estimating resolution", "Detected ", "Warning: Invalid resolution")
 STALE = 30.0
 FORMAT = 1
@@ -78,16 +79,17 @@ def parse(args):
     return opts, files
 
 
-def clean(text):
-    return text.translate(CONTROLS)
+def clean(text, page=False):
+    return text.translate(PAGE if page else CONTROLS)
 
 
 def marked(pg, found):
     """A page's text; an OCR'd one after a line that says so (in the output, not only -q's)."""
+    text = clean(found["text"], True)
     if found.get("kind") != "ocr":
-        return found["text"]
+        return text
     return (f"[page {pg}: no text layer; recognised by OCR (tesseract, {found['langs']}), errors "
-            "are possible]\n" + found["text"])
+            "are possible]\n" + text)
 
 
 def spans(pages, word=True):
@@ -366,14 +368,14 @@ class Ocr:
             lines = [ln for ln in err.decode("utf-8", "replace").splitlines()[-40:]
                      if ln.strip() and not ln.startswith(NOISE)]
             return self.fail(pg, "tesseract: " + (lines[-1] if lines else f"exit {proc.returncode}"))
-        text = out.decode("utf-8", "replace")
+        text = out.decode("utf-8", "replace").removesuffix("\f")  # tesseract's page separator
         self.cache.put(pg, "ocr", text, langs)
         self.done[pg] = {"kind": "ocr", "langs": langs, "text": text}
         self.say(f"OCR: page {pg} recognised ({len(self.done)}/{self.total})")
         return text
 
     def fail(self, pg, reason):
-        self.failed[pg] = reason[:200]
+        self.failed[pg] = f"OCR failed ({reason[:200]})"
         self.say(f"OCR: page {pg} failed: {reason[:200]}")
         return ""
 
@@ -517,23 +519,20 @@ def pdftotext(args):
                    f"after the last page ({last}).")
     pages = range(first, last + 1)
     deadline = START + BUDGET
-    texts, plains, scanned, unread = {}, {}, [], []
+    texts, plains, scanned, unread, failed = {}, {}, [], [], {}
     for pg in pages:
         if pg >= first + MAX_TEXT or time.monotonic() >= deadline:
             unread = range(pg, last + 1)  # a range: `in` below is O(1)
             break
-        page = doc[pg - 1]
-        textpage = page.get_textpage()
         try:
-            plain = clean(textpage.get_text_range().replace("\r\n", "\n").replace("\r", "\n"))
-            if len(plain.strip()) >= MIN_CHARS:
-                texts[pg] = layout(textpage, plain) if opts.get("-layout") else plain
-                plains[pg] = plain
-            else:
-                scanned.append(pg)
-        finally:
-            textpage.close()
-            page.close()
+            plain, text = read_page(doc, pg, opts.get("-layout"))
+        except Exception as err:  # noqa: BLE001 - one page PDFium cannot read is named
+            failed[pg] = f"not read (PDFium: {type(err).__name__}: {err})"[:220]
+            continue
+        if text is None:
+            scanned.append(pg)
+        else:
+            texts[pg], plains[pg] = text, plain
     if cache and scanned:
         # Kept only for a document with scans, for its <rel>.txt; a typed PDF leaves nothing.
         for pg, plain in plains.items():
@@ -546,7 +545,6 @@ def pdftotext(args):
         if ocred(found):
             known[pg] = found
     missing = [pg for pg in allowed if pg not in known]
-    failed = {}
     unavailable = bool(missing) and not (os.path.isfile(program) and os.path.isdir(tessdata))
     if missing and not unavailable:
         say(f"OCR: {len(missing)} page(s) of {os.path.basename(src)} have no text layer; "
@@ -558,7 +556,7 @@ def pdftotext(args):
                     try:
                         known.update(ocr.run(missing))
                     finally:
-                        failed = ocr.failed
+                        failed.update(ocr.failed)
                     if cache:
                         cache.set_meta(engine="tesseract", dpi=DPI, pages=count)
                 finally:
@@ -587,8 +585,8 @@ def pdftotext(args):
         notes.append(f"[{spans(missing)} of {name}: not yet recognised; OCR stops after "
                      f"{BUDGET:.0f} seconds per run. {again} -f/-l for the pages you need.]")
     for pg, reason in sorted(failed.items()):
-        notes.append(f"[page {pg} of {name}: OCR failed ({reason}); run the same "
-                     "command again to retry, or check the page image.]")
+        notes.append(f"[page {pg} of {name}: {reason}; run the same command again to retry, or "
+                     "check the page image.]")
     if unread:
         notes.append(f"[{spans(unread)} of {name}: not read; one run reads at most "
                      f"{MAX_TEXT:,} pages within {BUDGET:.0f} seconds. Use -f/-l for these "
@@ -618,6 +616,23 @@ def pdftotext(args):
         mirror(cache, src, count, name)
     emit(body, out)
     return 0
+
+
+def read_page(doc, pg, keep_layout):
+    """Page `pg`'s plain text, and its text as printed (None: too little, so a scan)."""
+    page = doc[pg - 1]
+    try:
+        textpage = page.get_textpage()
+        try:
+            plain = clean(textpage.get_text_range().replace("\r\n", "\n").replace("\r", "\n"),
+                          True)
+            if len(plain.strip()) < MIN_CHARS:
+                return plain, None
+            return plain, clean(layout(textpage, plain), True) if keep_layout else plain
+        finally:
+            textpage.close()
+    finally:
+        page.close()
 
 
 def ocred(found):

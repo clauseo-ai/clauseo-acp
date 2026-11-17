@@ -20,8 +20,9 @@
 //! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
 //! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
 //! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm`, `pdfinfo` and `pdftotext` run it); the
-//! host puts them after stetdoc's. On the same condition, Codex's instructions end with the line
-//! that tells it to render PDF pages with them (`clauseo_profile::instructions::codex_pdf`).
+//! host puts them after stetdoc's. On the same condition, Codex's instructions end with the lines
+//! that tell it to render PDF pages and read PDF text with them
+//! (`clauseo_profile::instructions::codex_pdf`).
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
