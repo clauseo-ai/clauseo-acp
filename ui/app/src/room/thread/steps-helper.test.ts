@@ -1,6 +1,6 @@
-// A step that asks a helper (UC-906, UC-907; helper-words.ts): Claude's Agent or Task, and ChatGPT's spawn_agent, said by
-// the helper's task in the words of the done and failed row, counted as other in the folded line, and kept to today's
-// words where the call gives no task. Pure, like steps.test.ts.
+// A step that asks a helper (UC-906, UC-907; helper-words.ts): Claude's Agent or Task, said by its description, and
+// ChatGPT's spawnAgent, said by its prompt, in the words of the done and failed row, counted as other in the folded
+// line, and kept to the other-step words where the call gives no task. Pure, like steps.test.ts.
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { describe, expect, test } from "vitest";
 import { toolCall } from "../../testing/stream-script.ts";
@@ -21,6 +21,12 @@ function call(
 /** Claude's Agent tool as claude-agent-acp reports it: kind think, the helper's description as its title. */
 const agent = (title: string, status: ToolCallStatus = "completed", name = "Agent") =>
   call("think", status, { title, tool_name: name });
+/** ChatGPT's spawn as codex-acp 2.2.2 reports it: kind other, titled spawnAgent, its input holding the prompt. */
+const spawn = (prompt: string | null, status: ToolCallStatus = "completed") =>
+  call("other", status, {
+    title: "spawnAgent",
+    raw_input: { inline: JSON.stringify(prompt === null ? {} : { prompt, model: "gpt-5" }) },
+  });
 const read = (title: string) => call("read", "completed", { title });
 
 const TASK = "Compare termination clauses";
@@ -48,10 +54,18 @@ describe("a helper's step, done or failed", () => {
     );
   });
 
-  test("ChatGPT's spawn_agent with a task says it the same way", () => {
-    expect(
-      doneOf("en", call("other", "completed", { title: TASK, tool_name: "spawn_agent" })),
-    ).toBe("Asked a helper: Compare termination clauses.");
+  test("ChatGPT's spawn says its prompt as the task, done and failed", () => {
+    expect(doneOf("en", spawn(TASK))).toBe("Asked a helper: Compare termination clauses.");
+    expect(doneOf("en", spawn(TASK, "failed"))).toBe(
+      "Tried to ask a helper: Compare termination clauses.",
+    );
+    expect(helperOf(spawn(TASK))).toBe(true);
+  });
+
+  test("a prompt's line breaks and controls are one plain line", () => {
+    expect(helperTaskOf(spawn(`Compare\n\n  termination\tclauses\u202E`))).toBe(
+      "Compare termination clauses",
+    );
   });
 
   test("a title's full stop is not doubled, and its paths are cut to their names", () => {
@@ -60,25 +74,34 @@ describe("a helper's step, done or failed", () => {
     );
   });
 
-  test("a long task is cut at 80 characters, the last one an ellipsis", () => {
+  test("a long task is cut at 80 characters, the last one an ellipsis, with no full stop after it", () => {
     const long =
       "Compare the termination and renewal clauses in each supplier contract, one clause at a time, against the bundle";
     const task = helperTaskOf(agent(long));
     expect(task).toBe(`${long.slice(0, 79)}…`);
     expect(task).toHaveLength(80);
-    expect(doneOf("en", agent(long))).toBe(`Asked a helper: ${long.slice(0, 79)}….`);
+    expect(doneOf("en", agent(long))).toBe(`Asked a helper: ${long.slice(0, 79)}…`);
+    expect(doneOf("en", spawn(long, "failed"))).toBe(
+      `Tried to ask a helper: ${long.slice(0, 79)}…`,
+    );
   });
 
-  test("with an empty title, today's words stay: a thought it went through, or one tried", () => {
-    expect(doneOf("en", agent(""))).toBe("Thought it through.");
-    expect(doneOf("en", agent("", "failed"))).toBe("Tried to think it through.");
+  test("with no task, a helper says the other-step words, as the folded line counts it", () => {
+    expect(doneOf("en", agent(""))).toBe("Did one other thing.");
+    expect(doneOf("en", agent("", "failed"))).toBe("Tried one other thing.");
     expect(helperTaskOf(agent(""))).toBe("");
+    expect(summaryOf("en", [agent("")])).toBe("Did 1 other thing.");
   });
 
-  test("a title that is only a tool's name is no task: ChatGPT's spawnAgent keeps its words", () => {
-    const spawn = call("other", "completed", { title: "spawnAgent", tool_name: "spawn_agent" });
-    expect(helperOf(spawn)).toBe(true);
-    expect(doneOf("en", spawn)).toBe(steps("en", "Did one other thing."));
+  test("ChatGPT's spawn with no prompt keeps the other-step words", () => {
+    expect(doneOf("en", spawn(null))).toBe(steps("en", "Did one other thing."));
+    expect(doneOf("en", spawn("   "))).toBe(steps("en", "Did one other thing."));
+    expect(doneOf("en", spawn(null, "failed"))).toBe(steps("en", "Tried one other thing."));
+  });
+
+  test("a spawnAgent title on a step of another kind is no helper", () => {
+    const other = call("read", "completed", { title: "spawnAgent" });
+    expect(helperOf(other)).toBe(false);
   });
 
   test("a step that is no helper, with the same kind and title, reads as before", () => {
@@ -90,9 +113,13 @@ describe("a helper's step, done or failed", () => {
 describe("a helper in the folded line", () => {
   test("a helper counts as other, so the line says it did one other thing, not that it planned", () => {
     expect(groupKindOf(agent(TASK))).toBe("other");
+    expect(groupKindOf(spawn(TASK))).toBe("other");
     expect(summaryOf("en", [agent(TASK)])).toBe("Did 1 other thing.");
     expect(summaryOf("en", [read("Lease.pdf"), read("Notice.pdf"), agent(TASK)])).toBe(
       "2 papers read. Did 1 other thing.",
+    );
+    expect(summaryOf("en", [read("Lease.pdf"), spawn(TASK)])).toBe(
+      "1 paper read. Did 1 other thing.",
     );
   });
 
