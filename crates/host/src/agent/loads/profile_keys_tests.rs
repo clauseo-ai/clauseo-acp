@@ -30,6 +30,7 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     own_reads: Vec::new(),
     edit_denied: Vec::new(),
     guarded: Vec::new(),
+    guarded_edit: Vec::new(),
     claude_home: None,
 };
 
@@ -160,6 +161,7 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
         matter: Path::new("/matters/a"),
         ask_all: false,
         protected: &[],
+        protected_edit: &[],
         home: None,
     };
     let keys = keys(OFF, Login::Bedrock);

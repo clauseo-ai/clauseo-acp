@@ -176,13 +176,10 @@ fn rules(
         .map(|place| parse(place).0)
         .collect();
     let mut targets: Vec<String> = deny.targets.clone();
-    // The folders denied for `Edit` alone are named too, unless a shared place holds them.
-    let edit_only = deny.edit_denied.iter().filter(|place| {
-        !shared
-            .iter()
-            .any(|shared| *place == shared || place.starts_with(&format!("{shared}/")))
-    });
-    for place in shared.iter().chain(edit_only) {
+    // Not the folders denied for `Edit` alone (`LaunchDeny::edit_denied`): the built-in plugin
+    // is in a shared place already, and the run's packs plugin holds the scripts a pack's
+    // skill runs (decision record 0040).
+    for place in &shared {
         let target = format!("{place}/**");
         if !targets.contains(&target) {
             targets.push(target);

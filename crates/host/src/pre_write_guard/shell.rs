@@ -146,7 +146,7 @@ pub(super) fn shell_targets(
                     let walked = walked_resolutions(&path, reach);
                     if !protected.is_empty()
                         && !named_protected.contains(word)
-                        && protected.covers(&path, &walked)
+                        && protected.covers_shell(&path, &walked)
                     {
                         named_protected.push(word.clone());
                     }

@@ -53,6 +53,7 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         matter,
         ask_all: false,
         protected: &[],
+        protected_edit: &[],
         home: None,
     });
     let keys = ClaudeKeys {
@@ -107,6 +108,7 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             matter: Path::new("/m"),
             ask_all: forced_ask,
             protected: &[],
+            protected_edit: &[],
             home: None,
         });
         let keys = ClaudeKeys {
@@ -239,6 +241,7 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             matter: Path::new("/m"),
             ask_all: forced_ask,
             protected: &[],
+            protected_edit: &[],
             home: None,
         });
         let meta = session_meta(
@@ -315,6 +318,7 @@ fn a_guard_that_cannot_go_has_a_reason() {
             matter,
             ask_all: true,
             protected: &[],
+            protected_edit: &[],
             home: None,
         })
     };
@@ -460,6 +464,7 @@ fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() 
         matter: Path::new("/m"),
         ask_all: false,
         protected: &[],
+        protected_edit: &[],
         home: None,
     });
     let hook = json!({"claudeCode": {"options": {"extraArgs": {"permission-mode": "default"}}}});

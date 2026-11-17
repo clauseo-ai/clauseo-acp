@@ -71,12 +71,11 @@ impl Layout {
         crate::agent::loads::guard_protected(
             Path::new(&self.path("home")),
             Path::new(&self.path("data")),
-            Path::new(&self.path("data/run/r1/skill-packs")),
         )
     }
 
-    /// Claude Code's arguments for the matter: `--matter`, then the config folder and each
-    /// protected path.
+    /// Claude Code's arguments for the matter: `--matter`, then the config folder, each
+    /// protected path, and the run's packs plugin, which only a file tool may not change.
     fn args(&self) -> Vec<String> {
         let mut args = vec![
             "--matter".to_owned(),
@@ -88,6 +87,8 @@ impl Layout {
             args.push("--protected".to_owned());
             args.push(path.to_str().unwrap().to_owned());
         }
+        args.push("--protected-edit".to_owned());
+        args.push(self.path("data/run/r1/skill-packs"));
         args
     }
 
@@ -120,11 +121,18 @@ impl Drop for Layout {
 
 /// The places a file tool may not write: each kind of protected path, existing or not, by
 /// absolute path, relative to the matter, or through a `..`.
-const PROTECTED_FILES: [&str; 8] = [
+const PROTECTED_FILES: [&str; 15] = [
     "home/settings.json",
     "home/settings.local.json",
     "home/CLAUDE.md",
+    "home/.claude.json",
     "home/skills/new/SKILL.md",
+    "home/commands/x.md",
+    "home/agents/x.md",
+    "home/rules/x.md",
+    "home/workflows/x.js",
+    "home/agent-memory/x/MEMORY.md",
+    "home/hooks/x.json",
     "home/plugins/p/hooks/hooks.json",
     "data/profile/claude-plugin/skills/planted/SKILL.md",
     "data/profile/claude-plugin/.claude-plugin/plugin.json",
@@ -185,7 +193,6 @@ fn bash_writing_a_protected_path_is_refused() {
     let fx = Layout::new("bash");
     let home = fx.slashed("home");
     let plugin = fx.slashed("data/profile/claude-plugin");
-    let packs = fx.slashed("data/run/r1/skill-packs");
     for command in [
         format!("echo x > {home}/settings.json"),
         format!("echo x >> '{home}/settings.local.json'"),
@@ -194,7 +201,6 @@ fn bash_writing_a_protected_path_is_refused() {
         format!("cd {home} && echo x > settings.local.json"),
         format!("cd {home}/skills; touch new.md"),
         format!("pushd {plugin} && rm -rf skills"),
-        format!("tee {packs}/skills/nda/SKILL.md < a.md"),
         "echo x > \"$CLAUDE_CONFIG_DIR/settings.json\"".to_owned(),
         "cp a.md ${CLAUDE_CONFIG_DIR}/skills/x/SKILL.md".to_owned(),
         "echo x > %CLAUDE_CONFIG_DIR%/CLAUDE.md".to_owned(),
@@ -278,6 +284,7 @@ fn the_real_entry_arguments_refuse_a_protected_write() {
         matter: &matter,
         ask_all: false,
         protected: &protected,
+        protected_edit: &[],
         home: Some(&home),
     })
     .unwrap();
@@ -292,4 +299,71 @@ fn the_real_entry_arguments_refuse_a_protected_write() {
     assert_eq!(fx.guard(&args, "Write", &input), REFUSED);
     let command = json!({"command": "echo x > $CLAUDE_CONFIG_DIR/CLAUDE.md"});
     assert_eq!(fx.guard(&args, "Bash", &command), REFUSED);
+}
+
+/// A write named past the words read one by one (after 64 other words) is refused by the whole
+/// text's tail, in both readings; so is one through an NTFS stream suffix. A read past them
+/// goes on.
+#[test]
+fn a_protected_write_past_the_word_limit_or_through_a_stream_is_refused() {
+    let fx = Layout::new("long");
+    let filler = "x ".repeat(crate::pre_write_guard::MAX_WORDS + 10);
+    let home = fx.slashed("home");
+    let bash = [
+        format!("echo {filler}; cp a.md {home}/settings.json"),
+        format!("echo {filler}; echo x > '{home}/skills/x/SKILL.md'"),
+    ];
+    for command in &bash {
+        assert_eq!(fx.shell("Bash", command), REFUSED, "{command}");
+    }
+    let home = fx.path("home");
+    for command in [
+        format!(r"Write-Output {filler}; Copy-Item a.md {home}\settings.json"),
+        format!(r"Set-Content -Path {home}\settings.json::$DATA -Value x"),
+        format!(r"Set-Content -Path {home}\CLAUDE.md:x -Value x"),
+    ] {
+        assert_eq!(fx.shell("PowerShell", &command), REFUSED, "{command}");
+    }
+    let home = fx.slashed("home");
+    let read = format!("echo {filler}; cat {home}/settings.json");
+    assert_eq!(fx.shell("Bash", &read), "", "{read}");
+}
+
+/// A pack's script in the run's packs plugin runs, and a command may read the plugin, in both
+/// readings: only a file tool may not change it (`--protected-edit`).
+#[test]
+fn a_pack_script_runs_and_its_plugin_is_closed_to_file_tools_alone() {
+    let fx = Layout::new("packs");
+    let script = fx.slashed("data/run/r1/skill-packs/skills/nda/scripts/fill.py");
+    for command in [
+        format!("python3 {script} m/a.md"),
+        format!("grep -rn x {}", fx.slashed("data/run/r1/skill-packs")),
+    ] {
+        assert_eq!(fx.shell("Bash", &command), "", "{command}");
+    }
+    let script = fx.path("data/run/r1/skill-packs/skills/nda/scripts/fill.py");
+    let command = format!("python {script} m\\a.md");
+    assert_eq!(fx.shell("PowerShell", &command), "", "{command}");
+    let input = json!({"file_path": script, "content": "x"});
+    assert_eq!(fx.guard(&fx.args(), "Write", &input), REFUSED);
+}
+
+/// A protected value the guard cannot read (not absolute) is left out with a line saying so;
+/// the guard still decides on the rest.
+#[test]
+fn a_protected_value_left_out_is_said() {
+    let fx = Layout::new("skipped");
+    let mut args = fx.args();
+    args.extend([
+        "--protected".to_owned(),
+        "relative/settings.json".to_owned(),
+    ]);
+    let skipped = format!("{}\n", crate::pre_write_guard::SKIPPED);
+    let input = json!({"file_path": fx.path("m/a.md"), "content": "x"});
+    assert_eq!(fx.guard(&args, "Write", &input), skipped);
+    let input = json!({"file_path": fx.path("home/settings.json"), "content": "x"});
+    assert_eq!(
+        fx.guard(&args, "Write", &input),
+        format!("{skipped}{REFUSED}")
+    );
 }
