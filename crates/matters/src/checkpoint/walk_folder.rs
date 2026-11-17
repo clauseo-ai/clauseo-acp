@@ -19,6 +19,15 @@
 //! read again. By [`OnHeld`], that error fails the walk (checkpoints, the import, a compare),
 //! or the file is listed as held with the cache's entry and the walk goes on (a restore and its
 //! preview, which report it locked).
+//!
+//! A versioned file found cloud-only (iCloud Drive or `OneDrive` freed its space) with the size and
+//! modification time the cache read it with, in an entry not racily clean, is **carried
+//! forward**: it keeps its blob as read ([`carried`]), so the checkpoint's version holds it as
+//! the folder does, and undo and restore may write it back. Neither is changed by evicting a
+//! file; a colleague's edit in the cloud changes them, and such a file is kept as before, its
+//! earlier blob in the tree but its content now unknown (`EntryState::Unread`, `stale` in the
+//! skip record), so undo never writes it. An entry rebuilt from the tree (no stat) or one
+//! already `Unread` is never carried forward: its stat when read is not known.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -156,6 +165,22 @@ fn cancelled(cancel: Option<&AtomicBool>) -> bool {
     cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
 }
 
+/// The blob of a file found cloud-only with `stat` whose cache entry `old` read it with the
+/// same size and modification time, not racily clean: the content it holds is still that blob.
+fn carried(cache: &StatCache, old: &CacheEntry, stat: &Stat) -> Option<Oid> {
+    match old.state {
+        EntryState::Read(blob)
+            if old.stat.size == stat.size
+                && old.stat.mtime == stat.mtime
+                && old.stat.mtime != crate::stat::FileTime::default()
+                && !cache.is_racy(&old.stat) =>
+        {
+            Some(blob)
+        }
+        EntryState::Read(_) | EntryState::Unread(_) | EntryState::Skipped => None,
+    }
+}
+
 /// One walk's files made into cache entries.
 struct Taker<'w, 'r> {
     cache: &'w StatCache,
@@ -225,6 +250,12 @@ impl Taker<'_, '_> {
                     Err(err) => return Err(err),
                 }
             }
+        }
+        // Cloud-only with the stat it was read with: carried forward (the module's doc).
+        if file.kind == FoundKind::CloudOnly {
+            state = old
+                .and_then(|old| carried(self.cache, old, &file.stat))
+                .map(EntryState::Read);
         }
         let state = if let Some(state) = state {
             state
