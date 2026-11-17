@@ -176,9 +176,9 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
 /// the thread's agent: its own folders are its run folder, this matter's notes and history, a
-/// Claude agent's plans folder in Clauseo's Claude home, and its working folder. None when the request names no
-/// path and no command, or the thread has no agent. Its command's search folders are read as
-/// `shell`, the shell of the request's tool, would read them.
+/// Claude agent's plans folder in Clauseo's Claude home, and its working folder. None when the
+/// request names no path and no command, or the thread has no agent. Its command's search
+/// folders are read as `shell`, the shell of the request's tool, would read them.
 fn fence_check(
     actor: &Actor,
     thread: ThreadId,

@@ -525,8 +525,8 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
 }
 
 /// The instructions with `{work_folder}`, `{matter_notes}`, `{matter_history}` (found from the
-/// notes, `agent::history`), `{connectors}` and `{browser}` filled, in one pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in
-/// the log.
+/// notes, `agent::history`), `{connectors}` and `{browser}` filled, in one pass. An unfillable
+/// token is a host bug: `agent.launch_failed`, naming it in the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
     let history = crate::agent::history::matter_history(Path::new(folders.notes));
     let history = history
