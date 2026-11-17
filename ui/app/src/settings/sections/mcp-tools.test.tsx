@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Settings › Tools (UC-169 to UC-189) over the fake host (tools-fake.ts): the list, its switch, adding, editing with
 // saved environment values (kept, replaced, removed), each refusal's place and words, the firm's two states, Remove's
-// confirm, Escape, and REMOTE_TOOLS hiding the address form. No real secret: the fake hides every value it is sent.
+// confirm, Escape, and a server at an address. No real secret: the fake hides every value it is sent.
 import { afterEach, expect, test, vi } from "vitest";
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
@@ -10,7 +10,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { refusalOf, type Place } from "./mcp-tools-refusal.ts";
 import { mount, PLAIN, THREE, type Rig } from "./mcp-tools-rig.tsx";
 import { FakeTools, local, type FakeImports } from "./tools-fake.ts";
-import { REMOTE_TOOLS, MCP_ERROR_CODES, type McpErrorCode } from "./tools-model.ts";
+import { MCP_ERROR_CODES, type McpErrorCode } from "./tools-model.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
@@ -313,14 +313,8 @@ test("firm_managed: one line and no list", async () => {
   expect(rig.text()).not.toContain("Not used in the Safe workspace.");
 });
 
-test("REMOTE_TOOLS off: adding offers no address; a preview turns the address form on", async () => {
-  expect(REMOTE_TOOLS).toBe(false);
-  rig = await mount(new FakeTools({ control: "lawyer", servers: [] }));
-  await rig.press("Add a tool");
-  expect(rig.has("Address")).toBe(false);
-  expect(rig.q('[data-testid="tools-url"]')).toBeNull();
-  await rig.unmount();
-  const fake = new FakeTools({ control: "lawyer", servers: [] }, { previewRemote: true });
+test("adding offers a server at an address; saved, it goes as a remote server", async () => {
+  const fake = new FakeTools({ control: "lawyer", servers: [] });
   rig = await mount(fake);
   await rig.press("Add a tool");
   await rig.press("Address");

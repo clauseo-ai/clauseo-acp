@@ -49,7 +49,6 @@ export function ToolsSceneOver({ page, lang }: { page: ToolsPage; lang: Lang }) 
   const scene: ToolsScene = TOOLS_SCENES[page];
   const [tools] = useState(() => {
     const fake = new FakeTools(scene.view, {
-      previewRemote: scene.previewRemote ?? false,
       imports: scene.imports ?? {},
     });
     fake.refuseNext = scene.refuse ?? null;

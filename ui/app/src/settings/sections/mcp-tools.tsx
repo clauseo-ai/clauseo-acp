@@ -33,7 +33,7 @@ import { Group, PlateRow } from "./parts.tsx";
 import {
   hostOf,
   localDetail,
-  remoteOffered,
+  REMOTE_TOOLS,
   SAFE_WORKSPACE_NOTE,
   toolsCommandsOf,
   type ImportSource,
@@ -146,7 +146,7 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
           <PlateRow>
             <ToolForm
               editing={open.editing}
-              remote={remoteOffered(commands)}
+              remote={REMOTE_TOOLS}
               save={(previousName, draft) => commands.save(previousName, draft)}
               onDone={(name) => {
                 setFailed(null);

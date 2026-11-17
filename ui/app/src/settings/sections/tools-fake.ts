@@ -55,21 +55,13 @@ export class FakeTools implements ToolsCommands {
   holdImport = false;
   private letImportGo: (() => void) | null = null;
   private lastImport: ImportResult | null = null;
-  readonly previewRemote: boolean;
   private readonly imports: FakeImports;
   private readonly listeners = new Set<(view: ToolsView) => void>();
   /** The values saved per server and secret name. Never shown. */
   private readonly values = new Map<string, string>();
 
-  constructor(
-    view: FakeView,
-    {
-      previewRemote = false,
-      imports = {},
-    }: { previewRemote?: boolean; imports?: FakeImports } = {},
-  ) {
+  constructor(view: FakeView, { imports = {} }: { imports?: FakeImports } = {}) {
     this.view = { control: view.control, servers: [...view.servers] };
-    this.previewRemote = previewRemote;
     this.imports = { ...imports };
   }
 

@@ -1,5 +1,5 @@
 // Settings › Tools' form (UC-176 to UC-189): add or edit one tool. A local tool is a name, the program's full path, its
-// arguments one per line and its environment values; a tool at an address (behind REMOTE_TOOLS) is a name, the address
+// arguments one per line and its environment values; a tool at an address is a name, the address
 // and its headers. A secret's value lives only in its password field's own DOM state: Save reads it from the form as
 // it sends, puts it in the one save and keeps it nowhere else (as connectors-key.tsx does). A saved value is never
 // shown: its row says Saved, with Replace (a new value, kept as it was when left empty) and Remove. The host's refusal

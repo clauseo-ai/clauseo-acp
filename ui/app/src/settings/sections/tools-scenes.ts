@@ -13,7 +13,6 @@ export type ToolsStep =
 
 export type ToolsScene = {
   view: FakeView;
-  previewRemote?: boolean;
   imports?: FakeImports;
   /** The fake's answer to the first command: a refusal, as the host's. */
   refuse?: McpErrorCode;
@@ -96,7 +95,6 @@ export const TOOLS_SCENES = {
   "firm-managed": { view: { ...THREE, control: "firm_managed" } },
   remote: {
     view: THREE,
-    previewRemote: true,
     steps: [
       ...ADD,
       { words: "Address" },
@@ -210,7 +208,6 @@ export const TOOLS_SCENES = {
   },
   "url-invalid": {
     view: EMPTY,
-    previewRemote: true,
     steps: [
       ...ADD,
       { words: "Address" },
