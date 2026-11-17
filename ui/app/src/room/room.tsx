@@ -281,12 +281,8 @@ function RoomFrame({
     railToggle,
     versions,
   });
-  /** The folded rail closes, and focus goes back to the sidebar's toggle, which opened it. */
-  const fold = () => {
-    if (!railOpen) return;
-    setRailOpen(false);
-    railToggle.current?.focus();
-  };
+  // the folded rail closes, and focus goes back to the sidebar's toggle, which opened it
+  const fold = layout.fold;
   // a matter made or opened from New matter folds the rail, and the dialog's focus goes back to the sidebar's toggle if
   // it was open
   const foldForNew = () => {
@@ -335,16 +331,18 @@ function RoomFrame({
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
   const openRail = layout.openRail;
   useFindKey(findField, openRail, mac);
-  // ⌘N, ⇧⌘N and the native menu's New conversation, New matter and Find (room-commands.ts)
-  const newMatterNow = versions.rail == null && !newOpen ? openNewMatter : null;
+  // ⌘N, ⇧⌘N, the layout keys and the native menu's commands (room-commands.ts): New matter and the panels' toggles
+  // wait while Versions or New matter holds the keys
+  const keysFree = versions.rail == null && !newOpen;
+  const newMatterNow = keysFree ? openNewMatter : null;
   const find = () => void focusFind(findField, openRail);
   useRoomCommands(
     {
       newConversation: canStart ? startNew : null,
       newMatter: newMatterNow,
       find,
-      toggleSidebar: layout.rail.toggle,
-      togglePapers: layout.papers.onToggle,
+      toggleSidebar: keysFree ? layout.rail.toggle : null,
+      togglePapers: keysFree ? layout.papers.onToggle : null,
     },
     mac,
   );

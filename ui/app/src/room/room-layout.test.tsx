@@ -169,6 +169,38 @@ test("on the Mac the page leaves ⌃⌘S and ⌥⌘I to the View menu, so one pr
   expect(win()?.getAttribute("data-wall")).toBe("hidden");
 });
 
+test("below 1200 px the sidebar's key, pressed in the open panel's Find, folds it and gives the focus to its toggle", async () => {
+  await mount(1100);
+  await press(railToggle());
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  const find = document.querySelector<HTMLInputElement>('[data-testid="find"]');
+  expect(rail()?.contains(find)).toBe(true);
+  await act(async () => find?.focus());
+  expect(await key({ key: "b", code: "KeyB", ctrlKey: true })).toBe(true);
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(railToggle());
+});
+
+test("while New matter holds the keys the layout keys and the View menu's items fold nothing", async () => {
+  await mount(1512);
+  await key({ key: "N", code: "KeyN", ctrlKey: true, shiftKey: true });
+  await act(async () => settled());
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(await key({ key: "b", code: "KeyB", ctrlKey: true })).toBe(false);
+  expect(await key({ key: "b", code: "KeyB", ctrlKey: true, altKey: true })).toBe(false);
+  await menu("toggle_sidebar");
+  await menu("toggle_papers");
+  expect(win()?.hasAttribute("data-rail")).toBe(false);
+  expect(win()?.hasAttribute("data-wall")).toBe(false);
+  // the dialog closed, the keys and the menu fold again
+  await key({ key: "Escape", code: "Escape" });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(await key({ key: "b", code: "KeyB", ctrlKey: true })).toBe(true);
+  expect(win()?.getAttribute("data-rail")).toBe("hidden");
+  await menu("toggle_papers");
+  expect(win()?.getAttribute("data-wall")).toBe("hidden");
+});
+
 test("the Mac's View menu is told the two shown flags; below 1200 px the sidebar's is its panel's", async () => {
   await mount(1100, "mac");
   const told: [boolean, boolean][] = [];

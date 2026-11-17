@@ -29,6 +29,8 @@ export type RoomLayout = {
   };
   /** Opens the sidebar where Find needs it: the folded rail's panel, or a hidden rail's column. */
   openRail: () => void;
+  /** Closes the folded rail's panel, and the focus goes back to the sidebar's toggle, which opened it. */
+  fold: () => void;
   /** The window's attributes for responsive.css. */
   attrs: { "data-rail"?: "hidden"; "data-wall"?: "hidden" };
 };
@@ -68,11 +70,18 @@ export function useRoomLayout({
       (selector !== undefined && at.closest(selector) !== null)
     );
   };
+  const fold = () => {
+    if (!railOpen) return;
+    setRailOpen(false);
+    railToggle.current?.focus();
+  };
   const toggleRail = () => {
     // the rail's place holds Versions' timeline: the toggle closes it, so the column ends as the toggle said
     if (versions.open) versions.close();
     if (!wide) {
-      setRailOpen((open) => !open);
+      // closed by its key or the menu from inside the panel, the focus would drop to the page: fold() gives it back
+      if (railOpen) fold();
+      else setRailOpen(true);
       return;
     }
     if (layout.sidebar && holds("rail", ".ver-panel")) railToggle.current?.focus();
@@ -105,6 +114,7 @@ export function useRoomLayout({
       ref: papersToggle,
     },
     openRail,
+    fold,
     attrs: {
       ...(layout.sidebar ? {} : { "data-rail": "hidden" as const }),
       ...(layout.papers ? {} : { "data-wall": "hidden" as const }),
