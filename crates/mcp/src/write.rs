@@ -296,7 +296,8 @@ mod copy;
 pub(crate) use copy::{CopyFailed, Incoming, Mark};
 
 /// Makes the folder `path` if it is missing, then insists it is a real folder, not a link or a
-/// file: the guard's folders, the downloads folder among them (`browser_guard.rs`). On Unix the
+/// file: the guard's folders (`browser_guard.rs`), and the downloads and fallback folders at
+/// their first delivery (`browser_guard/downloads/deliver.rs`). On Unix the
 /// folder is made and checked relative to its parent, opened once (`write/unix.rs`: `mkdirat`,
 /// then `openat(O_DIRECTORY|O_NOFOLLOW)`), so a link at its name is never followed. On Windows,
 /// where the guard does not run yet (see [`Folder`]), `fs::create_dir`, then

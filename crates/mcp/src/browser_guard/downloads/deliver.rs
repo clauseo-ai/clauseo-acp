@@ -67,7 +67,9 @@ pub(crate) struct Delivered {
 
 /// Delivers the file `from` into `folder` as `name`, or the first free `<stem> (<n>)<ext>`,
 /// never replacing a file: by a move, or by a copy where no move can be made (above). The
-/// folder is opened once, first ([`write::Folder::open`], which refuses a link at its name), and
+/// folder is made if missing ([`write::make_folder`], no link followed: the downloads folder
+/// is made at the first delivery, so a session without one leaves no empty folder in the
+/// matter), then opened once ([`write::Folder::open`], which refuses a link at its name), and
 /// every look for a free name, move and copy goes through that handle. When a name is taken by
 /// the time of the move or the copy's rename, the next free one is tried, [`MOVE_TRIES`] names at
 /// most. `before` runs between each look and its move or rename (the tests put a file there).
@@ -78,6 +80,7 @@ pub(crate) fn deliver(
     how: How,
     mut before: impl FnMut(&Path),
 ) -> Result<Delivered, Failed> {
+    write::make_folder(folder).map_err(Failed::Retry)?;
     let opened = write::Folder::open(folder).map_err(Failed::Retry)?;
     let mut first = 1;
     let mut copy = false;
@@ -168,8 +171,7 @@ pub(super) fn deliver_one(sweeper: &mut Sweeper, path: &Path, name: &str) {
             ),
         );
     };
-    let made = write::make_folder(&fallback).map_err(Failed::Retry);
-    match made.and_then(|()| deliver(path, &fallback, &given, sweeper.how, |_| {})) {
+    match deliver(path, &fallback, &given, sweeper.how, |_| {}) {
         Ok(delivered) => tell_delivered(sweeper, path, &delivered, true),
         Err(Failed::Retry(error)) => retry_later(sweeper, path, &error),
         Err(Failed::Copy(error)) => copy_failed(sweeper, path, &given, &error),

@@ -246,8 +246,9 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         DOWNLOAD_PATH.to_owned(),
         command.downloads.clone().into_os_string(),
     );
-    let folders = env::folders(env::Os::CURRENT, &command.cwd);
-    for folder in folders.iter().chain([&command.downloads]) {
+    // Not the downloads folder: it is in the matter, and made at the first download
+    // (`downloads/deliver.rs`), so a session that downloads nothing leaves no empty folder there.
+    for folder in &env::folders(env::Os::CURRENT, &command.cwd) {
         write::make_folder(folder).map_err(|error| {
             failed(&format!(
                 "cannot make the folder {}: {error}",
