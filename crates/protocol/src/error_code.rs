@@ -428,6 +428,10 @@ error_codes! {
         be read: the system's key store answered the read with an error (often a permission \
         prompt that was denied or cancelled, or a locked key store); no agent was started. \
         Trying again, and allowing the read, can succeed.";
+    AgentStartUnreachable = "agent.start_unreachable", retryable: true, meaning: "The agent did \
+        not start: its start failed on its connection, and the host's probe could not reach its \
+        service while the window says the computer is online (a slow network, a proxy or a \
+        firewall). Asking again can work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

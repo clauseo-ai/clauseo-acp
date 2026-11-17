@@ -1,9 +1,10 @@
 //! The start's bound (`agents/start_timer.rs`): an agent that never answers `initialize` is
 //! stopped through the ladder once [`START_WAIT`] runs out, and the waiting turn fails
-//! `agent.launch_failed`, or `agent.start_offline` when the host's probe cannot reach the
-//! agent's service. Driven by the manual clock; the agent's end is held (`hold_next`), never
-//! drained, so the deadline's stop and the agent's exit cannot race the test (#1050). The bound
-//! counts silence: an agent that keeps sending outlasts it; a timer held up by sleep waits again.
+//! `agent.launch_failed`, or `agent.start_unreachable` when the host's probe cannot reach the
+//! agent's service while the window says online. Driven by the manual clock; the agent's end is
+//! held (`hold_next`), never drained, so the deadline's stop and the agent's exit cannot race the
+//! test (#1050). The bound counts silence: an agent that keeps sending outlasts it; a timer held
+//! up by sleep waits again.
 
 use std::time::Duration;
 
@@ -158,7 +159,7 @@ fn a_start_that_never_answers_fails_at_the_bound() {
 }
 
 #[test]
-fn a_start_that_never_answers_and_whose_probe_fails_is_start_offline() {
+fn a_start_that_never_answers_and_whose_probe_misses_while_online_is_start_unreachable() {
     let (probe, count) = ReachProbe::fixed(false).counted();
     let mut rig = start_rig(
         "start-timeout-offline",
@@ -166,7 +167,7 @@ fn a_start_that_never_answers_and_whose_probe_fails_is_start_offline() {
         Some(AgentKind::Claude),
         probe,
     );
-    assert_eq!(timed_out(&mut rig), Some(ErrorCode::AgentStartOffline));
+    assert_eq!(timed_out(&mut rig), Some(ErrorCode::AgentStartUnreachable));
     assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     rig.finish();
 }

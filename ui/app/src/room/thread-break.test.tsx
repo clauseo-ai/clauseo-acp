@@ -86,7 +86,7 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked, agent.home_failed and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked, agent.home_failed, agent.start_unreachable and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
     "agent.home_failed",
@@ -94,6 +94,7 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start
     "agent.program_blocked",
     "agent.program_missing",
     "agent.start_offline",
+    "agent.start_unreachable",
     "thread.interrupted",
   ]);
   for (const code of RESTARTS) {
@@ -166,6 +167,10 @@ test("the stopped question comes back only before H10, only for the codes asking
   // A program missing or blocked keeps the question: it comes back to the field, as for a failed launch.
   expect(refillOf(brk("agent.program_missing"), true, null)).toEqual({ key: "step:x", text: "Q" });
   expect(refillOf(brk("agent.program_blocked"), true, null)).toEqual({ key: "step:x", text: "Q" });
+  expect(refillOf(brk("agent.start_unreachable"), true, null)).toEqual({
+    key: "step:x",
+    text: "Q",
+  });
   expect(refillOf(brk("agent.start_offline"), true, null)).toEqual({ key: "step:x", text: "Q" });
 });
 

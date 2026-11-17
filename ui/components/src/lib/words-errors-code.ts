@@ -131,4 +131,5 @@ export type ErrorCode =
   | "matter.file_refused"
   | "matter.file_write_failed"
   | "agent.key_denied"
+  | "agent.start_unreachable"
   | "unknown";

@@ -2101,6 +2101,8 @@ export type ErrorCode =
 "matter.file_write_failed" | 
 /** A stored API key could not be read: the system's key store answered the read with an error (often a permission prompt that was denied or cancelled, or a locked key store); no agent was started. Trying again, and allowing the read, can succeed. */
 "agent.key_denied" | 
+/** The agent did not start: its start failed on its connection, and the host's probe could not reach its service while the window says the computer is online (a slow network, a proxy or a firewall). Asking again can work. */
+"agent.start_unreachable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

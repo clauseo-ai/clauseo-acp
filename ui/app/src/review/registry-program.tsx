@@ -1,5 +1,6 @@
 // agent.program_missing's and agent.program_blocked's lines (words-errors-program.ts): the agent's program is missing
-// from this computer, or the computer refused to run it, so the agent didn't start. Each id is U3-err-<code> with the
+// from this computer, or the computer refused to run it, so the agent didn't start; and agent.start_unreachable's
+// (words-errors-start.ts), a start that couldn't reach the agent's service though the computer is online. Each id is U3-err-<code> with the
 // agent's variant (.chatgpt, .named, .nameless) and, for agent.program_blocked on the Mac, .mac: Claude's own line off
 // the Mac is U3-err-<code> itself (registry.tsx's ERRORS). Each renders the turn's stop line, on the computer it names,
 // for the thread's agent; the nameless lines render alone, as no thread the room opens lacks a name. Provisional.
@@ -10,6 +11,7 @@ import {
   PROGRAM_BLOCKED_MAC,
   PROGRAM_MISSING,
 } from "@clauseo/components/lib/words-errors-program.ts";
+import { START_UNREACHABLE } from "@clauseo/components/lib/words-errors-start.ts";
 import { step, userMessage } from "../testing/stream-script.ts";
 import type { AgentId, ErrorCode } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
@@ -44,6 +46,7 @@ type Row = readonly [ErrorCode, string, string, Entry["render"]];
 
 const MISSING: ErrorCode = "agent.program_missing";
 const BLOCKED: ErrorCode = "agent.program_blocked";
+const UNREACHABLE: ErrorCode = "agent.start_unreachable";
 
 export const PROGRAM_ENTRIES: Entry[] = (
   [
@@ -57,6 +60,14 @@ export const PROGRAM_ENTRIES: Entry[] = (
     [BLOCKED, ".named.mac", PROGRAM_BLOCKED_MAC.named, stopped(BLOCKED, "gemini", "mac")],
     [BLOCKED, ".nameless", PROGRAM_BLOCKED.nameless, alone(BLOCKED, "windows")],
     [BLOCKED, ".nameless.mac", PROGRAM_BLOCKED_MAC.nameless, alone(BLOCKED, "mac")],
+    [
+      UNREACHABLE,
+      ".chatgpt",
+      START_UNREACHABLE.chatgpt,
+      stopped(UNREACHABLE, "codex-acp", "windows"),
+    ],
+    [UNREACHABLE, ".named", START_UNREACHABLE.named, stopped(UNREACHABLE, "gemini", "windows")],
+    [UNREACHABLE, ".nameless", START_UNREACHABLE.nameless, alone(UNREACHABLE, "windows")],
   ] as readonly Row[]
 ).map(([code, suffix, key, render]) => ({
   id: `U3-err-${code}${suffix}`,
