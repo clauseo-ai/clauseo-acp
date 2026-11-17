@@ -21,6 +21,7 @@ import {
 } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
 import type { InstallProgress, SetupEvent, SignIn, ViewEntry } from "../../transport/protocol.ts";
+import type { ErrorCode } from "../../transport/bindings.ts";
 import { OnlineSource, fakeOnline } from "../../transport/online.ts";
 import { createSetupStore } from "../../store/setup.ts";
 import { Room } from "../room.tsx";
@@ -361,3 +362,114 @@ test("no file under room/ imports Settings' Plans section", () => {
   for (const file of files.filter((f) => f !== import.meta.filename))
     expect(readFileSync(file, "utf8"), file).not.toMatch(/settings\/sections\/plans/);
 });
+
+test.each([
+  ["agent.key_unreadable", "agent.key_denied"],
+  ["agent.key_denied", "agent.key_unreadable"],
+] as const)(
+  "%s (VM D7, K11, the real Mac's Deny): the card names the saved key in that code's words, the Plans line, Try again",
+  async (code, other) => {
+    // the question held for the sign-in while the marked key's read was denied or left unanswered
+    const t = await mount({
+      signIn: { failed: { code, at: AT } },
+      reason: "sign_in",
+      refuse: code,
+    });
+    expect(words()).toContain(errorWords("en", code));
+    expect(words()).not.toContain(errorWords("en", other));
+    expect(words()).toContain("To change it, open Settings, then Plans.");
+    expect(words()).toContain("Your question is kept.");
+    expect(words()).not.toContain("Sign-in didn't finish.");
+    const named = card()?.querySelector("[aria-label]")?.getAttribute("aria-label") ?? "";
+    expect(named).toContain(errorWords("en", code));
+    expect(named).not.toContain(errorWords("en", other));
+    expect(named).not.toContain("sign-in has expired");
+    // the gate's own button in the card (the rig's press by words looks in the first run's root)
+    const again = [...(card()?.querySelectorAll("button") ?? [])].find(
+      (b) => b.textContent?.trim() === "Try again",
+    );
+    await press(again ?? null);
+    expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+    // desktop refuses that press with the key's code, and reads the key again: said once, not twice
+    expect(words().split(errorWords("en", code)).length).toBe(2);
+  },
+);
+
+test("a last turn that failed for another reason shows its own line, never the sign-in card, though held for it", async () => {
+  // K11: the .mcp item's prompt held launch preparation past its wait; the queue still held for the sign-in
+  // the launch's own line by its code; a code this version doesn't know (host's coming tool-secret reason) the generic
+  for (const [failure, line] of [
+    ["agent.launch_failed", "Claude didn't start. Try again. Your question is kept."],
+    ["agent.tool_secret_unreadable", "Something went wrong inside Clauseo."],
+  ] as const) {
+    await act(async () => root?.unmount());
+    host?.remove();
+    await mount({
+      signIn: { failed: { code: "agent.key_unreadable", at: AT } },
+      reason: "sign_in",
+      // a code the wire's ErrorCode doesn't hold yet stands for a newer host's reason
+      entries: [ASKED, step(3, { stop: "failed", failure: failure as ErrorCode, ts: 3000 })],
+    });
+    expect(card()).toBeNull();
+    expect(document.body.textContent).not.toContain("Sign in with Claude first.");
+    expect(document.body.textContent).toContain(line);
+  }
+});
+
+test("key unreadable: the card's gate also says where the key can be changed, Settings then Plans", async () => {
+  await mount({ signIn: { failed: { code: "agent.key_unreadable", at: AT } }, reason: "sign_in" });
+  expect(words()).toContain(errorWords("en", "agent.key_unreadable"));
+  expect(words()).toContain("To change it, open Settings, then Plans.");
+});
+
+test("a last turn that failed with agent.key_unreadable shows the key's line in the thread, never the sign-in card", async () => {
+  await mount({
+    signIn: { failed: { code: "agent.key_unreadable", at: AT } },
+    reason: "sign_in",
+    entries: [ASKED, step(3, { stop: "failed", failure: "agent.key_unreadable", ts: 3000 })],
+  });
+  expect(card()).toBeNull();
+  expect(document.body.textContent).toContain(errorWords("en", "agent.key_unreadable"));
+  expect(document.body.textContent).not.toContain("Sign in with Claude first.");
+  expect(document.body.textContent).not.toContain("sign-in has expired");
+});
+
+/** The regions named `name` (a section's role with an aria-label; the rig has no testing-library getByRole). */
+const regionsNamed = (name: string) =>
+  [...document.querySelectorAll("section[aria-label], [role=region][aria-label]")].filter(
+    (el) => el.getAttribute("aria-label") === name,
+  );
+const EXPIRED_NAME = "Your Claude sign-in has expired. Your question is kept.";
+
+// VM (Windows, 4d2d29744): under "Claude didn't accept the API key. Your question is kept." the
+// card's group was named "Your Claude sign-in has expired. Your question is kept.", so a screen
+// reader said the wrong cause
+test.each([
+  ["the sign-in expired", { failed: { code: "agent.auth_required", at: AT } }, EXPIRED_NAME],
+  [
+    "the key refused",
+    { signed_in: { method: "api_key", source: "own", at: AT } },
+    "Claude didn't accept the API key. Your question is kept.",
+  ],
+  [
+    "the firm's account refused",
+    { signed_in: { method: "firm", source: "own", at: AT } },
+    "Your firm's account didn't accept the question. Your question is kept.",
+  ],
+  [
+    "the key unreadable",
+    { failed: { code: "agent.key_unreadable", at: AT } },
+    `${errorWords("en", "agent.key_unreadable")} Your question is kept.`,
+  ],
+] satisfies [string, SignIn, string][])(
+  "the card's accessible name is the cause it shows: %s",
+  async (_, state, name) => {
+    await mount({ signIn: state, reason: "sign_in" });
+    const named = regionsNamed(name);
+    expect(named).toHaveLength(1);
+    expect(card()?.contains(named[0] ?? null)).toBe(true);
+    // the visible words say the same cause
+    for (const part of name.split(/(?<=\.) /)) expect(words()).toContain(part);
+    if (name !== EXPIRED_NAME) expect(regionsNamed(EXPIRED_NAME)).toEqual([]);
+  },
+);

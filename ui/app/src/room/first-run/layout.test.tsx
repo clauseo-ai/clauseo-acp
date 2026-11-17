@@ -1,7 +1,8 @@
 // UD1, the UI review's narrow-window and text-size defects, held where happy-dom can hold them (it lays nothing out): the
 // first screen's column and the install line's buttons may narrow inside the well, the gate's quiet buttons and the
-// first screen's buttons wrap their words (as utilities, which a component rule can't beat), and the foot keeps the
-// welcome's scrollbar gutter. Checked by eye at 320 px and text size 20 on the review page too (impl-report.md).
+// first screen's buttons wrap their words (as utilities, which a component rule can't beat), and the question and the
+// foot share one scroller and its gutter. Checked by eye at 320 px and text size 20 on the review page too
+// (impl-report.md); the one-scroller change of #1162 is not checked by eye here.
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -78,10 +79,41 @@ test("the download bar ends on Cancel's words: the row's end is the quiet button
   );
 });
 
-test("the foot keeps the welcome's scrollbar gutter, so the working line shares the button's edge", () => {
-  expect(rule(".fl-welcome")).toContain("scrollbar-gutter: stable");
-  expect(rule(".fl-foot")).toContain("scrollbar-gutter: stable");
-  expect(rule(".fl-foot")).toContain("overflow-y: auto");
+test("the question and the foot scroll as one, with one gutter, so the working line shares the button's edge", () => {
+  expect(rule(".fl-screen")).toContain("scrollbar-gutter: stable");
+  expect(rule(".fl-screen")).toContain("overflow-y: auto");
+  expect(rule(".fl-welcome")).not.toContain("overflow");
+  expect(rule(".fl-foot")).not.toContain("overflow");
+});
+
+// The real-Mac rerun of A-K6 (f): the key's longer row grew the foot, and the question's own scroller, shrunk under
+// it, cut off Start a new matter. Now the question never shrinks below its height, and both sit in one scroller, so a
+// taller foot pushes the page down instead.
+test("a taller foot pushes the question up the page, never over Start a new matter", async () => {
+  expect(rule(".fl-welcome")).toContain("flex: 1 0 auto");
+  expect(rule(".fl-welcome")).not.toContain("min-height: 0");
+  expect(rule(".fl-foot")).toContain("flex: none");
+  expect(rule(".fl-screen")).toContain("min-height: 0");
+  await mountFirstRun({
+    matters: [],
+    first: [
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { failed: { code: "agent.key_denied", at: 0 } }),
+    ],
+  });
+  // one scroller holds both, the question first, then the foot with the key's row
+  const screen = document.querySelector(".fl-screen");
+  const child = (name: string) =>
+    [...(screen?.children ?? [])].find((c) => c.classList.contains(name));
+  const welcome = child("fl-welcome");
+  const foot = child("fl-foot");
+  expect(welcome?.contains(byId("start-new-matter"))).toBe(true);
+  expect(foot?.querySelector('[data-testid="plan-row"]')?.textContent).toContain(
+    "Clauseo couldn't read the saved API key on this computer.",
+  );
+  expect(welcome!.compareDocumentPosition(foot!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
 });
 
 test("a key or code field in the gate draws no focus ring of its own: the composer's well draws the one ring", () => {

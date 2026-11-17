@@ -83,6 +83,9 @@ export const HI = {
   "Add ChatGPT": "ChatGPT जोड़ें",
   // the same card for Claude, when Claude isn't added yet (the plans side by side)
   "Uses your Claude plan.": "आपके Claude प्लान का उपयोग करता है।",
+  // Plans' card line for a saved key the keychain didn't give (UC-910, UC-911). Provisional; hi: later
+  "Uses your Anthropic API key.": null,
+  "Uses your OpenAI API key.": null,
   // a plan whose API key the provider refused (after a question failed), in place of its signed-in line (UC-150)
   "{name} didn't accept the API key.": "{name} ने API key स्वीकार नहीं की।",
   "Add Claude": "Claude जोड़ें",

@@ -1,0 +1,29 @@
+{
+  "U3-err-agent.key_denied": {
+    "en": "Clauseo couldn't read the saved API key on this computer. Try again, and if this computer asks for permission, choose Allow. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "agent.key_denied (decision record 0048): a saved API key whose read the keychain answered with its error (macOS's Deny or Cancel, keyring's PlatformFailure; a locked keychain), on the start window, the gate, the thread's card and Plans; the timeout keeps U3-err-agent.key_unreadable"
+  },
+  "UC-910": {
+    "en": "Uses your Anthropic API key.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Settings, Plans: Claude's card line while its saved API key can't be read (agent.key_unreadable or agent.key_denied), in place of UD2-60's \"Uses your Claude plan.\""
+  },
+  "UC-911": {
+    "en": "Uses your OpenAI API key.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Settings, Plans: ChatGPT's card line while its saved API key can't be read (agent.key_unreadable or agent.key_denied), in place of UD2-42's \"Uses your ChatGPT plan.\""
+  }
+}

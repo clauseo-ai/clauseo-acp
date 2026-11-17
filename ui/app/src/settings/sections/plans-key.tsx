@@ -1,7 +1,8 @@
 // Plans' API key (UD2): one quiet "Use an API key instead" under the plan, as Connectors has it (connectors.tsx), which
 // opens UD1's key panel (its field named by the key's maker, its words, where the key is kept) with a Cancel; with a
 // key in use "Change key" (the same panel; a key sent from this window replaces the stored one) and "Remove key", which
-// asks first. The key goes from the field into one `set_agent_key` and is dropped: the field keeps it only until
+// asks first; with a saved key the keychain didn't give, "Remove key" alone (desktop deletes it with no read: the way
+// out when the keychain keeps refusing, decision record 0048). The key goes from the field into one `set_agent_key` and is dropped: the field keeps it only until
 // desktop takes it (PasteRow), and no store, log or state holds it. The block holds whether the panel is open, so the
 // gate's own key link (a stopped sign-in's) opens this panel too.
 import { useEffect, useRef } from "react";
@@ -20,6 +21,7 @@ export function PlansKey({
   keys,
   keysKnown,
   inUse,
+  unreadable = false,
   open,
   onOpen,
   onKey,
@@ -33,6 +35,8 @@ export function PlansKey({
   keysKnown: boolean;
   /** The plan is signed in with a stored key. */
   inUse: boolean;
+  /** A key is stored but the keychain didn't give it (agent.key_unreadable, agent.key_denied): Remove key only. */
+  unreadable?: boolean;
   /** The key panel is open. */
   open: boolean;
   onOpen: (open: boolean) => void;
@@ -106,11 +110,13 @@ export function PlansKey({
     <div ref={box} className="set-plan-ways">
       {open ? (
         panel
-      ) : inUse ? (
+      ) : inUse || unreadable ? (
         <div className="set-plan-acts">
-          <Button kind="quiet" size="small" onClick={() => onOpen(true)}>
-            {say(st(lang, "Change key"))}
-          </Button>
+          {!unreadable && (
+            <Button kind="quiet" size="small" onClick={() => onOpen(true)}>
+              {say(st(lang, "Change key"))}
+            </Button>
+          )}
           <Confirm
             label={st(lang, "Remove key")}
             title={st(lang, "Remove the API key?")}

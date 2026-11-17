@@ -2,8 +2,9 @@
 //! The refusal in force for an agent ([`wanted`]):
 //!
 //! - `signin.policy_unreadable` while an unreadable policy blocks it;
-//! - else `agent.key_unreadable` while its stored key is marked unreadable (the read failed,
-//!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
+//! - else `agent.key_unreadable` while its stored key is marked unreadable because its read did
+//!   not answer within the first load's bound, or `agent.key_denied` because the keychain
+//!   answered it with its error (`setup/keys/reads.rs`);
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over and the
@@ -13,7 +14,8 @@
 //! keys' load included), with the refusal in force.
 //! [`follow_keys`] keeps it in step later: each [`KeyNote::Read`] sets the agent's refusal
 //! again (a slow read that answered, a read again that succeeded, a key set or cleared), and
-//! each [`KeyNote::Retry`] (a launch met `agent.key_unreadable`) reads the key again.
+//! ends a plan sign-in still going when the key became unreadable; each [`KeyNote::Retry`] (a
+//! launch met `agent.key_unreadable`) reads the key again.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -37,10 +39,8 @@ pub(crate) fn in_force(
 ) -> Option<ErrorCode> {
     if blocked {
         Some(ErrorCode::SigninPolicyUnreadable)
-    } else if keys.unreadable_for(agent, firm) {
-        Some(ErrorCode::AgentKeyUnreadable)
     } else {
-        None
+        keys.unreadable_code(agent, firm)
     }
 }
 
@@ -122,8 +122,9 @@ pub(crate) async fn settle_after_load<'a>(
 }
 
 /// Each note about a stored key, until the channel closes: a [`KeyNote::Read`] sets that
-/// agent's refusal again (and what the windows show of its key); a [`KeyNote::Retry`] reads
-/// its key again when it is marked unreadable.
+/// agent's refusal again (and what the windows show of its key), and ends a sign-in going
+/// when the key became unreadable (`AgentsBackend::end_sign_in_if_key_unreadable`); a
+/// [`KeyNote::Retry`] reads its key again when it is marked unreadable.
 pub(crate) async fn follow_keys(backend: &AgentsBackend, mut notes: UnboundedReceiver<KeyNote>) {
     while let Some(note) = notes.next().await {
         match note {
@@ -136,6 +137,7 @@ pub(crate) async fn follow_keys(backend: &AgentsBackend, mut notes: UnboundedRec
                     continue;
                 }
                 backend.compose.show_key(&agent, &backend.keys);
+                backend.end_sign_in_if_key_unreadable(&agent);
                 sync(backend, &agent).await;
             }
         }

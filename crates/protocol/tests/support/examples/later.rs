@@ -184,6 +184,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentProgramMissing,
             "could not start node: No such file or directory (os error 2)",
         ),
+        failed(
+            ErrorCode::AgentKeyDenied,
+            "a stored API key could not be read: the key store refused the read",
+        ),
     ]
 }
 

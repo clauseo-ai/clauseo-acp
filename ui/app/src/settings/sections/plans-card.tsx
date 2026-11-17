@@ -19,10 +19,13 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 /** The card: the plan's line, its quiet line when it has one, and its buttons. */
 export function PlanCard({
   plan,
+  line,
   note,
   children,
 }: {
   plan: Plan;
+  /** The card's first line in place of "Uses your {name} plan." (a saved key the keychain didn't give). */
+  line?: string | undefined;
   note?: string | undefined;
   children: ReactNode;
 }) {
@@ -30,7 +33,10 @@ export function PlanCard({
   return (
     <>
       <p className="set-plan-line" data-part="plan">
-        {say(st(lang, plan === "claude" ? "Uses your Claude plan." : "Uses your ChatGPT plan."))}
+        {say(
+          line ??
+            st(lang, plan === "claude" ? "Uses your Claude plan." : "Uses your ChatGPT plan."),
+        )}
       </p>
       {note !== undefined && (
         <p className="set-plan-fine" data-part="note">

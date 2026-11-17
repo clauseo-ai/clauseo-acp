@@ -59,7 +59,7 @@ fn map(agent: &AgentId, err: &Error) -> KeyError {
             "an unreadable item"
         }
         Error::NoEntry => "no item",
-        Error::PlatformFailure(_) => "a platform failure",
+        Error::PlatformFailure(_) => super::PLATFORM_FAILURE,
         _ => "an unknown failure",
     };
     KeyError::Keychain { agent, kind }

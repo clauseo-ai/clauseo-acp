@@ -430,7 +430,7 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   prompt stays held while any hold applies. With the sign-in's among them it queues as above.
 - *`set_launch_refused(agent, Option<ErrorCode>) -> Result<(), HostError>`* refuses the id's
   **new launches only**. The codes come from a list: `signin.policy_unreadable`,
-  `agent.keys_loading` and `agent.key_unreadable`. Any other code is a bug: debug builds
+  `agent.keys_loading`, `agent.key_unreadable` and `agent.key_denied`. Any other code is a bug: debug builds
   assert, and release builds refuse it with `command.invalid` and change nothing. A turn that would launch fails as any refused
   launch does, an ordinary `TurnFailed` with that code. **Sessions already running go on until
   they exit,** unless desktop calls `stop_agents`. A refusal applies to new launches; a running
@@ -445,8 +445,13 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
 - *`agent.keys_loading` and `agent.key_unreadable` are two different facts* (R20 P5b A4, the
   orchestrator's ruling). `agent.keys_loading` means desktop has not finished loading the stored
   keys at all: start-up. `agent.key_unreadable` means this agent's stored key was tried and the
-  read failed (the keychain's error, such as a refused prompt) or did not answer in time. Both
-  are retryable, and a launch waits out either for 2 s.
+  read did not answer in time; `agent.key_denied` that the keychain answered it with its error
+  (a denied or cancelled prompt, keyring's `PlatformFailure`; a locked keychain). All are
+  retryable, and a launch waits out each for 2 s. (Amended 2026-11-17, the real-Mac run of
+  #1162: one code for both said "in time" after a Deny, which was untrue. The kind rides on
+  the key cache's mark, `ReadState::denied`, so the refusal, the composed state and the
+  sign-in bar all carry it; a read that timed out and then answers with an error turns into
+  `agent.key_denied`. Below, "unreadable" and `agent.key_unreadable` cover both codes.)
   - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
     setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
     agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
@@ -487,7 +492,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     `agent.key_unreadable`, and one it does not mark launches without a key: Clauseo never
     stored one for it. No marker file (a fresh install) marks no agent; a file that cannot be
     read or does not parse marks every agent (fail closed), logged by the error's kind only.
-    A read that fails with the keychain's error still refuses the agent, marked or not.
+    An unmarked read still waiting at the bound counts as a failed one: under a firm plan it is
+    refused with `agent.key_unreadable` until it answers, as a failed read is.
   - *The residual.* A key stored by a build without the marker, or removed outside Clauseo,
     leaves the marker stale until a read answers. A stale "on" only refuses the agent, so it
     fails closed; "off" with a key stored can only happen for a key Clauseo never stored, or
@@ -498,16 +504,38 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     a fresh plan-only install on a slow keychain. A marker's folder that will not sync after
     its rename (rare, an I/O error) is logged, not refused: the rename has already landed.
   - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
-    agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
-    with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read
-    succeeds. The launches, the restart after a leave and a key's overwrite still count an
-    unreadable key as stored.
+    agent.key_unreadable }`, never "signed in with an API key" and never Sign in, with the
+    code's own words ("Clauseo couldn't check for a saved API key in time. If this computer
+    asks for permission, allow it, then try again.") and Try again, on the first run's gate,
+    the expired sign-in card and Plans; the gate and the card also say the way out, "To change
+    it, open Settings, then Plans." (where the key can be removed with no read). After a
+    Deny the words are `agent.key_denied`'s ("Clauseo couldn't read the saved API key on
+    this computer. Try again, and if this computer asks for permission, choose Allow. If it
+    keeps happening, show this to whoever looks after this computer."), in the same places.
+    Plans' card heads such a key with "Uses your Anthropic API key." (ChatGPT's: "Uses your
+    OpenAI API key."), never "Uses your Claude plan.", and offers **Remove key**: the clear
+    deletes the keychain item and never reads it (`KeyCache::clear`), ends the mark and the
+    marker, and the agent is plain "no key", signed out, with a plan sign-in offered again. The log's
+    state word is `key_unreadable`, not `failed`. A sign-in press for it is refused with
+    `agent.key_unreadable` (`SignInBar::KeyUnreadable`, ahead of the firm's and the key's
+    bars; the key cache is asked as well as the composed facts, so a press before they catch
+    up is refused too) and reads the key again. A plan sign-in already going when the key
+    becomes unreadable is ended, as a key or an endpoint ends one. A stored key bars a plan
+    sign-in whether it reads or not, so an unanswered or denied keychain prompt never sends a
+    lawyer on a firm's key to a personal login. (Amended 2026-11-16, the
+    orchestrator's ruling on VM rows D7, A-K6 and K11: the card said "Sign-in didn't finish."
+    and its Try again started a plan sign-in.) The launches, the restart after a leave and a
+    key's overwrite still count an unreadable key as stored. A thread whose last turn failed
+    for any reason but `agent.auth_required` shows that failure's own line, never the expired
+    sign-in card, even while its queue is held for a sign-in.
   - *The retry.* A read that had not answered goes on, and when it answers it is taken in: a key
     or no item lifts the refusal. A launch meeting `agent.key_unreadable` also asks desktop to
     read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
-    before its 2 s wait, unless a read of it is still running. A read again that succeeds lifts
-    the refusal, so that launch, or the lawyer's next try, goes on. A read that fails again
-    leaves it. A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
+    before its 2 s wait, unless a read of it is still running, and so does a sign-in press (the
+    card's Try again). A read again that succeeds lifts the refusal, so that launch, or the
+    lawyer's next try, goes on. A read that fails again leaves it, and so does a read whose
+    thread panics (taken in as a failed read, so a retry can read again; a release build aborts
+    on a panic). A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
     force per agent (`setup/refusal.rs`): the policy's, else the unreadable key's, else none.
   - *A setup thread that never loads the keys.* The host bounds `agent.keys_loading` itself: from
     12 s after its start (desktop's 10 s and a margin), one still in place counts as
@@ -522,6 +550,10 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     refusal first, so a key that just turned unreadable is refused before the restart's
     launches. A `set_launch_refused` call that fails is tried once more, then logged by the
     agent and the error's code.
+  - *Known limit: the prompt outlives the window.* Closing the only window quits Clauseo, and
+    macOS's keychain prompt for a read still waiting stays on screen: the read is blocked inside
+    Security.framework, on a `clauseo-keychain` thread, and nothing on our side can cancel it.
+    The next start reads the key again. (Seen on the real-Mac run of #1162, 2026-11-17.)
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no

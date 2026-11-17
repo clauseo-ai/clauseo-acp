@@ -11,7 +11,9 @@ import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
 import { useDisplay, type Platform } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
+import { checkingLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { FolderRefId } from "../../transport/protocol.ts";
 import { useOnline } from "../../transport/online.ts";
@@ -20,6 +22,8 @@ import {
   isReady,
   isSignedIn,
   planInPlay,
+  planLocked,
+  type AgentSetup,
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
@@ -57,6 +61,12 @@ const folderName = (display: string, platform: Platform) =>
     .filter((p) => p !== "")
     .pop() ?? display;
 
+/** Whether the plan's sign-in state is a saved key the keychain didn't give, of either kind. */
+const keyUnreadable = (setup: AgentSetup | undefined): boolean => {
+  const signIn = setup?.signIn;
+  return typeof signIn === "object" && isKeyNotRead(signIn.failed?.code);
+};
+
 /** A row without its note: the first screen says the note under the row instead. */
 function unnoted(row: WorkingState | null): WorkingState | null {
   if (row?.kind !== "wait" || row.note === undefined) return row;
@@ -79,32 +89,51 @@ export function FirstScreen({
 }) {
   const { lang, platform } = useDisplay();
   const online = useOnline();
+  // desktop says nothing of either plan until the saved keys' first load is over, up to 10 s while a keychain prompt
+  // waits (setup/start.rs: the pump that publishes the installs and sign-ins starts after wait_for_keys, for both plans
+  // at once), and the screen stood empty: until then, once setup_info has come, each plan shows the sign-in check's
+  // existing line with its Sign in busy. No platform sends no setup_info, so it never shows there
+  const unheard =
+    state.keys !== null &&
+    PLANS.every(
+      (id) => state.agents[id]?.install === undefined && state.agents[id]?.signIn === undefined,
+    );
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
-    // the cancelled sign-in's note goes under the row, in Welcome's own slot, not in it
-    const install = unnoted(
-      welcomeFoot(
-        lang,
-        agent,
-        name,
-        setup,
-        state,
-        online,
-        footActs(store, agent, state),
-        IDS.install,
-      ),
-    );
+    const pending = unheard && !planLocked(state.locked, agent);
+    // the row's note (a cancelled sign-in's, an unreadable key's) goes under the row, in Welcome's
+    // own slot, not in it
+    const row = pending
+      ? checkingLine(lang, name, IDS.install, true)
+      : welcomeFoot(
+          lang,
+          agent,
+          name,
+          setup,
+          state,
+          online,
+          footActs(store, agent, state),
+          IDS.install,
+        );
+    const install = unnoted(row);
+    const own = row?.kind === "wait" ? (row.note ?? null) : null;
     return {
       key: agent,
       name,
       install,
-      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup),
+      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup) ?? own,
+      // an unreadable key's row offers Try again, which reads the key, never a sign-in; a pending row offers none yet
+      signs: !pending && !keyUnreadable(setup),
+      // an unreadable key's row is a group named by its visible words, the key's line (and a refusal's after it)
+      label: keyUnreadable(setup) && row?.kind === "wait" ? (row.said ?? row.words) : null,
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
-      // with no row for the plan, since its install was never seen turning ready here)
+      // with no row for the plan, since its install was never seen turning ready here); never while
+      // its saved key is unreadable (a plan the firm locks has no row then, and no tick either)
       ready:
-        setup?.readyHere === true ||
-        ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn)),
+        !keyUnreadable(setup) &&
+        (setup?.readyHere === true ||
+          ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn))),
     };
   });
   // the papers line names the one plan in play, else both

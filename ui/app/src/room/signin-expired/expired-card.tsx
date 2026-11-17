@@ -18,6 +18,7 @@ import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconChecking, IconQuestion, IconTick } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
@@ -133,7 +134,11 @@ export function ExpiredCard({
       : refusal.switching && refusal.code === "command.conflict"
         ? fl(lang, "Clauseo is still switching accounts. Try again in a moment.")
         : errorWords(lang, refusal.code, { kind: plan === "chatgpt" ? "codex" : "claude", name });
-  const label = sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
+  // a saved API key the keychain didn't give is no sign-in that expired: the card is named by the key's words
+  const keyCode = typeof setup?.signIn === "object" ? setup.signIn.failed?.code : undefined;
+  const label = isKeyNotRead(keyCode)
+    ? `${errorWords(lang, keyCode)} ${kept}`
+    : sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
   let card;
   switch (e.kind) {
     case "expired":
@@ -232,26 +237,35 @@ export function ExpiredCard({
         />
       );
       break;
-    case "key":
+    // a key or the firm's account refused is no expired sign-in: the card is named by its own line
+    // (VM, Windows: it was named "Your Claude sign-in has expired…" under the key's words)
+    case "key": {
+      const line = sx(lang, "{name} didn't accept the API key. Your question is kept.", { name });
       card = (
         <Frame
           icon={<IconQuestion size={16} />}
-          label={label}
-          title={sx(lang, "{name} didn't accept the API key. Your question is kept.", { name })}
+          label={line}
+          title={line}
           sub={sx(lang, "To change it, open Settings, then Plans.")}
         />
       );
       break;
-    case "firm":
+    }
+    case "firm": {
+      const line = sx(
+        lang,
+        "Your firm's account didn't accept the question. Your question is kept.",
+      );
       card = (
         <Frame
           icon={<IconQuestion size={16} />}
-          label={label}
-          title={sx(lang, "Your firm's account didn't accept the question. Your question is kept.")}
+          label={line}
+          title={line}
           sub={fl(lang, "Your firm manages this account.")}
         />
       );
       break;
+    }
   }
   return (
     <div className="signin-expired" data-testid="signin-expired" data-state={e.kind}>

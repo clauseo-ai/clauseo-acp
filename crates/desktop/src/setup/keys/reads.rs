@@ -16,10 +16,23 @@
 //!   `failed` entry, read with the plan by [`KeyCache::unreadable_for`]), so a lawyer's own
 //!   sign-in token is never offered to a firm's gateway.
 //!   A write since the read began (a key set or cleared) wins: the read's answer is dropped.
-//! - [`KeyCache::read_again`]: a key marked unreadable, with no read running, is read again.
-//! - Each change of a mark sends a [`KeyNote::Read`].
+//! - [`KeyCache::read_again`]: a key marked unreadable, or whose read failed unmarked (refused
+//!   under a firm plan), with no read running, is read again: a launch that met
+//!   `agent.key_unreadable` asks it, and so does a sign-in press while the key is unreadable
+//!   (`setup/backend.rs`), the card's Try again. A read that timed out still runs: its answer,
+//!   once the lawyer answers macOS's prompt, is taken in as any read is.
+//! - A read that has not answered by the bound, for an agent the marker does not mark, counts as
+//!   a failed read (`failed`) as well: it launches without a key, unless a firm plan, which
+//!   refuses it, as a failed read does, until the read answers.
+//! - A failed read is of one of two kinds (`ReadState::denied`): one that has not answered by
+//!   the bound (`agent.key_unreadable`), or one the keychain answered with its error, a denied
+//!   or cancelled prompt say (`agent.key_denied`, [`KeyCache::unreadable_code`]). A read that
+//!   timed out and then answers with an error turns into the second.
+//! - Each change of a mark, or of its kind, sends a [`KeyNote::Read`].
+//! - A read whose thread panics is a failed read (`READ_PANICKED`): `reading` ends with it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -35,6 +48,9 @@ use super::notes::{KeyNote, NoteSender, send};
 use super::{KeyCache, Keys, error_kind};
 use crate::bridge::lock;
 
+/// The kind a read that panicked is taken in as: a failed read, by the usual rule.
+const READ_PANICKED: &str = "a panic";
+
 /// Which agents' keys are unreadable and which are being read, and each agent's writes.
 #[derive(Debug, Default)]
 struct ReadState {
@@ -42,6 +58,9 @@ struct ReadState {
     /// Agents whose read failed with no "key stored" mark: refused only under a firm plan
     /// ([`KeyCache::unreadable_for`]).
     failed: BTreeSet<AgentId>,
+    /// Agents in `unreadable` or `failed` whose read the keychain answered with its error (a
+    /// denied prompt, say), not one that has not answered: `agent.key_denied`.
+    denied: BTreeSet<AgentId>,
     reading: BTreeSet<AgentId>,
     /// A count of each agent's writes and marks: a read that began before one is dropped.
     writes: BTreeMap<AgentId, u64>,
@@ -73,6 +92,17 @@ impl Marks {
         lock(&self.state).failed.contains(agent)
     }
 
+    /// Whether `agent`'s failed read was the keychain's error, not one with no answer yet.
+    pub(super) fn is_denied(&self, agent: &AgentId) -> bool {
+        lock(&self.state).denied.contains(agent)
+    }
+
+    /// Whether a read of `agent` runs: the tests'.
+    #[cfg(test)]
+    pub(super) fn is_reading(&self, agent: &AgentId) -> bool {
+        lock(&self.state).reading.contains(agent)
+    }
+
     /// The agents whose key is marked unreadable, for `Debug`.
     pub(super) fn unreadable_agents(&self) -> Vec<AgentId> {
         lock(&self.state).unreadable.iter().cloned().collect()
@@ -84,18 +114,20 @@ impl Marks {
             let mut state = lock(&self.state);
             *state.writes.entry(agent.clone()).or_default() += 1;
             let failed = state.failed.remove(agent);
-            state.unreadable.remove(agent) || failed
+            let denied = state.denied.remove(agent);
+            state.unreadable.remove(agent) || failed || denied
         };
         self.noted(changed, agent);
     }
 
-    /// A read of `agent`'s stored key failed with the error of `kind`: it is marked.
+    /// A read of `agent`'s stored key failed with the error of `kind`: it is marked, denied.
     pub(super) fn unreadable(&self, agent: &AgentId, kind: &str) {
         tracing::warn!(%agent, kind, "key unreadable");
         let changed = {
             let mut state = lock(&self.state);
             *state.writes.entry(agent.clone()).or_default() += 1;
-            state.unreadable.insert(agent.clone())
+            let denied = state.denied.insert(agent.clone());
+            state.unreadable.insert(agent.clone()) || denied
         };
         self.noted(changed, agent);
     }
@@ -138,12 +170,12 @@ impl Marks {
             match read {
                 Ok(Some(key)) => {
                     let new = lock(keys).insert(agent.clone(), key).is_none();
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.remove(agent);
                     (state.unreadable.remove(agent) || new || failed, Some(true))
                 }
                 Ok(None) => {
                     let gone = lock(keys).remove(agent).is_some();
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.remove(agent);
                     (
                         state.unreadable.remove(agent) || gone || failed,
                         Some(false),
@@ -151,7 +183,7 @@ impl Marks {
                 }
                 Err(error) if marked => {
                     tracing::warn!(%agent, kind = error_kind(&error), "key unreadable");
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.insert(agent.clone());
                     (state.unreadable.insert(agent.clone()) || failed, None)
                 }
                 Err(error) => {
@@ -162,7 +194,8 @@ impl Marks {
                         kind = error_kind(&error),
                         "key read failed, no key marked stored: none used unless a firm plan"
                     );
-                    let failed = state.failed.insert(agent.clone());
+                    let failed =
+                        state.failed.insert(agent.clone()) | state.denied.insert(agent.clone());
                     (state.unreadable.remove(agent) || failed, None)
                 }
             }
@@ -175,21 +208,33 @@ impl Marks {
 
     /// Marks each read still running unreadable when `marked` marks its agent: the first
     /// load's bound has passed. One the marker does not mark has no key Clauseo stored, so it
-    /// launches without one; its read goes on and is taken in when it answers.
+    /// launches without one, unless a firm plan: it counts as failed (`ReadState::failed`).
+    /// Each read goes on and is taken in when it answers.
     fn time_out(&self, marked: &Marked) {
-        let late: Vec<AgentId> = {
+        let (late, unmarked): (Vec<AgentId>, Vec<AgentId>) = {
             let mut state = lock(&self.state);
-            let late: Vec<AgentId> = state
+            let (late, unmarked): (Vec<AgentId>, Vec<AgentId>) = state
                 .reading
                 .iter()
-                .filter(|agent| !state.unreadable.contains(*agent) && marked.contains(agent))
+                .filter(|agent| {
+                    !state.unreadable.contains(*agent) && !state.failed.contains(*agent)
+                })
                 .cloned()
-                .collect();
+                .partition(|agent| marked.contains(agent));
             state.unreadable.extend(late.iter().cloned());
-            late
+            state.failed.extend(unmarked.iter().cloned());
+            (late, unmarked)
         };
         for agent in late {
             tracing::warn!(%agent, kind = "timed_out", "key unreadable");
+            self.noted(true, &agent);
+        }
+        for agent in unmarked {
+            tracing::warn!(
+                %agent,
+                kind = "timed_out",
+                "key read late, no key marked stored: none used unless a firm plan"
+            );
             self.noted(true, &agent);
         }
     }
@@ -288,12 +333,16 @@ impl FirstLoad {
     }
 }
 
-/// Reads `agent`'s key again when it is marked unreadable and no read of it runs (a launch
-/// met `agent.key_unreadable`); a read that succeeds ends the mark. The receiver resolves
-/// once the answer is in (at once when no read starts); nobody needs to wait for it.
+/// Reads `agent`'s key again when it is marked unreadable, or its read failed unmarked, and
+/// no read of it runs (a launch met `agent.key_unreadable`, or a sign-in press did, the card's
+/// Try again); a read that succeeds ends the mark. The receiver resolves once the answer is in
+/// (at once when no read starts); nobody needs to wait for it.
 pub(super) fn read_again(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
-    let reading = lock(&cache.marks.state).reading.contains(agent);
-    if !cache.marks.is_unreadable(agent) || reading {
+    let (reading, failed) = {
+        let state = lock(&cache.marks.state);
+        (state.reading.contains(agent), state.failed.contains(agent))
+    };
+    if !(cache.marks.is_unreadable(agent) || failed) || reading {
         // Nothing to read again, or the read that timed out still waits: its answer is taken
         // in when it comes.
         return oneshot::channel().1;
@@ -316,7 +365,15 @@ fn start_read(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
     let spawned = std::thread::Builder::new()
         .name("clauseo-keychain".to_owned())
         .spawn(move || {
-            let read = keychain.load(&for_thread);
+            // A read that panics is taken in as a failed one, so `reading` ends and Try again
+            // reads again (a build that unwinds; a release build aborts on a panic).
+            let read = catch_unwind(AssertUnwindSafe(|| keychain.load(&for_thread)))
+                .unwrap_or_else(|_panic| {
+                    Err(KeyError::Keychain {
+                        agent: for_thread.clone(),
+                        kind: READ_PANICKED,
+                    })
+                });
             {
                 let _order = lock(&order);
                 marks.finish(&keys, &marker, &for_thread, began, read);

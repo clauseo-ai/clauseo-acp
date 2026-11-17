@@ -223,9 +223,9 @@ error_codes! {
         finished loading the stored API keys; no agent was started; trying again in a moment can \
         succeed.";
     AgentKeyUnreadable = "agent.key_unreadable", retryable: true, meaning: "A stored API key \
-        could not be read from the system's key store (no answer in time, or the read was \
-        refused, often at a permission prompt); no agent was started. Trying again once it can \
-        be read can succeed.";
+        could not be read from the system's key store in time: the read had not answered (often \
+        a permission prompt not answered yet); no agent was started. Trying again once it can be \
+        read can succeed.";
     MatterDocumentPathTooLong = "matter.document_path_too_long", retryable: false, meaning: "A \
         Word document's path is too long for Word to open, even with its folders' short names \
         (Windows): move the matter's folder nearer the top of its drive, or shorten its folder \
@@ -407,6 +407,10 @@ error_codes! {
         refused to run the agent's program (permission, Windows policy or antivirus).";
     AgentProgramMissing = "agent.program_missing", retryable: false, meaning: "The OS found no \
         agent program to run (not found), so the agent did not start.";
+    AgentKeyDenied = "agent.key_denied", retryable: true, meaning: "A stored API key could not \
+        be read: the system's key store answered the read with an error (often a permission \
+        prompt that was denied or cancelled, or a locked key store); no agent was started. \
+        Trying again, and allowing the read, can succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

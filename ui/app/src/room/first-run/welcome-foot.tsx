@@ -2,8 +2,8 @@
 // then ChatGPT's): the install's line while the plan isn't here yet (install.tsx, with "Sign in with {name}" while it is
 // missing), and once it is installed but not signed in, the plan's "Sign in with {name}" in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
 // without opening a matter. No gate stands on the first screen: the line says the gate's own words for a sign-in under
-// way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, a login
-// found, switching accounts) leave the foot as it was. A plan whose sign-in waits (the setup store's `queued`, behind
+// way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, switching
+// accounts) leave the foot as it was; a login found says the gate's line with its Use it. A plan whose sign-in waits (the setup store's `queued`, behind
 // the other plan's sign-in, or desktop's, behind its own download) keeps its download's line with a Cancel that stops
 // the wait and leaves the download going, and once it is here says when its browser opens. The composer shows the
 // other plan's line the same way. A plan the firm's policy locks shows no control. Settings' Plans has its own Sign
@@ -15,7 +15,9 @@ import {
   type InstallActs,
   type InstallTestIds,
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
+import { APP } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
@@ -30,11 +32,16 @@ import {
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
-import { installActs } from "./acts.ts";
+import { installActs, planOf } from "./acts.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
 /** The line's presses: the install's, the room gate's Sign in, and its Cancel. */
-export type FootActs = InstallActs & { signIn: () => void; cancel: () => void };
+export type FootActs = InstallActs & {
+  signIn: () => void;
+  retryKey: () => void;
+  useFound: () => void;
+  cancel: () => void;
+};
 
 /** A plan's line's presses: its install's, its "Sign in with {name}" (through the store's queue), and Cancel, which
  * stops a wait for the other plan's sign-in, or cancels the sign-in under way or queued behind its download (the
@@ -42,6 +49,11 @@ export type FootActs = InstallActs & { signIn: () => void; cancel: () => void };
 export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): FootActs => ({
   ...installActs(store, agent, state.copied),
   signIn: () => store.signInTo(agent),
+  // an unreadable key's Try again: the same start_sign_in, which desktop refuses and reads the key again, but no
+  // choice of plan, so the papers line keeps naming both plans (the real-Mac run of #1162 lost "or ChatGPT")
+  retryKey: () => store.signIn(agent, { again: true }),
+  // a found login's Use it, as the room gate's: use_found_login
+  useFound: () => store.command({ use_found_login: { agent } }),
   cancel: () => store.cancelSignIn(agent),
 });
 
@@ -170,10 +182,14 @@ export function welcomeFoot(
     words: string,
     kind: string,
     button: { words: string; press: () => void; testId: string; quiet?: boolean },
+    note?: string,
+    said?: string,
   ): WorkingState => ({
     kind: "wait",
     words,
     pill: null,
+    ...(note === undefined ? {} : { note }),
+    ...(said === undefined ? {} : { said }),
     actions: (
       <span className="fl-install" data-testid={IDS.line} data-state={kind}>
         <Button
@@ -210,6 +226,31 @@ export function welcomeFoot(
           null,
           "none",
         );
+      // a saved key the keychain didn't give (agent.key_unreadable, or agent.key_denied after a Deny, each in its
+      // own words): the gate's words and Try again (gate-failed.tsx; it picks no plan: acts.retryKey), never "is
+      // ready" with a sign-in (VM row A-K6); desktop refuses the press
+      // and reads the key again. The note says where the key can be changed; no tick, since the
+      // plan can't be used until the key reads. Try again refused in another code says that code's
+      // words after it, as the gate's refused line does (the same code is said once)
+      if (isKeyNotRead(view.code)) {
+        const key = errorWords(lang, view.code);
+        const plans = sx(lang, "To change it, open Settings, then Plans.");
+        const code = setup?.refused;
+        const other = code === undefined || code === view.code ? null : errorWords(lang, code);
+        return named(
+          line(
+            key,
+            "key-unreadable",
+            { ...signIn, words: fl(lang, "Try again"), press: acts.retryKey },
+            other === null ? plans : `${plans} ${other}`,
+            other === null ? undefined : `${key} ${other}`,
+          ),
+          lang,
+          name,
+          null,
+          "none",
+        );
+      }
       return named(
         line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
         lang,
@@ -250,6 +291,28 @@ export function welcomeFoot(
             name,
             null,
           );
+    // a login found on this computer (detection, as after Remove key in Plans): its line and Use
+    // it, as the room gate says it, so the plan keeps its row (Mac mini run of #1162: none showed)
+    case "login-found": {
+      const app = APP[planOf(agent)];
+      const found =
+        view.email === undefined
+          ? fl(lang, "Clauseo found your {name} account from {app} and will use it here.", {
+              name,
+              app,
+            })
+          : fl(
+              lang,
+              "Clauseo found your {name} account ({email}) from {app} and will use it here.",
+              {
+                name,
+                app,
+                email: view.email,
+              },
+            );
+      const use = { words: fl(lang, "Use it"), press: acts.useFound, testId: "signin-foot-use" };
+      return named(line(found, view.kind, use), lang, name, null, "none");
+    }
     // the sign-in status check runs: its words, and Sign in busy until it answers
     case "checking":
       return checkingLine(lang, name, ids, true);

@@ -344,7 +344,7 @@ fn a_hold_lifted_while_the_key_is_unreadable_is_refused_before_the_restart() {
     leave_at_first_try(&rig);
     let calls = rig.host.calls();
     let at = |call: &HostCall| calls.iter().position(|seen| seen == call);
-    let refused = HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable));
+    let refused = HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied));
     let refused = at(&refused).expect("the refusal is set");
     let restart = at(&HostCall::RestartAgents(claude())).expect("restarted");
     assert!(refused < restart, "refused first: {calls:?}");

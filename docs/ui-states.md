@@ -362,7 +362,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Update (0037) | `ErrorCode::UpdateFailed` | yes |
 | Leave order | `ErrorCode::SigninAgentsStillRunning` | yes |
 | Launch while the keys load (0048) | `ErrorCode::AgentKeysLoading` | yes |
-| Launch with an unreadable key (0048) | `ErrorCode::AgentKeyUnreadable` | yes |
+| Launch with an unreadable key (0048): its read had not answered in time (`AgentKeyUnreadable`), or the key store answered it with an error, such as a denied permission prompt (`AgentKeyDenied`) | `ErrorCode::AgentKeyUnreadable`, `ErrorCode::AgentKeyDenied` | yes |
 | Open in Word with a path too long for Word (0026, Windows) | `ErrorCode::MatterDocumentPathTooLong` | no |
 | A protected name in the matter is a shortcut (Windows, S15 PR4a2) | `ErrorCode::MatterProtectedLink` | no |
 | Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |

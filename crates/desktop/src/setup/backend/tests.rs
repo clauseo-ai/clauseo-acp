@@ -11,6 +11,8 @@ mod endpoint;
 mod fakes;
 mod install_busy;
 mod key_marker;
+mod key_marker_denied;
+mod key_marker_presses;
 mod key_reads;
 mod key_state;
 mod keys;

@@ -327,11 +327,27 @@ fn a_late_read_that_answers_a_key_marks_an_unmarked_agent() {
     );
     assert!(!keys.unreadable(&codex()) && !keys.has(&codex()));
     assert_eq!(marked(&scratch), Marked::Only(BTreeSet::new()));
-    // The late read answers with the key: it is taken in, and the marker is set before the
-    // change is noted.
+    // At the bound it counts as a failed read: refused only under a firm plan.
+    assert!(keys.read_failed(&codex()) && !keys.unreadable_for(&codex(), false));
+    // Claude's read, unmarked too, counts as failed as well: one note each, in either order.
     let mut receiver = notes.take().unwrap();
+    let mut late = [block_on(receiver.next()), block_on(receiver.next())];
+    late.sort_by_key(|note| format!("{note:?}"));
+    assert_eq!(
+        late,
+        [Some(KeyNote::Read(claude())), Some(KeyNote::Read(codex()))]
+    );
+    // The late read answers with the key: it is taken in, and the marker is set before the
+    // change is noted (Claude's late answer, no key, is noted too, in either order).
     keychain.hang_reads(false);
-    assert_eq!(block_on(receiver.next()), Some(KeyNote::Read(codex())));
+    loop {
+        let note = block_on(receiver.next());
+        assert!(note.is_some(), "the notes ended");
+        if note == Some(KeyNote::Read(codex())) {
+            break;
+        }
+    }
+    assert!(!keys.read_failed(&codex()));
     assert_eq!(keys.get(&codex()).as_deref().map(String::as_str), Some(KEY));
     assert_eq!(marked(&scratch), Marked::Only([codex()].into()));
     assert_eq!(
@@ -371,7 +387,7 @@ fn a_keychain_error_for_an_unmarked_agent_launches_it_without_a_key() {
 }
 
 #[test]
-fn a_keychain_error_for_a_marked_agent_is_still_key_unreadable() {
+fn a_keychain_error_for_a_marked_agent_is_still_refused_as_key_denied() {
     let scratch = Scratch::folder("key-marker-error-marked", &[]);
     // Claude's key was stored through Clauseo (marked); the keychain now refuses every read.
     // A firm's key must never be silently skipped: Claude stays refused. Codex is unmarked.
@@ -387,7 +403,7 @@ fn a_keychain_error_for_a_marked_agent_is_still_key_unreadable() {
     assert_eq!(
         settled(&keys),
         [
-            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied)),
             HostCall::SetLaunchRefused(codex(), None),
         ]
     );
@@ -453,7 +469,7 @@ fn no_keychain_and_nothing_marked_composes_to_sign_in() {
 }
 
 #[test]
-fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreadable() {
+fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_denied() {
     let scratch = Scratch::folder("key-marker-error-firm", &[]);
     // Neither agent is marked and every read fails, but Claude has a firm endpoint or provider:
     // its launch must not go keyless, so a lawyer's own sign-in token never reaches the firm's
@@ -471,7 +487,7 @@ fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreada
     assert_eq!(
         settled_with(&keys, &BTreeSet::from([claude()])),
         [
-            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied)),
             HostCall::SetLaunchRefused(codex(), None),
         ]
     );
@@ -479,13 +495,14 @@ fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreada
     let facts = Facts {
         firm: Some(UNIX_EPOCH),
         read_failed: keys.read_failed(&claude()).then_some(UNIX_EPOCH),
+        denied: keys.denied(&claude()),
         ..Facts::default()
     };
     let s18 = SigninState::SignedOut { found: None };
     assert!(matches!(
         compose(&claude(), Some(&s18), facts),
         Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
+            code: ErrorCode::AgentKeyDenied,
             ..
         })
     ));
@@ -497,7 +514,7 @@ fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreada
     assert!(matches!(
         compose(&claude(), Some(&s18), managed),
         Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
+            code: ErrorCode::AgentKeyDenied,
             ..
         })
     ));

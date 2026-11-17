@@ -45,12 +45,13 @@ use clauseo_agents::{
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use futures::{Stream, StreamExt as _};
 
-use super::admit::sign_in_barred;
+use super::admit::{SignInBar, sign_in_barred};
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
 use super::keys::{KeyCache, KeysLoaded, needs_keys};
 use super::leave::{self, Waiter};
+use super::status_timing::TARGET;
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents, events};
 use crate::bridge::lock;
@@ -127,9 +128,7 @@ impl SetupBackend for AgentsBackend {
     }
 
     fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
-        self.compose
-            .sign_in_bar(agent)
-            .map(|bar| sign_in_barred(agent, bar))
+        self.barred(agent)
     }
 
     fn sign_in_pending(&self, agent: &AgentId) -> bool {
@@ -285,10 +284,32 @@ impl AgentsBackend {
     /// (`admit::sign_in_bar`: a firm policy's endpoint, a key, an endpoint the lawyer set).
     fn refuse_start(&self, agent: &AgentId) -> Result<(), HostError> {
         self.refuse_blocked(agent)?;
-        match self.compose.sign_in_bar(agent) {
-            Some(bar) => Err(sign_in_barred(agent, bar)),
-            None => Ok(()),
+        self.barred(agent).map_or(Ok(()), Err)
+    }
+
+    /// The refusal of a sign-in for what bars it now, if anything. A stored key that could not
+    /// be read is read again first: the card's Try again (a sign-in press) is the lawyer's
+    /// retry once macOS's prompt is answered, and a read that succeeds shows the key's line.
+    /// The key cache is asked as well as [`Compose`], whose facts follow the cache's notes a
+    /// moment later (`refusal::follow_keys`): a press in between is refused too.
+    fn barred(&self, agent: &AgentId) -> Option<HostError> {
+        let firm = self.compose.firm_plan(agent);
+        let bar = if self.keys.unreadable_for(agent, firm) {
+            SignInBar::key_not_read(self.keys.denied(agent))
+        } else {
+            self.compose.sign_in_bar(agent)?
+        };
+        if bar.reads_key() {
+            // On a lifecycle target, so host.log keeps it (`clauseo_host::log_file`).
+            tracing::info!(
+                target: TARGET,
+                %agent,
+                "sign-in press, stored key unreadable: read again"
+            );
+            // Its answer comes back as a `KeyNote::Read` when the mark changes.
+            drop(self.keys.read_again(agent));
         }
+        Some(sign_in_barred(agent, bar))
     }
 
     /// Ends `agent`'s sign-in, if one runs or is reserved, because a key or an endpoint took
@@ -311,6 +332,19 @@ impl AgentsBackend {
         }
         pending::drop_press(self, agent, "a key or an endpoint took over");
         self.events.end_start(agent);
+    }
+
+    /// Ends `agent`'s plan sign-in, running or kept, when its stored key became unreadable
+    /// (rule 3 of `compose.rs`), as a key or an endpoint ends one (`end_sign_in`): rule 3
+    /// bars a new one, so one already going ends too. From each key note
+    /// (`refusal::follow_keys`).
+    pub(crate) fn end_sign_in_if_key_unreadable(&self, agent: &AgentId) {
+        let firm = self.compose.firm_plan(agent);
+        let going = self.agents.sign_in_going(agent) || lock(&self.pending).contains_key(agent);
+        if going && self.keys.unreadable_for(agent, firm) {
+            tracing::info!(%agent, "stored key unreadable: the sign-in going ends");
+            self.end_sign_in(agent);
+        }
     }
 
     /// `agent`'s new S18 job (a sign-in, a sign-out or a search) replaced any it had, so an

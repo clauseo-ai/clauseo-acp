@@ -40,7 +40,7 @@ use futures::channel::oneshot;
 use zeroize::Zeroizing;
 
 use super::KeyWrite;
-use super::admit::key_stored;
+use super::admit::{key_not_read_code, key_stored};
 use crate::bridge::lock;
 
 mod loaded;
@@ -65,6 +65,30 @@ pub(crate) const KEYS_LOAD_BOUND: Duration = Duration::from_secs(10);
 /// Where the [`KeyCache`] lands once the setup thread has loaded it: the launch hook and the
 /// limits readers are built before, on the host's start thread, and find no key until then.
 pub(crate) type KeySlot = Arc<std::sync::OnceLock<Arc<KeyCache>>>;
+
+/// How an agent's stored key reads now (`KeyCache::read_state`), for `Compose::set_key_read`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct KeyRead {
+    /// Memory holds its key.
+    pub(crate) in_memory: bool,
+    /// Its stored key could not be read ([`KeyCache::unreadable`]).
+    pub(crate) unreadable: bool,
+    /// Its read failed with no "key stored" mark ([`KeyCache::read_failed`]).
+    pub(crate) read_failed: bool,
+    /// The kind of that failure, when either holds.
+    pub(crate) kind: ReadFail,
+}
+
+/// How a read failed: no answer in time (`agent.key_unreadable`), or the keychain's error
+/// ([`KeyCache::denied`]: `agent.key_denied`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ReadFail {
+    /// No answer by the first load's bound (or none failed).
+    #[default]
+    TimedOut,
+    /// The keychain answered the read with its error.
+    Denied,
+}
 
 /// The keys in memory, by agent.
 type Keys = Arc<Mutex<BTreeMap<AgentId, Zeroizing<String>>>>;
@@ -180,6 +204,12 @@ impl KeyCache {
         in_memory || self.marks.is_unreadable(agent)
     }
 
+    /// Whether a read of `agent`'s key runs: the tests'.
+    #[cfg(test)]
+    pub(crate) fn reading(&self, agent: &AgentId) -> bool {
+        self.marks.is_reading(agent)
+    }
+
     /// Whether memory holds `agent`'s key.
     pub(crate) fn in_memory(&self, agent: &AgentId) -> bool {
         lock(&self.keys).contains_key(agent)
@@ -202,6 +232,33 @@ impl KeyCache {
     /// lawyer's own sign-in token is never offered to the firm's gateway (decision record 0048).
     pub(crate) fn unreadable_for(&self, agent: &AgentId, firm: bool) -> bool {
         self.unreadable(agent) || (firm && self.read_failed(agent))
+    }
+
+    /// Whether `agent`'s failed read was the keychain's error (a denied or cancelled prompt, a
+    /// locked keychain), not a read with no answer yet (`keys/reads.rs`).
+    pub(crate) fn denied(&self, agent: &AgentId) -> bool {
+        self.marks.is_denied(agent)
+    }
+
+    /// How `agent`'s key reads now: in memory, unreadable, failed unmarked, denied.
+    pub(crate) fn read_state(&self, agent: &AgentId) -> KeyRead {
+        KeyRead {
+            in_memory: self.in_memory(agent),
+            unreadable: self.unreadable(agent),
+            read_failed: self.read_failed(agent),
+            kind: if self.denied(agent) {
+                ReadFail::Denied
+            } else {
+                ReadFail::TimedOut
+            },
+        }
+    }
+
+    /// The code of [`KeyCache::unreadable_for`], when it holds: `agent.key_denied` for a read the
+    /// keychain answered with its error, else `agent.key_unreadable` (no answer in time).
+    pub(crate) fn unreadable_code(&self, agent: &AgentId, firm: bool) -> Option<ErrorCode> {
+        self.unreadable_for(agent, firm)
+            .then(|| key_not_read_code(self.denied(agent)))
     }
 
     /// Whether the keychain would take `key` as `agent`'s: `command.invalid` (naming the agent
