@@ -358,7 +358,8 @@ class PdfToText(unittest.TestCase):
         code, out, err = self.run_tool("Bundle.pdf", "-")
         self.assertEqual(code, 0, err)
         widths = [call.split()[1] for call in self.calls()]
-        self.assertEqual(len(widths), 5)
+        # A page still in tesseract when the budget ends is stopped and done again by the rerun.
+        self.assertLessEqual(len(widths), 6, widths)
         self.assertEqual(len(set(widths)), 5)
         self.assertNotIn("not yet", out)
         self.assertEqual(out.count("recognised words"), 5)
