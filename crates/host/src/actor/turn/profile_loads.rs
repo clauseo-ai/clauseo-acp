@@ -167,9 +167,9 @@ pub(super) fn session_loads(
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
     let downloads = matter.join(browser::DOWNLOADS_FOLDER);
-    let fallback = browser::fallback_downloads(&run.notes);
-    let folders = (downloads.as_path(), fallback.as_path());
-    let inputs = browser_inputs(actor, &run, (control, browser_switch), folders);
+    // Clauseo's own downloads folder for the matter.
+    let own = browser::fallback_downloads(&run.notes);
+    let inputs = browser_inputs(actor, &run, (control, browser_switch), (&downloads, &own));
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     egress::unread_secret(&run, browser_state.as_ref());
