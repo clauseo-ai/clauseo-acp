@@ -76,9 +76,8 @@ pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-cod
 /// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
 pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
 
-/// The line every Codex session gets after the instructions, whatever its browser: Clauseo
-/// declines a Codex shell command that needs the internet (the host's
-/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Claude never gets it.
+/// The line every Codex session gets after the instructions, whatever its browser: it says the
+/// shell is offline, so Codex is told before it tries. Claude never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
