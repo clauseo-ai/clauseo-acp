@@ -3,7 +3,7 @@
 import { loadHindi } from "@clauseo/components/lib/words-core.ts";
 import { beforeAll, expect, test } from "vitest";
 import type { FolderScanned } from "../../transport/protocol.ts";
-import { countsLine, sizeOf } from "./scan-words.ts";
+import { cloudOnlyLine, countsLine, sizeOf } from "./scan-words.ts";
 
 beforeAll(async () => {
   await loadHindi();
@@ -27,6 +27,17 @@ test("200 files of 6 KB say 6 KB, not 1 MB", () => {
 test("an empty folder says it's empty once the scan is done, and nothing while it runs", () => {
   expect(countsLine("en", scanned(0, 0))).toBe("The folder is empty.");
   expect(countsLine("en", scanned(0, 0, false))).toBeNull();
+});
+
+test("papers all kept online only: no 'empty' line, only the cloud-only line", () => {
+  const icloud: FolderScanned["place"] = { synced: { service: "icloud" } };
+  const only = { ...scanned(0, 0), place: icloud, cloud_only: 2 };
+  expect(countsLine("en", only)).toBeNull();
+  expect(cloudOnlyLine("en", only)).toBe(
+    "2 files are kept only in iCloud Drive and download as they're read.",
+  );
+  expect(countsLine("en", { ...only, cloud_only: 0 })).toBe("The folder is empty.");
+  expect(countsLine("en", { ...only, cloud_only: 1, done: false })).toBeNull();
 });
 
 test("1.5 MB keeps its decimal; from 10 MB the size is whole; Indian grouping above a thousand", () => {
