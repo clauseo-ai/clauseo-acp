@@ -236,16 +236,21 @@ fn matter_query(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             // an undo's preview lists what the undo writes: that restore's files alone, if it
-            // put back chosen files (as `turn/restore.rs` restores them)
+            // put back chosen files (as `turn/restore.rs` restores them); an undo of a restore
+            // the log has no record of is refused
             let mut job = job;
-            if let MatterJob::Preview { scope, undoes, .. } = &mut job
-                && let Some(undone) = undone_scope(actor, matter, *undoes)
-            {
-                *scope = undone;
-            }
-            let checked = loaded
+            let undoes = if let MatterJob::Preview { undoes, .. } = &job {
+                *undoes
+            } else {
+                None
+            };
+            let undone = loaded
                 .and_then(|()| own_versions(actor, matter, &versions))
-                .and_then(|()| actor.matter_worker(matter));
+                .and_then(|()| undone_scope(actor, matter, undoes));
+            if let (MatterJob::Preview { scope, .. }, Ok(Some(files))) = (&mut job, &undone) {
+                *scope = files.clone();
+            }
+            let checked = undone.and_then(|_| actor.matter_worker(matter));
             match checked {
                 // A refused send drops the tag and with it `reply`: the caller sees the host
                 // closed.
@@ -399,29 +404,44 @@ pub(super) fn own_versions(
     Ok(())
 }
 
-/// The files the restore `undoes` put back, as the matter's log records it, for an undo of it to
-/// put back those alone whatever its request says: `None` for a whole-matter restore, for no
-/// `undoes`, and for one the loaded log doesn't hold (`own_versions` refuses that one).
+/// The files the restore `undoes` put back, as the matter's loaded log records it (its
+/// `VersionRestored` marker), for an undo of it to put back those alone whatever its request
+/// says: `None` for no `undoes` and for a whole-matter restore. A restore the log has no marker
+/// for is refused (`command.invalid`): what it put back is not known, so its undo could restore
+/// more than it.
 pub(super) fn undone_scope(
     actor: &Actor,
     matter: MatterId,
     undoes: Option<CheckpointId>,
-) -> Option<RestoreRequest> {
-    let undoes = undoes?;
-    let state = actor.loaded(StreamId::Matter(matter))?.state.as_matter()?;
-    state.entries().values().find_map(|entry| {
+) -> Result<Option<RestoreRequest>, Error> {
+    let Some(undoes) = undoes else {
+        return Ok(None);
+    };
+    let state = actor
+        .loaded(StreamId::Matter(matter))
+        .and_then(|loaded| loaded.state.as_matter())
+        .ok_or_else(|| Error::Internal(format!("matter {matter} is not loaded")))?;
+    let scope = state.entries().values().find_map(|entry| {
         if let ViewEntry::Marker(marker) = entry
             && let MarkerKind::VersionRestored {
-                checkpoint,
-                scope: RestoreScope::Files { paths },
-                ..
+                checkpoint, scope, ..
             } = &marker.kind
             && *checkpoint == undoes
         {
-            return Some(RestoreRequest::Files {
-                paths: paths.clone(),
-            });
+            return Some(scope);
         }
         None
-    })
+    });
+    let Some(scope) = scope else {
+        return Err(Error::refused(
+            ErrorCode::CommandInvalid,
+            format!("checkpoint {undoes} is no restore this matter has a record of"),
+        ));
+    };
+    if let RestoreScope::Files { paths } = scope {
+        return Ok(Some(RestoreRequest::Files {
+            paths: paths.clone(),
+        }));
+    }
+    Ok(None)
 }

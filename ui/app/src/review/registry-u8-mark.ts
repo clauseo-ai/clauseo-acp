@@ -1,12 +1,43 @@
-// The host's Word tool's answers for registry-u8.tsx's scripted host (word_blackline), apart from it to keep that file
-// under the size limit.
+// The host's Word tool's answers for registry-u8.tsx's scripted host (word_blackline), and its restores' markers, apart
+// from it to keep that file under the size limit.
+import { uuid } from "../testing/stream-script.ts";
 import type {
   BlacklineNotice,
   BlacklinePart,
   BlacklineParagraph,
   ChangedTable,
   QueryResult,
+  RestoreScope,
+  ViewEntry,
 } from "../transport/protocol.ts";
+
+/** What a restore's marker lists it did: the files it wrote, removed, and of those deleted for good. */
+type Did = { written?: string[]; removed?: string[]; deleted?: string[] };
+
+/** The host's marker for a restore: `checkpoint` restored the matter to `from`, doing `did`. */
+export const restoreMarker = (
+  order: number,
+  from: string,
+  checkpoint: string,
+  undoes?: string,
+  scope: RestoreScope = "matter",
+  did: Did = {},
+): ViewEntry => ({
+  marker: {
+    order,
+    event: uuid(order, 9),
+    ts: Date.now(),
+    kind: {
+      version_restored: {
+        from,
+        checkpoint,
+        scope,
+        ...(undoes === undefined ? {} : { undoes }),
+        ...Object.fromEntries(Object.entries(did).filter(([, paths]) => paths.length > 0)),
+      },
+    },
+  },
+});
 
 /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices,
  * links whose web address changed or paragraphs of its own, left unanswered, or refused with a code. */

@@ -31,8 +31,9 @@ export type MatterRead = {
   oneFile: ReadonlyMap<string, OneFile>;
 };
 
-/** The one file a restore put back, or an undo of one removed: deleted for good when the trash couldn't take it. */
-export type OneFile = { file: string; forGood: boolean };
+/** What a restore of one file did to it, as its marker lists: wrote it, removed it (deleted for good when the trash
+ * couldn't take it), or neither (the host left it as it was). */
+export type OneFile = { file: string; wrote: boolean; removed: boolean; forGood: boolean };
 
 /** Reads entries, oldest first: older pages first, then the view's window. */
 export function readMatter(view: StreamView | undefined, older: readonly ViewEntry[]): MatterRead {
@@ -55,7 +56,12 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
       const paths = typeof r.scope === "object" ? r.scope.files.paths : [];
       const file = paths.length === 1 ? paths[0] : undefined;
       if (file !== undefined)
-        oneFile.set(r.checkpoint, { file, forGood: (r.deleted ?? []).includes(file) });
+        oneFile.set(r.checkpoint, {
+          file,
+          wrote: (r.written ?? []).includes(file),
+          removed: (r.removed ?? []).includes(file),
+          forGood: (r.deleted ?? []).includes(file),
+        });
     }
   };
   for (const e of older) take(e);

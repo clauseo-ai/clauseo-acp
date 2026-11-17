@@ -163,16 +163,29 @@ pub(crate) fn hold_as_word(path: impl AsRef<Path>) -> File {
 }
 
 /// A probe that answers cloud-only for the absolute paths a test marks; marks can change
-/// between calls.
+/// between calls. It can also swap a file for a folder of its name while it is asked about it
+/// ([`MarkedProbe::swap_for_folder`]).
 #[derive(Debug, Default)]
 pub(crate) struct MarkedProbe {
     marked: Mutex<BTreeSet<PathBuf>>,
+    swap: Mutex<Option<(PathBuf, usize)>>,
 }
 
 impl MarkedProbe {
     /// Marks `path` (absolute) cloud-only.
     pub(crate) fn mark(&self, path: impl Into<PathBuf>) {
         self.marked.lock().unwrap().insert(path.into());
+    }
+
+    /// Swaps the file at `path` (absolute) for an empty folder of its name the `nth` time the
+    /// probe is asked about it: a folder made while a restore runs, between two of its looks.
+    pub(crate) fn swap_for_folder(&self, path: impl Into<PathBuf>, nth: usize) {
+        *self.swap.lock().unwrap() = Some((path.into(), nth));
+    }
+
+    /// Whether the swap asked for has been made.
+    pub(crate) fn swapped(&self) -> bool {
+        self.swap.lock().unwrap().is_none()
     }
 
     /// Unmarks `path`.
@@ -183,6 +196,20 @@ impl MarkedProbe {
 
 impl PlaceholderProbe for MarkedProbe {
     fn is_cloud_only(&self, path: &Path, _metadata: &std::fs::Metadata) -> bool {
+        let mut swap = self.swap.lock().unwrap();
+        let due = match swap.as_mut() {
+            Some((at, left)) if at.as_path() == path => {
+                *left = left.saturating_sub(1);
+                *left == 0
+            }
+            Some(_) | None => false,
+        };
+        if due {
+            *swap = None;
+            std::fs::remove_file(path).unwrap();
+            std::fs::create_dir(path).unwrap();
+        }
+        drop(swap);
         self.marked.lock().unwrap().contains(path)
     }
 }

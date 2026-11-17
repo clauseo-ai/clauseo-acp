@@ -165,15 +165,15 @@
     "note": "UC-393 on Windows"
   },
   "UC-395": {
-    "en": "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.",
-    "hi": "कुछ पूर्ववत नहीं हुआ: पुनर्स्थापन के बाद '{paper}' बदल गया है, इसलिए Clauseo ने उसे जैसा है वैसा ही छोड़ दिया।",
+    "en": "Nothing was undone: Clauseo couldn't safely put '{paper}' back, so it left it as it is.",
+    "hi": "कुछ पूर्ववत नहीं हुआ: Clauseo '{paper}' को सुरक्षित रूप से वापस नहीं ला सका, इसलिए उसे जैसा है वैसा ही छोड़ दिया।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-16",
+    "hi_at": "2026-11-17",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-16",
+    "at": "2026-11-17",
     "by": "host follow-ups (provisional; orchestrator to approve)",
-    "note": "Versions' line after undoing a one-document restore whose preview wrote and removed nothing: the paper changed since the restore (it had brought it back and the lawyer edited it), so the undo left it"
+    "note": "Versions' line after undoing a one-document restore whose marker lists the paper neither written nor removed, or that answered with no marker: the host left the paper (changed since, online-only, a case-only twin). Chosen from the marker, never the dialog's preview. English final (app track)"
   },
   "UC-396": {
     "en": "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.",
@@ -218,5 +218,16 @@
     "at": "2026-11-16",
     "by": "host follow-ups (provisional; orchestrator to approve)",
     "note": "Versions' line after undoing a one-document restore that removed the paper when the bin couldn't take it, so the host deleted it for good (VersionRestored.deleted names it; Versions holds a copy), and while the undo's marker hasn't said which; never the Trash or Recycle Bin line then. English final (app track)"
+  },
+  "UC-341": {
+    "en": "Nothing was restored: Clauseo left '{paper}' as it is.",
+    "hi": "कुछ पुनर्स्थापित नहीं हुआ: Clauseo ने '{paper}' को जैसा है वैसा ही छोड़ दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after a one-document restore that wrote nothing: the host answered with no marker, or one not listing the paper as written (it changed as Restore was pressed, say). Draft; app track to word"
   }
 }

@@ -1,10 +1,11 @@
 //! An undo of a restore that removes a file the restore brought back: into the trash, or, when
 //! the trash can't take it, deleted for good (Versions holds it). The logged `VersionRestored`
 //! says which in `deleted`, so the app's line never says the trash for a file deleted for good.
+//! And an undo of a restore the log has no record of is refused.
 
 use clauseo_protocol::{
-    CheckpointKind, CommandOutcome, DomainEvent, HostCommand, MatterPath, RestoreRequest,
-    VersionRestored,
+    CheckpointKind, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostQuery, MatterPath,
+    RestoreRequest, VersionRestored,
 };
 
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
@@ -87,4 +88,50 @@ fn a_trash_failure_then_a_delete_for_good_is_reported_as_deleted_not_trashed() {
         assert_eq!(undo.deleted, for_good, "blocked: {blocked}");
         host.shutdown();
     }
+}
+
+/// An undo names the restore it takes back; one the matter's log has no `VersionRestored` for
+/// (here the import, a version but no restore) is refused, by the preview and the restore
+/// alike, and nothing is written: the host would not know what that restore put back.
+#[test]
+fn an_undo_of_a_restore_with_no_record_is_refused() {
+    let dir = Dir::new(
+        "undo_of_a_restore_with_no_record",
+        &[(FAKE, Scenario::Local("restore-note"))],
+    );
+    let host = dir.start(0);
+    let (matter, _thread, folder) =
+        matter_with_thread(&dir, &host, "m", &[("brief.txt", "Clause 4 draft\n")], FAKE);
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    let brief = folder.join("brief.txt");
+    write::write(&brief, b"Clause 4 redrafted\n");
+
+    let previewed = host
+        .query(HostQuery::PreviewRestore {
+            matter,
+            checkpoint: import,
+            scope: RestoreRequest::Matter,
+            undoes: Some(import),
+        })
+        .unwrap_err();
+    let restored = host
+        .dispatch(HostCommand::RestoreVersion {
+            matter,
+            checkpoint: import,
+            scope: RestoreRequest::Matter,
+            undoes: Some(import),
+            thread: None,
+        })
+        .unwrap_err();
+    for error in [previewed, restored] {
+        assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error:?}");
+        assert!(error.message().contains("no restore"), "{error:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&brief).unwrap(),
+        "Clause 4 redrafted\n"
+    );
+    host.shutdown();
 }

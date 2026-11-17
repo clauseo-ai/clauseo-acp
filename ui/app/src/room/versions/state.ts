@@ -74,15 +74,12 @@ export type Done =
   /** One file put back as it was at a version, by Versions' per-file Restore; moved: it changed while the dialog was
    * open, and the copy it had then is kept in Versions. */
   | { kind: "restoredFile"; to: string; file: string; outcome: Outcome; moved?: boolean }
-  /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter; undid:
-   * for that file, what the undo did to it, by its preview: put it back (back), removed it, as the restore had brought
-   * it back (removed), or nothing, as it changed since the restore (none). */
+  /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter. */
   | {
       kind: "undidRestore";
       at: Timestamp;
       file: string | null;
-      undid?: FileUndid;
-      /** The version the undo wrote, whose marker says whether a removed file went to the trash. */
+      /** The version the undo answered with, whose marker says what it did to that file. */
       checkpoint?: string;
     }
   | {
@@ -94,16 +91,13 @@ export type Done =
       kept?: readonly SkippedFile[];
     };
 
-/** What an undo of a one-file restore did to that file. */
-export type FileUndid = "back" | "removed" | "none";
-
 /** Whether restoring writes nothing: no file changed or removed (the file is the same, or the host keeps it). */
 export const writesNothing = (p: RestorePreview): boolean =>
   p.changes.length === 0 && (p.removes ?? []).length === 0;
 
 /** What a restore that went through did: undid the restore it undoes (that file alone, for a one-file restore's undo,
- * saying what it did to it by the preview), restored the matter, or restored one file (moved: it changed while the
- * dialog was open, and the restore wrote). */
+ * its marker saying what it did to it), restored the matter, or restored one file (moved: it changed while the dialog
+ * was open; its marker says whether the restore wrote it). */
 export function restoreDone(
   ask: Pick<RestoreAsk, "id" | "preview" | "undoes" | "file" | "moved">,
   outcome: Outcome,
@@ -112,13 +106,8 @@ export function restoreDone(
   const { file, preview } = ask;
   if (ask.undoes !== null) {
     if (file === null) return { kind: "undidRestore", at, file };
-    const undid: FileUndid = (preview.removes ?? []).includes(file)
-      ? "removed"
-      : preview.changes.length > 0
-        ? "back"
-        : "none";
     const checkpoint = outcome.kind === "wrote" ? { checkpoint: outcome.checkpoint } : {};
-    return { kind: "undidRestore", at, file, undid, ...checkpoint };
+    return { kind: "undidRestore", at, file, ...checkpoint };
   }
   if (file === null) return { kind: "restored", to: ask.id, n: preview.changes.length, outcome };
   const moved = ask.moved === true && outcome.kind === "wrote";
