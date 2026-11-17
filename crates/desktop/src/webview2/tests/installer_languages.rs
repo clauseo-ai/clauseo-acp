@@ -141,17 +141,19 @@ fn the_app_running_lines_are_clauseos_words_above_tauris_stock_ones() {
             .unwrap()
             .to_owned()
     };
-    // The box has OK and Cancel: it names both, and what is kept and what isn't.
-    let ok = words("appRunningOkKill");
-    for part in [
-        "Click OK to close it and continue",
-        "Cancel",
-        "Your conversations are kept.",
-        "your question and the answer so far are kept",
-        "not sent isn't kept",
-    ] {
-        assert!(ok.contains(part), "{part}: {ok}");
-    }
+    // The box has OK and Cancel: it names both, then, after a blank line (`$\n$\n`, as the
+    // other Clauseo boxes break), what is kept and what is lost.
+    assert_eq!(
+        words("appRunningOkKill"),
+        "\"${PRODUCTNAME} is open. Click OK to close it and continue, or Cancel to leave it open \
+         and stop here.$\\n$\\nYour conversations are kept. An answer still being written stops, \
+         and your question and the answer so far are kept. A question you've typed but not sent \
+         is lost, so copy it before you click OK.\""
+    );
+    assert_eq!(
+        words("failedToKillApp"),
+        "\"Stopped, because ${PRODUCTNAME} didn't close. Quit ${PRODUCTNAME}, then try again.\""
+    );
     for key in ["appRunning", "failedToKillApp"] {
         assert!(
             words(key).contains("Quit ${PRODUCTNAME}, then try again."),

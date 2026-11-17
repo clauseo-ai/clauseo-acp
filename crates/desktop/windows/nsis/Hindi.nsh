@@ -90,10 +90,12 @@ LangString webview2TooOld ${LANG_HINDI} "इस कंप्यूटर पर 
 
 ; appRunning, appRunningOkKill and failedToKillApp: Tauri's CheckIfAppIsRunning box and status
 ; lines, for an install and an uninstall alike (English.nsh says when each shows and what is kept).
-; Clauseo's own words, no longer Tauri's. Provisional Hindi, to be reviewed (2026-11-17): the
-; words follow the app's Hindi for a stopped answer (words-thread.hi.ts: उत्तर, प्रश्न, रखे गए).
+; Clauseo's own words, no longer Tauri's. Provisional Hindi, to be reviewed (2026-11-17), for
+; the Hindi-speaking lawyer: the words follow the app's Hindi for a stopped answer
+; (words-thread.hi.ts: उत्तर, प्रश्न, रखे गए); the box breaks with a blank line ($\n$\n) as
+; English.nsh's does.
 LangString appRunning ${LANG_HINDI} "रुक गया, क्योंकि ${PRODUCTNAME} अभी भी खुला है। ${PRODUCTNAME} बंद करें, फिर दोबारा प्रयास करें।"
-LangString appRunningOkKill ${LANG_HINDI} "${PRODUCTNAME} खुला है। इसे बंद करके आगे बढ़ने के लिए OK पर क्लिक करें, या इसे खुला छोड़कर यहीं रुकने के लिए Cancel पर क्लिक करें। आपकी बातचीत रखी जाएगी। अगर ${PRODUCTNAME} कोई उत्तर लिख रहा है, तो वह उत्तर रुक जाएगा, और आपका प्रश्न और अब तक का उत्तर रखे जाएँगे। जो प्रश्न आपने लिखा है पर भेजा नहीं है, वह नहीं रखा जाएगा, इसलिए पहले उसे कॉपी कर लें।"
+LangString appRunningOkKill ${LANG_HINDI} "${PRODUCTNAME} खुला है। इसे बंद करके आगे बढ़ने के लिए OK पर क्लिक करें, या इसे खुला छोड़कर यहीं रुकने के लिए Cancel पर क्लिक करें।$\n$\nआपकी बातचीत रखी जाएगी। जो उत्तर अभी लिखा जा रहा है, वह रुक जाएगा, और आपका प्रश्न और अब तक का उत्तर रखे जाएँगे। जो प्रश्न आपने लिखा है पर भेजा नहीं है, वह खो जाएगा, इसलिए OK पर क्लिक करने से पहले उसे कॉपी कर लें।"
 LangString failedToKillApp ${LANG_HINDI} "रुक गया, क्योंकि ${PRODUCTNAME} बंद नहीं हो सका। ${PRODUCTNAME} बंद करें, फिर दोबारा प्रयास करें।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
