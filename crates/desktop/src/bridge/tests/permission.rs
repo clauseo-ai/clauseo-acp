@@ -144,6 +144,37 @@ fn answer_permission_refuses_the_plan_exit_options_that_change_the_mode() {
     while !messages.next_text().contains("Leaving plan mode") {}
 }
 
+/// `for-this-conversation` offers codex-acp's command options and expects `allow_for_session`:
+/// a conversation-only allow is sent with no "Always allow?" confirm (`Answers(None)` panics
+/// when asked), though its kind is `allow_always`.
+#[test]
+fn a_conversation_only_allow_is_sent_with_no_confirm() {
+    let scenario = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scenarios/for-this-conversation.jsonl"
+    );
+    let scratch = Scratch::with_fake_agent("for-this-conversation", scenario);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let messages = open(&bridge, MAIN);
+    block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
+    host.run(HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "List the folder.".to_owned(),
+        }],
+        delivery: DeliveryRequest::Queue,
+    });
+    let request = until_pending(&messages, &mut Vec::new(), 1);
+    let option = AgentChoiceId::new("allow_for_session").unwrap();
+    block_on(bridge.answer_permission(&Answers(None), thread, request, option)).unwrap();
+    while !messages
+        .next_text()
+        .contains("Ran it for this conversation.")
+    {}
+}
+
 /// Only the once kinds and `reject_always` skip the confirm; a kind this version does not know
 /// (acp refuses such a request today, so no agent can offer one here) is refused.
 #[test]
