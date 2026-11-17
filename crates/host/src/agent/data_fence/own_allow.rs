@@ -107,6 +107,11 @@ struct Lead {
 /// (`C:\…`, `C:/…`, Bash's `C:\\…` and `/c/…`) when `windows`, else the path with `/`. A
 /// spelling that is not UTF-8 gets none.
 fn own_paths(deny: &LaunchDeny, windows: bool) -> Vec<(Vec<Piece>, bool)> {
+    paths_of(deny, &deny.own_reads, windows)
+}
+
+/// [`own_paths`] for `places`, patterns under `<data>` in [`LaunchDeny::own_reads`]' form.
+fn paths_of(deny: &LaunchDeny, places: &[String], windows: bool) -> Vec<(Vec<Piece>, bool)> {
     let mut leads: Vec<Lead> = Vec::new();
     let mut push = |text: String, sep: &'static str, powershell: bool| {
         if !text.is_empty() && !leads.iter().any(|known| known.text == text) {
@@ -145,7 +150,7 @@ fn own_paths(deny: &LaunchDeny, windows: bool) -> Vec<(Vec<Piece>, bool)> {
         }
     }
     let mut paths = Vec::new();
-    for place in &deny.own_reads {
+    for place in places {
         let (names, _) = parse(place);
         for lead in &leads {
             let mut path = text(&lead.text);
@@ -214,6 +219,46 @@ pub(crate) fn own_shell_glob_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec
                             rules.push(rule);
                         }
                     }
+                }
+            }
+        }
+    }
+    rules
+}
+
+/// The read-only `git` commands of the instructions (`legal.md`, "Version history").
+const HISTORY_READS: [&str; 3] = ["log", "show", "diff"];
+
+/// The allow rules for reading this matter's version history (`agent::history`, found from the
+/// notes in [`LaunchDeny::own_reads`]) with `git`, as the instructions write each command:
+/// `git --git-dir="<history>" log *`, `show *` and `diff *`, so `auto` runs them with no
+/// classifier (`scripts/claude-rule-probe`, Claude Code 0.3.293: the literal path matched, a
+/// `$VAR` form did not). Bash's off Windows; PowerShell's on Windows, which matches a command
+/// with its quotes dropped, so its rules come with and without them. No other matter's.
+pub(crate) fn history_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let places: Vec<String> = deny
+        .own_reads
+        .iter()
+        .filter_map(|place| crate::agent::history::history_place(place))
+        .collect();
+    let mut rules = Vec::new();
+    for (path, powershell) in paths_of(deny, &places, windows) {
+        let (tool, quotes): (&str, &[&str]) = match (windows, powershell) {
+            (false, _) => ("Bash", &["\""]),
+            (true, true) => ("PowerShell", &["\"", ""]),
+            (true, false) => continue,
+        };
+        for quote in quotes {
+            for read in HISTORY_READS {
+                let pieces = join(&[
+                    &text(&format!("git --git-dir={quote}")),
+                    &path,
+                    &text(&format!("{quote} {read} ")),
+                    &[Piece::Any],
+                ]);
+                let rule = format!("{tool}({})", render(&pieces, false));
+                if !rules.contains(&rule) {
+                    rules.push(rule);
                 }
             }
         }

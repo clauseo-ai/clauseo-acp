@@ -47,7 +47,7 @@ The matter brief is `{matter_notes}/matter-brief.md`, shared by every agent on t
 
 ## Version history
 
-This matter's version history is a git repository at `{matter_history}`. Read it with `git --git-dir="{matter_history}" log refs/clauseo/timeline -- <path>`, `show <commit>:<path>` and `diff <commit> <commit>`; copy a version out to read it or bring it back with `show <commit>:<path> > "<file>"` (in PowerShell, inside `cmd /c`). Read only: never commit, reset, checkout, gc, status or a bare diff.
+This matter's version history is a git repository at `{matter_history}`. Run each git command on its own, exactly as written: `git --git-dir="{matter_history}" log refs/clauseo/timeline -- <path>`, likewise `show <commit>:<path>` and `diff <commit> <commit>`; copy a version out with `show <commit>:<path> > "<file>"` (in PowerShell, inside `cmd /c`). Never commit, reset, checkout, gc, status or a bare diff.
 
 ## Conduct
 

@@ -20,6 +20,25 @@ pub(crate) fn matter_history(notes: &Path) -> Option<PathBuf> {
     Some(data.join("matters").join(matter).join("history.git"))
 }
 
+/// [`matter_history`] of the notes folder `notes` as text for the instructions
+/// (`{matter_history}`); empty for a path not of that shape or not UTF-8.
+pub(crate) fn history_text(notes: &str) -> String {
+    let history = matter_history(Path::new(notes));
+    history
+        .as_deref()
+        .and_then(Path::to_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// [`matter_history`] as a pattern under `<data>` (`matters/<id>/history.git`) for the notes'
+/// pattern `notes` (`agent-state/<id>/notes`, `data_fence::LaunchDeny::own_reads`); `None` for
+/// any other pattern.
+pub(crate) fn history_place(notes: &str) -> Option<String> {
+    let matter = notes.strip_prefix("agent-state/")?.strip_suffix("/notes")?;
+    (!matter.is_empty() && !matter.contains('/')).then(|| format!("matters/{matter}/history.git"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
