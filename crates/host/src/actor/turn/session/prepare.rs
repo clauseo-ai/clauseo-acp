@@ -41,8 +41,8 @@ pub(super) fn before_attach(
 }
 
 /// A session's work before its first prompt, in order: `session/set_mode` to `mode` when given
-/// (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch, and this
-/// covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`], see
+/// (Codex's [`codex::MODE`]: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch, and
+/// this covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`], see
 /// [`claude_start`], with `acceptEdits` as its fallback when the switch to `auto` fails); then,
 /// for Codex, when a hooks object went into `CODEX_CONFIG` (`guard` is the session's folder),
 /// `_codex/hooks/list` once, which must show the guard trusted; then

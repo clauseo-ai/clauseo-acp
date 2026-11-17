@@ -91,7 +91,7 @@ fn create_thread_config_wins_over_an_options_update_before_the_session() {
     host.shutdown();
 }
 
-/// (b) Codex's shape (its own option ids, no Default rows, the ask mode switched first): model
+/// (b) Codex's shape (its own option ids, no Default rows, its mode switched first): model
 /// gpt-6-luna and effort low are set before the first prompt over the defaults it reported
 /// first, and the thread logs them.
 #[test]

@@ -59,7 +59,7 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, clauseo_acp::Error>,
     },
-    /// A session's work before its attach (Codex's ask mode and guard's trust, Claude's mode,
+    /// A session's work before its attach (Codex's mode and guard's trust, Claude's mode,
     /// the picks) ended; `picked` says what the picks did.
     Prepared {
         loaded: bool,

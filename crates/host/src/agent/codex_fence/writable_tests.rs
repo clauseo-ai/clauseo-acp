@@ -132,7 +132,7 @@ fn writable(config: &Map<String, Value>) -> Vec<PathBuf> {
 
 /// On macOS and Linux: the profile extends `:workspace` and writes only the run folder and the
 /// notes; nothing writable is the data folder, Codex's home, above either or in the home, and
-/// neither is a `write` entry. The ask mode and ACP's `additionalDirectories` say the same.
+/// neither is a `write` entry. Codex's mode and ACP's `additionalDirectories` say the same.
 #[test]
 fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windows() {
     let launch = Launch::new("writable-unix");
@@ -155,7 +155,8 @@ fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windo
     writes.dedup();
     assert_eq!(writes, vec![&launch.notes, &launch.run_root]);
     assert!(config.get("windows").is_none());
-    assert_eq!(crate::agent::codex::ASK_MODE, "workspace-write");
+    // Codex's mode keeps codex-acp's `workspace-write` sandbox (`dist/index.js:34293-34308`).
+    assert_eq!(crate::agent::codex::MODE, "agent");
     for directory in [&launch.run_root, &launch.notes] {
         assert!(!launch.too_wide(directory));
     }

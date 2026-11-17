@@ -66,7 +66,7 @@ bundled! {
         "codex-input-too-long",
         "codex-limit-air",
         "codex-mode-agent",
-        "codex-no-workspace-write",
+        "codex-no-agent-mode",
         "codex-permission",
         "codex-plan",
         "codex-resume",

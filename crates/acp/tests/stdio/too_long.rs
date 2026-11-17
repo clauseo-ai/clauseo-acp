@@ -4,18 +4,14 @@
 //! with no limit and no warning; Codex's recorded refusal reads as the internal error it says.
 
 use clauseo_acp::{AcpEvent, AgentFailed, AgentUpdate, MessageRole, Origin, PromptEnd, TooLong};
-use clauseo_protocol::{AgentChoiceId, StopReason};
+use clauseo_protocol::StopReason;
 
 use crate::harness::{self, Ctx, chunk, sess1, text, turn, update_event};
 
 /// Plays `scenario`'s one prompt and returns its end and the events it brought.
-fn one_prompt(scenario: &str, codex: bool, check: impl FnOnce(PromptEnd, Vec<AcpEvent>)) {
+fn one_prompt(scenario: &str, check: impl FnOnce(PromptEnd, Vec<AcpEvent>)) {
     let outcome = harness::run(scenario, async |ctx: Ctx| {
         ctx.handshake().await;
-        if codex {
-            let mode = AgentChoiceId::new("workspace-write").unwrap();
-            ctx.client.set_mode(&sess1(), mode).await.unwrap();
-        }
         let end = ctx
             .client
             .prompt(&sess1(), turn(1), text("Read the whole lease"))
@@ -44,7 +40,7 @@ fn no_limit_nor_warning(events: &[AcpEvent]) -> bool {
 
 #[test]
 fn codex_context_full_ends_too_long() {
-    one_prompt("codex-context-full", true, |end, events| {
+    one_prompt("codex-context-full", |end, events| {
         assert_eq!(end, too_long(TooLong::ContextExhausted));
         // The session_info_update's copy is its own event, before the answer's.
         assert_eq!(
@@ -68,7 +64,7 @@ fn codex_context_full_ends_too_long() {
 /// with the "Prompt is too long" failure of category `service`.
 #[test]
 fn claude_prompt_too_long_ends_too_long() {
-    one_prompt("claude-prompt-too-long", false, |end, events| {
+    one_prompt("claude-prompt-too-long", |end, events| {
         assert_eq!(end, too_long(TooLong::PromptTooLong));
         assert!(no_limit_nor_warning(&events), "{events:?}");
         let compaction: Vec<_> = events
@@ -104,7 +100,7 @@ fn claude_prompt_too_long_ends_too_long() {
 /// the agent gave up on, and no warning.
 #[test]
 fn codex_input_too_long_reads_as_the_internal_error_it_says() {
-    one_prompt("codex-input-too-long", true, |end, events| {
+    one_prompt("codex-input-too-long", |end, events| {
         assert_eq!(
             end,
             PromptEnd {
