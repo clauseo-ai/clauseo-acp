@@ -74,8 +74,7 @@ export interface HostTransport {
    * `section` when named (R24: the case-law hint and the out-of-credit note open "connectors"). Only a transport whose
    * host has that window carries it: the desktop one; the room draws no Settings button without it. */
   openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
-  /** Settings › Skills' native picker (the desktop's `pick_skill`): a folder that holds a SKILL.md file, or the file
-   * itself; its path, or `null` when the lawyer cancels. Only the desktop's; Skills shows only where it is. */
+  /** Settings › Skills' native picker (the desktop's `pick_skill`): a folder that holds a SKILL.md file; its path, or `null` when the lawyer cancels. Only the desktop's; Skills shows only where it is. */
   pickSkill?: (() => Promise<string | null>) | undefined;
   /** Sends the room's start-up marks to host.log, once, in the background (start-marks.ts); only the desktop's. */
   pageMarks?: SendMarks | undefined;

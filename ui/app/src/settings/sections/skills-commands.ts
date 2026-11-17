@@ -5,8 +5,13 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { nextHostOf } from "../../room/host-next.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { HostCommand } from "../../transport/protocol.ts";
-import type { SkillCommand, SkillPack } from "./skills-contract.ts";
+import type { HostCommand, PackStatus } from "../../transport/protocol.ts";
+
+/** What Settings › Skills sends. */
+type SkillCommand = Extract<
+  HostCommand,
+  { set_skill_pack: unknown } | { add_skill: unknown } | { remove_skill: unknown }
+>;
 
 const codeOf = (error: unknown): string =>
   typeof error === "object" && error !== null && "code" in error
@@ -15,7 +20,7 @@ const codeOf = (error: unknown): string =>
 
 export type SkillsState = {
   /** The packs as last read; null before the first answer. */
-  packs: readonly SkillPack[] | null;
+  packs: readonly PackStatus[] | null;
   /** The code of the last command the host refused; cleared by the next that goes through. */
   failed: string | null;
   /** A command is with the host (the picker included). */
@@ -36,7 +41,7 @@ function skillsOver(transport: HostTransport) {
     const n = (asked += 1);
     try {
       const answer = await transport.query("list_skill_packs");
-      if (n === asked) set({ packs: (answer.skill_packs ?? []) as SkillPack[] });
+      if (n === asked) set({ packs: answer.skill_packs ?? [] });
     } catch {
       // the list stays as last read; a first read that fails shows the empty list
       if (n === asked && state.packs === null) set({ packs: [] });
@@ -50,9 +55,8 @@ function skillsOver(transport: HostTransport) {
     try {
       const sent = await command();
       if (sent === null) return;
-      // add_skill and remove_skill aren't in the generated HostCommand yet (skills-contract.ts)
       await transport
-        .dispatch({ command_id: crypto.randomUUID(), command: sent as unknown as HostCommand })
+        .dispatch({ command_id: crypto.randomUUID(), command: sent })
         .catch((error: unknown) => (failed = codeOf(error)));
       await read();
     } catch (error: unknown) {

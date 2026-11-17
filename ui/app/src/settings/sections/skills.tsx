@@ -18,18 +18,18 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { settingLabel, settingNote } from "@clauseo/components/ui/recipes-controls.ts";
 import { Switch } from "@clauseo/components/ui/switch.tsx";
 import { useState } from "react";
+import type { PackStatus } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { useSkills } from "./skills-commands.ts";
-import { NO_SKILL_MD, type SkillPack } from "./skills-contract.ts";
 import { hostOf } from "./tools-model.ts";
 
-const nameOf = (pack: SkillPack): string => pack.name ?? pack.id;
+const nameOf = (pack: PackStatus): string => pack.name ?? pack.id;
 
 export function SkillsSection({ ctx }: { ctx: SectionContext }) {
   const { lang } = useDisplay();
   const { packs, failed, busy, add, remove, turn } = useSkills(ctx.transport);
-  const [removing, setRemoving] = useState<SkillPack | null>(null);
+  const [removing, setRemoving] = useState<PackStatus | null>(null);
   if (packs === null) return null;
   const locked = ctx.settings.locked.includes("skills.enabled");
   return (
@@ -116,11 +116,8 @@ export function SkillsSection({ ctx }: { ctx: SectionContext }) {
       {failed !== null && (
         <p className="set-note" role="status" data-testid="skills-failed">
           {say(
-            failed === NO_SKILL_MD
-              ? sk(
-                  lang,
-                  "That folder has no SKILL.md file. Choose the folder that holds one, or the file itself.",
-                )
+            failed === "skill.no_skill_md"
+              ? sk(lang, "That folder has no SKILL.md file. Choose the folder that holds one.")
               : sk(lang, "Clauseo couldn't make that change. Your skills are as they were."),
           )}
         </p>

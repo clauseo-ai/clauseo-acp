@@ -105,10 +105,7 @@ test("Cancel in the picker sends nothing", async () => {
 });
 
 test.each([
-  [
-    "skill.no_skill_md",
-    "That folder has no SKILL.md file. Choose the folder that holds one, or the file itself.",
-  ],
+  ["skill.no_skill_md", "That folder has no SKILL.md file. Choose the folder that holds one."],
   ["skill.invalid", "Clauseo couldn't make that change. Your skills are as they were."],
 ])("a refusal with %s says one line under the button", async (code, line) => {
   rig = await mount([]);

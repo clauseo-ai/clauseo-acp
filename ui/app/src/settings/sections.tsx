@@ -173,7 +173,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     lead: (lang) =>
       sk(
         lang,
-        "Skills teach Claude and ChatGPT to do a task your way. Add a folder that holds a SKILL.md file, or the SKILL.md file itself.",
+        "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.",
       ),
     shown: (ctx) => skillsShown(ctx.transport),
     Body: SkillsSection,

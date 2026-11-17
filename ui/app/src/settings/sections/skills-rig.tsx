@@ -8,7 +8,7 @@ import type { Settings } from "../../room/host-next.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { SettingsApp } from "../settings-app.tsx";
 import { FakeSkills } from "./skills-fake.ts";
-import type { SkillPack } from "./skills-contract.ts";
+import type { PackStatus } from "../../transport/protocol.ts";
 
 export const SETTINGS: Settings = {
   ui: { theme: "system", font_size: 16, language: "en", lite: "automatic", motion: "system" },
@@ -17,7 +17,7 @@ export const SETTINGS: Settings = {
 
 export type Rig = Awaited<ReturnType<typeof mount>>;
 
-export async function mount(packs: readonly SkillPack[]) {
+export async function mount(packs: readonly PackStatus[]) {
   history.replaceState(null, "", "/settings.html#skills");
   const skills = new FakeSkills(packs);
   const transport = new FakeTransport({

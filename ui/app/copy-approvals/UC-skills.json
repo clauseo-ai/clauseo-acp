@@ -8,7 +8,7 @@
     "note": "Settings › Skills: the section's name, on the side and as the pane's head"
   },
   "UC-971": {
-    "en": "Skills teach Claude and ChatGPT to do a task your way. Add a folder that holds a SKILL.md file, or the SKILL.md file itself.",
+    "en": "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.",
     "hi": null,
     "status": "provisional",
     "at": "2026-11-17",
@@ -40,7 +40,7 @@
     "note": "Settings › Skills: the empty list"
   },
   "UC-975": {
-    "en": "That folder has no SKILL.md file. Choose the folder that holds one, or the file itself.",
+    "en": "That folder has no SKILL.md file. Choose the folder that holds one.",
     "hi": null,
     "status": "provisional",
     "at": "2026-11-17",
@@ -70,5 +70,27 @@
     "at": "2026-11-17",
     "by": "skills_ui (provisional; Rohan batch review)",
     "note": "Settings › Skills: the button beside a changed skill: set_skill_pack on"
+  },
+  "U3-err-skill.no_skill_md": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "skill.no_skill_md: the settings window's failure line, as for the mcp.* codes; Settings › Skills says its own words"
+  },
+  "U3-err-skill.invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "skill.invalid: the settings window's failure line, as for the mcp.* codes; Settings › Skills says its own words"
   }
 }
