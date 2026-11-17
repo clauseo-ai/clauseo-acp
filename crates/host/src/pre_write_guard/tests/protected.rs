@@ -121,11 +121,15 @@ impl Drop for Layout {
 
 /// The places a file tool may not write: each kind of protected path, existing or not, by
 /// absolute path, relative to the matter, or through a `..`.
-const PROTECTED_FILES: [&str; 15] = [
+const PROTECTED_FILES: [&str; 19] = [
     "home/settings.json",
     "home/settings.local.json",
     "home/CLAUDE.md",
     "home/.claude.json",
+    "home/.config.json",
+    "home/cowork_settings.json",
+    "home/remote-settings.json",
+    "home/policy-limits.json.signature.json",
     "home/skills/new/SKILL.md",
     "home/commands/x.md",
     "home/agents/x.md",

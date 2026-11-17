@@ -189,6 +189,21 @@ pub(super) fn run_dir(data: &Path) -> PathBuf {
     data.join("run")
 }
 
+/// The last change to Claude's home `home` (none for Codex) before the agent starts: what
+/// Claude Code would load from it goes (`agent::home::clear_home`), so the folders it watches
+/// do not exist at its start. When that fails, `run`'s folders are taken back and the launch is
+/// refused with its error. File system calls: off the actor.
+pub(super) fn clear_claude_home(
+    run: &RunFolders,
+    data: &Path,
+    home: Option<&Path>,
+) -> Result<(), Error> {
+    let Some(home) = home else {
+        return Ok(());
+    };
+    crate::agent::home::clear_home(data, home).inspect_err(|_| run.remove())
+}
+
 /// `<data>/browser/run`: the parent of every session's browser folder, the guard's `--cwd`
 /// (`RunFolders::browser`). It sits in `<data>/browser`, which Codex's shell fence denies
 /// whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so a sandboxed shell cannot

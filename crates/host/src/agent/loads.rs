@@ -358,25 +358,26 @@ impl<'a> GuardHook<'a> {
     }
 }
 
-/// The names in Claude's config folder that load settings or instructions into every later
-/// session and that a launch does not remove (`settings.json`, which it rewrites, and
-/// `.claude.json` and `.config.json`, whose `env` Claude Code applies and which hold its own
-/// state), which the guard refuses the agent to change ([`guard_protected`]), with the ones a
-/// launch removes (`agent::home::CLAUDE_HOME_LOADED`).
-pub(crate) const GUARD_PROTECTED_HOME: [&str; 3] =
-    ["settings.json", ".claude.json", ".config.json"];
+/// The names in Claude's config folder that load settings into every later session and that a
+/// launch does not remove (`settings.json`, which it rewrites, and `.claude.json`, whose `env`
+/// Claude Code applies and which holds its own state), which the guard refuses the agent to
+/// change ([`guard_protected`]), with the ones a launch removes
+/// (`agent::home::CLAUDE_HOME_SETTINGS_FILES` and `agent::home::CLAUDE_HOME_LOADED`).
+pub(crate) const GUARD_PROTECTED_HOME: [&str; 2] = ["settings.json", ".claude.json"];
 
 /// What the pre-write guard refuses a Claude session's agent to change, whatever the matter: in
-/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`] and of
-/// `agent::home::CLAUDE_HOME_LOADED`; and under the data folder `data`, the built-in plugin
-/// (`data_fence::BUILT_IN_PLUGIN`). Its deny rules name the same (`agent/data_fence.rs`). The
-/// run's packs plugin is refused to the file tools alone (`LaunchDeny::guarded_edit`).
+/// its config folder `home`, each of [`GUARD_PROTECTED_HOME`],
+/// `agent::home::CLAUDE_HOME_SETTINGS_FILES` and `agent::home::CLAUDE_HOME_LOADED`; and under
+/// the data folder `data`, the built-in plugin (`data_fence::BUILT_IN_PLUGIN`). Its deny rules
+/// name the same (`agent/data_fence.rs`). The run's packs plugin is refused to the file tools
+/// alone (`LaunchDeny::guarded_edit`).
 pub(crate) fn guard_protected(home: &Path, data: &Path) -> Vec<PathBuf> {
     let plugin = crate::agent::data_fence::BUILT_IN_PLUGIN
         .split('/')
         .fold(data.to_path_buf(), |at, name| at.join(name));
     GUARD_PROTECTED_HOME
         .iter()
+        .chain(crate::agent::home::CLAUDE_HOME_SETTINGS_FILES.iter())
         .chain(crate::agent::home::CLAUDE_HOME_LOADED.iter())
         .map(|name| home.join(name))
         .chain([plugin])

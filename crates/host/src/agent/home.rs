@@ -126,11 +126,13 @@ pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
     }
 }
 
-/// [`write_claude_settings`] for the app: the sign-in jobs run it before each Claude Code
-/// process they start (`clauseo_agents::SigninConfig::claude_settings`), so a login, a status
-/// check or a logout reads only the user settings Clauseo ships. File system calls: off the
-/// host thread.
+/// [`write_claude_settings`] for the app, after the files Claude Code reads settings from and
+/// its global config's configuration go as at a launch (`clear::clear_settings`): the sign-in
+/// jobs run it before each Claude Code process they start
+/// (`clauseo_agents::SigninConfig::claude_settings`), so a login, a status check or a logout
+/// reads only the user settings Clauseo ships. File system calls: off the host thread.
 pub fn write_claude_home_settings(home: &Path) -> std::io::Result<()> {
+    clear::clear_settings(home)?;
     write_claude_settings(home)
 }
 
@@ -151,5 +153,8 @@ pub(crate) fn settings_unwritten(error: &std::io::Error) -> crate::error::Error 
 #[cfg(test)]
 mod tests;
 
+mod claude_json;
 mod clear;
-pub(crate) use clear::{LOADED as CLAUDE_HOME_LOADED, clear_home};
+pub(crate) use clear::{
+    LOADED as CLAUDE_HOME_LOADED, SETTINGS as CLAUDE_HOME_SETTINGS_FILES, clear_home,
+};

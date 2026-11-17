@@ -275,6 +275,17 @@ fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
         "settings.json",
         ".claude.json",
         ".config.json",
+        "cowork_settings.json",
+        "settings.local.json",
+        "remote-settings.json",
+        "remote-settings.json.signature.json",
+        "remote-settings.json.signature-iat.json",
+        "remote-settings-helper-consent",
+        "remote-settings-consent.json",
+        "policy-limits.json",
+        "policy-limits.json.signature.json",
+        "policy-limits.json.signature-iat.json",
+        "policy-limits.json.stamp.json",
         "CLAUDE.md",
         "skills",
         "commands",
@@ -285,7 +296,6 @@ fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
         "hooks",
         "workflows",
         "agent-memory",
-        "settings.local.json",
     ]
     .iter()
     .map(|name| home.join(name))
