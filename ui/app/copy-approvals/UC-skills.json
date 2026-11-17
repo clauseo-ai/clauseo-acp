@@ -1,0 +1,74 @@
+{
+  "UC-970": {
+    "en": "Skills",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: the section's name, on the side and as the pane's head"
+  },
+  "UC-971": {
+    "en": "Skills teach Claude and ChatGPT to do a task your way. Add a folder that holds a SKILL.md file, or the SKILL.md file itself.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: the line under the pane's head"
+  },
+  "UC-972": {
+    "en": "Add a skill",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: the button under the list: the native picker, then the host adds the skill"
+  },
+  "UC-973": {
+    "en": "Added on this computer",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: a skill's source line when the lawyer added it here (added_here); else its source address's host"
+  },
+  "UC-974": {
+    "en": "No skills added yet.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: the empty list"
+  },
+  "UC-975": {
+    "en": "That folder has no SKILL.md file. Choose the folder that holds one, or the file itself.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: under Add a skill: skill.no_skill_md"
+  },
+  "UC-976": {
+    "en": "Clauseo couldn't make that change. Your skills are as they were.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: under Add a skill: any other refusal of add, remove or a switch"
+  },
+  "UC-977": {
+    "en": "Clauseo can't use this skill as it is.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: a listed skill's line in any state but on or off (changed, not_admitted, invalid)"
+  },
+  "UC-978": {
+    "en": "Turn on again",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "skills_ui (provisional; Rohan batch review)",
+    "note": "Settings › Skills: the button beside a changed skill: set_skill_pack on"
+  }
+}
