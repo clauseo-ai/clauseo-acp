@@ -17,7 +17,7 @@ use clauseo_connectors::fake::{FakeConnector, FakeHandle, FakeOptions, ScratchDi
 use clauseo_connectors::{ConnectorHandle, Connectors, MemoryStore, SecretStore};
 use clauseo_host::connectors::{FixedOffset, RelayConfig, RelayEvent, RelayEvents, Relays};
 use clauseo_host::{HostConfig, McpServer, SystemClock, TestProxy};
-use clauseo_protocol::{ClauseoTool, ToolState, ToolsUnavailableReason};
+use clauseo_protocol::{AgentKind, ClauseoTool, ToolState, ToolsUnavailableReason};
 use serde_json::{Value, json};
 
 use crate::profile_rig::{
@@ -260,17 +260,18 @@ fn both_agents_get_case_law_after_the_other_servers() {
     assert_eq!(tokens.len(), 2, "one token file per session");
     assert_ne!(tokens[0], tokens[1]);
     for (at, (seen, token)) in seen.iter().zip(&tokens).enumerate() {
-        // Codex's session (the second) has the browser off Windows, so its proxy's password is
-        // hidden too; Claude's has no browser, so no proxy.
+        // A session with the browser (`servers::no_browser`) has a proxy; its password is hidden.
+        let kind = [AgentKind::Claude, AgentKind::Codex][at];
+        let browser = !clauseo_profile::servers::no_browser(Some(kind));
         let password = TestProxy::PASSWORD.to_owned();
         assert_eq!(
             seen.redacted.contains(&password),
-            at == 1 && !cfg!(windows),
+            browser,
             "the stderr tail hides the proxy password"
         );
         // And the `Proxy-Authorization: Basic` value it makes.
         let basic = base64::engine::general_purpose::STANDARD.encode(format!("clauseo:{password}"));
-        assert_eq!(seen.redacted.contains(&basic), at == 1 && !cfg!(windows));
+        assert_eq!(seen.redacted.contains(&basic), browser);
         let hidden: Vec<&String> = seen
             .redacted
             .iter()
@@ -357,7 +358,10 @@ fn no_case_law(
     assert_eq!(shown, expected.into_iter().collect::<Vec<_>>(), "{test}");
     let seen = launcher.seen();
     assert!(seen.iter().all(|seen| token_of(seen).is_none()), "{test}");
-    assert!(seen.iter().all(|seen| seen.redacted.is_empty()), "{test}");
+    let basic = base64::engine::general_purpose::STANDARD
+        .encode(format!("clauseo:{}", TestProxy::PASSWORD));
+    let proxy = |secret: &String| secret == TestProxy::PASSWORD || *secret == basic;
+    assert!(seen.iter().flat_map(|s| &s.redacted).all(proxy), "{test}");
     host.shutdown();
 }
 
