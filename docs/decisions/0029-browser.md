@@ -1937,7 +1937,8 @@ stayed without a browser until "Claude on Windows too" (below).
   lands: in downloads/ in the matter, by clicking its link (Codex) or clicking or opening it (Claude). The dormant shell part
   (`browser.txt`, "save a file into the matter with `curl`") reaches no session and is unchanged.
 - **Settings.** The Browser switch's line reads "Claude and ChatGPT use it. Runs on this
-  computer." (UC-213, provisional); the row stays hidden on Windows.
+  computer." (UC-213, provisional); the row shows on Windows too, since both
+  agents have the browser there (2026-11-17).
 - **Not verified here (the live Mac check).** That Claude Code 2.1.293 starts the MCP child
   outside Seatbelt and Chrome starts; 0 prompts in `auto`; and that `curl 127.0.0.1:<cdp>` and
   `nc -U <socket>` are refused from Claude's shell. That Seatbelt refuses the AF_UNIX connect is
