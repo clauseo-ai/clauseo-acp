@@ -1199,17 +1199,18 @@ this record and firm-it §8.
   - **`read`** (H1). agent-browser marks `agent_browser_read` read-only, so Codex runs it with
     no prompt; the guard refuses its `url`, `llms` and `requireMd` keys, so it reads only the
     page already open, through Chrome (agent-browser v0.41.1 `native/actions.rs:5964-5994`).
-- **No browser for Codex on Windows.** Clauseo gives Codex's shell the unelevated
-  restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only network block is
-  proxy variables that leave loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`,
-  applied at `spawn_prep.rs:141-143`); the firewall rules exist only in the elevated setup. Its
-  reads are not restricted, so the guard's port file and Chrome's command line are readable.
-  agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
-  command Codex runs without a prompt could drive the unfenced browser past the filter and write
-  outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
-  (`servers::no_browser`), no browser in its header (the app offers no browser action), and the
-  no-browser sentence. The way back is the elevated sandbox (its firewall) or an authenticated
-  daemon. Claude has no browser on Windows either (below), so no agent has one there.
+- **Codex's browser on Windows, back on** (2026-11-17). It was off: Clauseo gives Codex's shell
+  the unelevated restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only
+  network block is proxy variables that leave loopback out (codex 0.162.1
+  `windows-sandbox-rs/src/env.rs:126-170`, applied at `spawn_prep.rs:141-143`), and
+  agent-browser's daemon took no password, so a shell command Codex ran without a prompt could
+  have driven the guard's browser past the filter. That way back, an authenticated daemon, is
+  #1091: the guard draws a per-session key that only its own agent-browser gets (never in a file,
+  on a command line or in Chrome's environment), the patched daemon serves no client without it,
+  and Chrome speaks CDP over a pipe, not a port (record 0060). So Codex gets its guarded entry on
+  Windows as on macOS and Linux (`servers::browser_mcp`, `servers::no_browser` false for Codex
+  on every OS), with the session's egress proxy and downloads to the matter. Claude still has no
+  browser on Windows (below).
 - **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
   #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
   (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
