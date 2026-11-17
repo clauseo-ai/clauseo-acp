@@ -22,7 +22,7 @@
 // they can be found, the upstream commit, the archive's and each patch's SHA-256, and prints the
 // pin's two lines for that triple. Then it runs the patched source's own test suite
 // (`cargo test --locked --target <triple>`, as upstream's CI runs it; on Windows this is where the
-// pipe's restricted-token, session key and hardening tests run). The tests come after the binary
+// pipe and session key tests run). The tests come after the binary
 // so a failing test still leaves it for later jobs (a real-Intel job tests the x64 macOS one), but
 // `build` then still exits non-zero, so the leg stays red and nothing is published
 // (`releaseThenTest`). A failed release build exits non-zero without running the tests.

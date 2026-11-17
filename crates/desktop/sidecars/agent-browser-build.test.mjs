@@ -222,7 +222,7 @@ describe("the pin", () => {
     await main(["tag"], { log: (line) => lines.push(line) });
     await main(["toolchain"], { log: (line) => lines.push(line) });
     const channel = toolchainChannel(await readFile(new URL("../../../rust-toolchain.toml", import.meta.url), "utf8"));
-    assert.deepEqual(lines, ["agent-browser-v0.41.1-clauseo.1", channel]);
+    assert.deepEqual(lines, ["agent-browser-v0.41.1-clauseo.3", channel]);
   });
 
   test("toolchainChannel refuses a file with no channel", () => {

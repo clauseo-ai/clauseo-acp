@@ -20,7 +20,7 @@ after(() => rm(root, { recursive: true, force: true }));
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const VERSION = "0.41.1";
 const PREFIX = `https://github.com/vercel-labs/agent-browser/releases/download/v${VERSION}`;
-const TAG = `agent-browser-v${VERSION}-clauseo.1`;
+const TAG = `agent-browser-v${VERSION}-clauseo.3`;
 const OURS = `https://github.com/clauseo-ai/clauseo-acp/releases/download/${TAG}`;
 const COMMIT = "5868f7c05020e047c00e68e4abf9253cce864f41";
 const TARBALL = "ca59c4590a5a265d106c494d7726b9cde8575536d31834709dd525da8d778f6f";
