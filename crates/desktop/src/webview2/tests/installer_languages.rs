@@ -73,7 +73,7 @@ fn the_installer_language_files_name_the_product_through_nsis() {
 }
 
 #[test]
-fn the_installer_language_files_hold_tauris_3_messages_and_clauseos_53_once_each() {
+fn the_installer_language_files_hold_tauris_3_messages_and_clauseos_54_once_each() {
     // Tauri's 3 (deleteAppData, in Clauseo's words, older and unknown), the three lines of
     // Tauri's CheckIfAppIsRunning that Clauseo words itself (appRunning, appRunningOkKill and
     // failedToKillApp), the 21 of Tauri's that Clauseo words itself, the reinstall page's and the
@@ -91,18 +91,19 @@ fn the_installer_language_files_hold_tauris_3_messages_and_clauseos_53_once_each
     // (installTempFailed and uninstallTempFailed), the uninstaller's when it isn't started in
     // place (uninstallNotInPlace), the per-machine installer's details line on an ARM64
     // computer (nativeArm64Notice), the details line about an old WebView2 (webview2TooOld),
-    // and both installers' when Clauseo.exe is gone after the files are placed
-    // (clauseoAppRemovedByAv).
+    // both installers' when Clauseo.exe is gone after the files are placed
+    // (clauseoAppRemovedByAv), and theirs when a file they must replace stays in use
+    // (clauseoFileInUse).
     let [english, hindi] = language_files();
     let mut orders = Vec::new();
     for (file, constant) in [english, hindi] {
         let strings = lang_strings(&file);
-        assert_eq!(strings.len(), 56, "{file}");
+        assert_eq!(strings.len(), 57, "{file}");
         let order: Vec<String> = strings.iter().map(|(key, _, _)| key.clone()).collect();
         let mut keys = order.clone();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 56, "{file}");
+        assert_eq!(keys.len(), 57, "{file}");
         assert!(
             strings.iter().all(|(_, used, _)| used == constant),
             "{file}: every string is {constant}'s"

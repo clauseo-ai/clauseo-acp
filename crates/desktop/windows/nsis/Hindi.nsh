@@ -81,6 +81,11 @@ LangString nativeArm64Notice ${LANG_HINDI} "इस कंप्यूटर म�
 ; "Protection history" is translated, its English name kept in brackets, since Windows
 ; Security's own Hindi screen may name it differently.
 LangString clauseoAppRemovedByAv ${LANG_HINDI} "इंस्टॉल होते समय Windows Security ने Clauseo का एक हिस्सा रोक दिया, इसलिए Clauseo नहीं खुल सकता। Windows Security खोलें, सुरक्षा इतिहास (Protection history) चुनें, Clauseo को अनुमति दें, फिर Clauseo दोबारा इंस्टॉल करें।"
+; clauseoFileInUse: a file the installer must replace still couldn't be opened for writing after
+; three tries 2 s apart (installer.nsi, block place-file): something holds it open or locks it.
+; Both installers, every mode: a details line, a box (none under /S), exit code 29 and the
+; install fails. Provisional Hindi, to be reviewed (2026-11-17).
+LangString clauseoFileInUse ${LANG_HINDI} "Clauseo का इंस्टॉल पूरा नहीं हो सका, क्योंकि किसी दूसरे प्रोग्राम ने उसकी एक फ़ाइल खोल रखी है। इस कंप्यूटर को रीस्टार्ट करें, फिर दोबारा प्रयास करें।"
 
 ; The reinstall page's and the WebView2 section's words, which were Tauri's stock messages
 ; (English.nsh says where each shows). Provisional Hindi, to be reviewed (2026-11-17): Next is

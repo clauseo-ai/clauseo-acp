@@ -207,6 +207,102 @@ VIAddVersionKey "OriginalFilename" "${PRODUCTNAME} Setup"
 
 ; 4. Custom page to ask user if he wants to reinstall/uninstall
 ;    only if a previous installation was detected
+; >>> clauseo: place-file
+; Every file Section Install places is placed or the install fails, in every mode; none is ever
+; skipped. NSIS's default (SetOverwrite on, AllowSkipFiles on) meets a file it can't open for
+; writing with its Abort/Retry/Ignore box in its own English, and a silent install picks Ignore
+; by itself: the file is skipped, only the error flag is set, and the install exits 0 with the old
+; file in place (exec.c, EW_EXTRACTFILE; release run 44026502738's arm64 smoke kept the x64
+; Clauseo.exe that way). The blocks place-main-exe, place-resource and place-binary set
+; SetOverwrite try, under which NSIS shows no box at all: a file it can't open is skipped with
+; the error flag set (exec.c: overwriteflag 2, exec_error++). First, block place-preflight checks
+; every target already in $INSTDIR free (CLAUSEO_PLACE_FREE, below), so a held file stops the
+; install before anything is replaced; a file taken after that check is the per-file loop's.
+; Block reinstall-preflight runs the same check before the reinstall page starts the old
+; uninstaller ("Uninstall before installing"), which would otherwise delete what it can.
+; Defined here, before the reinstall page, as NSIS reads the script in order.
+; Each File then stands between
+; CLAUSEO_PLACE_BEGIN and CLAUSEO_PLACE_END, which try it CLAUSEO_PLACE_TRIES times, waiting
+; CLAUSEO_PLACE_WAIT_MS between tries, for a lock that passes (an antivirus scan of a file just
+; written). Still not placed: two details lines (clauseoFileInUse, then the file's path), the
+; same words in a box (none under /S, /SD; shown under /P and /UPDATE, where the updater's lawyer
+; is waiting), exit code CLAUSEO_EXIT_FILE_IN_USE (docs/firm-it.md), then Abort: Section Install
+; ends as failed before the uninstaller and the registry are written, so the uninstall key keeps
+; the version that was there. SetOverwrite try leaves a read-only file as it is (NSIS clears the
+; flag only under SetOverwrite on), so the attributes are reset first.
+!define CLAUSEO_PLACE_TRIES 3
+!define CLAUSEO_PLACE_WAIT_MS 2000
+; Clear of NSIS's 0 to 2, of the hooks' 20 to 28 (hooks.nsh) and of the codes Intune and SCCM
+; read as success, a reboot or a retry.
+!define CLAUSEO_EXIT_FILE_IN_USE 29
+Var ClauseoPlaceTry
+Var ClauseoPlaceHandle
+; 1 while the reinstall page's preflight runs (block reinstall-preflight), else 0.
+Var ClauseoPlacePage
+; A file still held after the last try: say so (the box, none under /S), then stop. In Section
+; Install: exit code 29 and Abort, which ends the section as failed. On the reinstall page,
+; before the old uninstaller: interactive, Abort keeps the lawyer on the page with nothing
+; uninstalled and sets no code (they may choose again and install); passive, exit code 29 and
+; Quit, so neither the old uninstaller nor the install runs.
+!macro CLAUSEO_PLACE_FAILED _CLAUSEO_FILE
+  DetailPrint "$(clauseoFileInUse)"
+  DetailPrint "${_CLAUSEO_FILE}"
+  MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(clauseoFileInUse)" /SD IDOK
+  ${If} $ClauseoPlacePage = 1
+    ${If} $PassiveMode = 1
+      SetErrorLevel ${CLAUSEO_EXIT_FILE_IN_USE}
+      Quit
+    ${EndIf}
+    Abort
+  ${EndIf}
+  SetErrorLevel ${CLAUSEO_EXIT_FILE_IN_USE}
+  Abort
+!macroend
+!macro CLAUSEO_PLACE_BEGIN _CLAUSEO_FILE
+  StrCpy $ClauseoPlaceTry 1
+  ${Do}
+    SetFileAttributes "${_CLAUSEO_FILE}" NORMAL
+    ClearErrors
+!macroend
+!macro CLAUSEO_PLACE_END _CLAUSEO_FILE
+    ${IfNot} ${Errors}
+      ${ExitDo}
+    ${EndIf}
+    ${If} $ClauseoPlaceTry >= ${CLAUSEO_PLACE_TRIES}
+      !insertmacro CLAUSEO_PLACE_FAILED "${_CLAUSEO_FILE}"
+    ${EndIf}
+    IntOp $ClauseoPlaceTry $ClauseoPlaceTry + 1
+    Sleep ${CLAUSEO_PLACE_WAIT_MS}
+  ${Loop}
+!macroend
+; The preflight (block place-preflight), before any File: each target already in $INSTDIR opened
+; for writing and closed again, with the same tries, so a held file stops the install before
+; anything in the folder is replaced. FileOpen's "a" is CreateFile with GENERIC_READ|GENERIC_WRITE,
+; OPEN_ALWAYS and FILE_SHARE_READ (NSIS script.cpp TOK_FILEOPEN, util.c myOpenFile), the share mode
+; File's own open uses: it fails on the same holders, keeps the contents, and with nothing
+; written leaves the last-write time as it was. OPEN_ALWAYS would create a missing file, hence
+; the FileExists test. The attributes are reset first, as placing does, or a read-only file
+; would fail here and not there.
+!macro CLAUSEO_PLACE_FREE _CLAUSEO_FILE
+  ${If} ${FileExists} "${_CLAUSEO_FILE}"
+    StrCpy $ClauseoPlaceTry 1
+    ${Do}
+      SetFileAttributes "${_CLAUSEO_FILE}" NORMAL
+      ClearErrors
+      FileOpen $ClauseoPlaceHandle "${_CLAUSEO_FILE}" a
+      ${IfNot} ${Errors}
+        FileClose $ClauseoPlaceHandle
+        ${ExitDo}
+      ${EndIf}
+      ${If} $ClauseoPlaceTry >= ${CLAUSEO_PLACE_TRIES}
+        !insertmacro CLAUSEO_PLACE_FAILED "${_CLAUSEO_FILE}"
+      ${EndIf}
+      IntOp $ClauseoPlaceTry $ClauseoPlaceTry + 1
+      Sleep ${CLAUSEO_PLACE_WAIT_MS}
+    ${Loop}
+  ${EndIf}
+!macroend
+; <<< clauseo: place-file
 Var ReinstallPageCheck
 Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
@@ -383,6 +479,21 @@ Function PageLeaveReinstall
   ${EndIf}
 
   reinst_uninstall:
+    ; >>> clauseo: reinstall-preflight
+    ; The install section's preflight (block place-file, CLAUSEO_PLACE_FREE), over the same
+    ; lists, before the old uninstaller runs on either branch (WiX or NSIS): it deletes what it
+    ; can and leaves a held file, which would leave no working Clauseo once the install stopped
+    ; at that file. A held one: the box, then back to this page (passive: exit 29, Quit).
+    StrCpy $ClauseoPlacePage 1
+    !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\${MAINBINARYNAME}.exe"
+    {{#each resources}}
+      !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this.[1]}}"
+    {{/each}}
+    {{#each binaries}}
+      !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this}}"
+    {{/each}}
+    StrCpy $ClauseoPlacePage 0
+    ; <<< clauseo: reinstall-preflight
     HideWindow
     ClearErrors
 
@@ -742,20 +853,53 @@ Section Install
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
+  ; >>> clauseo: place-preflight
+  ; Every target the blocks below place, from the same lists, checked free before the first
+  ; File (CLAUSEO_PLACE_FREE): a held one stops the install with the folder as it was. The
+  ; per-file loop stays for a file taken between this and its File.
+  StrCpy $ClauseoPlacePage 0
+  !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\${MAINBINARYNAME}.exe"
+  {{#each resources}}
+    !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this.[1]}}"
+  {{/each}}
+  {{#each binaries}}
+    !insertmacro CLAUSEO_PLACE_FREE "$INSTDIR\\{{this}}"
+  {{/each}}
+  ; <<< clauseo: place-preflight
+  ; >>> clauseo: place-main-exe
+  ; No file skipped, no NSIS box (block place-file). AllowSkipFiles off as well, for the rest of
+  ; the script: no File after this one may offer Ignore either.
+  SetOverwrite try
+  AllowSkipFiles off
+  !insertmacro CLAUSEO_PLACE_BEGIN "$INSTDIR\${MAINBINARYNAME}.exe"
   File "${MAINBINARYSRCPATH}"
+  !insertmacro CLAUSEO_PLACE_END "$INSTDIR\${MAINBINARYNAME}.exe"
+  ; <<< clauseo: place-main-exe
 
   ; Copy resources
   {{#each resources_dirs}}
     CreateDirectory "$INSTDIR\\{{this}}"
   {{/each}}
   {{#each resources}}
+    ; >>> clauseo: place-resource
+    !insertmacro CLAUSEO_PLACE_BEGIN "$INSTDIR\\{{this.[1]}}"
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    !insertmacro CLAUSEO_PLACE_END "$INSTDIR\\{{this.[1]}}"
+    ; <<< clauseo: place-resource
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
+    ; >>> clauseo: place-binary
+    !insertmacro CLAUSEO_PLACE_BEGIN "$INSTDIR\\{{this}}"
     File /a "/oname={{this}}" "{{no-escape @key}}"
+    !insertmacro CLAUSEO_PLACE_END "$INSTDIR\\{{this}}"
+    ; <<< clauseo: place-binary
   {{/each}}
+  ; >>> clauseo: place-files-end
+  ; NSIS's default again for any later File (admin_copy.nsh sets its own).
+  SetOverwrite on
+  ; <<< clauseo: place-files-end
 
   ; Create file associations
   {{#each file_associations as |association| ~}}

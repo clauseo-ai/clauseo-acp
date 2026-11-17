@@ -84,6 +84,10 @@ fn every_box_in_the_template_is_in_a_named_block_and_comes_to_the_front() {
     }
     assert_eq!(
         seen,
-        ["unable-to-uninstall-front", "silent-downgrades-front"]
+        [
+            "place-file",
+            "unable-to-uninstall-front",
+            "silent-downgrades-front"
+        ]
     );
 }

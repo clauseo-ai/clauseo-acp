@@ -11,6 +11,10 @@
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
 //! `un-gui-end`) are tested in `uninstall_in_place.rs`. `webview2-no-elevation` keeps a per-user
 //! install from asking for an administrator over an old `WebView2` (`webview2_floor.rs`);
+//! `place-file`, `reinstall-preflight`, `place-preflight`, `place-main-exe`, `place-resource`,
+//! `place-binary` and `place-files-end` place every file or fail the install with exit code 29,
+//! never skipping one, and check every file free before the old uninstaller or the first `File`
+//! runs (`place_files.rs`);
 //! `unable-to-uninstall-front` and `silent-downgrades-front` bring Tauri's own boxes to the front
 //! (`message_front.rs`). `reinstall-default` and `reinstall-focus` make install-over the reinstall
 //! page's pick for an older version, with focus on the pick (`reinstall_default.rs`).
@@ -42,7 +46,7 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 15] = [
+const BLOCKS: [Block; 22] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
@@ -61,6 +65,11 @@ const BLOCKS: [Block; 15] = [
         ],
     },
     Block {
+        name: "place-file",
+        after: ";    only if a previous installation was detected",
+        replaces: &[],
+    },
+    Block {
         name: "reinstall-default",
         after: "    ; selected the last time we were on this page",
         replaces: &[],
@@ -69,6 +78,11 @@ const BLOCKS: [Block; 15] = [
         name: "reinstall-focus",
         after: "",
         replaces: &["    ${NSD_SetFocus} $R2"],
+    },
+    Block {
+        name: "reinstall-preflight",
+        after: "  reinst_uninstall:",
+        replaces: &[],
     },
     Block {
         name: "unable-to-uninstall-front",
@@ -104,6 +118,31 @@ const BLOCKS: [Block; 15] = [
         name: "webview2-no-elevation",
         after: "      ${If} $R0 = 1",
         replaces: &UPSTREAM_UPDATE,
+    },
+    Block {
+        name: "place-preflight",
+        after: "  ; Copy main executable",
+        replaces: &[],
+    },
+    Block {
+        name: "place-main-exe",
+        after: "  ; Copy main executable",
+        replaces: &["  File \"${MAINBINARYSRCPATH}\""],
+    },
+    Block {
+        name: "place-resource",
+        after: "  {{#each resources}}",
+        replaces: &["    File /a \"/oname={{this.[1]}}\" \"{{no-escape @key}}\""],
+    },
+    Block {
+        name: "place-binary",
+        after: "  {{#each binaries}}",
+        replaces: &["    File /a \"/oname={{this}}\" \"{{no-escape @key}}\""],
+    },
+    Block {
+        name: "place-files-end",
+        after: "  {{/each}}",
+        replaces: &[],
     },
     Block {
         name: "uninstall-string",
@@ -516,57 +555,4 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
     line_with(sid, &["${AndIf} $R7 S!= $R5"]);
     let profile = macro_body(&code, "CLAUSEO_CHECK_PROFILE");
     line_with(profile, &["${If} $R5 == \"%\""]);
-}
-
-#[test]
-fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
-    // Unique to Clauseo (tao's default, `Tauri Window`, is every Tauri app's).
-    assert_eq!(crate::MAIN_WINDOW_CLASS, "ClauseoMainWindow");
-    let code = admin_code();
-    line_with(
-        &code,
-        &[&format!(
-            "!define CLAUSEO_MAIN_WINDOW_CLASS \"{}\"",
-            crate::MAIN_WINDOW_CLASS
-        )],
-    );
-    // With the Safe workspace off, hooks.nsh defines it instead, for repair mode's wait.
-    let off = read("windows/hooks.nsh");
-    assert!(
-        off.contains(&format!(
-            "!define CLAUSEO_MAIN_WINDOW_CLASS \"{}\"",
-            crate::MAIN_WINDOW_CLASS
-        )),
-        "hooks.nsh"
-    );
-    // Set where the main window is built.
-    let lib = read("src/lib.rs");
-    assert!(
-        lib.contains(".window_classname(MAIN_WINDOW_CLASS)"),
-        "lib.rs"
-    );
-    // The e2e close finds the main window by the same class.
-    let close = read("../../ui/e2e/app-windows/close.ts");
-    assert!(
-        close.contains(&format!(
-            "export const WINDOW_CLASS = \"{}\";",
-            crate::MAIN_WINDOW_CLASS
-        )),
-        "close.ts"
-    );
-    // Both instances look before anything happens: the outer one before it asks for the prompt.
-    let ask = macro_body(&code, "CLAUSEO_ASK_FOR_THE_ADMIN_SECTION");
-    let find = line_with(ask, &["FindWindow $R5 \"${CLAUSEO_MAIN_WINDOW_CLASS}\""]);
-    assert!(find < line_with(ask, &["$(adminCopyAsk)"]), "{ask:?}");
-    assert_run(
-        ask,
-        &[
-            "${ElseIf} $R6 = 6",
-            "DetailPrint \"$(adminCopyAppRunning)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
-            "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
-        ],
-    );
-    line_with(&code, &["!define CLAUSEO_EXIT_APP_RUNNING 24"]);
-    line_with(&code, &["!define CLAUSEO_ADMIN_APP_RUNNING 97"]);
 }

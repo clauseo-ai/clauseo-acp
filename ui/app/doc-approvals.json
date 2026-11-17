@@ -64,7 +64,8 @@
       "installingWebview2",
       "webview2InstallSuccess",
       "webview2InstallError",
-      "webview2AbortError"
+      "webview2AbortError",
+      "clauseoFileInUse"
     ],
     "slots": {
       "$R9": "the data folder",
