@@ -17,6 +17,7 @@ mod cancel;
 pub(super) mod case_law;
 mod close;
 mod codex_cap;
+mod codex_reviewer;
 mod end;
 mod failure;
 mod forced_mode;
@@ -112,8 +113,7 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
-    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
-    /// for the host's run.
+    /// The thread was told its agent's automatic mode is unavailable, once per host run.
     auto_told: bool,
     /// The thread's notice that Claude's sandbox did not start, once for the host's run.
     sandbox_off: profile_loads::claude::SandboxOffNotice,

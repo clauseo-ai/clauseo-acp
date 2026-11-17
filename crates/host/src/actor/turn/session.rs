@@ -310,28 +310,27 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         None if picks.is_empty() => return attach(actor, thread, start, loaded),
         None => return before_attach(actor, thread, (start, loaded), (None, None, picks)),
     }
-    let mode = AgentChoiceId::new(codex::MODE).map_err(|error| Error::Internal(error.to_string()));
+    // Codex's mode, or its fallback once the agent's account refused the reviewer.
+    let wanted = super::codex_reviewer::mode(actor, thread);
+    let mode = AgentChoiceId::new(wanted).map_err(|error| Error::Internal(error.to_string()));
     let checks = mode.and_then(|mode| {
-        let offered = start.modes.as_ref().is_some_and(|modes| {
-            modes
-                .available
-                .iter()
-                .any(|offered| offered.id == codex::MODE)
-        });
+        let offered = start
+            .modes
+            .as_ref()
+            .is_some_and(|modes| modes.available.iter().any(|offered| offered.id == wanted));
         if !offered {
             return Err(Error::refused(
                 ErrorCode::AgentModeMissing,
                 format!(
-                    "Codex offered no \"{}\" mode, which Clauseo runs it in, so no message was \
-                     sent",
-                    codex::MODE
+                    "Codex offered no \"{wanted}\" mode, which Clauseo runs it in, so no message \
+                     was sent"
                 ),
             ));
         }
         let switch = start
             .modes
             .as_ref()
-            .is_some_and(|modes| modes.current != codex::MODE);
+            .is_some_and(|modes| modes.current != wanted);
         Ok((mode, switch))
     });
     let (mode, switch) = match checks {
@@ -447,6 +446,9 @@ fn attach_commit(
         out.push(actor, notice)?;
     }
     if let Some(notice) = super::profile_loads::claude::notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
+    if let Some(notice) = super::codex_reviewer::notice(actor, thread) {
         out.push(actor, notice)?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).

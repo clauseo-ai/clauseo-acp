@@ -21,13 +21,17 @@ use crate::log_file::Cause;
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 /// The mode every Codex session runs in, with no Clauseo sandbox (tier C): codex-acp's own
 /// default, "Auto review" (`dist/index.js:34293-34308, 34319`), Codex's automatic mode. Its
-/// sandbox is `workspace-write` with no network, as in mode `workspace-write`: Codex creates,
+/// sandbox is `workspace-write` with no network, as in [`FALLBACK_MODE`]: Codex creates,
 /// changes and deletes files inside the matter folder without asking (G8a saw it,
 /// clauseo-acp-private #255). A step that needs more (a write outside the folder, the network,
 /// an escalation) goes to Codex's reviewer model, which answers it instead of the lawyer
 /// (approvals reviewer `auto_review`; codex 0.162.1 `core/src/tools/approvals.rs:505-524`).
 /// Undo per turn is the lawyer's way back.
 pub(crate) const MODE: &str = "agent";
+/// The mode a Codex session runs in once the account's requirements refuse [`MODE`]'s reviewer
+/// (`actor/turn/codex_reviewer.rs`): the same sandbox, and Codex asks the lawyer before
+/// writing outside the matter folder or escalating (`dist/index.js:34277-34292`).
+pub(crate) const FALLBACK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
 /// The variable codex-acp reads its config from.

@@ -47,7 +47,12 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   network, so file work inside the matter folder is as above; a step that needs more goes to
   Codex's reviewer model (approvals reviewer `auto_review`; codex 0.162.1
   `core/src/tools/approvals.rs:505-524`), which answers it instead of the lawyer. The
-  bullet above stays true of `workspace-write`.
+  bullet above stays true of `workspace-write`. An account whose requirements forbid the
+  reviewer refuses each prompt before its turn starts (codex-acp takes `set_mode agent`
+  unchecked); the host then sets the session to `workspace-write` and sends the same prompt
+  once more, remembers the agent for the host's run so its later sessions start there, and
+  tells each such conversation once, as Claude's `acceptEdits` fallback does
+  (`actor/turn/codex_reviewer.rs`).
 - **Claude runs in `auto` (Rohan, 2026-11-11).** Outside forced ask Claude now starts in Claude
   Code's `auto` mode, so a first read of a matter's papers never asks; `acceptEdits`, described
   below, is its fallback when auto is not available, with one notice (decision record 0030,
