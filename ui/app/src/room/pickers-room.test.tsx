@@ -57,6 +57,20 @@ const EFFORT = select("effort", "Effort", "thought_level", "high", [
   ["high", "High"],
 ]);
 const MODE = select("mode", "Mode", "mode", "default", [["default", "Default"]]);
+/** A model menu whose Haiku sets takes_effort false; the others leave the flag out. */
+const NO_EFFORT_MODEL: ConfigOption = {
+  ...MODEL,
+  kind: {
+    select: {
+      current_value: "sonnet",
+      options: [
+        { value: "opus", name: "Opus" },
+        { value: "sonnet", name: "Sonnet" },
+        { value: "haiku", name: "Haiku", takes_effort: false },
+      ],
+    },
+  },
+} as ConfigOption;
 
 const claude = (config_options?: ConfigOption[]): AgentSummary => ({
   id: "claude-acp",
@@ -137,6 +151,56 @@ test("with no pick in the draft create_thread sends no config: the host applies 
   await h.key({ key: "Enter", keyCode: 13 });
   await h.settle();
   expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
+});
+
+test("a draft's model that takes no effort hides the effort row, and create_thread sends no effort for it", async () => {
+  h = await mountRoom({
+    matters: [REMEMBERED],
+    threads: [],
+    next: withAgents([claude([NO_EFFORT_MODEL, EFFORT])]),
+    dispatch: (command) =>
+      command.create_thread !== undefined
+        ? { thread_created: { thread: MADE } }
+        : defaultOutcome(command),
+  });
+  // the remembered Sonnet takes an effort: its row shows, with the remembered Low
+  expect(said("model")).toBe("Sonnet");
+  expect(said("effort")).toBe("Low");
+  await open("model");
+  await h.click(item("Haiku"));
+  await h.settle();
+  expect(said("model")).toBe("Haiku");
+  expect(trigger("effort")).toBeNull();
+  // back to a model that takes one: the row is there again
+  await open("model");
+  await h.click(item("Opus"));
+  await h.settle();
+  expect(said("effort")).toBe("Low");
+  await open("model");
+  await h.click(item("Haiku"));
+  await h.settle();
+  await h.type("What does clause nine say about notice?");
+  await h.key({ key: "Enter", keyCode: 13 });
+  await h.settle();
+  // the remembered Low is not sent: Haiku takes no effort
+  expect(h.sent("create_thread")).toEqual([
+    { matter: THE_MATTER.matter, agent: "claude-acp", config: { model: "haiku" } },
+  ]);
+});
+
+test("in a conversation, a model that takes no effort hides the effort row at once", async () => {
+  h = await mountRoom({ next: withAgents([claude([NO_EFFORT_MODEL, EFFORT])]) });
+  h.deliver([reset([], headerWith([NO_EFFORT_MODEL, EFFORT]))]);
+  await h.settle();
+  expect(said("effort")).toBe("High");
+  await open("model");
+  await h.click(item("Haiku"));
+  await h.settle();
+  expect(said("model")).toBe("Haiku");
+  expect(trigger("effort")).toBeNull();
+  expect(h.sent("set_config_option")).toEqual([
+    { thread: THREAD, option_id: "model", value: { select: "haiku" } },
+  ]);
 });
 
 test("a remembered value the agent no longer offers falls back to the agent's own, with nothing said", async () => {

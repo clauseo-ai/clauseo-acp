@@ -19,6 +19,7 @@ import {
   AGENT_DEFAULT_VALUE,
   DEFAULT_VALUE,
   draftPickables,
+  draftShown,
   draftValue,
   pickables,
   resolvedDefault,
@@ -90,7 +91,7 @@ export function useDraftMenus(
     const remembered = kind === undefined ? undefined : prefs?.[kind];
     return menusOf(
       lang,
-      draftPickables(pickables(options), remembered),
+      draftPickables(draftShown(options, picked, remembered), remembered),
       (p) => draftValue(p, picked?.[p.id], remembered?.[p.id]),
       (p, value) => conversations.pick(p.id, value),
       // a new conversation's, for its plan: another plan's values come in silently
@@ -148,12 +149,8 @@ export function useThreadMenus(
   return useMemo(() => {
     if (thread === null) return undefined;
     const held = pending !== null && pending.over === options ? pending : null;
-    return menusOf(
-      lang,
-      pickables(options),
-      (p) => (held !== null && held.id === p.id ? held.value : p.current),
-      choose,
-      `thread:${thread}`,
-    );
+    const valueOf = (p: Pickable) => (held !== null && held.id === p.id ? held.value : p.current);
+    // the effort follows the model the lawyer just picked, shown at once
+    return menusOf(lang, pickables(options, valueOf), valueOf, choose, `thread:${thread}`);
   }, [thread, options, pending, lang, choose]);
 }

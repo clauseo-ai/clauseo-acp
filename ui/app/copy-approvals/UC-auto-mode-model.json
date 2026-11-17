@@ -1,0 +1,11 @@
+{
+  "UC-969": {
+    "en": "Claude's automatic mode isn't available with {model}, so Claude asks before running commands. To use it, start a new conversation with another model.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-18",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "The host's auto_mode_unavailable_for_model notice: the model's display name as {model}, isolated. The plain auto_mode_unavailable (TN-10) keeps its account line."
+  }
+}

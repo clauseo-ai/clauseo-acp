@@ -50,6 +50,34 @@ test("ChatGPT's auto mode unavailable gives ChatGPT's line; Claude's and an unkn
   );
 });
 
+test("the account kind's line is unchanged by the model kind, and names no model", () => {
+  expect(noticeLine("auto_mode_unavailable", en)).not.toContain("with");
+  expect(noticeLine("auto_mode_unavailable", en)).toContain("for this account");
+});
+
+test("Claude's automatic mode unavailable with a model names the model, isolated, in English", () => {
+  expect(noticeLine({ auto_mode_unavailable_for_model: { model: "Haiku 4.5" } }, en)).toBe(
+    `Claude's automatic mode isn't available with ${iso("Haiku 4.5")}, so Claude asks before running commands. To use it, start a new conversation with another model.`,
+  );
+});
+
+test("the model kind's Hindi is still the English, its Hindi not yet read", () => {
+  expect(noticeLine({ auto_mode_unavailable_for_model: { model: "Haiku 4.5" } }, words("hi"))).toBe(
+    `Claude's automatic mode isn't available with ${iso("Haiku 4.5")}, so Claude asks before running commands. To use it, start a new conversation with another model.`,
+  );
+});
+
+test("the model kind with no model name, or a malformed one, gives null, so the row shows its text", () => {
+  for (const bad of [
+    { auto_mode_unavailable_for_model: {} },
+    { auto_mode_unavailable_for_model: { model: " " } },
+    { auto_mode_unavailable_for_model: { model: 4 } },
+    { auto_mode_unavailable_for_model: null },
+  ]) {
+    expect(noticeLine(bad as unknown as NoticeKind, en)).toBeNull();
+  }
+});
+
 test("the data-fence refusal's line names the agent as the stop line does", () => {
   const claude = { kind: "claude", name: "claude-acp" } as const;
   expect(noticeLine("outside_matter_blocked", en, claude)).toBe(

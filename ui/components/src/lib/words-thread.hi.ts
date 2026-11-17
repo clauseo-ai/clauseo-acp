@@ -169,6 +169,10 @@ export const HI = {
   // the same for ChatGPT, whose session runs in workspace-write (UC-982; provisional; hi: later)
   "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.":
     null,
+  // Claude's automatic mode isn't available with the session's model, so Claude asks (UC-969,
+  // Hindi later; {model} is the model's name, isolated)
+  "Claude's automatic mode isn't available with {model}, so Claude asks before running commands. To use it, start a new conversation with another model.":
+    null,
   // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the
   // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
   // the AI where none is known (provisional, TN-12)

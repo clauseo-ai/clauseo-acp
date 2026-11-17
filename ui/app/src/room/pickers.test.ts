@@ -7,10 +7,12 @@ import {
   AGENT_DEFAULT_VALUE,
   draftConfig,
   draftPickables,
+  draftShown,
   draftValue,
   pickables,
   resolvedDefault,
   setOption,
+  takesEffort,
 } from "./pickers.ts";
 
 const select = (id: string, category: string, current: string, values: string[]): ConfigOption =>
@@ -213,4 +215,74 @@ test("a seeded option the matter remembers a pick for shows no picker; the rest 
   expect(ids(SEED_CLAUDE, {})).toEqual(["model", "effort"]);
   // the agent's own options and a remembered pick: unchanged
   expect(ids([MODEL, EFFORT], { model: "haiku", effort: "low" })).toEqual(["model", "effort"]);
+});
+
+/** A model menu: each choice says if it takes an effort (takes_effort; missing means it does). */
+const withEffortFlags = (
+  current: string,
+  flags: Record<string, boolean | undefined>,
+): ConfigOption =>
+  ({
+    id: "model",
+    name: "model",
+    category: "model",
+    kind: {
+      select: {
+        current_value: current,
+        options: Object.entries(flags).map(([value, takes]) => ({
+          value,
+          name: value,
+          ...(takes === undefined ? {} : { takes_effort: takes }),
+        })),
+      },
+    },
+  }) as ConfigOption;
+const ids = (options: ConfigOption[], shown?: ReturnType<typeof draftShown>) =>
+  (shown ?? pickables(options)).map((p) => p.id);
+
+test("a model that takes no effort gives no effort picker; true or missing keeps it", () => {
+  expect(ids([withEffortFlags("haiku", { haiku: false }), EFFORT])).toEqual(["model"]);
+  expect(ids([withEffortFlags("opus", { opus: true }), EFFORT])).toEqual(["model", "effort"]);
+  expect(ids([withEffortFlags("opus", { opus: undefined }), EFFORT])).toEqual(["model", "effort"]);
+  // a flag on another model's choice is not this one's
+  expect(ids([withEffortFlags("opus", { opus: true, haiku: false }), EFFORT])).toEqual([
+    "model",
+    "effort",
+  ]);
+  expect(takesEffort(undefined)).toBe(true);
+  expect(takesEffort({ value: "haiku", name: "Haiku", takes_effort: false })).toBe(false);
+});
+
+test("the model the menu shows decides: a draft's pick, else the remembered, else the agent's", () => {
+  const options = [withEffortFlags("opus", { opus: true, haiku: false }), EFFORT];
+  // the draft's picked model takes none: no effort, though the agent's current one takes one
+  expect(ids(options, draftShown(options, { model: "haiku" }, undefined))).toEqual(["model"]);
+  // a pick of an effort-taking model shows it again, whatever the remembered model
+  expect(ids(options, draftShown(options, { model: "opus" }, { model: "haiku" }))).toEqual([
+    "model",
+    "effort",
+  ]);
+  // no pick: the remembered model decides
+  expect(ids(options, draftShown(options, undefined, { model: "haiku" }))).toEqual(["model"]);
+  expect(ids(options, draftShown(options, undefined, undefined))).toEqual(["model", "effort"]);
+  // a pick the options no longer offer is no pick: the remembered one, then the agent's
+  expect(ids(options, draftShown(options, { model: "gone" }, { model: "haiku" }))).toEqual([
+    "model",
+  ]);
+});
+
+test("the draft sends no effort for a model that takes none, even one picked or remembered", () => {
+  const options = [withEffortFlags("opus", { opus: true, haiku: false }), EFFORT];
+  expect(draftConfig(options, { model: "haiku", effort: "low" }, undefined)).toEqual({
+    model: "haiku",
+  });
+  // the remembered effort stays out too
+  expect(draftConfig(options, { model: "haiku" }, { effort: "low" })).toEqual({ model: "haiku" });
+  // an effort pick alone, over a model that takes none: nothing of the draft's to send
+  expect(draftConfig(options, { effort: "low" }, { model: "haiku" })).toBeUndefined();
+  // an effort-taking model sends its effort as before
+  expect(draftConfig(options, { model: "opus", effort: "low" }, undefined)).toEqual({
+    model: "opus",
+    effort: "low",
+  });
 });
