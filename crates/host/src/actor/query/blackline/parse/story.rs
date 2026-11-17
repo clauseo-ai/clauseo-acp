@@ -35,7 +35,7 @@ use clauseo_protocol::{
 };
 
 use super::super::tables::squeezed;
-use super::text::read_lines;
+use super::text::{STRUCTURE, read_lines};
 use super::{
     Read, Unreadable, View, ViewFailure, code_word, logical_lines, notice_of, order, stet_1,
 };
@@ -216,7 +216,9 @@ pub(crate) fn part_texts(
     (squeezed(&older), squeezed(&newer))
 }
 
-/// The part a line names, or `None` when the line names no part.
+/// The part a line names, or `None` when the line names no part. A whole line in braces that is
+/// not one of the view's own (a `{comment 1}`, or a unit a newer stetdoc adds) opens a part this
+/// reader does not know, so its lines are never taken for the part before it.
 fn opener(line: &str) -> Option<Opened> {
     let inner = line.strip_prefix('{')?.strip_suffix('}')?;
     let mut words = inner.split(' ');
@@ -231,7 +233,8 @@ fn opener(line: &str) -> Option<Opened> {
                 BlacklinePartKind::Footer { uses }
             }
         }),
-        _ => return None,
+        _ if STRUCTURE.iter().any(|known| line.starts_with(known)) => return None,
+        _ => return Some(Opened::Unreadable),
     };
     Some(part.map_or(Opened::Unreadable, Opened::Part))
 }

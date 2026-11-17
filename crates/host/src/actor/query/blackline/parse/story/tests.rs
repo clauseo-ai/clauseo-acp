@@ -143,6 +143,27 @@ fn a_headers_texts_leave_out_its_list_number_and_nothing_else() {
     assert_eq!(notes.header_texts, Vec::<String>::new());
 }
 
+/// A unit the reader does not know (`{comment 1}`) after a footnote opens a part of its own:
+/// its lines are not shown under the footnote, and part of the blackline is said not shown.
+#[test]
+fn an_unknown_unit_after_a_footnote_is_a_part_not_shown() {
+    let json = fixture!("story-notes-footnote.json").replace(
+        "{position:",
+        "{comment 1}\\np4 Comment {++added++}{#4 C}.\\n{position:",
+    );
+    let notes = read(&json, Story::Notes);
+    assert_eq!(
+        notes.parts,
+        [part(
+            BlacklinePartKind::Footnote { number: 1 },
+            "Note ",
+            "one year",
+            "two years"
+        )]
+    );
+    assert_eq!(notes.notices, [PartNotShown]);
+}
+
 #[test]
 fn a_part_with_no_change_is_left_out() {
     let headers = read(fixture!("story-headers-unmatched.json"), Story::Headers);
