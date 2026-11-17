@@ -91,7 +91,12 @@ pub const SEED_SITES: &[&str] = &[
 /// [`SEED_SITES`]. Each host resolved with `getent hosts`, and through 1.1.1.1 and 8.8.8.8, on
 /// 2026-11-16. Left out because they did not: `www.indiankanoon.org`,
 /// `www.gujarathighcourt.nic.in`, `www.hcraj.nic.in`, and `main.sci.gov.in`, which `sci.gov.in`'s
-/// own name servers (`ns1.nic.in` and the rest) answer NXDOMAIN.
+/// own name servers (`ns1.nic.in` and the rest) answer NXDOMAIN. Claude's shell matches names
+/// exactly too (decision record 0065), so the `www.` form goes in wherever a listed site answers
+/// on it: on 2026-11-17 `www.cgat.gov.in` and `www.ncdrc.nic.in` resolved the same three ways
+/// and answered HTTPS. The other hosts' `www.` forms did not resolve, failed TLS (the
+/// `ecourts.gov.in` and `api.sci.gov.in` subdomains), or timed out
+/// (`www.lddashboard.legislative.gov.in`), and stay out.
 pub const FETCH_ONLY_SITES: &[&str] = &[
     // The Supreme Court: its site as it serves it, and the host of its judgment PDFs.
     "www.sci.gov.in",
@@ -179,7 +184,9 @@ pub const FETCH_ONLY_SITES: &[&str] = &[
     "tdsat.gov.in",
     "www.tdsat.gov.in",
     "cgat.gov.in",
+    "www.cgat.gov.in",
     "ncdrc.nic.in",
+    "www.ncdrc.nic.in",
     "e-jagriti.gov.in",
 ];
 

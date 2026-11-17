@@ -31,6 +31,8 @@ What Claude Code 2.1.293 does, read from its binary and `sdk.d.ts`:
   a court site's CDN host only where the court site itself is seeded), sorted, each once, no
   wildcard (`agent/loads/sandbox_network.rs`). The plain hosts reach what the seeded `WebFetch`
   rules reach, no wider and no narrower.
+- The list matches names exactly, so the `www.` form of a shipped site is listed wherever the
+  site answers on it (`browser/seed_sites.rs`).
 - `deniedDomains` (loopback and the any-address) stays. `allowLocalBinding` and
   `allowUnixSockets` stay unset.
 - `strictAllowlist: true` in every mode but forced ask, decided at launch. An unlisted host
