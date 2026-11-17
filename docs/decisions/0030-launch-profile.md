@@ -930,6 +930,17 @@ ask, could close even those: a later option, not this change.
   of `<data>`, Read only and nothing wider. A guard test checks that every data folder entry `Locations` names, the
   store's database and the search index is in `DENIED` or on an allow list with its reason
   (`agents`: it holds the plans folder; `profile`: the built-in plugin).
+  What Claude Code loads into every later session stays out of reach of the agent's writes.
+  Scope: Claude's file tools are denied `Edit` of the built-in plugin
+  (`<data>/profile/claude-plugin/**`, its skills still readable) and of the run's own packs plugin
+  (`<run>/skill-packs/**`, `LaunchDeny::edit_denied`), and of `settings.local.json` with the rest
+  of its home; on Windows the shell rules name both plugin folders. The pre-write guard refuses a
+  file tool's or a non-read-only command's write to Claude's `settings.json`,
+  `settings.local.json`, `CLAUDE.md`, `skills` and `plugins` and to both plugin folders
+  (`--protected`, `pre_write_guard/protected.rs`). Each launch rewrites Claude's `settings.json`
+  to what Clauseo ships (`agent/home.rs`) and removes from the built-in plugin whatever the
+  profile did not write (`clauseo_profile::match_plugin`), refusing the launch when it cannot.
+  The auto-deny refuses a Codex request naming the built-in plugin (`FenceCheck::shared_own`).
   Two folders every session may read and run but never edit (`READ_ONLY` in the module):
   `<data>/tools` (the agents' commands, agent-browser's copy) and each Python build
   (`agents/runtime/clauseo-python-*`, a real folder only; Node and `.tmp-*` stay denied). Each
