@@ -87,6 +87,17 @@
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
     "note": "after the blackline sheet's body, the heading over a footer on even pages (slot even_pages)"
   },
+  "UC-968": {
+    "en": "Another part of the document",
+    "hi": "दस्तावेज़ का कोई अन्य हिस्सा",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "blackline-notes-tables (en provisional, for the orchestrator)",
+    "note": "after the blackline sheet's body, the heading over a part of a kind this version doesn't know (BlacklinePartKind's string form, or an object with no key this version reads): a newer host's part, which under no heading would read as the body's text"
+  },
   "UC-450": {
     "en": "{part}, section {n}",
     "hi": "{part}, अनुभाग {n}",

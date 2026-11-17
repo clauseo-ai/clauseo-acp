@@ -1,6 +1,6 @@
 // UC's copy review entries for a Word document's marked-up changes in Versions (UC-113 to UC-116, and its notices and
 // the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391; its parts'
-// headings and the tables whose formatting changed, UC-949 to UC-956 and UC-450 to UC-464), apart from
+// headings and the tables whose formatting changed, UC-949 to UC-956, UC-968 and UC-450 to UC-464), apart from
 // registry-uc.tsx to keep that file under the size limit: the notice compared with now, over registry-u8.tsx's host,
 // whose word_blackline runs, fails or cuts the document short as each entry asks. UC_ALL is registry-uc.tsx's UC
 // entries, then registry-uc-blocks.tsx's UC_BLOCKS, then these, so registry.tsx lists UC in one place.
@@ -96,6 +96,12 @@ const PARTS: BlacklinePart[] = [
   ),
 ];
 
+/** A part of a kind this version doesn't know, as a newer host might send it, after a footnote (UC-968). */
+const UNKNOWN_PART: BlacklinePart[] = [
+  PARTS[0]!,
+  { kind: "text_box", paragraphs: [changedPara("Signed at ", "Pune", "Mumbai", ".")] },
+];
+
 /** Two sections' headers, each on its own section's pages: their headings say which section (UC-450). */
 const SECTIONS: BlacklinePart[] = [1, 2].map((n) => ({
   kind: { header: { uses: [{ slot: "default", sections: [n] }] } },
@@ -139,6 +145,7 @@ const HEADINGS: [string, VersionKey, BlacklinePart[]][] = [
   ["UC-954", "Footer", PARTS],
   ["UC-955", "Footer (first page)", PARTS],
   ["UC-956", "Footer (even pages)", PARTS],
+  ["UC-968", "Another part of the document", UNKNOWN_PART],
   ["UC-450", "{part}, section {n}", SECTIONS],
 ];
 
@@ -280,6 +287,6 @@ export const UC_BLACKLINE: Entry[] = [
 /**
  * UC's entries: registry-uc.tsx's (UC-01 to UC-78), registry-uc-blocks.tsx's (UC-80 to UC-106), then
  * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381, UC-388 to UC-391,
- * UC-450 to UC-464, UC-949 to UC-956).
+ * UC-450 to UC-464, UC-949 to UC-956, UC-968).
  */
 export const UC_ALL: Entry[] = [...UC, ...UC_BLOCKS, ...UC_BLACKLINE];

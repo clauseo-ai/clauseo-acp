@@ -135,6 +135,8 @@ const OWN = {
   Footer: "फ़ुटर",
   "Footer (first page)": "फ़ुटर (पहला पृष्ठ)",
   "Footer (even pages)": "फ़ुटर (सम पृष्ठ)",
+  // a part of a kind this version doesn't know, a newer host's (UC-968); provisional
+  "Another part of the document": "दस्तावेज़ का कोई अन्य हिस्सा",
   "{part}, section {n}": "{part}, अनुभाग {n}",
   // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
   "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",

@@ -74,7 +74,8 @@ const SIDE_HEADINGS: Readonly<Record<Side["side"], Readonly<Record<HeaderSlot, V
 /** The header or footer a part is, or a table is in; null for a note, the body, or a place this version doesn't
  * know. */
 function sideOf(kind: BlacklinePart["kind"] | ChangedTable["place"]): Side | null {
-  if (typeof kind === "string") return null;
+  // a newer host's kind may come as a string, or as an object this version has no key for; null is guarded too
+  if (typeof kind !== "object" || kind === null) return null;
   if ("header" in kind && kind.header !== undefined)
     return { side: "header", uses: kind.header.uses };
   if ("footer" in kind && kind.footer !== undefined)
@@ -108,21 +109,23 @@ function sidesOf(
 }
 
 /** The heading over each part shown after the body, in the host's order: "Footnote 3", "Endnote 1", "Header (first
- * page)"; null for a part of a kind this version doesn't know, which the sheet shows under no heading. */
+ * page)"; a part of a kind this version doesn't know (a newer host's) reads "Another part of the document", so its
+ * paragraphs aren't taken for the body's. */
 export function partHeadings(
   lang: Lang,
   parts: readonly BlacklinePart[],
   tables: readonly ChangedTable[],
-): (string | null)[] {
+): string[] {
   const sides = sidesOf(lang, parts, tables);
+  const other = vt(lang, "Another part of the document");
   return parts.map(({ kind }) => {
-    if (typeof kind === "string") return null;
+    if (typeof kind !== "object" || kind === null) return other;
     if ("footnote" in kind && kind.footnote !== undefined)
       return vt(lang, "Footnote {n}", { n: kind.footnote.number });
     if ("endnote" in kind && kind.endnote !== undefined)
       return vt(lang, "Endnote {n}", { n: kind.endnote.number });
     const side = sideOf(kind);
-    return side === null ? null : sides(side);
+    return side === null ? other : sides(side);
   });
 }
 
