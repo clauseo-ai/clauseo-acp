@@ -14,9 +14,11 @@
 //! - what a comment and a text box are: a comment, the text after its `{c0 …}` marker on a line
 //!   after `{appendix}` (stetdoc lists the comments the page cites there); a text box, the text
 //!   a `{textbox …}` marker shows;
-//! - which links changed: a link text whose addresses differ between the two versions (counted
-//!   as a multiset, so a link moved with its text is not a change), or a link that is on one
-//!   side only around text the other side has (a link added to kept text, or taken off it);
+//! - which links changed: a link whose web address one version has more times than the other
+//!   (counted with multiplicity, so a link moved with its text is not a change, and a link whose
+//!   text and address both change is), a text whose links' addresses come in another order (two
+//!   links of one text swapping addresses), or a link that is on one side only around text the
+//!   other side has (a link added to kept text, or taken off it);
 //! - what is compared: links, comments and text boxes of the body only; those in headers and
 //!   notes are left to the next stetdoc, whose compare marks them.
 //!
@@ -198,41 +200,34 @@ fn address(body: &str) -> Result<String, &'static str> {
 
 /// What differs between the older version's view (`old`) and the newer one's (`new`).
 pub(crate) fn cross(old: &Side, new: &Side) -> Crossed {
-    let by_text = |side: &Side| {
-        let mut texts: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for (text, address) in &side.links {
-            texts.entry(text.clone()).or_default().push(address.clone());
-        }
-        for addresses in texts.values_mut() {
-            addresses.sort();
-        }
-        texts
-    };
-    let (before, after) = (by_text(old), by_text(new));
     let mut crossed = Crossed {
         comments: old.comments != new.comments,
         boxes: old.boxes != new.boxes,
         ..Crossed::default()
     };
-    let none = Vec::new();
-    let mut done: BTreeSet<&str> = BTreeSet::new();
+    let (was, is) = (counts(old), counts(new));
+    let mut changed = surplus(new, &is, &was);
+    changed.extend(surplus(old, &was, &is));
+    // The same addresses in another order among links of one text (two `here`s swapping
+    // addresses); links that move with their text keep each text's order.
+    let (before, after) = (by_text(old), by_text(new));
     for (text, _) in new.links.iter().chain(&old.links) {
-        if !done.insert(text.as_str()) {
-            continue;
-        }
-        let (was, is) = (
-            before.get(text).unwrap_or(&none),
-            after.get(text).unwrap_or(&none),
-        );
-        let changed = if was.is_empty() || is.is_empty() {
+        let (was, is) = (before.get(text.as_str()), after.get(text.as_str()));
+        let moved = if let (Some(was), Some(is)) = (was, is) {
+            was != is
+        } else {
             // A link on one side only is a change of its own when the other side has its text
             // (Word marks a link added to kept text no more than one whose address changed).
-            let other = if was.is_empty() { old } else { new };
+            let other = if was.is_none() { old } else { new };
             !text.is_empty() && other.text.contains(text.as_str())
-        } else {
-            was != is
         };
-        if !changed {
+        if moved {
+            changed.push(text.as_str());
+        }
+    }
+    let mut done: BTreeSet<&str> = BTreeSet::new();
+    for text in changed {
+        if !done.insert(text) {
             continue;
         }
         if text.is_empty() {
@@ -242,6 +237,54 @@ pub(crate) fn cross(old: &Side, new: &Side) -> Crossed {
         }
     }
     crossed
+}
+
+/// Each web address's count in `side`; a place in the document (no address) is left out.
+fn counts(side: &Side) -> BTreeMap<&str, usize> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for (_, address) in &side.links {
+        if !address.is_empty() {
+            *counts.entry(address.as_str()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// Each link text of `side` with its links' addresses, in order.
+fn by_text(side: &Side) -> BTreeMap<&str, Vec<&str>> {
+    let mut texts: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (text, address) in &side.links {
+        texts
+            .entry(text.as_str())
+            .or_default()
+            .push(address.as_str());
+    }
+    texts
+}
+
+/// The texts of `side`'s links whose address the other version has fewer times (`mine` and
+/// `theirs`, each address's count on the two sides): new, gone or changed, whatever its text
+/// did (`account A` at one address becoming `account B` at another).
+fn surplus<'a>(
+    side: &'a Side,
+    mine: &BTreeMap<&str, usize>,
+    theirs: &BTreeMap<&str, usize>,
+) -> Vec<&'a str> {
+    let mut left: BTreeMap<&str, usize> = BTreeMap::new();
+    for (address, count) in mine {
+        let extra = count.saturating_sub(theirs.get(address).copied().unwrap_or(0));
+        if extra > 0 {
+            left.insert(address, extra);
+        }
+    }
+    let mut texts = Vec::new();
+    for (text, address) in &side.links {
+        if let Some(extra) = left.get_mut(address.as_str()).filter(|extra| **extra > 0) {
+            *extra -= 1;
+            texts.push(text.as_str());
+        }
+    }
+    texts
 }
 
 /// `text` cut to [`LINK_TEXT_MAX`] characters, with `…` where it was cut.
