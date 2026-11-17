@@ -52,6 +52,22 @@ test("Codex's justification leads; with none, the program and the paper it ran o
   expect(doneOf("en", task({ command: "swift run" }))).toBe("Ran swift.");
 });
 
+test("an escape inside a script's string is no part of a paper's name", () => {
+  const notes = task({
+    command: `python3 -c "open('notes.md','w').write('## Findings\\nNotice-E1.docx read in full')"`,
+  });
+  expect(doneOf("en", notes)).not.toContain("nNotice-E1.docx");
+  expect(doneOf("en", notes)).toBe("Ran python3.");
+  expect(taskOf(task({ command: "python3 -c \"print('a\\tLease.pdf')\"" })).paper).toBeNull();
+  // a real paper on the command line is still named, a Windows path's backslashes still its folders
+  expect(doneOf("en", task({ command: 'python3 script.py "Notice-E1.docx"' }))).toBe(
+    "Ran python3 on Notice-E1.docx.",
+  );
+  expect(taskOf(task({ command: 'python3 x.py "C:\\matter\\notes\\new.docx"' })).paper).toBe(
+    "new.docx",
+  );
+});
+
 test("a title is the command only when it reads as one; with nothing, a task as before", () => {
   expect(taskOf(task(null, { title: "`python3 run.py`" })).program).toBe("python3");
   expect(taskOf(task(null, { title: "Run ls papers" }))).toMatchObject({
