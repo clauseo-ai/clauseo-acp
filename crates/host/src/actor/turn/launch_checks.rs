@@ -380,6 +380,15 @@ pub(super) fn prepare(
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
+                // The last change to Claude's home before the agent starts (what follows writes
+                // the run folder and opens the session's claims): what Claude Code would load
+                // from it goes, and the folders it watches do not exist when it starts.
+                if let Some(home) = &claude_home
+                    && let Err(error) = crate::agent::home::clear_home(home)
+                {
+                    run.remove();
+                    return Err(error);
+                }
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
                 let packs_skipped;
