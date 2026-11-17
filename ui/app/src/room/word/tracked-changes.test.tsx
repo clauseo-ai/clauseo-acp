@@ -206,6 +206,28 @@ test("the list shows each change's author as recorded, its kind's label, its wor
   expect(panel()?.textContent).toContain("Accepting here accepts the change in the Word file too.");
 });
 
+test("a change's time reads as the author's clock time Word wrote, on a Mac in Asia/Kolkata", async () => {
+  // w:date is clock time labelled Z (Word and stetdoc write it so): a change made now in Kolkata is stamped with
+  // Kolkata's clock time and a Z, and the panel says that time, as Word does, not 5½ hours later
+  const zone = process.env["TZ"];
+  process.env["TZ"] = "Asia/Kolkata";
+  try {
+    const now = Date.now();
+    const written = now + 330 * 60_000;
+    const change: Revision = {
+      ...rev([1], "insert", "A. Mehta", "within fourteen days"),
+      at: written,
+    };
+    h = await mount({ list: () => listOf([change]) });
+    await openChanges();
+    const time = clock("en", clockOf(now, now, "Asia/Kolkata", "en").time);
+    expect(rows()[0]?.querySelector(".rd-change-when")?.textContent).toBe(`Today, ${time}`);
+  } finally {
+    if (zone === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = zone;
+  }
+});
+
 test("a change in a header, a footer or a note says where it is, and a formatting change says so; Accept sends its ids", async () => {
   // what the host lists for a file whose changes are all outside the body or formatting (stetdoc 0.9.3's ids)
   const outside: Revision[] = [

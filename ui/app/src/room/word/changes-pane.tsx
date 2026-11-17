@@ -16,17 +16,18 @@ import { baseName } from "@clauseo/components/lib/words-core.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId, Revision, Timestamp } from "../../transport/protocol.ts";
-import { clockOf, localZone } from "../when.ts";
+import { clockOf, localZone, stampOf } from "../when.ts";
 import { Revisions } from "./revisions.ts";
 
 const KINDS: readonly TrackedKind[] = ["insert", "delete", "move", "format"];
 const PLACES: readonly TrackedPlace[] = ["header_footer", "note", "comment"];
 
 /** When a change was made, in the language: "Today, 3:42 pm", else "Monday 3:42 pm"; "" where the file records no
- * time. */
+ * time. `at` is the change's w:date, the author's clock time labelled Z as Word writes it (stetdoc's
+ * crates/stetdoc-core/src/api/stamp.rs), so stampOf says it unchanged, as Word does. */
 function whenOf(at: Timestamp | undefined, now: Timestamp, zone: string, lang: Lang): string {
   if (at === undefined) return "";
-  const { time, day } = clockOf(at, now, zone, lang);
+  const { time, day } = stampOf(at, now, zone, lang);
   const said = clock(lang, time);
   return day === "" ? rdt(lang, "Today, {time}", { time: said }) : `${day} ${said}`;
 }

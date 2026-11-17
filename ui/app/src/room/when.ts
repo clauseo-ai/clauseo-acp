@@ -1,6 +1,6 @@
 // The rail's sense of time, pure: a calendar day in the lawyer's zone, and a moment as the rail says it ("4:31 pm", with
 // its day when it isn't today). Today and every clock time are taken in the lawyer's zone, given with `now` as inputs,
-// so nothing here reads the clock.
+// so nothing here reads the clock. A tracked change's time is the author's clock time, kept as written (stampOf).
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { Timestamp } from "../transport/protocol.ts";
 
@@ -57,19 +57,44 @@ export function clockOf(
   zone: string,
   lang: Lang,
 ): { time: string; day: string } {
-  const parts = format("en-US", zone, {
+  return said(at, zone, now, zone, lang);
+}
+
+/** A tracked change's time as clockOf says it. A change's `w:date` is the author's clock time labelled Z, as Word
+ * writes it (and Clauseo's Word tool, stetdoc: crates/stetdoc-core/src/api/stamp.rs, "its `w:date` is the author's
+ * local time labelled `Z`"), so the host's `at` is that clock time read as UTC, not an instant: its time and date are
+ * read in UTC, unchanged, and its date is set against today in the lawyer's zone. 12:31 written in Kolkata reads
+ * 12:31 pm, as Word shows it. */
+export function stampOf(
+  at: Timestamp,
+  now: Timestamp,
+  zone: string,
+  lang: Lang,
+): { time: string; day: string } {
+  return said(at, "UTC", now, zone, lang);
+}
+
+/** `at` read in `atZone`, its day set against `now`'s day in `zone`. */
+function said(
+  at: Timestamp,
+  atZone: string,
+  now: Timestamp,
+  zone: string,
+  lang: Lang,
+): { time: string; day: string } {
+  const parts = format("en-US", atZone, {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   }).formatToParts(at);
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const time = `${part("hour")}:${part("minute")} ${part("dayPeriod").toLowerCase()}`;
-  const apart = dayOf(at, zone) - dayOf(now, zone);
+  const apart = dayOf(at, atZone) - dayOf(now, zone);
   if (apart === 0) return { time, day: "" };
   const locale = lang === "hi" ? "hi-IN" : "en-GB";
   const day =
     Math.abs(apart) <= 6
-      ? format(locale, zone, { weekday: "long" }).format(at)
-      : format(locale, zone, { day: "numeric", month: "long" }).format(at);
+      ? format(locale, atZone, { weekday: "long" }).format(at)
+      : format(locale, atZone, { day: "numeric", month: "long" }).format(at);
   return { time, day };
 }
