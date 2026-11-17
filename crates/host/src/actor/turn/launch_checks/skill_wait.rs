@@ -11,14 +11,13 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
 use crate::actor::Actor;
 use crate::config::profile_hook::LaunchSkills;
 use crate::config::{LAUNCH_WAIT_LIMIT, LaunchWait};
-use crate::log_file::{Cause, LIFECYCLE};
+use crate::log_file::LIFECYCLE;
 
 /// A launch's skills: the writes read at the launch, and the wait for the step in flight.
 #[derive(Default)]
@@ -107,21 +106,4 @@ impl SkillsPrep {
             }
         }
     }
-}
-
-/// Writes `writes` in order, on the launch-prep thread; a failure is a warning. The first
-/// write's token, when it succeeded: the one the launch's Codex keys may take the index from.
-pub(super) fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
-    let mut first = None;
-    for (at, write) in writes.iter().enumerate() {
-        match clauseo_profile::write_skills(write) {
-            Ok(written) if at == 0 => first = Some(written),
-            Ok(_) => {}
-            Err(error) => tracing::warn!(
-                error = %Cause(&error),
-                "the profile's skills were not written; the agent starts with what the folder holds"
-            ),
-        }
-    }
-    first
 }

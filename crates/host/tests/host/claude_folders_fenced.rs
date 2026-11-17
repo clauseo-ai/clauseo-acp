@@ -2,14 +2,19 @@
 //! tools: a real launch's flag settings (the run's settings file, `agent::launch_settings`)
 //! carry an `Edit` deny, which covers `Write`, `MultiEdit` and `NotebookEdit` too, for Claude's
 //! settings, instructions, skills and plugins in its home, the built-in plugin and the run's
-//! packs plugin.
+//! packs plugin. And the built-in plugin holds only what Clauseo ships when an agent starts.
 
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::profile_rig::{CLAUDE, Wired, agents, settings, turn};
+use clauseo_protocol::AgentKind;
+
+use crate::profile_rig::{
+    CLAUDE, CODEX, Hook, Wired, agent_lines, agents, codex_lines, settings, template, turn,
+};
 use crate::support::{Dir, Scenario};
+use crate::write;
 
 /// The `permissions.deny` rules of the first Claude launch's settings file in `dir`, and that
 /// launch's run folder name.
@@ -65,4 +70,62 @@ fn a_launch_denies_edits_to_what_claude_code_loads() {
             "no Edit deny for {place}: {deny:?}"
         );
     }
+}
+
+/// A new skill file planted in the built-in plugin after one launch is gone before the next
+/// session starts, and that session's Codex skills index never names it.
+#[test]
+fn a_skill_planted_in_the_built_in_plugin_is_gone_before_the_next_session() {
+    let dir = Dir::new("claude_folders_planted", &[]);
+    let claude = template(
+        &dir,
+        "planted",
+        &agent_lines("planted", "session/new", &json!({}), &[]),
+    );
+    let codex = template(
+        &dir,
+        "planted-codex",
+        &codex_lines("planted-codex", &json!({})),
+    );
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &claude, json!({})), (CODEX, &codex, json!({}))]),
+        json!({}),
+    );
+    let profile = Arc::new(crate::tools::profile(dir.data()));
+    let hook = Hook {
+        skills: profile.launch_writes(Some(AgentKind::Codex)),
+        profile: Some(Arc::clone(&profile)),
+        ..Hook::default()
+    };
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        config.with_profile_hook(Box::new(hook))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CLAUDE));
+    let skills = dir
+        .data()
+        .join("profile")
+        .join("claude-plugin")
+        .join("skills");
+    assert!(skills.is_dir(), "the first launch wrote the plugin");
+    let planted = skills.join("zz-planted-skill").join("SKILL.md");
+    write::write(
+        &planted,
+        b"---\nname: zz-planted-skill\ndescription: d\n---\nx\n",
+    );
+    turn(&host, host.create_thread(matter, CODEX));
+    host.shutdown();
+    assert!(!planted.exists(), "the planted skill file is gone");
+    assert!(!skills.join("zz-planted-skill").exists(), "and its folder");
+    let seen = launcher.seen();
+    assert_eq!(seen.len(), 2, "both sessions started");
+    let config = seen[1].codex_config().expect("a CODEX_CONFIG");
+    let instructions = config["developer_instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains(&profile.skills_index()),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("zz-planted-skill"), "{instructions}");
 }

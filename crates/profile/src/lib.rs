@@ -25,6 +25,7 @@ pub mod instructions;
 pub mod packs;
 pub mod paths;
 pub mod placeholders;
+mod plugin_match;
 pub mod servers;
 pub mod skills;
 pub mod subagents;
@@ -46,6 +47,7 @@ pub use error::ProfileError;
 pub use instructions::Instructions;
 pub use packs::{PackEntry, PackWrite, PacksWritten, write_packs};
 pub use paths::{BrowserSidecars, ProfilePaths};
+pub use plugin_match::match_plugin;
 pub use servers::ProfileServer;
 pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
 

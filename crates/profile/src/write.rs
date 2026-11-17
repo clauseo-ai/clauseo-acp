@@ -6,6 +6,7 @@
 //! `<data>/profile/claude-plugin`, Codex's `<agent home>/skills`), and in them only the folders
 //! of the skills a render is given, their manifest and the plugin's `plugin.json`; and for the
 //! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`;
+//! what Claude's plugin holds beyond what the profile ships, which goes (`crate::plugin_match`);
 //! and the agents' shell commands in `<data>/tools` ([`crate::tools`]).
 
 #![expect(
@@ -203,6 +204,27 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
         .open(path)
         .and_then(|mut file| file.write_all(bytes))
         .map_err(|err| ProfileError::io("write", path, err))
+}
+
+/// Removes the entry at `path` itself, never what it leads to: a file or a symlink, or on
+/// Windows a link to a folder or a junction, which only `fs::remove_dir` takes. A missing one
+/// is no error.
+pub(crate) fn remove_entry(path: &Path) -> Result<(), ProfileError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => std::fs::remove_dir(path).map_err(|_| ProfileError::io("remove", path, err)),
+    }
+}
+
+/// `fs::remove_dir` of a folder that must be empty; a missing one is no error.
+pub(crate) fn remove_dir(path: &Path) -> Result<(), ProfileError> {
+    match std::fs::remove_dir(path) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => {
+            Err(ProfileError::io("remove", path, err))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `fs::remove_dir_all`, which never follows a symlink inside; a missing folder is no error,

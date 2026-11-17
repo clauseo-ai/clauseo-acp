@@ -9,11 +9,12 @@
 //! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
 //! fails the waiting work.
 //!
-//! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
-//! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
-//! notes folder) and, for an agent with a kind, writes the profile's skills
+//! After both refusals, the same thread writes, for an agent with a kind, the profile's skills
 //! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`), after their wait when one is
-//! in flight ([`skill_wait`]). A skill write that fails is a warning, never a failed launch.
+//! in flight ([`skill_wait`]), then makes the session's folders ([`RunFolders`]: its stand-in
+//! `run/<session id>` folder with `work` and `browser` under it, and the matter's notes
+//! folder). A skill write that fails is a warning, never a failed launch; the built-in plugin
+//! holding files Clauseo did not ship that cannot be removed refuses it (`folders.rs`).
 //! The first write's token goes in [`Prepared`], so only that launch's Codex keys carry the
 //! skills index; a failed write leaves none. Then the launch's skill packs go into its own
 //! plugin under the run folder ([`packs`]). The notes folder stays; the run folder is the
@@ -374,6 +375,9 @@ pub(super) fn prepare(
                         );
                     }
                 }
+                // Before anything is made for the run: the built-in plugin holds only what
+                // Clauseo ships, or the launch is refused.
+                let skills_written = write_skills(&skills.writes)?;
                 run.make(&data, &sweep)?;
                 make_guard(&mut run, &data, claude)?;
                 let short = run.claude_tmp.take();
@@ -382,7 +386,6 @@ pub(super) fn prepare(
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
-                let skills_written = skill_wait::write_skills(&skills.writes);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
@@ -559,7 +562,9 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
+use folders::{
+    browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir, write_skills,
+};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod skill_wait;
