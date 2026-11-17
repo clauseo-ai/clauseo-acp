@@ -50,7 +50,7 @@ pub(crate) use answer::{Answer, Decided, Failure};
 #[cfg(any(target_os = "macos", windows, test))]
 pub(crate) use answer::{Configured, PacSetting};
 pub use answer::{FailKind, UpstreamAnswer, upstream_answer, upstream_for};
-pub(crate) use firm::firm_suffixes;
+pub(crate) use firm::{Counts, firm_suffixes};
 pub use launch::{UnusableProxy, launch_route};
 use os::{os_intent, os_route};
 #[cfg(test)]

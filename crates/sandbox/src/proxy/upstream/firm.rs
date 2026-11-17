@@ -1,14 +1,16 @@
 //! The firm's own DNS suffixes, which the egress proxy refuses on its name-only path (open mode's
 //! browser listener, behind the firm's proxy, on a network whose local DNS answers no public
-//! name: `proxy::name_only`). Read when that path comes on, and again each time the probe's
-//! answer changes, so a VPN joined since is seen. The sources: the domain entries of `NO_PROXY`;
+//! name: `proxy::name_only`). Read again on every probe that finds local DNS unable to answer,
+//! so a VPN joined since is seen. The sources: the domain entries of `NO_PROXY`;
 //! the OS's proxy exceptions (the Windows bypass list, `<local>` aside: single labels are refused
 //! anyway; macOS's `ExceptionsList`); and the DNS search and VPN domains: `/etc/resolv.conf` on
 //! Linux and macOS; on macOS `State:/Network/Global/DNS` `SearchDomains`, every service's
 //! `SupplementalMatchDomains` and the file names in `/etc/resolver`; on Windows each adapter's
 //! DNS suffix, the `Tcpip` `Domain` and `SearchList`, Group Policy's `SearchList` and primary
-//! suffix, and the Name Resolution Policy Table's namespaces. If any source cannot be read, the
-//! read gives none at all and the name-only path stays off; a log line names the source only.
+//! suffix, and the Name Resolution Policy Table's namespaces. A source that is not there (no
+//! `/etc/resolv.conf`, no `/etc/resolver`, no DNS state in the dynamic store) gives none; if any
+//! source is there but cannot be read, the read gives none at all and the name-only path stays
+//! off; a log line names the source only.
 //! An entry that is an IP address, a network or a known public suffix (`com`, `co.uk`) is
 //! dropped: it is no firm's own, and would refuse half the web.
 
@@ -35,25 +37,32 @@ struct Sources {
     unreadable: Vec<&'static str>,
 }
 
+/// The counts of [`learn`]'s line, in its field order: kept between reads so the line is
+/// written only when they change.
+pub(crate) type Counts = [usize; 12];
+
 /// The firm's own suffixes, normalised, from `no_proxy` (the process's `NO_PROXY`) and every
-/// source this OS has, with the one log line [`learn`] writes; `None` when any source cannot
-/// be read.
-pub(crate) fn firm_suffixes(no_proxy: Option<&str>) -> Option<Vec<String>> {
+/// source this OS has, with the log line [`learn`] writes when the counts differ from `last`;
+/// `None` when any source cannot be read.
+pub(crate) fn firm_suffixes(
+    no_proxy: Option<&str>,
+    last: &mut Option<Counts>,
+) -> Option<Vec<String>> {
     let no_proxy = NoProxy::parse(no_proxy.unwrap_or_default());
     let mut sources = Sources {
         no_proxy: no_proxy.domains().map(str::to_owned).collect(),
         ..Sources::default()
     };
     read_os(&mut sources);
-    learn(&sources)
+    learn(&sources, last)
 }
 
-/// The suffixes of every source, and one info line on [`LIFECYCLE`] with how many usable
-/// suffixes each source gave, by its fixed name, how many sources could not be read, and the
-/// total. Counts only, never a name: the names are the firm's internal domains, a settings
-/// value, which the log never holds (decision record 0047). `None` when a source could not be
-/// read.
-fn learn(sources: &Sources) -> Option<Vec<String>> {
+/// The suffixes of every source, and, when the counts differ from `last` (kept), one info
+/// line on [`LIFECYCLE`] with how many usable suffixes each source gave, by its fixed name, how
+/// many sources could not be read, and the total. Counts only, never a name: the names are the
+/// firm's internal domains, a settings value, which the log never holds (decision record 0047).
+/// `None` when a source could not be read.
+fn learn(sources: &Sources, last: &mut Option<Counts>) -> Option<Vec<String>> {
     let usable = |entries: &[String]| {
         entries
             .iter()
@@ -77,22 +86,52 @@ fn learn(sources: &Sources) -> Option<Vec<String>> {
         all.iter()
             .flat_map(|entries| entries.iter().map(String::as_str)),
     );
-    tracing::info!(
-        target: LIFECYCLE,
-        no_proxy = usable(&sources.no_proxy),
-        resolv_conf = usable(&sources.resolv_conf),
-        macos_exceptions = usable(&sources.macos_exceptions),
-        macos_search_domains = usable(&sources.macos_search_domains),
-        macos_supplemental = usable(&sources.macos_supplemental),
-        macos_resolver_files = usable(&sources.macos_resolver_files),
-        windows_bypass = usable(&sources.windows_bypass),
-        adapter_dns_suffix = usable(&sources.adapter_dns_suffix),
-        tcpip_registry = usable(&sources.tcpip_registry),
-        windows_nrpt = usable(&sources.windows_nrpt),
-        unreadable = sources.unreadable.len(),
-        suffixes = found.len(),
-        "egress: the firm's own names learned (counts per source; names are never logged)"
-    );
+    let counts: Counts = [
+        usable(&sources.no_proxy),
+        usable(&sources.resolv_conf),
+        usable(&sources.macos_exceptions),
+        usable(&sources.macos_search_domains),
+        usable(&sources.macos_supplemental),
+        usable(&sources.macos_resolver_files),
+        usable(&sources.windows_bypass),
+        usable(&sources.adapter_dns_suffix),
+        usable(&sources.tcpip_registry),
+        usable(&sources.windows_nrpt),
+        sources.unreadable.len(),
+        found.len(),
+    ];
+    if last.replace(counts) != Some(counts) {
+        let [
+            no_proxy,
+            resolv_conf,
+            macos_exceptions,
+            macos_search_domains,
+            macos_supplemental,
+            macos_resolver_files,
+            windows_bypass,
+            adapter_dns_suffix,
+            tcpip_registry,
+            windows_nrpt,
+            unreadable,
+            suffixes,
+        ] = counts;
+        tracing::info!(
+            target: LIFECYCLE,
+            no_proxy,
+            resolv_conf,
+            macos_exceptions,
+            macos_search_domains,
+            macos_supplemental,
+            macos_resolver_files,
+            windows_bypass,
+            adapter_dns_suffix,
+            tcpip_registry,
+            windows_nrpt,
+            unreadable,
+            suffixes,
+            "egress: the firm's own names learned (counts per source; names are never logged)"
+        );
+    }
     sources.unreadable.is_empty().then_some(found)
 }
 
@@ -118,8 +157,7 @@ fn read_os(sources: &mut Sources) {
     let unreadable = &mut sources.unreadable;
     #[cfg(unix)]
     {
-        let text = std::fs::read_to_string("/etc/resolv.conf").ok();
-        let read = text.map(|text| resolv_conf(&text));
+        let read = resolv_conf_file(std::path::Path::new("/etc/resolv.conf"));
         sources.resolv_conf = learned(unreadable, "resolv_conf", read);
     }
     #[cfg(target_os = "macos")]
@@ -160,6 +198,26 @@ fn resolver_files(dir: &std::path::Path) -> Option<Vec<String>> {
     entries
         .map(|entry| entry.ok()?.file_name().into_string().ok())
         .collect()
+}
+
+/// The domains of the `resolv.conf` at `path` ([`resolv_conf`]); none when there is no such
+/// file (a machine with no DNS server set), `None` when it cannot be read.
+#[cfg(any(unix, test))]
+fn resolv_conf_file(path: &std::path::Path) -> Option<Vec<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Some(resolv_conf(&text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_unreadable) => None,
+    }
+}
+
+/// What a dynamic store read that gave nothing means, by `SCError()`'s status: none when the
+/// key is not there (`kSCStatusNoKey`, 1004: no DNS set, or a service gone), `None` for any
+/// other status (the store could not be read).
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn store_absent(status: i32) -> Option<Vec<String>> {
+    const NO_KEY: i32 = 1004;
+    (status == NO_KEY).then(Vec::new)
 }
 
 /// The domains of a `resolv.conf`'s `search` and `domain` lines, both kept (the resolver uses
@@ -232,274 +290,4 @@ fn suffix(entry: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fmt;
-    use std::sync::{Arc, Mutex};
-
-    use tracing::field::{Field, Visit};
-    use tracing::span::{Attributes, Id, Record};
-    use tracing::{Event, Level, Metadata, Subscriber};
-
-    use super::{LIFECYCLE, Sources, bypass_entries, learn, resolv_conf, resolver_files, suffixes};
-    use crate::proxy::upstream::parse::NoProxy;
-    use crate::test_support::TempDir;
-
-    /// One event: its target, level, and every field (the message included) as text.
-    #[derive(Debug)]
-    struct Line {
-        target: String,
-        level: Level,
-        fields: Vec<(String, String)>,
-    }
-
-    impl Line {
-        fn field(&self, name: &str) -> Option<&str> {
-            let found = self.fields.iter().find(|(field, _)| field == name);
-            found.map(|(_, value)| value.as_str())
-        }
-    }
-
-    /// A subscriber that keeps every event.
-    #[derive(Clone, Default)]
-    struct Capture(Arc<Mutex<Vec<Line>>>);
-
-    struct Fields(Vec<(String, String)>);
-
-    impl Visit for Fields {
-        fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-            self.0.push((field.name().to_owned(), format!("{value:?}")));
-        }
-    }
-
-    impl Subscriber for Capture {
-        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-            true
-        }
-
-        fn new_span(&self, _span: &Attributes<'_>) -> Id {
-            Id::from_u64(1)
-        }
-
-        fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-        fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-        fn event(&self, event: &Event<'_>) {
-            let mut fields = Fields(Vec::new());
-            event.record(&mut fields);
-            self.0.lock().unwrap().push(Line {
-                target: event.metadata().target().to_owned(),
-                level: *event.metadata().level(),
-                fields: fields.0,
-            });
-        }
-
-        fn enter(&self, _span: &Id) {}
-
-        fn exit(&self, _span: &Id) {}
-    }
-
-    /// `learn`'s suffixes from `sources`, and the events it sent.
-    fn learn_captured(sources: &Sources) -> (Option<Vec<String>>, Vec<Line>) {
-        let capture = Capture::default();
-        let found = tracing::subscriber::with_default(capture.clone(), || learn(sources));
-        let lines = std::mem::take(&mut *capture.0.lock().unwrap());
-        (found, lines)
-    }
-
-    #[test]
-    fn learning_logs_one_lifecycle_line_with_a_count_per_source() {
-        let sources = Sources {
-            no_proxy: vec!["firm.com".to_owned(), "127.0.0.1".to_owned()],
-            resolv_conf: resolv_conf(
-                "search corp.example canary-suffix.example
-nameserver 1
-",
-            ),
-            windows_bypass: bypass_entries("<local>;*.legal.example;10.*"),
-            ..Sources::default()
-        };
-        let (found, lines) = learn_captured(&sources);
-        let learned = [
-            "canary-suffix.example",
-            "corp.example",
-            "firm.com",
-            "legal.example",
-        ];
-        assert_eq!(found.unwrap(), learned);
-        let [line] = lines.as_slice() else {
-            panic!("one line, got {lines:?}");
-        };
-        assert_eq!(line.target, LIFECYCLE);
-        // What the host's log file keeps at info (`log_file::kept_target`).
-        assert!(line.target.starts_with("clauseo_") && line.target.ends_with("::lifecycle"));
-        assert_eq!(line.level, Level::INFO);
-        let counts = [
-            ("no_proxy", "1"),
-            ("resolv_conf", "2"),
-            ("macos_exceptions", "0"),
-            ("macos_search_domains", "0"),
-            ("macos_supplemental", "0"),
-            ("macos_resolver_files", "0"),
-            ("windows_bypass", "1"),
-            ("adapter_dns_suffix", "0"),
-            ("tcpip_registry", "0"),
-            ("windows_nrpt", "0"),
-            ("unreadable", "0"),
-            ("suffixes", "4"),
-        ];
-        for (field, count) in counts {
-            assert_eq!(line.field(field), Some(count), "{field}");
-        }
-        assert_eq!(
-            line.field("message"),
-            Some(
-                "egress: the firm's own names learned (counts per source; names are never logged)"
-            )
-        );
-        assert_eq!(line.fields.len(), counts.len() + 1, "{:?}", line.fields);
-    }
-
-    #[test]
-    fn the_learned_line_names_no_suffix() {
-        let sources = Sources {
-            resolv_conf: resolv_conf(
-                "domain canary-suffix.example
-search canary-two.example
-",
-            ),
-            macos_search_domains: vec!["canary-three.example".to_owned()],
-            ..Sources::default()
-        };
-        let (found, lines) = learn_captured(&sources);
-        let found = found.unwrap();
-        assert_eq!(found.len(), 3, "the canaries were learned: {found:?}");
-        assert_eq!(lines.len(), 1);
-        for line in &lines {
-            let text = format!("{line:?}");
-            assert!(!text.contains("canary"), "{text}");
-            assert!(!text.contains("example"), "{text}");
-        }
-    }
-
-    #[test]
-    fn a_source_that_cannot_be_read_gives_no_names_at_all() {
-        let sources = Sources {
-            no_proxy: vec!["firm.com".to_owned()],
-            unreadable: vec!["macos_supplemental"],
-            ..Sources::default()
-        };
-        let (found, lines) = learn_captured(&sources);
-        assert_eq!(found, None);
-        let [line] = lines.as_slice() else {
-            panic!("one line, got {lines:?}");
-        };
-        assert_eq!(line.field("unreadable"), Some("1"));
-        assert_eq!(line.field("no_proxy"), Some("1"));
-        let mut unreadable = Vec::new();
-        assert_eq!(
-            super::learned(&mut unreadable, "windows_nrpt", None),
-            Vec::<String>::new()
-        );
-        assert_eq!(unreadable, ["windows_nrpt"]);
-        let read = Some(vec!["firm.com".to_owned()]);
-        assert_eq!(
-            super::learned(&mut unreadable, "no_proxy", read),
-            ["firm.com"]
-        );
-        assert_eq!(unreadable, ["windows_nrpt"], "a source read adds none");
-    }
-
-    #[test]
-    fn a_multi_string_gives_each_namespace() {
-        let mut units: Vec<u16> = ".firm.example\0vpn.firm.example\0\0"
-            .encode_utf16()
-            .collect();
-        assert_eq!(
-            super::multi_sz(&units),
-            Some(vec![
-                ".firm.example".to_owned(),
-                "vpn.firm.example".to_owned()
-            ])
-        );
-        assert_eq!(super::multi_sz(&[]), Some(Vec::new()));
-        units.insert(0, 0xD800);
-        assert_eq!(super::multi_sz(&units), None, "not UTF-16");
-    }
-
-    #[test]
-    fn resolver_files_name_their_domains() {
-        let dir = TempDir::new("firm-resolver-files");
-        assert_eq!(resolver_files(&dir.path().join("none")), Some(Vec::new()));
-        dir.file("vpn.firm.example", "nameserver 10.1.2.3\n");
-        dir.file("emea.firm.example", "nameserver 10.1.2.4\n");
-        let mut names = resolver_files(dir.path()).unwrap();
-        names.sort();
-        assert_eq!(names, ["emea.firm.example", "vpn.firm.example"]);
-    }
-
-    fn learned(entries: &[String]) -> Vec<String> {
-        suffixes(entries.iter().map(String::as_str))
-    }
-
-    #[test]
-    fn resolv_conf_gives_its_search_and_domain_lines() {
-        let text = "# made by NetworkManager\nnameserver 10.0.0.53\n; old\n\
-                    domain Firm.Example.\nsearch corp.firm.example  emea.firm.example # x\n\
-                    options ndots:2\nsearchx no.example\n";
-        assert_eq!(
-            learned(&resolv_conf(text)),
-            ["corp.firm.example", "emea.firm.example", "firm.example"]
-        );
-        assert_eq!(resolv_conf("nameserver 1.1.1.1\n"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn the_windows_bypass_list_gives_its_domains() {
-        let raw = "<local>;*.firm.com; 10.*;192.168.1.1 intra*.emea.firm.net,\
-                   http://*.legal.example:8080;[fe80::1];*.com;*";
-        assert_eq!(
-            learned(&bypass_entries(raw)),
-            ["emea.firm.net", "firm.com", "legal.example"]
-        );
-    }
-
-    #[test]
-    fn macos_exceptions_give_their_domains() {
-        let raw = [
-            "*.local",
-            "169.254/16",
-            "firm.example",
-            "*.Firm.Example",
-            "10.0.0.0/8",
-        ];
-        let entries: Vec<String> = raw.iter().map(|entry| (*entry).to_owned()).collect();
-        assert_eq!(learned(&entries), ["firm.example", "local"]);
-    }
-
-    #[test]
-    fn search_domains_drop_public_suffixes_and_addresses() {
-        let raw = [
-            "firm.example",
-            "co.uk",
-            "com",
-            "github.io",
-            "10.1.2.3",
-            "firm",
-            "::1",
-        ];
-        let entries: Vec<String> = raw.iter().map(|entry| (*entry).to_owned()).collect();
-        assert_eq!(learned(&entries), ["firm", "firm.example"]);
-    }
-
-    #[test]
-    fn no_proxy_gives_its_domain_entries() {
-        let raw = "localhost,127.0.0.1,.firm.com,*.corp.example,10.0.0.0/8,fileserver:8080,*";
-        let no_proxy = NoProxy::parse(raw);
-        let entries: Vec<String> = no_proxy.domains().map(str::to_owned).collect();
-        assert_eq!(
-            learned(&entries),
-            ["corp.example", "fileserver", "firm.com", "localhost"]
-        );
-    }
-}
+mod tests;

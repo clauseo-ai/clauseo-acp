@@ -40,7 +40,7 @@ impl Network for SystemNetwork {
         }))
     }
 
-    /// A thread per call, which a probe makes at most once a minute; `blocking`'s pool when no
+    /// A thread per call, which a probe makes at most once every 10 s; `blocking`'s pool when no
     /// thread can be made.
     fn resolve_alone(
         &self,
