@@ -537,5 +537,48 @@ fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     write::remove_dir_all(&dir).unwrap();
 }
 
+/// A mover started on a missing downloads folder, `downloads` (it is in the matter).
+fn start_on(staging: &Path, downloads: &Path) -> Mover {
+    let (staging, downloads) = (staging.to_owned(), downloads.to_owned());
+    Mover::start(staging, downloads, None, Arc::default(), Arc::default())
+}
+
+/// No empty downloads folder in the matter: a mover started and finished with nothing to
+/// deliver makes none; the first delivery makes it.
+#[test]
+fn the_downloads_folder_is_made_at_the_first_delivery() {
+    let (dir, staging, downloads) = scratch("made-on-demand");
+    write::remove_dir(&downloads).unwrap();
+    start_on(&staging, &downloads).finish();
+    assert!(!downloads.exists());
+    write::write(&staging.join("report.pdf"), "download").unwrap();
+    start_on(&staging, &downloads).finish();
+    assert_eq!(names(&downloads), ["report.pdf"]);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// A link planted at the downloads folder's name before the first delivery, to a folder or to
+/// nothing, is refused as one at an existing folder is: the file stays in staging, nothing
+/// reaches where the link points, and no folder is made there.
+#[cfg(unix)]
+#[test]
+fn a_link_planted_before_the_first_delivery_is_refused() {
+    let (dir, staging, downloads) = scratch("link-before-first");
+    let (outside, missing) = (dir.join("outside"), dir.join("missing"));
+    write::create_dir_all(&outside).unwrap();
+    write::remove_dir(&downloads).unwrap();
+    start_on(&staging, &downloads).finish();
+    write::write(&staging.join("report.pdf"), "download").unwrap();
+    for target in [&outside, &missing] {
+        write::symlink(target, &downloads).unwrap();
+        start_on(&staging, &downloads).finish();
+        assert_eq!(names(&staging), ["report.pdf"]);
+        write::remove_file(&downloads).unwrap();
+    }
+    assert_eq!(names(&outside), NONE);
+    assert!(!missing.exists());
+    write::remove_dir_all(&dir).unwrap();
+}
+
 mod copy;
 mod hardening;

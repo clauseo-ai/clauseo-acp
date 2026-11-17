@@ -335,7 +335,9 @@ impl Sweeper {
                     "downloads are held back: the drive cannot record the \"downloaded from the \
                      internet\" mark ({error}); see {BLOCKED_NOTE} in the downloads folder"
                 ));
-                let made = write::Folder::open(&self.downloads)
+                // The folder is made here, at the first download, as by a delivery.
+                let made = write::make_folder(&self.downloads)
+                    .and_then(|()| write::Folder::open(&self.downloads))
                     .and_then(|folder| folder.create_new(OsStr::new(BLOCKED_NOTE)));
                 if let Ok(mut file) = made {
                     drop(io::Write::write_all(&mut file, BLOCKED_TEXT.as_bytes()));
