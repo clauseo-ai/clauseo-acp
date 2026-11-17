@@ -57,7 +57,7 @@ pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
 pub(crate) use shell_deny::{
-    history_allow_rules, own_shell_allow_rules, own_shell_glob_deny_rules,
+    history_allow_rules, history_deny_rules, own_shell_allow_rules, own_shell_glob_deny_rules,
     windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
 };
 pub(crate) use variables::launch_vars;
