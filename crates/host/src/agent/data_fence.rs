@@ -55,7 +55,9 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, t
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
-pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use launch::{
+    BUILT_IN_PLUGIN, LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads,
+};
 pub(crate) use shell_deny::{
     own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
     windows_shell_deny_rules_without_variables,
@@ -158,14 +160,13 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
-/// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
-/// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
-/// allowed listing or read of an own folder that holds a glob. Under the sandbox they would buy
-/// nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob after
-/// an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny being
-/// matched on the whole command too. A spelling that is not UTF-8 gets none (no rule could
-/// name it).
+/// and `deny.edit_denied` and all under it; then, unless the launch has Claude's shell sandbox
+/// (`sandboxed`: macOS or Linux with `agent::loads::sandbox` on; never Windows, nor a launch
+/// whose sandbox is `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
+/// refuse an allowed listing or read of an own folder that holds a glob. Under the sandbox they
+/// would buy nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a
+/// glob after an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the
+/// deny being matched on the whole command too. A spelling that is not UTF-8 gets none.
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
     claude_deny_rules_on(deny, cfg!(windows), sandboxed)
 }
@@ -191,7 +192,8 @@ pub(crate) fn claude_deny_rules_on(
                 push(format!("{tool}({base}/{target})"));
             }
         }
-        for place in READ_ONLY {
+        let edit_only = deny.edit_denied.iter().map(String::as_str);
+        for place in READ_ONLY.into_iter().chain(edit_only) {
             push(format!("Edit({base}/{place}/**)"));
         }
     }

@@ -176,7 +176,13 @@ fn rules(
         .map(|place| parse(place).0)
         .collect();
     let mut targets: Vec<String> = deny.targets.clone();
-    for place in &shared {
+    // The folders denied for `Edit` alone are named too, unless a shared place holds them.
+    let edit_only = deny.edit_denied.iter().filter(|place| {
+        !shared
+            .iter()
+            .any(|shared| *place == shared || place.starts_with(&format!("{shared}/")))
+    });
+    for place in shared.iter().chain(edit_only) {
         let target = format!("{place}/**");
         if !targets.contains(&target) {
             targets.push(target);

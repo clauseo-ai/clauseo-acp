@@ -93,11 +93,22 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
+    /// Folders denied to Claude for `Edit` alone, as patterns in the same form (no final
+    /// `/**`; the rule covers all under each): places the launch otherwise keeps that hold what
+    /// Claude Code loads, the built-in plugin ([`BUILT_IN_PLUGIN`]) and, once the launch prep
+    /// has it, the session's own packs plugin (`<run>/skill-packs`). Reads stay as they were;
+    /// the Windows shell rules name them as targets (`super::windows_shell_deny_rules`).
+    pub(crate) edit_denied: Vec<String>,
 }
+
+/// The built-in plugin's folder under `<data>` (`clauseo_profile`'s `claude_plugin`), as a
+/// pattern: in [`SHARED`]'s `profile`, readable by every session, written only by the launch.
+pub(crate) const BUILT_IN_PLUGIN: &str = "profile/claude-plugin";
 
 impl LaunchDeny {
     /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`]
-    /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`).
+    /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`), and `Edit` of the
+    /// built-in plugin ([`BUILT_IN_PLUGIN`]).
     pub(crate) fn fixed(spellings: Vec<PathBuf>) -> Self {
         let home = super::claude_home::CLAUDE_HOME
             .iter()
@@ -116,6 +127,7 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
+            edit_denied: vec![BUILT_IN_PLUGIN.to_owned()],
         }
     }
 }
