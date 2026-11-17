@@ -215,17 +215,28 @@ fn a_failed_put_back_puts_the_new_content_in_place() {
     assert!(message.contains("Lease.docx.clauseo-0.orig.tmp") && message.contains("gone.tmp"));
 }
 
-/// A name too long to take the backup suffix: the plain rename, as on main, with the metadata
-/// counted lost.
+/// Names of 236 to 255 UTF-16 units: the call gets a backup name the folder takes (the suffix up
+/// to 236, the short hashed name from 237), so the old file's metadata is kept, nothing lost,
+/// and nothing is left beside the file.
 #[test]
-fn a_name_too_long_for_a_backup_gets_the_plain_rename() {
-    let dir = TestDir::new("replace-keeping-long");
-    let name = format!("{}.docx", "a".repeat(235));
-    assert_eq!(name.len(), 240);
-    let target = file(&dir, &name, b"old");
-    let temp = file(&dir, "new.tmp", b"new");
-    let lost = replace_keeping(&temp, &target, |_, _, _| panic!("called")).unwrap();
-    assert_eq!(lost.count, 1);
-    assert_eq!(read(&target), b"new");
-    assert_eq!(names(&dir), [name]);
+fn a_long_name_gets_a_backup_name_the_folder_takes() {
+    for len in [236, 237, 240, 255] {
+        let dir = TestDir::new("replace-keeping-long");
+        let name = format!("{}.docx", "a".repeat(len - 5));
+        let target = file(&dir, &name, b"old");
+        let temp = file(&dir, "new.tmp", b"new");
+        let mut given = None;
+        let lost = replace_keeping(&temp, &target, |replaced, replacement, backup| {
+            given = backup.file_name().map(std::ffi::OsStr::to_os_string);
+            rename(replaced, backup)?;
+            rename(replacement, replaced)
+        })
+        .unwrap();
+        let given = given.expect("called").into_string().unwrap();
+        assert!(given.encode_utf16().count() <= 255, "{len}: {given}");
+        assert_eq!(given.starts_with(".clauseo-"), len > 236, "{len}: {given}");
+        assert_eq!(lost, Lost::default(), "{len}");
+        assert_eq!(read(&target), b"new");
+        assert_eq!(names(&dir), [name]);
+    }
 }

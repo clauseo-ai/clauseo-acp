@@ -1,6 +1,7 @@
-//! The backups a crashed rewrite left (`<name>.clauseo-<n>.orig.tmp`), as the host's matter worker
-//! opens the matter again (`recover_backups`): a backup whose content the store holds is
-//! put back where the file is missing and removed where it is there; any other is left alone.
+//! The backups a crashed rewrite left (`<name>.clauseo-<n>.orig.tmp`, or
+//! `.clauseo-<hash>-<n>.orig.tmp` for a name too long for the suffix), as the host's matter worker
+//! opens the matter again (`recover_backups`): a backup whose content the store holds is put
+//! back where the file is missing and removed where it is there; any other is left alone.
 //! `Matter::open` alone touches none of them.
 
 use clauseo_matters::{Matter, recover_backups};
@@ -122,4 +123,43 @@ fn a_name_that_is_not_utf8_gets_its_backup_back() {
     drop(reopened(&fx));
     assert_eq!(std::fs::read(&target).unwrap(), b"old");
     assert!(!backup.exists());
+}
+
+/// A 240-unit name, too long for `<name>.clauseo-<n>.orig.tmp`.
+fn long() -> String {
+    format!("Papers/{}.docx", "a".repeat(235))
+}
+
+/// [`long`]'s backup name: its FNV-1a hash, the same in every build.
+const LONG_BACKUP: &str = "Papers/.clauseo-6f79de2aa1282bde-0.orig.tmp";
+
+/// `Papers/<240 units>` "old" imported, the matter closed.
+fn imported_long(name: &str) -> Fixture {
+    let fx = Fixture::new(name);
+    fx.write(&long(), "old");
+    drop(fx.import());
+    fx
+}
+
+/// A crash left a long-named file under its hashed backup name: matched through the cached
+/// name, it is put back.
+#[test]
+fn a_hashed_backup_whose_file_is_missing_is_put_back() {
+    let fx = imported_long("backups-hashed-put-back");
+    support::rename(fx.file(&long()), fx.file(LONG_BACKUP));
+    drop(reopened(&fx));
+    assert_eq!(fx.read(&long()), b"old");
+    assert!(!fx.exists(LONG_BACKUP));
+}
+
+/// A hashed backup whose hash is no cached name's is kept, even with content the store holds
+/// and a missing long-named file beside it: never put back on a guess.
+#[test]
+fn a_hashed_backup_of_no_cached_name_is_kept() {
+    let fx = imported_long("backups-hashed-unknown");
+    let other = "Papers/.clauseo-0123456789abcdef-0.orig.tmp";
+    support::rename(fx.file(&long()), fx.file(other));
+    drop(reopened(&fx));
+    assert!(!fx.exists(&long()));
+    assert_eq!(fx.read(other), b"old");
 }
