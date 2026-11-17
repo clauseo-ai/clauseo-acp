@@ -260,7 +260,7 @@ fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
 
 /// R21's done-when "Hook servers": the lawyer's enabled servers first, in name order, then the
 /// hook's `browser` with its per-session values, on `session/new` and then `session/load`, for a
-/// kind-less agent (`BROWSING`: Claude has no browser on macOS and Linux) and a `codex-acp` agent
+/// kind-less agent (`BROWSING`: the real profile's entry is per kind) and a `codex-acp` agent
 /// (both `fake_agent`). The new session plays the
 /// checked-in `tools-mcp-servers`; the load and the Codex session check the filled folder and
 /// session id exactly.

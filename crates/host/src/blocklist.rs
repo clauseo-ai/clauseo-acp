@@ -253,8 +253,8 @@ pub(crate) fn allowed_sites(
 /// Whether the host fetches the list: only when something enforces it. Only a session's egress
 /// proxy reads it, and a proxy opens for a session that can get the guarded browser
 /// (`launch_checks/egress.rs`): so when an egress proxy is set (`HostConfig::with_egress_proxy`)
-/// and some agent has the browser on this OS (`clauseo_profile::servers::no_browser`: Codex on
-/// macOS and Linux today), or for the Safe workspace (`HostConfig::with_sandbox`). The
+/// and some agent has the browser on this OS (`clauseo_profile::servers::no_browser`: Codex and
+/// Claude on every OS today), or for the Safe workspace (`HostConfig::with_sandbox`). The
 /// `tools.browser` switch is not asked: the lawyer may turn it on at any time, and the list must
 /// be loaded by then. A host with none of these makes no fetch at start and none every interval.
 pub(crate) fn needed(config: &crate::HostConfig) -> bool {

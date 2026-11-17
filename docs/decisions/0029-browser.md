@@ -1816,8 +1816,8 @@ Record 0030 has the entry; this is the browser's side of it.
   on a command line or in Chrome's environment), the patched daemon serves no client without it,
   and Chrome speaks CDP over a pipe, not a port (record 0060). So Codex gets its guarded entry on
   Windows as on macOS and Linux (`servers::browser_mcp`, `servers::no_browser` false for Codex
-  on every OS), with the session's egress proxy and downloads to the matter. Claude still has no
-  browser on Windows (below).
+  on every OS), with the session's egress proxy and downloads to the matter. Claude got its entry on
+  Windows after it ("Claude on Windows too" below).
 - **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
   #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
   (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
@@ -1866,10 +1866,10 @@ Record 0030 has the entry; this is the browser's side of it.
 
 Approved by the orchestrator (the browser plan's PR-1 and its decision 4). It supersedes, on
 macOS and Linux, the two "No browser for Claude" entries above; on Windows Claude
-stays without a browser until a later change.
+stayed without a browser until "Claude on Windows too" (below).
 
-- **The entry.** `servers::browser_mcp` is true for Claude off Windows, as for Codex, and
-  `servers::no_browser` is true for Claude on Windows only. Claude gets the same `browser`
+- **The entry.** `servers::browser_mcp` is true for Claude, as for Codex (off Windows at
+  first; on Windows too since "Claude on Windows too" below). Claude gets the same `browser`
   entry (`clauseo-mcp browser-guard … -- mcp --tools core`), the same filter, the same downloads
   mover and the same "Saved … to downloads/" note. No agent gets the shell `agent-browser`
   (`servers::shell_browser` is false on its own now, no longer derived from Claude's gate), so
@@ -1942,6 +1942,14 @@ stays without a browser until a later change.
   outside Seatbelt and Chrome starts; 0 prompts in `auto`; and that `curl 127.0.0.1:<cdp>` and
   `nc -U <socket>` are refused from Claude's shell. That Seatbelt refuses the AF_UNIX connect is
   read from sandbox-runtime's source (below), not tried.
+- **Claude on Windows too** (2026-11-17, after Codex's above). `servers::no_browser` is false
+  for every agent on every OS, so a Claude session on Windows gets the same guarded entry, with
+  the session's egress proxy. Claude Code has no sandbox there (`Off::Windows`), so nothing
+  fences Claude's shell off loopback; what keeps it off the guard's browser is what let Codex
+  have it on Windows: the patched daemon serves no client without the guard's per-session key
+  (#1091), which only the guard's own agent-browser gets, and Chrome speaks CDP over a pipe, not
+  a port (record 0060). `Off::drops_browser` stays false for `Off::Windows`, since no sandbox
+  was meant to be there, and such a session gets no notice.
 
 ## Consequences
 

@@ -162,21 +162,18 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             Some(&OsString::from("Clauseo")),
             "{id}"
         );
-        // Codex gets `browser` first on every OS, Claude on macOS and Linux
-        // (`clauseo_profile::servers::browser_mcp`); both get `case-law` (R24). The host fills
+        // Both agents get `browser` first on every OS
+        // (`clauseo_profile::servers::browser_mcp`) and get `case-law` (R24). The host fills
         // each per session or leaves it out (no relay, the connector not signed in, the firm's
         // managed MCP).
         let mut servers = hook.mcp_servers(&agent(id));
-        assert_eq!(
-            id == CODEX || !cfg!(windows),
-            clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id)))
-        );
-        if clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id))) {
-            let McpServer::Stdio { name, command, .. } = servers.remove(0) else {
-                panic!("expected a stdio server");
-            };
-            assert_eq!((name.as_str(), &command), ("browser", &clauseo_mcp));
-        }
+        assert!(clauseo_profile::servers::browser_mcp(AgentKind::of(
+            &agent(id)
+        )));
+        let McpServer::Stdio { name, command, .. } = servers.remove(0) else {
+            panic!("expected a stdio server");
+        };
+        assert_eq!((name.as_str(), &command), ("browser", &clauseo_mcp));
         let [
             McpServer::Stdio {
                 name: case_law,

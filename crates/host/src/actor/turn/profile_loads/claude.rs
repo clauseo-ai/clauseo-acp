@@ -9,8 +9,8 @@
 //! sentence (decision record 0030, decision 4 of the browser plan). The same decision holds
 //! `auto` back (`Off::holds_auto_back`): the session runs in `acceptEdits` and Claude asks before
 //! running commands. One plain notice says both, once per thread for the host's run
-//! (`NoticeKind::SandboxOff`). On Windows, where no sandbox was meant to be and Claude has no
-//! browser yet (`servers::no_browser`), no notice.
+//! (`NoticeKind::SandboxOff`). On Windows, where no sandbox was meant to be, Claude keeps the
+//! entry (`Off::drops_browser`) and gets no notice.
 
 use std::path::{Path, PathBuf};
 

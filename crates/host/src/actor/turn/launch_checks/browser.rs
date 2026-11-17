@@ -338,8 +338,7 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
-    // Claude on Windows has no browser at all
-    // (`agent::loads::browser::no_browser`).
+    // No agent lacks the browser on any OS now (`agent::loads::browser::no_browser`).
     let kind = clauseo_protocol::AgentKind::of(agent);
     if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
         return skip;
