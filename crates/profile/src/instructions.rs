@@ -78,13 +78,19 @@ pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-s
 
 /// The line every Codex session gets after the instructions, whatever its browser: Clauseo
 /// declines a Codex shell command that needs the internet (the host's
-/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Claude never gets it.
+/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Stage E's approval census
+/// found `curl` (a download, or a check that a link is alive) the commonest repeated "run outside
+/// the sandbox" card on a Mac, so the line names the download commands on macOS and Windows,
+/// sends all web work to the browser tools (whose downloads land in `<matter>/downloads`) and
+/// says what to do without a browser (Codex on Windows today). It also holds R22's rule against
+/// posing as a person's browser when a site refuses (Claude's wording: [`CLAUDE_WEB`]). Claude
+/// never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
 /// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
 /// without web search ([`codex_shell_offline`]).
-pub const CODEX_SHELL_SEARCH: &str = "Use your web search and web fetch tools instead.";
+pub const CODEX_SHELL_SEARCH: &str = "Web search and web fetch also read pages.";
 
 /// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
 /// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.
@@ -110,18 +116,29 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
 }
 
-/// The line a Codex session's instructions end with where Clauseo's own `pdftoppm` is on its
-/// `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as the
-/// folder, `setup/hook.rs`): Codex has no PDF input and its image viewer reads PNG, JPEG, GIF
-/// and WebP only, so it renders pages into `{work_folder}`, which its sandbox may write and the
-/// host fills. [`ClauseoProfile`](crate::ClauseoProfile)'s own instructions never hold it.
-/// Claude gets none: its Read runs that `pdftoppm` itself for a PDF over 10 pages.
+/// The line a Codex session's instructions end with where Clauseo's own `pdftoppm`, `pdftotext`
+/// and `pdfinfo` are on its `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same
+/// condition as the folder, `setup/hook.rs`), on macOS and Windows alike: Codex has no PDF input,
+/// and reading one any other way (stage C's census saw `mdls` and `swift`) meets its sandbox and
+/// raises a "run outside the sandbox" card that can never be always-approved, so the line sends
+/// every PDF read to those tools (`pdftotext` for text, by OCR on scans). Its image viewer reads
+/// PNG, JPEG, GIF and WebP only, so it renders pages into `{work_folder}`, which its sandbox may
+/// write and the host fills. [`ClauseoProfile`](crate::ClauseoProfile)'s own instructions never
+/// hold it.
+/// Claude gets none: its Read takes a PDF itself (running that `pdftoppm` for one over 10
+/// pages), and its sandbox has no way out, so a blocked command raises no card.
 pub const CODEX_PDF: &str = include_str!("../assets/instructions/codex-pdf.txt");
 
 /// [`CODEX_PDF`], trimmed.
 pub fn codex_pdf() -> &'static str {
     CODEX_PDF.trim()
 }
+
+/// The line every Claude session gets right after the instructions, on every OS: R22's rule
+/// against posing as a browser. A page its web fetch tool or the site refuses is never retried
+/// with a browser user-agent or another disguise; the lawyer is told and given the link. Codex
+/// gets its own wording in [`CODEX_SHELL_OFFLINE`].
+pub const CLAUDE_WEB: &str = include_str!("../assets/instructions/claude-web.txt");
 
 /// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
 /// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off

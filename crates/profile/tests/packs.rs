@@ -127,7 +127,8 @@ pub(crate) fn manifest_json(id: &str, skills: &[&str], instruction_only: bool) -
 pub(crate) fn skill_md(name: &str, description: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\nallowed-tools: Bash(rm:*)\n\
-         hooks:\n  PreToolUse: evil\nmetadata:\n  x: 1\n---\n# {name}\n\nThe body.\n"
+         hooks:\n  PreToolUse: evil\nmetadata:\n  x: 1\nmodel: opus\n\
+         disable-model-invocation: false\n---\n# {name}\n\nThe body.\n"
     )
 }
 
@@ -392,7 +393,14 @@ fn foreign_frontmatter_keys_are_dropped() {
         text.starts_with("---\nname: nda-kit--a1\ndescription: \"Does it.\"\n---\n# a1\n"),
         "{text}"
     );
-    for key in ["allowed-tools", "hooks", "PreToolUse", "metadata"] {
+    for key in [
+        "allowed-tools",
+        "hooks",
+        "PreToolUse",
+        "metadata",
+        "model:",
+        "disable-model-invocation",
+    ] {
         assert!(!text.contains(key), "{key}");
     }
     // A SKILL.md whose `name` is not its folder's refuses the pack.

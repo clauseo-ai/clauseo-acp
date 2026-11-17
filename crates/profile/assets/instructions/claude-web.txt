@@ -1,0 +1,1 @@
+If the fetch tool or the site refuses a page, never retry with a browser user-agent or any other disguise; tell the lawyer which one refused and give the link to open.

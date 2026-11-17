@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL, SCALE_CLAUDE,
-    STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part, word_count,
+    BrowserPart, CLAUDE_SHELL_MACOS, CLAUDE_WEB, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
+    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_pdf, codex_shell,
+    connectors_part, word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
@@ -23,14 +24,16 @@ const LEGAL_MAX: usize = 1360;
 /// 0058's cap, kept.
 const SHARED_MAX: usize = 1800;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
-/// legal part, the shell line and "Working at scale".
-const CLAUDE_MAX: usize = 2250;
-/// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
-/// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
+/// legal part, R22's line against posing as a browser, the shell line and "Working at scale".
+/// Measured worst 2263; the room over main's 2250 is for the browser-refusal rule (0058, amended).
+const CLAUDE_MAX: usize = 2285;
+/// Codex's whole `developer_instructions`, the worst case on each OS: the tools part with the
+/// stetdoc line, the legal part, the offline line, the refusal line, the shell line (macOS), the
+/// built-in skills index and the PDF line the desktop adds with Clauseo's PDF tools on its `PATH`.
+/// Measured worst 2173 (macOS; 2125 on Windows); the room over main's 2040 is for the PDF line
+/// and the browser-refusal rule (0058, amended).
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-/// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
-/// 2016.
-const CODEX_MAX: usize = 2040;
+const CODEX_MAX: usize = 2195;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -107,40 +110,56 @@ fn claude_standing_text_budget() {
         &profile.claude_instructions_for(true),
         browser_part(BrowserPart::NotInstalled),
     );
-    for part in [LEGAL, STETDOC_CLI, CLAUDE_SHELL_MACOS, SCALE_CLAUDE] {
+    for part in [
+        LEGAL,
+        STETDOC_CLI,
+        CLAUDE_WEB,
+        CLAUDE_SHELL_MACOS,
+        SCALE_CLAUDE,
+    ] {
         let head = part.trim().lines().next().unwrap();
         assert!(text.contains(head.split('{').next().unwrap()), "{head}");
     }
     let count = word_count(&text);
     assert!(
         count <= CLAUDE_MAX,
-        "Claude's standing text has {count} words"
+        "Claude worst case {count} words, cap {CLAUDE_MAX}"
     );
 }
 
-/// Codex's standing text: everything in `developer_instructions` with the built-in index.
+/// Codex's standing text: everything in `developer_instructions` with the built-in index and the
+/// PDF line (the desktop's, `setup/hook.rs`, with Clauseo's PDF tools on its `PATH`), on macOS
+/// with its shell line and on Windows without: every line that can ship, so the cap is what a
+/// lawyer's Codex session really gets. The browser part is the longest Codex can get, the
+/// `browser` MCP entry's.
 #[test]
 fn codex_standing_text_budget() {
     let profile = profile();
     let index = profile.skills_index();
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
-    let text = filled(
-        &format!("{}\n\n{index}", profile.codex_instructions_for(true)),
-        browser_part_for(BrowserPart::On, true),
-    );
-    for line in [
-        CODEX_SHELL_OFFLINE,
-        CODEX_REFUSAL,
-        codex_shell(true).unwrap(),
-    ] {
-        assert!(text.contains(line.trim()), "{line}");
+    for macos in [true, false] {
+        let text = filled(
+            &format!(
+                "{}\n\n{index}\n\n{}",
+                profile.codex_instructions_for(macos),
+                codex_pdf()
+            ),
+            browser_part_for(BrowserPart::On, true),
+        );
+        for line in [CODEX_SHELL_OFFLINE, CODEX_REFUSAL, codex_pdf()] {
+            // The PDF line's `{work_folder}` is filled: its words up to the token must be there.
+            let head = line.trim().split('{').next().unwrap();
+            assert!(text.contains(head), "{line}");
+        }
+        let shell = codex_shell(true).unwrap();
+        assert_eq!(text.contains(shell), macos);
+        assert!(text.ends_with(codex_pdf().rsplit('}').next().unwrap()));
+        let count = word_count(&text);
+        assert!(
+            count <= CODEX_MAX,
+            "Codex worst case (macOS: {macos}) {count} words, cap {CODEX_MAX}"
+        );
     }
-    assert!(text.ends_with(index.trim_end()));
-    let count = word_count(&text);
-    assert!(
-        count <= CODEX_MAX,
-        "Codex's standing text has {count} words"
-    );
 }
 
 /// Each helper's prompt is all the standing text it gets (a helper never gets
