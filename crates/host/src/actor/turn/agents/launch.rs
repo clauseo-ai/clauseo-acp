@@ -116,6 +116,7 @@ pub(super) fn launch(
         codex
     });
     let parts = path::launch_parts(actor, codex.is_some(), &prepared.run.path);
+    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
     // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
     let mut env = agent::launch_env(
@@ -128,10 +129,13 @@ pub(super) fn launch(
     );
     // The agent's shells get the same `PATH` the session does (`agent/shell_path.rs`).
     agent::shell_path::apply(&mut env, &prepared.run.path);
+    // On Windows Claude's one shell is PowerShell (`agent/one_shell.rs`).
+    if claude {
+        agent::one_shell::apply_env(&mut env, agent::shell_path::Os::host());
+    }
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
-    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();

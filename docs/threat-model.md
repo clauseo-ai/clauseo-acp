@@ -152,6 +152,12 @@ any ACP message, including permission requests with misleading text.
   adapter
 - `designed`: The host checkpoints the matter before and after every turn, so any step can be undone
 - `designed`: Adapters are installed pinned by version and integrity hash
+- `built`: On Windows Claude has one shell tool, PowerShell (Windows PowerShell 5.1, or
+  PowerShell 7 when installed), on every machine, Git or not: the launch sets
+  `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` and denies the whole `Bash` tool (decision record 0030,
+  2026-11-16); every Windows acceptance row runs on a Git-free machine with 5.1 only and with
+  `pwsh` 7 installed
+- `designed`: The launch self-test (#1167) refuses a launch whose pre-write guard cannot start
 
 ## Sandbox
 
