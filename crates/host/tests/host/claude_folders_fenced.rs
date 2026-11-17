@@ -16,16 +16,24 @@ use crate::profile_rig::{
 use crate::support::{Dir, Scenario};
 use crate::write;
 
-/// The `permissions.deny` rules of the first Claude launch's settings file in `dir`, and that
-/// launch's run folder name.
-fn launch_deny(dir: &Dir, launcher: &Wired) -> (Vec<String>, String) {
+/// The first Claude launch's settings file in `dir` (`agent::launch_settings`, the flag
+/// settings).
+fn launch_settings(dir: &Dir, launcher: &Wired) -> Value {
     let run = launcher.seen()[0].run.clone().expect("a run folder");
     let run_id = run.file_name().unwrap().to_str().unwrap().to_owned();
     let file = dir
         .data()
         .join("launch-settings")
         .join(format!("{run_id}.json"));
-    let written: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap()
+}
+
+/// The `permissions.deny` rules of the first Claude launch's settings file in `dir`, and that
+/// launch's run folder name.
+fn launch_deny(dir: &Dir, launcher: &Wired) -> (Vec<String>, String) {
+    let run = launcher.seen()[0].run.clone().expect("a run folder");
+    let run_id = run.file_name().unwrap().to_str().unwrap().to_owned();
+    let written = launch_settings(dir, launcher);
     let deny = written["permissions"]["deny"]
         .as_array()
         .unwrap_or_else(|| panic!("no deny rules: {written}"))
@@ -132,8 +140,11 @@ fn a_skill_planted_in_the_built_in_plugin_is_gone_before_the_next_session() {
 
 /// What Claude Code would load from Clauseo's home for it, planted there before a launch, is
 /// gone when the agent starts: `skills`, `commands` and `agents` do not exist at all (Claude Code
-/// watches them during a session only when they exist at its start), nor `CLAUDE.md`, `rules`,
-/// `settings.local.json` and the rest; Claude Code's own `.claude.json` stays as it was.
+/// watches them during a session only when they exist at its start), nor `CLAUDE.md` (here with
+/// text and an `@` import of a file outside), `rules`, `settings.local.json` and the rest;
+/// Claude Code's own `.claude.json` stays as it was, and so does the imported file. The launch's
+/// flag settings exclude the home's `CLAUDE.md` and `rules` and turn auto-memory off. That
+/// Claude Code 2.1.293 then loads none of it is stage B's real row (hot-reload part 3).
 #[test]
 fn a_launch_starts_claude_with_nothing_loadable_in_its_home() {
     let dir = Dir::new("claude_home_cleared", &[]);
@@ -158,10 +169,15 @@ fn a_launch_starts_claude_with_nothing_loadable_in_its_home() {
         let path = file.split('/').fold(home.clone(), |at, part| at.join(part));
         write::write(&path, b"{}");
     }
+    let outside = dir.folder("outside", &[]).join("imported.md");
+    write::write(&outside, b"zz-imported");
+    let memory = format!("zz-stray memory\n@{}\n", outside.display());
+    write::write(&home.join("CLAUDE.md"), memory.as_bytes());
     let launcher = Wired::new(&dir);
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, CLAUDE));
+    let written = launch_settings(&dir, &launcher);
     host.shutdown();
     assert_eq!(launcher.seen().len(), 1, "the session started");
     for file in loaded {
@@ -172,4 +188,22 @@ fn a_launch_starts_claude_with_nothing_loadable_in_its_home() {
         );
     }
     assert_eq!(std::fs::read(home.join(".claude.json")).unwrap(), b"{}");
+    assert_eq!(std::fs::read(&outside).unwrap(), b"zz-imported");
+    let excludes: Vec<String> = written["claudeMdExcludes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no claudeMdExcludes: {written}"))
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|pattern| pattern.replace('\\', "/"))
+        .collect();
+    for tail in [
+        "agents/claude-acp/home/CLAUDE.md",
+        "agents/claude-acp/home/rules/**",
+    ] {
+        assert!(
+            excludes.iter().any(|pattern| pattern.ends_with(tail)),
+            "{tail}: {excludes:?}"
+        );
+    }
+    assert_eq!(written["autoMemoryEnabled"], json!(false));
 }
