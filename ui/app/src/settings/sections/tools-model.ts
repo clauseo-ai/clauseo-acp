@@ -89,8 +89,6 @@ export interface ToolsCommands {
   /** `import`: adds an app's servers, their saved values with them, behind the host's confirm. Answers how it went
    * (the view's `last_import` for this command), the host's refusal, or null when Done came but no result did. */
   mcpImport(source: ImportSource): Promise<ImportResult | McpErrorCode | null>;
-  /** Only a fake sets it: offers the remote form before REMOTE_TOOLS turns on, for its shot. */
-  readonly previewRemote?: boolean;
 }
 
 /** A refusal's code as the section maps it: one of MCP_ERROR_CODES, else `command.invalid`'s generic line. */
@@ -177,17 +175,13 @@ function hostTools(transport: HostTransport): ToolsCommands | null {
   };
 }
 
-/** Whether a lawyer may add a server at an address (PR B, remote http servers). Off until it lands; a server the
- * host already lists as remote still opens its own form. */
-export const REMOTE_TOOLS: boolean = false;
+/** Whether a lawyer may add a server at an address (PR B, remote http servers; the host takes them). A server the host
+ * already lists as remote opens its own form either way. */
+export const REMOTE_TOOLS: boolean = true;
 
 /** Whether the section says the Safe workspace doesn't start a lawyer's tools, where this build has the Safe
  * workspace (sections.tsx's own signal for it, carriesProtectionWire). One line to take out. */
 export const SAFE_WORKSPACE_NOTE: boolean = true;
-
-/** Whether the form offers a server at an address. */
-export const remoteOffered = (commands: ToolsCommands): boolean =>
-  REMOTE_TOOLS || commands.previewRemote === true;
 
 const provided = new WeakMap<HostTransport, ToolsCommands>();
 const hosts = new WeakMap<HostTransport, ToolsCommands | null>();

@@ -1,7 +1,6 @@
 // Settings › Tools' copy review entries (UC-169 to UC-196, UC-205 to UC-211, UC-250 and UC-251): each new string in the real settings window over the fake
 // host, open at Tools in the scene that shows it (settings/sections/tools-probe.tsx, the probe's scenes), at the
-// window's size. The address form's strings show with its preview on, as REMOTE_TOOLS keeps it hidden until remote
-// tools land. Hindi provisional.
+// window's size. Hindi provisional.
 import { mw, type McpToolsKey } from "@clauseo/components/lib/words-mcp-tools.ts";
 import { ToolsSceneOver } from "../settings/sections/tools-probe.tsx";
 import type { ToolsPage } from "../settings/sections/tools-scenes.ts";
