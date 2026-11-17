@@ -28,8 +28,8 @@
 //! and the others are then strays. Names are compared as the OS gives them, UTF-8 or not.
 //!
 //! Only on Windows, the one OS that makes backups, and only from the open of the host's matter
-//! worker (the matter's one writer); `Matter::open` itself reads nothing in the folder. Built in
-//! tests on every OS. Nothing here fails; the counts are logged once.
+//! worker (the matter's one writer, `matter/leftovers.rs`); `Matter::open` itself reads nothing
+//! in the folder. Built in tests on every OS. Nothing here fails; the counts are logged once.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::Matter;
+use super::leftovers::folders;
 use crate::checkpoint::Core;
 use crate::history::HistoryStore as _;
 use crate::no_download::NoDownload;
@@ -146,40 +147,11 @@ struct Found {
 }
 
 /// Puts back or clears the backups crashed rewrites left in the folder of `matter` (see
-/// `matter/backups.rs`). Windows only, through [`recover_leftovers`] as the host's matter worker
+/// `matter/backups.rs`). Windows only, through `recover_leftovers` as the host's matter worker
 /// opens the matter; built on every OS for tests.
 pub fn recover_backups(matter: &mut Matter) {
     let probe = matter.settings.probe.as_ref();
     recover(&mut matter.core, &matter.folder, probe);
-}
-
-/// Clears what a crash left in the folder of `matter`, from the open of the host's matter worker
-/// (the matter's one writer, before any job, so no write of its own is in flight): on every OS
-/// the temp files of an unfinished write (exactly `.clauseo-<digits>.tmp`, regular files, in the
-/// folders [`recover_backups`] goes through, [`write::sweep_temps`]), and on Windows the
-/// backups ([`recover_backups`]). A temp file that cannot be removed (held open by another
-/// process on Windows) stays, tried once and logged as a count; nothing here fails the open.
-pub fn recover_leftovers(matter: &mut Matter) {
-    for dir in folders(&matter.core, &matter.folder).keys() {
-        write::sweep_temps(dir);
-    }
-    #[cfg(windows)]
-    recover_backups(matter);
-}
-
-/// The matter folder and every folder the stat cache has a file in, each with the names the
-/// cache holds in it.
-fn folders(core: &Core, folder: &Path) -> BTreeMap<PathBuf, Vec<String>> {
-    let mut dirs: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
-    dirs.insert(folder.to_owned(), Vec::new());
-    for entry in &core.cache.entries {
-        let (dir, name) = match entry.path.as_str().rsplit_once('/') {
-            Some((parent, name)) => (folder.join(parent), name),
-            None => (folder.to_owned(), entry.path.as_str()),
-        };
-        dirs.entry(dir).or_default().push(name.to_owned());
-    }
-    dirs
 }
 
 /// [`recover_backups`] of `folder`.
@@ -341,6 +313,30 @@ mod tests {
         ] {
             assert_eq!(hashed_of(OsStr::new(other)), None, "{other}");
         }
+    }
+
+    /// A name is measured in UTF-16 units, as NTFS counts: a character outside the BMP is two
+    /// (a surrogate pair), so one ending at unit 236 takes the suffix and one ending at unit 237
+    /// gets the hashed name, though both are well over 236 bytes in UTF-8.
+    #[test]
+    fn a_surrogate_pair_at_the_236th_unit_counts_as_two_units() {
+        // 229 + 2 + 5 = 236 units, 240 bytes.
+        let fits = format!("{}\u{1F4DC}.docx", "a".repeat(229));
+        assert_eq!(fits.encode_utf16().count(), 236);
+        let backup = backup_name(OsStr::new(&fits), 0);
+        assert_eq!(backup, format!("{fits}.clauseo-0.orig.tmp").as_str());
+        assert_eq!(backup.to_string_lossy().encode_utf16().count(), 255);
+        assert_eq!(target_of(&backup), Some(OsStr::new(&fits)));
+        // 230 + 2 + 5 = 237 units: the pair straddles units 236 and 237.
+        let over = format!("{}\u{1F4DC}.docx", "a".repeat(230));
+        assert_eq!(over.encode_utf16().count(), 237);
+        let backup = backup_name(OsStr::new(&over), 0);
+        let hash = name_hash(OsStr::new(&over));
+        assert_eq!(backup, format!(".clauseo-{hash:016x}-0.orig.tmp").as_str());
+        assert_eq!(
+            hashed_target(std::slice::from_ref(&over), hash, 0),
+            Some(over.as_str())
+        );
     }
 
     /// A hashed backup is of the one cached name too long for the suffix with its hash: never a
