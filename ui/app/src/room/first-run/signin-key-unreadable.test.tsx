@@ -16,6 +16,7 @@ import {
   play,
   press,
   settle,
+  settingsView,
   setups,
   signIn,
   text,
@@ -121,4 +122,42 @@ test("key-unreadable on the start window, late: the key's words, the Plans line 
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   expect(byId("signin-foot")?.dataset["state"]).toBe("key-unreadable");
   expect(text()).not.toContain("Sign in with Claude");
+});
+
+// The review of 37eaf3f1b: a plan the firm locks has no row, and its install finishing in this
+// window set the "{name} is ready" tick (readyHere) whatever its key; an unreadable key never does
+test("key-unreadable on the start window, a plan the firm locks: no ready tick after its install finished here", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [info(true), install(CLAUDE, { downloading: { received: 1, total: 2 } })],
+    settings: settingsView({ locked: ["plans.claude-acp"] }),
+  });
+  await play(t, install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} }));
+  await play(t, signIn(CLAUDE, UNREADABLE));
+  expect(text()).not.toContain("Claude is ready");
+  expect(text()).not.toContain("Sign in with Claude");
+  expect(allById("plan-row").filter((r) => r.getAttribute("data-agent") === CLAUDE)).toEqual([]);
+  // control: the key read, the plan signed in by it, the tick shows
+  await play(t, signIn(CLAUDE, { signed_in: { method: "api_key", source: "own", at: AT } }));
+  expect(text()).toContain("Claude is ready");
+});
+
+test("key-unreadable on the start window: Try again refused in another code says that code's words", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [info(true), install(CLAUDE, READY), signIn(CLAUDE, UNREADABLE)],
+    command: (c) => {
+      if (c.start_sign_in !== undefined) throw refusal("command.conflict");
+    },
+  });
+  const conflict = "That request clashes with one already made, so nothing changed.";
+  expect(text()).not.toContain(conflict);
+  await press(byId("signin-foot-sign-in"));
+  await settle();
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  const row = document.querySelector(`[data-testid="plan-row"][data-agent="${CLAUDE}"]`);
+  expect(row?.textContent).toContain(conflict);
+  expect(row?.textContent).toContain("To change it, open Settings, then Plans.");
+  expect(byId("install-said")?.textContent).toContain(conflict);
+  expect(byId("signin-foot")?.dataset["state"]).toBe("key-unreadable");
 });

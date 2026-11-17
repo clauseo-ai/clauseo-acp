@@ -222,21 +222,25 @@ export function welcomeFoot(
       // a saved key the keychain didn't give (agent.key_unreadable): the gate's words and Try again
       // (gate-failed.tsx), never "is ready" with a sign-in (VM row A-K6); desktop refuses the press
       // and reads the key again. The note says where the key can be changed; no tick, since the
-      // plan can't be used until the key reads
-      if (view.code === "agent.key_unreadable")
+      // plan can't be used until the key reads. Try again refused in another code says that code's
+      // words after it, as the gate's refused line does (the same code is said once)
+      if (view.code === "agent.key_unreadable") {
+        const key = errorWords(lang, "agent.key_unreadable");
+        const plans = sx(lang, "To change it, open Settings, then Plans.");
+        const code = setup?.refused;
+        const other = code === undefined || code === view.code ? null : errorWords(lang, code);
         return named(
           noted(
-            line(errorWords(lang, "agent.key_unreadable"), "key-unreadable", {
-              ...signIn,
-              words: fl(lang, "Try again"),
-            }),
-            sx(lang, "To change it, open Settings, then Plans."),
+            line(key, "key-unreadable", { ...signIn, words: fl(lang, "Try again") }),
+            other === null ? plans : `${plans} ${other}`,
+            other === null ? undefined : `${key} ${other}`,
           ),
           lang,
           name,
           null,
           "none",
         );
+      }
       return named(
         line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
         lang,
