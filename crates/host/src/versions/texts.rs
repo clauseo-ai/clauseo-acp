@@ -172,6 +172,7 @@ impl Refusal {
             Self::Unavailable => "unavailable",
             Self::NotOpen => "not_open",
             Self::TooLarge => "too_large",
+            Self::WordTooLarge => "word_too_large",
             Self::NoWordTool => "no_word_tool",
             Self::NotChecked => "not_checked",
             Self::NotRead => "not_read",
