@@ -1040,6 +1040,11 @@ ask, could close even those: a later option, not this change.
 - **Rejected:** holding the chosen model in every mode by watching `config_option_update` and
   setting the model back. Plans would run on the weaker model, and setting it back could fight
   the adapter if the adapter re-applies its plan model.
+- **The draft's default (2026-11-17, orchestrator).** A new conversation's draft pickers show
+  the agent's options as kept in `agent-options.json` (`actor/agent_options.rs`). Each option's
+  kept current value is the one the agent's latest session started with, before Clauseo set a
+  remembered or new pick; later reports refresh only the options and their values, so a pick in
+  one matter never shows as another matter's default.
 
 ### Deviations from the brief (PR-A)
 
