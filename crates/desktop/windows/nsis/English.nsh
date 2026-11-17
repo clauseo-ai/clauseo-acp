@@ -120,6 +120,46 @@ LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 process
 ; and the install fails. Provisional (2026-11-09).
 LangString clauseoAppRemovedByAv ${LANG_ENGLISH} "Windows Security stopped part of Clauseo while it was installing, so Clauseo can't open. Open Windows Security, choose Protection history, allow Clauseo, then install Clauseo again."
 
+; The reinstall page's and the WebView2 section's words, which were Tauri's stock English
+; (installer.nsi, Tauri's template; the installer only, never the uninstaller). The reinstall page
+; (PageReinstall) shows when a Clauseo install is found: alreadyInstalled is its title, in all
+; three cases; the same version: chooseMaintenanceOption under it, alreadyInstalledLong, then the
+; radios addOrReinstall (installs over it) and uninstallApp (the old uninstaller runs, its own
+; pages, then this version installs); an older version, or one with no version recorded:
+; choowHowToInstall, olderOrUnknownVersionInstalled ($R4 is older or unknown, below), then
+; uninstallBeforeInstalling (the old uninstaller, then the install) and dontUninstall (installs over
+; it); a newer one: choowHowToInstall, newerVersionInstalled, uninstallBeforeInstalling and
+; dontUninstallDowngrade, greyed out since downgrades are off. Interactive only; /P takes the
+; page's choice unseen. unableToUninstall: a box when the old uninstaller failed; OK goes back to
+; the page. silentDowngrades: a newer version found under /S (console text), /P or /UPDATE (a box);
+; the installer quits. createDesktop: the finish page's box. The webview2* lines and
+; installingWebview2: details lines while WebView2, missing, is downloaded and installed (not
+; under /UPDATE), and in the per-machine installer's update of an old WebView2;
+; webview2AbortError is the progress page's status line when that fails, and the install stops.
+; $0 is the download's own English result, $1 the WebView2 installer's exit code. Provisional
+; (stage F, 2026-11-17).
+LangString alreadyInstalled ${LANG_ENGLISH} "${PRODUCTNAME} is already installed"
+LangString chooseMaintenanceOption ${LANG_ENGLISH} "Reinstall ${PRODUCTNAME}, or uninstall it and install it again."
+LangString choowHowToInstall ${LANG_ENGLISH} "Choose whether to uninstall the other version first."
+LangString alreadyInstalledLong ${LANG_ENGLISH} "${PRODUCTNAME} ${VERSION} is already on this computer. Choose what to do, then click Next."
+LangString addOrReinstall ${LANG_ENGLISH} "Reinstall ${PRODUCTNAME}"
+LangString uninstallApp ${LANG_ENGLISH} "Uninstall ${PRODUCTNAME} first, then install it again"
+LangString olderOrUnknownVersionInstalled ${LANG_ENGLISH} "An $R4 version of ${PRODUCTNAME} is on this computer. Choose whether to uninstall it first, then click Next."
+LangString uninstallBeforeInstalling ${LANG_ENGLISH} "Uninstall the other version first"
+LangString dontUninstall ${LANG_ENGLISH} "Install over the other version"
+LangString dontUninstallDowngrade ${LANG_ENGLISH} "Install over the newer version (not possible)"
+LangString newerVersionInstalled ${LANG_ENGLISH} "A newer version of ${PRODUCTNAME} is on this computer. To install this older one, the newer one is uninstalled first. Click Next to go on, or Cancel to keep the newer one."
+LangString unableToUninstall ${LANG_ENGLISH} "${PRODUCTNAME} couldn't uninstall the version that's on this computer. Choose again, or quit this installer and try later."
+LangString silentDowngrades ${LANG_ENGLISH} "${PRODUCTNAME} wasn't installed, because a newer version is already on this computer. To install this older one, run this installer without /S or /P, and it uninstalls the newer one first.$\n"
+LangString createDesktop ${LANG_ENGLISH} "Add a shortcut to the desktop"
+LangString webview2Downloading ${LANG_ENGLISH} "Downloading WebView2 from Microsoft."
+LangString webview2DownloadSuccess ${LANG_ENGLISH} "Downloaded WebView2."
+LangString webview2DownloadError ${LANG_ENGLISH} "Couldn't download WebView2: $0"
+LangString installingWebview2 ${LANG_ENGLISH} "Installing WebView2, which ${PRODUCTNAME} needs."
+LangString webview2InstallSuccess ${LANG_ENGLISH} "WebView2 is installed."
+LangString webview2InstallError ${LANG_ENGLISH} "WebView2's installer stopped with error code $1."
+LangString webview2AbortError ${LANG_ENGLISH} "${PRODUCTNAME} needs WebView2, which couldn't be installed. Check that you're online, then try again."
+
 ; webview2TooOld: a per-user install found WebView2 older than Clauseo needs and, so as never to
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block
 ; webview2-no-elevation); the per-machine installer says it when its update fails. Details list
@@ -148,28 +188,8 @@ LangString failedToKillApp ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} didn
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), less the keys Clauseo words itself:
-; deleteAppData, and appRunning, appRunningOkKill and failedToKillApp (above). On a Tauri upgrade,
-; copy that file's other lines here again; a key missing here has no English text.
-LangString addOrReinstall ${LANG_ENGLISH} "Add/Reinstall components"
-LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
-LangString alreadyInstalledLong ${LANG_ENGLISH} "${PRODUCTNAME} ${VERSION} is already installed. Select the operation you want to perform and click Next to continue."
-LangString chooseMaintenanceOption ${LANG_ENGLISH} "Choose the maintenance option to perform."
-LangString choowHowToInstall ${LANG_ENGLISH} "Choose how you want to install ${PRODUCTNAME}."
-LangString createDesktop ${LANG_ENGLISH} "Create desktop shortcut"
-LangString dontUninstall ${LANG_ENGLISH} "Do not uninstall"
-LangString dontUninstallDowngrade ${LANG_ENGLISH} "Do not uninstall (Downgrading without uninstall is disabled for this installer)"
-LangString installingWebview2 ${LANG_ENGLISH} "Installing WebView2..."
-LangString newerVersionInstalled ${LANG_ENGLISH} "A newer version of ${PRODUCTNAME} is already installed! It is not recommended that you install an older version. If you really want to install this older version, it's better to uninstall the current version first. Select the operation you want to perform and click Next to continue."
+; deleteAppData, appRunning, appRunningOkKill and failedToKillApp, and the reinstall page's
+; and the WebView2 section's 21 (above). On a Tauri upgrade, copy that file's other lines here
+; again; a key missing here has no English text.
 LangString older ${LANG_ENGLISH} "older"
-LangString olderOrUnknownVersionInstalled ${LANG_ENGLISH} "An $R4 version of ${PRODUCTNAME} is installed on your system. It's recommended that you uninstall the current version before installing. Select the operation you want to perform and click Next to continue."
-LangString silentDowngrades ${LANG_ENGLISH} "Downgrades are disabled for this installer, can't proceed with the silent installer, please use the graphical interface installer instead.$\n"
-LangString unableToUninstall ${LANG_ENGLISH} "Unable to uninstall!"
-LangString uninstallApp ${LANG_ENGLISH} "Uninstall ${PRODUCTNAME}"
-LangString uninstallBeforeInstalling ${LANG_ENGLISH} "Uninstall before installing"
 LangString unknown ${LANG_ENGLISH} "unknown"
-LangString webview2AbortError ${LANG_ENGLISH} "Failed to install WebView2! The app can't run without it. Try restarting the installer."
-LangString webview2DownloadError ${LANG_ENGLISH} "Error: Downloading WebView2 Failed - $0"
-LangString webview2DownloadSuccess ${LANG_ENGLISH} "WebView2 bootstrapper downloaded successfully"
-LangString webview2Downloading ${LANG_ENGLISH} "Downloading WebView2 bootstrapper..."
-LangString webview2InstallError ${LANG_ENGLISH} "Error: Installing WebView2 failed with exit code $1"
-LangString webview2InstallSuccess ${LANG_ENGLISH} "WebView2 installed successfully"

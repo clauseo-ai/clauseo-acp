@@ -10,6 +10,8 @@ use serde_json::Value;
 use std::path::Path;
 
 mod installer_languages;
+// The reinstall page's and the WebView2 section's lines in Clauseo's words.
+mod installer_stock_words;
 
 fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
