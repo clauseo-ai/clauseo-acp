@@ -33,7 +33,7 @@ fn modes(events: &Events) -> Vec<String> {
         .collect()
 }
 
-const LINE: &str = "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.";
+const LINE: &str = "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.";
 
 #[test]
 fn a_refused_reviewer_resends_once_in_workspace_write_and_later_sessions_start_there() {

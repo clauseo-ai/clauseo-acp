@@ -33,7 +33,7 @@ use crate::log_file::Cause;
 /// (`NoticeKind::AutoModeUnavailable` from a Codex agent), for a view that does not know the
 /// kind.
 pub(crate) const CODEX_AUTO_UNAVAILABLE: &str = "ChatGPT's automatic mode isn't available for \
-     this account, so ChatGPT asks before approving steps.";
+     this account, so ChatGPT asks before running commands.";
 
 /// A prompt's one resend in the fallback mode, for a Codex agent only.
 #[derive(Debug, Default)]

@@ -167,7 +167,7 @@ export function noticeLine(
     if (kind === "auto_mode_unavailable")
       return agent?.kind === "codex"
         ? w.th(
-            "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+            "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.",
           )
         : w.th(
             "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
