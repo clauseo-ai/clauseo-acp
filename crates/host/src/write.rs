@@ -456,6 +456,17 @@ pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
         .open(path)
 }
 
+/// Opens `path` for reading with no sharing at all (share mode 0): no other open succeeds until
+/// it drops. For the rig's Windows test of a checkpoint that can't read a held file.
+#[cfg(all(test, windows))]
+pub(crate) fn open_no_share(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(path)
+}
+
 /// Makes `link` a symbolic link to `target`. For unit tests: a matter stored as a link.
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
