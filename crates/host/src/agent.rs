@@ -190,7 +190,8 @@ pub(crate) struct AgentLink {
     /// The agent's descendants, which a cancelled turn's sweep lists and ends
     /// ([`leftovers`]); it keeps nothing alive.
     descendants: Descendants,
-    stop: Option<oneshot::Sender<()>>,
+    /// Asks for the stop, with how long its listing of the agent's descendants may wait.
+    stop: Option<oneshot::Sender<Duration>>,
     /// The connection's event channel, read only to see whether it is empty ([`Self::fence`]).
     events: async_channel::Receiver<AcpEvent>,
     /// The fenced calls in flight, which the owner waits for before it posts [`Ended`].
@@ -254,10 +255,16 @@ impl AgentLink {
 
     /// Asks the owner task to stop the agent with the shutdown ladder. It posts
     /// [`Ended::Stopped`] when done, or [`Ended::Exited`] if the agent exited first. A second
-    /// call does nothing.
+    /// call does nothing. Its listing waits [`leftovers::STOP_LIST_WAIT`].
     pub(crate) fn stop(&mut self) {
+        self.stop_listing_within(leftovers::STOP_LIST_WAIT);
+    }
+
+    /// [`AgentLink::stop`] with its listing waiting `list_wait`: a quit's stop waits
+    /// [`leftovers::SNAPSHOT_WAIT`], as the quit's budget counts (desktop's `EXIT_STOP_WAIT`).
+    pub(crate) fn stop_listing_within(&mut self, list_wait: Duration) {
         if let Some(stop) = self.stop.take()
-            && stop.send(()).is_err()
+            && stop.send(list_wait).is_err()
         {
             tracing::debug!(
                 pid = self.pid,
@@ -304,7 +311,7 @@ pub(crate) fn start(
     // Each sender is dropped when its task ends, which wakes its receiver.
     let (pump_done, pump_end) = oneshot::channel::<()>();
     let (events_done, events_end) = oneshot::channel::<()>();
-    let (stop, stop_asked) = oneshot::channel::<()>();
+    let (stop, stop_asked) = oneshot::channel::<Duration>();
 
     spawn(spawner, async move {
         if let Err(err) = stderr.drain().await {
@@ -460,7 +467,7 @@ impl Owner {
 /// The owner task: exit or stop, then the bounded wait for the pipes, then the report.
 async fn own(
     mut handle: Handle,
-    stop_asked: oneshot::Receiver<()>,
+    stop_asked: oneshot::Receiver<Duration>,
     ends: impl Future<Output = ()>,
     output: Output,
     owner: Owner,
@@ -469,57 +476,61 @@ async fn own(
     let pid = handle.pid();
     let exited = {
         let exit = pin!(handle.exited());
-        // A dropped `AgentLink` (Canceled) asks for a stop too.
+        // A dropped `AgentLink` (Canceled) asks for a stop too, with the short listing wait: the
+        // actor is going, as at a quit.
         match select(exit, stop_asked).await {
-            Either::Left((report, _)) => Some(report),
-            Either::Right(_) => None,
+            Either::Left((report, _)) => Ok(report),
+            Either::Right((wait, _)) => Err(wait.unwrap_or(leftovers::SNAPSHOT_WAIT)),
         }
     };
-    let ended = if let Some(report) = exited {
-        // The agent is gone: all it wrote is in its stdout or already read.
-        owner.enter(pid, OwnerStep::Settling);
-        let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &**clock).await;
-        Ended::Exited(report.detach_reason())
-    } else {
-        // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
-        // ends a descendant that left the agent's group, as a Codex command does.
-        // A listing that misses its wait is still ended once it comes (`leftovers::end_late`).
-        owner.enter(pid, OwnerStep::Listing);
-        let listing = if cfg!(unix) {
-            let descendants = handle.descendants();
-            leftovers::listing(descendants, Arc::clone(clock), leftovers::STOP_LIST_WAIT).await
-        } else {
-            leftovers::Listed::Failed
-        };
-        let (listed, late) = match listing {
-            leftovers::Listed::Taken(snapshot) => (Some(snapshot), None),
-            late @ leftovers::Listed::Late(_) => (None, Some(late)),
-            leftovers::Listed::Failed => (None, None),
-        };
-        owner.enter(pid, OwnerStep::Ladder);
-        let outcome = handle
-            .shutdown(&ProcessTimer(Arc::clone(clock)), listed)
-            .await;
-        #[cfg(unix)]
-        if let Some(late) = late {
-            leftovers::end_late(late, Arc::clone(clock));
+    let ended = match exited {
+        Ok(report) => {
+            // The agent is gone: all it wrote is in its stdout or already read.
+            owner.enter(pid, OwnerStep::Settling);
+            let mark = output.progress.mark();
+            settle(ends, || output.posted_since(mark), &**clock).await;
+            Ended::Exited(report.detach_reason())
         }
-        #[cfg(not(unix))]
-        drop(late);
-        let step = StopStep::of(&outcome);
-        if step == StopStep::Unresponsive {
-            tracing::warn!(
-                pid,
-                "the agent did not exit after its kill; it is reaped later"
-            );
-        }
-        owner.enter(pid, OwnerStep::Settling);
-        let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &**clock).await;
-        Ended::Stopped {
-            step,
-            report: outcome.report().detach_reason(),
+        Err(list_wait) => {
+            // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
+            // ends a descendant that left the agent's group, as a Codex command does.
+            // A listing that misses its wait is still ended once it comes (`leftovers::end_late`).
+            owner.enter(pid, OwnerStep::Listing);
+            let listing = if cfg!(unix) {
+                let descendants = handle.descendants();
+                leftovers::listing(descendants, Arc::clone(clock), list_wait).await
+            } else {
+                leftovers::Listed::Failed
+            };
+            let (listed, late) = match listing {
+                leftovers::Listed::Taken(snapshot) => (Some(snapshot), None),
+                late @ leftovers::Listed::Late(_) => (None, Some(late)),
+                leftovers::Listed::Failed => (None, None),
+            };
+            owner.enter(pid, OwnerStep::Ladder);
+            let outcome = handle
+                .shutdown(&ProcessTimer(Arc::clone(clock)), listed)
+                .await;
+            #[cfg(unix)]
+            if let Some(late) = late {
+                leftovers::end_late(late, Arc::clone(clock));
+            }
+            #[cfg(not(unix))]
+            drop(late);
+            let step = StopStep::of(&outcome);
+            if step == StopStep::Unresponsive {
+                tracing::warn!(
+                    pid,
+                    "the agent did not exit after its kill; it is reaped later"
+                );
+            }
+            owner.enter(pid, OwnerStep::Settling);
+            let mark = output.progress.mark();
+            settle(ends, || output.posted_since(mark), &**clock).await;
+            Ended::Stopped {
+                step,
+                report: outcome.report().detach_reason(),
+            }
         }
     };
     owner.enter(pid, OwnerStep::Posted);

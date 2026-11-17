@@ -7,11 +7,12 @@
 //! while the refusal lasted. So the held updates are dropped with a host.log line, and the held
 //! cards (permission requests, elicitations) are answered at once: the permission's reject-once
 //! option (else `cancelled`), an elicitation `decline`. ACP's answer carries no reason, so the
-//! reason goes to host.log; the agent is stopped next (`steps::on_before_turn`).
+//! reason goes to host.log. A refused agent-started turn's agent is stopped next
+//! (`steps::on_before_turn`); a refused prompt of the lawyer's stops nothing.
 //!
 //! The belt ([`CAP`]): however a thread's agent-started turns come to fail, no more than `CAP`
-//! of them in a row fail with the same code and no turn starting between: past it the agent is
-//! stopped, once, and logged. A turn that starts, or a turn the lawyer sent, ends the run.
+//! of them in a row fail with the same code and no turn starting between: the `CAP`th stops the
+//! agent, once, and is logged. A turn that starts, or a turn the lawyer sent, ends the run.
 
 use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_protocol::{AgentChoiceId, ElicitationResponse, ErrorCode, ThreadId};
@@ -61,6 +62,20 @@ pub(in crate::actor::turn) fn unstarted_failed(
     if run >= CAP {
         tracing::warn!(%thread, %code, run, "agent-started turns keep failing; the agent is stopped");
         agents::stop(actor, thread);
+    }
+}
+
+/// `thread`'s agent ended: what it sent between turns is dropped (no card of it is answered on
+/// another connection, where its key may name another request), and the run of failed
+/// agent-started turns ends with it.
+pub(in crate::actor::turn) fn agent_ended(actor: &mut Actor, thread: ThreadId) {
+    let Some(state) = state(actor, thread) else {
+        return;
+    };
+    state.own_held.failed = None;
+    let held = std::mem::take(&mut state.own_held.updates);
+    if !held.is_empty() {
+        tracing::info!(%thread, dropped = held.len(), "the agent ended; what it held went with it");
     }
 }
 

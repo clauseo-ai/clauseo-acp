@@ -9,7 +9,7 @@ use super::super::launch_checks;
 use super::super::out::Out;
 use super::super::{End, Then, TurnPhase, current, end, state, updates};
 use super::{Agent, Stage, Waiting, fail_waiting, start};
-use crate::agent::{Ended, StopStep};
+use crate::agent::{Ended, StopStep, leftovers};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::log_file::LIFECYCLE;
@@ -39,15 +39,21 @@ pub(super) fn stop_closed(agent: &mut Agent, waiting: Waiting) {
     agent.after_stop.push(waiting);
 }
 
-/// Stops `thread`'s agent with the shutdown ladder; `Ended` follows.
+/// Stops `thread`'s agent with the shutdown ladder; `Ended` follows. While the host stops (a
+/// quit) its listing waits the short [`leftovers::SNAPSHOT_WAIT`], which the quit's budget counts.
 pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
+    let list_wait = if super::super::host_stopping(actor) {
+        leftovers::SNAPSHOT_WAIT
+    } else {
+        leftovers::STOP_LIST_WAIT
+    };
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     if agent.stage == Stage::Stopping {
         return;
     }
-    agent.link.stop();
+    agent.link.stop_listing_within(list_wait);
     if agent.stage == Stage::Closed || agent.link.closed() {
         agent.stop_cause = StopCause::Closed;
     }
@@ -94,6 +100,9 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
+    // What it sent between turns went with its connection: no card of it is answered on the
+    // next agent, whose request keys start again at 1.
+    super::super::own_turn::refused::agent_ended(actor, thread);
     super::super::idle::ended(actor, thread);
     // Its pending questions went with it.
     super::super::super::limits::asking_changed(actor);

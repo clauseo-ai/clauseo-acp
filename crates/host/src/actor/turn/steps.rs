@@ -367,12 +367,15 @@ pub(super) fn on_before_turn(
                 code: error.code(),
                 detail: Some(error.detail()),
             };
+            let own = super::own_turn::is_own(actor, thread);
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
-            // Nothing reached the agent, but it may still be working (a Codex helper, a background
-            // command): stopped, as a refused prompt's is (`end::on_prompt_refused`), whatever the
-            // refusal (the folder moved or gone, a failed checkpoint). The next prompt launches it
-            // again, if it can.
-            agents::stop(actor, thread);
+            // An agent-started turn's agent is stopped: it may still be working (a Codex helper,
+            // a background command) on output nobody will see. A refused prompt of the lawyer's
+            // stops nothing: dropping the held output already ends the loop, and the stop would
+            // kill the lawyer's background commands for nothing.
+            if own {
+                agents::stop(actor, thread);
+            }
             return;
         }
     };

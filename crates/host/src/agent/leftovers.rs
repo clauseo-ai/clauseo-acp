@@ -102,7 +102,11 @@ pub(crate) async fn listing(
     };
     match within(&answer, &*clock, wait).await {
         Some(snapshot) => Listed::Taken(snapshot),
-        None if answer.is_closed() && answer.is_empty() => Listed::Failed,
+        // Kept late on Unix only: Windows waits as before (its stop ends the whole job).
+        None if cfg!(not(unix)) || (answer.is_closed() && answer.is_empty()) => {
+            tracing::warn!("the agent's descendants were not listed in time");
+            Listed::Failed
+        }
         None => {
             tracing::warn!("the agent's descendants were not listed in time; kept for later");
             Listed::Late(answer)
