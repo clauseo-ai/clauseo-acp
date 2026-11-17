@@ -106,9 +106,13 @@ libc = { workspace = true }
 # of Claude Code's registry policy (System_Registry; actor/turn/offline/probe/settings/os_policy).
 # The native crash handler's unhandled-exception filter (src/crash/native/win.rs):
 # Diagnostics_Debug, and Kernel, which SetUnhandledExceptionFilter and EXCEPTION_POINTERS need.
+# The check of Codex's sandbox SIDs against this process's token (agent/codex/cap_sid.rs):
+# Security, Security_Authorization and System_Threading.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
   "Win32_Security_Cryptography",
   "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
@@ -116,6 +120,7 @@ windows = { workspace = true, features = [
   "Win32_System_Kernel",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
+  "Win32_System_Threading",
 ] }
 
 # The console program Codex's hook runs on Windows (`src/bin/clauseo-guard.rs`): the guard, as the
