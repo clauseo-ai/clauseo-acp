@@ -31,6 +31,7 @@ When a thread runs out of its block, it asks the app track, which hands out a su
 | --------------------------------------------------------------------------- | ---------------- | ---------- |
 | app track (helper step: UC-906, UC-907; others given out as their PRs land) | UC-900 to UC-919 | 2026-11-17 |
 | online words (UC-online-only-read.json, within the app track's 900 to 919)  | UC-913 to UC-915 | 2026-11-17 |
+| stage B automode (UC-codex-auto.json; asked of the app track in its PR)     | UC-920 to UC-923 | 2026-11-17 |
 
 ## Other prefixes: closed to new ids
 

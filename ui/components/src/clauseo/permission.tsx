@@ -30,6 +30,12 @@ const LABEL = {
   deny: "Don't allow",
   never: "Don't allow for this matter",
 } as const;
+/** The allow-always answer of an agent whose standing answers last for the conversation only (ChatGPT's session
+ * answers, crates/host/src/agent/codex_options.rs): never "for this matter". */
+const CONVERSATION_ALWAYS = "For this conversation";
+
+/** How long the agent keeps an allow-always answer: for the matter, or for this conversation only. */
+export type AlwaysScope = "matter" | "conversation";
 
 export function PermissionPrompt({
   paper,
@@ -42,6 +48,7 @@ export function PermissionPrompt({
   details,
   reason,
   kept = true,
+  scope = "matter",
   done,
   confirming = false,
   busy = false,
@@ -68,6 +75,9 @@ export function PermissionPrompt({
   reason?: ReactNode;
   /** Whether "Every change is kept." shows. */
   kept?: boolean;
+  /** How long the agent keeps the allow-always answer: its button and folded line say "this conversation" for one
+   * whose answers last the conversation only. */
+  scope?: AlwaysScope;
   /** Whether the tool call finished; left out, the folded line names the paper as before. */
   done?: boolean | undefined;
   /** The computer's own dialog is up: the answers wait and the prompt says so. */
@@ -173,7 +183,7 @@ export function PermissionPrompt({
 
   if (state !== "pending") {
     // what the lawyer decided, then what Clauseo did, in the past tense
-    const said = folded(w.th, state, paper, done);
+    const said = folded(w.th, state, paper, done, scope);
     const refused = state === "deny" || state === "never";
     return (
       <p
@@ -273,7 +283,9 @@ export function PermissionPrompt({
             >
               {/* a tick on the two that allow, a cross on the two that refuse; the words name the answer */}
               {a === "once" || a === "always" ? <IconTick size={16} /> : <IconCross size={16} />}
-              <span className="deva-nudge">{w.th(LABEL[a])}</span>
+              <span className="deva-nudge">
+                {w.th(a === "always" && scope === "conversation" ? CONVERSATION_ALWAYS : LABEL[a])}
+              </span>
               {withKey && <Kbd className="perm-key">{cap(a)}</Kbd>}
             </Button>
           );
@@ -304,8 +316,15 @@ function folded(
   state: Exclude<PermissionState, "pending">,
   paper: string | null,
   done: boolean | undefined,
+  scope: AlwaysScope,
 ): string {
   if (state === "gone") return th("No longer waiting for an answer.");
+  if (state === "always" && scope === "conversation") {
+    const saved = paper !== null && done !== false;
+    return saved
+      ? th("Allowed for this conversation. Clauseo saved a new version of {paper}.", { paper })
+      : th("Allowed for this conversation.");
+  }
   if (state === "never") return th("Not allowed for this matter.");
   // done left out: the sentences from before the agent said whether the call finished
   const named = paper ?? "";
