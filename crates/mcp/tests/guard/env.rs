@@ -38,8 +38,8 @@ const HOSTILE: &[(&str, &str)] = &[
     ("TMPDIR", "/tmp/elsewhere"),
 ];
 
-/// The session key's name (Windows), and what [`child_env`] puts for its random value once the
-/// form (64 lower-case hex digits) is checked.
+/// The session key's name (Windows), and what [`child_env`] puts for its value once the
+/// guard's redaction mark is checked in its place.
 const SESSION_KEY: &str = "AGENT_BROWSER_SESSION_KEY";
 const SESSION_KEY_SEEN: &str = "<session key>";
 
@@ -311,9 +311,12 @@ fn child_env(report: &Value, host_session: &str) -> BTreeMap<String, String> {
             }
         }
         if let Some(key) = env.get_mut(SESSION_KEY) {
-            assert!(
-                key.len() == 64 && key.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
-                "not a session key"
+            // The stub's report comes back through the guard's redaction (`relay/redact.rs`),
+            // which puts its mark for the key's value.
+            assert_eq!(
+                key.as_str(),
+                "[secret redacted]",
+                "the session key was not redacted"
             );
             SESSION_KEY_SEEN.clone_into(key);
         }
