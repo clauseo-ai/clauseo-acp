@@ -14,6 +14,8 @@
 //! is in [`profile`].
 
 pub(crate) mod browser;
+#[cfg(test)]
+mod builtin_skills_tests;
 pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
