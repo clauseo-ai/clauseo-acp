@@ -1,0 +1,26 @@
+# The packages pdf-python-tests.yml's fake-engine lane installs (pip --require-hashes
+# --only-binary=:all:), at the versions python-runtime/lock.toml pins for Clauseo's Python
+# runtime. One wheel per runner the lane uses (Linux x86_64, macOS arm64, Windows x64), each by
+# the sha256 PyPI gives; the macOS and Windows hashes are also the lock's. No package here
+# depends on another on Python 3.13 (pypdf's typing_extensions is for Python < 3.11 only).
+# Move these with the lock: a bump of pillow, pypdf or pypdfium2 there changes them here.
+
+# pillow-13.0.0-cp313-cp313-macosx_11_0_arm64.whl
+# pillow-13.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (Linux: not in the lock)
+# pillow-13.0.0-cp313-cp313-win_amd64.whl
+pillow==13.0.0 \
+    --hash=sha256:f11a3c1358bb3c68012a7b1f41b223c3db9f7bfde90b481df028cfe1c3363313 \
+    --hash=sha256:5f56499c1a74d2b862beb0c33b8016f99d095858455df9d21583bbbc1c15b582 \
+    --hash=sha256:9dda0788a9932776a75d8bcc020076edc308ce2508b51f6739a45e3158b3fc42
+
+# pypdf-7.0.0-py3-none-any.whl
+pypdf==7.0.0 \
+    --hash=sha256:112a2c7cbabefd8dfe498f7a13977e575e762d58cdb0d832acb8886922602c6f
+
+# pypdfium2-5.15.2-py3-none-macosx_13_0_arm64.whl
+# pypdfium2-5.15.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (Linux: not in the lock)
+# pypdfium2-5.15.2-py3-none-win_amd64.whl
+pypdfium2==5.15.2 \
+    --hash=sha256:e71fe832e94421ac3c28d6a6ed4a9e61f22417089652d339f391c4ffc2a44c35 \
+    --hash=sha256:dc31aea5b0fb9fefc9b537a65f4113980b2c40798445736a7e6565bc85161e37 \
+    --hash=sha256:74d1bace34fb01c660d0b64344d5a4b7d276942b7c6623c88ab59ea21c5acfbd

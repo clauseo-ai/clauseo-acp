@@ -1,0 +1,168 @@
+# pdf python tests: crates/pdf's Python tests (crates/pdf/tests/test_*.py, the scripts its
+# pdftoppm, pdfinfo and pdftotext launchers run) on every change to crates/pdf. The workspace's
+# nextest in ci.yml never runs them: they are unittest files, run with
+#   <python> -m unittest discover -s crates/pdf/tests -p 'test_*.py'
+# from the repository root.
+#
+# Per event:
+# - pull_request, when crates/pdf/** or this lane's own files change (the paths below): both
+#   jobs. No push to main runs it (ci.yml: pushes to main run nothing). It is not a required check.
+#
+# Jobs:
+# - fake-engine, on Linux x64, macOS arm64 and Windows x64: Python 3.13 (the minor of
+#   python-runtime/lock.toml's [runtime] python) from setup-python, with pillow, pypdf and
+#   pypdfium2 at the lock's versions from .github/requirements/pdf-python-tests.txt, installed
+#   with --require-hashes, binary wheels only. The tests drive a fake tesseract. On macOS and
+#   Linux it is a Python script; Windows runs only an .exe, so there `cargo build -p clauseo-pdf
+#   --bins` builds the Rust fake (clauseo-fake-tesseract.exe) and pdftotext.exe, and
+#   CLAUSEO_TEST_FAKE_TESSERACT and CLAUSEO_TEST_PDFTOTEXT name them. The crate's only dependency
+#   is `windows`, so the build is small. It runs cold: no rust-cache, so nothing joins
+#   cache-families.txt.
+# - real-engine, on macOS arm64 and Windows x64: the same tests with the interpreter of Clauseo's
+#   pinned Python runtime, the archive the app installs, which ships pypdfium2, Pillow, pypdf and
+#   tesseract with its eng model (no pip), and CLAUSEO_TEST_TESSERACT set to tesseract's folder
+#   (bin/ on macOS, clauseo-bin\ on Windows), so the test that OCRs a real scan runs and must pass.
+#   The archive's name, URL and SHA-256 are read from PYTHON_ARCHIVES in
+#   crates/agents/src/snapshot/embedded.rs, the app's pin (python-runtime/lock.toml pins the
+#   runtime's inputs, not the archives python-runtime.yml builds from them), so a new pin moves
+#   this lane with it. The download must have that SHA-256 or the job fails before it unpacks.
+#   The release (python-runtime-<python>-c<build>) is public and never replaced
+#   (python-runtime.yml's publish).
+#
+# - Every action is pinned by commit SHA, with its tag in a comment: checkout copied from ci.yml;
+#   setup-python, which no other workflow uses, at v7.1.0's commit. Checkout keeps no credentials.
+# - The token can only read the repository. No secret is used.
+
+name: pdf python tests
+
+on:
+  pull_request:
+    paths:
+      - crates/pdf/**
+      - crates/agents/src/snapshot/embedded.rs
+      - .github/requirements/pdf-python-tests.txt
+      - .github/workflows/pdf-python-tests.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdf-python-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fake-engine:
+    name: fake engine (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install pillow, pypdf and pypdfium2 by hash
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps --only-binary=:all:
+          --require-hashes -r .github/requirements/pdf-python-tests.txt
+
+      - name: Install the Rust toolchain from rust-toolchain.toml (Windows)
+        if: runner.os == 'Windows'
+        run: rustup toolchain install
+
+      - name: Build the fake tesseract and pdftotext (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --locked -p clauseo-pdf --bins
+          dir=$(cygpath -w "$PWD/target/debug")
+          for exe in clauseo-fake-tesseract.exe pdftotext.exe; do
+            if [ ! -f "target/debug/$exe" ]; then
+              echo "::error::cargo build -p clauseo-pdf --bins made no target/debug/$exe"
+              exit 1
+            fi
+          done
+          echo "CLAUSEO_TEST_FAKE_TESSERACT=$dir\\clauseo-fake-tesseract.exe" >> "$GITHUB_ENV"
+          echo "CLAUSEO_TEST_PDFTOTEXT=$dir\\pdftotext.exe" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: python -m unittest discover -v -s crates/pdf/tests -p 'test_*.py'
+
+  real-engine:
+    name: real engine (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos-arm64, runner: macos-15 }
+          - { platform: windows-x64, runner: windows-2025 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The row of PYTHON_ARCHIVES for this platform: its file name ends in -<platform>.tar.gz,
+      # then come its URL and, after the two sizes, its SHA-256.
+      - name: Download the pinned Python runtime and check its SHA-256
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          pins=crates/agents/src/snapshot/embedded.rs
+          row=$(grep -A6 -E "^ *\"clauseo-python-[^\"]*-${PLATFORM}\\.tar\\.gz\",\$" "$pins" || true)
+          name=$(printf '%s\n' "$row" | sed -n '1s/^ *"\([^"]*\)",$/\1/p')
+          url=$(printf '%s\n' "$row" | grep -oE '"https://github\.com/clauseo-ai/clauseo-acp/releases/download/[^"]+"' | tr -d '"')
+          sha=$(printf '%s\n' "$row" | grep -oE '"[0-9a-f]{64}"' | tr -d '"')
+          if [ -z "$name" ] || [ -z "$url" ] || [ "$(printf '%s\n' "$sha" | wc -l)" -ne 1 ] || [ -z "$sha" ] \
+             || [ "${url##*/}" != "$name" ]; then
+            echo "::error::no single PYTHON_ARCHIVES row for $PLATFORM in $pins"
+            exit 1
+          fi
+          cd "$RUNNER_TEMP"
+          curl --fail --location --silent --show-error --retry 3 --output "$name" "$url"
+          if command -v sha256sum >/dev/null; then
+            got=$(sha256sum "$name" | cut -d' ' -f1)
+          else
+            got=$(shasum -a 256 "$name" | cut -d' ' -f1)
+          fi
+          if [ "$got" != "$sha" ]; then
+            echo "::error::$name has SHA-256 $got, but $pins pins $sha"
+            exit 1
+          fi
+          echo "$name: SHA-256 $sha, as $pins pins"
+          mkdir rt
+          tar -xzf "$name" -C rt
+          rm "$name"
+          top=$(ls rt)
+          if [ "$(printf '%s\n' "$top" | wc -l)" -ne 1 ]; then
+            echo "::error::$name does not hold one top folder"
+            exit 1
+          fi
+          root="$RUNNER_TEMP/rt/$top"
+          if [ "$RUNNER_OS" = Windows ]; then
+            echo "RUNTIME_PYTHON=$root/python.exe" >> "$GITHUB_ENV"
+            echo "CLAUSEO_TEST_TESSERACT=$(cygpath -w "$root/clauseo-bin")" >> "$GITHUB_ENV"
+          else
+            echo "RUNTIME_PYTHON=$root/bin/python3" >> "$GITHUB_ENV"
+            echo "CLAUSEO_TEST_TESSERACT=$root/bin" >> "$GITHUB_ENV"
+          fi
+
+      # The real-engine test skips without CLAUSEO_TEST_TESSERACT; here it must have run and passed.
+      - name: Test with the runtime's interpreter and tesseract
+        run: |
+          "$RUNTIME_PYTHON" -m unittest discover -v -s crates/pdf/tests -p 'test_*.py' 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+          if ! grep -qE '^test_a_scanned_page_yields_its_words_with_the_real_engine .*\.\.\. ok' "$RUNNER_TEMP/unittest.log"; then
+            echo "::error::the real-engine test did not run and pass"
+            exit 1
+          fi
