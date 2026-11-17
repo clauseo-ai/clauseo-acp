@@ -336,9 +336,10 @@ pub(crate) fn reason_from(name: &str) -> SkippedFileReason {
         .map_or(SkippedFileReason::Unknown, |(reason, _)| *reason)
 }
 
-/// Whether `stat` has the size and modification time of `entry`.
+/// Whether `stat` has the size and modification time of `entry`, the times within the
+/// first-read rule's tolerance (`stamps.rs`: iCloud Drive rounds a time on first download).
 pub(crate) fn same_stat(entry: &SkipEntry, stat: &Stat) -> bool {
-    entry.size == stat.size && entry.mtime == stat.mtime
+    crate::stamps::same(entry.size, entry.mtime, stat, crate::stamps::FIRST_READ_NS)
 }
 
 /// Unit tests only: records written with one line no reader can read, as a damaged or foreign

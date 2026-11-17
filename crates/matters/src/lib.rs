@@ -149,6 +149,7 @@ mod restore;
 mod rules;
 mod scan;
 mod skip_record;
+mod stamps;
 mod stat;
 #[cfg(test)]
 mod test_dir;
