@@ -5,7 +5,7 @@
 use clauseo_protocol::{ConfigCategory, ConfigChoice, ConfigOption, ConfigOptionKind};
 
 use super::seed::{self, AGENT_DEFAULT};
-use super::{AgentOptions, CAP, FILE};
+use super::{AgentOptions, CAP, FILE, merged};
 use crate::pipeline::tests::support::TempDir;
 
 fn model(current: &str) -> ConfigOption {
@@ -108,4 +108,26 @@ fn each_seed_is_the_agents_model_and_effort_at_its_own_default() {
         }
     }
     assert_eq!(seed::of("fake-agent"), []);
+}
+
+#[test]
+fn the_seed_is_never_kept_and_merged_never_keeps_its_value() {
+    let dir = TempDir::new("agent-options-seed-merged");
+    let mut kept = AgentOptions::new(dir.path());
+    // shown for a fresh Claude agent, but stored is the sessions' alone
+    assert_eq!(kept.of("claude-acp"), seed::of("claude-acp"));
+    assert_eq!(kept.stored("claude-acp"), []);
+    // a later report over nothing stored is as reported
+    assert_eq!(
+        merged(kept.stored("claude-acp"), &[model("opus")]),
+        [model("opus")]
+    );
+    // a seed handed in as kept counts as none kept: the report's value stands, never the seed's
+    let merged_over_seed = merged(seed::of("claude-acp"), &[model("opus")]);
+    assert_eq!(merged_over_seed, [model("opus")]);
+    // a real kept value still wins over a later report that offers it
+    assert_eq!(
+        merged(&[model("default")], &[model("opus")]),
+        [model("default")]
+    );
 }
