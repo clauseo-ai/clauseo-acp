@@ -7,32 +7,14 @@ use serde_json::{Value, json};
 use crate::profile_rig::{CLAUDE, Wired, agent_lines, agents, settings, template, turn};
 use crate::support::Dir;
 
-/// Claude Code's own sandbox (`agent::loads::sandbox`): a Claude session on macOS and Linux
-/// gets it, with its work folder writable, the home denied and a short temp folder of its own
-/// as `CLAUDE_CODE_TMPDIR`; on Windows none, so its commands keep asking.
+/// Claude Code's own sandbox (`agent::loads::sandbox`) is off on every OS (`SandboxOs::LAUNCH`,
+/// Rohan 2026-11-17): a Claude session gets no `sandbox` in its settings, as on Windows. Off
+/// Windows it still gets a short temp folder of its own as `CLAUDE_CODE_TMPDIR`.
 #[test]
-fn claude_runs_its_commands_in_its_sandbox_except_on_windows() {
+fn claude_gets_no_shell_sandbox_on_any_os() {
     let dir = Dir::new("profile_claude_sandbox", &[]);
-    let (expected, offs): (Value, &[&str]) = if cfg!(windows) {
-        (json!({}), &["/_meta/claudeCode/options/settings/sandbox"])
-    } else {
-        (
-            json!({"sandbox": {
-                "enabled": true,
-                "autoAllowBashIfSandboxed": true,
-                "allowUnsandboxedCommands": false,
-                // The lists' lengths follow the OS's spellings of the same folders (macOS adds
-                // `/private/var/...` beside `/var/...`); `agent/loads/sandbox_tests.rs` pins their
-                // entries, so here each list only has to be there.
-                "filesystem": {
-                    "denyRead": "{{any}}",
-                    "denyWrite": "{{any}}",
-                    "allowWrite": "{{any}}",
-                },
-            }}),
-            &[],
-        )
-    };
+    let (expected, offs): (Value, &[&str]) =
+        (json!({}), &["/_meta/claudeCode/options/settings/sandbox"]);
     let claude = template(
         &dir,
         "sandbox",

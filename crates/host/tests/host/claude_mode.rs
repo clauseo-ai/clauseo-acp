@@ -230,13 +230,13 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_auto() {
     host.shutdown();
 }
 
-/// A matter folder whose name holds a `*` cannot be named in Claude's sandbox, so the session
-/// gets none and runs in `acceptEdits` though `auto` is offered, with no auto notice (the
-/// account has auto) and one `SandboxOff` notice, which says Claude asks before commands (and
-/// has no browser); a move to `bypassPermissions` goes back to `acceptEdits`, not `auto`.
+/// A matter folder whose name holds a `*`, which Claude's sandbox could not name, runs in `auto`
+/// with no auto notice and no `SandboxOff` notice: the sandbox is off on every OS
+/// (`SandboxOs::LAUNCH`, the not-wanted `Off::Windows`), so no fallback holds `auto` back; a
+/// move to `bypassPermissions` goes back to `auto`.
 #[cfg(unix)]
 #[test]
-fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
+fn a_matter_the_sandbox_could_not_name_runs_in_auto() {
     let dir = Dir::new(
         "claude_mode_no_sandbox",
         &[(CLAUDE, Scenario::Local("claude-mode-no-sandbox"))],
@@ -244,10 +244,10 @@ fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "A*", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = turn(&host, thread, "Summarise clause 4.");
-    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 3);
+    events.until("ModeChanged auto back", |e| modes(e).len() == 3);
     assert_eq!(
         modes(&events),
-        ["acceptEdits", "bypassPermissions", "acceptEdits"],
+        ["auto", "bypassPermissions", "auto"],
         "{}",
         events.dump()
     );
@@ -259,6 +259,6 @@ fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
                 if notice.kind == Some(NoticeKind::SandboxOff))
         })
         .count();
-    assert_eq!(sandbox_off, 1, "{}", events.dump());
+    assert_eq!(sandbox_off, 0, "{}", events.dump());
     host.shutdown();
 }

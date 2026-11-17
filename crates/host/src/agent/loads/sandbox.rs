@@ -133,6 +133,9 @@ pub(crate) const SOCKET_DIRS: [&str; 2] = ["/tmp/clauseo-ab-*", "/private/tmp/cl
 /// The characters Claude Code reads as a pattern in a sandbox path that no escape makes literal.
 const WILDCARDS: [char; 2] = ['*', '?'];
 
+/// Whether a Claude session gets Claude Code's shell sandbox at launch ([`SandboxOs::LAUNCH`]).
+const SHELL_SANDBOX: bool = false;
+
 /// The OS a sandbox is built for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SandboxOs {
@@ -152,6 +155,15 @@ impl SandboxOs {
         Self::Mac
     } else {
         Self::Linux
+    };
+
+    /// The OS a Claude session's sandbox is built for at launch: Windows' (none) on every OS.
+    /// Claude's shell sandbox is off (Rohan, 2026-11-17), as in Claude Code's own auto mode, so
+    /// a session gets [`Off::Windows`] and stays in `auto`; [`SHELL_SANDBOX`] on emits it again.
+    pub(crate) const LAUNCH: Self = if SHELL_SANDBOX {
+        Self::CURRENT
+    } else {
+        Self::Windows
     };
 }
 

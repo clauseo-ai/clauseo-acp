@@ -87,8 +87,8 @@ pub(crate) fn notice(actor: &mut Actor, thread: ThreadId) -> Option<Notice> {
 }
 
 /// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder
-/// is `matter` (`agent::loads::sandbox`), or why there is none (on Windows, among others).
-/// Path joins only.
+/// is `matter` (`agent::loads::sandbox`), or why there is none: on every OS for now, the
+/// not-wanted `Off::Windows` ([`SandboxOs::LAUNCH`]). Path joins only.
 fn claude_sandbox(
     actor: &Actor,
     agent_id: &AgentId,
@@ -130,5 +130,5 @@ fn claude_sandbox(
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
     };
-    ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
+    ClaudeSandbox::for_os(SandboxOs::LAUNCH, &paths)
 }
