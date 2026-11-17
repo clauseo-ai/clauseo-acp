@@ -229,5 +229,23 @@
     "at": "2026-11-17",
     "by": "host follow-ups (provisional; orchestrator to approve)",
     "note": "Versions' line after a one-document restore that wrote nothing: the host answered with no marker, or one not listing the paper as written (it changed as Restore was pressed, say). English final (app track)"
+  },
+  "UC-983": {
+    "en": "Undid the restore. {paper} changed after it, so it stays as it is.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after undoing a restore of the whole matter whose preview kept one document, changed after the restore (or one it can't write), in place of \"The matter stands as it did at {time}.\". Words from the app track; Hindi later"
+  },
+  "UC-984": {
+    "en": "Undid the restore. {papers} changed after it, so they stay as they are.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "As UC-983, for two or more kept documents; {papers} joined as Versions joins names. Words from the app track; Hindi later"
   }
 }

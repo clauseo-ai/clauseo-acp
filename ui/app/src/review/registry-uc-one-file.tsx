@@ -1,5 +1,5 @@
-// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-341, UC-392 to UC-399, and UC-428): Restore
-// this document beside the
+// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-341, UC-392 to UC-399, UC-428, and
+// UC-983 and UC-984 for the matter's undo that keeps documents changed after it): Restore this document beside the
 // documents that differ from now, the restore dialog it opens for that document alone, and the line once it is done,
 // in the room with Versions open over registry-u8.tsx's host, after the presses that bring each state. The English
 // is provisional until Rohan's review, its Hindi too.
@@ -41,6 +41,14 @@ const BROUGHT_BACK: Matter = { ...MODIFIED, removes: [NOTICE] };
 /** The notice changed again after the restore: undoing it writes nothing. */
 const EDITED_SINCE: Matter = { ...MODIFIED, undoChanges: [] };
 const UNDOING_TODAY = [...ASK_TODAY, CONFIRM, UNDO_DONE, CONFIRM] as const;
+/** The newest version a restore of the matter, undone from its row, with these documents changed after it. */
+const UNDO_MATTER = [
+  OPEN,
+  '[data-testid="version"][data-checkpoint="cp7"]',
+  '[data-testid="version-undo"]',
+  CONFIRM,
+];
+const keptAfter = (...kept: string[]): Matter => ({ restored: true, kept });
 
 export const UC_ONE_FILE: Entry[] = [
   state("UC-316", versionWords("Restore this document"), MODIFIED, [OPEN, EARLIER, COMPARE]),
@@ -180,4 +188,17 @@ export const UC_ONE_FILE: Entry[] = [
     ...ASK_EARLIER,
     CONFIRM,
   ]),
+  // undoing a restore of the matter kept documents the lawyer changed after it: the matter doesn't stand as it did
+  state(
+    "UC-983",
+    versionWords("Undid the restore. {paper} changed after it, so it stays as it is."),
+    keptAfter(NOTICE),
+    UNDO_MATTER,
+  ),
+  state(
+    "UC-984",
+    versionWords("Undid the restore. {papers} changed after it, so they stay as they are."),
+    keptAfter(NOTICE, "Reply notes.md"),
+    UNDO_MATTER,
+  ),
 ];
