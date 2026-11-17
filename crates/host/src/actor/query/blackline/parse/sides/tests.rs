@@ -76,8 +76,8 @@ fn a_text_box_s_new_text_is_found() {
     assert!(found.boxes && !found.comments);
 }
 
-/// A link added to kept text or taken off it is named; a link whose text is new, or that moves
-/// with its text, is not (the blackline shows the text); a link with no text can't be named.
+/// A link added to kept text or taken off it is named, and so is a new link around new text (its
+/// address is new); a link that moves with its text is not; a link with no text can't be named.
 #[test]
 fn links_are_compared_by_text_and_address() {
     let linked = "p1 Pay to {link \"https://a.example\"}the account{/link}.";
@@ -89,7 +89,7 @@ fn links_are_compared_by_text_and_address() {
     assert_eq!(crossed(plain, linked), named(&["the account"]));
     assert_eq!(crossed(linked, plain), named(&["the account"]));
     let new_text = "p1 Pay to {link \"https://a.example\"}the new account{/link}.";
-    assert_eq!(crossed(plain, new_text), Crossed::default());
+    assert_eq!(crossed(plain, new_text), named(&["the new account"]));
     let two = "p1 {link \"https://b.example\"}B{/link}\np2 {link \"https://a.example\"}A{/link}";
     let swapped =
         "p1 {link \"https://a.example\"}A{/link}\np2 {link \"https://b.example\"}B{/link}";
@@ -103,6 +103,39 @@ fn links_are_compared_by_text_and_address() {
             "p1 {link ->p57}clause 4{/link}",
             "p1 {link ->p58}clause 4{/link}"
         ),
+        Crossed::default()
+    );
+}
+
+/// "account A" at one address becomes "account B" at another: neither text is on both sides,
+/// but the address is new, so the link is named (the new one first, then the one it replaced).
+#[test]
+fn a_link_whose_text_and_address_both_change_is_named() {
+    let found = crossed(
+        "p1 Pay to {link \"https://bank.example/1\"}account A{/link}.",
+        "p1 Pay to {link \"https://bank.example/2\"}account B{/link}.",
+    );
+    assert_eq!(
+        found.links,
+        ["account B".to_owned(), "account A".to_owned()]
+    );
+    assert!(!found.unnamed_link);
+}
+
+/// Two links of one text swap addresses: the addresses are the same on both sides, but each
+/// link's changed, so the text is named.
+#[test]
+fn links_of_one_text_that_swap_addresses_are_named() {
+    let lines = |first: &str, second: &str| {
+        format!(
+            "p1 Pay {{link \"https://bank.example/{first}\"}}here{{/link}}.\n\
+             p2 Bill {{link \"https://bank.example/{second}\"}}here{{/link}}."
+        )
+    };
+    let found = crossed(&lines("pay", "bill"), &lines("bill", "pay"));
+    assert_eq!(found.links, ["here".to_owned()]);
+    assert_eq!(
+        crossed(&lines("pay", "bill"), &lines("pay", "bill")),
         Crossed::default()
     );
 }
