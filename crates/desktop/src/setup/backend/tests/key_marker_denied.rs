@@ -1,8 +1,10 @@
 //! A marked agent whose keychain prompt was denied or left unanswered (the VM's rows D7, A-K6
-//! and K11, macOS, a self-update's first read): its card is `Failed { agent.key_unreadable }`
-//! and its launches are refused with that code, never `SignedOut` or a sign-in; a sign-in
+//! and K11, macOS, a self-update's first read): its card is `Failed { agent.key_denied }` after
+//! Deny and `Failed { agent.key_unreadable }` past the bound, and its launches are refused with
+//! that code, never `SignedOut` or a sign-in; a sign-in
 //! press (the card's Try again) is refused with that code too, and reads the key again, so the
 //! key is taken in once the prompt is answered, with no restart. Under a firm plan the same.
+//! Remove key (Settings › Plans) deletes it with no read, and the agent is signed out.
 //!
 //! Deny on macOS's prompt fails the read with `errSecAuthFailed` (-25293), Cancel with
 //! `errSecUserCanceled` (-128): apple-native-keyring-store 1.0.2's `keychain::decode_error`
@@ -14,7 +16,7 @@ use std::time::UNIX_EPOCH;
 use clauseo_agents::SigninState;
 use clauseo_agents::keys::Keychain;
 use clauseo_process::Timer;
-use clauseo_protocol::{AgentId, ErrorCode, SignIn, SignInMethod};
+use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SignIn, SignInMethod};
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use serde_json::json;
@@ -22,7 +24,7 @@ use serde_json::json;
 use super::fakes::{Rig, command, rig_keys};
 use super::key_reads::{Never, Passed, stored};
 use super::switching::shown;
-use super::{MAIN, claude, codex};
+use super::{MAIN, SETTINGS, claude, codex};
 use crate::setup::compose::{Facts, compose};
 use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes};
 use crate::setup::refusal::in_force;
@@ -35,6 +37,17 @@ pub(super) const OUT: SigninState = SigninState::SignedOut { found: None };
 pub(super) enum Prompt {
     Denied,
     Unanswered,
+}
+
+impl Prompt {
+    /// The code of a marked key read so: the keychain's error is `agent.key_denied`, no answer
+    /// by the bound `agent.key_unreadable`.
+    pub(super) fn code(self) -> ErrorCode {
+        match self {
+            Self::Denied => ErrorCode::AgentKeyDenied,
+            Self::Unanswered => ErrorCode::AgentKeyUnreadable,
+        }
+    }
 }
 
 /// A rig whose first load read Claude's stored key, marked by the "key stored" marker in
@@ -83,14 +96,23 @@ pub(super) fn load(
     (keys, notes)
 }
 
+/// Whether `shown` is a stored key not read, of either kind.
 pub(super) fn is_key_unreadable(shown: Option<&SignIn>) -> bool {
     matches!(
         shown,
         Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
+            code: ErrorCode::AgentKeyUnreadable | ErrorCode::AgentKeyDenied,
             ..
         })
     )
+}
+
+/// The code of `shown` when it is `Failed`.
+pub(super) fn failed_code(shown: Option<&SignIn>) -> Option<ErrorCode> {
+    match shown {
+        Some(SignIn::Failed { code, .. }) => Some(*code),
+        _ => None,
+    }
 }
 
 /// A sign-in press for `agent` from the first run (the card's Try again): its refusal's code.
@@ -118,7 +140,7 @@ fn assert_refused(rig: &Rig, prompt: Prompt) {
     );
     assert_eq!(keys.get(&claude()), None);
     let line = shown(rig, &claude());
-    assert!(is_key_unreadable(line.as_ref()), "{prompt:?}: {line:?}");
+    assert_eq!(failed_code(line.as_ref()), Some(prompt.code()), "{line:?}");
     assert!(
         !matches!(line, Some(SignIn::SignedOut { .. })),
         "never Sign in"
@@ -126,13 +148,13 @@ fn assert_refused(rig: &Rig, prompt: Prompt) {
     for firm in [false, true] {
         assert_eq!(
             in_force(false, firm, keys, &claude()),
-            Some(ErrorCode::AgentKeyUnreadable),
+            Some(prompt.code()),
             "{prompt:?}, firm {firm}"
         );
     }
     // Try again: refused with the key's own code, and no plan sign-in starts (S-D7 saw
     // `kind="sign_in" why="claude_ai"` and claude.ai's login open in the browser).
-    assert_eq!(press(rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+    assert_eq!(press(rig, &claude()), Some(prompt.code()));
     assert!(
         rig.calls().iter().all(|(call, _)| *call != "sign_in"),
         "{prompt:?}: {:?}",
@@ -141,7 +163,7 @@ fn assert_refused(rig: &Rig, prompt: Prompt) {
 }
 
 #[test]
-fn a_denied_prompt_for_a_marked_agent_is_key_unreadable_never_signed_out() {
+fn a_denied_prompt_for_a_marked_agent_is_key_denied_never_signed_out() {
     let scratch = Scratch::folder("key-denied-deny", &[]);
     let (rig, _notes) = marked_rig(&scratch, Prompt::Denied);
     assert_refused(&rig, Prompt::Denied);
@@ -189,7 +211,7 @@ fn denied_then_allowed_the_card_s_try_again_reads_the_key_again() {
     let scratch = Scratch::folder("key-denied-retry", &[]);
     let (rig, mut notes) = marked_rig(&scratch, Prompt::Denied);
     rig.keychain.deny_reads(false);
-    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyDenied));
     until_read(&rig, &mut notes);
     rig.backend.compose.show_key(&claude(), &rig.backend.keys);
     assert!(matches!(
@@ -215,15 +237,15 @@ fn under_a_firm_plan_a_denied_or_unanswered_prompt_refuses_and_offers_no_sign_in
         let (rig, mut notes) = marked_rig(&scratch, prompt);
         rig.backend.compose.set_firm(&claude(), true);
         let line = shown(&rig, &claude());
-        assert!(is_key_unreadable(line.as_ref()), "{prompt:?}: {line:?}");
+        assert_eq!(failed_code(line.as_ref()), Some(prompt.code()), "{line:?}");
         assert_eq!(
             in_force(false, true, &rig.backend.keys, &claude()),
-            Some(ErrorCode::AgentKeyUnreadable)
+            Some(prompt.code())
         );
         // The key's bar goes first: never `signin.endpoint_in_use`, never a sign-in.
-        assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+        assert_eq!(press(&rig, &claude()), Some(prompt.code()));
         rig.backend.set_firm_policy(&claude(), true);
-        assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+        assert_eq!(press(&rig, &claude()), Some(prompt.code()));
         assert!(rig.calls().iter().all(|(call, _)| *call != "sign_in"));
         rig.keychain.hang_reads(false);
         if matches!(prompt, Prompt::Unanswered) {
@@ -267,4 +289,66 @@ fn an_unmarked_unanswered_read_refuses_only_under_a_firm_plan() {
         assert!(note.is_some(), "the notes ended before the reads answered");
     }
     assert_eq!(in_force(false, true, &keys, &claude()), None);
+}
+
+#[test]
+fn remove_key_under_an_unreadable_key_never_reads_it_and_ends_the_mark() {
+    // The way out when the keychain keeps refusing (decision record 0048): Settings › Plans'
+    // Remove key deletes the item, which needs no read. Any read from here on would wait for
+    // good, so a removal that read first would not answer.
+    for (name, prompt) in [
+        ("key-denied-remove-deny", Prompt::Denied),
+        ("key-denied-remove-timeout", Prompt::Unanswered),
+    ] {
+        let scratch = Scratch::folder(name, &[]);
+        let (rig, _notes) = marked_rig(&scratch, prompt);
+        rig.keychain.deny_reads(false);
+        rig.keychain.hang_reads(true);
+        let clear = command("clear_agent_key", &claude(), &json!({}));
+        assert_eq!(
+            within("the removal", rig.setup().run(SETTINGS, clear)),
+            Ok(CommandOutcome::Done),
+            "{prompt:?}"
+        );
+        let keys = &rig.backend.keys;
+        assert!(!keys.unreadable(&claude()), "{prompt:?}");
+        assert!(!keys.denied(&claude()), "{prompt:?}");
+        assert!(!keys.has(&claude()), "{prompt:?}");
+        assert!(!keys.read_failed(&claude()), "{prompt:?}");
+        let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
+        assert!(
+            !marker.marked().contains(&claude()),
+            "{prompt:?}: the mark is cleared"
+        );
+        assert_eq!(in_force(false, false, keys, &claude()), None, "{prompt:?}");
+        // Plain "no key": signed out, and a plan sign-in is offered again.
+        assert_eq!(
+            shown(&rig, &claude()),
+            Some(SignIn::SignedOut { found: None }),
+            "{prompt:?}"
+        );
+        assert_eq!(
+            rig.backend.compose.sign_in_bar(&claude()),
+            None,
+            "{prompt:?}"
+        );
+        let pressed = press(&rig, &claude());
+        assert!(
+            !matches!(
+                pressed,
+                Some(
+                    ErrorCode::AgentKeyUnreadable
+                        | ErrorCode::AgentKeyDenied
+                        | ErrorCode::SigninKeyInUse
+                )
+            ),
+            "{prompt:?}: {pressed:?}"
+        );
+        rig.keychain.hang_reads(false);
+        assert_eq!(
+            rig.keychain.load(&claude()).unwrap(),
+            None,
+            "{prompt:?}: deleted"
+        );
+    }
 }

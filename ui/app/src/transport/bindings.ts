@@ -1885,7 +1885,7 @@ export type ErrorCode =
 "signin.agents_still_running" | 
 /** Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. */
 "agent.keys_loading" | 
-/** A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. */
+/** A stored API key could not be read from the system's key store in time: the read had not answered (often a permission prompt not answered yet); no agent was started. Trying again once it can be read can succeed. */
 "agent.key_unreadable" | 
 /** A Word document's path is too long for Word to open, even with its folders' short names (Windows): move the matter's folder nearer the top of its drive, or shorten its folder names. */
 "matter.document_path_too_long" | 
@@ -2001,6 +2001,8 @@ export type ErrorCode =
 "agent.program_blocked" | 
 /** The OS found no agent program to run (not found), so the agent did not start. */
 "agent.program_missing" | 
+/** A stored API key could not be read: the system's key store answered the read with an error (often a permission prompt that was denied or cancelled, or a locked key store); no agent was started. Trying again, and allowing the read, can succeed. */
+"agent.key_denied" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

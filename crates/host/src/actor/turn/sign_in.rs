@@ -28,7 +28,7 @@ use super::close::TurnClose;
 use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
-use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
+use crate::agent::launch_refusals::{KEY_NOT_READ, KEYS_WAIT, WAITED_OUT};
 use crate::agent::login_link::{LoginLink, LoginSplit, Seen, StopFor};
 use crate::error::Error;
 
@@ -188,11 +188,11 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     None
 }
 
-/// Whether `thread`'s launch waits for its agent's `agent.keys_loading` or
-/// `agent.key_unreadable` refusal: when it is the refusal in force (no `stop_agents` hold), the
+/// Whether `thread`'s launch waits for its agent's `agent.keys_loading`, `agent.key_unreadable`
+/// or `agent.key_denied` refusal: when it is the refusal in force (no `stop_agents` hold), the
 /// wait, at most [`KEYS_WAIT`] on the host clock and woken when the refusal lifts or changes.
-/// For `agent.key_unreadable` desktop is first asked to read the key again, so a read that
-/// now succeeds lifts it. The launch checks the refusals again after it
+/// For a key not read (`KEY_NOT_READ`) desktop is first asked to read the key again, so a
+/// read that now succeeds lifts it. The launch checks the refusals again after it
 /// (`launch_checks::on_prepared`).
 pub(super) fn keys_wait(
     actor: &mut Actor,
@@ -207,7 +207,7 @@ pub(super) fn keys_wait(
     if !WAITED_OUT.contains(&code) {
         return None;
     }
-    if code == ErrorCode::AgentKeyUnreadable {
+    if KEY_NOT_READ.contains(&code) {
         tracing::info!(%agent, "a launch waits for its stored key to be read again");
         refused.retry_key(&agent);
     } else {

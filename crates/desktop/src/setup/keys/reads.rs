@@ -24,7 +24,11 @@
 //! - A read that has not answered by the bound, for an agent the marker does not mark, counts as
 //!   a failed read (`failed`) as well: it launches without a key, unless a firm plan, which
 //!   refuses it, as a failed read does, until the read answers.
-//! - Each change of a mark sends a [`KeyNote::Read`].
+//! - A failed read is of one of two kinds (`ReadState::denied`): one that has not answered by
+//!   the bound (`agent.key_unreadable`), or one the keychain answered with its error, a denied
+//!   or cancelled prompt say (`agent.key_denied`, [`KeyCache::unreadable_code`]). A read that
+//!   timed out and then answers with an error turns into the second.
+//! - Each change of a mark, or of its kind, sends a [`KeyNote::Read`].
 //! - A read whose thread panics is a failed read (`READ_PANICKED`): `reading` ends with it.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,6 +58,9 @@ struct ReadState {
     /// Agents whose read failed with no "key stored" mark: refused only under a firm plan
     /// ([`KeyCache::unreadable_for`]).
     failed: BTreeSet<AgentId>,
+    /// Agents in `unreadable` or `failed` whose read the keychain answered with its error (a
+    /// denied prompt, say), not one that has not answered: `agent.key_denied`.
+    denied: BTreeSet<AgentId>,
     reading: BTreeSet<AgentId>,
     /// A count of each agent's writes and marks: a read that began before one is dropped.
     writes: BTreeMap<AgentId, u64>,
@@ -85,6 +92,11 @@ impl Marks {
         lock(&self.state).failed.contains(agent)
     }
 
+    /// Whether `agent`'s failed read was the keychain's error, not one with no answer yet.
+    pub(super) fn is_denied(&self, agent: &AgentId) -> bool {
+        lock(&self.state).denied.contains(agent)
+    }
+
     /// Whether a read of `agent` runs: the tests'.
     #[cfg(test)]
     pub(super) fn is_reading(&self, agent: &AgentId) -> bool {
@@ -102,18 +114,20 @@ impl Marks {
             let mut state = lock(&self.state);
             *state.writes.entry(agent.clone()).or_default() += 1;
             let failed = state.failed.remove(agent);
-            state.unreadable.remove(agent) || failed
+            let denied = state.denied.remove(agent);
+            state.unreadable.remove(agent) || failed || denied
         };
         self.noted(changed, agent);
     }
 
-    /// A read of `agent`'s stored key failed with the error of `kind`: it is marked.
+    /// A read of `agent`'s stored key failed with the error of `kind`: it is marked, denied.
     pub(super) fn unreadable(&self, agent: &AgentId, kind: &str) {
         tracing::warn!(%agent, kind, "key unreadable");
         let changed = {
             let mut state = lock(&self.state);
             *state.writes.entry(agent.clone()).or_default() += 1;
-            state.unreadable.insert(agent.clone())
+            let denied = state.denied.insert(agent.clone());
+            state.unreadable.insert(agent.clone()) || denied
         };
         self.noted(changed, agent);
     }
@@ -156,12 +170,12 @@ impl Marks {
             match read {
                 Ok(Some(key)) => {
                     let new = lock(keys).insert(agent.clone(), key).is_none();
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.remove(agent);
                     (state.unreadable.remove(agent) || new || failed, Some(true))
                 }
                 Ok(None) => {
                     let gone = lock(keys).remove(agent).is_some();
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.remove(agent);
                     (
                         state.unreadable.remove(agent) || gone || failed,
                         Some(false),
@@ -169,7 +183,7 @@ impl Marks {
                 }
                 Err(error) if marked => {
                     tracing::warn!(%agent, kind = error_kind(&error), "key unreadable");
-                    let failed = state.failed.remove(agent);
+                    let failed = state.failed.remove(agent) | state.denied.insert(agent.clone());
                     (state.unreadable.insert(agent.clone()) || failed, None)
                 }
                 Err(error) => {
@@ -180,7 +194,8 @@ impl Marks {
                         kind = error_kind(&error),
                         "key read failed, no key marked stored: none used unless a firm plan"
                     );
-                    let failed = state.failed.insert(agent.clone());
+                    let failed =
+                        state.failed.insert(agent.clone()) | state.denied.insert(agent.clone());
                     (state.unreadable.remove(agent) || failed, None)
                 }
             }

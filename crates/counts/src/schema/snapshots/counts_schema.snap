@@ -1561,7 +1561,8 @@ expression: counts_schema()
         "agent.mode_missing",
         "agent.setting_refused",
         "agent.program_blocked",
-        "agent.program_missing"
+        "agent.program_missing",
+        "agent.key_denied"
       ],
       "type": "string"
     },

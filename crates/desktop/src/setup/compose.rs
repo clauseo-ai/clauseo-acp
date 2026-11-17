@@ -18,7 +18,8 @@
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
 //! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`; for a read
 //!    that failed with no "key stored" mark, only under a firm plan), `Failed { code:
-//!    agent.key_unreadable }`: its launches are refused until a read succeeds. It bars a
+//!    agent.key_unreadable }`, or `agent.key_denied` when the keychain answered the read with
+//!    its error (`Facts::denied`): its launches are refused until a read succeeds. It bars a
 //!    sign-in with that code, and the press reads the key again (`AgentsBackend::barred`): an
 //!    unanswered or denied keychain prompt never sends a lawyer on a firm key to a plan login
 //!    (VM rows D7, A-K6, K11; the desktop review's item 1 had it bar none).
@@ -48,8 +49,8 @@ use clauseo_protocol::{
 };
 
 use super::SetupEvents;
-use super::admit::{SignInBar, sign_in_bar};
-use super::keys::KeyCache;
+use super::admit::{SignInBar, key_not_read_code, sign_in_bar};
+use super::keys::{KeyCache, KeyRead, ReadFail};
 use crate::bridge::lock;
 
 /// What desktop knows of one agent's sign-in besides S18's state.
@@ -64,6 +65,9 @@ pub(crate) struct Facts {
     /// Since when the agent's key read failed with no "key stored" mark, if it did: shown as
     /// `unreadable` only under a firm plan (`KeyCache::unreadable_for`).
     pub(crate) read_failed: Option<SystemTime>,
+    /// Whether that failed read was the keychain's error (a denied prompt), not one with no
+    /// answer yet: rule 3's code is then `agent.key_denied` (`KeyCache::denied`).
+    pub(crate) denied: bool,
     /// Since when policy is unreadable with the `firm-policy` marker there, if it is.
     pub(crate) blocked: Option<SystemTime>,
     /// Since when a firm policy sets the agent's endpoint or provider, if it does.
@@ -105,7 +109,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     }
     if let Some(since) = unreadable_since(&facts) {
         return Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
+            code: key_not_read_code(facts.denied),
             at: timestamp(since),
         });
     }
@@ -142,6 +146,10 @@ fn state_word(state: &SignIn) -> &'static str {
             code: ErrorCode::AgentKeyUnreadable,
             ..
         } => "key_unreadable",
+        SignIn::Failed {
+            code: ErrorCode::AgentKeyDenied,
+            ..
+        } => "key_denied",
         SignIn::SignedOut { .. } => "signed_out",
         SignIn::Checking => "checking",
         SignIn::Queued => "queued",
@@ -383,7 +391,7 @@ impl Compose {
             .map(|known| known.facts)
             .unwrap_or_default();
         if key_unreadable(&facts) {
-            return Some(SignInBar::KeyUnreadable);
+            return Some(SignInBar::key_not_read(facts.denied));
         }
         sign_in_bar(
             facts.managed.is_some(),
@@ -401,13 +409,13 @@ impl Compose {
 
     /// Whether memory holds a key for `agent`, and whether its stored key could not be read:
     /// one change, so the windows never see one without the other.
-    pub(crate) fn set_key_read(
-        &self,
-        agent: &AgentId,
-        in_memory: bool,
-        unreadable: bool,
-        read_failed: bool,
-    ) {
+    pub(crate) fn set_key_read(&self, agent: &AgentId, read: KeyRead) {
+        let KeyRead {
+            in_memory,
+            unreadable,
+            read_failed,
+            kind,
+        } = read;
         self.change(agent, |known, now| {
             if in_memory && known.facts.key.is_none() {
                 took_over(agent, known);
@@ -415,6 +423,7 @@ impl Compose {
             known.facts.key = in_memory.then(|| known.facts.key.unwrap_or(now));
             known.facts.unreadable = unreadable.then(|| known.facts.unreadable.unwrap_or(now));
             known.facts.read_failed = read_failed.then(|| known.facts.read_failed.unwrap_or(now));
+            known.facts.denied = kind == ReadFail::Denied;
             if !in_memory {
                 known.facts.refused = None;
             }
@@ -447,18 +456,17 @@ impl Compose {
     /// [`Compose::set_key_read`] as `keys` holds `agent`'s key now: in memory, or unreadable.
     /// Never [`KeyCache::has`], which counts an unreadable key as stored for the launches.
     pub(crate) fn show_key(&self, agent: &AgentId, keys: &KeyCache) {
-        self.set_key_read(
-            agent,
-            keys.in_memory(agent),
-            keys.unreadable(agent),
-            keys.read_failed(agent),
-        );
+        self.set_key_read(agent, keys.read_state(agent));
     }
 
     /// Whether a key is in memory for `agent`, none unreadable: the tests' shorthand.
     #[cfg(test)]
     pub(crate) fn set_key(&self, agent: &AgentId, stored: bool) {
-        self.set_key_read(agent, stored, false, false);
+        let read = KeyRead {
+            in_memory: stored,
+            ..KeyRead::default()
+        };
+        self.set_key_read(agent, read);
     }
 
     /// Whether `agent` has an endpoint or a provider.

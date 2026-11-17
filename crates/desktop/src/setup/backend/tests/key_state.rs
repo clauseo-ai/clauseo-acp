@@ -43,11 +43,12 @@ fn unreadable() -> Rig {
     rig
 }
 
-fn key_unreadable(shown: Option<&SignIn>) -> bool {
+/// Whether `shown` is a stored key the keychain refused to give (`agent.key_denied`).
+fn key_denied(shown: Option<&SignIn>) -> bool {
     matches!(
         shown,
         Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
+            code: ErrorCode::AgentKeyDenied,
             ..
         })
     )
@@ -71,18 +72,18 @@ fn key_of(keys: &KeyCache) -> Option<String> {
 fn an_unreadable_key_shows_key_unreadable_never_an_api_key_and_a_sign_in_press_reads_it_again() {
     let rig = unreadable();
     let line = shown(&rig, &claude());
-    assert!(key_unreadable(line.as_ref()), "{line:?}");
+    assert!(key_denied(line.as_ref()), "{line:?}");
     // Codex has no key stored, but a read that failed cannot tell: refused all the same.
-    assert!(key_unreadable(shown(&rig, &codex()).as_ref()));
+    assert!(key_denied(shown(&rig, &codex()).as_ref()));
     // A stored key bars a plan sign-in, readable or not (VM rows D7, A-K6, K11): the card's Try
     // again is refused with the key's own code, never a sign-in, and reads the key again.
     assert_eq!(
         rig.backend.compose.sign_in_bar(&claude()),
-        Some(crate::setup::admit::SignInBar::KeyUnreadable)
+        Some(crate::setup::admit::SignInBar::KeyDenied)
     );
     let start = || command("start_sign_in", &claude(), &json!({}));
     let refused = block_on(rig.setup().run(MAIN, start())).unwrap_err();
-    assert_eq!(refused.code(), ErrorCode::AgentKeyUnreadable);
+    assert_eq!(refused.code(), ErrorCode::AgentKeyDenied);
     assert_eq!(rig.calls(), [], "no sign-in runs");
     // The prompt is answered. The press's own read (failed) may still be running, when a read
     // again starts none: ask until one runs and lands the key.
@@ -114,7 +115,7 @@ fn a_restart_sets_the_key_unreadable_refusal_before_anything_launches() {
     assert_eq!(
         rig.host.calls(),
         [
-            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied)),
             HostCall::RestartAgents(claude()),
         ]
     );
@@ -148,7 +149,7 @@ fn a_late_read_loses_to_a_newer_set_key() {
 fn clear_key_lifts_the_key_unreadable_refusal() {
     let rig = unreadable();
     block_on(sync(&rig.backend, &claude()));
-    let refused = HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable));
+    let refused = HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied));
     assert_eq!(rig.host.calls(), [refused]);
     let clear = command("clear_agent_key", &claude(), &json!({}));
     assert_eq!(
@@ -203,8 +204,8 @@ fn follow_keys_sets_the_refusal_from_each_note_and_a_retry_reads_the_key_again()
     };
     let drive = async {
         // The load's notes: both reads failed.
-        wait_for(told(Some(ErrorCode::AgentKeyUnreadable))).await;
-        assert!(key_unreadable(shown(&rig, &claude()).as_ref()));
+        wait_for(told(Some(ErrorCode::AgentKeyDenied))).await;
+        assert!(key_denied(shown(&rig, &claude()).as_ref()));
         // The prompt is allowed; a launch meets the refusal and asks for a read again.
         keychain.fail_reads(false);
         retry(&claude());

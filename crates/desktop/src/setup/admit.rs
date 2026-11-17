@@ -99,17 +99,48 @@ pub(crate) fn key_stored(agent: &AgentId) -> HostError {
 /// an endpoint then hides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SignInBar {
-    /// Its stored key could not be read (the card's `Failed { agent.key_unreadable }`, rule 3
-    /// of `compose.rs`): `agent.key_unreadable`, and the key is read again
+    /// Its stored key could not be read in time (the card's `Failed { agent.key_unreadable }`,
+    /// rule 3 of `compose.rs`): `agent.key_unreadable`, and the key is read again
     /// (`AgentsBackend::barred`). A lawyer on a firm key is never sent to a plan login by an
     /// unanswered or denied keychain prompt (VM rows D7, A-K6, K11).
     KeyUnreadable,
+    /// As `KeyUnreadable`, for a read the keychain answered with its error (a denied or
+    /// cancelled prompt, a locked keychain): `agent.key_denied`.
+    KeyDenied,
     /// A firm endpoint set by policy: `signin.firm_managed`.
     FirmManaged,
     /// An API key stored: `signin.key_in_use`.
     KeyInUse,
     /// An endpoint set in Settings: `signin.endpoint_in_use`.
     EndpointInUse,
+}
+
+impl SignInBar {
+    /// The bar of a stored key not read: `KeyDenied` when the keychain refused the read
+    /// (`denied`), else `KeyUnreadable`.
+    pub(crate) fn key_not_read(denied: bool) -> Self {
+        if denied {
+            Self::KeyDenied
+        } else {
+            Self::KeyUnreadable
+        }
+    }
+
+    /// Whether it is a stored key not read, whose press reads the key again.
+    pub(crate) fn reads_key(self) -> bool {
+        matches!(self, Self::KeyUnreadable | Self::KeyDenied)
+    }
+}
+
+/// The code of a stored key not read: `agent.key_denied` when the keychain answered the read
+/// with its error (`denied`: a denied or cancelled prompt, a locked keychain), else
+/// `agent.key_unreadable` (no answer in time).
+pub(crate) fn key_not_read_code(denied: bool) -> ErrorCode {
+    if denied {
+        ErrorCode::AgentKeyDenied
+    } else {
+        ErrorCode::AgentKeyUnreadable
+    }
 }
 
 /// The bar on a sign-in, if any, from what holds: the firm's policy wins, then a key, then an
@@ -134,6 +165,10 @@ pub(crate) fn sign_in_barred(agent: &AgentId, bar: SignInBar) -> HostError {
         SignInBar::KeyUnreadable => (
             ErrorCode::AgentKeyUnreadable,
             "its stored API key could not be read; it is read again",
+        ),
+        SignInBar::KeyDenied => (
+            ErrorCode::AgentKeyDenied,
+            "the keychain refused its stored API key's read; it is read again",
         ),
         SignInBar::FirmManaged => (
             ErrorCode::SigninFirmManaged,

@@ -18,6 +18,7 @@ import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconChecking, IconQuestion, IconTick } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
@@ -134,10 +135,9 @@ export function ExpiredCard({
         ? fl(lang, "Clauseo is still switching accounts. Try again in a moment.")
         : errorWords(lang, refusal.code, { kind: plan === "chatgpt" ? "codex" : "claude", name });
   // a saved API key the keychain didn't give is no sign-in that expired: the card is named by the key's words
-  const keyUnreadable =
-    typeof setup?.signIn === "object" && setup.signIn.failed?.code === "agent.key_unreadable";
-  const label = keyUnreadable
-    ? `${errorWords(lang, "agent.key_unreadable")} ${kept}`
+  const keyCode = typeof setup?.signIn === "object" ? setup.signIn.failed?.code : undefined;
+  const label = isKeyNotRead(keyCode)
+    ? `${errorWords(lang, keyCode)} ${kept}`
     : sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
   let card;
   switch (e.kind) {

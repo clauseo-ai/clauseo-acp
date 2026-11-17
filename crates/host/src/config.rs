@@ -544,9 +544,9 @@ impl HostConfig {
     }
 
     /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
-    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
-    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
-    /// must not block.
+    /// of each launch that meets `agent.key_unreadable` or `agent.key_denied`, before the
+    /// launch waits for the refusal to lift; desktop reads that key again and lifts the refusal
+    /// when it reads. It must not block.
     #[must_use]
     pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
         self.wiring.sign_in.refused.set_key_retry(retry);

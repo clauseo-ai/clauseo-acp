@@ -11,11 +11,21 @@
   .room-window:has(.fl-welcome) .room-pane {
     display: none;
   }
-  .fl-welcome {
+  /* the first screen scrolls as one, the question and the foot together: a plan row that grows (an unreadable key's
+     longer words, its note) pushes the question up the page and the foot down, never over Start a new matter (the
+     real-Mac run of #1162, where the question's own scroller cut it off under the foot). One scroller, one gutter, so
+     the working line keeps the lockup's and the button's edge where scrollbars take room (Windows, Linux) */
+  .fl-screen {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     scrollbar-gutter: stable;
+    display: flex;
+    flex-direction: column;
+  }
+  /* the question takes the room the foot leaves, and never less than its own height */
+  .fl-welcome {
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -80,13 +90,10 @@
     animation: fl-rise var(--dur-arrive) var(--ease-arrive) backwards;
   }
 
-  /* the foot, where the composer will stand: the agent getting ready on the working line, then the fine print */
-  /* the same gutter as the welcome's scroller above, so the working line keeps the lockup's and the button's edge where
-     scrollbars take room (Windows, Linux) */
+  /* the foot, where the composer will stand: the agent getting ready on the working line, then the fine print; at the
+     bottom while everything fits, below the question when it doesn't (.fl-screen) */
   .fl-foot {
     flex: none;
-    overflow-y: auto;
-    scrollbar-gutter: stable;
     display: flex;
     justify-content: center;
     padding: var(--s2) var(--thread-pad) var(--s3);

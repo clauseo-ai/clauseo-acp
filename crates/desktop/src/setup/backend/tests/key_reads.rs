@@ -127,7 +127,7 @@ fn a_stored_key_whose_read_times_out_is_key_unreadable_and_lifts_once_the_read_a
 }
 
 #[test]
-fn a_refused_read_is_key_unreadable_never_no_key() {
+fn a_refused_read_is_key_denied_never_no_key() {
     let keychain = stored();
     keychain.fail_reads(true);
     let (keys, _notes) = load(keychain, &Never);
@@ -136,7 +136,7 @@ fn a_refused_read_is_key_unreadable_never_no_key() {
     assert_eq!(keys.get(&claude()), None);
     assert_eq!(
         settled(&keys)[0],
-        HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable))
+        HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied))
     );
 }
 
@@ -170,8 +170,8 @@ fn a_read_again_that_succeeds_lifts_the_refusal() {
     assert_eq!(
         rig.host.calls(),
         [
-            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
-            HostCall::SetLaunchRefused(codex(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyDenied)),
+            HostCall::SetLaunchRefused(codex(), Some(ErrorCode::AgentKeyDenied)),
         ]
     );
     // Still refused: a read again fails, and the refusal stays as it was.
