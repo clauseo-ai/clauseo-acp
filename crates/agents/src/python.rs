@@ -466,7 +466,7 @@ pub(crate) fn remove_stale_runtimes(
 /// Renames the folder at `path` to `keep`'s folder in `root` when its receipt names `keep`
 /// and that name is free (nothing there, not even a link), and says whether it did.
 fn moved_back(root: &Path, path: &Path, keep: &PythonArchive) -> io::Result<bool> {
-    if !read_receipt(path).is_some_and(|receipt| receipt.archive == keep.name()) {
+    if read_receipt(path).is_none_or(|receipt| receipt.archive != keep.name()) {
         return Ok(false);
     }
     let current = root.join(keep.stem());
