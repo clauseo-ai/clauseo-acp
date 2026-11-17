@@ -6,6 +6,7 @@ import { menusOf } from "./config-menus.ts";
 import {
   AGENT_DEFAULT_VALUE,
   draftConfig,
+  draftPickables,
   draftValue,
   pickables,
   resolvedDefault,
@@ -199,4 +200,17 @@ test("create_thread's config never carries the seed's sentinel", () => {
   expect(draftConfig(mixed, { model: "haiku" }, { effort: AGENT_DEFAULT_VALUE })).toEqual({
     model: "haiku",
   });
+});
+
+test("a seeded option the matter remembers a pick for shows no picker; the rest stand", () => {
+  const ids = (options: ConfigOption[], remembered?: Record<string, string>) =>
+    draftPickables(pickables(options), remembered).map((p) => p.id);
+  // the remembered model runs, so no "Claude's default" for it; the effort, not remembered, keeps its seed
+  expect(ids(SEED_CLAUDE, { model: "haiku" })).toEqual(["effort"]);
+  expect(ids(SEED_CODEX, { model: "gpt-5", reasoning_effort: "high" })).toEqual([]);
+  // nothing remembered: both seed menus, as they were
+  expect(ids(SEED_CLAUDE, undefined)).toEqual(["model", "effort"]);
+  expect(ids(SEED_CLAUDE, {})).toEqual(["model", "effort"]);
+  // the agent's own options and a remembered pick: unchanged
+  expect(ids([MODEL, EFFORT], { model: "haiku", effort: "low" })).toEqual(["model", "effort"]);
 });
