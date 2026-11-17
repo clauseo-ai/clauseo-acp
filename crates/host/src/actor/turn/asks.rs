@@ -7,8 +7,7 @@
 //! data folder (`agent/data_fence.rs`) is rejected unasked, with a notice (`outside.rs`).
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
-//! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
-//! network is refused without asking, told by a notice once a turn (`shell_network.rs`).
+//! allowed once with nothing logged ([`trusted_tool_to_allow`]).
 
 use std::path::PathBuf;
 
@@ -17,14 +16,13 @@ use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
     ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
+    PermissionRequested, PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
 use super::super::{Actor, limits};
 use super::out::Out;
-use super::shell_network::reject_option;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
@@ -47,6 +45,14 @@ pub(super) struct PermissionAsk {
     pub(super) options: Vec<PermissionOption>,
     /// What it is about, when the host can tell (`agent/plan_note.rs`).
     pub(super) about: Option<PermissionAbout>,
+}
+
+/// The option that rejects this request only: the first `RejectOnce`. A `RejectAlways` is
+/// never taken, since it may leave a lasting rule in the agent the lawyer never chose.
+pub(super) fn reject_option(options: &[PermissionOption]) -> Option<&PermissionOption> {
+    options
+        .iter()
+        .find(|option| option.kind == PermissionKind::RejectOnce)
 }
 
 /// A permission request and the turn it came in, while the matter thread checks its paths.
@@ -109,14 +115,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         allow_trusted_tool(actor, thread, ask.key, &server, option);
         return;
     }
-    if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
-        return;
-    }
     // Codex (`agent/codex_options.rs`): only the once-only and refusing options
     // reach the lawyer, so no card can make a standing rule in the agent's home, and an answer
     // naming a dropped option is refused as one the agent did not offer. After the answers the
     // host gives itself above, which read the request's own options (`allow_session`,
-    // `allow_once`, a network amendment's id) and never give an amendment.
+    // `allow_once`) and never give an amendment.
     let kind = actor
         .check_thread(thread)
         .ok()

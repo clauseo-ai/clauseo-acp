@@ -49,16 +49,6 @@ pub(crate) fn hold(actor: &mut Actor, thread: ThreadId, tools: Vec<ToolState>) {
     actor.header_tools.held.insert(thread, tools);
 }
 
-/// Whether `thread`'s session has web search, as its header shows it (the state its launch
-/// worked out); `tools.web_search` as it stands for a thread that shows none yet.
-pub(crate) fn web_search_on(actor: &Actor, thread: ThreadId) -> bool {
-    let shown = actor.header_tools.shown.get(&thread);
-    match shown.and_then(|tools| tools.iter().find(|s| s.tool == ClauseoTool::WebSearch)) {
-        Some(state) => state.availability == ToolAvailability::Available,
-        None => actor.effective.settings().tools.web_search,
-    }
-}
-
 /// `thread`'s session call answered: what [`hold`] kept shows in its header.
 pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
     if let Some(tools) = actor.header_tools.held.remove(&thread) {

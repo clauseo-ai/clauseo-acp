@@ -19,8 +19,7 @@ use clauseo_protocol::{
 };
 
 use super::super::Actor;
-use super::asks::PermissionAsk;
-use super::shell_network::reject_option;
+use super::asks::{PermissionAsk, reject_option};
 use super::updates::{agent, commit};
 use super::{current, spawn};
 use crate::log_file::Cause;

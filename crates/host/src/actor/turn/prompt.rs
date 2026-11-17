@@ -1,5 +1,4 @@
-//! Step 5: the prompt, with the notes first: the offline-shell note a steer could not deliver
-//! (`shell_network.rs`), then the undo note (the files put back since the last turn).
+//! Step 5: the prompt, with the undo note first (the files put back since the last turn).
 //!
 //! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is
 //! checked against Codex's cap again as it will be sent (`codex_cap::refuse`): over
@@ -7,7 +6,7 @@
 //! held, and the note kept for the next prompt.
 //!
 //! The undo note is held aside while its prompt is out, and put back unless the agent took that
-//! prompt (`note.rs`); the offline-shell note is spent once sent, or once the agent is gone.
+//! prompt (`note.rs`).
 
 use clauseo_protocol::{ContentBlock, ErrorCode, ThreadId, TurnId};
 use futures::future::{AbortHandle, Abortable, join};
@@ -40,9 +39,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         });
     let Some(((id, check), (client, descendants), fence, session)) = agent else {
         // The undo note stays: no prompt reached the agent.
-        if let Some(state) = state(actor, thread) {
-            state.offline_owed = false;
-        }
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Prompting;
         }
