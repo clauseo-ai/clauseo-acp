@@ -106,6 +106,21 @@ pub(crate) struct LaunchDeny {
     pub(crate) claude_home: Option<PathBuf>,
 }
 
+/// Whether `plans` is a plans folder in one of Clauseo's agents' homes under `data`
+/// (`<data>/agents/<agent id>/home/plans`, `Locations::agent_home`), where Claude Code writes
+/// its plan note (`agent/plan_note.rs`) when its home is Clauseo's.
+pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
+    let Ok(place) = plans.strip_prefix(data) else {
+        return false;
+    };
+    let names: Vec<_> = place.components().collect();
+    matches!(
+        names.as_slice(),
+        [Component::Normal(agents), Component::Normal(_), Component::Normal(home), Component::Normal(folder)]
+            if *agents == "agents" && *home == "home" && *folder == "plans"
+    )
+}
+
 /// The built-in plugin's folder under `<data>` (`clauseo_profile`'s `claude_plugin`), as a
 /// pattern: in [`SHARED`]'s `profile`, readable by every session, written only by the launch.
 pub(crate) const BUILT_IN_PLUGIN: &str = "profile/claude-plugin";
