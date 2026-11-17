@@ -442,11 +442,12 @@ test("a command.conflict while switching says Clauseo is still switching account
   expect(t.setups()).toHaveLength(1);
 });
 
-test("agent.key_unreadable shows as failed, in words-errors' words, with Try again (never Sign in again) and the key's quiet button", async () => {
+test("agent.key_unreadable shows as failed, in words-errors' words, with Try again (never Sign in again) and Remove key", async () => {
   const t = await at({ failed: { code: "agent.key_unreadable", at: AT } });
   expect(block("claude")!.dataset["state"]).toBe("failed");
   expect(words()).toContain("Clauseo couldn't check for a saved API key in time.");
-  expect(button("Use an API key instead", block("claude")!)).not.toBeNull();
+  // the stored key can be removed with no read (plans-key-unreadable.test.tsx)
+  expect(button("Remove key", block("claude")!)).not.toBeNull();
   expect(button("Sign in again", block("claude")!)).toBeNull();
   // desktop refuses the press with agent.key_unreadable and reads the key again
   await press(button("Try again", block("claude")!));

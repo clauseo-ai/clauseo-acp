@@ -110,6 +110,16 @@ const KEY_REFUSED: Scene = {
     first: both({ signed_in: { method: "api_key", source: "own", at: AT, refused: AT } }),
   },
 };
+/** Saved keys the keychain didn't give (decision record 0048): Claude's denied at macOS's prompt, ChatGPT's read not
+ * answered in time. Each card says "Uses your … API key.", its code's words, Try again and Remove key. */
+const KEY_NOT_READ: Scene = {
+  setup: {
+    first: both(
+      { failed: { code: "agent.key_denied", at: AT } },
+      { failed: { code: "agent.key_unreadable", at: AT } },
+    ),
+  },
+};
 /** ChatGPT's key panel, opened from its "Use an API key instead". */
 const CHATGPT_KEY: Scene = {
   ...SIGNED_OUT,
@@ -184,6 +194,9 @@ export const UD2_PLANS: Entry[] = [
   entry("UC-140", firstLaunchWords("OpenAI API key"), CHATGPT_KEY),
   // UC-150: a key the provider refused, in place of the signed-in line (key path fixes)
   entry("UC-150", "{name} didn't accept the API key.", KEY_REFUSED),
+  // UC-910 and UC-911: the card's line for a saved key the keychain didn't give, in place of "Uses your … plan."
+  entry("UC-910", "Uses your Anthropic API key.", KEY_NOT_READ),
+  entry("UC-911", "Uses your OpenAI API key.", KEY_NOT_READ),
   entry(
     "UC-146",
     firstLaunchWords("A key from the OpenAI platform. Billed to that account."),

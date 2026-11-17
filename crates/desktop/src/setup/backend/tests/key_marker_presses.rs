@@ -1,8 +1,9 @@
 //! A key that could not be read, pressed through the backend: every sign-in start is refused
-//! with `agent.key_unreadable` (a device code, a found login, a different account too), also
-//! before the windows' facts have caught up with the key cache, under a firm plan for an agent
-//! the marker does not mark, and after a late answer that fails again. A sign-in already going
-//! when the key becomes unreadable ends, and a read whose thread panics is taken in as failed.
+//! with `agent.key_unreadable` or `agent.key_denied` (a device code, a found login, a different
+//! account too), also before the windows' facts have caught up with the key cache, under a firm
+//! plan for an agent the marker does not mark, and after a late answer that fails again. A
+//! sign-in already going when the key becomes unreadable ends, and a read whose thread panics
+//! is taken in as failed.
 
 use std::time::Duration;
 
@@ -58,7 +59,7 @@ fn a_device_code_a_found_login_and_another_account_are_refused_while_the_key_is_
     ] {
         assert_eq!(
             run(&rig, name, &claude()),
-            Some(ErrorCode::AgentKeyUnreadable),
+            Some(ErrorCode::AgentKeyDenied),
             "{name}"
         );
         assert!(!called(&rig, call, &claude()), "{name}: {:?}", rig.calls());
@@ -81,7 +82,7 @@ fn a_press_before_the_windows_hear_of_the_unreadable_key_is_refused_too() {
         shown(&rig, &claude()),
         Some(SignIn::SignedOut { .. })
     ));
-    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyDenied));
     assert!(!called(&rig, "sign_in", &claude()), "{:?}", rig.calls());
 }
 
@@ -108,14 +109,19 @@ fn under_a_firm_plan_an_unmarked_failed_or_late_read_refuses_a_press() {
             rig.backend.compose.show_key(&agent, &rig.backend.keys);
         }
         rig.backend.compose.set_firm(&claude(), true);
-        assert_eq!(
-            press(&rig, &claude()),
-            Some(ErrorCode::AgentKeyUnreadable),
-            "late {late}"
-        );
+        // Late: no answer by the bound; failed: the keychain's error.
+        let code = if late {
+            ErrorCode::AgentKeyUnreadable
+        } else {
+            ErrorCode::AgentKeyDenied
+        };
+        assert_eq!(press(&rig, &claude()), Some(code), "late {late}");
         assert!(!called(&rig, "sign_in", &claude()), "late {late}");
         // Codex, with no firm plan, is not refused for its key.
-        assert_ne!(press(&rig, &codex()), Some(ErrorCode::AgentKeyUnreadable));
+        assert!(!matches!(
+            press(&rig, &codex()),
+            Some(ErrorCode::AgentKeyUnreadable | ErrorCode::AgentKeyDenied)
+        ));
         keychain.hang_reads(false);
     }
 }
@@ -137,7 +143,13 @@ fn under_a_firm_plan_a_read_denied_after_the_bound_stays_refused() {
         let rig = rig_keys(keychain.clone(), keys);
         rig.s18_was(&claude(), OUT);
         rig.backend.compose.set_firm(&claude(), true);
-        // The prompt, answered after the bound: Deny.
+        // Past the bound with no answer: `agent.key_unreadable`.
+        assert_eq!(
+            in_force(false, true, &rig.backend.keys, &claude()),
+            Some(ErrorCode::AgentKeyUnreadable),
+            "timed out, marked {marked}"
+        );
+        // The prompt, answered after the bound: Deny, which turns it into `agent.key_denied`.
         keychain.deny_reads(true);
         keychain.hang_reads(false);
         let keys = &rig.backend.keys;
@@ -146,7 +158,7 @@ fn under_a_firm_plan_a_read_denied_after_the_bound_stays_refused() {
         assert_eq!(keys.unreadable(&claude()), marked);
         assert_eq!(
             in_force(false, true, keys, &claude()),
-            Some(ErrorCode::AgentKeyUnreadable),
+            Some(ErrorCode::AgentKeyDenied),
             "marked {marked}"
         );
         let line = shown(&rig, &claude());
@@ -154,7 +166,7 @@ fn under_a_firm_plan_a_read_denied_after_the_bound_stays_refused() {
             is_key_unreadable(line.as_ref()),
             "marked {marked}: {line:?}"
         );
-        assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+        assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyDenied));
         assert!(!called(&rig, "sign_in", &claude()), "marked {marked}");
     }
 }
@@ -204,6 +216,6 @@ fn a_read_that_panics_is_taken_in_as_failed_and_try_again_reads_again() {
     let rig = rig_keys(keychain.clone(), keys);
     rig.s18_was(&claude(), OUT);
     keychain.panic_reads(false);
-    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyUnreadable));
+    assert_eq!(press(&rig, &claude()), Some(ErrorCode::AgentKeyDenied));
     until_read(&rig, &mut notes.take().unwrap());
 }

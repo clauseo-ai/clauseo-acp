@@ -61,6 +61,7 @@ const STATES: [string, SignIn][] = [
   ["failed", { failed: { code: "signin.cancelled", at: AT } }],
   ["no plan", { failed: { code: "signin.no_plan", at: AT } }],
   ["key unreadable", { failed: { code: "agent.key_unreadable", at: AT } }],
+  ["key denied", { failed: { code: "agent.key_denied", at: AT } }],
   ["switching", { switching: { since: AT, stuck: true } }],
   ["signed in, reused", plans.signed({ source: "reused" })],
 ];

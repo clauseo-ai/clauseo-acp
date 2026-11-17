@@ -39,6 +39,9 @@ export type FootPlan = {
   /** false when its line offers no sign-in (a saved key the keychain didn't give: its Try again reads the
    * key), so the lead asking for one stands only for the other plan; left out, its line counts. */
   signs?: boolean | undefined;
+  /** The row's name for assistive technology, its visible words (a saved key the keychain didn't give: the key's
+   * line), so the row is a group named by its cause; left out, the row is no group. */
+  label?: string | null | undefined;
 };
 
 export function Welcome({
@@ -87,7 +90,7 @@ export function Welcome({
   const { lang } = useDisplay();
   const heading = useId();
   return (
-    <>
+    <div className="fl-screen" data-testid="first-screen">
       <div className="fl-welcome">
         <div className="fl-col">
           {/* the page's one level-one heading, for assistive technology: the header shows no title on this screen (the
@@ -185,6 +188,8 @@ export function Welcome({
               <div
                 key={plan.key}
                 className="room-entry fl-foot-well fl-plan"
+                role={plan.label == null ? undefined : "group"}
+                aria-label={plan.label ?? undefined}
                 data-working=""
                 data-testid="plan-row"
                 data-agent={plan.key}
@@ -219,7 +224,7 @@ export function Welcome({
           <Counts {...counts} onWhatsSent={onWhatsSent} testId={testIds.counts} />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

@@ -21,6 +21,7 @@ import { installLine } from "@clauseo/components/clauseo/first-launch/install.ts
 import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
@@ -67,8 +68,8 @@ type Stand =
   | { kind: "install" }
   | { kind: "signed"; signed: SignedIn }
   | { kind: "signed-out"; found: PlansFound | undefined }
-  /** A stored key that couldn't be read in time (agent.key_unreadable, #506): its words, and a sign-in, which the
-   * host doesn't bar meanwhile. */
+  /** A stored key the keychain didn't give (agent.key_unreadable in time, agent.key_denied after a Deny; #506, 0048):
+   * its code's words under "Uses your Anthropic API key.", Try again (which reads it again), and Remove key. */
   | { kind: "failed"; code: string }
   | { kind: "gate" };
 
@@ -94,8 +95,7 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
     // the agent's own refusal for no sign-in is the signed-out block again, as the gate has it
     if (signIn.failed?.code === "agent.auth_required")
       return { kind: "signed-out", found: undefined };
-    if (signIn.failed?.code === "agent.key_unreadable")
-      return { kind: "failed", code: signIn.failed.code };
+    if (isKeyNotRead(signIn.failed?.code)) return { kind: "failed", code: signIn.failed.code };
   }
   return { kind: "gate" };
 }
@@ -427,7 +427,13 @@ export function PlanBlock({
       }
       case "failed":
         body = (
-          <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
+          <PlanCard
+            plan={plan}
+            line={s(
+              plan === "claude" ? "Uses your Anthropic API key." : "Uses your OpenAI API key.",
+            )}
+            note={errorWords(lang, stand.code)}
+          >
             {/* the key unreadable: Try again reads it again (desktop refuses the press with the code), never a sign-in */}
             <MainAct label={fl(lang, "Try again")} onClick={signIn} testId="plans-sign-in" />
           </PlanCard>
@@ -499,6 +505,7 @@ export function PlanBlock({
           keys={keys}
           keysKnown={keysKnown}
           inUse={method === "api_key"}
+          unreadable={stand.kind === "failed"}
           open={keyOpen}
           onOpen={setKeyOpen}
           onKey={saveKey}

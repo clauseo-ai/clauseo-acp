@@ -1,8 +1,9 @@
-//! `agent.key_unreadable` (decision record 0048, R20 P5b A4): desktop refuses an agent's
-//! launches with it once that agent's stored key was tried and its read failed or did not answer
-//! in time. A launch meeting it asks desktop to read the key again (`HostConfig::with_key_retry`)
-//! and waits at most 2 s on the host clock: lifted in time, it goes on with the key; still
-//! refused, it fails with the code and no process starts. `agent.keys_loading` past its bound
+//! `agent.key_unreadable` and `agent.key_denied` (decision record 0048, R20 P5b A4): desktop
+//! refuses an agent's launches with one once that agent's stored key was tried and its read did
+//! not answer in time, or the key store answered it with an error (a denied prompt). A launch
+//! meeting one asks desktop to read the key again (`HostConfig::with_key_retry`) and waits at
+//! most 2 s on the host clock: lifted in time, it goes on with the key; still refused, it fails
+//! with the code and no process starts. `agent.keys_loading` past its bound
 //! (desktop never loaded the keys) refuses the same way.
 
 use std::ffi::OsString;
@@ -20,10 +21,20 @@ const KEYS_LOAD_BOUND: Duration = Duration::from_secs(12);
 
 #[test]
 fn a_launch_meeting_key_unreadable_asks_for_a_read_again_and_goes_on_once_it_lifts() {
-    let dir = Dir::new(
-        "key_unreadable",
-        &[(FAKE, Scenario::Local("launch-refused"))],
-    );
+    a_launch_meeting(ErrorCode::AgentKeyUnreadable, "key_unreadable");
+}
+
+#[test]
+fn a_launch_meeting_key_denied_asks_for_a_read_again_and_goes_on_once_it_lifts() {
+    a_launch_meeting(ErrorCode::AgentKeyDenied, "key_denied");
+}
+
+/// A launch meeting `code`, a key not read: desktop is asked to read it again, the launch fails
+/// with `code` while it stays, and goes on with the key once it lifts. `cfg(test)`: a test's own
+/// helper, which may unwrap and panic as the tests do.
+#[cfg(test)]
+fn a_launch_meeting(code: ErrorCode, name: &str) {
+    let dir = Dir::new(name, &[(FAKE, Scenario::Local("launch-refused"))]);
     let recording = Recording::new(&dir);
     let launches = Arc::clone(&recording.envs);
     let slot = Arc::new(Mutex::new(None));
@@ -33,7 +44,7 @@ fn a_launch_meeting_key_unreadable_asks_for_a_read_again_and_goes_on_once_it_lif
     let host = dir.start_launching(0, Arc::new(recording), |config| {
         config
             .with_profile_hook(Box::new(hook))
-            .with_launch_refused(fake(), ErrorCode::AgentKeyUnreadable)
+            .with_launch_refused(fake(), code)
             .with_key_retry(Arc::new(move |agent: &AgentId| {
                 asked.lock().unwrap().push(agent.clone());
             }))
@@ -52,7 +63,7 @@ fn a_launch_meeting_key_unreadable_asks_for_a_read_again_and_goes_on_once_it_lif
     host.clock.advance(KEYS_WAIT);
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Failed);
     let failed = turn_failed(&events, first).unwrap_or_else(|| panic!("{}", events.dump()));
-    assert_eq!(failed.code, ErrorCode::AgentKeyUnreadable);
+    assert_eq!(failed.code, code);
     assert!(failed.code.is_retryable());
     assert_eq!(launches.lock().unwrap().len(), 0, "no process started");
 
