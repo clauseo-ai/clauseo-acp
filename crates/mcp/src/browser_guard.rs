@@ -377,8 +377,7 @@ fn serve(
     outcome_code(outcome, &command.agent_browser)
 }
 
-/// Windows: a new session key for this run's agent-browser (`env::SESSION_KEY`); a guard that
-/// cannot draw one starts no browser. None elsewhere: only the Windows build checks one.
+/// Windows: this run's agent-browser's session key (`env::SESSION_KEY`), or no browser; else None.
 fn session_key() -> Result<Option<String>, Failure> {
     if cfg!(windows) {
         env::new_session_key()
