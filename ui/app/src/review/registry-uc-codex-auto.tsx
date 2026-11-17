@@ -1,4 +1,4 @@
-// UC's entries for ChatGPT running in Codex's automatic mode (UC-920 to UC-923): its permission card's allow answer
+// UC's entries for ChatGPT running in Codex's automatic mode (UC-979 to UC-982): its permission card's allow answer
 // that Codex keeps for the rest of the conversation, "For this conversation", and the card folded after it; and the
 // notice that the account refuses the automatic mode. The real room over FakeTransport, in a thread of codex-acp.
 import { chosen, editCall, permission, userMessage, uuid } from "../testing/stream-script.ts";
@@ -23,7 +23,7 @@ const AUTO_NOTICE: ViewEntry = {
     order: 6,
     event: uuid(1, 10),
     level: "info",
-    text: "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+    text: "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.",
     ts: 6000,
     kind: "auto_mode_unavailable",
   },
@@ -33,27 +33,27 @@ const pending = codex([editCall(6, 1, "pending"), permission(7, 1)], "needs_you"
 
 export const UC_CODEX_AUTO: Entry[] = [
   {
-    id: "UC-920",
+    id: "UC-979",
     words: threadWords("For this conversation"),
     screen: "room/thread",
     render: pending,
   },
   {
-    id: "UC-921",
+    id: "UC-980",
     words: threadWords("Allowed for this conversation."),
     screen: "room/thread",
     render: codex([permission(7, 3, chosen("allow_always"), null)], "idle"),
   },
   {
-    id: "UC-922",
+    id: "UC-981",
     words: threadWords("Allowed for this conversation. Clauseo saved a new version of {paper}."),
     screen: "room/thread",
     render: codex([editCall(6, 1, "completed"), permission(7, 1, chosen("allow_always"))], "idle"),
   },
   {
-    id: "UC-923",
+    id: "UC-982",
     words: threadWords(
-      "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+      "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.",
     ),
     screen: "room/thread",
     render: codex([AUTO_NOTICE], "idle"),
