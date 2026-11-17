@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
+use clauseo_profile::servers::BROWSER_OFF_HERE;
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
@@ -70,8 +71,7 @@ pub(super) fn launch_keys(
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
         let kind = AgentKind::of(&agent_id);
-        let none_here = browser::no_browser(kind, clauseo_profile::servers::BROWSER_OFF_HERE)
-            .then_some(BrowserPart::Off);
+        let none_here = browser::no_browser(kind, BROWSER_OFF_HERE).then_some(BrowserPart::Off);
         let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
@@ -162,7 +162,7 @@ pub(super) fn session_loads(
             Error::refused(ErrorCode::AgentLaunchFailed, "the session has no folders")
         })?;
     let control = loads::mcp_control(&actor.managed_mcp);
-    let none_here = browser::no_browser(kind, clauseo_profile::servers::BROWSER_OFF_HERE);
+    let none_here = browser::no_browser(kind, BROWSER_OFF_HERE);
     let offered = browser::offered(actor.profile.mcp_servers(&agent_id), none_here);
     let (hook, case_law_entry, case_law_state) = case_law_servers(actor, &run, offered, control);
     let part = connectors_part(case_law_entry.is_some());
@@ -500,12 +500,7 @@ fn shell_browser(
     agent: &AgentId,
 ) -> Option<(clauseo_protocol::ToolState, BrowserPart)> {
     actor.profile.browser_tool()?;
-    if offers_entry(actor, agent)
-        || browser::no_browser(
-            AgentKind::of(agent),
-            clauseo_profile::servers::BROWSER_OFF_HERE,
-        )
-    {
+    if offers_entry(actor, agent) || browser::no_browser(AgentKind::of(agent), BROWSER_OFF_HERE) {
         return None;
     }
     let (_, switch) = switches(actor);
