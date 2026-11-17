@@ -22,6 +22,8 @@ pub(crate) mod lawyer;
 #[cfg(test)]
 mod lawyer_tests;
 #[cfg(test)]
+mod layering_deny_tests;
+#[cfg(test)]
 mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
