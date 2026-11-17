@@ -190,11 +190,20 @@ fn a_header_text_one_version_only_has_is_listed() {
         compare(&old, &edited).lone_header_texts,
         ["Mainheader,revised.", "Mainheader."]
     );
-    // A header with no text lists none, and is said not compared.
+    // A blank header (no text, no picture) has nothing to miss: it lists none and says nothing.
     let blank = sectioned(&[hdr(&p("Main header.")), hdr("")], "Two years.");
     let found = compare(&old, &blank);
     assert_eq!(found.lone_header_texts, Vec::<String>::new());
-    assert!(found.lone_header_unseen);
+    assert!(!found.lone_header_unseen);
+    assert_eq!(notices_of(&old, &blank), []);
+    // A header holding only an equation is not blank: its `m:t` is text.
+    let math = r#"<w:p><m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>x=1</m:t></m:r></m:oMath></w:p>"#;
+    let equation = sectioned(&[hdr(&p("Main header.")), hdr(math)], "Two years.");
+    assert_eq!(compare(&old, &equation).lone_header_texts, ["x=1"]);
+    assert_eq!(
+        notices_of(&old, &equation),
+        [BlacklineNotice::HeaderOrFooterNotCompared]
+    );
 }
 
 /// A section added with a header that is only a picture (a letterhead logo) has no text to find,

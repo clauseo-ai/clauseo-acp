@@ -43,6 +43,13 @@ const W_NAMESPACES: &[&str] = &[
     "http://purl.oclc.org/ooxml/wordprocessingml/main",
 ];
 
+/// Office Math's namespaces, Transitional and Strict: an equation's text (`m:t`) is a part's
+/// text too.
+const M_NAMESPACES: &[&str] = &[
+    "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    "http://purl.oclc.org/ooxml/officeDocument/math",
+];
+
 /// The markup-compatibility namespace, whose `Fallback` repeats what its `Choice` holds.
 const MC_NAMESPACE: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 

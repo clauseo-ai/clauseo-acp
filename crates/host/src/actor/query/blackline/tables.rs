@@ -23,9 +23,9 @@
 //! - which headers and footers were not compared at all: the texts of the parts one version has
 //!   and the other does not ([`TablesCompared::lone_header_texts`]); stetdoc's compare does not
 //!   compare a header of a section it pairs with none, and does not warn of it, so `run.rs`
-//!   says so when no part the blackline shows has that text, and always for such a part with
-//!   no text or a picture ([`TablesCompared::lone_header_unseen`]). The parts are counted, so
-//!   two parts with one text are not taken for one;
+//!   says so when no part the blackline shows has that text, and always for such a part with a
+//!   picture ([`TablesCompared::lone_header_unseen`]); a blank one (no text, no picture) has
+//!   nothing to miss. The parts are counted, so two parts with one text are not taken for one;
 //! - what is never silent: where both sides have tables, rows or cells left between two pairs
 //!   and not as many of them, what changed there can't be put on a table, so the part may differ
 //!   ([`TablesCompared::may_differ`]); and so may the whole document when a version can't be
@@ -57,11 +57,12 @@ pub(crate) struct TablesCompared {
     pub(crate) may_differ: bool,
     /// The texts of the headers and footers some section uses that only one version has, each
     /// with its white space taken out ([`squeezed`]), once, sorted. The parts are counted, so a
-    /// text one version has on more parts than the other is listed too. A part with no text or
-    /// with a picture is not listed: it sets [`TablesCompared::lone_header_unseen`] instead.
+    /// text one version has on more parts than the other is listed too. A part with a picture is
+    /// not listed: it sets [`TablesCompared::lone_header_unseen`] instead. A blank part (no text,
+    /// no picture) is in neither: it has nothing to miss, and Word makes many.
     pub(crate) lone_header_texts: Vec<String>,
-    /// Whether a header or footer only one version has holds no text or a picture (a letterhead
-    /// logo): no shown text can stand for it, so `run.rs` says it was not compared.
+    /// Whether a header or footer only one version has holds a picture (a letterhead logo): no
+    /// shown text can stand for it, so `run.rs` says it was not compared.
     pub(crate) lone_header_unseen: bool,
 }
 
@@ -118,9 +119,10 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
         if count == 0 {
             continue;
         }
-        if text.is_empty() || picture {
+        // A blank part (no text, no picture) has nothing to miss, and Word makes many.
+        if picture {
             found.lone_header_unseen = true;
-        } else {
+        } else if !text.is_empty() {
             lone.insert(text);
         }
     }

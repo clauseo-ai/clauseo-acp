@@ -10,7 +10,7 @@ use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 
-use super::{Cell, MARKS, MC_NAMESPACE, Prop, Row, SectionRefs, Table, W_NAMESPACES};
+use super::{Cell, M_NAMESPACES, MARKS, MC_NAMESPACE, Prop, Row, SectionRefs, Table, W_NAMESPACES};
 
 /// What an open element is, to the streaming read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,10 +42,7 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
     loop {
         buf.clear();
         let (resolved, event) = reader.read_resolved_event_into(&mut buf).ok()?;
-        let word =
-            matches!(resolved, ResolveResult::Bound(Namespace(ns)) if W_NAMESPACES.contains(&ns));
-        let fallback =
-            matches!(resolved, ResolveResult::Bound(Namespace(ns)) if ns == MC_NAMESPACE);
+        let (word, fallback) = namespace_of(&resolved);
         match event {
             Event::Start(element) => {
                 let name = element.local_name();
@@ -154,6 +151,19 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
             | Event::GeneralRef(_) => {}
         }
     }
+}
+
+/// Whether an element's namespace is read as Word's main one, and whether it is markup
+/// compatibility's. Office Math's is read as Word's, so an equation's `m:t` is text; none of its
+/// other names is one this reader matches.
+fn namespace_of(resolved: &ResolveResult<'_>) -> (bool, bool) {
+    let ResolveResult::Bound(Namespace(ns)) = resolved else {
+        return (false, false);
+    };
+    (
+        W_NAMESPACES.contains(ns) || M_NAMESPACES.contains(ns),
+        *ns == MC_NAMESPACE,
+    )
 }
 
 /// Closes `table`: a row or cell whose deletion is tracked is left out, as accepting it does.
