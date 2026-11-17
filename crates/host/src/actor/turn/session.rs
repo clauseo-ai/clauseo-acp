@@ -1,7 +1,7 @@
 //! A launched agent's session: `session/load` with the stored session id when the agent offers
 //! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
 //! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
-//! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
+//! its first prompt (its mode, the guard's trust), for a Claude agent the switch to
 //! Clauseo's mode, for any agent the model and effort picks (`picks.rs`); then the attach
 //! commit, the held replay and the work that waited. When `initialize` gave the agent a title,
 //! its name is logged first (`AgentNamed`, `session/named.rs`), so a failed `session/new`
@@ -310,38 +310,36 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         None if picks.is_empty() => return attach(actor, thread, start, loaded),
         None => return before_attach(actor, thread, (start, loaded), (None, None, picks)),
     }
-    let ask =
-        AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
-    let checks = ask.and_then(|ask| {
-        let offered = start.modes.as_ref().is_some_and(|modes| {
-            modes
-                .available
-                .iter()
-                .any(|mode| mode.id == codex::ASK_MODE)
-        });
+    // Codex's mode, or its fallback once the agent's account refused the reviewer.
+    let wanted = super::codex_reviewer::mode(actor, thread);
+    let mode = AgentChoiceId::new(wanted).map_err(|error| Error::Internal(error.to_string()));
+    let checks = mode.and_then(|mode| {
+        let offered = start
+            .modes
+            .as_ref()
+            .is_some_and(|modes| modes.available.iter().any(|offered| offered.id == wanted));
         if !offered {
             return Err(Error::refused(
                 ErrorCode::AgentModeMissing,
                 format!(
-                    "Codex offered no \"{}\" mode, which Clauseo runs it in, so no message was \
-                     sent",
-                    codex::ASK_MODE
+                    "Codex offered no \"{wanted}\" mode, which Clauseo runs it in, so no message \
+                     was sent"
                 ),
             ));
         }
         let switch = start
             .modes
             .as_ref()
-            .is_some_and(|modes| modes.current != codex::ASK_MODE);
-        Ok((ask, switch))
+            .is_some_and(|modes| modes.current != wanted);
+        Ok((mode, switch))
     });
-    let (ask, switch) = match checks {
+    let (mode, switch) = match checks {
         Ok(checks) => checks,
         Err(error) => {
             tracing::warn!(
                 %thread,
                 error = %Cause(&error),
-                "the Codex session cannot run in its ask mode"
+                "the Codex session cannot run in its mode"
             );
             launch_failed(actor, thread, &error);
             return;
@@ -357,11 +355,11 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         attach(actor, thread, start, loaded);
         return;
     }
-    let ask = switch.then_some(Switch {
-        mode: ask,
+    let mode = switch.then_some(Switch {
+        mode,
         fallback: None,
     });
-    before_attach(actor, thread, (start, loaded), (ask, guard, picks));
+    before_attach(actor, thread, (start, loaded), (mode, guard, picks));
 }
 
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode
@@ -445,6 +443,9 @@ fn attach_commit(
         )?;
     }
     if let Some(notice) = claude_mode::notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
+    if let Some(notice) = super::codex_reviewer::notice(actor, thread) {
         out.push(actor, notice)?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).

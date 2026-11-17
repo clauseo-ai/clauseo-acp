@@ -50,8 +50,9 @@ pub(crate) const FLAG: &str = "--record";
 pub(crate) const ID_FLAG: &str = "--record-id";
 
 /// The guard folder of the session `session` (its run id): `<data>/browser/guard/<session>`,
-/// in `<data>/browser`, which no agent's shell or patch tool may write (Codex's fence,
-/// `agent/codex_fence.rs` `DATA_DENIED`; Claude's `Read` and `Edit` deny of `browser/**`).
+/// in `<data>/browser`, which no agent's sandboxed shell or patch tool may write (Codex's
+/// sandbox names no writable root there, `agent/codex_fence.rs`; Claude's `Read` and `Edit`
+/// deny of `browser/**`). A Codex command its reviewer approves runs unsandboxed.
 pub(crate) fn folder(data: &Path, session: &str) -> PathBuf {
     data.join(crate::browser::CONFIG_DIR)
         .join(FOLDER)

@@ -126,6 +126,7 @@ pub(super) async fn open(
         blocked: Box::default(),
         allowed,
         agent_options,
+        codex_reviewer_refused: std::collections::BTreeSet::new(),
         blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),
         triage: super::triage::Triage::new(),

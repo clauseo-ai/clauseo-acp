@@ -190,6 +190,9 @@ pub(crate) struct Actor {
     pub(crate) allowed: Box<allowed::AllowState>,
     /// Each agent's config options as its latest session reported them (`agent_options.rs`).
     pub(crate) agent_options: agent_options::AgentOptions,
+    /// The Codex agents whose account refused Codex's reviewer this host run: their sessions
+    /// run in `codex::FALLBACK_MODE` (`turn/codex_reviewer.rs`).
+    pub(crate) codex_reviewer_refused: std::collections::BTreeSet<clauseo_protocol::AgentId>,
     /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
     pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).

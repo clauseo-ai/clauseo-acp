@@ -1,8 +1,7 @@
-//! The data-folder fence in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`, decision
-//! record 0030), checked from `codex.rs`'s launch test: denies scoped under the data folder,
-//! the siblings of the own run folder and notes as the launch listed them, never `run` or
-//! `agent-state` whole, so an escalated command reaches the own folders too (they are `write`
-//! entries as well, checked in `profile.rs`), never Codex's home. Windows gets none.
+//! Codex's permission profile in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`),
+//! checked from `codex.rs`'s launch test: it extends `:workspace`, names only the session's run
+//! folder and notes `write`, scoped under the data folder, and has no `deny` entry, so a
+//! command Codex's reviewer approves runs as in plain Codex. Windows gets none.
 
 use std::path::Path;
 
@@ -11,49 +10,37 @@ use serde_json::{Value, json};
 
 use crate::support::Dir;
 
-/// Checks the fence keys in `config` for a Codex session of `matter` whose run folder is `run`
-/// and whose Codex home is `home`, and returns them as they are, for the exact comparison.
+/// Checks the profile keys in `config` for a Codex session of `matter` whose run folder is
+/// `run`, and returns them as they are, for the exact comparison.
 pub(crate) fn checked_keys(
     config: &Value,
     dir: &Dir,
     matter: MatterId,
     run: &Path,
-    home: &Path,
 ) -> [(&'static str, Value); 2] {
     let data = crate::profile_rig::path_text(dir.data());
     assert_eq!(config["default_permissions"], json!("clauseo"));
     let profile = &config["permissions"]["clauseo"];
     assert_eq!(profile["extends"], json!(":workspace"));
+    assert!(
+        !profile.to_string().contains("deny"),
+        "no deny entry: {profile}"
+    );
     let scoped = profile["filesystem"][data.as_str()]
         .as_object()
-        .expect("denies scoped under the data folder");
-    for subpath in [
-        "logs",
-        "search.sqlite",
-        "state.sqlite",
-        "skill-packs",
-        "run.old-*",
-        "agents/claude-acp",
-        "agents/signin",
-        "agents/codex-acp/home/auth.json",
-        "agents/codex-acp/home/history.jsonl",
-    ] {
-        assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
-    }
-    for whole in ["run", "agent-state"] {
-        assert_eq!(scoped.get(whole), None, "{whole}");
-    }
+        .expect("entries scoped under the data folder");
     let notes = crate::profile_rig::notes(dir, matter);
-    for (subpath, mode) in scoped {
-        if mode == &json!("write") {
-            continue;
-        }
-        assert_eq!(mode, &json!("deny"), "{subpath}");
-        let denied = dir.data().join(subpath);
-        for own in [run, notes.as_path(), home] {
-            assert!(!own.starts_with(&denied), "{subpath}");
-        }
-    }
+    let mut written: Vec<_> = scoped
+        .iter()
+        .map(|(subpath, mode)| {
+            assert_eq!(mode, &json!("write"), "{subpath}");
+            dir.data().join(subpath)
+        })
+        .collect();
+    written.sort();
+    let mut own = vec![run.to_path_buf(), notes];
+    own.sort();
+    assert_eq!(written, own);
     [
         ("default_permissions", config["default_permissions"].clone()),
         ("permissions", config["permissions"].clone()),

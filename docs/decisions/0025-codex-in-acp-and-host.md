@@ -40,6 +40,19 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   before writing outside it or escalating; Undo per turn is the lawyer's way back. No screen may
   promise per-edit approval for Codex. The Word-open guard still applies to Codex's writes,
   through the hooks object in `CODEX_CONFIG` (clauseo-acp #152).
+- **Codex runs in `agent` (Rohan, 2026-11-17).** Codex now runs in codex-acp's own default,
+  `agent` ("Auto review", `dist/index.js:34293-34308, 34319`), Codex's automatic mode, as Claude
+  runs in `auto`: the bar is to be as safe as Claude Code and Codex in their own automatic
+  modes, no safer, with no needless cards. Its sandbox is still `workspace-write` with no
+  network, so file work inside the matter folder is as above; a step that needs more goes to
+  Codex's reviewer model (approvals reviewer `auto_review`; codex 0.162.1
+  `core/src/tools/approvals.rs:505-524`), which answers it instead of the lawyer. The
+  bullet above stays true of `workspace-write`. An account whose requirements forbid the
+  reviewer refuses each prompt before its turn starts (codex-acp takes `set_mode agent`
+  unchecked); the host then sets the session to `workspace-write` and sends the same prompt
+  once more, remembers the agent for the host's run so its later sessions start there, and
+  tells each such conversation once, as Claude's `acceptEdits` fallback does
+  (`actor/turn/codex_reviewer.rs`).
 - **Claude runs in `auto` (Rohan, 2026-11-11).** Outside forced ask Claude now starts in Claude
   Code's `auto` mode, so a first read of a matter's papers never asks; `acceptEdits`, described
   below, is its fallback when auto is not available, with one notice (decision record 0030,
@@ -57,10 +70,11 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   turn is the lawyer's way back, as for Codex. Forced ask is unchanged: Claude asks before
   every change there. Decision record 0030 ("Claude's permission mode") has the scope, its
   sources and what still guards.
-- **The host owns the mode.** A Codex agent is launched with `INITIAL_AGENT_MODE=workspace-write`
+- **The host owns the mode.** A Codex agent is launched with `INITIAL_AGENT_MODE=agent`
+  (`workspace-write` until 2026-11-17)
   over any settings value. After `session/new`, `session/load` or `session/resume` the host reads
-  the session's modes: none, or none named `workspace-write`, fails the turn with
-  `agent.protocol_error` and no prompt is sent; a current mode other than `workspace-write` gets
+  the session's modes: none, or none named `agent`, fails the turn with
+  `agent.protocol_error` and no prompt is sent; a current mode other than `agent` gets
   `session/set_mode` before the first prompt. Doing both is safe whichever route G8a shows to
   win. Updates the agent sends meanwhile are held until the attach commit.
 - **`AcpClient::resume_session`** sends ACP v1's stable `session/resume`; nothing is replayed.
@@ -108,7 +122,7 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   the profile hook, in any case. `MODEL_PROVIDER` goes too: the `config.toml` Clauseo writes in
   the home defines no provider, and sign-in is Codex's ChatGPT login.
 - **A Codex agent's launch env**, set over any settings or profile value of the same name:
-  `INITIAL_AGENT_MODE=workspace-write`, `CODEX_HOME=<agent_home>`,
+  `INITIAL_AGENT_MODE=agent`, `CODEX_HOME=<agent_home>`,
   `DISABLE_MCP_CONFIG_FILTERING=true`, and `CODEX_CONFIG`, a JSON object holding every one of
   `clauseo_limits::CODEX_OVERRIDES` as nested keys: apps, plugins, skill MCP installs, cloud
   skills and bundled skills off, and `skills.include_instructions=false`. The last two joined the

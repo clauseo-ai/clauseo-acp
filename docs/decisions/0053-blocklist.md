@@ -302,7 +302,7 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
   already the host's (0024), so no crate is added; the item is replaced at each save, so it
   refuses a rollback as a MAC alone would not. While the store is unusable, allows last one run.
 - **The agent's fence denies `blocklist/`** (`agent/data_fence.rs`'s `DENIED` for Claude,
-  `agent/codex_fence.rs`'s `DATA_DENIED` for Codex) whether or not it exists at the launch, so
+  `agent/codex_fence.rs`'s `DATA_DENIED` for Codex, removed 2026-11-17: decision record 0030) whether or not it exists at the launch, so
   no agent reads or edits the stored list or the lawyer's allows.
 - **Notices are kept per thread** (the latest 64 of each, 1024 in all), so an agent looping in
   one thread cannot push out another thread's notice before the lawyer acts on it; none is

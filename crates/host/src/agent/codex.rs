@@ -19,12 +19,19 @@ use crate::log_file::Cause;
 
 /// The variable codex-acp takes its first mode from (`dist/index.js:34362-34367`).
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
-/// The mode every Codex session runs in, with no Clauseo sandbox (tier C). codex-acp describes
-/// it as "edit workspace files; ask before writing outside the workspace" (`dist/index.js:
-/// 34277-34281`): Codex creates, changes and deletes files inside the matter folder without
-/// asking (G8a saw it, clauseo-acp-private #255), and asks before writing outside it or
-/// escalating. Undo per turn is the lawyer's way back.
-pub(crate) const ASK_MODE: &str = "workspace-write";
+/// The mode every Codex session runs in, with no Clauseo sandbox (tier C): codex-acp's own
+/// default, "Auto review" (`dist/index.js:34293-34308, 34319`), Codex's automatic mode. Its
+/// sandbox is `workspace-write` with no network, as in [`FALLBACK_MODE`]: Codex creates,
+/// changes and deletes files inside the matter folder without asking (G8a saw it,
+/// clauseo-acp-private #255). A step that needs more (a write outside the folder, the network,
+/// an escalation) goes to Codex's reviewer model, which answers it instead of the lawyer
+/// (approvals reviewer `auto_review`; codex 0.162.1 `core/src/tools/approvals.rs:505-524`).
+/// Undo per turn is the lawyer's way back.
+pub(crate) const MODE: &str = "agent";
+/// The mode a Codex session runs in once the account's requirements refuse [`MODE`]'s reviewer
+/// (`actor/turn/codex_reviewer.rs`): the same sandbox, and Codex asks the lawyer before
+/// writing outside the matter folder or escalating (`dist/index.js:34277-34292`).
+pub(crate) const FALLBACK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
 /// The variable codex-acp reads its config from.
@@ -52,7 +59,7 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
-/// name: the ask mode, `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, and no MCP
+/// name: [`MODE`], `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, and no MCP
 /// filtering.
 pub(crate) fn launch_env(
     home: &Path,
@@ -62,7 +69,7 @@ pub(crate) fn launch_env(
 ) -> BTreeMap<OsString, OsString> {
     let config = Value::Object(config(settings_env, profile, hooks)).to_string();
     BTreeMap::from([
-        (OsString::from(MODE_VAR), OsString::from(ASK_MODE)),
+        (OsString::from(MODE_VAR), OsString::from(MODE)),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
         (OsString::from(CONFIG_VAR), OsString::from(config)),
         (OsString::from(MCP_FILTER_VAR), OsString::from("true")),
@@ -72,9 +79,9 @@ pub(crate) fn launch_env(
 /// The top-level keys `config` takes from the launch profile's side
 /// (`agent::loads::profile::codex_keys`): the profile's own [`PROFILE_KEYS`], and the host's
 /// `web_search` and `sandbox_workspace_write` (only its `writable_roots`, the session's work
-/// and notes folders), and the data-folder fence's `default_permissions` and `permissions`
-/// (`agent::codex_fence`; `codex_keys` drops both from the profile hook, so only the host's
-/// reach here). Any other key is refused with a warning: `hooks`, `mcp_servers`,
+/// and notes folders), and Codex's permission profile's `default_permissions` and
+/// `permissions` (`agent::codex_fence`; `codex_keys` drops both from the profile hook, so only
+/// the host's reach here). Any other key is refused with a warning: `hooks`, `mcp_servers`,
 /// `sandbox_mode`, `approval_policy`, `skills`, `features`, `projects`, `model_providers`,
 /// `profiles`, `notify` and the rest.
 const LAUNCH_KEYS: [&str; 5] = [
@@ -92,7 +99,7 @@ pub(crate) const PROFILE_KEYS: [&str; 1] = ["developer_instructions"];
 /// The Windows sandbox Codex gets on Windows, as `windows.sandbox`: Codex's restricted-token
 /// sandbox, which needs no admin setup and which G8a verified (clauseo-acp-private #281). With no
 /// Windows sandbox set, codex 0.162.1 turns `workspace-write` into read-only on Windows
-/// (`codex-rs/config/src/config_toml.rs:687-700` at `rust-v0.162.1`), so under the ask mode it
+/// (`codex-rs/config/src/config_toml.rs:687-700` at `rust-v0.162.1`), so under [`MODE`] it
 /// asks before every shell command, reads included (#274's by-hand proof). Record 0025; it is
 /// revisited when stage C's Windows sandbox (S15) lands.
 pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";

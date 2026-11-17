@@ -1790,7 +1790,7 @@ Record 0030 has the entry; this is the browser's side of it.
   - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
     temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
     (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
-    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`, removed 2026-11-17: decision record 0030), so the shell
     cannot plant a link the guard would write through. The folder goes with the run folder at the
     session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
     the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also
