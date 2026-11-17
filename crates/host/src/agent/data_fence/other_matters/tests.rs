@@ -511,3 +511,30 @@ fn the_cache_is_read_again_when_the_matter_list_changes() {
     fence.other_matters.as_mut().unwrap().cache = cache;
     assert!(reached(&fence));
 }
+
+/// A PowerShell command is read by the one PowerShell reader (`pre_write_guard`'s
+/// `powershell_words`): `'O''Brien'` is the folder `O'Brien`. Read so, a command reaching the
+/// other matter `O'Brien` is refused, and one naming the matter's own `O'Brien` folder reaches
+/// the card.
+#[test]
+fn a_powershell_word_with_a_doubled_apostrophe_is_read_as_powershell() {
+    let dir = with_other("other-apostrophe");
+    let root = dir.path();
+    write::create_dir_all(&root.join("O'Brien")).unwrap();
+    write::write_file(&root.join("O'Brien/brief.txt"), b"other").unwrap();
+    write::create_dir_all(&root.join("matter/O'Brien")).unwrap();
+    write::write_file(&root.join("matter/O'Brien/notes.txt"), b"own").unwrap();
+    let answer = |command: &str| {
+        let input = json!({"command": command, "cwd": root.join("matter").display().to_string()});
+        let mut fence = check(root, &[], Some(&input));
+        fence.other_matters = Some(OtherMatters {
+            own: root.join("matter"),
+            others: vec![root.join("O'Brien")],
+            args: command_args(Some(&input), true),
+            cache: super::Cache::default(),
+        });
+        checked(root, &fence)
+    };
+    assert_eq!(answer("Get-Content '../O''Brien/brief.txt'"), "other");
+    assert_eq!(answer("Get-Content 'O''Brien/notes.txt'"), "card");
+}
