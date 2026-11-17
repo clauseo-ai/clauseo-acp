@@ -238,6 +238,18 @@ impl TurnPaths {
         self.calls.get(key)?.tool_name.as_deref()
     }
 
+    /// The places the call `key`'s locations and diffs named, inside the matter and outside:
+    /// Codex's pre-card check reads a file change's targets from them, its request carrying none
+    /// (`data_fence/other_matters.rs`).
+    pub(crate) fn places(&self, key: &str) -> Places {
+        let mut places = Places::default();
+        if let Some(call) = self.calls.get(key) {
+            places.extend(&call.located);
+            places.extend(&call.diffed);
+        }
+        places
+    }
+
     /// Sets where the turn's shell calls start: by the session's launch (`Agent::shell_carries`)
     /// live, [`ShellStart::Policy`] for the restart repair.
     pub(crate) fn set_start(&mut self, start: ShellStart) {

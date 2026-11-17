@@ -352,8 +352,9 @@ impl Refusal {
                  would be lost when that program saves it. Ask the lawyer to close it, or write \
                  to a copy with another name."
             ),
-            Self::CodexFolder => "Clauseo doesn't let the agent change the .codex folder in a \
-                                  matter: files there change what the agent loads and runs."
+            Self::CodexFolder => "Clauseo doesn't let the agent change the .codex or .agents \
+                                  folder in a matter: files there change what the agent loads \
+                                  and runs."
                 .to_owned(),
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."

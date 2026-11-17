@@ -69,6 +69,7 @@ pub(super) fn check_as(
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
         vars: Vec::new(),
+        other_matters: None,
     }
 }
 

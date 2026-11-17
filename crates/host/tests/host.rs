@@ -105,6 +105,9 @@ mod codex_options;
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
 #[cfg(test)]
+#[path = "host/codex_precard.rs"]
+mod codex_precard;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 

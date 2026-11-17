@@ -26,6 +26,7 @@ pub(super) fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
         words: Vec::new(),
         health: super::DataFenceHealth::default(),
         vars: Vec::new(),
+        other_matters: None,
     }
 }
 

@@ -101,7 +101,7 @@ fn a_refused_write_into_the_codex_folder_adds_a_line_with_no_path() {
         "*** Begin Patch\n*** Add File: .codex/config.toml\n+x\n*** End Patch"}),
     );
     let said = guard_with(&strs(&args), hook.to_string().as_bytes());
-    assert!(said.contains(".codex folder"), "{said}");
+    assert!(said.contains(".codex or .agents folder"), "{said}");
     let lines = records(&file);
     assert_eq!(lines.len(), 1);
     assert_eq!(

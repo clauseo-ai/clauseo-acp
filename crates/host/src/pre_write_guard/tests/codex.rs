@@ -11,8 +11,8 @@ use crate::write;
 
 /// The deny line for a Codex patch into the matter's `.codex` folder.
 fn codex_refused() -> String {
-    "Clauseo doesn't let the agent change the .codex folder in a matter: files there change \
-     what the agent loads and runs.\n"
+    "Clauseo doesn't let the agent change the .codex or .agents folder in a matter: files there \
+     change what the agent loads and runs.\n"
         .to_owned()
 }
 
@@ -215,6 +215,104 @@ fn a_codex_patch_through_an_alias_of_the_matter_is_refused_before_codex_exists()
     let body = format!("*** Add File: {}", fx.path("alias/.codex/config.toml"));
     assert_eq!(
         guard_json(&fx.hook("apply_patch", &json!({"command": patch(&body)}))),
+        codex_refused()
+    );
+}
+
+/// The `.agents` folder (Codex loads skills from it) is kept as `.codex` is: a patch into it in
+/// the matter, in any spelling, is refused; one into a folder that only starts with it is not.
+#[test]
+fn a_codex_patch_into_the_agents_folder_is_refused() {
+    assert_codex_folder_refused(
+        "agents-patch",
+        &[
+            "*** Add File: .agents/skills/x/SKILL.md\n+run anything",
+            "*** Add File: .AGENTS/x.md",
+            "*** Add File: sub/../.agents. /x.md",
+            "*** Update File: Free.docx\n*** Move to: .agents/x.md",
+        ],
+    );
+    let fx = Fixture::new("agents-patch-elsewhere");
+    for body in ["*** Add File: .agentsrc", "*** Add File: notes/agents.md"] {
+        assert_eq!(
+            guard_json(&fx.hook("apply_patch", &json!({"command": patch(body)}))),
+            "",
+            "{body}"
+        );
+    }
+}
+
+/// Under Codex's hook, a `Bash` command naming a `.agents` folder is refused, reads included,
+/// as for `.codex` (the guard can't tell a command's reads from its writes by its words).
+#[test]
+fn a_codex_shell_command_naming_an_agents_folder_is_refused() {
+    let fx = Fixture::new("agents-shell");
+    for command in [
+        "mkdir -p .agents/skills/x",
+        "echo x > .agents/skills/x/SKILL.md",
+        "cat .Agents/skills/x/SKILL.md",
+        "mv /tmp/skill .agents/skills/x",
+        "cp -r /tmp/skill .agents/skills/",
+        "mkdir -p .agent{s,}/skills/x",
+        "cp /tmp/SKILL.md .agent{s,}/skills/x/",
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            codex_refused(),
+            "{command}"
+        );
+    }
+    for command in ["cat .agentsrc", "ls agents"] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            "",
+            "{command}"
+        );
+    }
+}
+
+/// Under Codex's hook, a brace group a shell closes later than the guard's first `}` (a quoted
+/// or escaped brace, or bash reading on to a `,`) or a zsh `{...s}` range, each giving
+/// `.agents`, is refused; ordinary braces still pass.
+#[test]
+fn a_codex_shell_command_hiding_agents_in_braces_is_refused() {
+    let fx = Fixture::new("agents-braces");
+    for command in [
+        "cat .agent{'x}',s}/skills/x/SKILL.md",
+        r"cat .agent{x\},s}/skills/x/SKILL.md",
+        "cat .agent{'{',s}/skills/x/SKILL.md",
+        "cat .agent{x},s}/skills/x/SKILL.md",
+        "cat .agent{...s}/skills/x/SKILL.md",
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            codex_refused(),
+            "{command}"
+        );
+    }
+    for command in ["cat file{1,2}.txt", "cat a{b}c", "cat file{1..3}.txt"] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            "",
+            "{command}"
+        );
+    }
+}
+
+/// A link named `.agents` in the matter, leading elsewhere: a patch through it is refused by
+/// its name, as one into the folder is.
+#[cfg(unix)]
+#[test]
+fn a_codex_patch_through_a_link_named_agents_is_refused() {
+    let fx = Fixture::new("agents-link");
+    let elsewhere = fx.path("elsewhere");
+    write::create_dir_all(Path::new(&elsewhere)).unwrap();
+    write::symlink(Path::new(&elsewhere), &fx.matter().join(".agents")).unwrap();
+    assert_eq!(
+        guard_json(&fx.hook(
+            "apply_patch",
+            &json!({"command": patch("*** Add File: .agents/skills/x/SKILL.md\n+x")})
+        )),
         codex_refused()
     );
 }

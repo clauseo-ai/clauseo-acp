@@ -33,10 +33,12 @@ use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
 
 mod codex_auto;
+mod codex_paths;
 
 use codex_auto::{
     allow_browser_tool, allow_trusted_tool, browser_tool_to_allow, trusted_tool_to_allow,
 };
+use codex_paths::{codex_call_places, is_codex, other_matters};
 
 /// A permission request from the agent, kept until it is logged.
 #[derive(Debug, Clone)]
@@ -126,7 +128,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         ask.options.retain(crate::agent::codex_options::keep_option);
         let dropped = offered - ask.options.len();
         if dropped > 0 {
-            tracing::info!(%thread, dropped, "a Codex permission request lost options that outlive the session");
+            tracing::info!(
+                %thread,
+                dropped,
+                "a Codex permission request lost its options that answer more than once"
+            );
         }
     }
     // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
@@ -135,7 +141,15 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
         .map(str::to_owned);
     let shell = data_fence::ShellKind::of_tool(tool_name.as_deref());
-    let fence = fence_check(actor, thread, &paths, raw_input.as_ref(), shell);
+    // Codex's file change names its targets only in its tool call's locations and diffs: the
+    // pre-card check reads every one (`data_fence/other_matters.rs`), those inside the matter by
+    // their text too, which a link in the matter folder may lead into another matter
+    // (`<matter>/link/x.md`).
+    let mut fenced = paths.clone();
+    if is_codex(actor, thread) {
+        fenced.extend(codex_call_places(actor, thread, &ask));
+    }
+    let fence = fence_check(actor, thread, &fenced, raw_input.as_ref(), shell);
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
@@ -173,9 +187,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     }
 }
 
-/// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
-/// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
-/// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
+/// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), and for
+/// Codex the other matters' check too (`data_fence/other_matters.rs`), for the thread's agent:
+/// its own folders are its run folder, this matter's notes, a Claude agent's plans folder in
+/// Clauseo's Claude home, and its working folder. None when the request names no
 /// path and no command, or the thread has no agent. Its command's search folders are read as
 /// `shell`, the shell of the request's tool, would read them.
 fn fence_check(
@@ -185,9 +200,16 @@ fn fence_check(
     raw_input: Option<&serde_json::Value>,
     shell: data_fence::ShellKind,
 ) -> Option<Box<FenceCheck>> {
-    let paths = data_fence::candidates(paths, raw_input, cfg!(windows));
+    let codex = is_codex(actor, thread);
+    let mut paths = data_fence::candidates(paths, raw_input, cfg!(windows));
     let words = data_fence::candidates_words(raw_input, cfg!(windows));
-    let roots = data_fence::candidates_roots(raw_input, cfg!(windows), shell);
+    let mut roots = data_fence::candidates_roots(raw_input, cfg!(windows), shell);
+    // Codex says where its command runs (`rawInput.cwd`): a relative path or search folder is
+    // taken from there, not from the matter folder, for both checks.
+    if codex {
+        data_fence::input::from_command_cwd(raw_input, &mut paths);
+        data_fence::input::from_command_cwd(raw_input, &mut roots);
+    }
     if paths.is_empty() && words.is_empty() && roots.is_empty() {
         return None;
     }
@@ -217,6 +239,9 @@ fn fence_check(
         words,
         health: actor.protection.data_fence().clone(),
         vars: agent.fence_vars.clone(),
+        other_matters: codex
+            .then(|| other_matters(actor, thread, raw_input, &agent.other_matters))
+            .flatten(),
     }))
 }
 
@@ -266,6 +291,12 @@ pub(super) fn on_held_open(
     }
     let held = match checked {
         PathsChecked::DataFolder => {
+            super::outside::refuse_data_folder(actor, thread, &ask);
+            return;
+        }
+        // Codex's pre-card check: the same refusal and words ("outside this matter").
+        PathsChecked::OtherMatter => {
+            tracing::info!(%thread, "refused a permission request: it reaches another matter");
             super::outside::refuse_data_folder(actor, thread, &ask);
             return;
         }

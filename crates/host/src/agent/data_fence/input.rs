@@ -1,7 +1,7 @@
 //! What a permission request names, for the data folder fence: the paths it may touch, the
 //! words of its shell command, and the folders it may search the whole of.
 
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 use serde_json::Value;
 
@@ -75,6 +75,91 @@ pub(crate) fn candidates_words(raw_input: Option<&Value>, windows: bool) -> Vec<
         .into_iter()
         .flat_map(|line| command::command_words(line, windows))
         .collect()
+}
+
+/// How many words of a Codex command [`command_args`] takes, at most.
+const MAX_ARGS: usize = 256;
+
+/// The words of a Codex command (`rawInput.command`, [`command_lines`]) that may name a file,
+/// taken from `rawInput.cwd` when it is absolute: each word that is no option (`-x`), the
+/// value of a `name=value` (`--target=out`, `dd`'s `if=link`), and nothing that a shell would
+/// expand or that is a URL (`$`, `%`, a backtick, `*`, `?`, `[`, `://`), which the check could
+/// only guess at. A bare name such as
+/// `link.txt` counts, unlike [`candidates`]'s path tokens: a link in the matter folder may lead
+/// anywhere. Best effort: a script can still build a path the words do not show.
+pub(crate) fn command_args(raw_input: Option<&Value>, windows: bool) -> Vec<PathBuf> {
+    let Some(input) = raw_input else {
+        return Vec::new();
+    };
+    let cwd = command_cwd(raw_input);
+    let mut out: Vec<PathBuf> = Vec::new();
+    for word in command_lines(input)
+        .into_iter()
+        .flat_map(|line| command::command_words(line, windows))
+    {
+        let word = match word.split_once('=') {
+            Some((name, value)) if !name.contains(['/', '\\']) => value.to_owned(),
+            _ => word,
+        };
+        let expands = ['$', '%', '`', '*', '?', '[']
+            .iter()
+            .any(|c| word.contains(*c));
+        if word.is_empty() || word.starts_with('-') || expands || word.contains("://") {
+            continue;
+        }
+        let path = match &cwd {
+            Some(cwd) if !word.starts_with('~') => cwd.join(&word),
+            _ => PathBuf::from(&word),
+        };
+        if !out.contains(&path) {
+            out.push(path);
+        }
+        if out.len() >= MAX_ARGS {
+            break;
+        }
+    }
+    out
+}
+
+/// A Codex request's `rawInput.cwd`, where its command runs: an absolute one as it is, or a
+/// relative one (`sub`, with no drive or root) left relative, so that a path joined to it is
+/// still taken from the matter folder, under `sub`.
+pub(crate) fn command_cwd(raw_input: Option<&Value>) -> Option<PathBuf> {
+    raw_input?
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|cwd| {
+            cwd.is_absolute()
+                || (cwd.components().next().is_some()
+                    && cwd.components().all(|part| {
+                        matches!(
+                            part,
+                            Component::Normal(_) | Component::CurDir | Component::ParentDir
+                        )
+                    }))
+        })
+}
+
+/// `paths` (a request's paths or search folders) with each relative one taken from Codex's
+/// `rawInput.cwd` ([`command_cwd`]), where its command runs, instead of the matter folder; as
+/// they are when there is none. `~` forms stay as written, and so does a path starting with a
+/// variable (`$HOME/…`, PowerShell's `$env:USERPROFILE\…`, cmd's `%USERPROFILE%\…`): the
+/// variable names its own folder, not one under the command's. The data-folder check judges a
+/// PowerShell variable where it leads (`variables::judged`); cmd's `%USERPROFILE%` stays
+/// unhandled until #1085's `variables::judged` (rebase).
+pub(crate) fn from_command_cwd(raw_input: Option<&Value>, paths: &mut [PathBuf]) {
+    let Some(cwd) = command_cwd(raw_input) else {
+        return;
+    };
+    for path in paths {
+        let variable = path
+            .to_str()
+            .is_some_and(|text| text.starts_with(['$', '%']));
+        if path.is_relative() && !path.starts_with("~") && !variable {
+            *path = cwd.join(&*path);
+        }
+    }
 }
 
 /// The folders a request may search the whole of ([`search::search_roots`]), its command read
