@@ -10,6 +10,9 @@ use super::{
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
+#[path = "profile_tests.rs"]
+mod profile_tests;
+
 /// A temp folder for `test`: `data` with a pack source, two sessions' run folders and the
 /// matter's notes, the matter folder `matter` and an unrelated folder `outside`, beside it.
 /// The folder removes itself when dropped, a failing test's too.
@@ -69,6 +72,19 @@ pub(super) fn check_as(
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
         vars: Vec::new(),
+        reads: false,
+    }
+}
+
+/// [`check`] of a request from a tool that only reads (`Read`, `Glob`, `Grep`, `LS`).
+pub(super) fn check_read(
+    root: &Path,
+    paths: &[&str],
+    raw_input: Option<&serde_json::Value>,
+) -> FenceCheck {
+    FenceCheck {
+        reads: true,
+        ..check(root, paths, raw_input)
     }
 }
 
@@ -101,7 +117,7 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "/run/",
         "/agent-state",
         "/plans",
-        "/profile",
+        "Read(//d/ata/profile",
         "(//d/ata/**)",
         "(//d/ata/agents/**)",
         "claude-acp/home/**",

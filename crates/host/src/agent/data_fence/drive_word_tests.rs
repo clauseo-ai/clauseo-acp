@@ -31,6 +31,7 @@ fn shell(command: &str) -> FenceCheck {
         words: candidates_words(Some(&raw), true),
         health: DataFenceHealth::default(),
         vars: Vec::new(),
+        reads: false,
     }
 }
 

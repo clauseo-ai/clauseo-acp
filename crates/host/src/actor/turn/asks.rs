@@ -129,13 +129,18 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
             tracing::info!(%thread, dropped, "a Codex permission request lost options that outlive the session");
         }
     }
-    // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
-    // start or updates named it; unknown when none did.
+    // The request's tool (Claude Code's `Bash`, `PowerShell`, `Read`, …), as its start or
+    // updates named it; unknown when none did.
     let tool_name = current(actor, thread)
         .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
         .map(str::to_owned);
-    let shell = data_fence::ShellKind::of_tool(tool_name.as_deref());
-    let fence = fence_check(actor, thread, &paths, raw_input.as_ref(), shell);
+    let fence = fence_check(
+        actor,
+        thread,
+        &paths,
+        raw_input.as_ref(),
+        tool_name.as_deref(),
+    );
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
@@ -177,16 +182,18 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 /// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
 /// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
 /// path and no command, or the thread has no agent. Its command's search folders are read as
-/// `shell`, the shell of the request's tool, would read them.
+/// the shell of the request's tool (`tool_name`) would read them; the built-in plugin counts as
+/// its own only when that tool only reads (`data_fence::reads_only`).
 fn fence_check(
     actor: &Actor,
     thread: ThreadId,
     paths: &[PathBuf],
     raw_input: Option<&serde_json::Value>,
-    shell: data_fence::ShellKind,
+    tool_name: Option<&str>,
 ) -> Option<Box<FenceCheck>> {
     let paths = data_fence::candidates(paths, raw_input, cfg!(windows));
     let words = data_fence::candidates_words(raw_input, cfg!(windows));
+    let shell = data_fence::ShellKind::of_tool(tool_name);
     let roots = data_fence::candidates_roots(raw_input, cfg!(windows), shell);
     if paths.is_empty() && words.is_empty() && roots.is_empty() {
         return None;
@@ -217,6 +224,7 @@ fn fence_check(
         words,
         health: actor.protection.data_fence().clone(),
         vars: agent.fence_vars.clone(),
+        reads: data_fence::reads_only(tool_name),
     }))
 }
 

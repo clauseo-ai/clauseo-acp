@@ -26,6 +26,15 @@ const NOT_PATHS: [&str; 10] = [
 const MAX_DEPTH: usize = 8;
 const MAX_STRINGS: usize = 512;
 
+/// Claude Code's tools that only read the files they name (ACP's `name`).
+const READERS: [&str; 4] = ["Read", "Glob", "Grep", "LS"];
+
+/// Whether a request's tool, named `tool_name`, only reads ([`READERS`], in any case): a
+/// command, an edit, a Codex patch or a tool with no name may write.
+pub(crate) fn reads_only(tool_name: Option<&str>) -> bool {
+    tool_name.is_some_and(|name| READERS.iter().any(|tool| tool.eq_ignore_ascii_case(name)))
+}
+
 /// The paths a permission request may touch, as the agent wrote them: `paths` (its locations
 /// and diffs), then `rawInput`'s `file_path`, `notebook_path`, `path`, `cwd`, `workdir` and each
 /// string of `paths`, then every string anywhere in `rawInput` that looks like a path

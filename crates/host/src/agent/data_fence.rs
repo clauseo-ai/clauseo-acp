@@ -54,7 +54,7 @@ use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
-pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
+pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names, reads_only};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
 pub(crate) use shell_deny::{
     own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
@@ -80,10 +80,9 @@ pub(crate) use variables::launch_vars;
 /// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
 /// need it, and a token read through them would land in the transcript; the session proxy's
 /// password file (`proxy-secret`, ADR 0053), for the same reasons (the browser guard reads and
-/// deletes it); and the shell
-/// browser's config file
-/// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
-/// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
+/// deletes it); and the shell browser's config file (`browser::SESSION_CONFIG`), which
+/// agent-browser reads itself: an edit to it could set what the `agent-browser` deny rules
+/// refuse as flags (`--profile`, `--config`).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
@@ -124,9 +123,9 @@ pub(crate) const DENIED: [&str; 32] = [
     "launch-settings/**",
 ];
 
-/// What of `<data>` every session may read, with the reason: neither denied to Claude nor listed
-/// per launch, and an own folder of every session for the auto-deny (while it resolves to its
-/// place under `<data>`'s canonical path).
+/// What of `<data>` every session may read, never write, with the reason: `Edit` denied to
+/// Claude, listed by no launch, and own for the auto-deny only to a tool that only reads
+/// ([`reads_only`]) while it resolves to its place under `<data>`'s canonical path.
 pub(crate) const SHARED: [(&str, &str); 1] = [(
     "profile",
     "holds only the built-in plugin, the same for every matter; the model must Read files in \
@@ -157,15 +156,15 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
-/// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
-/// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
-/// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
-/// allowed listing or read of an own folder that holds a glob. Under the sandbox they would buy
-/// nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob after
-/// an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny being
-/// matched on the whole command too. A spelling that is not UTF-8 gets none (no rule could
-/// name it).
+/// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`SHARED`] and
+/// [`READ_ONLY`] and all under it; then, unless the launch has Claude's shell sandbox
+/// (`sandboxed`: macOS or Linux with `agent::loads::sandbox` on; never Windows, nor a launch
+/// whose sandbox is `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
+/// refuse an allowed listing or read of an own folder that holds a glob. Under the sandbox they
+/// would buy nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a
+/// glob after an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the
+/// deny being matched on the whole command too. A spelling that is not UTF-8 gets none (no rule
+/// could name it).
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
     claude_deny_rules_on(deny, cfg!(windows), sandboxed)
 }
@@ -191,7 +190,8 @@ pub(crate) fn claude_deny_rules_on(
                 push(format!("{tool}({base}/{target})"));
             }
         }
-        for place in READ_ONLY {
+        let shared = SHARED.iter().map(|(place, _)| escape(place));
+        for place in shared.chain(READ_ONLY.map(str::to_owned)) {
             push(format!("Edit({base}/{place}/**)"));
         }
     }
@@ -323,6 +323,8 @@ pub(crate) struct FenceCheck {
     /// The agent's launch variables that hold a path ([`launch_vars`]), for PowerShell's
     /// `$env:NAME` in a path; a variable not among them is read from the host's environment.
     pub(crate) vars: Vec<(String, String)>,
+    /// The request's tool only reads ([`reads_only`]): only then is each of [`SHARED`] own.
+    pub(crate) reads: bool,
 }
 
 impl FenceCheck {
@@ -430,7 +432,7 @@ impl FenceCheck {
                 .any(|root| agent(root, true).iter().any(holds))
     }
 
-    /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.
+    /// The own folders ([`Self::allowed`], [`SHARED`] for a read, [`Self::cwd`]) as keys.
     fn own(
         &self,
         real_data: &Path,
@@ -441,7 +443,8 @@ impl FenceCheck {
         let home = self.home.as_deref();
         let data = key(real_data, insensitive);
         let mut own = Vec::new();
-        let shared = SHARED.iter().map(|(place, _)| self.data.join(place));
+        let shared = SHARED.iter().filter(|_| self.reads);
+        let shared = shared.map(|(place, _)| self.data.join(place));
         for folder in self.allowed.iter().cloned().chain(shared) {
             let Ok(place) = folder.strip_prefix(&self.data) else {
                 continue;

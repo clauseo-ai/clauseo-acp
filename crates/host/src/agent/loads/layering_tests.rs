@@ -456,8 +456,9 @@ fn covers(rule: &str, tool: &str, path: &str) -> bool {
 
 /// A Claude session's flag settings allow a Read of Clauseo's built-in skill assets, for each
 /// spelling of the data folder, after the hook's own allow rules, so a built-in skill never asks
-/// the lawyer; no deny rule covers them, and no allow covers anything else in the data folder
-/// but a Read of the agents' commands and Clauseo's Python runtime (`data_fence::READ_ONLY`).
+/// the lawyer; no deny rule covers a Read of them (an Edit of the built-in plugin is denied), and
+/// no allow covers anything else in the data folder but a Read of the agents' commands and
+/// Clauseo's Python runtime (`data_fence::READ_ONLY`).
 #[test]
 fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data() {
     let spellings = ["/data", "/link/data"];
@@ -507,10 +508,8 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
     for data in spellings {
         let asset =
             format!("/{data}/profile/claude-plugin/skills/legal-drafting/section-checklists.md");
-        for tool in ["Read", "Edit"] {
-            let denied: Vec<&String> = deny.iter().filter(|r| covers(r, tool, &asset)).collect();
-            assert!(denied.is_empty(), "{tool} {asset}: {denied:?}");
-        }
+        let denied = |tool: &str| deny.iter().any(|rule| covers(rule, tool, &asset));
+        assert!(!denied("Read") && denied("Edit"), "{asset}: {deny:?}");
         assert!(allow.iter().any(|rule| covers(rule, "Read", &asset)));
         for elsewhere in [
             format!("/{data}/profile/claude-plugin/.claude-plugin/plugin.json"),

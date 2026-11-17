@@ -17,7 +17,7 @@ fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
 }
 use super::search::{literal_root, pattern_roots};
 
-use super::tests::{check, layout, text};
+use super::tests::{check, check_read, layout, text};
 use crate::write;
 
 /// The review's seven requests from the data folder's parent, each denied.
@@ -96,7 +96,6 @@ fn a_search_in_the_matter_or_an_unrelated_folder_is_not_denied() {
         json!({"pattern": format!("{outside}/[a-z]*.md")}),
         json!({"pattern": "privileged", "path": run}),
         json!({"path": notes, "pattern": "**"}),
-        json!({"path": skills, "pattern": "**/*.md"}),
         json!({"pattern": "https://example.com/a/.*", "path": matter, "output_mode": "content"}),
         json!({"command": format!("grep -rn privileged {matter}")}),
         json!({"command": "grep -rn privileged ."}),
@@ -114,6 +113,9 @@ fn a_search_in_the_matter_or_an_unrelated_folder_is_not_denied() {
             "{request}"
         );
     }
+    // The built-in skills are own only to a tool that only reads (a Glob here).
+    let glob = json!({"path": skills, "pattern": "**/*.md"});
+    assert!(!check_read(root, &[], Some(&glob)).touches_data());
 }
 
 /// A third-party (MCP) tool's input is read under every key, nested ones too: a `filename`, a

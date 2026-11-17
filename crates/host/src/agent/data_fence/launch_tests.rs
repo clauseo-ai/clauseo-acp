@@ -6,7 +6,7 @@
 use serde_json::json;
 
 use super::launch::claude_project_key;
-use super::tests::{check, layout, text};
+use super::tests::{check, check_read, layout, text};
 use super::{
     DENIED, LaunchDeny, READ_ONLY, SHARED, claude_allow_rules, claude_deny_rules, claude_projects,
     launch_deny,
@@ -168,7 +168,8 @@ fn every_data_folder_entry_locations_names_is_denied_or_allowed_for_a_reason() {
 }
 
 /// The built-in plugin is the same for every matter and its skills send the model to Read their
-/// files: no launch rule covers one, and the auto-deny lets a Read of it through.
+/// files: no launch rule covers one, and the auto-deny lets a Read of it through, never a write
+/// (`profile_tests.rs`).
 #[test]
 fn the_built_in_plugins_files_stay_readable() {
     let dir = layout("plugin");
@@ -186,7 +187,8 @@ fn the_built_in_plugins_files_stay_readable() {
     let covering: Vec<&String> = deny.targets.iter().filter(|t| covers(t)).collect();
     assert!(covering.is_empty(), "{covering:?}");
     let read = text(&file);
-    assert!(!check(root, &[&read], None).touches_data());
+    assert!(!check_read(root, &[&read], None).touches_data());
+    assert!(check(root, &[&read], None).touches_data());
 }
 
 /// Claude Code's project key for a working folder, as its `kI` computes it: every UTF-16 unit
