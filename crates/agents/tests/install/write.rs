@@ -18,6 +18,11 @@ pub(crate) fn write(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     std::fs::write(path, contents)
 }
 
+/// `fs::remove_file`.
+pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    std::fs::remove_file(path)
+}
+
 /// `fs::write`, then mode 0755: a script the launcher can start.
 #[cfg(unix)]
 pub(crate) fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {

@@ -100,7 +100,7 @@ fn an_install_whose_script_or_package_json_is_gone_is_not_ready() {
     drop(agents);
     let package_json = installed.folder.join("node_modules/adapter-a/package.json");
     for gone in [&installed.script, &package_json] {
-        std::fs::remove_file(gone).unwrap();
+        write::remove_file(gone).unwrap();
         let (agents, events) = fx.start();
         let (a, _) = events.first_states();
         assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
