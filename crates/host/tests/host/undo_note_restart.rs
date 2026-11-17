@@ -79,8 +79,8 @@ fn reopen(agent: &str) -> Vec<Value> {
             .collect()
     };
     if agent == CODEX {
-        // Initialize, the resume and the mode, as the bundled scenario plays them.
-        lines("codex-resume.jsonl")[1..7].to_vec()
+        // Initialize and the resume, in mode agent, as the bundled scenario plays them.
+        lines("codex-resume.jsonl")[1..5].to_vec()
     } else {
         let handshake = lines("common/claude-handshake.jsonl");
         let mut modes = handshake[3]["respond"]["result"].clone();

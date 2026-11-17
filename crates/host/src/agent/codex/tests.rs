@@ -202,7 +202,7 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
     ]);
     let env = launch_env(home, &settings, Map::new(), None);
     let get = |name: &str| env.get(&OsString::from(name)).cloned();
-    assert_eq!(get("INITIAL_AGENT_MODE"), Some("workspace-write".into()));
+    assert_eq!(get("INITIAL_AGENT_MODE"), Some("agent".into()));
     assert_eq!(get("CODEX_HOME"), Some(home.as_os_str().to_owned()));
     assert_eq!(get("DISABLE_MCP_CONFIG_FILTERING"), Some("true".into()));
     let text = get("CODEX_CONFIG").unwrap();

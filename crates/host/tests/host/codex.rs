@@ -1,4 +1,4 @@
-//! A Codex agent (`codex-acp`, played by the `codex-*` scenarios): its ask mode before the first
+//! A Codex agent (`codex-acp`, played by the `codex-*` scenarios): its mode before the first
 //! prompt, its launch variables, `session/resume`, and its file changes, permissions, limit and
 //! sign-in failures through the host. The guard's trust check is in `codex_guard.rs`, the
 //! `.codex` refusal in `codex_folder.rs`, `ListAgents` in `list_agents.rs` and the plans in
@@ -109,7 +109,7 @@ fn last_mode(events: &Events) -> Option<String> {
 }
 
 #[test]
-fn codex_handshake_streams_in_workspace_write() {
+fn codex_handshake_streams_in_mode_agent() {
     let dir = codex_dir("codex_handshake", "codex-handshake");
     let host = dir.start(0);
     let (_, events, turn) = one_turn(&dir, &host, CODEX);
@@ -118,7 +118,7 @@ fn codex_handshake_streams_in_workspace_write() {
     assert_eq!(events.turn_text(turn), HANDSHAKE_TEXT);
     assert_eq!(
         last_mode(&events).as_deref(),
-        Some("workspace-write"),
+        Some("agent"),
         "{}",
         events.dump()
     );
@@ -199,10 +199,7 @@ fn codex_launch_variables_beat_the_settings_env() {
         panic!("two launches, not {}", envs.len());
     };
     let home = dir.data().join("agents").join(CODEX).join("home");
-    assert_eq!(
-        var(codex, "INITIAL_AGENT_MODE").as_deref(),
-        Some("workspace-write")
-    );
+    assert_eq!(var(codex, "INITIAL_AGENT_MODE").as_deref(), Some("agent"));
     assert_eq!(var(codex, "CODEX_HOME"), Some(home.display().to_string()));
     assert_eq!(
         var(codex, "DISABLE_MCP_CONFIG_FILTERING").as_deref(),
@@ -255,20 +252,20 @@ fn codex_launch_variables_beat_the_settings_env() {
 }
 
 #[test]
-fn codex_in_mode_agent_is_switched_before_the_first_prompt() {
+fn codex_in_workspace_write_is_switched_to_agent_before_the_first_prompt() {
     let dir = codex_dir("codex_mode_agent", "codex-mode-agent");
     let host = dir.start(0);
     let (_, events, turn) = one_turn(&dir, &host, CODEX);
     events.assert_no_mismatch();
     assert_eq!(events.turn_ended(turn).unwrap().stop, StopReason::EndTurn);
-    assert_eq!(events.turn_text(turn), "In workspace-write.");
-    assert_eq!(last_mode(&events).as_deref(), Some("workspace-write"));
+    assert_eq!(events.turn_text(turn), "In agent.");
+    assert_eq!(last_mode(&events).as_deref(), Some("agent"));
     host.shutdown();
 }
 
 #[test]
-fn codex_without_workspace_write_fails_before_any_prompt() {
-    let dir = codex_dir("codex_no_workspace_write", "codex-no-workspace-write");
+fn codex_without_mode_agent_fails_before_any_prompt() {
+    let dir = codex_dir("codex_no_agent_mode", "codex-no-agent-mode");
     let host = dir.start(0);
     let (_, events, turn) = one_turn(&dir, &host, CODEX);
     assert_failed_before_prompt(&events, turn, ErrorCode::AgentModeMissing);
@@ -329,7 +326,7 @@ fn codex_reopens_with_session_resume() {
     assert_eq!(events.turn_ended(second).unwrap().stop, StopReason::EndTurn);
     assert_eq!(events.turn_text(second), "Resumed.");
     assert_eq!(attached(&events), ["sess-1"], "{}", events.dump());
-    assert_eq!(last_mode(&events).as_deref(), Some("workspace-write"));
+    assert_eq!(last_mode(&events).as_deref(), Some("agent"));
     assert_eq!(notices(&events), Vec::<String>::new(), "{}", events.dump());
     // Nothing replayed: run 1 logged no text but the second turn's.
     let text = events.count(|e| matches!(e, DomainEvent::TextAppended(t) if t.turn != second));

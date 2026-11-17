@@ -442,7 +442,7 @@ pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]
 }
 
 /// A Codex agent's scenario, as `codex-handshake` (codex-acp 2.2.2): `initialize`,
-/// `session/new` matching `params`, the switch to its ask mode, one prompt.
+/// `session/new` matching `params` (in mode `agent`, Clauseo's, so no switch), one prompt.
 pub(crate) fn codex_lines(name: &str, params: &Value) -> String {
     codex_lines_for(name, "session/new", params)
 }
@@ -468,9 +468,6 @@ pub(crate) fn codex_lines_for(name: &str, method: &str, params: &Value) -> Strin
             "title": "Codex", "version": "2.2.2"}}}}),
         json!({"expect": {"method": method, "as": "start", "params": params}}),
         json!({"respond": {"to": "start", "result": result}}),
-        json!({"expect": {"method": "session/set_mode", "as": "set-mode",
-            "params": {"sessionId": "sess-1", "modeId": "workspace-write"}}}),
-        json!({"respond": {"to": "set-mode", "result": {}}}),
         json!({"expect": {"method": "session/prompt", "as": "p", "params": {"sessionId": "sess-1"}}}),
         json!({"update": {"update": {"sessionUpdate": "agent_message_chunk", "messageId": "m-codex",
             "content": {"type": "text", "text": "Done."}}}}),

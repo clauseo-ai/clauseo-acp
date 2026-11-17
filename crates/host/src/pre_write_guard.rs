@@ -124,9 +124,9 @@
 //!
 //! One more rule for Codex's writes: a patch target in the matter's `.codex` folder (the folder
 //! or anything under it; a move's source and destination both) is refused, held open or not.
-//! codex-acp trusts the session folder, so a `.codex/config.toml` there loads, and in
-//! workspace-write Codex could write one without asking (clauseo-acp-private#184). A target
-//! counts when either resolution puts it there: canonical (its deepest existing folder
+//! codex-acp trusts the session folder, so a `.codex/config.toml` there loads, and in its
+//! workspace-write sandbox Codex could write one without asking (clauseo-acp-private#184). A
+//! target counts when either resolution puts it there: canonical (its deepest existing folder
 //! canonicalised, the rest added, then [`clauseo_matters::matter_path_in`], so a symlinked alias
 //! of the matter, another case or a `\\?\` prefix is caught even before `.codex` exists) or
 //! lexical (`..` takes a part off, so `sub/../.codex/x` is caught with no `sub` yet). The name
