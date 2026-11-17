@@ -132,18 +132,19 @@ LangString webview2TooOld ${LANG_ENGLISH} "WebView2 on this computer is older th
 ; using $INSTDIR\Clauseo.exe. appRunningOkKill is its OK/Cancel box, interactive only: /S and /P
 ; (the updater runs the installer passive, after the app exits) close Clauseo without asking. OK
 ; closes it with Restart Manager (RmShutdown, RmForceShutdown), which sends its window
-; WM_ENDSESSION: tao's handler runs the app's quit (the running answer cancelled, its text committed, at
-; most SESSION_END_WAIT), and the agents end with it (their Job Objects kill on close); a turn
-; left open ends thread.interrupted at the next start, with the question and the answer so far,
-; as the app says it (words-errors.ts STOPPED). An unsent draft lives only in the window
-; (room.tsx), so it is lost. appRunning: the status line after Cancel, and under /S the console
-; line when the close failed. failedToKillApp: the status line when the close failed. All three
-; read for an install and an uninstall alike: the same strings serve both. Tauri wrote them as
+; WM_ENDSESSION: tao's handler runs the app's quit (the running answer cancelled, its text
+; committed, at most SESSION_END_WAIT), and the agents end with it (their Job Objects kill on
+; close); a turn left open ends thread.interrupted at the next start, with the question and the
+; answer so far, as the app says it (words-errors.ts STOPPED). An unsent draft lives only in the
+; window (room.tsx), so it is lost. appRunning: the status line after Cancel, and under /S the
+; console line when the close failed. failedToKillApp: the status line when the close failed. All
+; three read for an install and an uninstall alike: the same strings serve both. Tauri wrote them as
 ; "... is running! Click OK to kill it"; these are Clauseo's own, so a Tauri upgrade must not
-; copy its lines back (a key twice fails the tests). Provisional (2026-11-17).
+; copy its lines back (a key twice fails the tests). The box breaks with a blank line ($\n$\n),
+; as deleteAppDataFailed's does. Provisional (2026-11-17).
 LangString appRunning ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} is still open. Quit ${PRODUCTNAME}, then try again."
-LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is open. Click OK to close it and continue, or Cancel to leave it open and stop here. Your conversations are kept. If ${PRODUCTNAME} is writing an answer, the answer stops, and your question and the answer so far are kept. A question you've typed but not sent isn't kept, so copy it first."
-LangString failedToKillApp ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} couldn't be closed. Quit ${PRODUCTNAME}, then try again."
+LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is open. Click OK to close it and continue, or Cancel to leave it open and stop here.$\n$\nYour conversations are kept. An answer still being written stops, and your question and the answer so far are kept. A question you've typed but not sent is lost, so copy it before you click OK."
+LangString failedToKillApp ${LANG_ENGLISH} "Stopped, because ${PRODUCTNAME} didn't close. Quit ${PRODUCTNAME}, then try again."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), less the keys Clauseo words itself:
