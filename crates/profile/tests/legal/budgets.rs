@@ -139,11 +139,13 @@ fn codex_standing_text_budget() {
             browser_part_for(BrowserPart::On, true),
         );
         for line in [CODEX_SHELL_OFFLINE, CODEX_REFUSAL, codex_pdf()] {
-            assert!(text.contains(line.trim()), "{line}");
+            // The PDF line's `{work_folder}` is filled: its words up to the token must be there.
+            let head = line.trim().split('{').next().unwrap();
+            assert!(text.contains(head), "{line}");
         }
         let shell = codex_shell(true).unwrap();
         assert_eq!(text.contains(shell), macos);
-        assert!(text.ends_with(codex_pdf()));
+        assert!(text.ends_with(codex_pdf().rsplit('}').next().unwrap()));
         let count = word_count(&text);
         eprintln!("MEASURE codex macos={macos}: {count}");
         assert!(
