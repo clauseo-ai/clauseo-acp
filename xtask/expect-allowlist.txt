@@ -719,3 +719,9 @@ crates/host/src/crash/native/win.rs - unsafe_code
 crates/desktop/src/counts/crashes/win.rs - unsafe_code
 crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
+# shell_writes: the changed, deleted and moved readings of a command and their `Kind`, read by the
+# no-copy guard (#1180), which is stacked on them.
+crates/host/src/shell_writes.rs add_changed_input dead_code
+crates/host/src/shell_writes.rs add_deleted_input dead_code
+crates/host/src/shell_writes.rs add_moved_input dead_code
+crates/host/src/shell_writes.rs Kind dead_code

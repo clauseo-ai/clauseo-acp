@@ -6,8 +6,8 @@
 //!
 //! Only the command text in a shell call's input is read, never its output: a listing or a
 //! `grep` names files it does not write. Only write targets count: `>` and `>>` redirects,
-//! `-o` and `--output` values, `tee`'s files, the last argument of `cp` (a `mv` only moves
-//! a file, so it writes none), and what a `stetdoc` command writes, read with its real options
+//! `-o` and `--output` values, `tee`'s files, the last argument of `cp`, and what a
+//! `stetdoc` command writes, read with its real options
 //! by the parser the pre-write guard shares (`crate::stetdoc_args::written`): its output, else
 //! with `--in-place` the document, else `NAME.edited.docx` beside it; nothing for `--dry-run`,
 //! `view` and the other reading subcommands. The command is split as a shell does (quotes kept
@@ -26,17 +26,24 @@
 //! settings may turn that variable off, the start is unknown instead (`sent::ShellStart`): only
 //! absolute targets, and those after an absolute `cd`, count. A target that is unclear (an
 //! expansion, a glob, one ending in `/`) writes nothing, and leaves the others as they are.
+//! A delete or a move writes no content, so [`add_input`] leaves it out (a file moved away and
+//! back stays the lawyer's); [`deletes`] reads them, once for every caller: the paths a delete
+//! names ([`add_deleted_input`]), a move's sources apart from where they go
+//! ([`add_moved_input`]), and both sides with every write ([`add_changed_input`]).
 //! Kept in memory for the turn only, never logged.
 
 use std::collections::BTreeSet;
-use std::iter::Peekable;
 use std::path::Path;
-use std::str::Chars;
 
 use crate::stetdoc_args;
 
+mod changes;
+pub(crate) mod deletes;
 mod folder;
+mod posix;
 mod powershell;
+
+use posix::segments;
 
 /// The most targets one turn keeps.
 const MAX_TARGETS: usize = 1024;
@@ -71,12 +78,150 @@ impl Dialect {
 /// or an argument list (`["bash", "-lc", "<script>"]`, or the program's own arguments), run in
 /// its `cwd` or `workdir` when the input gives one, else in `start` (`""`: the matter's folder,
 /// `None`: unknown, so only absolute targets and those after an absolute `cd` count). A
-/// `command` string is read in `dialect`. Input that is not JSON adds nothing.
+/// `command` string is read in `dialect`. Input that is not JSON adds nothing. A move or a
+/// delete adds nothing here: a file moved away and back (`mv a tmp && mv tmp a`) must stay the
+/// lawyer's ([`add_changed_input`] adds them).
 pub(crate) fn add_input(
     targets: &mut BTreeSet<String>,
     raw_input: &str,
     dialect: Dialect,
     start: Option<&str>,
+) {
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Writes);
+}
+
+/// [`add_input`] with every path a delete or a move names, sources and destinations alike
+/// ([`deletes`]): what a turn's shell changed in any way. A deleted or moved path may be a
+/// folder, with what is under it; `exact` gets those of the paths a caller matches only whole,
+/// never as a folder: a write's target, and a move's destination named without a separator at
+/// its end, which may be the new name or a folder the source goes in (`mv a.docx Archive` adds
+/// `Archive`, matched whole, and `Archive/a.docx`).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the no-copy guard (#1180) reads it, on top of this"
+    )
+)]
+pub(crate) fn add_changed_input(
+    targets: &mut BTreeSet<String>,
+    exact: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+) {
+    let mut out = Out::new(targets, Some(exact));
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Changes);
+}
+
+/// [`add_input`] for the paths a delete program names alone ([`deletes::taken`]: `rm`,
+/// `Remove-Item`, ...; no move), for the pre-write guard's folder rule. Returns whether a delete
+/// in it names a target that is no path here: a word with an expansion, a glob, `~` or a
+/// PowerShell array element of those, a parameter with no value, a target whose path the start
+/// leaves unknown, the matter's folder itself or above it (`rm -rf .`, `rm -rf ..` run in the
+/// matter's folder), or, on a pipeline's input, no path at all (`Get-ChildItem | Remove-Item`).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the no-copy guard (#1180) reads it, on top of this"
+    )
+)]
+pub(crate) fn add_deleted_input(
+    targets: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+) -> bool {
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Deletes);
+    out.unclear
+}
+
+/// [`add_input`] for the paths a move takes away alone: the sources of `mv`, `git mv`,
+/// `Move-Item`, `Rename-Item`, `cmd /c` `move` and `ren` ([`deletes::taken`]), not where they
+/// go. Returns whether a move in it names a source that is no path here, as
+/// [`add_deleted_input`] says for a delete.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the no-copy guard (#1180) reads it, on top of this"
+    )
+)]
+pub(crate) fn add_moved_input(
+    targets: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+) -> bool {
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::MovedFrom);
+    out.unclear
+}
+
+/// Where a reading puts what it reads.
+struct Out<'a> {
+    /// Every path read.
+    targets: &'a mut BTreeSet<String>,
+    /// The paths matched only whole ([`add_changed_input`]), when the reading keeps them.
+    exact: Option<&'a mut BTreeSet<String>>,
+    /// A delete or a move names a target that is no path here ([`add_deleted_input`]).
+    unclear: bool,
+}
+
+impl<'a> Out<'a> {
+    fn new(targets: &'a mut BTreeSet<String>, exact: Option<&'a mut BTreeSet<String>>) -> Self {
+        Self {
+            targets,
+            exact,
+            unclear: false,
+        }
+    }
+
+    /// Adds `target`, run in `cwd`; whether it is a path here ([`add`]).
+    fn path(&mut self, cwd: Option<&str>, target: &str) -> bool {
+        add(self.targets, cwd, target)
+    }
+
+    /// Adds `target`, run in `cwd`, as a path matched only whole.
+    fn whole(&mut self, cwd: Option<&str>, target: &str) {
+        if self.path(cwd, target)
+            && let Some(exact) = self.exact.as_deref_mut()
+            && let Some(path) = place(cwd, target)
+        {
+            exact.insert(path);
+        }
+    }
+}
+
+/// Which targets a reading adds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the no-copy guard (#1180) reads all but the writes"
+    )
+)]
+enum Kind {
+    /// Every write target, no move or delete.
+    Writes,
+    /// Every write target, and every path a delete or a move names.
+    Changes,
+    /// Only what a delete program names.
+    Deletes,
+    /// Only a move's sources.
+    MovedFrom,
+}
+
+fn add_input_as(
+    out: &mut Out<'_>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+    kind: Kind,
 ) {
     let Ok(serde_json::Value::Object(input)) = serde_json::from_str(raw_input) else {
         return;
@@ -86,7 +231,9 @@ pub(crate) fn add_input(
         .find_map(|key| input.get(*key).and_then(serde_json::Value::as_str))
         .or(start);
     match input.get("command") {
-        Some(serde_json::Value::String(script)) => add_script(targets, cwd, script, dialect),
+        Some(serde_json::Value::String(script)) => {
+            add_script_as(out, cwd, script, dialect, kind);
+        }
         Some(serde_json::Value::Array(items)) => {
             let Some(argv) = items
                 .iter()
@@ -100,11 +247,16 @@ pub(crate) fn add_input(
                     if ["-c", "-lc", "-ic"].contains(&flag.as_str())
                         && ["sh", "bash", "zsh", "dash"].contains(&base(shell)) =>
                 {
-                    add_script(targets, cwd, script, Dialect::Posix);
+                    add_script_as(out, cwd, script, Dialect::Posix, kind);
                 }
                 _ => {
                     let words: Vec<Word> = argv.into_iter().map(Word::plain).collect();
-                    add_segment(targets, cwd, &words, &[]);
+                    let how = How {
+                        kind,
+                        dialect: Dialect::Posix,
+                        piped: false,
+                    };
+                    add_segment(out, cwd, &words, &[], how);
                 }
             }
         }
@@ -114,22 +266,44 @@ pub(crate) fn add_input(
 
 /// Adds the targets of the shell script `script`, written in `dialect` and run in `cwd` (`""`:
 /// the matter's folder, `None` unknown).
-pub(crate) fn add_script(
-    targets: &mut BTreeSet<String>,
-    cwd: Option<&str>,
-    script: &str,
-    dialect: Dialect,
-) {
+#[cfg(test)]
+fn add_script(targets: &mut BTreeSet<String>, cwd: Option<&str>, script: &str, dialect: Dialect) {
+    add_script_as(
+        &mut Out::new(targets, None),
+        cwd,
+        script,
+        dialect,
+        Kind::Writes,
+    );
+}
+
+fn add_script_as(out: &mut Out<'_>, cwd: Option<&str>, script: &str, dialect: Dialect, kind: Kind) {
     let segments = match dialect {
         Dialect::Posix => segments(script),
         Dialect::PowerShell => powershell::segments(script),
     };
     let mut folder = folder::Folder::new(cwd);
+    let mut piped = false;
     for segment in &segments {
         if let Some((cwd, words)) = folder.read(segment, dialect) {
-            add_segment(targets, cwd.as_deref(), words, &segment.redirects);
+            let how = How {
+                kind,
+                dialect,
+                piped,
+            };
+            add_segment(out, cwd.as_deref(), words, &segment.redirects, how);
         }
+        piped = segment.ender == Sep::Pipe;
     }
+}
+
+/// How a simple command is read: for which targets, in which shell, and whether it runs on a
+/// pipeline's input.
+#[derive(Debug, Clone, Copy)]
+struct How {
+    kind: Kind,
+    dialect: Dialect,
+    piped: bool,
 }
 
 /// The path in the matter `folder` of `target` (relative to the folder, or absolute), or `None`
@@ -143,16 +317,29 @@ pub(crate) fn in_matter(folder: &Path, target: &str) -> Option<String> {
     (!rest.is_empty()).then(|| rest.to_owned())
 }
 
-/// One word of a command, and whether it is plain text: no expansion, glob or `~`.
+/// One word of a command, whether it is plain text (no expansion, glob or `~`), and whether it
+/// is a PowerShell array of plain text elements (`a.docx, 'b c.docx'`, split at
+/// `ARRAY_COMMA`).
 #[derive(Debug)]
 struct Word {
     text: String,
     clear: bool,
+    list: bool,
 }
 
 impl Word {
     fn plain(text: String) -> Self {
-        Self { text, clear: true }
+        Self {
+            text,
+            clear: true,
+            list: false,
+        }
+    }
+}
+
+impl AsRef<str> for Word {
+    fn as_ref(&self) -> &str {
+        &self.text
     }
 }
 
@@ -188,15 +375,9 @@ struct Segment {
     nested: bool,
 }
 
-/// Adds one simple command's targets, run in `cwd` (`None`: unknown, so only absolute
-/// targets count).
-fn add_segment(
-    targets: &mut BTreeSet<String>,
-    cwd: Option<&str>,
-    words: &[Word],
-    redirects: &[Word],
-) {
-    let mut found: Vec<&Word> = redirects.iter().collect();
+/// Adds one simple command's targets, read as `how` says, run in `cwd` (`None`: unknown, so only
+/// absolute targets count).
+fn add_segment(out: &mut Out<'_>, cwd: Option<&str>, words: &[Word], redirects: &[Word], how: How) {
     // Leading assignments and wrappers that run the rest as the command.
     let start = words
         .iter()
@@ -206,6 +387,20 @@ fn add_segment(
         })
         .unwrap_or(words.len());
     let argv = words.get(start..).unwrap_or_default();
+    if matches!(how.kind, Kind::Writes | Kind::Changes) {
+        add_writes(out, cwd, argv, redirects);
+    }
+    if how.kind != Kind::Writes
+        && let Some((program, args)) = argv.split_first()
+    {
+        let taken = deletes::taken(&program.text, args, how.dialect);
+        changes::add_taken(out, cwd, args, &taken, how);
+    }
+}
+
+/// Adds the files one simple command's words `argv` and `redirects` write, run in `cwd`.
+fn add_writes(out: &mut Out<'_>, cwd: Option<&str>, argv: &[Word], redirects: &[Word]) {
+    let mut found: Vec<&Word> = redirects.iter().collect();
     if let Some((program, args)) = argv.split_first()
         && is_stetdoc(&program.text)
     {
@@ -215,7 +410,7 @@ fn add_segment(
         if program.clear && args.iter().all(|arg| arg.clear) {
             let words: Vec<String> = args.iter().map(|arg| arg.text.clone()).collect();
             for target in stetdoc_args::written(&words) {
-                add(targets, cwd, &target);
+                out.whole(cwd, &target);
             }
         }
     } else if let Some((program, args)) = argv.split_first() {
@@ -247,41 +442,73 @@ fn add_segment(
                 && arg.clear
                 && !value.is_empty()
             {
-                add(targets, cwd, value);
+                out.whole(cwd, value);
             }
         }
     }
     for word in found {
         if word.clear {
-            add(targets, cwd, &word.text);
+            out.whole(cwd, &word.text);
         }
     }
 }
 
-fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) {
+/// Adds `target`, run in `cwd` (`None`: unknown), to `targets`; whether it is a path here: not
+/// past [`MAX_TARGETS`], no separator at its end, and a place [`place`] gives.
+fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) -> bool {
     if targets.len() >= MAX_TARGETS || target.ends_with(['/', '\\']) {
-        return;
+        return false;
     }
-    let Some(cwd) = cwd.or_else(|| is_absolute(target).then_some("")) else {
-        return;
-    };
-    if let Some(path) = join(cwd, target)
-        && !path.is_empty()
-    {
-        targets.insert(path);
+    match place(cwd, target) {
+        Some(path) => {
+            targets.insert(path);
+            true
+        }
+        None => false,
     }
+}
+
+/// `target`'s path, run in `cwd` (`None`: unknown, so an absolute target alone has one), joined
+/// ([`join`]); `None` for the matter's folder itself (an empty path) or one above it.
+fn place(cwd: Option<&str>, target: &str) -> Option<String> {
+    let cwd = cwd.or_else(|| is_absolute(target).then_some(""))?;
+    join(cwd, target).filter(|path| !path.is_empty())
 }
 
 /// `target` joined to `cwd` and normalised: separators as `/`, no `.` or empty part, each `..`
 /// taking off the part before it. An absolute result keeps its root (`/`, `C:/`, `//`); a
-/// relative one that climbs out of the matter's folder is `None`.
+/// relative one that climbs out of the matter's folder is `None`. A drive-relative target
+/// (`C:a.docx`, `C:..\b.docx`) is joined to `cwd` when `cwd` is on that drive, else `None`.
+/// A Win32 path's `\\?\` or `\\.\` prefix is read before a drive (`\\?\C:\x` is `C:/x`) or
+/// `UNC\` (`\\?\UNC\server\share\x` is `//server/share/x`); any other such path is `None`.
 fn join(cwd: &str, target: &str) -> Option<String> {
+    if let Some((drive, rest)) = drive_of(target).filter(|(_, rest)| !rest.starts_with(['/', '\\']))
+    {
+        return match drive_of(cwd) {
+            Some((on, path))
+                if on.eq_ignore_ascii_case(&drive) && path.starts_with(['/', '\\']) =>
+            {
+                join(cwd, rest)
+            }
+            _ => None,
+        };
+    }
     let whole = if is_absolute(target) || cwd.is_empty() {
         target.to_owned()
     } else {
         format!("{cwd}/{target}")
     };
-    let unified = whole.replace('\\', "/");
+    let mut unified = whole.replace('\\', "/");
+    if let Some(rest) = ["//?/", "//./"]
+        .iter()
+        .find_map(|prefix| unified.strip_prefix(prefix))
+    {
+        unified = match rest.get(..4) {
+            Some(unc) if unc.eq_ignore_ascii_case("UNC/") => format!("//{}", rest.get(4..)?),
+            _ if drive_of(rest).is_some_and(|(_, path)| path.starts_with('/')) => rest.to_owned(),
+            _ => return None,
+        };
+    }
     let (root, rest) = if let Some(rest) = unified.strip_prefix("//") {
         ("//".to_owned(), rest)
     } else if let Some(rest) = unified.strip_prefix('/') {
@@ -342,213 +569,6 @@ fn is_assignment(word: &str) -> bool {
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && !name.starts_with(|c: char| c.is_ascii_digit())
     })
-}
-
-/// The words of the segment being read, and where the word being read goes.
-#[derive(Default)]
-struct Reader {
-    out: Vec<Segment>,
-    segment: Segment,
-    word: String,
-    /// A word has begun (an empty quoted word counts).
-    started: bool,
-    /// It holds no expansion, glob or `~` so far.
-    unclear: bool,
-    /// It is a redirect's target.
-    redirect: bool,
-    /// How many parentheses are open.
-    depth: usize,
-}
-
-impl Reader {
-    fn push(&mut self, c: char) {
-        self.started = true;
-        self.word.push(c);
-    }
-
-    fn end_word(&mut self) {
-        if self.started {
-            let word = Word {
-                text: std::mem::take(&mut self.word),
-                clear: !self.unclear,
-            };
-            if self.redirect {
-                self.segment.redirects.push(word);
-            } else {
-                self.segment.words.push(word);
-            }
-            self.redirect = false;
-        }
-        self.started = false;
-        self.unclear = false;
-    }
-
-    /// Ends the segment being read at `sep` (`Sep::End` at the command's end).
-    fn end_segment(&mut self, sep: Sep) {
-        self.end_word();
-        self.redirect = false;
-        let mut segment = std::mem::take(&mut self.segment);
-        if !segment.words.is_empty() || !segment.redirects.is_empty() {
-            segment.ender = sep;
-            segment.nested = self.depth > 0;
-            self.out.push(segment);
-        }
-        match sep {
-            Sep::Open => self.depth += 1,
-            Sep::Close => self.depth = self.depth.saturating_sub(1),
-            Sep::Then | Sep::And | Sep::Or | Sep::Pipe | Sep::Background | Sep::End => {}
-        }
-    }
-}
-
-/// The simple commands of `script`, as a POSIX shell splits it.
-fn segments(script: &str) -> Vec<Segment> {
-    let mut r = Reader::default();
-    let mut heredocs: Vec<Heredoc> = Vec::new();
-    let mut chars = script.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                r.started = true;
-                for q in chars.by_ref() {
-                    if q == '\'' {
-                        break;
-                    }
-                    r.word.push(q);
-                }
-            }
-            '"' => {
-                r.started = true;
-                while let Some(q) = chars.next() {
-                    match q {
-                        '"' => break,
-                        '\\' if matches!(chars.peek(), Some('"' | '\\' | '$' | '`')) => {
-                            r.word.extend(chars.next());
-                        }
-                        '$' | '`' => {
-                            r.unclear = true;
-                            r.word.push(q);
-                        }
-                        _ => r.word.push(q),
-                    }
-                }
-            }
-            '\\' => {
-                r.started = true;
-                r.word.extend(chars.next());
-            }
-            '$' | '`' | '*' | '?' | '[' | '{' => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '~' if !r.started => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '>' => {
-                // `2>`: the number before it is no word
-                if r.started && !r.unclear && r.word.chars().all(|d| d.is_ascii_digit()) {
-                    r.word.clear();
-                    r.started = false;
-                }
-                r.end_word();
-                if chars.peek() == Some(&'>') {
-                    chars.next();
-                }
-                if chars.peek() == Some(&'&') {
-                    // `>&2`: a copy of another output, no file
-                    chars.next();
-                    while chars.next_if(|d| d.is_ascii_digit() || *d == '-').is_some() {}
-                } else {
-                    r.redirect = true;
-                }
-            }
-            '<' => {
-                // the input's file is read, not written: its word is dropped
-                r.end_word();
-                let mut extra = 0;
-                while chars.next_if_eq(&'<').is_some() {
-                    extra += 1;
-                }
-                if extra == 1 {
-                    // `<<WORD` or `<<-WORD`: the lines after this one are its body, not commands
-                    let strip_tabs = chars.next_if_eq(&'-').is_some();
-                    while chars.next_if(|d| *d == ' ' || *d == '\t').is_some() {}
-                    let word = heredoc_word(&mut chars);
-                    heredocs.push(Heredoc { word, strip_tabs });
-                } else {
-                    while chars.next_if(|d| *d == ' ' || *d == '<').is_some() {}
-                    while chars
-                        .next_if(|d| !d.is_whitespace() && !";&|<>".contains(*d))
-                        .is_some()
-                    {}
-                }
-            }
-            ';' | '&' | '|' | '\n' | '(' | ')' => {
-                let double = matches!(c, '&' | '|') && chars.next_if_eq(&c).is_some();
-                r.end_segment(sep_of(c, double));
-                if c == '\n' {
-                    skip_heredoc_bodies(&mut chars, &mut heredocs);
-                }
-            }
-            c if c.is_whitespace() => r.end_word(),
-            _ => r.push(c),
-        }
-    }
-    r.end_segment(Sep::End);
-    r.out
-}
-
-/// The separator `c` (doubled: `&&`, `||`).
-fn sep_of(c: char, double: bool) -> Sep {
-    match (c, double) {
-        ('&', true) => Sep::And,
-        ('&', false) => Sep::Background,
-        ('|', true) => Sep::Or,
-        ('|', false) => Sep::Pipe,
-        ('(', _) => Sep::Open,
-        (')', _) => Sep::Close,
-        _ => Sep::Then,
-    }
-}
-
-/// A heredoc opened on a line: its delimiter word, and whether `<<-` strips leading tabs.
-struct Heredoc {
-    word: String,
-    strip_tabs: bool,
-}
-
-/// A heredoc's delimiter, read up to a blank or an operator with its quotes taken off
-/// (`'EOF'`, `"EOF"` and `EOF` are all `EOF`).
-fn heredoc_word(chars: &mut Peekable<Chars<'_>>) -> String {
-    let mut word = String::new();
-    while let Some(c) = chars.next_if(|d| !d.is_whitespace() && !";&|<>()".contains(*d)) {
-        match c {
-            '\'' => word.extend(chars.by_ref().take_while(|q| *q != '\'')),
-            '"' => word.extend(chars.by_ref().take_while(|q| *q != '"')),
-            '\\' => word.extend(chars.next()),
-            _ => word.push(c),
-        }
-    }
-    word
-}
-
-/// Skips the bodies of the heredocs opened on the line just ended, in order. Each runs up to
-/// the line that is its delimiter (leading tabs taken off first for `<<-`), or to the end.
-fn skip_heredoc_bodies(chars: &mut Peekable<Chars<'_>>, heredocs: &mut Vec<Heredoc>) {
-    for doc in heredocs.drain(..) {
-        loop {
-            let line: String = chars.by_ref().take_while(|c| *c != '\n').collect();
-            let content = if doc.strip_tabs {
-                line.trim_start_matches('\t')
-            } else {
-                line.as_str()
-            };
-            if content == doc.word || chars.peek().is_none() {
-                break;
-            }
-        }
-    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! The folder each segment of a shell command runs in, for [`super::add_script`]: a `cd` or
+//! The folder each segment of a shell command runs in, for [`super::add_input`]: a `cd` or
 //! `pushd` to a plain folder (PowerShell's `Set-Location`, `sl`, `chdir` and `Push-Location`
 //! too, `-Path`/`-LiteralPath` or not), wherever it stands, sets the folder of the segments
 //! after it when `&&`, `;` or a new line joins it to them. A folder change that may not run in

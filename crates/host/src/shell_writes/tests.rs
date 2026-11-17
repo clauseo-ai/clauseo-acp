@@ -404,3 +404,8 @@ fn an_unknown_start_counts_only_what_an_absolute_folder_places() {
     );
     assert_eq!(out.into_iter().collect::<Vec<_>>(), ["/m/b.md"]);
 }
+
+mod delete_forms;
+mod deletes;
+#[cfg(windows)]
+mod windows_paths;
