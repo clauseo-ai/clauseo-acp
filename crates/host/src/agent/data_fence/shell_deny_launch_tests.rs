@@ -486,3 +486,61 @@ fn the_shared_places_are_denied_to_the_shell_and_still_readable() {
         assert!(allow.contains(&rule), "{rule}: {allow:?}");
     }
 }
+
+/// This matter's `history.git` kept by the launch (`launch_checks::folders`): a command may name
+/// it to read it with `git` in every spelling of `<data>`; another matter's history, a sibling
+/// beside it and the matters' folder stay denied, and so do Claude's Read and Edit of it.
+#[test]
+fn only_this_matters_history_opens_to_a_command() {
+    let dir = TempDir::new("shell-deny-history");
+    let data = dir.path().join("data");
+    let other = matter_id(1);
+    for file in [
+        format!("matters/{VM_MATTER}/history.git/HEAD"),
+        format!("matters/{VM_MATTER}/stray"),
+        format!("matters/{other}/history.git/HEAD"),
+        format!("agent-state/{VM_MATTER}/notes/n.md"),
+    ] {
+        let path = data.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, b"x").unwrap();
+    }
+    let notes = data.join("agent-state").join(VM_MATTER).join("notes");
+    let history = crate::agent::history::matter_history(&notes).unwrap();
+    let deny = on_windows(
+        launch_deny(vec![data.clone()], &data, &[notes, history], &[]),
+        VM_DATA,
+    );
+    let rules = windows_shell_deny_rules(&deny, &vm_env);
+    for (data, sep) in spellings() {
+        let git = |matter: &str| {
+            format!(
+                r#"git --git-dir="{data}{sep}matters{sep}{matter}{sep}history.git" log refs/clauseo/timeline"#
+            )
+        };
+        for tool in ["PowerShell", "Bash"] {
+            assert!(
+                !denied_by(&rules, tool, &git(VM_MATTER)),
+                "{tool}: {}",
+                git(VM_MATTER)
+            );
+            assert!(
+                denied_by(&rules, tool, &git(&other)),
+                "{tool}: {}",
+                git(&other)
+            );
+            for denied in [
+                format!("Get-Content {data}{sep}matters{sep}{VM_MATTER}{sep}stray"),
+                format!("Get-ChildItem {data}{sep}matters"),
+            ] {
+                assert!(denied_by(&rules, tool, &denied), "{tool}: {denied}");
+            }
+        }
+    }
+    let read_edit = claude_deny_rules_on(&deny, true, false);
+    let base = "//c/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop";
+    for tool in ["Read", "Edit"] {
+        let rule = format!("{tool}({base}/matters/**)");
+        assert!(read_edit.contains(&rule), "{rule}");
+    }
+}

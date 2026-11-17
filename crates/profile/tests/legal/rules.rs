@@ -7,7 +7,7 @@ use std::path::Path;
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::instructions::LEGAL;
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
 };
 
 use super::{launch_profile, paths_under};
@@ -21,6 +21,7 @@ fn the_launch_instructions_hold_only_tokens_the_host_fills() {
     for kind in [AgentKind::Claude, AgentKind::Codex] {
         let text = profile.instructions_for(kind);
         assert!(text.contains(WORK_FOLDER) && text.contains(MATTER_NOTES));
+        assert_eq!(text.matches(MATTER_HISTORY).count(), 2, "the history line");
         assert!(!text.contains("{author}") && !text.contains(PLAN));
         let filled = clauseo_profile::placeholders::fill(
             &text,
@@ -28,6 +29,7 @@ fn the_launch_instructions_hold_only_tokens_the_host_fills() {
             &[
                 (WORK_FOLDER, "W"),
                 (MATTER_NOTES, "M"),
+                (MATTER_HISTORY, "H"),
                 (CONNECTORS, ""),
                 (BROWSER, ""),
             ],

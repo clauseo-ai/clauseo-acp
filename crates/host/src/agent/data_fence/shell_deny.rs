@@ -92,6 +92,9 @@ mod forms;
 #[path = "own_allow.rs"]
 mod own_allow;
 
+/// The matters' histories under `<data>` (`data_fence::DENIED`'s `matters/**`).
+const HISTORIES: &str = "matters/**";
+
 /// The separators a command may write between two names: `\`, `/`, and `\\` (Git Bash's escaped
 /// form, or a doubled `\`).
 const JUNCTIONS: [&str; 3] = ["\\", "/", "\\\\"];
@@ -182,6 +185,11 @@ fn rules(
         .filter(|target| target.as_str() != super::STALE_WORK)
         .cloned()
         .collect();
+    // This matter's `history.git` kept (`launch_checks::folders`): the launch named every other
+    // matter, so `matters/**` goes, and a command may name the history to read it with `git`.
+    if deny.kept.iter().any(|place| place.starts_with("matters/")) {
+        targets.retain(|target| target != HISTORIES);
+    }
     for place in &shared {
         let target = format!("{place}/**");
         if !targets.contains(&target) {

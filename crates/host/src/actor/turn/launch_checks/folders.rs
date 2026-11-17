@@ -99,9 +99,13 @@ pub(super) fn launch_deny(
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, its work
 /// folder, this matter's notes, the matter folder (`agent::session_folder` of `stored`) and,
-/// for Claude, the plans folder in its home.
+/// for Claude, the plans folder in its home; and this matter's `history.git`
+/// (`agent::history`), which the Windows shell rules then leave a command to name for reading
+/// with `git`, while `matters/**` still denies it to Claude's Read and Edit
+/// (`data_fence::DENIED`).
 fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> Vec<PathBuf> {
     let plans = claude_home.map(|home| home.join("plans"));
+    let history = crate::agent::history::matter_history(&run.notes);
     [
         run.root.clone(),
         run.work.clone(),
@@ -110,6 +114,7 @@ fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> V
     ]
     .into_iter()
     .chain(plans)
+    .chain(history)
     .collect()
 }
 

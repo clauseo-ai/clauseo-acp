@@ -28,6 +28,7 @@ use super::shell_network::reject_option;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
+use crate::agent::history;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
@@ -174,10 +175,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 }
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
-/// the thread's agent: its own folders are its run folder, its work folder, this matter's notes,
-/// a Claude agent's plans folder in Clauseo's Claude home, and its working folder. None when the
-/// request names no path and no command, or the thread has no agent. Its command's search folders
-/// are read as `shell`, the shell of the request's tool, would read them.
+/// the thread's agent: its own folders are its run folder, its work folder, this matter's notes
+/// and history, a Claude agent's plans folder in Clauseo's Claude home, and its working folder.
+/// None when the request names no path and no command, or the thread has no agent. Its
+/// command's search folders are read as `shell`, the shell of the request's tool, would read
+/// them.
 pub(super) fn fence_check(
     actor: &Actor,
     thread: ThreadId,
@@ -194,10 +196,16 @@ pub(super) fn fence_check(
     let turn = &actor.threads.get(&thread)?.turn;
     let agent = turn.agent.as_deref()?;
     let data = actor.effective.locations().data_dir().to_owned();
+    // And this matter's version history, which the agents read with `git` (`agent::history`).
+    let history = turn
+        .run
+        .iter()
+        .filter_map(|run| history::matter_history(&run.notes));
     let mut allowed: Vec<PathBuf> = turn
         .run
         .iter()
         .flat_map(|run| [run.root.clone(), run.work.clone(), run.notes.clone()])
+        .chain(history)
         .collect();
     // Claude Code writes its plan note there (`agent/plan_note.rs`); a plans folder elsewhere
     // in the data folder is not the session's.

@@ -73,8 +73,9 @@
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
 //!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and each folder first on
-//!   `PATH`. Not the whole run folder: it holds the case-law relay's token and a browser's
-//!   profile (the visited sites' cookies). Of Claude's own project
+//!   `PATH`, and the matter's version history (`agent::history`), read only. Not the whole
+//!   run folder: it holds the case-law relay's token and a browser's profile (the visited
+//!   sites' cookies). Of Claude's own project
 //!   folder only `<home>/projects/<key>/*/tool-results`, where `WebFetch` keeps the files it
 //!   fetches (a PDF among them): never the transcripts or the memory beside them.
 //! - `ignoreViolations`: Claude Code's shell snapshot folder in its home, which the data fence
@@ -336,8 +337,8 @@ impl ClaudeSandbox {
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
-    /// the built-in skills, the shells' `PATH` file, the trust roots file, and each folder first
-    /// on `PATH` (stetdoc's), except that a folder in Clauseo's
+    /// the built-in skills, the matter's `history.git` (never in `allowWrite`), the shells'
+    /// `PATH` file, the trust roots file, and each folder first on `PATH` (stetdoc's), except that a folder in Clauseo's
     /// Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
@@ -355,6 +356,8 @@ impl ClaudeSandbox {
         .map(|path| path.to_path_buf())
         .collect();
         folders.extend(paths.skills.iter().cloned());
+        // Read, never write: the matter's version history (`agent::history`).
+        folders.extend(crate::agent::history::matter_history(paths.notes));
         folders.extend(paths.env_file.map(Path::to_path_buf));
         folders.extend(paths.ca_file.map(Path::to_path_buf));
         for folder in paths.path {

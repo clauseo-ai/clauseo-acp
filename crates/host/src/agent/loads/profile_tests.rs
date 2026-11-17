@@ -176,6 +176,24 @@ fn a_folder_named_like_a_token_stays_literal() {
     );
 }
 
+/// `{matter_history}` is this matter's `history.git`, found from its notes folder.
+#[test]
+fn the_history_token_names_this_matters_history() {
+    let notes = Path::new("/d/agent-state/m-1/notes");
+    let folders = Folders {
+        notes: notes.to_str().unwrap(),
+        ..folders()
+    };
+    let want = Path::new("/d")
+        .join("matters")
+        .join("m-1")
+        .join("history.git");
+    assert_eq!(
+        fill_instructions("at {matter_history}.", folders).unwrap(),
+        format!("at {}.", want.display())
+    );
+}
+
 #[test]
 fn each_reason_drops_the_browser_in_order() {
     let dir = PathBuf::from("/b");

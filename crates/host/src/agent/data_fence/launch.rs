@@ -241,15 +241,17 @@ fn names(place: &Path) -> Option<Vec<String>> {
 }
 
 /// The folders whose entries grow with the matters and their conversations (run folders,
-/// matters' state, a matter's work folders, Claude's projects), whose other entries [`walk`]
-/// names in groups ([`group_prefix`]); [`ANY_NAME`] stands for any one name (the matter's id).
+/// matters' state and histories, a matter's work folders, Claude's projects), whose other
+/// entries [`walk`] names in groups ([`group_prefix`]); [`ANY_NAME`] stands for any one name
+/// (the matter's id).
 /// Named whole, every other conversation of the matter ever launched added 1,010 bytes to a
 /// launch's rules on Windows, 1,283 with `<data>` in two spellings, which filled Claude Code's
 /// 2 MiB at about 930 conversations; in groups, 46 and 65 bytes (`work_folders_tests.rs`).
-const GROUPED: [&[&str]; 4] = [
+const GROUPED: [&[&str]; 5] = [
     &["run"],
     &["agent-state"],
     &["agent-state", ANY_NAME, "work"],
+    &["matters"],
     &["agents", "claude-acp", "home", "projects"],
 ];
 

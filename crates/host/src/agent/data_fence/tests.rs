@@ -316,3 +316,24 @@ fn case_is_ignored_only_where_the_file_system_ignores_it() {
         assert!(!fence.touches_data_as(false));
     }
 }
+
+/// The matter's history as an own folder (`actor::turn::asks` adds it, `agent::history`): a
+/// `git` command that names it to read it is not refused, one naming another matter's is.
+#[test]
+fn a_git_read_of_this_matters_history_alone_passes() {
+    let dir = layout("history");
+    let root = dir.path();
+    let data = root.join("data");
+    for matter in ["m1", "m2"] {
+        write::create_dir_all(&data.join("matters").join(matter).join("history.git")).unwrap();
+    }
+    let notes = data.join("agent-state").join("m1").join("notes");
+    let history = crate::agent::history::matter_history(&notes).unwrap();
+    for (matter, refused) in [("m1", false), ("m2", true)] {
+        let git_dir = text(&data.join("matters").join(matter).join("history.git"));
+        let command = format!("git --git-dir=\"{git_dir}\" log refs/clauseo/timeline");
+        let mut fence = check(root, &[], Some(&json!({ "command": command })));
+        fence.allowed.push(history.clone());
+        assert_eq!(fence.touches_data(), refused, "{command}");
+    }
+}
