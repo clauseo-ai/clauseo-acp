@@ -933,13 +933,39 @@ ask, could close even those: a later option, not this change.
   What Claude Code loads into every later session stays out of reach of the agent's writes.
   Scope: Claude's file tools are denied `Edit` of the built-in plugin
   (`<data>/profile/claude-plugin/**`, its skills still readable) and of the run's own packs plugin
-  (`<run>/skill-packs/**`, `LaunchDeny::edit_denied`), and of `settings.local.json` with the rest
-  of its home; on Windows the shell rules name both plugin folders. The pre-write guard refuses a
-  file tool's or a non-read-only command's write to Claude's `settings.json`,
-  `settings.local.json`, `CLAUDE.md`, `skills` and `plugins` and to both plugin folders
-  (`--protected`, `pre_write_guard/protected.rs`). Each launch rewrites Claude's `settings.json`
-  to what Clauseo ships (`agent/home.rs`) and removes from the built-in plugin whatever the
-  profile did not write (`clauseo_profile::match_plugin`), refusing the launch when it cannot.
+  (`<run>/skill-packs/**`, `LaunchDeny::edit_denied`), and of every name Claude Code reads in its
+  home (`claude_home::CLAUDE_HOME`); on Windows the shell rules name the built-in plugin, and not
+  the run's packs plugin, whose scripts a pack's skill runs. The pre-write guard refuses a file
+  tool's or a non-read-only command's write to Claude's `settings.json` and `.claude.json`, to
+  each name a launch clears from its home (below) and to the built-in plugin
+  (`--protected`), and a file tool's write to the run's packs plugin (`--protected-edit`,
+  `pre_write_guard/protected.rs`); it reads each name with an NTFS stream suffix off on Windows,
+  and searches a command's whole text for each protected path's last three names. Each launch
+  rewrites Claude's `settings.json` to what Clauseo ships (`agent/home.rs`), and the sign-in, its
+  status checks and the logout write it first too (`SigninConfig::claude_settings`), after
+  removing the other files Claude Code reads settings from (`.config.json`,
+  `cowork_settings.json`, `settings.local.json`, and the cached remote settings and policy limits
+  with their signature and consent files, fetched afresh at its start) and the keys of
+  `.claude.json` it reads as configuration (`env`, `mcpServers`, `projects` and the keys its
+  `config` command sets; `agent/home/claude_json.rs`), its own state kept. As the last change to
+  Claude's home before the agent starts, the launch removes the same, and what Claude Code would
+  load from it that Clauseo does not write (`CLAUDE.md`, `skills`, `commands`, `agents`, `rules`,
+  `output-styles`, `plugins`, `hooks`, `workflows`, `agent-memory`; `agent/home/clear.rs`), so
+  the folders Claude Code watches during a session do not exist at its
+  start. The built-in plugin is made to hold exactly what the profile renders, each file with its
+  bytes and one link, the folder and its parent real folders, never followed
+  (`clauseo_profile::match_plugin`). What a repair cannot overwrite or remove is renamed aside and
+  written fresh; the launch is refused only when that fails too. In the flag settings, a
+  `ConfigChange` hook (the guard program, `pre_write_guard/config_change.rs`) refuses a running
+  session's reload of the user, project and local settings and of skills; a firm's managed
+  settings still apply. The flag settings also exclude `CLAUDE.md` and `rules/**` in Claude's
+  home from what Claude Code loads after a compaction (`claudeMdExcludes`) and turn its
+  auto-memory off (`autoMemoryEnabled: false`, and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` forced in
+  the launch's environment and the settings' `env`; `agent/loads/memory.rs`). That costs the
+  lawyer nothing they have today: the data fence already denies Claude's tools Read and Edit of
+  its projects' `memory` folders, a real data folder with 30 conversations held no memory file,
+  and each matter's notes folder is the memory Clauseo gives the agent. Claude's own memory, if
+  wanted back, becomes a designed feature.
   The auto-deny refuses a Codex request naming the built-in plugin (`FenceCheck::shared_own`).
   Two folders every session may read and run but never edit (`READ_ONLY` in the module):
   `<data>/tools` (the agents' commands, agent-browser's copy) and each Python build
