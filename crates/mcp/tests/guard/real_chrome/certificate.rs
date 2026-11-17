@@ -44,6 +44,8 @@ const MARKER: &str = "CLAUSEO-CERT-PAGE-MARKER-5e1d";
 /// The warning's heading, which the agent sees instead (beside `NET::ERR_CERT_*`, and
 /// `Navigation failed: net::ERR_CERT_*` as `open`'s answer).
 const WARNING: &str = "Your connection is not private";
+/// How many times, a second apart, a row looks for the warning.
+const LOOKS: usize = 10;
 /// The origin of Chrome's error page, the certificate warning's.
 const ERROR_PAGE: &str = "chrome-error://chromewebdata/";
 /// The pages: host, and the name its certificate gives.
@@ -230,23 +232,28 @@ impl Agent {
         format!("{snapshot}\n{text}")
     }
 
-    /// After `row`, the warning shows and the page does not; with no "Proceed" anywhere.
+    /// After `row`, the warning shows and the page does not; with no "Proceed" anywhere. The
+    /// page's content and a way past are checked at every look; the warning has up to
+    /// [`LOOKS`] seconds to arrive (a new tab is `about:blank` until its navigation commits,
+    /// and `s_server` answers one connection at a time).
     fn assert_warning(&mut self, row: &str) -> String {
-        // The navigation or the typed keys have time to land.
-        self.call("agent_browser_wait_ms", &json!({"ms": 1500}));
-        let seen = self.seen();
-        assert!(
-            !seen.contains(MARKER),
-            "{row}: the page's content showed: {seen}"
-        );
-        // The tab is on Chrome's error page: its heading, or its origin (once "Advanced" is open
-        // the heading and the error code are hidden; agent-browser names the origin either way).
-        assert!(
-            seen.contains(WARNING) || seen.contains(ERROR_PAGE),
-            "{row}: no certificate warning: {seen}"
-        );
-        assert!(!seen.contains("Proceed to"), "{row}: a way past: {seen}");
-        seen
+        let mut seen = String::new();
+        for _ in 0..LOOKS {
+            self.call("agent_browser_wait_ms", &json!({"ms": 1000}));
+            seen = self.seen();
+            assert!(
+                !seen.contains(MARKER),
+                "{row}: the page's content showed: {seen}"
+            );
+            assert!(!seen.contains("Proceed to"), "{row}: a way past: {seen}");
+            // The tab is on Chrome's error page: its heading, or its origin (once "Advanced" is
+            // open the heading and the error code are hidden; agent-browser names the origin
+            // either way).
+            if seen.contains(WARNING) || seen.contains(ERROR_PAGE) {
+                return seen;
+            }
+        }
+        panic!("{row}: no certificate warning: {seen}");
     }
 }
 
