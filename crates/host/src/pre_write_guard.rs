@@ -138,6 +138,8 @@
 //! `cat .codex/config.toml` too, since an agent has no reason to touch a folder Clauseo refuses
 //! it. Claude Code needs no such rule: its `settingSources` leave out project settings.
 //!
+//! And Codex's own home, when its hook names it with [`CODEX_HOME_FLAG`]: see `codex.rs`.
+//!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
 //! (Codex's hook), one line in that file for the host to show the lawyer (`record.rs`); stdout
@@ -170,17 +172,20 @@ mod words;
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 pub use answers::{IGNORED, UNCHECKED};
 use answers::{Ignored, Refusal};
-use codex::{has_codex_part, in_codex_folder, patch_targets};
+use codex::{
+    codex_home_arg, has_codex_part, in_codex_folder, names_codex_home, patch_targets,
+    reaches_codex_home,
+};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
-use reach::Reach;
+use reach::{Reach, existing_resolved, lexical};
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
 pub(crate) use words::{
@@ -193,6 +198,10 @@ pub const FLAG: &str = "--pre-write-guard";
 
 /// The argument after [`FLAG`] that names the matter folder, followed by the folder.
 pub const MATTER_FLAG: &str = "--matter";
+
+/// The argument that names Codex's home (`CODEX_HOME`), followed by the folder: Codex's hook
+/// passes it (`agent/loads/codex.rs`), and a target in that folder is refused ([`run`]).
+pub const CODEX_HOME_FLAG: &str = "--codex-home";
 
 /// The argument that names the file each refusal the lawyer is told about is recorded in
 /// (`record.rs`), followed by the file.
@@ -249,7 +258,8 @@ fn run_timed(
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
         Ok(_) => {
             timings::mark("read");
-            refusal(&bytes, matter_arg(args).as_deref())
+            let home = codex_home_arg(args);
+            refusal(&bytes, matter_arg(args).as_deref(), home.as_deref())
         }
         Err(_) => Err(Ignored::Unreadable),
     };
@@ -310,11 +320,17 @@ fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
 }
 
 /// Why the hook input `bytes` is refused, if it is, with `matter` the folder from the
-/// arguments: a patch target in the matter's `.codex` folder, or under Codex's hook (no
-/// `matter`) a `Bash` word with a `.codex` part, else the first target that lies in the matter
-/// folder and is held open. [`Ignored`] when the input cannot be read or has a shape the guard
-/// does not know.
-fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignored> {
+/// arguments: a target in Codex's home `codex_home` ([`reaches_codex_home`]) or, under Codex's
+/// hook, a `Bash` command whose text names that home ([`names_codex_home`], with the home
+/// argument or without), a patch target in
+/// the matter's `.codex` folder, or under Codex's hook (no `matter`) a `Bash` word with a
+/// `.codex` part, else the first target that lies in the matter folder and is held open.
+/// [`Ignored`] when the input cannot be read or has a shape the guard does not know.
+fn refusal(
+    bytes: &[u8],
+    matter: Option<&Path>,
+    codex_home: Option<&Path>,
+) -> Result<Option<Refusal>, Ignored> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Err(Ignored::Empty);
     }
@@ -343,6 +359,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         base: &base,
         reach: &reach,
         codex_bash: matter.is_none() && tool == "Bash",
+        codex_home,
         held: &held,
     };
     // Under Codex's hook on Windows a `Bash` command is read as PowerShell and as Bash: a
@@ -366,13 +383,15 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
 }
 
 /// Where a tool's targets are judged: the matter `folder`, the `base` its relative paths start
-/// from, the walk that resolves them, whether it is a `Bash` call under Codex's hook, and the
-/// matter's held files ([`names::held_files`]), listed on first need.
+/// from, the walk that resolves them, whether it is a `Bash` call under Codex's hook, Codex's
+/// home when the hook named it, and the matter's held files ([`names::held_files`]), listed on
+/// first need.
 struct Place<'a> {
     folder: &'a Path,
     base: &'a Path,
     reach: &'a Reach,
     codex_bash: bool,
+    codex_home: Option<&'a Path>,
     held: &'a std::cell::OnceCell<Vec<names::Held>>,
 }
 
@@ -383,8 +402,14 @@ fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
         base,
         reach,
         codex_bash,
+        codex_home,
         held,
     } = *place;
+    if codex_home.is_some_and(|home| reaches_codex_home(targets, home, base, reach))
+        || (codex_bash && names_codex_home(targets))
+    {
+        return Some(Refusal::CodexHome);
+    }
     let into_codex = match targets {
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
@@ -455,6 +480,9 @@ enum Targets {
         files: Vec<(PathBuf, String)>,
         patch: Vec<PathBuf>,
         names_codex: bool,
+        /// Every place a word may name, existing or not, as spelled from each folder the command
+        /// may be in and as walked ([`shell::walked_resolutions`]).
+        named: Vec<PathBuf>,
         /// The command's text (an argument list's parts one per line) and its shell's escape.
         text: String,
         /// The command as one shell line (an argument list's parts quoted, joined by spaces).
@@ -505,34 +533,6 @@ fn bash_escape(codex: bool, windows: bool) -> Escape {
     } else {
         Escape::Backslash
     }
-}
-
-/// The longest path [`existing_resolved`] resolves; a longer one (no OS opens it) is only
-/// normalised by its text, so a huge word costs time in proportion to its length.
-const MAX_RESOLVED: usize = 4096;
-
-/// Where `path` leads: the network-safe walk's resolved path ([`Reach::walked`]: every link
-/// followed, `..` taken as the OS takes it, missing names kept as written), used as it is and
-/// never canonicalised again. A path over [`MAX_RESOLVED`] bytes, or one the walk does not vouch
-/// for (a network location, or one it can't look at), is only normalised by its text
-/// ([`lexical`]), never touched.
-fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
-    reach.walked(path).unwrap_or_else(|| lexical(path))
-}
-
-/// `path` with `.` parts dropped and each `..` taking the part before it off.
-fn lexical(path: &Path) -> PathBuf {
-    let mut resolved = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::ParentDir => {
-                resolved.pop();
-            }
-            Component::CurDir => {}
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => resolved.push(part),
-        }
-    }
-    resolved
 }
 
 #[cfg(test)]

@@ -550,6 +550,7 @@ mod ask;
 mod backstop;
 mod batch;
 mod codex;
+mod codex_home;
 mod devanagari;
 mod fixtures;
 mod gaps;

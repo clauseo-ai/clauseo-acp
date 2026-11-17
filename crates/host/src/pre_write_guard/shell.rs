@@ -44,8 +44,9 @@ struct Part<'a> {
 
 /// A shell command's targets: the existing files among its first [`MAX_WORDS`] words (and the
 /// first [`MAX_WORDS`] of each script it hands to `sh -c`, `bash -c`, `eval`, `pwsh -Command` and
-/// the like), the files of a patch in its text, and whether one of those words has a `.codex`
-/// part. Claude Code sends the command as a string; an argument list (one shape Codex has used) is
+/// the like), the files of a patch in its text, whether one of those words has a `.codex`
+/// part, and every place those words may name (for Codex's home, `codex::reaches_codex_home`).
+/// Claude Code sends the command as a string; an argument list (one shape Codex has used) is
 /// taken word by word, each split again so `["bash", "-lc", "…"]` reaches the script's words.
 ///
 /// Each word's candidates ([`candidates`]) are taken from `cwd` and from every folder reached so
@@ -115,6 +116,8 @@ pub(super) fn shell_targets(
         .any(|part| part.words.iter().any(|word| change(word).is_some()));
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut names_codex = false;
+    let mut named: Vec<PathBuf> = Vec::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     let mut folders = Folders {
         reached: vec![cwd.to_path_buf()],
         unknown: false,
@@ -128,7 +131,13 @@ pub(super) fn shell_targets(
                 names_codex |= text_has_codex_part(candidate);
                 let candidate = native(candidate, part.escape);
                 for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
+                    if seen.insert(path.clone()) {
+                        named.push(path.clone());
+                    }
                     for path in walked_resolutions(&path, reach) {
+                        if seen.insert(path.clone()) {
+                            named.push(path.clone());
+                        }
                         let file = (path, word.clone());
                         // The walked path, its links already followed: not followed again.
                         if !files.contains(&file)
@@ -148,6 +157,7 @@ pub(super) fn shell_targets(
         files,
         patch: patch_targets(&text),
         names_codex,
+        named,
         text,
         line,
         escape,

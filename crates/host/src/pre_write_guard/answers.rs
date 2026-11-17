@@ -57,6 +57,9 @@ pub(super) enum Refusal {
     /// A Codex patch writes in the matter's `.codex` folder, or a Codex shell command names a
     /// `.codex` folder.
     CodexFolder,
+    /// A Codex patch or shell command reaches Codex's home (`CODEX_HOME`), or a shell command
+    /// names its variable.
+    CodexHome,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
 }
@@ -72,6 +75,11 @@ impl Refusal {
             ),
             Self::CodexFolder => "Clauseo doesn't let the agent change the .codex folder in a \
                                   matter: files there change what the agent loads and runs."
+                .to_owned(),
+            Self::CodexHome => "Clauseo doesn't let the agent touch Codex's own folder \
+                                (CODEX_HOME): files there change what the agent loads and runs. \
+                                Run tools by name (for example rg), not by their path in that \
+                                folder."
                 .to_owned(),
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
