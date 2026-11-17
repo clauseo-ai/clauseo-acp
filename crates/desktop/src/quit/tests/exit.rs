@@ -36,13 +36,18 @@ fn downloaded() -> Downloaded {
 }
 
 /// The windows hide before anything else, the flag is set before the stopper starts (so before
-/// any wait), and the wait ends when the stopper marks the stop ended.
+/// any wait), the wait ends when the stopper marks the stop ended, and the run is marked closed
+/// after it. The log is the stopper's to flush.
 #[test]
 fn the_windows_hide_and_the_flag_is_set_before_the_stopper_starts() {
     let exit = Arc::new(Exit::default());
     let steps = Arc::new(Mutex::new(Vec::new()));
-    let (hide_steps, idle_steps, start_steps) =
-        (Arc::clone(&steps), Arc::clone(&steps), Arc::clone(&steps));
+    let (hide_steps, idle_steps, start_steps, flush_steps) = (
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+    );
     let mut stopper = None;
     let waited = stop_on_exit_with(
         &exit,
@@ -58,10 +63,11 @@ fn the_windows_hide_and_the_flag_is_set_before_the_stopper_starts() {
             stopper = Some(std::thread::spawn(move || stopper_exit.mark_stopped()));
             true
         },
-        || lock(&steps).push("flush"),
+        || lock(&flush_steps).push("flush"),
+        || lock(&steps).push("closed"),
     );
     assert_eq!(waited, ExitWait::Stopped);
-    assert_eq!(*lock(&steps), ["hide", "idle", "start, flag set"]);
+    assert_eq!(*lock(&steps), ["hide", "idle", "start, flag set", "closed"]);
     stopper.unwrap().join().unwrap();
 }
 
@@ -86,6 +92,7 @@ fn an_exit_during_a_running_stop_waits_for_it_and_starts_no_second() {
         || panic!("only the first stopper asks whether anything runs"),
         |_exit| panic!("a stopper already runs"),
         || panic!("the running stopper flushes the log"),
+        || {},
     );
     assert_eq!(waited, ExitWait::Stopped);
     assert!(exit.exiting_on_main.load(Ordering::Acquire));
@@ -115,6 +122,7 @@ fn an_exit_during_a_running_stop_waits_for_it_and_starts_no_second() {
                         true
                     },
                     || {},
+                    || {},
                 )
             })
         })
@@ -125,44 +133,78 @@ fn an_exit_during_a_running_stop_waits_for_it_and_starts_no_second() {
     assert_eq!(starts.load(Ordering::Acquire), 1);
 }
 
-/// A stopper that never ends: the exit gives up at its bound (a short one here; the app's is
-/// `EXIT_STOP_WAIT`, 13 s), flushes the log, and returns.
+/// A stopper that never ends, busy or idle: the exit gives up at its bound (a short one here;
+/// the app's is `EXIT_STOP_WAIT`, 13 s), flushes the log, and returns without marking the run
+/// closed, so the next start knows the stop did not finish.
 #[test]
-fn a_stop_that_does_not_end_is_given_up_on_at_the_bound() {
-    let exit = Arc::new(Exit::default());
-    let flushed = AtomicUsize::new(0);
-    let waited = stop_on_exit_with(
-        &exit,
-        Duration::from_millis(100),
-        || {},
-        || false,
-        // Started, and never marks the stop ended.
-        |_exit| true,
-        || {
-            flushed.fetch_add(1, Ordering::AcqRel);
-        },
-    );
-    assert_eq!(waited, ExitWait::TimedOut);
-    assert_eq!(flushed.load(Ordering::Acquire), 1);
-    assert!(!exit.stopped.load(Ordering::Acquire));
+fn a_stop_that_does_not_end_is_given_up_on_at_the_bound_and_the_run_stays_unclosed() {
+    for nothing_runs in [false, true] {
+        let exit = Arc::new(Exit::default());
+        let flushed = AtomicUsize::new(0);
+        let waited = stop_on_exit_with(
+            &exit,
+            Duration::from_millis(100),
+            || {},
+            || nothing_runs,
+            // Started, and never marks the stop ended.
+            |_exit| true,
+            || {
+                flushed.fetch_add(1, Ordering::AcqRel);
+            },
+            || panic!("the stop did not end: the run is not marked closed"),
+        );
+        assert_eq!(waited, ExitWait::TimedOut);
+        assert_eq!(flushed.load(Ordering::Acquire), 1);
+        assert!(!exit.stopped.load(Ordering::Acquire));
+    }
 }
 
-/// Nothing runs (a Windows logoff with the app idle): the exit hides the windows, starts no
-/// stopper and waits for nothing; the log is flushed. One that stopped already does nothing.
+/// Nothing runs (a quit or a Windows logoff with no agent): the exit hides the windows, then
+/// still starts the host's stop and waits for it, so host work with no process behind it (a
+/// commit, a snapshot, a matter job, an import) that holds the stop open briefly ends before
+/// the exit returns; then the run is marked closed. The stopper flushes the log. One that
+/// stopped already does nothing.
 #[test]
-fn an_idle_app_exits_without_a_stop_or_a_wait() {
+fn an_idle_app_still_waits_for_the_host_s_stop() {
     let exit = Arc::new(Exit::default());
-    let steps = Mutex::new(Vec::new());
+    let steps = Arc::new(Mutex::new(Vec::new()));
+    let (hide_steps, idle_steps, start_steps, flush_steps) = (
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+        Arc::clone(&steps),
+    );
+    let mut stopper = None;
     let waited = stop_on_exit_with(
         &exit,
         LONG,
-        || lock(&steps).push("hide"),
-        || true,
-        |_exit| panic!("nothing runs: no stopper"),
-        || lock(&steps).push("flush"),
+        || lock(&hide_steps).push("hide"),
+        || {
+            lock(&idle_steps).push("idle");
+            true
+        },
+        |stopper_exit| {
+            lock(&start_steps).push("start");
+            let work_steps = Arc::clone(&start_steps);
+            stopper = Some(std::thread::spawn(move || {
+                // The host's shutdown waiting on a matter job: 150 ms that nothing cuts short.
+                let (_held, job) = mpsc::channel::<()>();
+                assert!(job.recv_timeout(Duration::from_millis(150)).is_err());
+                lock(&work_steps).push("host stopped");
+                stopper_exit.mark_stopped();
+            }));
+            true
+        },
+        || lock(&flush_steps).push("flush"),
+        || lock(&steps).push("closed"),
     );
     assert_eq!(waited, ExitWait::Idle);
-    assert_eq!(*lock(&steps), ["hide", "flush"]);
+    assert_eq!(
+        *lock(&steps),
+        ["hide", "idle", "start", "host stopped", "closed"]
+    );
+    assert!(exit.stopped.load(Ordering::Acquire));
+    stopper.unwrap().join().unwrap();
 
     let stopped = Arc::new(Exit::default());
     stopped.mark_stopped();
@@ -172,6 +214,7 @@ fn an_idle_app_exits_without_a_stop_or_a_wait() {
         || panic!("stopped already: the windows are going"),
         || panic!("stopped already"),
         |_exit| panic!("stopped already"),
+        || panic!("stopped already"),
         || panic!("stopped already"),
     );
     assert_eq!(waited, ExitWait::AlreadyStopped);
@@ -277,8 +320,8 @@ fn the_stopper_and_the_update_path_save_no_window_state() {
 }
 
 /// The app's `stop_on_exit` on the mock runtime with no host, setup or counts managed: it sets
-/// the flag and returns without the 13 s wait (idle, or a stopper with nothing to stop when
-/// another test of this binary holds a process). Once stopped, it does nothing.
+/// the flag and returns without the 13 s wait (idle or not, its stopper has nothing to stop) and
+/// the stop is marked ended. Once stopped, it does nothing.
 #[test]
 fn the_app_s_exit_with_nothing_managed_returns_at_once() {
     let app = app();
@@ -289,6 +332,7 @@ fn the_app_s_exit_with_nothing_managed_returns_at_once() {
         "{waited:?}"
     );
     assert!(exit.exiting_on_main.load(Ordering::Acquire));
+    assert!(exit.stopped.load(Ordering::Acquire));
 
     let stopped = Arc::new(Exit::default());
     stopped.mark_stopped();
