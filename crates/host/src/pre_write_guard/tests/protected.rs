@@ -329,6 +329,21 @@ fn a_protected_write_past_the_word_limit_or_through_a_stream_is_refused() {
     assert_eq!(fx.shell("Bash", &read), "", "{read}");
 }
 
+/// A redirect into Claude's home spelled from the user's home folder (`~`, `$HOME`: spellings
+/// the path layer does not expand) is refused by the protected path's tail, on every OS.
+#[test]
+fn a_redirect_spelled_from_the_home_folder_is_refused() {
+    let fx = Layout::new("tilde");
+    let name = fx.root.file_name().unwrap().to_str().unwrap().to_owned();
+    for command in [
+        format!("echo x > ~/Library/{name}/home/CLAUDE.md"),
+        format!("echo x >> \"$HOME/Library/{name}/home/CLAUDE.md\""),
+        format!("printf '@outside.md' > ~/{name}/home/CLAUDE.md"),
+    ] {
+        assert_eq!(fx.shell("Bash", &command), REFUSED, "{command}");
+    }
+}
+
 /// A pack's script in the run's packs plugin runs, and a command may read the plugin, in both
 /// readings: only a file tool may not change it (`--protected-edit`).
 #[test]
