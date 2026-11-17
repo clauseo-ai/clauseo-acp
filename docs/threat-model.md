@@ -224,6 +224,11 @@ anything the agent starts.
   command; a firm rule that allows only `Clauseo.exe` by path refuses every Codex step. The
   program's folder is the app's: no Clauseo fence names it, and Codex's own sandbox, which asks
   before a write outside the matter, covers both programs alike
+- `built` (Windows, tier C): Scope: with no sandbox, Claude's command-text deny rules and the
+  pre-write guard are the only layers between the agent's shell and Claude's own settings, skills
+  and plugins and Clauseo's plugin folders. Both read a command's text and the paths it names (the
+  guard also follows its folder changes and Claude's config-folder variable); each launch
+  rewrites Claude's settings file and the built-in plugin to what Clauseo ships
 
 ## Egress proxy
 
