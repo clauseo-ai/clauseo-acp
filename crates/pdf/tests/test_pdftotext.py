@@ -59,7 +59,10 @@ if "TEST_TEXT_FAIL" in os.environ:
 
         def close(self):
             self.doc.close()
-    m.open_doc = lambda *args: Doc(opened(*args))
+    def open_doc(*args):
+        doc, count = opened(*args)
+        return Doc(doc), count
+    m.open_doc = open_doc
 if "TEST_RENDER_FAIL" in os.environ:
     render = m.pgm
 
@@ -218,13 +221,18 @@ def scan_image(lines):
 
 def embedded(source):
     """`source` as the launcher embeds it (lib.rs, strip_comment_lines): without the lines that
-    hold only spaces, tabs, \\r, \\v or \\f, then a `#` or the line's end."""
+    hold only spaces, tabs, \\r, \\v or \\f, then a `#` or the line's end, and each kept line
+    cut at its first "  # ", with the spaces before it."""
     def kept(line):
         rest = line.lstrip(" \t\r\x0b\x0c")
         return rest not in ("", "\n") and not rest.startswith("#")
+
+    def cut(line):
+        at = line.find("  # ")
+        return line if at < 0 else line[:at].rstrip(" ") + ("\n" if line.endswith("\n") else "")
     lines = source.split("\n")
     lines = [line + "\n" for line in lines[:-1]] + [lines[-1]]
-    return "".join(line for line in lines if kept(line))
+    return "".join(cut(line) for line in lines if kept(line))
 
 
 def script():
@@ -527,8 +535,8 @@ class PdfToText(unittest.TestCase):
         self.assertLess(len(stripped), len(source))
         self.assertEqual(ast.dump(ast.parse(source)), ast.dump(ast.parse(stripped)))
         self.assertLess(len(stripped.encode()) + sum(stripped.count(c) for c in '"\\'), 30_000)
-        self.assertNotEqual(ast.dump(ast.parse('x = """a\n\nb"""\n')),
-                            ast.dump(ast.parse(embedded('x = """a\n\nb"""\n'))))
+        for unsafe in ('x = """a\n\nb"""\n', 'x = """a  # b\n"""\n'):
+            self.assertNotEqual(ast.dump(ast.parse(unsafe)), ast.dump(ast.parse(embedded(unsafe))))
 
     @fake_engine
     def test_a_slow_engine_is_stopped_inside_the_budget(self):
@@ -794,6 +802,159 @@ class PdfToText(unittest.TestCase):
                          "eng+hin), errors are possible]")
         self.assertTrue(words.endswith("\f") and words.count("\f") == 1, repr(words))
         self.assertEqual([ln.strip() for ln in words[:-1].split("\n") if ln.strip()], lines)
+        # The same scan as a JPEG file: decoded by Pillow, not PDFium.
+        scan_image(lines).save(os.path.join(self.matter, "scan.jpg"), quality=90)
+        code, out, err = self.run_tool(
+            "scan.jpg", "-", TEST_ENGINE=engine,
+            TEST_TESSDATA=os.path.join(folder, "tessdata"))
+        self.assertEqual(code, 0, err)
+        for word in ("HIGH", "COURT", "DELHI", "petition", "allowed", "costs"):
+            self.assertIn(word, out)
+
+
+def png_header(width, height):
+    """A PNG that is only a header saying `width` x `height`, with a 1-byte IDAT."""
+    def chunk(kind, body):
+        return (len(body).to_bytes(4, "big") + kind + body
+                + zlib.crc32(kind + body).to_bytes(4, "big"))
+    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 0, 0, 0, 0])
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", b"\x00")
+            + chunk(b"IEND", b""))
+
+
+class ImageScan(unittest.TestCase):
+    """JPEG, PNG and TIFF files, told by their first bytes, OCR'd frame by frame. The images are
+    drawn by Pillow here; the fake engine tells frames apart by their width."""
+
+    setUp, tearDown, env, start, run_tool, calls, mirror = (
+        PdfToText.setUp, PdfToText.tearDown, PdfToText.env, PdfToText.start, PdfToText.run_tool,
+        PdfToText.calls, PdfToText.mirror)
+
+    def image(self, name, widths, **save):
+        """`name` holding one frame per width (300 px tall, noise, so it does not compress to
+        nothing); a TIFF with more than one is multi-frame."""
+        from PIL import Image
+
+        mode = save.pop("mode", "L")
+        frames = [Image.effect_noise((w, 300), 60).convert(mode) for w in widths]
+        path = os.path.join(self.matter, name)
+        frames[0].save(path, save_all=len(frames) > 1, append_images=frames[1:], **save)
+        return path
+
+    def assert_refused(self, name):
+        code, out, err = self.run_tool(name, "-")
+        self.assertEqual((code, out), (1, ""), err)
+        self.assertIn(f"pdftotext: {name} is damaged or not a PDF; its text cannot be read. "
+                      "Recorded;", err)
+        self.assertEqual(self.calls(), [])
+
+    @fake_engine
+    def test_a_jpeg_and_a_png_are_one_page_each(self):
+        self.image("scan.jpg", [900], format="JPEG")
+        self.image("scan.png", [910], format="PNG")
+        code, out, err = self.run_tool("scan.jpg", "-")
+        self.assertEqual((code, out), (0, ocr(1, 900) + "\f"), err)
+        self.assertIn("pages recognised 1 of 1", self.mirror("scan.jpg"))
+        code, out, err = self.run_tool("scan.png", "-")
+        self.assertEqual((code, out), (0, ocr(1, 910) + "\f"), err)
+        self.assertEqual(self.calls(), ["eng+hin 900", "eng+hin 910"])
+
+    @fake_engine
+    def test_every_frame_of_a_tiff_is_a_page_g4_or_lzw(self):
+        for name, save in (("g4.tif", {"compression": "group4", "mode": "1"}),
+                           ("lzw.tiff", {"compression": "tiff_lzw"})):
+            with self.subTest(name):
+                base = 600 if name == "g4.tif" else 650
+                widths = [base, base + 100, base + 200]
+                self.image(name, widths, **save)
+                code, out, err = self.run_tool(name, "-", TEST_WORKERS=1)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out, ocr(1, widths[0]) + "\f" + ocr(2, widths[1], "eng")
+                                 + "\f" + ocr(3, widths[2], "eng") + "\f")
+                self.assertEqual([int(c.split()[1]) for c in self.calls()[-3:]], widths)
+
+    @fake_engine
+    def test_f_and_l_choose_frames_and_a_rerun_or_a_renamed_copy_runs_no_tesseract(self):
+        path = self.image("bundle.tif", [600, 700, 800], compression="tiff_lzw")
+        code, out, err = self.run_tool("-f", "2", "-l", "2", "bundle.tif", "-")
+        self.assertEqual((code, out), (0, ocr(2, 700) + "\f"), err)
+        self.assertEqual(self.calls(), ["eng+hin 700"])
+        self.assertEqual(self.run_tool("-f", "2", "-l", "2", "bundle.tif", "-")[1], out)
+        os.rename(path, os.path.join(self.matter, "renamed.tif"))
+        self.assertEqual(self.run_tool("-f", "2", "-l", "2", "renamed.tif", "-")[1], out)
+        self.assertEqual(len(self.calls()), 1)
+
+    @fake_engine
+    def test_a_failed_frame_is_named_and_the_others_are_kept(self):
+        self.image("bundle.tif", [600, 700, 800], compression="tiff_lzw")
+        code, out, err = self.run_tool("bundle.tif", "-", FAKE_FAIL_WIDTH=700, TEST_WORKERS=1)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.count("recognised words"), 2)
+        self.assertTrue(out.startswith("[bundle.tif: 0 of 3 pages read from the text layer, 2 "
+                                       "by OCR; 0 not read, 1 failed."), out)
+        self.assertIn("[page 2 of bundle.tif: OCR failed (tesseract: Error: page broke); run "
+                      "the same command again to retry, or check the page image.]", out)
+
+    @fake_engine
+    def test_a_short_budget_names_the_frames_not_yet_recognised(self):
+        self.image("bundle.tif", [600 + 10 * n for n in range(5)], compression="tiff_lzw")
+        code, out, err = self.run_tool("bundle.tif", "-", TEST_BUDGET=1, FAKE_SLEEP=0.4,
+                                       TEST_WORKERS=1)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith("[bundle.tif: 0 of 5 pages read"), out)
+        self.assertRegex(out, r"of bundle\.tif: not yet recognised; OCR stops after 1 seconds")
+
+    @fake_engine
+    def test_a_truncated_jpeg_or_png_names_its_page_as_failed(self):
+        for name, fmt in (("cut.jpg", "JPEG"), ("cut.png", "PNG")):
+            with self.subTest(name):
+                path = self.image(name, [900], format=fmt)
+                with open(path, "r+b") as file:
+                    file.truncate(os.path.getsize(path) // 2)
+                code, out, err = self.run_tool(name, "-")
+                self.assertEqual(code, 0, err)
+                self.assertIn(f"[page 1 of {name}: OCR failed (Pillow could not decode it: ", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_file_that_is_neither_pdf_nor_image_is_refused_and_recorded(self):
+        with open(os.path.join(self.matter, "scan.jpg"), "w") as file:
+            file.write("not an image at all, just some text\n")
+        self.assert_refused("scan.jpg")
+        [folder] = os.listdir(os.path.join(self.ocr, ".by-hash"))
+        with open(os.path.join(self.ocr, ".by-hash", folder, "failed.json")) as file:
+            self.assertEqual(json.load(file)["reason"], "damaged")
+        for name, fmt in (("a.gif", "GIF"), ("a.webp", "WEBP")):
+            self.image(name, [100], format=fmt)
+            self.assert_refused(name)
+        with open(os.path.join(self.matter, "big.tif"), "wb") as file:
+            file.write(b"II+\x00\x08\x00\x00\x00" + bytes(64))  # BigTIFF: not a magic it takes
+        self.assert_refused("big.tif")
+
+    @fake_engine
+    def test_the_first_bytes_decide_not_the_name(self):
+        self.image("scan.pdf", [900], format="JPEG")
+        code, out, err = self.run_tool("scan.pdf", "-")
+        self.assertEqual((code, out), (0, ocr(1, 900) + "\f"), err)
+
+    def test_pillows_own_bomb_guard_refuses_a_huge_header_before_decoding(self):
+        with open(os.path.join(self.matter, "bomb.png"), "wb") as file:
+            file.write(png_header(100_000, 100_000))
+        began = time.monotonic()
+        self.assert_refused("bomb.png")
+        self.assertLess(time.monotonic() - began, 10)
+
+    def test_a_big_jpeg_is_decoded_under_the_pixel_cap(self):
+        from PIL import Image
+
+        module = script()
+        module.MAX_PIXELS = 100_000
+        path = os.path.join(self.dir, "big.jpg")
+        Image.effect_noise((1600, 1200), 60).save(path, format="JPEG")
+        with Image.open(path, formats=["JPEG"]) as image:
+            data = module.frame_pgm(image, 1)
+        width, height = (int(v) for v in data[:40].split()[1:3])
+        self.assertLessEqual(width * height, 100_000)
+        self.assertEqual(len(data), len(b"P5\n%d %d\n255\n" % (width, height)) + width * height)
 
 
 def wait_for_pids(path, want, seconds=30):

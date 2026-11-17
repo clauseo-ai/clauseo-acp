@@ -10,6 +10,9 @@
 # there, so a rerun continues (without it a rerun starts over), a renamed file is found by its bytes, and a changed byte misses;
 # a lock there makes one process do the OCR while another waits for its pages. A document under
 # the current folder also gets <rel path>.txt there: the text of every page known so far.
+# A JPEG, PNG or TIFF (told by its first bytes, not its name) is OCR'd the same way, a TIFF frame
+# a page: Pillow decodes it (those three formats only, with its own decompression-bomb guard) to
+# the same grayscale PGM, under the same MAX_PIXELS and MAX_SIDE.
 import hashlib
 import json
 import os
@@ -26,6 +29,7 @@ DPI = 300
 MAX_PIXELS = 20_000_000
 MAX_SIDE = 20_000  # px a side, under tesseract's 32,767: a 1e9 x 1e-4 pt page passes the area cap
 LANGS = ("eng", "eng+hin")
+IMAGES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"II*\x00", b"MM\x00*")  # JPEG, PNG, TIFF
 # C0 and C1 controls but \t, \n and \f: a ToUnicode map can name ESC or BEL.
 CONTROLS = dict.fromkeys(c for c in range(160) if c < 32 and c not in (9, 10, 12) or c > 126)
 PAGE = {**CONTROLS, 12: 10}  # in a page's text \f is a line break: \f is the page separator
@@ -324,8 +328,9 @@ class Ocr:
     """The lock holder's OCR of `pages`: the first with eng+hin, which decides the rest's
     languages; then up to WORKERS tesseract processes at once, each killed at the deadline."""
 
-    def __init__(self, doc, cache, deadline, say):
+    def __init__(self, doc, cache, deadline, say, image=False):
         self.doc, self.cache, self.deadline, self.say = doc, cache, deadline, say
+        self.image = image
         self.program, self.tessdata, _ = runtime()
         self.render_lock, self.pick_lock = threading.Lock(), threading.Lock()
         self.procs, self.done, self.failed, self.stopped = set(), {}, {}, False
@@ -335,9 +340,10 @@ class Ocr:
             if self.stopped or time.monotonic() >= self.deadline:
                 return None
             try:
-                image = pgm(self.doc, pg)
-            except Exception as err:  # noqa: BLE001 - one page PDFium cannot render is named
-                return self.fail(pg, f"PDFium could not render it: {type(err).__name__}: {err}")
+                image = (frame_pgm if self.image else pgm)(self.doc, pg)
+            except Exception as err:  # noqa: BLE001 - one page that cannot be rendered is named
+                what = "Pillow could not decode it" if self.image else "PDFium could not render it"
+                return self.fail(pg, f"{what}: {type(err).__name__}: {err}")
         if not image.startswith(b"P5") or self.stopped or time.monotonic() >= self.deadline:
             return None
         kwargs = {}
@@ -441,13 +447,43 @@ def open_doc(data, src, cache):
     import pypdfium2.raw as raw
 
     try:
-        return pdfium.PdfDocument(data)
+        doc = pdfium.PdfDocument(data)
+        return doc, len(doc)
     except pdfium.PdfiumError as err:
         reason = "encrypted" if getattr(err, "err_code", None) == raw.FPDF_ERR_PASSWORD \
             else "damaged"
         if cache:
             cache.fail(reason)
         raise Fail(OPEN_ERROR, failure(src, reason, cache is not None)) from None
+
+
+def open_image(data, src, cache):
+    """A JPEG, PNG or TIFF, by Pillow's plugins for those three only, and its frame count; one
+    Pillow cannot open (its bomb guard's refusal included) is damaged, as a PDF would be."""
+    from io import BytesIO
+    from PIL import Image
+
+    try:
+        image = Image.open(BytesIO(data), formats=["JPEG", "PNG", "TIFF"])
+        return image, getattr(image, "n_frames", 1)
+    except Exception:  # noqa: BLE001 - whatever Pillow raises, the file cannot be read
+        if cache:
+            cache.fail("damaged")
+        raise Fail(OPEN_ERROR, failure(src, "damaged", cache is not None)) from None
+
+
+def frame_pgm(image, pg):
+    """Frame `pg` of an image as a binary PGM, shrunk under MAX_PIXELS and MAX_SIDE (a JPEG
+    decoded at a reduced scale, Pillow's draft, when that is enough)."""
+    image.seek(pg - 1)
+    w, h = image.size
+    scale = min(1.0, (MAX_PIXELS / max(w * h, 1)) ** 0.5 * 0.99, MAX_SIDE * 0.99 / max(w, h, 1))
+    size = (max(int(w * scale), 1), max(int(h * scale), 1))
+    if image.format == "JPEG":
+        image.draft("L", size)
+    frame = image.convert("L")
+    frame.thumbnail(size)
+    return b"P5\n%d %d\n255\n" % frame.size + frame.tobytes()
 
 
 def failure(src, reason, recorded, at=None):
@@ -509,8 +545,8 @@ def pdftotext(args):
     if cache and cache.failed():
         record = cache.failed()
         raise Fail(OPEN_ERROR, failure(src, record.get("reason"), True, record.get("at")))
-    doc = open_doc(data, src, cache)
-    count = len(doc)
+    image = data.startswith(IMAGES)
+    doc, count = open_image(data, src, cache) if image else open_doc(data, src, cache)
     first = max(opts.get("-f", 1), 1)
     last = opts.get("-l", count)
     last = count if last < 1 or last > count else last
@@ -524,6 +560,9 @@ def pdftotext(args):
         if pg >= first + MAX_TEXT or time.monotonic() >= deadline:
             unread = range(pg, last + 1)  # a range: `in` below is O(1)
             break
+        if image:
+            scanned.append(pg)
+            continue
         try:
             plain, text = read_page(doc, pg, opts.get("-layout"))
         except Exception as err:  # noqa: BLE001 - one page PDFium cannot read is named
@@ -552,7 +591,7 @@ def pdftotext(args):
         while missing and time.monotonic() < deadline:
             if cache is None or cache.lock():
                 try:
-                    ocr = Ocr(doc, cache or Memory(), deadline, say)
+                    ocr = Ocr(doc, cache or Memory(), deadline, say, image)
                     try:
                         known.update(ocr.run(missing))
                     finally:
