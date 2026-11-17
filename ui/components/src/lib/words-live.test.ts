@@ -280,6 +280,16 @@ const PLANNED_LINES = [
     "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
     "Clauseo, AI तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
   ],
+  // hi: later, so its Hindi columns hold the English that errorWords falls back to
+  [
+    "agent.home_failed",
+    "ChatGPT didn't start, because Clauseo couldn't set up the folder it keeps for ChatGPT on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    "ChatGPT didn't start, because Clauseo couldn't set up the folder it keeps for ChatGPT on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    "gemini didn't start, because Clauseo couldn't set up the folder it keeps for gemini on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    "gemini didn't start, because Clauseo couldn't set up the folder it keeps for gemini on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    "The AI didn't start, because Clauseo couldn't set up the folder it keeps for the AI on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+    "The AI didn't start, because Clauseo couldn't set up the folder it keeps for the AI on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(
@@ -294,8 +304,8 @@ test.each(PLANNED_LINES)(
       expect(errorWords("hi", code, named(none))).toBe(namelessHi);
     }
     // the kind picks the line, never the name: an agent of no kind whose id reads like a plan is named by it
-    expect(errorWords("en", code, named("ChatGPT"))).toBe(namedEn.replace("gemini", "ChatGPT"));
-    expect(errorWords("en", code, named("Claude"))).toBe(namedEn.replace("gemini", "Claude"));
+    expect(errorWords("en", code, named("ChatGPT"))).toBe(namedEn.replaceAll("gemini", "ChatGPT"));
+    expect(errorWords("en", code, named("Claude"))).toBe(namedEn.replaceAll("gemini", "Claude"));
     // a Claude thread, or a caller that doesn't know the thread, keeps the approved line
     for (const agent of [CLAUDE, undefined]) {
       expect(errorWords("en", code, agent)).toBe(ERROR_WORDS[code]);

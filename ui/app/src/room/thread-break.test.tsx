@@ -86,9 +86,10 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked, agent.home_failed and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
+    "agent.home_failed",
     "agent.launch_failed",
     "agent.program_blocked",
     "agent.program_missing",
@@ -261,6 +262,28 @@ test("agent.unreachable (offline truth): no Restart, no time mark, no working li
       `Clauseo, ${hi} तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।`,
     );
   }
+});
+
+// the agent's own folder not prepared before it started: a launch's failure, so Restart (with H10) and the question back
+// in the field (before H10) as agent.launch_failed has; its words name the thread's agent in both places
+test("agent.home_failed: Restart and the question back as for agent.launch_failed, and words that name the agent", () => {
+  const b = brk("agent.home_failed");
+  expect(RESTARTS.has("agent.home_failed")).toBe(true);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(refillOf(b, true, null)).toEqual({ key: "step:x", text: "Q" });
+  const said =
+    "Claude didn't start, because Clauseo couldn't set up the folder it keeps for Claude on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.";
+  expect(errorWords("en", "agent.home_failed")).toBe(said);
+  expect(errorWords("en", "agent.home_failed", { kind: "codex", name: "codex-acp" })).toBe(
+    said.replaceAll("Claude", "ChatGPT"),
+  );
+  expect(errorWords("en", "agent.home_failed", { kind: undefined, name: "Gemini CLI" })).toBe(
+    said.replaceAll("Claude", "Gemini CLI"),
+  );
+  expect(errorWords("en", "agent.home_failed", { kind: undefined, name: null })).toBe(
+    said.replace("Claude", "The AI").replace("Claude", "the AI"),
+  );
 });
 
 test("a stream that failed: its line and code; Try again only for a retryable code, and it calls retry", () => {

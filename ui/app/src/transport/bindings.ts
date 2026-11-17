@@ -2093,6 +2093,8 @@ export type ErrorCode =
 "skill.invalid" | 
 /** A restore of chosen files names a file whose name is now a folder, or one of whose folders is now a file, so nothing was restored or written. */
 "matter.file_folder_clash" | 
+/** Clauseo could not prepare the agent's own folder under its data folder (its home, or a folder of its session), so the agent was not started. Asking again can work. */
+"agent.home_failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

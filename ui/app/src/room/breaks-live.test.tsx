@@ -216,8 +216,13 @@ test("a reopened thread's break: the step row's mark alone, no stopped line, an 
   expect(field().value).toBe("");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.interrupted, dispatching restart_agent", async () => {
-  for (const code of ["agent.exited", "agent.launch_failed", "thread.interrupted"] as const) {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.home_failed and thread.interrupted, dispatching restart_agent", async () => {
+  for (const code of [
+    "agent.exited",
+    "agent.launch_failed",
+    "agent.home_failed",
+    "thread.interrupted",
+  ] as const) {
     h = await asked({ next: H10 });
     // hidden during the turn
     expect(h.one("restart")).toBeNull();

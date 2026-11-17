@@ -27,6 +27,7 @@ import { U7 } from "./registry-u7.tsx";
 import { TF } from "./registry-follow.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
+import { HOME_FAILED } from "./registry-home-failed.tsx";
 import { ME } from "./registry-me.tsx";
 import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
@@ -412,6 +413,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UTC,
   ...C117,
   ...U6F,
+  ...HOME_FAILED,
   ...WEB_SOURCES,
   ...UET,
   ...ME,
