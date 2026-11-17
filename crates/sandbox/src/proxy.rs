@@ -395,13 +395,9 @@ pub(crate) fn start_with(
             })
         })
     });
-    // One line per start: open mode's warning takes the place of the once-only notice.
-    let noted = config.block.first_unloaded_notice();
+    let noted = config.block.first_unloaded_notice(); // open mode warns on every start instead
     if open_unlisted {
-        tracing::warn!(
-            "egress: the proxy starts in open mode with no block list, so the browser allows any \
-             public site until a list loads"
-        );
+        tracing::warn!("egress: open mode with no block list; the browser allows any public site");
     } else if noted {
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
     }
