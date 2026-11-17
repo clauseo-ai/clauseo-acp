@@ -12,26 +12,27 @@ use clauseo_profile::instructions::{
     word_count,
 };
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
 };
 use clauseo_profile::subagents::{PAPER_READER, ResearcherArm, researcher_prompt, subagents};
 use clauseo_profile::{ClauseoProfile, Instructions};
 use clauseo_protocol::AgentKind;
 
-/// The legal part (`legal.md`): 0058's cap, kept.
-const LEGAL_MAX: usize = 1360;
+/// The legal part (`legal.md`): 0058's cap, raised to the next 50 for the version history line.
+const LEGAL_MAX: usize = 1400;
 /// The text both agents share (the tools part with the stetdoc line, and the legal part), filled:
 /// 0058's cap, kept.
 const SHARED_MAX: usize = 1800;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
-/// legal part, the shell line and "Working at scale".
-const CLAUDE_MAX: usize = 2250;
+/// legal part, the shell line and "Working at scale"; raised to the next 50 for the version
+/// history line.
+const CLAUDE_MAX: usize = 2300;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
 /// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 /// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
-/// 2016.
-const CODEX_MAX: usize = 2040;
+/// 2016; 2100 for the version history line.
+const CODEX_MAX: usize = 2100;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -46,12 +47,14 @@ const DATA: &str = "/Users/Ann Mary/Library/Application Support/Clauseo";
 fn filled(text: &str, browser: &str) -> String {
     let work = format!("{DATA}/run/0b7e3c1a-5d2f-4e8a-9c61-2f4d8e7a1b30/work");
     let notes = format!("{DATA}/agent-state/matter-4821/notes");
+    let history = format!("{DATA}/matters/matter-4821/history.git");
     clauseo_profile::placeholders::fill(
         text,
         &IN_INSTRUCTIONS,
         &[
             (WORK_FOLDER, &work),
             (MATTER_NOTES, &notes),
+            (MATTER_HISTORY, &history),
             (CONNECTORS, connectors_part(true)),
             (BROWSER, browser),
         ],
