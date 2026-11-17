@@ -24,6 +24,10 @@ use crate::write;
 #[path = "python_run.rs"]
 mod run;
 
+// Python cut short by a quit, at the next start.
+#[path = "python_restart.rs"]
+mod restart;
+
 const fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
 }
@@ -242,7 +246,9 @@ fn b_found_before_python(label: &str, bytes: &[u8]) -> Fixture {
 #[test]
 fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alone() {
     let bytes = fake_python("echo 3.13.18");
-    let fx = b_found_before_python("py-retry-any", &bytes);
+    let mut fx = b_found_before_python("py-retry-any", &bytes);
+    // A press's path: the start's own Python job (python_restart.rs) is left out.
+    fx.config.no_resume_for_tests = true;
     let (agents, events) = fx.start();
     let (a, b) = events.first_states();
     assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
@@ -273,7 +279,8 @@ fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alo
 #[test]
 fn a_python_retry_while_another_agent_installs_starts_nothing_and_pauses_nothing() {
     let bytes = fake_python("echo 3.13.18");
-    let fx = b_found_before_python("py-retry-busy", &bytes);
+    let mut fx = b_found_before_python("py-retry-busy", &bytes);
+    fx.config.no_resume_for_tests = true;
     fx.registry
         .then(&crate::support::tarball_path("adapter-a"), Behaviour::Stall);
     let (agents, events) = fx.start();

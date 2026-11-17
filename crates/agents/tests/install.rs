@@ -63,6 +63,10 @@ mod node_env;
 mod resume;
 
 #[cfg(test)]
+#[path = "install/restart.rs"]
+mod restart;
+
+#[cfg(test)]
 #[path = "install/sac.rs"]
 mod sac;
 

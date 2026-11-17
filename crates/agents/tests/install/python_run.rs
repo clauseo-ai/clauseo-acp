@@ -26,7 +26,7 @@ impl Launcher for RefusePython {
 }
 
 /// A started with a launcher refusing `python3` with `refusal`: the agents and Python's end.
-fn refused_with(fx: &Fixture, refusal: Refusal) -> (Agents, Events, PythonState) {
+pub(super) fn refused_with(fx: &Fixture, refusal: Refusal) -> (Agents, Events, PythonState) {
     let passthrough = PassthroughLauncher::new(SpawnOptions::new());
     let launcher: Arc<dyn Launcher> = Arc::new(RefusePython(passthrough, refusal));
     let (agents, events) = Agents::start(fx.config.clone(), launcher, fx.timer.clone());

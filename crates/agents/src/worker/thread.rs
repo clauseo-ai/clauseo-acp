@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
+use super::python_log::LIFECYCLE;
 use super::{Command, Inner, Shared, Ticket, first, signin};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
@@ -37,6 +38,7 @@ pub(super) struct Worker<T> {
 impl<T: Timer + Send + Sync + 'static> Worker<T> {
     pub(super) fn run(mut self, inbox: &mpsc::Receiver<Command>) {
         futures::executor::block_on(first::first_states(&self));
+        self.resume();
         while let Ok(command) = inbox.recv() {
             match command {
                 Command::Install(agent) => self.install(&agent),
@@ -77,8 +79,56 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
     }
 
     fn pause(&self, agent: &AgentId) {
+        // The lawyer's pause: the next start leaves it paused.
+        install::restart::clear_wanted(&self.config.data_dir, agent);
         let mut inner = self.shared.lock();
         inner.stop_job(&self.shared.events, agent, false);
+    }
+
+    /// At start, what a quit cut short goes on with no press (`install::restart`): each agent
+    /// still `Missing` whose marker says its install was under way starts its job, and a
+    /// missing Python, not refused by the OS at an earlier start, follows the first one to be
+    /// `Ready`: a job of its own for a `Ready` agent when no agent's job started.
+    fn resume(&mut self) {
+        #[cfg(feature = "test-support")]
+        if self.config.no_resume_for_tests {
+            return;
+        }
+        let data_dir = self.config.data_dir.clone();
+        let agents: Vec<AgentId> = self
+            .config
+            .snapshot
+            .agents()
+            .map(|e| e.id.clone())
+            .collect();
+        for agent in &agents {
+            let missing = matches!(
+                self.shared.lock().states.get(agent),
+                Some(InstallState::Missing { .. })
+            );
+            if missing && install::restart::is_wanted(&data_dir, agent) {
+                tracing::info!(target: LIFECYCLE, %agent, "agent install: resumed at start");
+                self.start_job(agent);
+            }
+        }
+        let (python, idle) = {
+            let inner = self.shared.lock();
+            let missing = matches!(inner.python, PythonState::Missing { .. });
+            (missing, inner.jobs.is_empty())
+        };
+        let archive = self.config.snapshot.python_archive(self.config.platform);
+        if !python || !idle || install::restart::blocked(&data_dir, archive).is_some() {
+            return;
+        }
+        if let Some(agent) = self.shared.ready_agent() {
+            // A test's agent taken as ready has no install a job could find.
+            #[cfg(feature = "test-support")]
+            if self.config.ready_for_tests.contains_key(&agent) {
+                return;
+            }
+            tracing::info!(target: LIFECYCLE, %agent, "python runtime: resumed at start");
+            self.start_job(&agent);
+        }
     }
 
     fn set_network(&mut self, network: Network) {
@@ -111,6 +161,10 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                         !matches!(inner.states.get(running), Some(InstallState::Ready { .. }))
                     });
                     let restart = wanted && !installing;
+                    if restart {
+                        // Try again: an earlier refusal no longer holds the start's retry back.
+                        install::restart::clear_blocked(&self.config.data_dir);
+                    }
                     if restart && let Some(owner) = inner.python_owner() {
                         inner.stop_job(&self.shared.events, &owner, true);
                     }

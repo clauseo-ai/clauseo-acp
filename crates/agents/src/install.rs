@@ -33,6 +33,7 @@ mod locks;
 mod npm;
 mod python;
 mod ready;
+pub(crate) mod restart;
 mod try_error;
 
 pub(crate) use files::{empty_npm_cache, remove_legacy_shared, written};
@@ -204,6 +205,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         if let Err(err) = self.take_lock() {
             return self.fail(FailureKind::Failed, &err, &Run::new(agent), None);
         }
+        restart::mark_wanted(&config.data_dir, agent);
         let search = {
             let find = pin!(node::search_user_node(
                 &config.node_search,
@@ -465,6 +467,7 @@ impl<T: Timer + Send + Sync> Job<T> {
     /// not installed, the job goes on to install it under the same locks ([`python::step`]),
     /// and ends with Python's state instead; nothing Python meets changes the agent's `Ready`.
     async fn ready(&self, installed: Installed, tries: u32) {
+        restart::clear_wanted(&self.config.data_dir, &self.ticket.agent);
         self.shared.set_tries(&self.ticket.agent, tries);
         let version = installed.version.clone();
         let state = InstallState::Ready { version };
@@ -497,6 +500,9 @@ impl<T: Timer + Send + Sync> Job<T> {
     /// Sends the job's last state, `Failed` of `kind`, with its log.
     fn fail(&self, kind: FailureKind, err: &TryError, run: &Run, user: Option<&FoundNode>) {
         self.release_lock();
+        if !self.ticket.cancel.is_cancelled() {
+            restart::clear_wanted(&self.config.data_dir, &self.ticket.agent);
+        }
         let mut log = run.log.clone();
         push_error(&mut log, err);
         finish_log(&mut log, run, kind);

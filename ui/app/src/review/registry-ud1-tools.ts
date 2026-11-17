@@ -51,6 +51,11 @@ const toolsAfterClaude = (python: PythonProgress) => ({
 export const TOOLS_DOWNLOADING = toolsAfterClaude({
   downloading: { received: 42_000_000, total: 120_000_000 },
 });
+/** Every byte in, being unpacked and run once: the download's size came first, as SetupInfo sends it. */
+export const TOOLS_INSTALLING = {
+  ...TOOLS_DOWNLOADING,
+  events: [...TOOLS_DOWNLOADING.events, tools("installing")],
+};
 export const TOOLS_FAILED = toolsAfterClaude({
   failed: { cause: "failed", code: "agent.install_failed", log: ["result: failed after 3 tries"] },
 });

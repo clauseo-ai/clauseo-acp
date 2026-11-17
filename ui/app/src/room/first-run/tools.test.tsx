@@ -92,7 +92,7 @@ test("missing with no plan left to download: no size line", async () => {
   expect(line()).toBeNull();
 });
 
-test("downloading after Claude is ready: done of size in whole MB with the plan rows' meter, Claude's row still ready to sign in; then installing says the full size", async () => {
+test("downloading after Claude is ready: done of size in whole MB with the plan rows' meter, Claude's row still ready to sign in; then installing says it is being set up, its bar full", async () => {
   const t = await mountFirstRun({
     matters: [],
     first: [...CLAUDE_READY, tools({ downloading: { received: 42_000_000, total: 120_000_000 } })],
@@ -105,7 +105,8 @@ test("downloading after Claude is ready: done of size in whole MB with the plan 
   expect(claudeRow()?.querySelector("button")?.textContent).toBe("Sign in with Claude");
   await play(t, tools("installing"));
   expect(line()?.dataset["state"]).toBe("installing");
-  expect(line()?.textContent).toContain("Downloading document tools… 120 MB of 120 MB");
+  expect(line()?.textContent).toContain("Setting up the document tools…");
+  expect(line()?.querySelector(".fl-bar")).not.toBeNull();
   await play(t, tools({ ready: { version: "3.12.8" } }));
   expect(line()).toBeNull();
 });

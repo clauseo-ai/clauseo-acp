@@ -460,6 +460,14 @@ const REUSE_UNUSABLE: Entry = {
   render: render(found("reuse_unusable")),
 };
 
+/** The document tools being unpacked and run once, every byte in: stage D's UC block. */
+const TOOLS_FINISHING: Entry = {
+  id: "UC-660",
+  words: firstLaunchWords("Setting up the document tools…"),
+  screen: "first-launch/tools-installing",
+  render: render(T.TOOLS_INSTALLING),
+};
+
 /** The document tools offline: the plans' own offline sentence, in the null SCENES keeps for it. */
 const TOOLS_OFFLINE: Entry = {
   id: "UD1-102",
@@ -581,6 +589,7 @@ export const UD1: readonly Entry[] = [
   ),
   REFUSAL,
   TOOLS_OFFLINE,
+  TOOLS_FINISHING,
   REUSE_UNUSABLE,
   ...UC_KEY,
   ...UC_UNREACHABLE,

@@ -8,7 +8,7 @@ use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
 use super::Worker;
-use crate::state::InstallState;
+use crate::state::{InstallState, PythonState};
 use crate::write::{self, AgentsLock, Mode};
 use crate::{install, node, python, receipt};
 
@@ -35,6 +35,8 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
             // behind; what will not go now goes at the next start.
             let keep = config.snapshot.python_archive(config.platform);
             drop(python::remove_stale_runtimes(&config.data_dir, keep));
+            // And its archive, or a part of it, left in `downloads/`.
+            install::restart::remove_stale_archives(&config.data_dir, keep);
             drop(python);
         }
     }
@@ -99,5 +101,23 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
             .emit(&agent, InstallState::Missing { download_bytes }, None);
     }
     drop(lock);
-    worker.shared.set_python(python::resting_state(config));
+    worker.shared.set_python(python_state(worker));
+}
+
+/// Python's first state: as it rests on the disk, except a missing Python that the OS refused
+/// to start at an earlier start (`install::restart`): `Failed` again while an agent is ready.
+fn python_state<T: Timer + Send + Sync + 'static>(worker: &Worker<T>) -> PythonState {
+    let config = &worker.config;
+    let state = python::resting_state(config);
+    if !matches!(state, PythonState::Missing { .. }) {
+        return state;
+    }
+    let archive = config.snapshot.python_archive(config.platform);
+    let Some(by) = install::restart::blocked(&config.data_dir, archive) else {
+        return state;
+    };
+    match worker.shared.ready_agent() {
+        Some(agent) => install::restart::blocked_state(by, &agent),
+        None => state,
+    }
 }

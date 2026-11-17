@@ -215,6 +215,8 @@ export const HI = {
   "Also downloads Clauseo's document tools ({size}).":
     "Clauseo के दस्तावेज़ टूल भी डाउनलोड होते हैं ({size})।",
   "Downloading document tools… {done} of {size}": "दस्तावेज़ टूल डाउनलोड हो रहे हैं… {size} में से {done}",
+  // their unpack and first run, every byte in (UC-660; the app track's words, hi: later)
+  "Setting up the document tools…": null,
   "Clauseo couldn't download its document tools.": "Clauseo अपने दस्तावेज़ टूल डाउनलोड नहीं कर सका।",
   "Windows blocked Clauseo's document tools on this computer.":
     "Windows ने इस कंप्यूटर पर Clauseo के दस्तावेज़ टूल रोक दिए।",
