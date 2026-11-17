@@ -69,6 +69,13 @@ pub(crate) struct Held {
     /// The run of agent-started turns refused before they started, no turn starting between:
     /// their code and how many (`refused.rs`, `refused::CAP`).
     failed: Option<(clauseo_protocol::ErrorCode, u32)>,
+    /// How many answers to held cards are on their way to the agent (`refused.rs`).
+    answering: u32,
+    /// The agent is stopped once those answers are on its connection (`refused::stop_agent`).
+    stop_after: bool,
+    /// How many held cards were answered on an agent so far (tests).
+    #[cfg(test)]
+    sent: usize,
 }
 
 #[cfg(test)]

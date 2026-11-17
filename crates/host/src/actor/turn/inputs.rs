@@ -95,6 +95,9 @@ pub(crate) enum AgentReply {
     ModeReset(&'static str, Result<(), clauseo_acp::Error>),
     /// A steer into the running turn answered (`queue/steer.rs`).
     Steer(Box<super::queue::Steered>),
+    /// A refused turn's held cards were answered (`own_turn/refused.rs`): a stop that waited
+    /// for them goes.
+    HeldAnswered,
 }
 
 /// Why a thread's whole log was read.

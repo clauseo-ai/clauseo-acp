@@ -112,3 +112,46 @@ fn a_late_prompt_listing_still_lets_the_cancel_end_the_turns_command() {
     assert!(gone, "the turn's command outlived the cancel");
     rig.finish();
 }
+
+/// A listing that misses its wait: kept for later on Unix (`Late`), where a cancel's sweep
+/// waits for it; dropped on Windows (`Failed`), whose stop ends the whole job.
+#[test]
+fn a_late_listing_is_kept_on_unix_and_dropped_on_windows() {
+    use std::sync::Arc;
+
+    use super::agents::send_prompt;
+    use super::idle::{TWO_ANSWERS, rig, until_idle};
+    use crate::agent::leftovers::{self, Listed, SNAPSHOT_WAIT};
+    use crate::clock::Clock;
+
+    let mut rig = rig("sweep-late-listed", TWO_ANSWERS, "exit");
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    let descendants = rig.actor.threads[&thread]
+        .turn
+        .agent
+        .as_deref()
+        .unwrap()
+        .link
+        .descendants()
+        .clone();
+    let clock: Arc<dyn Clock> = Arc::new(rig.clock.clone());
+    let held = leftovers::hold_next_listing();
+    let manual = rig.clock.clone();
+    let listed = futures::executor::block_on(async {
+        let listing = leftovers::listing(descendants, clock, SNAPSHOT_WAIT);
+        let late = async {
+            held.taken.recv().await.unwrap();
+            manual.advance(SNAPSHOT_WAIT);
+        };
+        futures::join!(listing, late).0
+    });
+    if cfg!(windows) {
+        assert!(matches!(listed, Listed::Failed), "{listed:?}");
+    } else {
+        assert!(matches!(listed, Listed::Late(_)), "{listed:?}");
+    }
+    drop((held, listed));
+    rig.finish();
+}
