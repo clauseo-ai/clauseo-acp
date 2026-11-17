@@ -236,17 +236,19 @@ pub fn run_until_online(
     }
 }
 
-/// Waits `retry`, looking at `cancel` every 250 ms: `Err(cancelled)` once it is set.
+/// Waits `retry` in steps of 250 ms (the system tools' tick), looking at `cancel` before each:
+/// `Err(cancelled)` once it is set.
 fn wait(retry: std::time::Duration, cancel: &Cancel) -> Result<(), Failure> {
     let step = std::time::Duration::from_millis(250);
-    let start = std::time::Instant::now();
+    let mut left = retry;
     loop {
         cancel.check()?;
-        let left = retry.saturating_sub(start.elapsed());
         if left.is_zero() {
             return Ok(());
         }
-        std::thread::sleep(left.min(step));
+        let this = left.min(step);
+        futures::executor::block_on(async_io::Timer::after(this));
+        left = left.saturating_sub(this);
     }
 }
 

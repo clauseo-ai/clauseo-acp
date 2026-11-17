@@ -50,14 +50,12 @@ fn the_check_at_start_updates_a_copy_two_releases_behind() {
         });
     write::create_dir_all(old.parent().unwrap());
     write::write(&old, b"chrome");
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
     let seen = StableRecord {
         stable: "158.0.0.5".to_owned(),
         previous: Some("158.0.0.4".to_owned()),
-        checked_at: i64::try_from(now).unwrap(),
+        // Whatever the test clock says, the copy is behind: older than Stable and the one
+        // before it, or than Stable alone once that record counts as stale.
+        checked_at: 0,
     };
     fresh::write_record(&browsers_dir, &seen).unwrap();
     let (tools, handles) = Fake::new(true);

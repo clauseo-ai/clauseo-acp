@@ -56,7 +56,7 @@ const SWEEP_THREAD_NAME: &str = "clauseo-browser-sweep";
 const TIMER_THREAD_NAME: &str = "clauseo-browser-check";
 
 /// How often the daily check runs while the host runs (and once at start).
-pub(crate) const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+pub(crate) const CHECK_EVERY: Duration = Duration::from_hours(24);
 
 /// What reaches the actor from the download's thread and the timer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +242,7 @@ fn begin(actor: &mut Actor, quiet: bool) -> Result<(), Error> {
         platform,
         app_data,
         random: uuid::Uuid::now_v7().simple().to_string(),
-        now: unix_now(),
+        now: actor.now().wall.as_millis().div_euclid(1000),
     };
     let cancel = Cancel::new();
     let quiet = Arc::new(AtomicBool::new(quiet));
@@ -283,15 +283,6 @@ fn quiet_now(actor: &Actor) -> bool {
         .running
         .as_ref()
         .is_some_and(|running| running.quiet.load(Ordering::SeqCst))
-}
-
-/// Now on this computer's clock, in seconds since the Unix epoch (0 before it).
-fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
-        })
 }
 
 /// What the download's thread takes with it.

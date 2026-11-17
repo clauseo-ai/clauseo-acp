@@ -140,7 +140,9 @@ pub fn too_far_behind(version: &str, record: Option<&StableRecord>) -> bool {
 pub fn read_record(browsers: &Path) -> Option<StableRecord> {
     let path = browsers.join(RECORD_FILE);
     let file = crate::write::open_read_nofollow(&path).ok()?;
-    serde_json::from_reader(std::io::Read::take(file, 4096)).ok()
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, 4096), &mut bytes).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Writes `record` to `browsers`, atomically, replacing a link there rather than following it.
