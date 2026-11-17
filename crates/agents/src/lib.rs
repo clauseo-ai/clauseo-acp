@@ -21,7 +21,8 @@
 //!   run once before its receipt, as the second step of an agent's install job. Its own
 //!   [`PythonState`]; a failure never blocks the agent's `Ready`. [`python_command_dir`] is the
 //!   folder for the agent's `PATH`; [`python_path_dirs`] the folders an agent session's `PATH`
-//!   takes (all three on Windows: pandoc's, the interpreter's and pip's).
+//!   takes (all three on Windows: pandoc's, the interpreter's and pip's); [`python_tessdata_dir`]
+//!   the tesseract language folder for `TESSDATA_PREFIX`.
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -66,7 +67,7 @@
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`]; [`PythonState`] ([`AgentsEvent::Python`], [`Agents::python_state`]),
 //!   [`PythonFailure`], [`PythonFailureKind`], [`PythonBlocker`], [`python_command_dir`] and
-//!   [`python_path_dirs`].
+//!   [`python_path_dirs`], [`python_tessdata_dir`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
 //!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
@@ -179,7 +180,9 @@ pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
-pub use python::{python_command_dir, python_contents_match, python_path_dirs};
+pub use python::{
+    python_command_dir, python_contents_match, python_path_dirs, python_tessdata_dir,
+};
 pub use receipt::{install_folder, install_root, script_path};
 #[cfg(feature = "test-support")]
 pub use sac::SacForTests;

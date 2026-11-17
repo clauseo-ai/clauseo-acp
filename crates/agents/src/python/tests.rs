@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::SpawnOptions;
 use clauseo_process::{AsyncIoTimer, LaunchSpec, Launched, Launcher, PassthroughLauncher};
@@ -377,4 +378,140 @@ fn the_session_path_dirs_per_os_are_those_that_exist() {
 fn a_config_is_send_and_sync_for_the_path_lookup() {
     fn send_sync<T: Send + Sync>() {}
     send_sync::<AgentsConfig>();
+}
+
+/// What a test's subscriber wrote.
+#[derive(Clone, Default)]
+struct Written(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for Written {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Whether [`open_checked`] accepts the archive at `path`, and the lines it logged on the
+/// lifecycle target.
+fn checked_logs(path: &Path, archive: &PythonArchive) -> (bool, Vec<String>) {
+    let written = Written::default();
+    let writer = written.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    let ok = tracing::subscriber::with_default(subscriber, || open_checked(path, archive).is_ok());
+    let bytes = written
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let text = String::from_utf8(bytes).unwrap();
+    let lines = text
+        .lines()
+        .filter(|line| line.contains(LIFECYCLE))
+        .map(str::to_owned)
+        .collect();
+    (ok, lines)
+}
+
+/// The archive check logs its verdict at INFO for a match and WARN for a mismatch: the name, the
+/// first 12 hex digits of the pinned SHA-256, never the whole digest nor the file's digest.
+#[test]
+fn the_archive_check_logs_its_verdict_with_twelve_digits_only() {
+    use sha2::Digest as _;
+    let data = TestDir::new("python-verdict");
+    let bytes = fake_archive("echo 3.13.18");
+    let (path, _entry, archive) = stage(&data, &bytes);
+    let digest = archive.sha256_hex();
+    let short = digest.get(..12).unwrap_or_default();
+
+    let (ok, lines) = checked_logs(&path, &archive);
+    assert!(ok);
+    assert_eq!(lines.len(), 1, "{lines:#?}");
+    let line = &lines[0];
+    assert!(line.contains("INFO"), "{line}");
+    for field in [
+        format!("archive=\"{}\"", archive.name()),
+        format!("expected=\"{short}\""),
+        "verdict=\"match\"".to_owned(),
+    ] {
+        assert!(line.contains(&field), "{field} in {line}");
+    }
+    assert!(!line.contains(&digest), "{line}");
+
+    // The same size with other bytes: refused, deleted, and the line at WARN.
+    let mut other = bytes;
+    if let Some(last) = other.last_mut() {
+        *last ^= 0xff;
+    }
+    let actual = crate::integrity::to_hex(&sha2::Sha256::digest(&other));
+    write::write_atomic(&path, &other).unwrap();
+    let (ok, lines) = checked_logs(&path, &archive);
+    assert!(!ok);
+    assert!(!path.exists(), "the archive is deleted");
+    assert_eq!(lines.len(), 1, "{lines:#?}");
+    let line = &lines[0];
+    assert!(line.contains("WARN"), "{line}");
+    for field in [
+        format!("archive=\"{}\"", archive.name()),
+        format!("expected=\"{short}\""),
+        "verdict=\"mismatch\"".to_owned(),
+    ] {
+        assert!(line.contains(&field), "{field} in {line}");
+    }
+    assert!(!line.contains(&digest) && !line.contains(&actual), "{line}");
+}
+
+/// The tessdata folder is there only for a runtime that passes its receipt check and has the
+/// folder: `bin/tessdata` on macOS and Linux, `clauseo-bin/tessdata` on Windows.
+#[cfg(unix)]
+#[test]
+fn the_tessdata_folder_is_given_only_for_a_valid_runtime_that_has_it() {
+    let data = TestDir::new("python-tessdata");
+    let (path, entry, archive) = stage(&data, &fake_archive("echo 3.13.18"));
+    let mut config = AgentsConfig::new(
+        data.0.clone(),
+        crate::platform::Platform::new(Os::Linux, Arch::X64),
+    );
+    config.snapshot = config.snapshot.clone().with_python(entry.clone());
+    assert_eq!(python_tessdata_dir(&config), None, "none installed");
+    let dir = runtime_dir(&data.0, &archive);
+    install(&path, &entry, &archive, &dir, &launcher()).unwrap();
+    assert_eq!(python_tessdata_dir(&config), None, "installed, no folder");
+    write::make_writable(&dir).unwrap();
+    write::create_dir_all(&dir.join("bin/tessdata")).unwrap();
+    assert_eq!(python_tessdata_dir(&config), Some(dir.join("bin/tessdata")));
+    write::make_writable(&dir).unwrap();
+    write::remove_file(&dir.join(PYTHON_MANIFEST)).unwrap();
+    assert_eq!(python_tessdata_dir(&config), None, "invalid receipt");
+}
+
+/// The tessdata folder is beside tesseract: `bin/tessdata` on macOS, `clauseo-bin\tessdata` on
+/// Windows, and the same folder the PATH entry's `bin` or `clauseo-bin` is.
+#[test]
+fn the_tessdata_folder_sits_beside_tesseract_on_each_os() {
+    let dir = PathBuf::from("/data/agents/runtime/clauseo-python-3.13.18-c4-macos-arm64");
+    assert_eq!(
+        runtime_tessdata_dir(&dir, Os::Darwin),
+        dir.join("bin").join("tessdata")
+    );
+    assert_eq!(
+        runtime_tessdata_dir(&dir, Os::Darwin),
+        runtime_command_dir(&dir, Os::Darwin).join("tessdata")
+    );
+    assert_eq!(
+        runtime_tessdata_dir(&dir, Os::Win32),
+        dir.join("clauseo-bin").join("tessdata")
+    );
+    assert_eq!(
+        runtime_tessdata_dir(&dir, Os::Win32),
+        runtime_command_dir(&dir, Os::Win32).join("tessdata")
+    );
 }

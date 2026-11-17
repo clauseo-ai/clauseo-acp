@@ -31,7 +31,7 @@ use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
-use crate::setup::python_path::{PythonPath, PythonSlot};
+use crate::setup::python_path::{PythonFolders, PythonPath, PythonSlot};
 use crate::setup::readers::LeaveReaders;
 use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
@@ -467,7 +467,10 @@ pub(super) fn rig_with(
     let python = PythonSlot::default();
     let lookup = PythonPath::new(
         Arc::clone(&python),
-        Arc::new(|| vec![PathBuf::from(RIG_PYTHON_DIR)]),
+        Arc::new(|| PythonFolders {
+            path: vec![PathBuf::from(RIG_PYTHON_DIR)],
+            tessdata: None,
+        }),
     );
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
