@@ -374,8 +374,25 @@ fn a_protected_value_left_out_is_said() {
         "relative/settings.json".to_owned(),
     ]);
     let skipped = format!("{}\n", crate::pre_write_guard::SKIPPED);
-    let input = json!({"file_path": fx.path("m/a.md"), "content": "x"});
-    assert_eq!(fx.guard(&args, "Write", &input), skipped);
+    let hook = json!({
+        "session_id": "s-1",
+        "cwd": fx.path("m"),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": fx.path("m/a.md"), "content": "x"},
+    });
+    let args_os: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+    let mut errors = Vec::new();
+    let code = crate::pre_write_guard::run_timed(
+        &args_os,
+        hook.to_string().as_bytes(),
+        (Vec::new(), &mut errors),
+        false,
+    );
+    assert_eq!(
+        (code, String::from_utf8(errors).unwrap()),
+        (0, skipped.clone())
+    );
     let input = json!({"file_path": fx.path("home/settings.json"), "content": "x"});
     assert_eq!(
         fx.guard(&args, "Write", &input),
