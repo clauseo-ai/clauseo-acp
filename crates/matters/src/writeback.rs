@@ -233,11 +233,12 @@ pub(crate) fn writable(
 ///
 /// A crash in step 1 or 2 leaves the folder's files as they were, with `.clauseo-<n>.tmp` files
 /// beside them at worst (excluded from every checkpoint, and removed by the next write in that
-/// folder, [`write::sweep_temps`]); a crash in step 3 or 4 leaves the
-/// folder partly written, each file old or new and never torn (each was synced before its
-/// rename; a rename whose folder was not synced yet may be lost, leaving the old file),
-/// recorded by nothing until the next checkpoint. `apply` returns only after every folder is
-/// synced, so the checkpoint the caller takes next never records a rename that could be lost.
+/// folder, [`write::sweep_temps`], or by the host's matter worker as it opens the matter,
+/// [`crate::recover_leftovers`]); a crash in step 3 or 4 leaves the folder partly written, each
+/// file old or new and never torn (each was synced before its rename; a rename whose folder was
+/// not synced yet may be lost, leaving the old file), recorded by nothing until the next
+/// checkpoint. `apply` returns only after every folder is synced, so the checkpoint the caller
+/// takes next never records a rename that could be lost.
 ///
 /// A delete or rename in step 3 or 4 that Windows refuses because another program holds the
 /// target (it opened the file after the caller's check) fails with `matter.file_locked` naming

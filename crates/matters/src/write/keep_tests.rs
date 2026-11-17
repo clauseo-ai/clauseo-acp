@@ -203,25 +203,66 @@ fn only_the_systems_own_attributes_are_skipped() {
     }
 }
 
-/// Windows: `ReplaceFileW` keeps the hidden attribute and the `Zone.Identifier` stream, the mark
-/// of a downloaded file, which a rename over the file drops.
+/// Windows: `ReplaceFileW` keeps the hidden attribute, the `Zone.Identifier` stream (the mark
+/// of a downloaded file) and the creation time, which a rename over the file drops.
 #[cfg(windows)]
 #[test]
 fn a_rewrite_keeps_hidden_and_the_zone_stream_on_windows() {
-    use std::os::windows::fs::MetadataExt as _;
+    keeps_hidden_zone_and_created("keep-windows", "Lease.docx");
+}
+
+/// Windows: names of 240 and 255 units, too long for `<name>.clauseo-<n>.orig.tmp`, keep the
+/// same through two rewrites: their backup name is the short hashed one.
+#[cfg(windows)]
+#[test]
+fn a_long_name_keeps_hidden_the_zone_stream_and_the_creation_time_on_windows() {
+    for len in [240, 255] {
+        let name = format!("{}.docx", "a".repeat(len - 5));
+        keeps_hidden_zone_and_created("keep-windows-long", &name);
+    }
+}
+
+/// Gives the file `name` a creation time in 2020, the hidden attribute and a `Zone.Identifier`
+/// stream with `ZoneId=3`, rewrites it twice, and checks each time that all three are kept,
+/// nothing is counted lost and the folder holds only the file.
+#[cfg(windows)]
+fn keeps_hidden_zone_and_created(dir_name: &str, name: &str) {
+    use std::os::windows::fs::{FileTimesExt as _, MetadataExt as _};
+    use std::time::{Duration, SystemTime};
     /// `FILE_ATTRIBUTE_HIDDEN` and `ARCHIVE`.
     const HIDDEN: u32 = 0x2;
     const ARCHIVE: u32 = 0x20;
     let zone = b"[ZoneTransfer]\r\nZoneId=3\r\n";
-    let dir = TestDir::new("keep-windows");
-    let target = old_file(&dir, "Lease.docx");
-    let stream = dir.path().join("Lease.docx:Zone.Identifier");
+    let created = SystemTime::UNIX_EPOCH + Duration::from_hours(438_288);
+    let dir = TestDir::new(dir_name);
+    let target = old_file(&dir, name);
+    let times = std::fs::FileTimes::new().set_created(created);
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&target)
+        .unwrap();
+    file.set_times(times).unwrap();
+    drop(file);
+    let stream = dir.path().join(format!("{name}:Zone.Identifier"));
     super::create_new(&stream).unwrap().write_all(zone).unwrap();
     super::windows::set_attributes(&target, HIDDEN | ARCHIVE).unwrap();
-    assert_eq!(rewrite(&target), 0);
-    let attributes = std::fs::metadata(&target).unwrap().file_attributes();
-    assert_eq!(attributes & HIDDEN, HIDDEN, "{attributes:#x}");
-    assert_eq!(std::fs::read(&stream).unwrap(), zone);
+    for round in 1..=2 {
+        assert_eq!(rewrite(&target), 0, "{name}: round {round}");
+        let metadata = std::fs::metadata(&target).unwrap();
+        let attributes = metadata.file_attributes();
+        assert_eq!(
+            attributes & HIDDEN,
+            HIDDEN,
+            "round {round}: {attributes:#x}"
+        );
+        assert_eq!(metadata.created().unwrap(), created, "round {round}");
+        assert_eq!(std::fs::read(&stream).unwrap(), zone, "round {round}");
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from(name)], "round {round}");
+    }
 }
 
 /// Windows: a new file goes in by the plain rename, with nothing lost.

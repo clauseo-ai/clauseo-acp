@@ -19,9 +19,10 @@
 //!    its publish leaves the ref old or new, by decision record 0007's sync order.
 //! 5. `writeback::apply`: stage, check the targets again, rename, then sync each folder once.
 //!    A crash while staging leaves the folder as it was (with `.clauseo-<n>.tmp` files at
-//!    worst); while renaming or before the folder syncs, partly restored, each file old or new,
-//!    recorded by nothing until the next checkpoint, which takes it as outside edits. A retry
-//!    with fresh ids writes only what still differs.
+//!    worst, removed by the next write in that folder or by the host's matter worker as it opens
+//!    the matter, `recover_leftovers`); while renaming or before the folder syncs, partly
+//!    restored, each file old or new, recorded by nothing until the next checkpoint, which takes
+//!    it as outside edits. A retry with fresh ids writes only what still differs.
 //! 6. The `restore` checkpoint. A crash before its publish leaves the folder restored and
 //!    recorded by the next checkpoint as outside edits; a retry finds nothing to write.
 

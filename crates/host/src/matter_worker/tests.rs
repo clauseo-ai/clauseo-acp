@@ -362,10 +362,11 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
     );
 }
 
-/// The worker's open puts back a crashed rewrite's backup on Windows, the one OS that makes
-/// them; elsewhere it leaves it where it is.
+/// The worker's open removes a crash's temp file on every OS, and leaves a lawyer's `.tmp` file;
+/// it puts back a crashed rewrite's backup on Windows, the one OS that makes them, and elsewhere
+/// leaves it where it is.
 #[test]
-fn the_worker_open_puts_back_backups_on_windows_alone() {
+fn the_worker_open_sweeps_temps_and_puts_back_backups_on_windows_alone() {
     let dir = TempDir::new("worker-backups");
     let root = dir.path();
     let folder = root.join("matter");
@@ -400,6 +401,10 @@ fn the_worker_open_puts_back_backups_on_windows_alone() {
     made.stop().unwrap();
 
     write::rename(&lease, &backup).unwrap();
+    let temp = folder.join(".clauseo-0.tmp");
+    let lawyers = folder.join("notes.tmp");
+    write::write_file(&temp, b"part").unwrap();
+    write::write_file(&lawyers, b"mine").unwrap();
     let (opened, replies) = worker(root);
     let job = MatterJob::Open {
         id,
@@ -411,5 +416,7 @@ fn the_worker_open_puts_back_backups_on_windows_alone() {
     assert!(matches!(reply, MatterReply::Opened(Ok(_))), "{reply:?}");
     assert_eq!(lease.exists(), cfg!(windows));
     assert_eq!(backup.exists(), !cfg!(windows));
+    assert!(!temp.exists());
+    assert_eq!(std::fs::read(&lawyers).unwrap(), b"mine");
     opened.stop().unwrap();
 }

@@ -171,6 +171,7 @@ pub use locks::{
 };
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use matter::backups::recover_backups;
+pub use matter::leftovers::recover_leftovers;
 pub use matter::{
     Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
 };

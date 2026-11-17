@@ -7,6 +7,7 @@ pub use aside::set_aside_marker;
 #[cfg(any(windows, test, feature = "test-support"))]
 pub(crate) mod backups;
 mod discard;
+pub(crate) mod leftovers;
 pub use discard::remove_marker_of;
 pub(crate) mod json;
 pub use json::{check_marker, read_marker};
