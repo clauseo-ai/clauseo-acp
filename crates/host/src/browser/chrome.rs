@@ -11,7 +11,10 @@
 //!    `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, then the same under
 //!    `~/Applications`.
 //! 2. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
-//!    the highest version first, with the binary where the Chrome for Testing zip puts it.
+//!    the highest version only, with the binary where the Chrome for Testing zip puts it. It is
+//!    passed over when it is below this release's floor or more than one Stable security
+//!    release behind (`install::fresh`): an older copy never runs, and a stale one waits for
+//!    the update.
 //! 3. The other Chromium browsers a lawyer may have, last ([`ChromeRoots::others`]): Microsoft
 //!    Edge, Brave, then Chromium, each under `/Applications` then `~/Applications` as
 //!    `<App>.app/Contents/MacOS/<binary>` ([`MAC_OTHERS`]). Arc is not looked for: it is no
@@ -293,11 +296,14 @@ impl ChromeRoots {
 /// The Chrome this machine offers, or `None` (`BrowserNotInstalled`). File system calls: off
 /// the actor.
 pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
-    find_with(roots, EDGE_ALLOWED)
+    find_with(roots, EDGE_ALLOWED, test_switch::ignore_installed())
 }
 
-/// [`find`] with Windows' Edge switch given, so its test covers both values.
-fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
+/// [`find`] with Windows' Edge switch and the test row's switch ([`test_switch`]) given, so its
+/// tests cover each value. `ignore_installed` passes over the browsers installed on a macOS or
+/// Linux machine (Chrome, and Edge, Brave and Chromium); Clauseo's own download stays a
+/// candidate.
+fn find_with(roots: &ChromeRoots, edge_allowed: bool, ignore_installed: bool) -> Option<PathBuf> {
     if roots.platform.is_windows() {
         return windows_installed_with(roots, edge_allowed)
             .usable
@@ -306,12 +312,17 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
             .map(|(_, path)| path);
     }
     let usable = |path: &PathBuf| usable(roots.platform, path);
-    roots
-        .installed()
+    let (installed, others) = if ignore_installed {
+        tracing::warn!("test-browser-search: the installed browsers are passed over");
+        (Vec::new(), Vec::new())
+    } else {
+        (roots.installed(), roots.others())
+    };
+    installed
         .into_iter()
         .find(usable)
         .or_else(|| chrome_for_testing(roots))
-        .or_else(|| roots.others().into_iter().find(usable))
+        .or_else(|| others.into_iter().find(usable))
 }
 
 /// Whether `binary` can be taken: a regular file and, on macOS, inside its expected bundle.
@@ -406,7 +417,9 @@ fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBro
     }
 }
 
-/// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.
+/// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there,
+/// when it is at or above the floor and not more than one Stable release behind the record of
+/// the daily checks (`install::fresh`); never an older copy in its place.
 /// A version folder must be a real folder (a link is passed over, by `file_type`, which does not
 /// follow it), and the binary, links resolved, must still sit under the browsers folder, so a
 /// link planted in the folder cannot pick another program. The folder must be outside what an
@@ -414,6 +427,12 @@ fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBro
 fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
     let binary = roots.platform.cft_binary()?;
     let browsers = roots.app_data.join(BROWSERS_DIR);
+    // The browsers folder itself must be a real folder: a link there (or a junction) is never
+    // followed, so it cannot point the search at a Chrome somewhere else.
+    if !crate::write::is_real_dir(&browsers) {
+        tracing::warn!("the browsers folder is not a real folder; no Chrome for Testing is run");
+        return None;
+    }
     let real_browsers = dunce::canonicalize(&browsers).ok()?;
     let mut found: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(&browsers)
         .ok()?
@@ -431,7 +450,28 @@ fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
         })
         .collect();
     found.sort();
-    found.pop().map(|(_, path)| path)
+    let (_, path) = found.pop()?;
+    let version = path
+        .strip_prefix(&browsers)
+        .ok()?
+        .components()
+        .next()?
+        .as_os_str()
+        .to_str()?
+        .strip_prefix(CFT_PREFIX)?;
+    if !super::install::fresh::at_or_above_floor(version) {
+        tracing::warn!(%version, "a Chrome for Testing below this release's floor is not run");
+        return None;
+    }
+    let record = super::install::fresh::read_record(&browsers);
+    if super::install::fresh::too_far_behind(version, record.as_ref()) {
+        tracing::warn!(
+            %version,
+            "a Chrome for Testing more than one Stable release behind is not run until it updates"
+        );
+        return None;
+    }
+    Some(path)
 }
 
 /// A dotted version, such as `131.0.6778.85`, as numbers to compare; `None` when it is not one.
@@ -449,6 +489,8 @@ pub(crate) fn version(text: &str) -> Option<Vec<u64>> {
 fn is_file(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
+
+pub(crate) mod test_switch;
 
 #[cfg(test)]
 mod tests;

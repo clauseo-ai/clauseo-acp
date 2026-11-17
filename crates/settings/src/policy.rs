@@ -14,6 +14,9 @@
 //! Each OS's `policy.json` is read through a [`TrustedFilePolicy`]: only when an administrator
 //! (root on macOS and Linux) owns it and its folder and no one else can change them. A file that
 //! fails is ignored, as if absent, with one host log warning; the rule is in [`trust`]'s doc.
+//!
+//! The test build (feature `test-browser-search`) also reads a `policy.json` named by
+//! `CLAUSEO_TEST_POLICY_FILE` first, with no owner check; that file exists in no release.
 
 pub mod file;
 pub mod managed_prefs;
@@ -24,6 +27,8 @@ pub mod trust;
 mod macos;
 #[cfg(windows)]
 mod windows;
+
+mod test_file;
 
 #[cfg(windows)]
 pub(crate) use windows::SystemRegistry;
@@ -120,8 +125,16 @@ pub struct FilePolicy<F> {
 
 /// The policy sources of this OS, strongest first: on Windows the registry, on macOS managed
 /// preferences, then the OS's `policy.json`, read only when an administrator owns it
-/// ([`TrustedFilePolicy`]). No variable moves them.
+/// ([`TrustedFilePolicy`]). In the test build (feature `test-browser-search`) the file
+/// `CLAUSEO_TEST_POLICY_FILE` names comes before them; no other variable moves them.
 pub fn system_policy_sources() -> Vec<Box<dyn PolicySource>> {
+    let mut sources: Vec<Box<dyn PolicySource>> = test_file::source().into_iter().collect();
+    sources.extend(os_sources());
+    sources
+}
+
+/// The OS's own sources, strongest first (the module doc of [`system_policy_sources`]).
+fn os_sources() -> Vec<Box<dyn PolicySource>> {
     #[cfg(windows)]
     return windows::sources();
     #[cfg(target_os = "macos")]

@@ -13,6 +13,12 @@ publish.workspace = true
 # `HostConfig::profile_hook` and `HostConfig::agent_path_prepend` for this crate's tests and its
 # dependents' tests.
 test-support = []
+# The real-Mac test row's build (src/browser/chrome/test_switch.rs), never on by default and never in
+# a release: CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS=1 makes the browser search pass over the
+# browsers installed on the machine, so a Mac with Chrome shows the download's offer. Without it the
+# variable is not compiled in. It also turns on the settings crate's test policy file
+# (CLAUSEO_TEST_POLICY_FILE, clauseo-settings's test-browser-search).
+test-browser-search = ["clauseo-settings/test-browser-search"]
 
 [dependencies]
 # Whether a listed .docx holds tracked changes or comments (revisions/marks.rs): its zip parts.

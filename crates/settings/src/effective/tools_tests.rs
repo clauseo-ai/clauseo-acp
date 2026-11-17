@@ -95,6 +95,7 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "browser.allow_download",
             "browser.allow_when_remote_debugging_disabled",
             "install.bundle",
             "install.registry",
@@ -162,7 +163,8 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "network.allowed_domains",
             "network.allow_unsafe_site_override",
             "network.unsafe_site_list_updates",
-            "browser.allow_when_remote_debugging_disabled"
+            "browser.allow_when_remote_debugging_disabled",
+            "browser.allow_download"
         ]
     );
 }
@@ -523,4 +525,33 @@ fn only_a_policy_lets_the_browser_start_where_remote_debugging_is_off() {
     let effective = Effective::load(&locations(), &mine, &[&unreadable()]);
     assert!(!allowed(&effective));
     assert!(effective.is_locked(key));
+}
+
+// The firm's word on Clauseo's own browser download (a Mac with no Chromium browser): policy
+// only, on by default, and off when a policy source cannot be read.
+#[test]
+fn only_a_policy_turns_off_the_browser_download() {
+    let key = "browser.allow_download";
+    let allowed = |effective: &Effective| effective.settings().browser.allow_download;
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[]);
+    assert!(allowed(&effective));
+    assert!(!effective.is_locked(key));
+    let mine = user(r#"{"browser": {"allow_download": false}}"#);
+    let effective = Effective::load(&locations(), &mine, &[]);
+    assert!(allowed(&effective));
+    assert!(!effective.is_locked(key));
+    assert!(effective.warnings().iter().any(|w| matches!(
+        &w.kind, WarningKind::InvalidValue { key: k, .. } if k == key
+    )));
+    let firm = policy("firm", r#"{"browser": {"allow_download": false}}"#);
+    let effective = Effective::load(&locations(), &mine, &[&firm]);
+    assert!(!allowed(&effective));
+    assert!(effective.is_locked(key));
+    let effective = Effective::load(&locations(), &mine, &[&unreadable()]);
+    assert!(!allowed(&effective));
+    assert!(effective.is_locked(key));
+    assert!(effective.warnings().iter().any(|w| matches!(
+        &w.kind, WarningKind::InvalidValue { key: k, message }
+            if k == key && message.ends_with("locked off")
+    )));
 }

@@ -241,7 +241,7 @@ fn roots(dir: &Dir, chrome: Chrome) -> ChromeRoots {
     let pf = dir.data().join("pf");
     let pf86 = dir.data().join("pf86");
     let local = dir.data().join("local");
-    let cft = ["browsers", "chrome-131.0.6778.85"];
+    let cft = ["browsers", "chrome-158.0.6778.85"];
     let platform = match chrome {
         Chrome::Forced | Chrome::ForTesting => {
             let mac = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";

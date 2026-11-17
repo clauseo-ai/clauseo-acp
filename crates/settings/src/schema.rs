@@ -202,16 +202,30 @@ impl Default for NetworkSettings {
     }
 }
 
-/// The `browser` section. Its key is a security key, set by policy only: a policy source that
-/// cannot be read locks it `false`, its default, and a `settings.json` value is ignored with a
-/// warning.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+/// The `browser` section. Both keys are security keys, set by policy only, and a
+/// `settings.json` value for either is ignored with a warning. A policy source that cannot be
+/// read locks `allow_when_remote_debugging_disabled` `false`, its default, and `allow_download`
+/// `false`, not its default (on).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct BrowserSettings {
     /// Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote
     /// debugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo
     /// drives needs. Off by default: such a policy then turns Clauseo's browser off too.
     pub allow_when_remote_debugging_disabled: bool,
+    /// Whether Clauseo may download its own browser (Chrome for Testing from Google) on a Mac
+    /// where no Chrome, Edge, Brave or Chromium is installed. On by default; a firm's policy
+    /// can turn it off.
+    pub allow_download: bool,
+}
+
+impl Default for BrowserSettings {
+    fn default() -> Self {
+        Self {
+            allow_when_remote_debugging_disabled: false,
+            allow_download: true,
+        }
+    }
 }
 
 /// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are

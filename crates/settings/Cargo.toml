@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The real-Mac test row's build (src/policy/test_file.rs), never on by default and never in a
+# release: CLAUSEO_TEST_POLICY_FILE=<absolute path> names a policy.json read as the strongest
+# source, with no administrator-ownership check, so a Mac with no admin rights can run with a
+# firm setting. Without it the variable is not compiled in.
+test-browser-search = []
+
 [dependencies]
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

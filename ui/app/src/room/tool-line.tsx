@@ -6,9 +6,9 @@
 import { lazy, Suspense, use, useMemo } from "react";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
+import { browserInstallOf } from "./browser-install.ts";
 import { browserPolicyOf } from "./browser-policy.ts";
-import { quietly } from "./open.ts";
-import { CHROME_DOWNLOAD, ToolLineContext } from "./tool-line-context.ts";
+import { ToolLineContext } from "./tool-line-context.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
 import { glyphState, type KnownTool } from "./tools.ts";
 
@@ -34,11 +34,7 @@ export function ToolLine({ label, tools }: { label: string; tools: readonly Know
       plan,
       openSettings,
       policy: transport === null ? null : browserPolicyOf(transport),
-      // a plain web link: the host opens it at once, with no confirm (HostTransport.openExternal)
-      openChromeDownload:
-        transport === null
-          ? null
-          : () => void quietly("open_external", transport.openExternal(CHROME_DOWNLOAD)),
+      install: transport === null ? null : browserInstallOf(transport),
     }),
     [plan, openSettings, transport],
   );

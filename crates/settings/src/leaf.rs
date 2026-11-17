@@ -63,7 +63,7 @@ pub(crate) use reset::{locked_word, refuse};
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 28] = [
+pub(crate) const KEYS: [(&str, Kind); 29] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -95,6 +95,7 @@ pub(crate) const KEYS: [(&str, Kind); 28] = [
         "browser.allow_when_remote_debugging_disabled",
         Kind::Boolean,
     ),
+    ("browser.allow_download", Kind::Boolean),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -109,8 +110,9 @@ pub(crate) const KEYS: [(&str, Kind); 28] = [
 /// lock at not required and no auto mode outside the sandbox, and the `network` keys at no proxy
 /// (so the OS's), no CA file and no added domain (decision record 0051), and at no allowing a
 /// site the block list names, and block list updates on: an unreadable policy must not stop them.
-/// The `browser` key locks at no browser where the firm turned remote debugging off.
-pub(crate) const SECURITY_KEYS: [&str; 21] = [
+/// The `browser` keys lock at no browser where the firm turned remote debugging off, and at no
+/// download of Clauseo's own browser (`browser.allow_download` locks at `false`, not its default).
+pub(crate) const SECURITY_KEYS: [&str; 22] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
@@ -132,6 +134,7 @@ pub(crate) const SECURITY_KEYS: [&str; 21] = [
     "network.allow_unsafe_site_override",
     "network.unsafe_site_list_updates",
     "browser.allow_when_remote_debugging_disabled",
+    "browser.allow_download",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -143,12 +146,14 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 /// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
 /// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
 /// firm's (0051), so without a policy it is empty; so is the firm's update off-switch (0053),
-/// and the firm's leave for the browser where it turned remote debugging off.
-pub const POLICY_ONLY_KEYS: [&str; 4] = [
+/// the firm's leave for the browser where it turned remote debugging off, and the firm's word on
+/// whether Clauseo may download its own browser (`browser.allow_download`).
+pub const POLICY_ONLY_KEYS: [&str; 5] = [
     "skills.curated",
     "network.allowed_domains",
     "network.unsafe_site_list_updates",
     "browser.allow_when_remote_debugging_disabled",
+    "browser.allow_download",
 ];
 
 /// The MCP server names Clauseo keeps, each with what it is for: `browser` (S27) and `case-law`,
@@ -222,6 +227,7 @@ pub(crate) enum Leaf {
     SiteOverride(bool),
     ListUpdates(bool),
     BrowserWhenRdOff(bool),
+    BrowserDownload(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -359,6 +365,7 @@ impl Leaf {
             "browser.allow_when_remote_debugging_disabled" => {
                 typed_value(key, value).map(Leaf::BrowserWhenRdOff)
             }
+            "browser.allow_download" => typed_value(key, value).map(Leaf::BrowserDownload),
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -402,6 +409,7 @@ impl Leaf {
             Leaf::SiteOverride(_) => "network.allow_unsafe_site_override".to_owned(),
             Leaf::ListUpdates(_) => "network.unsafe_site_list_updates".to_owned(),
             Leaf::BrowserWhenRdOff(_) => "browser.allow_when_remote_debugging_disabled".to_owned(),
+            Leaf::BrowserDownload(_) => "browser.allow_download".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -459,6 +467,7 @@ impl Leaf {
             Leaf::BrowserWhenRdOff(on) => {
                 settings.browser.allow_when_remote_debugging_disabled = on;
             }
+            Leaf::BrowserDownload(on) => settings.browser.allow_download = on,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

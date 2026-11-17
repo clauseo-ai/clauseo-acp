@@ -226,10 +226,9 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       // what to install, the firm's policy, or a policy not read, says it in full
       note: notes[tool.state] ?? null,
       settings: tool.state === "off",
-      // without the app feed, no Try again
+      // without the app feed, no Try again and no download of Clauseo's own browser
       recheck: null,
-      // with no browser on a Mac, Download Chrome
-      download: tool.state === "browser_not_installed" ? "Download Chrome" : null,
+      install: null,
     });
   }
 });
@@ -250,19 +249,19 @@ test("no browser on the computer: what to install, by the OS, and that a new con
     note: INSTALL_MAC,
     settings: false,
     recheck: null,
-    download: "Download Chrome",
+    install: null,
   });
-  // Windows has Edge: no Download Chrome
+  // Windows has Edge
   expect(words(missing, { platform: "windows" })).toMatchObject({
     reason: "Install Chrome or Edge",
     note: INSTALL_WINDOWS,
-    download: null,
+    install: null,
   });
   // Linux is for development only: Chrome, as on a Mac
   expect(words(missing, { platform: "linux" })).toMatchObject({
     reason: "Install Chrome",
     note: INSTALL_MAC,
-    download: "Download Chrome",
+    install: null,
   });
   // a policy read has nothing to say to it
   expect(words(missing, { policy: { state: "clear" } }).reason).toBe("Install Chrome");
@@ -411,7 +410,6 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
     note:
       "Clauseo को इस कंप्यूटर पर Google Chrome, Microsoft Edge, Brave या Chromium नहीं मिला। " +
       "इनमें से कोई एक इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
-    download: "Chrome डाउनलोड करें",
   });
   // provisional Hindi, until the app thread writes it
   expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(

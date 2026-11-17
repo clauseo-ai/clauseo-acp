@@ -666,8 +666,10 @@ export type BlockedSiteId = string;
  */
 export type BrowserInstallFailure = 
 /**
- *  The network failed: curl could not connect, the server answered an error, or the
- *  transfer stalled (slower than 1 byte a second for 60 s).
+ *  The network failed: curl could not connect or resolve the host, the connection broke,
+ *  the server failed (an HTTP 5xx), or the transfer stalled (slower than 1 byte a second
+ *  for 60 s) or ran past its time bound. The lawyer's download tries again a few times
+ *  first, so the app hears it only once those tries are spent.
  */
 "network" | 
 /**
@@ -675,14 +677,20 @@ export type BrowserInstallFailure =
  *  larger than the 400 MiB cap.
  */
 "size_mismatch" | 
-/**  Less than about 1 GB is free in the app data folder. */
+/**
+ *  Less than about 1 GB is free in the app data folder, or the disk filled up during the
+ *  download or the unpacking.
+ */
 "disk_space" | 
 /**
  *  The version list named a URL or version the host does not accept: not `https`, not
  *  Google's host, or a path that does not match the version and platform.
  */
 "host_refused" | 
-/**  Chrome's code signature did not check out (only while the host requires it). */
+/**
+ *  Chrome's code signature did not check out: Windows only, and only while the host
+ *  requires it. Never on macOS, where Chrome for Testing is ad hoc signed.
+ */
 "signature" | 
 /**
  *  The zip did not unpack, held an entry that would land outside its folder or lacked
@@ -696,13 +704,31 @@ export type BrowserInstallFailure =
 "unsupported" | 
 /**  The lawyer cancelled, or the app quit, during the download. */
 "cancelled" | 
+/**
+ *  The secure connection failed: the server's certificate was not trusted, or TLS could
+ *  not be set up. Not tried again.
+ */
+"tls" | 
+/**
+ *  The server refused the request with an HTTP 4xx (such as 403 or 404). Not tried
+ *  again.
+ */
+"server_refused" | 
+/**
+ *  The firm does not allow it: its Clauseo policy forbids the download
+ *  (`browser.allow_download` false, or a policy source that cannot be read), or its
+ *  Chrome, Edge or Chromium policy turns Clauseo's browser off.
+ */
+"firm_forbids" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
 /**
  *  Where the one Chrome for Testing download stands. A download publishes some `Downloading`,
  *  then `Unpacking`, then one `Done` or one `Failed`; a download refused before it starts (an
- *  unsupported machine, too little disk) publishes only its `Failed`. After `Done` the next
+ *  unsupported machine, too little disk, the firm's policy) publishes only its `Failed`. While
+ *  the network is down it publishes `Offline` between tries. The daily check of a copy that is
+ *  already current publishes nothing. After `Done` the next
  *  session started finds the browser; sessions already running keep their header.
  */
 export type BrowserInstallState = 
@@ -715,7 +741,17 @@ export type BrowserInstallState =
 	bytes: Count,
 	/**  The whole zip's size, from `Content-Length`. */
 	total: Count,
+	/**
+	 *  Whether this replaces a downloaded copy more than one Stable security release
+	 *  behind, which no session starts until the new one is in place. False when absent.
+	 */
+	behind?: boolean,
 } }) & { failed?: never } | 
+/**
+ *  The network could not be reached: the host tries again about every minute until it
+ *  can, or until the lawyer cancels.
+ */
+"offline" | 
 /**  The zip is downloaded; it is being unpacked and checked. */
 "unpacking" | 
 /**  Chrome for Testing is in place; the next session uses it. */

@@ -3,7 +3,9 @@
 // the tools in the state that shows it, the tool line pressed so its popover stands open. A string that is only a
 // tooltip and an accessible name shows with its tooltip open, its control focused from the keyboard. The firm's
 // browser policy re-read is faked: the host plays its `browser_policy` reports (room/browser-policy.ts) once the
-// thread's view is in. What to install for the browser follows the host's OS: a Mac unless the entry says Windows.
+// thread's view is in, as is the download of Clauseo's own browser (its `browser_install` reports, room/browser-install.ts;
+// UC-580 to UC-590, stage E, in UC_OWN_BROWSER). What to install for the browser follows the host's OS: a Mac unless the
+// entry says Windows.
 import { Composer } from "@clauseo/components/clauseo/composer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -11,7 +13,7 @@ import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tool
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { batch, event, header, reset, THREAD } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { BrowserPolicyState, ToolState } from "../transport/protocol.ts";
+import type { BrowserInstallState, BrowserPolicyState, ToolState } from "../transport/protocol.ts";
 import { toolsSegment } from "../room/tool-line-room.ts";
 import { knownTools } from "../room/tools.ts";
 import type { Entry } from "./entry.ts";
@@ -42,11 +44,15 @@ const browser = (reason?: string): ToolState => ({
   availability: reason === undefined ? "available" : ({ unavailable: { reason } } as never),
 });
 
-/** What an entry's host does beyond its header: the policy reports it plays, and its OS. */
-type HostPlay = { policy?: readonly BrowserPolicyState[]; platform?: "mac" | "windows" };
+/** What an entry's host does beyond its header: the policy and download reports it plays, and its OS. */
+type HostPlay = {
+  policy?: readonly BrowserPolicyState[];
+  install?: readonly BrowserInstallState[];
+  platform?: "mac" | "windows";
+};
 
 /** A host with one matter and its one thread, whose header carries `tools`, with Settings, and the app feed that
- * plays `play.policy`'s reports once the view is in. */
+ * plays `play.policy`'s and `play.install`'s reports once the view is in. */
 function toolsHost(tools: ToolState[], play: HostPlay = {}): FakeTransport {
   const head = header();
   head.header!.tools = tools;
@@ -66,6 +72,7 @@ function toolsHost(tools: ToolState[], play: HostPlay = {}): FakeTransport {
       queueMicrotask(() => {
         transport.deliver(event(batch(1, [reset([], head)], undefined, stream)));
         for (const state of play.policy ?? []) transport.appEvent({ browser_policy: { state } });
+        for (const state of play.install ?? []) transport.appEvent({ browser_install: { state } });
       }),
   });
   return transport;
@@ -160,8 +167,6 @@ export const UET: Entry[] = [
     ),
     NONE,
   ),
-  // and on a Mac, the button to Chrome's download page
-  entry("UC-540", popWords("Download Chrome"), NONE),
   entry(
     "UET-50",
     popWords("Install Google Chrome or Microsoft Edge, then start a new conversation."),
@@ -270,4 +275,83 @@ export const UET: Entry[] = [
     screen: "room/status",
     render: statusFit,
   },
+];
+
+const MB = 1_000_000;
+const getting = (behind: boolean): HostPlay => ({
+  install: [{ downloading: { bytes: 84 * MB, total: 162 * MB, behind } }],
+});
+
+/** Clauseo's own browser under the browser row with none on a Mac (stage E's UC-580 to UC-590): the offer, the download
+ * with Cancel, its update when the copy on the computer is behind, the wait for the network, the firm's policy, and
+ * ready; then the offer with its line, for each failure with words of its own. Cancel is the
+ * approved word of words-ui.ts, so it has no entry here. */
+export const UC_OWN_BROWSER: Entry[] = [
+  entry("UC-580", popWords("Get a browser for Clauseo"), NONE),
+  entry(
+    "UC-581",
+    popWords("Getting Clauseo's browser: {done}\u00a0MB of {total}\u00a0MB ({percent}%)"),
+    NONE,
+    getting(false),
+  ),
+  entry("UC-582", popWords("Waiting for an internet connection to get the browser."), NONE, {
+    install: ["offline"],
+  }),
+  entry(
+    "UC-583",
+    popWords("Clauseo's browser is behind on security updates. Updating it now."),
+    NONE,
+    getting(true),
+  ),
+  entry("UC-584", popWords("Your firm doesn't allow Clauseo to download a browser."), NONE, {
+    install: [{ failed: { code: "firm_forbids", message: "" } }],
+  }),
+  entry(
+    "UC-585",
+    popWords("Clauseo's browser is ready. Start a new conversation to use it."),
+    NONE,
+    {
+      install: ["done"],
+    },
+  ),
+  entry(
+    "UC-586",
+    popWords(
+      "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "tls", message: "" } }] },
+  ),
+  entry(
+    "UC-587",
+    popWords(
+      "The download address was refused, so Clauseo couldn't get the browser. Try again later.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "host_refused", message: "" } }] },
+  ),
+  entry(
+    "UC-588",
+    popWords(
+      "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "server_refused", message: "" } }] },
+  ),
+  entry(
+    "UC-589",
+    popWords(
+      "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "disk_space", message: "" } }] },
+  ),
+  entry(
+    "UC-590",
+    popWords(
+      "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "network", message: "" } }] },
+  ),
 ];

@@ -16,7 +16,7 @@ use super::support::MAC_BINARY;
 use super::support::{Fake, Made, VERSION, ZipEntry, file, zip};
 use super::{fails_with, run_with};
 use crate::browser::chrome::Platform;
-use crate::browser::install::system::{CURL_FLAGS, download_args};
+use crate::browser::install::system::{CURL_FLAGS, download_args, versions_args};
 use crate::browser::install::{Cancel, Failure, archive};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -138,11 +138,12 @@ fn a_link_back_in_by_the_unpack_folders_name_is_refused() {
 }
 
 /// Redirects are pinned: `--max-redirs 0` (tightening the agreed 3), so a redirect fails as
-/// `network`. The zip download's whole argument list, in order.
+/// `host_refused`. The zip download's whole argument list, in order, with its hour's bound.
 #[test]
 fn the_download_pins_redirects_and_names_its_files() {
     let args = download_args(
         "https://storage.googleapis.com/z.zip",
+        None,
         Path::new("/w/headers.txt"),
         Path::new("/w/chrome.zip"),
     );
@@ -151,7 +152,14 @@ fn the_download_pins_redirects_and_names_its_files() {
         .chain(CURL_FLAGS)
         .map(OsString::from)
         .collect();
-    for arg in ["-D", "/w/headers.txt", "-o", "/w/chrome.zip"] {
+    for arg in [
+        "--max-time",
+        "3600",
+        "-D",
+        "/w/headers.txt",
+        "-o",
+        "/w/chrome.zip",
+    ] {
         expected.push(arg.into());
     }
     expected.push("https://storage.googleapis.com/z.zip".into());
@@ -162,6 +170,54 @@ fn the_download_pins_redirects_and_names_its_files() {
         .unwrap();
     assert_eq!(CURL_FLAGS.get(redirs + 1), Some(&"0"));
     assert!(CURL_FLAGS.contains(&"--location"));
+}
+
+/// Both fetches have a total time bound (the list agent-browser's 120 s, the zip an hour), and
+/// take the firm's proxy as `--proxy` when there is one; without it, no `--proxy` at all.
+#[test]
+fn both_fetches_have_a_time_bound_and_take_the_firms_proxy() {
+    let tail = |args: Vec<OsString>, skip: usize| -> Vec<String> {
+        args.into_iter()
+            .skip(skip)
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    };
+    let fixed = 3 + CURL_FLAGS.len();
+    let list = "https://googlechromelabs.github.io/x.json";
+    assert_eq!(
+        tail(versions_args(list, None), fixed),
+        ["--max-time", "120", list]
+    );
+    let firm = Some("http://proxy.firm.example:3128");
+    assert_eq!(
+        tail(versions_args(list, firm), fixed),
+        [
+            "--max-time",
+            "120",
+            "--proxy",
+            "http://proxy.firm.example:3128",
+            list
+        ]
+    );
+    let zip = download_args(
+        "https://storage.googleapis.com/z.zip",
+        firm,
+        Path::new("/w/h"),
+        Path::new("/w/z"),
+    );
+    assert_eq!(
+        tail(zip, fixed)[..4],
+        [
+            "--max-time",
+            "3600",
+            "--proxy",
+            "http://proxy.firm.example:3128"
+        ]
+    );
+    assert!(
+        !tail(versions_args(list, Some("")), 0).contains(&"--proxy".to_owned()),
+        "an empty proxy is none"
+    );
 }
 
 /// Nit: a link at `browsers` is not followed by the sweep, so its target's `.partial-*` stays.

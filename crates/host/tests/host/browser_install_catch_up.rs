@@ -63,6 +63,7 @@ fn downloading() -> BrowserInstallState {
     BrowserInstallState::Downloading {
         bytes: Count::from(22u32),
         total: Count::from(22u32),
+        behind: false,
     }
 }
 
@@ -88,14 +89,22 @@ fn a_lagged_subscriber_hears_how_the_download_ended() {
         .unwrap();
     handles.release.send(()).unwrap();
     first_frames_carry(&host, &BrowserInstallState::Done);
-    assert_eq!(browsers(&dir), ["chrome-131.0.6778.85"]);
+    assert_eq!(browsers(&dir), ["chrome-158.0.6778.85"]);
     let seen = install_states(&available(&mut lagged));
     assert_eq!(
         seen.last(),
         Some(&BrowserInstallState::Done),
         "the lagged subscriber's states: {seen:?}"
     );
-    // A second download: the subscriber, caught up, hears it start and end.
+    // A second download (the copy gone, so Stable is new again): the subscriber, caught up,
+    // hears it start and end.
+    crate::write::remove_dir_all(
+        &dir.data()
+            .join("app")
+            .join("browsers")
+            .join("chrome-158.0.6778.85"),
+    )
+    .unwrap();
     host.ok(HostCommand::InstallBrowser {});
     handles
         .starts

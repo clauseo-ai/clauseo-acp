@@ -1,17 +1,45 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
-// install and that a new conversation then finds it, and on a Mac Download Chrome, which opens Chrome's download page; under the browser the firm's policy blocks, whose policy
-// Clauseo couldn't check, or whose safe connection or unsafe-site list didn't start, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so
-// the tests can read every state; loaded with the popover only.
+// install and that a new conversation then finds it, and on a Mac (or Linux) Clauseo's own browser: its offer, with a
+// line above it when the last download failed in a way the lawyer can act on (TLS, a refused address, the server's
+// error, a full disk, no network after the retries); how far a download has got, with Cancel; or
+// why there is none (browser-install.ts); under the browser the firm's policy blocks, whose policy Clauseo couldn't
+// check, or whose safe connection or unsafe-site list didn't start, the reason in full, and for the policy not checked,
+// Try again (browser-policy.ts). Pure, so the tests can read every state; loaded with the popover only.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
+import { ui } from "@clauseo/components/lib/words-ui.ts";
 import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
+import type { BrowserInstall, InstallProgress } from "./browser-install.ts";
 import type { BrowserPolicy } from "./browser-policy.ts";
 import { glyphState, reasonOf, toolName, type BrowserState, type KnownTool } from "./tools.ts";
 
 /** Try again under the browser whose policy Clauseo couldn't check: its words, and whether the read it asked for runs. */
 export type RecheckPart = { button: string; waiting: boolean };
+
+/** Clauseo's own browser under the browser row with none on the computer, its words resolved. */
+export type InstallPart =
+  /** Get a browser for Clauseo, with `line` above it (why it is offered again, in words) or null for the plain offer;
+   * `waiting` (disabled, busy) from the press until the host says where it stands. */
+  | { kind: "offer"; line: string | null; button: string; waiting: boolean }
+  /** The download under way or unpacking: `behind` (its update's words) or null, how far in words (empty until the
+   * size is known), its bar, and Cancel. */
+  | {
+      kind: "getting";
+      behind: string | null;
+      text: string;
+      value: number;
+      max: number;
+      percent: number;
+      cancel: string;
+    }
+  /** No network: the wait, in words, and Cancel. */
+  | { kind: "offline"; line: string; cancel: string }
+  /** The firm's policy forbids it: the line, and nothing to press. */
+  | { kind: "forbidden"; line: string }
+  /** In place: the line saying a new conversation gets it. */
+  | { kind: "done"; line: string };
 
 export type ToolRowWords = {
   tool: KnownTool["tool"];
@@ -35,9 +63,8 @@ export type ToolRowWords = {
   settings: boolean;
   /** Under the browser whose policy Clauseo couldn't check, Try again; else null. */
   recheck: RecheckPart | null;
-  /** Under the browser with none on a Mac (any OS but Windows), Download Chrome's words: it opens Chrome's download
-   * page (tool-line-context.ts's CHROME_DOWNLOAD); else null. */
-  download: string | null;
+  /** Under the browser with none on a Mac (or Linux), Clauseo's own browser; else null (Windows, or no app feed). */
+  install: InstallPart | null;
 };
 
 export type ToolRowRoom = {
@@ -47,6 +74,8 @@ export type ToolRowRoom = {
   platform: Platform;
   /** The re-read of the firm's browser policy; null when the window has no app feed to hear it on. */
   policy?: BrowserPolicy | null;
+  /** Clauseo's own browser download; null (or left out) when the window has no app feed to hear it on. */
+  install?: BrowserInstall | null;
 };
 
 const POLICY: ToolsKey =
@@ -78,6 +107,19 @@ const INSTALL_MAC: ToolsKey =
 const INSTALL_WINDOWS: ToolsKey =
   "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
+/** Above the offer, why it is offered again: the last download failed in a way the lawyer can act on, in full (UC-586 to
+ * UC-590). */
+const TLS: ToolsKey =
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.";
+const HOST_REFUSED: ToolsKey =
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.";
+const SERVER_REFUSED: ToolsKey =
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.";
+const DISK_SPACE: ToolsKey =
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.";
+const NETWORK: ToolsKey =
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.";
+
 /** The browser's reason in full: what to install with none on the computer, its policy keeping it off, or its safe
  * connection or unsafe-site list not started; else null. */
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
@@ -102,13 +144,114 @@ function recheckPart(lang: Lang, policy: BrowserPolicy | null | undefined): Rech
   return { button: tw(lang, "Try again"), waiting: policy.state === "checking" };
 }
 
+const mb = (bytes: number) => Math.round(bytes / 1e6);
+
+/** The line above the offer for a progress that offers again with words of its own; null for the plain offer. */
+function offerLine(lang: Lang, progress: InstallProgress | null): string | null {
+  switch (progress) {
+    case "tls":
+      return tw(lang, TLS);
+    case "host_refused":
+      return tw(lang, HOST_REFUSED);
+    case "server_refused":
+      return tw(lang, SERVER_REFUSED);
+    case "disk_space":
+      return tw(lang, DISK_SPACE);
+    case "network":
+      return tw(lang, NETWORK);
+    default:
+      return null;
+  }
+}
+
+/** Clauseo's own browser under the browser row with none, by the download's state: the offer until one starts, and
+ * again after a cancel or a failure (with a line above it when the failure has words of its own, else none); never on
+ * Windows, whose browser is Edge. */
+export function installPart(
+  lang: Lang,
+  platform: Platform,
+  install: BrowserInstall | null | undefined,
+): InstallPart | null {
+  if (install == null || platform === "windows") return null;
+  const p = install.progress;
+  const cancel = ui(lang, "Cancel");
+  if (
+    p === null ||
+    p === "tls" ||
+    p === "host_refused" ||
+    p === "server_refused" ||
+    p === "disk_space" ||
+    p === "network"
+  )
+    return {
+      kind: "offer",
+      line: offerLine(lang, p),
+      button: tw(lang, "Get a browser for Clauseo"),
+      waiting: install.pressed,
+    };
+  if (p === "offline")
+    return {
+      kind: "offline",
+      line: tw(lang, "Waiting for an internet connection to get the browser."),
+      cancel,
+    };
+  if (p === "forbidden")
+    return {
+      kind: "forbidden",
+      line: tw(lang, "Your firm doesn't allow Clauseo to download a browser."),
+    };
+  if (p === "done")
+    return {
+      kind: "done",
+      line: tw(lang, "Clauseo's browser is ready. Start a new conversation to use it."),
+    };
+  // unpacking: the whole size, at 100%
+  const total = p === "unpacking" ? install.total : p.downloading.total;
+  const bytes = p === "unpacking" ? total : Math.min(p.downloading.bytes, total);
+  const behind = p === "unpacking" ? install.behind : p.downloading.behind;
+  // rounded, but never 100% before the last byte
+  const percent =
+    total === 0
+      ? p === "unpacking"
+        ? 100
+        : 0
+      : bytes >= total
+        ? 100
+        : Math.min(99, Math.round((bytes / total) * 100));
+  return {
+    kind: "getting",
+    behind: behind
+      ? tw(lang, "Clauseo's browser is behind on security updates. Updating it now.")
+      : null,
+    // the first Downloading brings the size: until then the bar has no words
+    text:
+      total > 0
+        ? tw(lang, "Getting Clauseo's browser: {done}\u00a0MB of {total}\u00a0MB ({percent}%)", {
+            done: mb(bytes),
+            total: mb(total),
+            percent,
+          })
+        : "",
+    value: p === "unpacking" ? 1 : bytes,
+    max: p === "unpacking" ? 1 : Math.max(total, 1),
+    percent,
+    cancel,
+  };
+}
+
 /** One row, for a tool the line speaks for. */
 export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRowWords {
   const on = tool.state === "available";
   const reason = reasonOf(tool, room.platform);
   const unread = tool.tool === "browser" && tool.state === "browser_policy_unreadable";
-  // a read since found nothing blocking: the next conversation gets the browser
-  const ready = unread && room.policy?.state === "clear";
+  const install =
+    tool.tool === "browser" && tool.state === "browser_not_installed"
+      ? installPart(lang, room.platform, room.install)
+      : null;
+  // a read since found nothing blocking, or Clauseo's own browser is in: the next conversation gets the browser
+  const ready = (unread && room.policy?.state === "clear") || install?.kind === "done";
+  // while Clauseo's own browser downloads, waits or is in, installing Chrome is no longer the step to say
+  const busy = install !== null && install.kind !== "offer" && install.kind !== "forbidden";
   return {
     tool: tool.tool,
     glyph: glyphState(tool),
@@ -124,14 +267,12 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
           : toolsLine(lang, reason),
     beside: tool.state === "off",
     reasonTip: ready ? tw(lang, "The browser comes with your next conversation.") : null,
-    note: tool.tool === "browser" && !ready ? browserNote(lang, room.platform, tool.state) : null,
+    note:
+      tool.tool === "browser" && !ready && !busy
+        ? browserNote(lang, room.platform, tool.state)
+        : null,
     settings: tool.state === "off" && room.settings,
     recheck: unread ? recheckPart(lang, room.policy) : null,
-    download:
-      tool.tool === "browser" &&
-      tool.state === "browser_not_installed" &&
-      room.platform !== "windows"
-        ? tw(lang, "Download Chrome")
-        : null,
+    install,
   };
 }

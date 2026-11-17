@@ -340,7 +340,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   }
 
   /** Plays one app event (H4) as the host would send it to every window; `{ browser_policy: { state } }` is the
-   * firm's browser policy re-read (room/browser-policy.ts). A new app listener hears `host.next.first` first, the catch-up. */
+   * firm's browser policy re-read (room/browser-policy.ts), `{ browser_install: { state } }` the download of Clauseo's own
+   * browser (room/browser-install.ts). A new app listener hears `host.next.first` first, the catch-up. */
   appEvent(event: AppEvent): void {
     for (const listener of this.#appHeard) listener(event);
   }

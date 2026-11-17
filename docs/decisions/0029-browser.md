@@ -1273,7 +1273,8 @@ The download that fills step 3 is the next section.
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
 counts when it is a regular file, following links (an installed Chrome may be one). In
-`<app data>/browsers/` a version folder must be a real folder (`file_type`, no link followed)
+`<app data>/browsers/` must itself be a real folder (a link or junction there is never followed, and
+no Chrome for Testing is run), a version folder in it must be a real folder (`file_type`, no link followed)
 and the binary, links resolved, must sit under the browsers folder, so a planted link picks
 nothing. That folder must stay outside what any agent can write (in tier C too). Every root comes in through `ChromeRoots`
 (`HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`, which reads `HOME`,
@@ -1373,9 +1374,10 @@ ending: then a new download starts once its `Failed { cancelled }` is out. `Host
 {}` stops it, and does nothing when none runs. Neither stores a receipt. Every app subscriber gets
 `HostEvent::BrowserInstall { state }` as it goes: some `Downloading { bytes, total }` (at most
 four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
-`Failed { code, message }`. The app's copy keys on `code` (`BrowserInstallFailure`, an open
-enum: `network`, `size_mismatch`, `disk_space`, `host_refused`, `signature`, `unpack`,
-`unsupported`, `cancelled`); `message` is for the log. The latest state goes into every app catch-up:
+`Failed { code, message }`, with `Offline` between tries while the network is down. The app's
+copy keys on `code` (`BrowserInstallFailure`, an open enum: `network`, `size_mismatch`,
+`disk_space`, `host_refused`, `signature`, `unpack`, `unsupported`, `cancelled`,
+`firm_forbids`); `message` is for the log. The latest state goes into every app catch-up:
 the running download's last step, or the last download's end until the next one starts. So a
 window that lagged, resubscribed after a pause or the watchdog, or reloaded hears where the
 download stands, its end included. The desktop bridge admits both commands from the main window only, and only main's app
@@ -1423,33 +1425,76 @@ the download's last state. At start a thread removes every `browsers/.partial-*`
 `browsers` itself is not followed), and the first
 download waits for it.
 
-**Tools.** Each is an absolute path, never a `PATH` lookup: `/usr/bin/curl`, `/usr/bin/ditto` and
-`/usr/bin/codesign` on macOS; `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
+**Tools.** Each is an absolute path, never a `PATH` lookup: `/usr/bin/curl` and `/usr/bin/ditto`
+on macOS (no `codesign` since 2026-11-15); `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
 Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::spawn_in_tree`. curl
 gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
---location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
+--location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`),
+then `--max-time 120` for the list (agent-browser's own bound) or `--max-time 3600` for the zip,
+and `--proxy` with `network.upstream_proxy` when it is set (amended 2026-11-17).
 `--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
 47, `host_refused` (a retry would meet the same redirect). HTTPS to Google's host is the whole
-integrity check while the signature does not enforce, so a redirect to another https host
+network-side integrity check (no signature on macOS, none enforced on Windows), so a redirect to another https host
 must not replace it; neither URL redirects today (checked 2026-11-04). curl's exit 63 (over
-the 400 MiB cap) is `size_mismatch`, any other failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+the 400 MiB cap) is `size_mismatch`; 22 (an HTTP error) `server_refused` for a 4xx; 23 (a write
+error) `disk_space`; a TLS failure `tls`. A failed or broken connection, a timeout or an HTTP 5xx
+is `network`, the only failure tried again, as agent-browser's `install` does (amended
+2026-11-17). Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
 `InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
 
-**Signature.** macOS: `codesign --verify --deep --strict` on the app bundle, then `codesign -dv`
-must show `TeamIdentifier=EQHXZ8M8AV` (Google). Windows: `WinVerifyTrust` (Authenticode) on
-`chrome.exe`, without fetching revocation. The result is logged; it fails the download
-(`signature`) only while `SIGNATURE_REQUIRED_MAC` or `SIGNATURE_REQUIRED_WINDOWS` is true. Both
-are false: nobody has checked here whether Chrome for Testing is signed. The by-hand check below
-decides, and a later PR flips the constant.
+**Signature.** None on macOS, by decision (amended 2026-11-15): Chrome for Testing on a Mac is ad
+hoc signed, with no team id, so `codesign` can never tie it to Google and a signature can never
+be required of it. `SIGNATURE_REQUIRED_MAC` and the `codesign` check are removed. The integrity
+of a Mac download is HTTPS to the two pinned hosts with no redirect, the size checks, the zip
+checks, and the browsers folder sitting outside what any agent can write: anything running as
+the lawyer could patch an ad hoc signed app, so that fence is load-bearing. Windows:
+`WinVerifyTrust` (Authenticode) on `chrome.exe`, without fetching revocation, logged; it fails
+the download (`signature`) only while `SIGNATURE_REQUIRED_WINDOWS` is true (false: the by-hand
+check below decides).
 
 **Quarantine.** curl sets no `com.apple.quarantine` attribute, so Gatekeeper does not check the
-download when Chrome starts. HTTPS to Google's host, the size check, and the logged `codesign`
-result are the checks today.
+download when Chrome starts (it could not vouch for an ad hoc signature anyway).
+
+**No Clauseo manifest** (amended 2026-11-15). The host reads Google's own list,
+`last-known-good-versions-with-downloads.json` on exactly `https://googlechromelabs.github.io/`,
+and takes `channels.Stable` (`install/versions.rs`, formerly `manifest.rs`). The signed
+browser-pins manifest of #806 (never merged) is superseded: no Clauseo-signed list, no signing
+job. The zip comes only from exactly
+`https://storage.googleapis.com/chrome-for-testing-public/<v>/<plat>/chrome-<plat>.zip`, its
+`Content-Length` at most 400 MiB (`MAX_ZIP_BYTES`, checked in process as well as by curl).
+
+**Never older, never stale** (`install/fresh.rs`, `install/prune.rs`, amended 2026-11-15).
+
+- *Floor.* `CFT_FLOOR` is built into each release (157.0.8103.0 today). No version below it is
+  installed (`host_refused`) or run (`chrome::find` passes it over). It only ever rises.
+- *Never downgrade.* A Stable below the highest copy installed is `host_refused`; equal to it,
+  the run ends with nothing downloaded. The search runs only the highest copy (at or above the
+  floor), never an older one in its place.
+- *Freshness.* Each read of the list (the lawyer's download, and the daily check: a timer at
+  start and every 24 h while the host runs, when a copy is on disk) updates
+  `browsers/stable.json`: Stable, the Stable before it, and when it was read. A copy older than
+  both is more than one Stable security release behind: no launch starts it, and its update's
+  `Downloading` carries `behind: true`, so the app says it is updating for security. A new
+  Stable seen after more than 14 days without a read forgets the one before (the releases in
+  between are unknown), so any copy older than Stable then counts as too far behind. A missing
+  or unreadable record refuses nothing. The daily check is quiet: it publishes nothing unless it
+  downloads.
+- *Old copies.* After each successful run, every copy below the highest goes unless a session
+  runs it: the launch prep notes each session's copy against its run folder, under the lock the
+  prune takes, and a note counts while that run folder exists.
+- *Offline.* The lawyer's download publishes `Offline` and tries again after 60 s, three tries in
+  all (`OFFLINE_TRIES`, agent-browser's count), then fails as `network` (amended 2026-11-17). The daily check does not wait: the next tick tries again.
+
+**Firm policy.** `InstallBrowser` and the daily check need the firm's Clauseo policy
+`browser.allow_download` (default true; policy only; a security key, so an unreadable policy
+source locks it false). False publishes `Failed { firm_forbids }` and downloads nothing. The
+download thread also asks the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` policy,
+the launch's rule (`browser::rd_policy`); a block is `firm_forbids` too.
 
 **By hand.** On a Mac (arm64 and Intel) and on Windows x64:
 `cargo test -p clauseo-host --lib real_download -- --ignored --nocapture` downloads the real zip
-into a temporary folder. Record what it logs, then run `codesign -dv --verbose=4` on the app, or
-`Get-AuthenticodeSignature` on `chrome.exe`, and note whether it passes.
+into a temporary folder. On Windows, run `Get-AuthenticodeSignature` on `chrome.exe` and note
+whether it passes.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
 

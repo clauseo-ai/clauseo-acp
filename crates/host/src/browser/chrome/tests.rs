@@ -85,7 +85,7 @@ fn installed_chrome_wins_on_mac_over_home_and_chrome_for_testing() {
     touch(&dir.path().join("home"), MAC_CHROME);
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(system));
 }
@@ -96,7 +96,7 @@ fn mac_home_applications_comes_second() {
     let home = touch(&dir.path().join("home"), MAC_CHROME);
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(home));
 }
@@ -152,7 +152,7 @@ fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         let roots = roots(dir.path(), platform);
         assert_eq!(
-            find_with(&roots, false),
+            find_with(&roots, false, false),
             None,
             "{platform:?}: Edge while not allowed"
         );
@@ -169,8 +169,8 @@ fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
     // An allowed Edge comes before a Program Files Chrome; a disallowed one leaves Chrome.
     let chrome = touch(&dir.path().join("pf"), WIN_CHROME);
     let win = roots(dir.path(), Platform::WindowsX64);
-    assert_eq!(find_with(&win, true), Some(edge.clone()));
-    assert_eq!(find_with(&win, false), Some(chrome.clone()));
+    assert_eq!(find_with(&win, true, false), Some(edge.clone()));
+    assert_eq!(find_with(&win, false, false), Some(chrome.clone()));
     assert_eq!(
         windows_installed(&win).usable,
         [(Browser::Edge, edge), (Browser::Chrome, chrome.clone())]
@@ -200,7 +200,10 @@ fn windows_installed_is_empty_off_windows() {
 fn windows_edge_is_never_looked_for_on_mac() {
     let dir = TempDir::new("chrome-mac-no-edge");
     touch(&dir.path().join("pf86"), WIN_EDGE);
-    assert_eq!(find_with(&roots(dir.path(), Platform::MacX64), true), None);
+    assert_eq!(
+        find_with(&roots(dir.path(), Platform::MacX64), true, false),
+        None
+    );
 }
 
 /// On a Mac with no Chrome: Edge, Brave, then Chromium, each in `/Applications` before
@@ -220,7 +223,7 @@ fn mac_other_chromium_browsers_come_after_chrome_in_order() {
     let edge = touch(&home, MAC_EDGE);
     assert_eq!(find(&mac()), Some(edge));
     // Windows' Edge switch does not touch the Mac's list.
-    assert!(find_with(&mac(), false).is_some());
+    assert!(find_with(&mac(), false, false).is_some());
     let chrome = touch(&home, MAC_CHROME);
     assert_eq!(find(&mac()), Some(chrome));
     // Each browser's places, in order.
@@ -239,7 +242,7 @@ fn mac_chrome_for_testing_beats_the_other_browsers() {
     touch(&dir.path().join("root"), MAC_EDGE);
     let cft = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(cft));
 }
@@ -306,11 +309,11 @@ fn chrome_for_testing_highest_version_wins() {
     );
     let newest = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.6778.85/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_WIN}"),
     );
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-130.9.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-157.9.1/{CFT_WIN}"),
     );
     // A higher version without its binary, and folders that are no version, are passed over.
     write::create_dir_all(&dir.path().join("app/browsers/chrome-200.0.0.0")).unwrap();
@@ -324,14 +327,14 @@ fn chrome_for_testing_layout_per_platform() {
     let dir = TempDir::new("chrome-cft-layout");
     let arm = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(arm));
     // The arm64 zip's layout is not the x64 one.
     assert_eq!(find(&roots(dir.path(), Platform::MacX64)), None);
     let x64 = touch(
         dir.path(),
-        "app/browsers/chrome-131.0.1/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "app/browsers/chrome-158.0.1/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacX64)), Some(x64));
 }
@@ -343,7 +346,7 @@ fn windows_ignores_chrome_for_testing() {
     let dir = TempDir::new("chrome-win-cft");
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         assert_eq!(find(&roots(dir.path(), platform)), None, "{platform:?}");
@@ -407,7 +410,7 @@ fn windows_edge_beats_program_files_chrome_and_ignores_the_rest() {
     let dir = TempDir::new("chrome-win-edge-first");
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     touch(&dir.path().join(LOCAL), WIN_CHROME);
     let chrome = touch(&dir.path().join("pf86"), WIN_CHROME);
@@ -429,7 +432,7 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
     let dir = TempDir::new("chrome-cft-links");
     let real = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     let elsewhere = touch(dir.path(), &format!("outside/chrome-999.0/{CFT_WIN}"));
     write::symlink(
@@ -443,4 +446,111 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
     write::create_dir_all(linked.parent().unwrap()).unwrap();
     write::symlink(&elsewhere, &linked).unwrap();
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(real));
+}
+
+/// The highest copy below this release's floor is never run, nor is an older one in its place.
+#[test]
+fn chrome_for_testing_below_the_floor_is_not_run() {
+    let dir = TempDir::new("chrome-cft-floor");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.6778.85/{CFT_MAC_ARM}"),
+    );
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+}
+
+/// A copy more than one Stable release behind the daily check's record is not run (it waits
+/// for its update); Stable, or the one release behind, is. Never an older copy in its place.
+#[test]
+fn chrome_for_testing_more_than_one_release_behind_is_not_run() {
+    use crate::browser::install::fresh::{StableRecord, write_record};
+    let dir = TempDir::new("chrome-cft-behind");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.0.1/{CFT_MAC_ARM}"),
+    );
+    let copy = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.0.2/{CFT_MAC_ARM}"),
+    );
+    let browsers = dir.path().join("app/browsers");
+    let roots = roots(dir.path(), Platform::MacArm64);
+    let record = |stable: &str, previous: Option<&str>| StableRecord {
+        stable: stable.to_owned(),
+        previous: previous.map(str::to_owned),
+        checked_at: 0,
+    };
+    write_record(&browsers, &record("158.0.0.3", Some("158.0.0.2"))).unwrap();
+    assert_eq!(find(&roots), Some(copy.clone()), "one release behind runs");
+    write_record(&browsers, &record("158.0.0.4", Some("158.0.0.3"))).unwrap();
+    assert_eq!(find(&roots), None, "two behind: neither copy runs");
+    write_record(&browsers, &record("158.0.0.3", None)).unwrap();
+    assert_eq!(find(&roots), None, "behind, the release before unknown");
+    write_record(&browsers, &record("158.0.0.2", None)).unwrap();
+    assert_eq!(find(&roots), Some(copy));
+}
+
+/// A link at `<app data>/browsers` itself is never followed: the copy it points at is not run.
+#[cfg(unix)]
+#[test]
+fn a_linked_browsers_folder_is_not_followed() {
+    let dir = TempDir::new("chrome-cft-linked-folder");
+    let elsewhere = dir.path().join("elsewhere");
+    let binary = touch(&elsewhere, &format!("chrome-158.0.6778.85/{CFT_MAC_ARM}"));
+    write::create_dir_all(&dir.path().join("app")).unwrap();
+    write::symlink(&elsewhere, &dir.path().join("app/browsers")).unwrap();
+    assert!(binary.is_file());
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+}
+
+/// The test row's switch, with the feature on: the installed Chrome, Edge, Brave and Chromium are
+/// passed over, Clauseo's own download is still found, and only `1` turns it on.
+#[cfg(feature = "test-browser-search")]
+#[test]
+fn the_test_switch_hides_installed_browsers_but_not_the_download() {
+    use std::ffi::OsStr;
+    let dir = TempDir::new("chrome-test-switch");
+    for app in [MAC_CHROME, MAC_EDGE, MAC_BRAVE, MAC_CHROMIUM] {
+        touch(&dir.path().join("root"), app);
+    }
+    let roots = roots(dir.path(), Platform::MacArm64);
+    assert!(
+        find_with(&roots, true, false).is_some(),
+        "found without the switch"
+    );
+    assert_eq!(
+        find_with(&roots, true, true),
+        None,
+        "Chrome, Edge, Brave and Chromium hidden, nothing else"
+    );
+    let cft = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_MAC_ARM}"),
+    );
+    assert_eq!(find_with(&roots, true, true), Some(cft));
+    assert!(super::test_switch::says(Some(OsStr::new("1"))));
+    for value in [None, Some("0"), Some(""), Some("yes")] {
+        assert!(
+            !super::test_switch::says(value.map(OsStr::new)),
+            "{value:?}"
+        );
+    }
+    assert_eq!(
+        super::test_switch::VAR,
+        "CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS"
+    );
+}
+
+/// Without the feature (every release), the variable does nothing: no value turns the switch on.
+#[cfg(not(feature = "test-browser-search"))]
+#[test]
+fn without_the_feature_the_test_switch_is_always_off() {
+    use std::ffi::OsStr;
+    for value in [Some("1"), Some("0"), None] {
+        assert!(
+            !super::test_switch::says(value.map(OsStr::new)),
+            "{value:?}"
+        );
+    }
+    assert!(!super::test_switch::ignore_installed());
 }

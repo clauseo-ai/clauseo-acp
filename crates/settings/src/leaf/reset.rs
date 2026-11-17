@@ -4,8 +4,8 @@
 use super::{SECURITY_KEYS, agent_id};
 use crate::plans::plan_id;
 use crate::schema::{
-    Density, FontSize, Language, Lite, Motion, NetworkSettings, PrivacySettings, SandboxSettings,
-    Settings, SkillsExtra, Theme, ToolsSettings, UpdateMode,
+    BrowserSettings, Density, FontSize, Language, Lite, Motion, NetworkSettings, PrivacySettings,
+    SandboxSettings, Settings, SkillsExtra, Theme, ToolsSettings, UpdateMode,
 };
 
 /// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
@@ -16,7 +16,8 @@ use crate::schema::{
 /// `false`, `network.upstream_proxy` unset (the OS's proxy), `network.ca_certs` and
 /// `network.allowed_domains` empty, `network.allow_unsafe_site_override` `false`, and
 /// `network.unsafe_site_list_updates` `true`, its default: an unreadable policy must not stop
-/// protection updates (0053), and `browser.allow_when_remote_debugging_disabled` `false`.
+/// protection updates (0053), `browser.allow_when_remote_debugging_disabled` `false`, and
+/// `browser.allow_download` `false` (its safe value, not its default, which is on).
 /// Kept apart from [`reset`], which restores the default, since a security key's default can be
 /// on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in
 /// `.` (`tools.`, `install.`) that names every security key under it. A single `plans.<id>`
@@ -59,6 +60,7 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "browser.allow_when_remote_debugging_disabled" => {
                 settings.browser.allow_when_remote_debugging_disabled = false;
             }
+            "browser.allow_download" => settings.browser.allow_download = false,
             other => unreachable!("security key {other} has no refused value"),
         }
     }
@@ -119,6 +121,9 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         }
         "browser.allow_when_remote_debugging_disabled" => {
             settings.browser.allow_when_remote_debugging_disabled = false;
+        }
+        "browser.allow_download" => {
+            settings.browser.allow_download = BrowserSettings::default().allow_download;
         }
         _ => {
             if let Some(id) = agent_id(key) {

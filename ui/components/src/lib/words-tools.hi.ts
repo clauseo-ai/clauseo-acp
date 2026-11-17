@@ -20,8 +20,32 @@ export const HI = {
   // a policy read found nothing blocking: the browser row's reason, and its tooltip on when the browser comes
   "Ready for new conversations": "नई बातचीत के लिए तैयार",
   "The browser comes with your next conversation.": "ब्राउज़र आपकी अगली बातचीत के साथ आएगा।",
-  // under the Mac's no-browser line: opens Chrome's download page in the default browser (provisional Hindi)
-  "Download Chrome": "Chrome डाउनलोड करें",
+  // with no Chromium browser on a Mac: the offer of Clauseo's own browser, how far its download has got, the wait
+  // for the network, its update when the copy on the computer is behind, the firm's policy forbidding it, and done
+  // (provisional Hindi, stage E)
+  "Get a browser for Clauseo": "Clauseo के लिए ब्राउज़र डाउनलोड करें",
+  "Getting Clauseo's browser: {done}\u00a0MB of {total}\u00a0MB ({percent}%)":
+    "Clauseo का ब्राउज़र डाउनलोड हो रहा है: {total}\u00a0MB में से {done}\u00a0MB ({percent}%)",
+  "Waiting for an internet connection to get the browser.":
+    "ब्राउज़र डाउनलोड करने के लिए इंटरनेट कनेक्शन की प्रतीक्षा की जा रही है।",
+  "Clauseo's browser is behind on security updates. Updating it now.":
+    "Clauseo का ब्राउज़र सुरक्षा अपडेट में पीछे है। इसे अभी अपडेट किया जा रहा है।",
+  "Your firm doesn't allow Clauseo to download a browser.":
+    "आपकी फ़र्म Clauseo को ब्राउज़र डाउनलोड करने की अनुमति नहीं देती।",
+  "Clauseo's browser is ready. Start a new conversation to use it.":
+    "Clauseo का ब्राउज़र तैयार है। इसका उपयोग करने के लिए एक नई बातचीत शुरू करें।",
+  // under the offer, the last download's failure in a way the lawyer can act on (UC-586 to UC-590; provisional Hindi,
+  // app track final)
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.":
+    "Clauseo ब्राउज़र डाउनलोड करने के लिए सुरक्षित रूप से कनेक्ट नहीं कर सका। सहायता के लिए अपनी फ़र्म की IT टीम से पूछें।",
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.":
+    "डाउनलोड का पता अस्वीकार कर दिया गया, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.":
+    "Google के डाउनलोड सर्वर ने त्रुटि लौटाई, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.":
+    "ब्राउज़र डाउनलोड करने के लिए इस कंप्यूटर पर पर्याप्त खाली जगह नहीं है। लगभग 1\u00a0GB जगह खाली करें और फिर से प्रयास करें।",
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.":
+    "Clauseo ब्राउज़र डाउनलोड करने के लिए इंटरनेट तक नहीं पहुँच सका। अपना कनेक्शन जाँचें और फिर से प्रयास करें।",
   // under the browser whose policy Clauseo couldn't check: read it again now
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help

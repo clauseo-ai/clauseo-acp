@@ -183,7 +183,7 @@ jobs:
                   todo += features.get(name, [])
           print(" ".join(sorted(seen & {
               "e2e", "marks", "crash_test", "staging-connector", "local-connector",
-              "stetdoc-slow-test",
+              "stetdoc-slow-test", "test-browser-search",
           })))
           PY
           )
@@ -852,6 +852,24 @@ jobs:
             fi
           done
           echo "$exe holds no stetdoc-slow-test string"
+
+      # The test-browser-search build is never released either: every run's app binary holds
+      # neither CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS, the variable only that build reads
+      # (crates/host/src/browser/chrome/test_switch.rs), nor CLAUSEO_TEST_POLICY_FILE, the variable
+      # its test policy file reads (crates/settings/src/policy/test_file.rs).
+      - name: The app binary holds no test-browser-search string
+        run: |
+          set -euo pipefail
+          exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
+          [ -f "$exe" ] || { echo "::error::no app binary at $exe"; exit 1; }
+          for form in CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS CLAUSEO_TEST_POLICY_FILE; do
+            found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$form") || [ $? -eq 1 ]
+            if [ "$found" != 0 ]; then
+              echo "::error::$exe holds the test-browser-search string $form"
+              exit 1
+            fi
+          done
+          echo "$exe holds no test-browser-search string"
 
       # The case-law connector's test servers are compiled only into desktop's staging-connector
       # and local-connector builds (docs/connector-staging.md). Every other run's app binary holds

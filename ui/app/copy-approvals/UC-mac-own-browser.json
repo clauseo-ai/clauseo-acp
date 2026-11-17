@@ -1,0 +1,112 @@
+{
+  "UC-580": {
+    "en": "Get a browser for Clauseo",
+    "hi": "Clauseo के लिए ब्राउज़र डाउनलोड करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-581": {
+    "en": "Getting Clauseo's browser: {done} MB of {total} MB ({percent}%)",
+    "hi": "Clauseo का ब्राउज़र डाउनलोड हो रहा है: {total} MB में से {done} MB ({percent}%)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-582": {
+    "en": "Waiting for an internet connection to get the browser.",
+    "hi": "ब्राउज़र डाउनलोड करने के लिए इंटरनेट कनेक्शन की प्रतीक्षा की जा रही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-583": {
+    "en": "Clauseo's browser is behind on security updates. Updating it now.",
+    "hi": "Clauseo का ब्राउज़र सुरक्षा अपडेट में पीछे है। इसे अभी अपडेट किया जा रहा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-584": {
+    "en": "Your firm doesn't allow Clauseo to download a browser.",
+    "hi": "आपकी फ़र्म Clauseo को ब्राउज़र डाउनलोड करने की अनुमति नहीं देती।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-585": {
+    "en": "Clauseo's browser is ready. Start a new conversation to use it.",
+    "hi": "Clauseo का ब्राउज़र तैयार है। इसका उपयोग करने के लिए एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-586": {
+    "en": "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.",
+    "hi": "Clauseo ब्राउज़र डाउनलोड करने के लिए सुरक्षित रूप से कनेक्ट नहीं कर सका। सहायता के लिए अपनी फ़र्म की IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-587": {
+    "en": "The download address was refused, so Clauseo couldn't get the browser. Try again later.",
+    "hi": "डाउनलोड का पता अस्वीकार कर दिया गया, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-588": {
+    "en": "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.",
+    "hi": "Google के डाउनलोड सर्वर ने त्रुटि लौटाई, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-589": {
+    "en": "There isn't enough free space on this computer to get the browser. Free up about 1 GB and try again.",
+    "hi": "ब्राउज़र डाउनलोड करने के लिए इस कंप्यूटर पर पर्याप्त खाली जगह नहीं है। लगभग 1 GB जगह खाली करें और फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-590": {
+    "en": "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.",
+    "hi": "Clauseo ब्राउज़र डाउनलोड करने के लिए इंटरनेट तक नहीं पहुँच सका। अपना कनेक्शन जाँचें और फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-17",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

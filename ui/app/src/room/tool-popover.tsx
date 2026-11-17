@@ -1,25 +1,31 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome (or
-// Edge, on Windows), what to install, in full, and on a Mac Download Chrome, which opens Chrome's download page in the
-// default browser; a browser installed then is there in the next new conversation, as the words say. Under the browser the firm's policy blocks, or whose policy Clauseo
-// couldn't check, the reason in full; for the policy not checked, Try again, which asks the host to read it now and
-// waits (disabled, busy) until the read ends, then the row follows what it found: Ready for new conversations.
-// A tool
-// the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
-// there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
-// (tool-line.tsx).
+// Edge, on Windows), what to install, in full, and on a Mac (or Linux) Clauseo's own browser: Get a browser for
+// Clauseo is the consent, with a line above it when the last download failed (TLS, a refused address, the server's
+// error, a full disk, no network); then how far its download has got, its bar and Cancel (or
+// the wait for the network, with Cancel), then that it is ready; or that the firm doesn't allow it. Under the browser
+// the firm's policy blocks, or whose policy Clauseo couldn't check, the reason in full; for the policy not checked,
+// Try again, which asks the host to read it now and waits (disabled, busy) until the read ends, then the row follows
+// what it found: Ready for new conversations. A tool the lawyer turned off is turned on in Settings: one Open Settings
+// at the popover's foot, however many rows are off there, its tooltip saying what a change reaches. Its own chunk,
+// loaded as the status line first shows the tool line (tool-line.tsx).
 import { useId, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { LineTip, ToolLinePopover } from "@clauseo/components/clauseo/tool-line-popover.tsx";
-import { IconTick, IconTryAgain } from "@clauseo/components/icons/icons.tsx";
+import {
+  DownloadBar,
+  LineTip,
+  ToolLinePopover,
+} from "@clauseo/components/clauseo/tool-line-popover.tsx";
+import { IconDownload, IconTick, IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { cn } from "@clauseo/components/lib/cn.ts";
 import { useToolsWords } from "@clauseo/components/lib/words-tools.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { chip } from "@clauseo/components/ui/recipes.ts";
+import type { BrowserInstall, BrowserInstallStore } from "./browser-install.ts";
 import type { BrowserPolicy, BrowserPolicyStore } from "./browser-policy.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
-import { toolRow, type RecheckPart } from "./tool-rows.ts";
+import { toolRow, type InstallPart, type RecheckPart } from "./tool-rows.ts";
 import type { KnownTool } from "./tools.ts";
 
 const nothing = () => () => {};
@@ -31,6 +37,102 @@ function usePolicy(store: BrowserPolicyStore | null): BrowserPolicy | null {
     store?.get ?? unheard,
     store?.get ?? unheard,
   );
+}
+
+const none = (): BrowserInstall | null => null;
+
+function useInstall(store: BrowserInstallStore | null): BrowserInstall | null {
+  return useSyncExternalStore(store?.subscribe ?? nothing, store?.get ?? none, store?.get ?? none);
+}
+
+/** Cancel, for a download under way or waiting for the network. */
+function CancelInstall({ text, onCancel }: { text: string; onCancel: () => void }) {
+  return (
+    <Button kind="quiet" size="small" data-testid="tool-install-cancel" onClick={onCancel}>
+      {text}
+    </Button>
+  );
+}
+
+/** Clauseo's own browser under the browser row with none: the offer (with its line, when it has one), the download with
+ * Cancel, the wait for the network with Cancel, the firm's policy, or ready. */
+function Install({
+  part,
+  onInstall,
+  onCancel,
+}: {
+  part: InstallPart;
+  onInstall: () => void;
+  onCancel: () => void;
+}) {
+  switch (part.kind) {
+    case "offer":
+      return (
+        <div className="tool-row-sub grid gap-s2">
+          {part.line !== null && (
+            <p className="text-small text-muted" data-testid="tool-install-line">
+              {part.line}
+            </p>
+          )}
+          <div className="flex items-center gap-s2">
+            <Button
+              kind="tone"
+              size="small"
+              data-testid="tool-install"
+              data-waiting={part.waiting}
+              disabled={part.waiting}
+              aria-busy={part.waiting}
+              onClick={onInstall}
+            >
+              <IconDownload size={16} />
+              {part.button}
+            </Button>
+          </div>
+        </div>
+      );
+    case "getting":
+      return (
+        <div className="tool-row-sub grid gap-s2" data-testid="tool-install-getting">
+          {part.behind !== null && (
+            <p className="text-small text-primary" data-testid="tool-install-behind">
+              {part.behind}
+            </p>
+          )}
+          {part.text !== "" && (
+            <p className="text-small text-muted" data-testid="tool-install-line">
+              {part.text}
+            </p>
+          )}
+          <div className="flex items-center gap-s2">
+            {/* the line above says how far in words; the bar's own figure is the percent alone */}
+            <DownloadBar
+              value={part.value}
+              max={part.max}
+              text={part.text === "" ? "" : `${part.percent}%`}
+              name={part.text === "" ? part.cancel : part.text}
+              className="min-w-0 flex-1"
+            />
+            <CancelInstall text={part.cancel} onCancel={onCancel} />
+          </div>
+        </div>
+      );
+    case "offline":
+      return (
+        <div className="tool-row-sub flex items-center gap-s2">
+          <p className="min-w-0 flex-1 text-small text-muted" data-testid="tool-install-line">
+            {part.line}
+          </p>
+          <CancelInstall text={part.cancel} onCancel={onCancel} />
+        </div>
+      );
+    case "forbidden":
+    case "done":
+      return (
+        <p className="tool-row-sub text-small text-muted" data-testid="tool-install-line">
+          {part.line}
+        </p>
+      );
+  }
 }
 
 /** Try again under the browser whose policy Clauseo couldn't check: disabled and busy while the read runs. */
@@ -118,11 +220,19 @@ export function ToolPopover({
   const w = useToolsWords();
   const { platform } = useDisplay();
   const policy = usePolicy(room.policy);
+  const install = useInstall(room.install);
   const rows = tools.map((tool) =>
-    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, platform, policy }),
+    toolRow(w.lang, tool, {
+      settings: room.openSettings !== undefined,
+      platform,
+      policy,
+      install,
+    }),
   );
   const settings = rows.some((row) => row.settings);
   const onRecheck = () => room.policy?.recheck();
+  const onInstall = () => room.install?.install();
+  const onCancel = () => room.install?.cancel();
   return (
     <ToolLinePopover label={label} glyphs={glyphs}>
       <ul className="grid">
@@ -157,17 +267,8 @@ export function ToolPopover({
               </p>
             )}
             {row.recheck !== null && <Recheck part={row.recheck} onRecheck={onRecheck} />}
-            {row.download !== null && room.openChromeDownload !== null && (
-              <div className="tool-row-sub flex items-center gap-s2">
-                <Button
-                  kind="tone"
-                  size="small"
-                  data-testid="tool-download-chrome"
-                  onClick={room.openChromeDownload}
-                >
-                  {row.download}
-                </Button>
-              </div>
+            {row.install !== null && (
+              <Install part={row.install} onInstall={onInstall} onCancel={onCancel} />
             )}
           </li>
         ))}

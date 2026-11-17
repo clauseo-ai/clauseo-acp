@@ -5,18 +5,18 @@ import { createElement } from "react";
 import type { ToolsSegment } from "@clauseo/components/clauseo/composer.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import type { StreamView } from "../store/view.ts";
+import type { BrowserInstallStore } from "./browser-install.ts";
 import type { BrowserPolicyStore } from "./browser-policy.ts";
 import { ToolLine } from "./tool-line.tsx";
 import { knownTools, sameTools, toolsLabel, type KnownTool } from "./tools.ts";
 
 /** What the room gives the tool line: the plan's name, as the status line names it ("Claude"), Settings where the
- * host has the window, the app's re-read of the firm's browser policy, and the open of Chrome's download page in the
- * default browser (null with no transport). */
+ * host has the window, the app's re-read of the firm's browser policy, and its download of Clauseo's own browser. */
 export type ToolLineRoom = {
   plan: string;
   openSettings: (() => void) | undefined;
   policy: BrowserPolicyStore | null;
-  openChromeDownload: (() => void) | null;
+  install: BrowserInstallStore | null;
 };
 
 let last: readonly KnownTool[] = [];

@@ -4,9 +4,6 @@
 import { createContext } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
 
-/** Chrome's official download page, which the tool line's Download Chrome opens in the lawyer's default browser. */
-export const CHROME_DOWNLOAD = "https://www.google.com/chrome/";
-
 export type ToolLineHost = {
   plan: string;
   openSettings: (() => void) | undefined;

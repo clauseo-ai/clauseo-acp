@@ -356,6 +356,7 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!(false),
         json!(false),
         json!(true),
+        json!(false),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -401,6 +402,7 @@ fn a_refused_key_goes_back_to_its_default() {
         json!(!NetworkSettings::default().allow_unsafe_site_override),
         json!(!NetworkSettings::default().unsafe_site_list_updates),
         json!(!BrowserSettings::default().allow_when_remote_debugging_disabled),
+        json!(!BrowserSettings::default().allow_download),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {

@@ -20,6 +20,8 @@ use crate::support::{Dir, Running, wait};
 
 #[path = "browser_install_catch_up.rs"]
 mod catch_up;
+#[path = "browser_install_guard.rs"]
+mod guard;
 use crate::write;
 
 /// The browser inside the unpacked folder on Apple silicon.
@@ -41,7 +43,7 @@ const EMPTY_ZIP: [u8; 22] = [
     0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-/// Fake tools: Stable is `131.0.6778.85`; the download either finishes at once or, when
+/// Fake tools: Stable is `158.0.6778.85`; the download either finishes at once or, when
 /// `block` is set, says it started and runs until released (then finishes) or cancelled.
 pub(super) struct Fake {
     block: bool,
@@ -49,6 +51,10 @@ pub(super) struct Fake {
     release: Mutex<mpsc::Receiver<()>>,
     /// How many downloads began.
     downloads: AtomicUsize,
+    /// How many version-list fetches began.
+    fetches: AtomicUsize,
+    /// The proxy each fetch and download was given, in order.
+    proxies: Mutex<Vec<Option<String>>>,
 }
 
 /// A fake's handles: its starts, and the sender that releases a blocked download.
@@ -66,6 +72,8 @@ impl Fake {
             started: Mutex::new(started),
             release: Mutex::new(released),
             downloads: AtomicUsize::new(0),
+            fetches: AtomicUsize::new(0),
+            proxies: Mutex::new(Vec::new()),
         };
         (Arc::new(fake), Handles { starts, release })
     }
@@ -80,9 +88,12 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         _work: &Path,
+        proxy: Option<&str>,
         _cancel: &Cancel,
     ) -> Result<Vec<u8>, Failure> {
-        let version = "131.0.6778.85";
+        self.fetches.fetch_add(1, Ordering::SeqCst);
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
+        let version = "158.0.6778.85";
         let url = format!(
             "https://storage.googleapis.com/chrome-for-testing-public/{version}/mac-arm64/\
              chrome-mac-arm64.zip"
@@ -98,10 +109,12 @@ impl InstallTools for Fake {
         &self,
         _url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.proxies.lock().unwrap().push(proxy.map(str::to_owned));
         write::write(zip, &EMPTY_ZIP);
         progress(22, 22);
         self.started.lock().unwrap().send(()).unwrap();
@@ -196,6 +209,7 @@ pub(super) fn browsers(dir: &Dir) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir.data().join("app").join("browsers"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != clauseo_host::browser::install::fresh::RECORD_FILE)
         .collect();
     names.sort();
     names
@@ -226,17 +240,18 @@ fn a_download_reaches_the_app_and_the_next_search_finds_it() {
             BrowserInstallState::Downloading {
                 bytes: Count::from(22u32),
                 total: Count::from(22u32),
+                behind: false,
             },
             BrowserInstallState::Unpacking,
             BrowserInstallState::Done,
         ]
     );
-    assert_eq!(browsers(&dir), ["chrome-131.0.6778.85"]);
+    assert_eq!(browsers(&dir), ["chrome-158.0.6778.85"]);
     let binary: PathBuf = MAC_BINARY.split('/').fold(
         dir.data()
             .join("app")
             .join("browsers")
-            .join("chrome-131.0.6778.85"),
+            .join("chrome-158.0.6778.85"),
         |path, part| path.join(part),
     );
     assert_eq!(chrome::find(&roots(&dir)), Some(binary));
@@ -266,7 +281,7 @@ fn a_second_install_while_one_runs_is_done_and_starts_nothing() {
     handles.release.send(()).unwrap();
     assert_eq!(states(&mut sub).pop(), Some(BrowserInstallState::Done));
     assert_eq!(tools.downloads.load(Ordering::SeqCst), 1);
-    assert_eq!(browsers(&dir), ["chrome-131.0.6778.85"]);
+    assert_eq!(browsers(&dir), ["chrome-158.0.6778.85"]);
     host.shutdown();
 }
 
@@ -283,19 +298,26 @@ impl InstallTools for SlowCancel {
         self.inner.free_bytes(folder)
     }
 
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
-        self.inner.fetch_versions(url, work, cancel)
+    fn fetch_versions(
+        &self,
+        url: &str,
+        work: &Path,
+        proxy: Option<&str>,
+        cancel: &Cancel,
+    ) -> Result<Vec<u8>, Failure> {
+        self.inner.fetch_versions(url, work, proxy, cancel)
     }
 
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        proxy: Option<&str>,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         if self.inner.downloads.load(Ordering::SeqCst) > 0 {
-            return self.inner.download(url, zip, cancel, progress);
+            return self.inner.download(url, zip, proxy, cancel, progress);
         }
         self.inner.downloads.fetch_add(1, Ordering::SeqCst);
         write::write(zip, &EMPTY_ZIP);
@@ -366,7 +388,7 @@ fn an_install_right_after_a_cancel_starts_once_the_cancelled_one_ends() {
     );
     assert_eq!(states(&mut sub).pop(), Some(BrowserInstallState::Done));
     assert_eq!(inner.downloads.load(Ordering::SeqCst), 2);
-    assert_eq!(browsers(&dir), ["chrome-131.0.6778.85"]);
+    assert_eq!(browsers(&dir), ["chrome-158.0.6778.85"]);
     host.shutdown();
 }
 
