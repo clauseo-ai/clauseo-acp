@@ -51,9 +51,9 @@ export type RoomCommands = {
   newMatter: (() => void) | null;
   find: () => void;
   /** Shows or hides the sidebar, as its toolbar button does. */
-  toggleSidebar: () => void;
+  toggleSidebar: (() => void) | null;
   /** Shows or hides the papers, as their toolbar button does. */
-  togglePapers: () => void;
+  togglePapers: (() => void) | null;
 };
 
 /** New conversation's and New matter's keys, the sidebar's and the papers' off the Mac, and the native menu's five
@@ -80,8 +80,8 @@ export function useRoomCommands(commands: RoomCommands, mac: boolean): void {
       if (command === "new_conversation") newConversation?.();
       else if (command === "new_matter") newMatter?.();
       else if (command === "find") find();
-      else if (command === "toggle_sidebar") toggleSidebar();
-      else if (command === "toggle_papers") togglePapers();
+      else if (command === "toggle_sidebar") toggleSidebar?.();
+      else if (command === "toggle_papers") togglePapers?.();
     };
     document.addEventListener("keydown", onKey);
     window.addEventListener(MENU_EVENT, onMenu);
