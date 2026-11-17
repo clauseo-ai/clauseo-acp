@@ -210,8 +210,8 @@ const OWN = {
     "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे हटा दिया। उसकी एक प्रति संस्करणों में रहती है।",
   "Nothing was undone: Clauseo couldn't safely put '{paper}' back, so it left it as it is.":
     "कुछ पूर्ववत नहीं हुआ: Clauseo '{paper}' को सुरक्षित रूप से वापस नहीं ला सका, इसलिए उसे जैसा है वैसा ही छोड़ दिया।",
-  "Nothing was restored: Clauseo left '{paper}' as it is.":
-    "कुछ पुनर्स्थापित नहीं हुआ: Clauseo ने '{paper}' को जैसा है वैसा ही छोड़ दिया।",
+  "Nothing was restored: Clauseo couldn't safely bring back that version of '{paper}', so it left it as it is.":
+    "कुछ पुनर्स्थापित नहीं हुआ: Clauseo '{paper}' का वह संस्करण सुरक्षित रूप से वापस नहीं ला सका, इसलिए उसे जैसा है वैसा ही छोड़ दिया।",
   "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.":
     "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: जहाँ यह था, वहाँ अब '{name}' नाम का एक फ़ोल्डर है। कुछ नहीं बदला है। उस फ़ोल्डर का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
   "Clauseo can't restore this paper: '{name}', the folder it was in, is now a file. Nothing has changed. Rename or move that file, then try again.":

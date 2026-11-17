@@ -169,7 +169,9 @@ export const UC_ONE_FILE: Entry[] = [
   // the paper changed as Restore was pressed (saved in Word, say), so the host wrote nothing
   state(
     "UC-341",
-    versionWords("Nothing was restored: Clauseo left '{paper}' as it is."),
+    versionWords(
+      "Nothing was restored: Clauseo couldn't safely bring back that version of '{paper}', so it left it as it is.",
+    ),
     { ...MODIFIED, wroteNothing: true },
     [...ASK_EARLIER, CONFIRM],
   ),

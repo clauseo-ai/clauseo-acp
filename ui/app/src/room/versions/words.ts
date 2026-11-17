@@ -389,7 +389,11 @@ export function doneLine(
       const mark =
         done.outcome.kind === "wrote" ? s.oneFile.get(done.outcome.checkpoint) : undefined;
       if (mark?.wrote !== true)
-        return vt(lang, "Nothing was restored: Clauseo left '{paper}' as it is.", { paper });
+        return vt(
+          lang,
+          "Nothing was restored: Clauseo couldn't safely bring back that version of '{paper}', so it left it as it is.",
+          { paper },
+        );
       if (done.moved === true)
         return vt(
           lang,
