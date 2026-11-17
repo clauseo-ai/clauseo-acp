@@ -158,9 +158,19 @@ impl Handle {
         }
         #[cfg(windows)]
         drop(listed);
-        self.stdin.close();
+        // Closed once flushed, within the stdin grace: on Windows the pipe is `blocking::Unblock`,
+        // where a write that returned (an answer the host just sent) may still wait in its buffer
+        // for a blocking thread, and a pipe dropped unflushed loses it, so the agent read end of
+        // file in its place. A Unix pipe takes each write at once.
+        let pipe = self.stdin.take();
+        let close = async move {
+            if let Some(mut pipe) = pipe {
+                // A broken pipe (the agent gone) leaves nothing to flush.
+                drop(futures::AsyncWriteExt::close(&mut pipe).await);
+            }
+        };
         let exit = pin!(self.child.status());
-        let ended = ladder(exit, timer, self.stdin_grace, |step| self.step(step)).await;
+        let ended = ladder(exit, close, timer, self.stdin_grace, |step| self.step(step)).await;
         match ended {
             Ended::StdinClosed(status) => ShutdownOutcome::StdinClosed(self.finish(&status)),
             #[cfg(unix)]
@@ -266,15 +276,21 @@ enum Ended<S> {
     Unresponsive,
 }
 
-/// The ladder's waits, once stdin is closed: `exit` against each grace period (`stdin_grace` for
-/// the first), with `act` taking the step that follows a wait that ran out.
+/// The ladder's waits: `close` closing stdin, then `exit`, against the first grace period
+/// (`stdin_grace`; a close still waiting then is dropped, and the pipe with it), then `exit`
+/// against each later one, with `act` taking the step that follows a wait that ran out.
 async fn ladder<S, T: Timer>(
     mut exit: Pin<&mut impl Future<Output = S>>,
+    close: impl Future<Output = ()>,
     timer: &T,
     stdin_grace: Duration,
     mut act: impl FnMut(Step),
 ) -> Ended<S> {
-    if let Some(status) = within(exit.as_mut(), timer.after(stdin_grace)).await {
+    let closed_then_exit = async {
+        close.await;
+        exit.as_mut().await
+    };
+    if let Some(status) = within(pin!(closed_then_exit), timer.after(stdin_grace)).await {
         return Ended::StdinClosed(status);
     }
     #[cfg(unix)]

@@ -35,14 +35,21 @@ impl StdinSlot {
     /// Closes the pipe: the agent reads end of file, and later writes fail with `BrokenPipe`. A
     /// write that waits for room wakes and fails the same way.
     pub(crate) fn close(&self) {
+        drop(self.take());
+    }
+
+    /// Takes the pipe out, as [`close`](Self::close) does but without dropping it: later writes
+    /// fail with `BrokenPipe`, a write that waits for room wakes and fails the same way, and the
+    /// caller closes the pipe (shutdown flushes it first: `Handle::shutdown`).
+    pub(crate) fn take(&self) -> Option<ChildStdin> {
         let (pipe, waiting) = {
             let mut slot = self.lock();
             (slot.pipe.take(), slot.waiting.take())
         };
-        drop(pipe);
         if let Some(waiting) = waiting {
             waiting.wake();
         }
+        pipe
     }
 }
 
