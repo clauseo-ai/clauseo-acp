@@ -208,26 +208,27 @@ anything the agent starts.
   included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
   can't enforce a read deny (until S15)
-- `built` (every OS): A session's processes end with the session. Every agent launch gets its
-  own `CLAUSEO_SESSION` (128 random bits in hex), which every process it starts inherits. When
-  the session ends (the agent's stop, the host's quit, the agent's own exit or crash; never at a
-  turn's end), after the tree kill, the host lists this user's processes and kills (SIGKILL, by
-  pid, never by name) each whose environment holds exactly that entry, whatever its session,
-  group or parent, pass after pass (at most 5) until none is found (Linux `/proc`; macOS libproc
-  and `sysctl(KERN_PROCARGS2)`). Each is read again just before its kill, on Linux through a
-  pidfd, so a reused pid is never signalled. On Windows the agent's Job Object takes every
-  process it starts and refuses breakaway. Not covered by this layer:
-  - macOS and Linux: a process without the variable in its environment, and work a session hands
-    to a system service that runs it outside the session; the sandbox still bounds what either
-    can write (on Linux, tier C, only Codex's own sandbox does)
+- `built` (Linux, Windows): A session's processes end with the session. Every agent launch gets
+  its own `CLAUSEO_SESSION` (128 random bits in hex), which every process it starts inherits.
+  When the session ends (the agent's stop, the host's quit, the agent's own exit or crash; never
+  at a turn's end), after the tree kill, the host lists this user's processes and kills (SIGKILL,
+  by pid, never by name) each whose environment holds exactly that entry, whatever its session,
+  group or parent, pass after pass (at most 5) until none is found (Linux `/proc`). Each is read
+  again just before its kill, through a pidfd where the kernel has one. On Windows the agent's
+  Job Object takes every process it starts and refuses breakaway. Not covered by this layer:
+  - macOS: not covered yet. The same sweep runs there (libproc and `sysctl(KERN_PROCARGS2)`),
+    but it cannot identify every process of a session that has left the agent's process tree,
+    so a session's leftover processes on macOS stay an open gap until an identifier that holds
+    there is chosen
+  - Linux: a process that does not inherit the session's environment, and work a session hands
+    to a system service that runs it outside the session; Codex's own sandbox still bounds what
+    either can write (Linux is tier C)
   - Windows: work handed to WMI, the task scheduler or an already-running program by an agent
     without the sandbox (Claude)
   - a host that crashes: no sweep runs for its sessions
   - planned after launch: a Linux cgroup v2 scope per session, ended through `cgroup.kill`
-    (10 h); a macOS sweep by Seatbelt profile (`sandbox_check` against the session's temp
-    folder; a private API, to be checked on macOS 14 and 15) (10 h); on Windows, a sweep like
-    the sandbox's pool-user sweep for sessions without the sandbox (3 h); an option to sweep at
-    each turn's end (4 h)
+    (10 h); on Windows, a sweep like the sandbox's pool-user sweep for sessions without the
+    sandbox (3 h); an option to sweep at each turn's end (4 h)
 
 ## Egress proxy
 
