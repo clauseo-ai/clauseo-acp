@@ -2093,6 +2093,13 @@ export type FilesChanged = {
 	files: FileChange[],
 	/**  The files it changed that were not versioned. */
 	skipped: SkippedFile[],
+	/**
+	 *  The files that were in the folder when it began but not versioned (cloud-only, over the
+	 *  size cap) and are gone now, with why each had not been versioned: Clauseo had no copy of
+	 *  them to bring back. Missing reads as empty, and empty is left out, so an event from before
+	 *  the field still decodes.
+	 */
+	gone?: SkippedFile[],
 };
 
 /**
@@ -4393,7 +4400,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4403,7 +4410,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; other_matter_refused?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4435,7 +4442,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { files_came_back?: never; guard_steps_more?: never; matter_read_stopped?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4453,7 +4460,7 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { files_came_back?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo kept the agent out of another matter's files: a refused permission request,
  *  or a tool call that failed as refused on a path in that matter (the innermost, when
@@ -4465,7 +4472,7 @@ export type NoticeKind =
 	matter: MatterId,
 	/**  Its name when the host gave the notice (display only; it may have changed). */
 	name: string,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Matters Clauseo could not fully fence off from the agent: a folder on the way to
  *  them could not be listed or is on a network share, or there were too many paths to
@@ -4476,7 +4483,7 @@ export type NoticeKind =
 	matters: MatterId[],
 	/**  How many more beyond `matters`. */
 	more: number,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Claude's sandboxed commands can't reach some folders this session: another matter
  *  this conversation is not invited into lies inside this one, or another matter's
@@ -4494,7 +4501,48 @@ export type NoticeKind =
 	matter: MatterId,
 	/**  Its name when the host gave the notice (display only; it may have changed). */
 	name: string,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Files that were in the matter's folder when a step began but that Clauseo kept no copy
+ *  of (cloud-only, over the size cap) were deleted during it: no undo brings them back.
+ *  The step's `FilesChanged` lists them all as `gone`.
+ */
+({ files_gone_no_copy: {
+	/**
+	 *  The first of them, at most five (all six when there are six, so `more` is never
+	 *  1), sorted by path bytes, each with why it had not been versioned.
+	 */
+	files: SkippedFile[],
+	/**  How many more were deleted beyond `files`. */
+	more: number,
+} }) & { files_came_back?: never; files_changed_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Files that were in the matter's folder when an answer began but that Clauseo kept no
+ *  copy of (cloud-only, over the size cap) are still there with another size or
+ *  modification time: changed during it, with no copy of how they were before, so no
+ *  undo brings that version back. A file only downloaded is not one.
+ */
+({ files_changed_no_copy: {
+	/**
+	 *  The first of them, at most five (all six when there are six, so `more` is never
+	 *  1), sorted by path bytes, each with why it had not been versioned.
+	 */
+	files: SkippedFile[],
+	/**  How many more were changed beyond `files`. */
+	more: number,
+} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; no_copy_blocked?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Clauseo's pre-write guard refused a step of the agent's that would delete, move or
+ *  overwrite a file Clauseo keeps no copy of (cloud-only, over the size cap), which no
+ *  undo could bring back. Codex sends no event of its own for it.
+ */
+({ no_copy_blocked: {
+	/**
+	 *  The file's name, the last part of its path in the matter, cut to a length the
+	 *  line can show.
+	 */
+	file: MatterPath,
+} }) & { files_came_back?: never; files_changed_no_copy?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -6352,6 +6400,11 @@ export type StepEntry = {
 	 *  started, and in a step folded before the field.
 	 */
 	checkpoint_before?: CheckpointId,
+	/**
+	 *  The files gone during it that Clauseo had no copy of (from its `FilesChanged`), with why
+	 *  each had not been versioned. Missing reads as empty, and empty is left out.
+	 */
+	gone?: SkippedFile[],
 	/**  The after-turn checkpoint; `None` when it failed, and the step cannot be undone. */
 	checkpoint_after?: CheckpointId,
 	/**  Whether the step was undone. */
