@@ -268,8 +268,8 @@ fn wired_host(
 }
 
 /// `config` with a block list already loaded, as a release's bundled snapshot gives one: the
-/// session's proxy runs in open mode, which starts only with a list
-/// (`clauseo_sandbox::Error::BlockListNotLoaded`). Its updates go to a closed local port.
+/// session's proxy runs in open mode and blocks the listed hosts. Its updates go to a closed
+/// local port.
 fn with_list(config: HostConfig) -> HostConfig {
     let header = Header {
         generated: Generated::parse("2026-11-07T06:00:00Z").unwrap(),
