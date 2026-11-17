@@ -129,6 +129,7 @@
 )]
 
 mod checkpoint;
+mod clash;
 mod compare;
 mod diff;
 mod error;

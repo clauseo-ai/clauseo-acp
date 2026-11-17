@@ -187,6 +187,7 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
         | MatterReply::AfterTurn(_)
         | MatterReply::Undone(_)
         | MatterReply::Restored(_)
+        | MatterReply::RestoreRecorded(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)

@@ -18,6 +18,9 @@ use crate::write;
 #[cfg(test)]
 #[path = "restore_for_good.rs"]
 mod restore_for_good;
+#[cfg(test)]
+#[path = "restore_recorded_first.rs"]
+mod restore_recorded_first;
 
 /// The matter's events, read until caught up.
 pub(crate) fn matter_events(host: &Running, matter: MatterId) -> Events {

@@ -315,6 +315,10 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
         }
         Tag::Turn(tag) => turn::committed(actor, tag, outcome),
         Tag::Restore(matter) => turn::restore_committed(actor, matter, outcome.is_ok()),
+        Tag::RestoreRecord(ask) => {
+            let outcome = outcome.map_err(|failure| Error::Store(failure.error.clone()));
+            turn::record_logged(actor, *ask, outcome);
+        }
         Tag::Wake => super::triage::wake_committed(actor, outcome),
     }
 }

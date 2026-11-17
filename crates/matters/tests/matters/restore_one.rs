@@ -75,6 +75,49 @@ fn one_changed_file_comes_back_alone_and_can_be_taken_back() {
     assert_eq!(fx.read("b.txt"), b"bee, edited");
 }
 
+/// An undo puts back only what the restore left: a save made outside after it, recorded first as
+/// a version (as the watcher does) or not, stays on disk; the preview keeps it, and the undo
+/// writes nothing.
+#[test]
+fn an_undo_never_replaces_a_save_made_after_the_restore() {
+    for recorded in [true, false] {
+        let name = if recorded {
+            "restore-one-undo-after-save-recorded"
+        } else {
+            "restore-one-undo-after-save"
+        };
+        let (fx, mut matter) = versioned(name);
+        let chosen = only("a.txt");
+        matter
+            .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
+            .unwrap();
+        assert_eq!(fx.read("a.txt"), b"one");
+        fx.write("a.txt", "four, saved outside");
+        let next = if recorded {
+            matter.before_turn(&meta(6)).unwrap();
+            7
+        } else {
+            6
+        };
+
+        let plan = matter
+            .preview_restore(cid(3), RestoreFiles::Only(&chosen), Some(cid(5)))
+            .unwrap();
+        assert!(plan.writes.is_empty(), "recorded: {recorded}");
+        assert_eq!(plan.kept, chosen);
+        let mut back = restore_request(3, RestoreFiles::Only(&chosen), next, next + 1);
+        back.undoes = Some(cid(5));
+        let undone = matter.restore(&back).unwrap();
+        assert_none(&undone.written);
+        assert_eq!(undone.kept, chosen);
+        assert_eq!(
+            fx.read("a.txt"),
+            b"four, saved outside",
+            "recorded: {recorded}"
+        );
+    }
+}
+
 #[test]
 fn one_deleted_file_comes_back_with_its_folders() {
     let (fx, mut matter) = versioned("restore-one-deleted");

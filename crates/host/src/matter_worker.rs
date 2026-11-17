@@ -11,9 +11,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter,
-    OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
-    TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
+    Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe,
+    PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta, UndoRequest,
+    Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
@@ -29,7 +29,7 @@ use crate::network_paths::{self, NetEnv};
 use crate::sent::{Places, TurnPaths};
 use crate::shell_writes;
 
-pub(crate) use jobs::{RestoreJob, UndoJob};
+pub(crate) use jobs::{RecordDone, RestoreDone, RestoreJob, UndoJob};
 
 /// The matter paths a turn's tool calls wrote ([`TurnPaths::written`]), in `folder`: those
 /// `acp` placed inside the session folder by text, and each `outside` path that the network-safe
@@ -174,6 +174,9 @@ pub(crate) enum MatterJob {
     Undo(UndoJob),
     /// Restore a version.
     Restore(RestoreJob),
+    /// A restore's steps before it writes (`Matter::restore_record`): the folder recorded as
+    /// the outside-edits checkpoint, or the last checkpoint it equals; writes no file.
+    RestoreRecord(RestoreJob),
     /// Compare a version with another version, or with the folder now (`to` is
     /// [`CompareSide::Folder`]; nothing is stored).
     Compare { from: CheckpointId, to: CompareSide },
@@ -227,6 +230,7 @@ pub(crate) enum MatterReply {
     AfterTurn(Result<TurnCheckpoint, Error>),
     Undone(Result<Box<Undone>, Error>),
     Restored(Result<Box<RestoreDone>, Error>),
+    RestoreRecorded(Result<Box<RecordDone>, Error>),
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
@@ -255,6 +259,7 @@ impl MatterReply {
             Self::AfterTurn(_) => "AfterTurn",
             Self::Undone(_) => "Undone",
             Self::Restored(_) => "Restored",
+            Self::RestoreRecorded(_) => "RestoreRecorded",
             Self::Compared(_) => "Compared",
             Self::Previewed(_) => "Previewed",
             Self::HeldOpen(_) => "HeldOpen",
@@ -275,15 +280,6 @@ pub(crate) struct TurnCheckpoint {
     pub(crate) checkpoint: Checkpoint,
     /// `Some` when the outcome is `Reused`.
     pub(crate) reused: Option<Reused>,
-}
-
-/// A restore R8 has done, with the timeline entry of the id it reused when it wrote nothing,
-/// so the host can record that id late if the log lacks it.
-#[derive(Debug)]
-pub(crate) struct RestoreDone {
-    pub(crate) restored: Restored,
-    /// For a `Reused` restore checkpoint: its kind, thread and turn on R8's timeline.
-    pub(crate) reused: Option<TimelineEntry>,
 }
 
 /// A reused checkpoint as R8's timeline has it.
@@ -479,22 +475,8 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             };
             Ok(Box::new(matter.undo(&request)?))
         })),
-        MatterJob::Restore(job) => MatterReply::Restored(open(settings, slot).and_then(|matter| {
-            let request = Restore {
-                undoes: job.undoes,
-                from: job.from,
-                files: (&job.scope).into(),
-                outside_edits: job.outside_edits,
-                checkpoint: job.checkpoint,
-                at: job.at,
-            };
-            let restored = matter.restore(&request)?;
-            let reused = match restored.checkpoint.outcome {
-                CheckpointOutcome::Reused(id) => timeline_entry(matter, id),
-                CheckpointOutcome::Created(_) => None,
-            };
-            Ok(Box::new(RestoreDone { restored, reused }))
-        })),
+        MatterJob::Restore(job) => jobs::restore(open(settings, slot), &job),
+        MatterJob::RestoreRecord(job) => jobs::record(open(settings, slot), &job),
         MatterJob::Compare { from, to } => MatterReply::Compared(
             open(settings, slot)
                 .and_then(|matter| Ok(matter.compare(CompareSide::Checkpoint(from), to)?)),
@@ -584,7 +566,7 @@ mod relocate;
 mod sides;
 mod too_deep;
 
-use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
+use checkpoints::{repair, root_commit, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 #[cfg(test)]
 pub(crate) use crash::hook;

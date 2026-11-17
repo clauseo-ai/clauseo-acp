@@ -154,3 +154,7 @@ mod word_no_owner;
 #[cfg(test)]
 #[path = "matters/restore_one.rs"]
 mod restore_one;
+
+#[cfg(test)]
+#[path = "matters/restore_record.rs"]
+mod restore_record;

@@ -385,6 +385,32 @@ test("a document that changes while the dialog is open: asked again, Restore goe
   );
 });
 
+test("a document saved again while the dialog is open, still modified, says it had changed since", async () => {
+  // the same change, over other content: the save outside lands while the dialog is open
+  const over = (before: string) => ({
+    ...one("brief.txt"),
+    changes: [file("brief.txt", { before })],
+  });
+  let asked = 0;
+  h = await comparing([file("brief.txt")], {
+    preview: () => {
+      asked += 1;
+      return { restore_preview: over(asked === 1 ? "sha1:aa" : "sha1:bb") };
+    },
+    dispatch: () => ({ version_restored: { checkpoint: "cp4" } }),
+  });
+  await h.click(h.one("version-restore-file"));
+  await h.deliver(MATTER_STREAM, [
+    upsert(version(5, "outside_edits", { files: [file("brief.txt")] })),
+  ]);
+  expect(asked).toBe(2);
+  await h.click(h.one("dialog-confirm"));
+  await h.deliver(MATTER_STREAM, [upsert(version(4, "restore")), MARKED]);
+  expect(doneText()).toContain(
+    "'\u2068brief.txt\u2069' had changed since you opened this, so Clauseo restored it as it was then. Your newer version is kept in Versions.",
+  );
+});
+
 test.each([
   [
     "a folder now has its name",

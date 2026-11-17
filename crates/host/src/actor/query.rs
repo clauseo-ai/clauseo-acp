@@ -300,6 +300,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::AfterTurn(_)
         | MatterReply::Undone(_)
         | MatterReply::Restored(_)
+        | MatterReply::RestoreRecorded(_)
         | MatterReply::Located(_)
         | MatterReply::HeldOpen(_)
         | MatterReply::StillGone(_)

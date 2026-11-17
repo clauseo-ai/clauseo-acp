@@ -2,7 +2,8 @@
 //! checkpoint. Everything moves forward: the result is a new `restore` checkpoint, so a restore
 //! can be undone. Files added since stay: a restore never deletes, except when it undoes an
 //! earlier restore ([`Restore::undoes`]): then the files that restore added go, each only while
-//! it still holds what that restore wrote.
+//! it still holds what that restore wrote, and a file goes back only while it holds what that
+//! restore left there: one changed since, however and whenever, is kept as it is.
 //!
 //! The order, and what a crash between two steps leaves (nothing is committed or written before
 //! step 4):
@@ -25,6 +26,11 @@
 //!    it as outside edits. A retry with fresh ids writes only what still differs.
 //! 6. The `restore` checkpoint. A crash before its publish leaves the folder restored and
 //!    recorded by the next checkpoint as outside edits; a retry finds nothing to write.
+//!
+//! [`record`] runs steps 1 to 4 alone and writes no file, so the host can log the
+//! outside-edits checkpoint, durably, before any file is written: a crash in step 5 then never
+//! leaves that copy in the history alone, where Versions would not show it. The restore that
+//! follows takes fresh ids; its step 4 reuses that checkpoint unless the folder changed since.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -40,7 +46,7 @@ use crate::types::{
     Settings, TimelineEntry,
 };
 use crate::writeback::{self, Names, Op, writable};
-use crate::{Error, locks, rules};
+use crate::{Error, clash, locks, rules};
 
 /// One file the restore writes: the version's blob, the blob there now (`None`: absent), and
 /// the version's size.
@@ -251,7 +257,7 @@ fn plan(
     then: &[VersionEntry],
     now: &[CacheEntry],
     chosen: Option<&BTreeSet<&str>>,
-    undone: &[VersionEntry],
+    undone: &Undone,
 ) -> Result<Plan, Error> {
     let draft = draft(then, now, chosen)?;
     let cap = settings.limits.effective_cap();
@@ -265,7 +271,7 @@ fn plan(
     // A file added since goes only when the undone restore added it and it still holds what
     // that restore wrote, and when it may be deleted by its exact name.
     for path in draft.added_since {
-        let wrote = find_by_path(undone, path.as_str(), |file| file.path.as_str());
+        let wrote = find_by_path(&undone.added, path.as_str(), |file| file.path.as_str());
         let there = find_by_path(now, path.as_str(), |entry| entry.path.as_str());
         let same = matches!(
             (wrote, there.map(|entry| entry.state)),
@@ -285,12 +291,21 @@ fn plan(
         // A chosen file meeting a folder of its name, or a file where its folder goes, is
         // refused: the lawyer named it, so keeping it silently would restore nothing.
         if chosen.is_some()
-            && let Some(in_way) = writeback::clash(folder, &candidate.path)?
+            && let Some(in_way) = clash::clash(folder, &candidate.path)?
         {
             return Err(Error::FileFolderClash {
                 path: candidate.path,
                 in_way,
             });
+        }
+        // An undo writes over only what the undone restore left: content it didn't write (an
+        // edit since, recorded as a version or not) is never replaced.
+        if let Some(left) = &undone.left {
+            let wrote = find_by_path(left, candidate.path.as_str(), |file| file.path.as_str());
+            if wrote.map(|file| file.blob) != candidate.now {
+                plan.kept.push(candidate.path);
+                continue;
+            }
         }
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
         // A name the folder holds only spelled otherwise, by the rule undo and `apply` use
@@ -320,8 +335,17 @@ fn plan(
     Ok(plan)
 }
 
-/// The files the restore `undoes` added (in its tree, not in the checkpoint just before it),
-/// with the blobs it wrote, sorted by path bytes; empty for `None`. `UnknownCheckpoint` unless
+/// The restore an undo takes back; empty (`left` none) for a plain restore.
+#[derive(Debug, Default)]
+struct Undone {
+    /// The files it added, with the blobs it wrote, sorted by path bytes.
+    added: Vec<VersionEntry>,
+    /// Every file as it left them (its tree), sorted by path bytes.
+    left: Option<Vec<VersionEntry>>,
+}
+
+/// The restore `undoes` ([`Undone`]): the files it added (in its tree, not in the checkpoint
+/// just before it), and its tree; empty for `None`. `UnknownCheckpoint` unless
 /// `undoes` is a `restore` checkpoint with one before it, and unless `from` holds the same
 /// tree as that one (it is that checkpoint, or one with the same files, such as a
 /// `before-turn` checkpoint that caught no edit): `UnknownCheckpoint` names `from` then.
@@ -329,9 +353,9 @@ fn added_by(
     core: &Core,
     from: CheckpointId,
     undoes: Option<CheckpointId>,
-) -> Result<Vec<VersionEntry>, Error> {
+) -> Result<Undone, Error> {
     let Some(id) = undoes else {
-        return Ok(Vec::new());
+        return Ok(Undone::default());
     };
     let before = core
         .timeline
@@ -345,7 +369,8 @@ fn added_by(
         .history
         .changed_files(before_tree, core.timeline.tree(id)?)?;
     let old: BTreeSet<&str> = old.iter().map(|file| file.path.as_str()).collect();
-    new.into_iter()
+    let added = new
+        .into_iter()
         .filter(|file| !old.contains(file.path.as_str()) && !rules::is_excluded_path(&file.path))
         .map(|file| {
             let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
@@ -354,7 +379,11 @@ fn added_by(
                 blob: file.blob,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(Undone {
+        added,
+        left: Some(core.tree_files(id)?),
+    })
 }
 
 /// See [`crate::Matter::preview_restore`].
@@ -396,13 +425,14 @@ fn with_held(mut locked: Vec<MatterPath>, held: &[MatterPath]) -> Vec<MatterPath
     locked
 }
 
-/// See [`crate::Matter::restore`]. The steps are the module's.
-pub(crate) fn restore(
+/// Steps 1 to 4 of a restore: the plan, and the outside-edits checkpoint, `Reused` when the
+/// folder equals the last checkpoint. Every refusal of [`restore`] before it writes is here.
+fn prepare(
     core: &mut Core,
     folder: &Path,
     settings: &Settings,
     request: &Restore<'_>,
-) -> Result<Restored, Error> {
+) -> Result<(Plan, Checkpoint), Error> {
     // 1. The request.
     let chosen = chosen(request.files)?;
     for id in [request.outside_edits, request.checkpoint] {
@@ -441,6 +471,27 @@ pub(crate) fn restore(
         walked,
         &spec(request.outside_edits, CheckpointKind::OutsideEdits, request),
     )?;
+    Ok((plan, outside))
+}
+
+/// See [`crate::Matter::restore_record`]: steps 1 to 4 alone.
+pub(crate) fn record(
+    core: &mut Core,
+    folder: &Path,
+    settings: &Settings,
+    request: &Restore<'_>,
+) -> Result<Checkpoint, Error> {
+    prepare(core, folder, settings, request).map(|(_, outside)| outside)
+}
+
+/// See [`crate::Matter::restore`]. The steps are the module's.
+pub(crate) fn restore(
+    core: &mut Core,
+    folder: &Path,
+    settings: &Settings,
+    request: &Restore<'_>,
+) -> Result<Restored, Error> {
+    let (plan, outside) = prepare(core, folder, settings, request)?;
     let outside_edits = match outside.outcome {
         CheckpointOutcome::Created(_) => Some(outside),
         CheckpointOutcome::Reused(_) => None,
@@ -468,8 +519,11 @@ pub(crate) fn restore(
         });
     }
     // 5. Stage, check again, rename; a folder made since the plan where a file goes, or a file
-    // where its folder goes, is the clash it is, not a file another program moved.
+    // where its folder goes, is the clash it is, not a file another program moved. With the
+    // `test-support` feature, first the failure `test_support::fail_restore_write` armed.
     clashed_since(folder, &plan.writes)?;
+    #[cfg(feature = "test-support")]
+    crate::test_support::before_restore_write(folder, &plan.targets())?;
     let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
     let deleted = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?.for_good;
@@ -491,11 +545,11 @@ pub(crate) fn restore(
 }
 
 /// `FileFolderClash` for the first of `writes` that now meets an entry of the other kind
-/// ([`writeback::clash`]): one made after the plan checked it. A whole-matter restore keeps such
+/// ([`clash::clash`]): one made after the plan checked it. A whole-matter restore keeps such
 /// a file when the plan sees it, and refuses it here, since the write would fail on it.
 fn clashed_since(folder: &Path, writes: &[Write]) -> Result<(), Error> {
     for write in writes {
-        if let Some(in_way) = writeback::clash(folder, &write.path)? {
+        if let Some(in_way) = clash::clash(folder, &write.path)? {
             return Err(Error::FileFolderClash {
                 path: write.path.clone(),
                 in_way,
