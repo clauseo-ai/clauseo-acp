@@ -164,8 +164,11 @@ pub(super) fn start(actor: &mut Actor) {
         .name(TIMER_THREAD_NAME.to_owned())
         .spawn(move || {
             loop {
+                // Blocking, so a busy start-up's full input queue delays the tick, never drops it.
                 if !fresh::installed(&browsers).is_empty()
-                    && post.try_send(Input::BrowserInstall(Step::Check)).is_err()
+                    && post
+                        .send_blocking(Input::BrowserInstall(Step::Check))
+                        .is_err()
                 {
                     return;
                 }

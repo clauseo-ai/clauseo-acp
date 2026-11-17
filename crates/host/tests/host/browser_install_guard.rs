@@ -62,10 +62,18 @@ fn the_check_at_start_updates_a_copy_two_releases_behind() {
     fresh::write_record(&browsers_dir, &seen).unwrap();
     let (tools, handles) = Fake::new(true);
     let host = start(&dir, tools);
-    handles
+    if handles
         .starts
-        .recv_timeout(std::time::Duration::from_secs(30))
-        .expect("the check at start downloads");
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .is_err()
+    {
+        let record = fresh::read_record(&browsers_dir);
+        let listed: Vec<String> = std::fs::read_dir(&browsers_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        panic!("the check at start did not download: record {record:?}, browsers {listed:?}");
+    }
     let mut sub = subscribe(&host);
     handles.release.send(()).unwrap();
     let heard = states(&mut sub);
