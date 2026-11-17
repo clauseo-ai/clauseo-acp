@@ -321,7 +321,8 @@ impl PlaceholderProbe for TouchingProbe {
 #[test]
 fn undo_refuses_a_target_written_after_its_outside_edits_checkpoint() {
     let fx = Fixture::new("undo-moved-since");
-    // Asked about a.txt once by undo's writable check, then by the outside-edits walk.
+    // Asked about a.txt once by undo's writable check, then by the outside-edits walk, then by
+    // undo's look again after that walk.
     let probe = Arc::new(TouchingProbe {
         target: fx.file("a.txt"),
         nth: 2,
@@ -354,7 +355,7 @@ fn undo_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         matches!(&err, Error::FileLocked { paths } if *paths == [path("a.txt")]),
         "{err:?}"
     );
-    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 3);
     assert_eq!(fx.read("a.txt"), b"two");
     assert!(!fx.exists("b.txt"));
     assert_eq!(fx.read("c.txt"), b"sea");

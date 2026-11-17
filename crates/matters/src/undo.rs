@@ -269,8 +269,10 @@ fn current(
     }
 }
 
-/// Whether a regular file is at `path` now that is over the cap or cloud-only.
-fn now_skipped(
+/// Whether a regular file is at `path` now, by its exact name, that is over the cap or
+/// cloud-only: one the walk read may have gone cloud-only since, and one it found cloud-only
+/// with its stat unchanged is carried forward as read (`checkpoint/walk_folder.rs`).
+pub(crate) fn now_skipped(
     names: &mut Names,
     folder: &Path,
     settings: &Settings,
@@ -340,20 +342,30 @@ pub(crate) fn undo(
         CheckpointOutcome::Created(_) => Some(outside),
         CheckpointOutcome::Reused(_) => None,
     };
-    // A target that the outside-edits walk found cloud-only or over the cap (it went so after
-    // `writable` looked at it, or was found not downloaded when read) is never written or
-    // deleted: its step is kept. Nothing is written yet.
-    acting.retain(|step| {
-        let ok = step.ops.iter().all(|op| {
-            core.cache
-                .get(op.path().as_str())
-                .is_none_or(|entry| matches!(entry.state, EntryState::Read(_)))
-        });
-        if !ok {
+    // A target that went cloud-only or over the cap after `writable` looked at it is never
+    // written or deleted: its step is kept. Nothing is written yet. The outside-edits walk left
+    // such a file unread (or found it not downloaded when read), or carried it forward as read
+    // (`checkpoint/walk_folder.rs`): a carried file's entry is `Read`, so the file is looked
+    // at again here.
+    let mut names = Names::default();
+    let mut still = Vec::with_capacity(acting.len());
+    for step in acting {
+        let mut ok = true;
+        for op in &step.ops {
+            ok = ok
+                && core
+                    .cache
+                    .get(op.path().as_str())
+                    .is_none_or(|entry| matches!(entry.state, EntryState::Read(_)))
+                && !now_skipped(&mut names, folder, settings, op.path())?;
+        }
+        if ok {
+            still.push(step);
+        } else {
             kept.push(step.path.clone());
         }
-        ok
-    });
+    }
+    acting = still;
     // A step kept here can leave a file that another step's write would now replace (a delete
     // of `memo.txt` kept, a write of `Memo.txt` acting): check the names again.
     keep_respelled(folder, &mut acting, &mut kept)?;

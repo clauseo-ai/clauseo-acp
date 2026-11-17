@@ -20,14 +20,18 @@
 //! or the file is listed as held with the cache's entry and the walk goes on (a restore and its
 //! preview, which report it locked).
 //!
-//! A versioned file found cloud-only (iCloud Drive or `OneDrive` freed its space) with the size and
-//! modification time the cache read it with, in an entry not racily clean, is **carried
-//! forward**: it keeps its blob as read ([`carried`]), so the checkpoint's version holds it as
-//! the folder does, and undo and restore may write it back. Neither is changed by evicting a
-//! file; a colleague's edit in the cloud changes them, and such a file is kept as before, its
-//! earlier blob in the tree but its content now unknown (`EntryState::Unread`, `stale` in the
-//! skip record), so undo never writes it. An entry rebuilt from the tree (no stat) or one
-//! already `Unread` is never carried forward: its stat when read is not known.
+//! A versioned file found cloud-only (a sync client freed its space) with the size,
+//! modification time and (on Unix) inode the cache read it with, in an entry not racily clean,
+//! is **carried forward**: it keeps its blob as read ([`carried`]), so the checkpoint's version
+//! holds it as the folder does, and undo and restore can put it back once the agent changed or
+//! deleted it. A file cloud-only when they would write it is never written
+//! (`writeback::writable`, `undo::now_skipped`), carried or not. Evicting a file changes
+//! none of the three: measured for iCloud Drive (`stamps.rs`, [`carried`]), expected and not
+//! yet measured for `OneDrive`. A colleague's edit in the cloud usually changes them, and such
+//! a file is kept as before, its earlier blob in the tree but its content now unknown
+//! (`EntryState::Unread`, `stale` in the skip record), so undo never writes it. An entry
+//! rebuilt from the tree (no stat) or one already `Unread` is never carried forward: its stat
+//! when read is not known.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -167,12 +171,30 @@ fn cancelled(cancel: Option<&AtomicBool>) -> bool {
 }
 
 /// The blob of a file found cloud-only with `stat` whose cache entry `old` read it with the
-/// same size and modification time (within `stamps::CARRY_FORWARD_NS`), not racily clean: the
-/// content it holds is still that blob.
+/// same size and modification time (within `stamps::CARRY_FORWARD_NS`) and the same inode, not
+/// racily clean: the content it holds is still that blob.
+///
+/// The inode tells apart another file put in its place with the same size and time (`mv` of a
+/// copy made with `touch -r`, `rsync -t` or an unzip) and then evicted: it has a new inode, and
+/// carrying it would make undo write the old content over it. On the Mac mini (macOS 27.2,
+/// APFS, iCloud Drive, 2026-11-17) the inode survived every eviction and download, and such a
+/// replacement had a new inode with size and mtime equal to the nanosecond. The status-change
+/// time is not compared (every eviction and download moves it), nor the creation time (the
+/// first download moves it, as it does the mtime), nor the device id (not measured). The inode
+/// is its low 32 bits, as the cache stores it.
+///
+/// On Windows the stored stat has no identity: the inode is 0 on both sides (`Stat`; the file
+/// ID the OS has is not recorded), so only the size and time are compared, and a replacement
+/// like the one above is carried there. `OneDrive` is not measured yet.
+///
+/// Not measured, on any OS: a change made on another device while the file is cloud-only, an
+/// eviction the OS makes by itself (not asked for), and a file that came to this machine as a
+/// download from the cloud rather than being made here.
 fn carried(cache: &StatCache, old: &CacheEntry, stat: &Stat) -> Option<Oid> {
     match old.state {
         EntryState::Read(blob)
             if crate::stamps::same(old.stat.size, old.stat.mtime, stat, CARRY_FORWARD_NS)
+                && old.stat.ino == stat.ino
                 && old.stat.mtime != crate::stat::FileTime::default()
                 && !cache.is_racy(&old.stat) =>
         {
