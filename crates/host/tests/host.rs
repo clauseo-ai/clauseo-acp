@@ -111,6 +111,9 @@ mod codex_options;
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
 #[cfg(test)]
+#[path = "host/codex_reviewer.rs"]
+mod codex_reviewer;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 

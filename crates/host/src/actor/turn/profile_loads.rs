@@ -81,13 +81,10 @@ pub(super) fn launch_keys(
             .profile
             .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
-        // The data-folder fence (`agent::codex_fence`), in every Codex session.
+        // Codex's permission profile (`agent::codex_fence`), in every Codex session.
         let session = crate::agent::codex_fence::Session {
             run_root: &prepared.run.root,
             notes: &prepared.run.notes,
-            codex_home: &codex.home,
-            listed: &prepared.run.codex_listed,
-            socket_dir: socket_dir(&prepared.run),
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
@@ -470,21 +467,6 @@ fn browser_inputs<'a>(
 
 /// Whether the profile hook offers `agent` the `browser` MCP entry (Codex:
 /// `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
-/// The session's browser socket folder, for Codex's fence (`agent::codex_fence::Session`): the
-/// folder as made, when the session holds a browser claim (macOS and Linux).
-fn socket_dir(run: &RunFolders) -> Option<&Path> {
-    let session = run.browser_session.as_deref()?;
-    #[cfg(unix)]
-    {
-        Some(session.socket_dir.path())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = session;
-        None
-    }
-}
-
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
     actor
         .profile

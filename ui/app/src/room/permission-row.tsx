@@ -1,10 +1,11 @@
 // The agent's permission requests and elicitations in the thread. A live permission row reads its tool call from the
 // view store too, so its folded line follows the call to completion; a paged one shows its entry alone. Answering
 // sends answer_permission and holds the prompt busy until the entry folds; allow_always shows the OS's confirm line
-// while the native dialog is up, and a confirm declined there (`transport.unauthorized`) puts the prompt back as it
-// was. Only the prompt Work names (KeyedRequestContext: the oldest pending one) takes the keys. A pending form
-// elicitation is its form (elicitation-form.tsx): the fields, Send, Don't answer and Stop. A link elicitation
-// says the agent has a question, with its words and Stop; its URL is never shown or opened.
+// while the native dialog is up (never on ChatGPT's card, whose allow lasts the conversation and asks none), and a
+// confirm declined there (`transport.unauthorized`) puts the prompt back as it was. Only the prompt Work names
+// (KeyedRequestContext: the oldest pending one) takes the keys. A pending form elicitation is its form
+// (elicitation-form.tsx): the fields, Send, Don't answer and Stop. A link elicitation says the agent has a question,
+// with its words and Stop; its URL is never shown or opened.
 import { use, useCallback, useMemo, useRef, useState } from "react";
 import { PermissionPrompt } from "@clauseo/components/clauseo/permission.tsx";
 import type { PermissionAnswer } from "@clauseo/components/clauseo/permission-keys.ts";
@@ -120,9 +121,10 @@ function Permission({
         {...(command === null ? {} : { details: <CommandFold command={command} lang={lang} /> })}
         {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
+        scope={plan?.kind === "codex" ? "conversation" : "matter"}
         done={m.done}
         busy={pending && asked !== null}
-        confirming={pending && asked?.answer === "always" && !asked.sent}
+        confirming={pending && asked?.answer === "always" && !asked.sent && plan?.kind !== "codex"}
         error={pending ? error : null}
         testIds={PERMISSION_TEST_IDS}
         dataState={m.dataState}

@@ -1,6 +1,7 @@
 //! Answering a permission request (`Bridge::answer_permission`): the option must be one the
 //! request offered, the options that change the session's mode are refused (`MODE_OPTIONS`),
-//! and an `allow_always` asks the lawyer first (`needs_confirm`).
+//! and an `allow_always` asks the lawyer first (`needs_confirm`), unless it lasts for the
+//! conversation only (`CONVERSATION_OPTIONS`).
 
 use clauseo_protocol::{
     AgentChoiceId, ErrorCode, HostCommand, HostError, HostQuery, MAX_PAGE_ENTRIES, PageLimit,
@@ -8,7 +9,7 @@ use clauseo_protocol::{
     ThreadId, ViewEntry,
 };
 
-use super::{Bridge, MODE_OPTIONS, PRINCIPAL, invalid};
+use super::{Bridge, CONVERSATION_OPTIONS, MODE_OPTIONS, PRINCIPAL, invalid};
 use crate::dialogs::Confirm;
 
 /// Whether answering with an option of `kind` first needs the lawyer's native confirm. Fails
@@ -27,8 +28,9 @@ pub(super) fn needs_confirm(kind: PermissionKind) -> Result<bool, HostError> {
 }
 
 /// Answers a permission request with `option`, which it must have offered. An
-/// `allow_always` option first goes past `confirm`; declined there, nothing is answered and
-/// the call fails with `transport.unauthorized`. One of [`MODE_OPTIONS`], or an option of a
+/// `allow_always` option first goes past `confirm` (not one of [`CONVERSATION_OPTIONS`], which
+/// lasts the conversation only); declined there, nothing is answered and the call fails with
+/// `transport.unauthorized`. One of [`MODE_OPTIONS`], or an option of a
 /// kind this version does not know, is refused with `command.invalid`.
 pub(super) async fn answer(
     bridge: &Bridge,
@@ -53,7 +55,8 @@ pub(super) async fn answer(
                 format!("permission request {request} did not offer option {option}"),
             )
         })?;
-    if needs_confirm(offered.kind)? && !confirm.confirm().await {
+    let conversation = CONVERSATION_OPTIONS.contains(&option.as_str());
+    if needs_confirm(offered.kind)? && !conversation && !confirm.confirm().await {
         return Err(HostError::new(
             ErrorCode::TransportUnauthorized,
             "the lawyer declined to always allow",

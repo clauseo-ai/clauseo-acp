@@ -40,8 +40,9 @@ pub(crate) fn write_config(data: &std::path::Path) -> std::io::Result<std::path:
 }
 
 /// The shell tool's per-session folder in the session's run folder, `<run>/agent-browser`: its
-/// config file, Chrome profile and downloads, so the data fences reopen exactly one folder for
-/// them (the run folder, `agent::codex_fence`), and no other session's.
+/// config file, Chrome profile and downloads, so Claude's data fence reopens exactly one folder
+/// for them, and no other session's; for Codex the run folder is a writable root
+/// (`agent::codex_fence`).
 pub const SESSION_DIR: &str = "agent-browser";
 
 /// The shell tool's config file in [`SESSION_DIR`], as `AGENT_BROWSER_CONFIG`.

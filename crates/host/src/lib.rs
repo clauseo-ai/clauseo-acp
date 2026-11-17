@@ -72,13 +72,13 @@
 //!   `permissions.defaultMode` or a resumed transcript's mode may differ) gets
 //!   `session/set_mode` to it before its first prompt; when auto is not available it runs in
 //!   `acceptEdits` with one notice, and any other failed switch fails the launch.
-//! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
-//!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
-//!   `config.toml` of the same switches for app-server's start-up, a
+//! - What a Codex agent is launched with (`agent/codex.rs`): its mode
+//!   (`INITIAL_AGENT_MODE=agent`, Codex's automatic mode), its home under the data folder as
+//!   `CODEX_HOME` with a `config.toml` of the same switches for app-server's start-up, a
 //!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` (and on Windows the unelevated
 //!   sandbox, record 0025) and the hooks seam's object, and no
 //!   MCP filtering, over any settings value; its refusal in a folder holding `.codex` (#184);
-//!   and, before its first prompt, `session/set_mode` to the ask mode and the guard's trust check.
+//!   and, before its first prompt, `session/set_mode` to that mode and the guard's trust check.
 //!   No agent inherits a `GIT_*` variable. `docs/decisions/0025-codex-in-acp-and-host.md`.
 //! - The session start: `session/load` when the agent offers it, else `session/resume`, else
 //!   `session/new`.

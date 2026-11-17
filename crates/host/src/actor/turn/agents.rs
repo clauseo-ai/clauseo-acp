@@ -365,8 +365,9 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
     {
         agent.stage = Stage::Closed;
     }
+    super::codex_reviewer::on_reply(actor, thread, same, &reply);
     match reply {
-        AgentReply::Prompt { turn, result } => {
+        AgentReply::Prompt { turn, result, .. } => {
             // A failure for the connection may wait for the host's probe first.
             if let Some(result) = offline::hold_for_probe(actor, thread, turn, result) {
                 end::on_prompt_done(actor, thread, turn, result);

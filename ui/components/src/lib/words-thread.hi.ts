@@ -101,6 +101,10 @@ export const HI = {
     "इस मामले के लिए अनुमति दी गई। Clauseo ने {paper} का नया संस्करण सहेजा।",
   "Not allowed. Clauseo left {paper} as it was.":
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
+  // ChatGPT's allow-always answers last the conversation only (UC-979 to UC-981; provisional; hi: later)
+  "For this conversation": null,
+  "Allowed for this conversation.": null,
+  "Allowed for this conversation. Clauseo saved a new version of {paper}.": null,
   // the prompt's line for Claude's own plan note, in place of the call's title: a provisional draft (stage C #418)
   "Claude wants to save its plan as a note in its own folder, not in this matter.":
     "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",
@@ -162,6 +166,9 @@ export const HI = {
   // Claude's auto mode isn't available, so the session runs in acceptEdits (en settled, hi provisional, TN-10)
   "Claude's automatic mode isn't available for this account, so Claude asks before running commands.":
     "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+  // the same for ChatGPT, whose session runs in workspace-write (UC-982; provisional; hi: later)
+  "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.":
+    null,
   // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the
   // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
   // the AI where none is known (provisional, TN-12)

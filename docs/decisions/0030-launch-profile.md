@@ -1093,6 +1093,15 @@ ask, could close even those: a later option, not this change.
 
 ### Codex's data-folder deny
 
+**Removed (Rohan, 2026-11-17, with Codex's `agent` mode in decision record 0025).** The profile
+keeps only its two `write` entries and has no `deny` entry. With any denied read Codex runs a
+command its reviewer approved still sandboxed, without network
+(`codex-rs/core/src/tools/sandboxing.rs:252-296`); and codex-acp's per-turn `workspaceWrite`
+policy keeps only a profile's `deny` entries (`codex-rs/core/src/session/session.rs:491-497`), so
+no `read` entry could stand in. An ordinary command writes only the matter folder, the run
+folder, the notes and `/tmp`, and reads the rest; an approved one runs as in plain Codex. What
+follows is the fence as it was.
+
 Every Codex session's `CODEX_CONFIG` carries a permission profile, `clauseo`. It is chosen with
 `default_permissions` and extends the built-in `:workspace`. Its `filesystem` table denies what
 of the data folder only Clauseo uses (`agent::codex_fence::rules`), scoped under the data folder
@@ -1183,7 +1192,7 @@ this record and firm-it §8.
   - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
     temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
     (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
-    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`, removed 2026-11-17: see "Codex's data-folder deny"), so the shell
     cannot plant a link the guard would write through. The folder goes with the run folder at the
     session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
     the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also

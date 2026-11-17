@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value};
 
-use super::{Session, keys, list};
+use super::{Session, keys};
 use crate::agent::loads::browser::Switch;
 use crate::agent::loads::profile::{Folders, codex_keys};
 use crate::write;
@@ -68,13 +68,9 @@ impl Launch {
             locked: false,
         };
         let mut keys_now = codex_keys(hook, web_search, folders).unwrap();
-        let listed = list(&self.data, &self.run_root, &self.notes);
         let session = Session {
             run_root: &self.run_root,
             notes: &self.notes,
-            codex_home: &self.home,
-            listed: &listed,
-            socket_dir: None,
         };
         keys_now.extend(keys(&self.locations, session, windows));
         let program = self.root.join("app").join("clauseo");
@@ -132,7 +128,7 @@ fn writable(config: &Map<String, Value>) -> Vec<PathBuf> {
 
 /// On macOS and Linux: the profile extends `:workspace` and writes only the run folder and the
 /// notes; nothing writable is the data folder, Codex's home, above either or in the home, and
-/// neither is a `write` entry. The ask mode and ACP's `additionalDirectories` say the same.
+/// neither is a `write` entry. Codex's mode and ACP's `additionalDirectories` say the same.
 #[test]
 fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windows() {
     let launch = Launch::new("writable-unix");
@@ -155,7 +151,8 @@ fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windo
     writes.dedup();
     assert_eq!(writes, vec![&launch.notes, &launch.run_root]);
     assert!(config.get("windows").is_none());
-    assert_eq!(crate::agent::codex::ASK_MODE, "workspace-write");
+    // Codex's mode keeps codex-acp's `workspace-write` sandbox (`dist/index.js:34293-34308`).
+    assert_eq!(crate::agent::codex::MODE, "agent");
     for directory in [&launch.run_root, &launch.notes] {
         assert!(!launch.too_wide(directory));
     }
@@ -179,27 +176,4 @@ fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_on_window
         assert!(!launch.too_wide(root), "{root:?} in {config:?}");
     }
     assert!(config.get("sandbox_mode").is_none());
-}
-
-/// What Codex loads settings, rules, instructions or code from in its home is denied to every
-/// command, ordinary or approved, read and write alike; its working folders stay readable.
-#[test]
-fn what_codex_loads_from_its_home_is_denied_to_every_command() {
-    let keys = super::tests::fence();
-    let home = super::tests::codex_home();
-    let loaded = crate::agent::codex::home_clear::LOADED;
-    let names = ["config.toml", "rules"].into_iter().chain(loaded);
-    for name in names {
-        for path in [home.join(name), home.join(name).join("x")] {
-            let shown = path.display();
-            assert_eq!(super::tests::access(&keys, &path), "deny", "{shown}");
-            assert_eq!(
-                super::tests::escalated_access(&keys, &path),
-                "deny",
-                "{shown}"
-            );
-        }
-    }
-    let arg0 = home.join("tmp").join("arg0").join("codex-linux-sandbox");
-    assert!(super::tests::readable(&keys, &arg0));
 }

@@ -17,7 +17,7 @@ import type {
   ViewEntry,
 } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import { mountRoom, type Harness } from "./thread/harness.ts";
+import { mountRoom, summary, type Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -454,4 +454,36 @@ test("an elicitation: a question for you, the agent's words isolated, Stop the a
   expect(row()?.dataset["state"]).toBe("resolved");
   expect(row()?.textContent).toBe("Sign in to Westlaw");
   expect(h.one("elicitation-stop")).toBeNull();
+});
+
+// ChatGPT's allow-always answers are Codex's session answers (codex_options.rs): its card says "For this
+// conversation", and the folded line says the same, never "this matter"; Claude's card keeps "Always for this matter"
+test("a ChatGPT card says For this conversation, and its folded line names the conversation", async () => {
+  const codexHeader = (status: "needs_you" | "idle"): ViewEntry => {
+    const head = header(status);
+    return { header: { ...head.header!, agent: "codex-acp" } };
+  };
+  h = await mountRoom({ threads: [{ ...summary(), agent: "codex-acp" }] });
+  h.deliver([
+    reset([callEntry(6, 1), perm(7, 1, { tool_call: uuid(1, 7) })], codexHeader("needs_you")),
+  ]);
+  await h.settle();
+  const always = h.one("permission-allow_always");
+  expect(always?.textContent).toContain(th("en", "For this conversation"));
+  expect(h.host.textContent).not.toContain(th("en", "Always for this matter"));
+  h.deliver([
+    reset(
+      [
+        callEntry(6, 1, { status: "completed" }),
+        perm(7, 1, { tool_call: uuid(1, 7), state: chose("allow_always") }),
+      ],
+      codexHeader("idle"),
+    ),
+  ]);
+  await h.settle();
+  expect(h.host.textContent).toContain(
+    th("en", "Allowed for this conversation. Clauseo saved a new version of {paper}.", {
+      paper: iso("Notice to the bank"),
+    }),
+  );
 });
