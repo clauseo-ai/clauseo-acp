@@ -73,8 +73,9 @@ pub const CONNECTORS: &str = "{connectors}";
 
 /// The browser part, inside the tools part's sentence on reading web pages, with no separator.
 /// The host fills it with [`crate::instructions::browser_part_for`]: a space and the
-/// `agent-browser` rules in a Claude session whose launch put the command on its `PATH`, or the
-/// line naming the `browser` MCP entry's tools in a Codex session that got the entry; in any
+/// `agent-browser` rules in a session whose launch put the command on its `PATH` (none for
+/// launch), or the line naming the `browser` MCP entry's tools, Codex's or Claude's, in a
+/// session that got the entry; in any
 /// other, a space and the sentence that says the session has no browser (and why, when none is
 /// installed).
 /// Instructions only.

@@ -200,8 +200,8 @@ impl ClauseoProfile {
             .unwrap_or(text)
     }
 
-    /// The servers for an agent of `kind`: `browser` for Codex ([`servers::browser_mcp`]; Claude
-    /// keeps the shell command), then `case-law` (R24), which the host sends only in a session
+    /// The servers for an agent of `kind`: `browser` for Codex and Claude off Windows
+    /// ([`servers::browser_mcp`]), then `case-law` (R24), which the host sends only in a session
     /// whose relay it opened.
     pub fn servers(&self, kind: Option<AgentKind>) -> Vec<ProfileServer> {
         servers::browser_mcp(kind)

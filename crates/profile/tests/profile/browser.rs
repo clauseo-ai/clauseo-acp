@@ -96,7 +96,9 @@ fn agent_browser_rules_are_the_hosts_per_session() {
 /// names `agent-browser`; the others say there is no browser, the not-installed one why.
 #[test]
 fn only_the_browser_part_names_agent_browser() {
-    use clauseo_profile::instructions::{BrowserPart, browser_part, browser_part_for};
+    use clauseo_profile::instructions::{
+        BrowserPart, BrowserRoute, browser_part, browser_part_for,
+    };
     assert_eq!(TOOLS.matches(BROWSER).count(), 1);
     let text = profile().instructions();
     assert!(!text.contains("agent-browser"));
@@ -139,13 +141,13 @@ fn only_the_browser_part_names_agent_browser() {
     assert!(fill(BrowserPart::NotInstalled).contains("found no Google Chrome"));
     // A Codex session with the browser is told to use the `browser` MCP entry's tools, never the
     // shell command or its variables, and never to escalate; Claude never gets Codex's part.
-    let codex_on = browser_part_for(BrowserPart::On, true);
+    let codex_on = browser_part_for(BrowserPart::On, BrowserRoute::CodexEntry);
     for rule in [
         "use the `browser` MCP server's tools",
         "never a browser command in your shell",
         "confidential matter text",
         "The eval tool is off",
-        "Save a file from the web by clicking its link in the browser.",
+        "Save a file from the web by clicking its link: it lands in downloads/.",
         // A certificate warning: the lawyer hears it plainly, and no other route is tried.
         "Certificate error: stop, tell the lawyer the site's certificate couldn't be verified;",
         "never retry or suggest going past the warning.",
@@ -162,13 +164,45 @@ fn only_the_browser_part_names_agent_browser() {
     ] {
         assert!(!codex_on.contains(word), "{word}: {codex_on}");
     }
+    // Claude's entry part: Codex's rules, without the shell's lack of internet (false for
+    // Claude) and with the same way to save a file into the matter.
+    let claude_on = browser_part_for(BrowserPart::On, BrowserRoute::ClaudeEntry);
+    for rule in [
+        "use your browser tools, the ones from the `browser` MCP server",
+        "never a browser command in your shell",
+        "confidential matter text",
+        "The eval tool is off",
+        "To save a file from a page, click or open its link in the browser: it lands in \
+         downloads/ in the matter.",
+        "close tool",
+    ] {
+        assert!(claude_on.contains(rule), "{rule}: {claude_on}");
+    }
+    for word in [
+        "agent-browser",
+        "AGENT_BROWSER",
+        "no internet",
+        "curl",
+        "wget",
+        "pdf",
+    ] {
+        assert!(!claude_on.contains(word), "{word}: {claude_on}");
+    }
+    assert!(!codex_on.contains("pdf"), "{codex_on}");
+    assert_ne!(claude_on, codex_on);
     assert_eq!(
-        browser_part_for(BrowserPart::On, false),
+        browser_part_for(BrowserPart::On, BrowserRoute::Shell),
         browser_part(BrowserPart::On)
     );
     for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
-        assert_eq!(browser_part_for(part, true), browser_part(part));
-        assert!(!browser_part_for(part, true).contains("agent-browser"));
+        for route in [
+            BrowserRoute::Shell,
+            BrowserRoute::CodexEntry,
+            BrowserRoute::ClaudeEntry,
+        ] {
+            assert_eq!(browser_part_for(part, route), browser_part(part));
+            assert!(!browser_part_for(part, route).contains("agent-browser"));
+        }
     }
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
 }

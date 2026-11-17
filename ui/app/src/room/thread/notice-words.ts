@@ -167,6 +167,10 @@ export function noticeLine(
       return w.th(
         "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
       );
+    if (kind === "sandbox_off")
+      return w.th(
+        "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.",
+      );
     return null;
   }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field

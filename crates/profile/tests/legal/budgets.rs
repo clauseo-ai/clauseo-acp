@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL, SCALE_CLAUDE,
-    STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part, word_count,
+    BrowserPart, BrowserRoute, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
+    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part,
+    word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
@@ -126,7 +127,7 @@ fn codex_standing_text_budget() {
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
     let text = filled(
         &format!("{}\n\n{index}", profile.codex_instructions_for(true)),
-        browser_part_for(BrowserPart::On, true),
+        browser_part_for(BrowserPart::On, BrowserRoute::CodexEntry),
     );
     for line in [
         CODEX_SHELL_OFFLINE,

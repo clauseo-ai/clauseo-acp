@@ -15,6 +15,8 @@
 
 pub(crate) mod browser;
 pub(crate) mod case_law;
+#[cfg(test)]
+mod claude_browser_tests;
 mod codex;
 #[cfg(test)]
 mod codex_entry_tests;
@@ -29,6 +31,8 @@ mod profile_keys_tests;
 #[cfg(test)]
 mod profile_tests;
 pub(crate) mod sandbox;
+#[cfg(test)]
+mod sandbox_browser_tests;
 #[cfg(test)]
 mod sandbox_tests;
 pub(crate) mod subagents;

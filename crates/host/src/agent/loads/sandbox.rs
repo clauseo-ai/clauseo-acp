@@ -43,13 +43,13 @@
 //!   the Spotlight and Quick Look services outside the sandbox's Mach list, `mdls`, `mdfind` and
 //!   `qlmanage` fail too: the accepted breakages, which Claude is told of on macOS
 //!   (`clauseo_profile::instructions::claude_shell`).
-//! - No `excludedCommands`: every command runs sandboxed. Claude has no browser on macOS and
-//!   Linux for launch (`clauseo_profile::servers::no_browser`): agent-browser would have to run
-//!   outside the sandbox, and Claude Code's exclusion check strips `env` and reworks `VAR=`
-//!   prefixes before it matches, so `PATH=$CLAUDE_CODE_TMPDIR agent-browser …` would run a
-//!   program Claude wrote unsandboxed, and quoting (`-q "upload"`, `e"v"al`, a tab) would run
-//!   unsandboxed past the ask rules. Clauseo's own shim, named by its absolute path, is the
-//!   after-launch way back (decision record 0030).
+//! - No `excludedCommands`: every command runs sandboxed. Claude's browser is the guarded
+//!   `browser` MCP entry (`clauseo_profile::servers::browser_mcp`), which Claude Code starts
+//!   itself, outside this sandbox; no shell `agent-browser`: it would have to run outside the
+//!   sandbox, and Claude Code's exclusion check strips `env` and reworks `VAR=` prefixes before
+//!   it matches, so `PATH=$CLAUDE_CODE_TMPDIR agent-browser …` would run a program Claude wrote
+//!   unsandboxed, and quoting (`-q "upload"`, `e"v"al`, a tab) would run unsandboxed past the
+//!   ask rules. A session with no sandbox gets no entry (`actor/turn/profile_loads/claude.rs`).
 //! - `network.allowedDomains: ["*"]`: every host, so a sandboxed command (`curl` of a court PDF)
 //!   never asks for a domain; Claude Code 2.1.293 accepts it (stage C, 2026-11-11: a real
 //!   judgment PDF downloaded with no prompt and no certificate error in auto mode).
@@ -62,10 +62,12 @@
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
 //! - `filesystem.denyWrite`: the matter's `.clauseo` folder, which holds `matter.json`, the
-//!   marker that finds a moved matter folder again.
+//!   marker that finds a moved matter folder again, and on macOS agent-browser's socket folders
+//!   ([`SOCKET_DIRS`]).
 //! - `filesystem.denyRead`: the lawyer's home (other clients' files, `~/.ssh`), each spelling of
 //!   `<data>` (it may lie outside the home), every other matter's folder the host knows at the
-//!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
+//!   launch, `/Volumes` and `/Users/Shared`, agent-browser's socket folders ([`SOCKET_DIRS`]);
+//!   the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
@@ -91,13 +93,41 @@ use serde_json::{Map, Value, json};
 /// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
 /// the browser's debugging port and agent-browser's daemon listen, and the any-address
 /// `0.0.0.0` and `[::]`, which reach loopback too (stage C on a Mac, 2026-11-11). `127.1`, the
-/// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them.
-pub(crate) const DENIED_DOMAINS: [&str; 6] =
-    ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]"];
+/// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them;
+/// loopback names are refused after the lookup (sandbox-runtime 0.0.83). An IP literal off this
+/// list passes, and the URL parser keeps an IPv4-mapped IPv6 address mapped (`[::ffff:127.0.0.1]`
+/// is `[::ffff:7f00:1]`, `[::ffff:0.0.0.0]` is `[::ffff:0:0]`), where a dual-stack connect lands
+/// on loopback, so the mapped forms are listed, with and without brackets, and the dotted ones
+/// verbatim in case a path skips the parser (security re-check of PR-1).
+pub(crate) const DENIED_DOMAINS: [&str; 14] = [
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "[::1]",
+    "0.0.0.0",
+    "[::]",
+    "::ffff:7f00:1",
+    "[::ffff:7f00:1]",
+    "::ffff:0:0",
+    "[::ffff:0:0]",
+    "::ffff:127.0.0.1",
+    "[::ffff:127.0.0.1]",
+    "::ffff:0.0.0.0",
+    "[::ffff:0.0.0.0]",
+];
 
 /// What sandboxed commands may not read beside `<data>` and the other matters: the home, as
 /// Claude Code expands it, and macOS's shared places where matters may be kept.
 pub(crate) const DENY_READ: [&str; 3] = ["~/", "/Volumes", "/Users/Shared"];
+
+/// agent-browser's daemon socket folders, every session's (`clauseo_sandbox::BrowserSocketDir`,
+/// `/tmp/clauseo-ab-<16 random>`): denied for reading and writing, so a sandboxed command can
+/// neither list nor connect to a guarded browser's daemon, this session's or another's, the
+/// folder Codex's fence denies by exact path (decision record 0030, B2). Globs, added after the
+/// wildcard check ([`Off::Wildcard`] is about paths Clauseo cannot escape, not these). On macOS
+/// `/tmp` is `/private/tmp`, so both spellings go in; on Linux a glob write path is skipped,
+/// so only `denyRead` holds it there (`/tmp` is not writable in the sandbox anyway).
+pub(crate) const SOCKET_DIRS: [&str; 2] = ["/tmp/clauseo-ab-*", "/private/tmp/clauseo-ab-*"];
 
 /// The characters Claude Code reads as a pattern in a sandbox path that no escape makes literal.
 const WILDCARDS: [char; 2] = ['*', '?'];
@@ -141,6 +171,14 @@ impl Off {
     /// Whether a session with no sandbox for this reason runs in `acceptEdits`, not `auto`:
     /// every reason but Windows, where no sandbox was meant to be (see the module doc).
     pub(crate) fn holds_auto_back(self) -> bool {
+        self != Self::Windows
+    }
+
+    /// Whether a session with no sandbox for this reason gets no `browser` entry: every reason
+    /// but Windows, since its shell could then reach the guard's Chrome and daemon
+    /// (`actor/turn/profile_loads/claude.rs`). Claude has no browser on Windows yet
+    /// (`clauseo_profile::servers::no_browser`).
+    pub(crate) fn drops_browser(self) -> bool {
         self != Self::Windows
     }
 }
@@ -187,9 +225,8 @@ pub(crate) struct SandboxPaths<'a> {
     /// of `<data>`.
     pub(crate) skills: &'a [PathBuf],
     /// The folders first on the agent's `PATH` and its shells' (`agent::shell_path`):
-    /// stetdoc's (the shell browser's tools never: Claude has no browser where it has a
-    /// sandbox), then the profile hook's (Clauseo's Python runtime, `<rt>/bin`, where pandoc
-    /// is too).
+    /// stetdoc's (the shell browser's tools never: no agent has the shell tool), then the profile
+    /// hook's (Clauseo's Python runtime, `<rt>/bin`, where pandoc is too).
     pub(crate) path: &'a [PathBuf],
     /// The file that puts those folders first in each Bash command (`<run>/clauseo-env.sh`,
     /// `agent::shell_path::ENV_FILE`), if it was written: the file alone, never its folder.
@@ -241,7 +278,24 @@ impl ClaudeSandbox {
         sandbox
             .allow_read
             .extend(tool_results(paths.claude_home, paths.matter));
+        sandbox.deny_socket_dirs(os);
         Ok(sandbox)
+    }
+
+    /// Adds [`SOCKET_DIRS`] to `denyRead`, and to `denyWrite` where `os` reads globs in it (macOS);
+    /// `/private/tmp` only on macOS.
+    fn deny_socket_dirs(&mut self, os: SandboxOs) {
+        let mac = os == SandboxOs::Mac;
+        let dirs = SOCKET_DIRS
+            .iter()
+            .filter(|dir| mac || !dir.starts_with("/private/"))
+            .map(|dir| (*dir).to_owned());
+        for dir in dirs {
+            if mac {
+                self.deny_write.push(dir.clone());
+            }
+            self.deny_read.push(dir);
+        }
     }
 
     /// The lists with each `[` escaped where `os` reads globs, each escaped allowed path also

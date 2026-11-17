@@ -48,8 +48,9 @@ pub(crate) enum Auto {
     /// Held back by the host: Claude's sandbox is off before the launch on macOS or Linux (a
     /// `*` or `?` in a path, a path to deny that is not UTF-8, or no short temp folder:
     /// `agent::loads::sandbox::Off::holds_auto_back`), so the session runs in `acceptEdits` and
-    /// goes back to it, as when unavailable, with no notice: the account has auto, and only this
-    /// launch's paths keep it off.
+    /// goes back to it, as when unavailable, without the auto notice (the account has auto, and
+    /// only this launch's paths keep it off): the sandbox's own notice says so, with the browser
+    /// it costs too (`NoticeKind::SandboxOff`, `profile_loads/claude.rs`).
     NoSandbox,
 }
 

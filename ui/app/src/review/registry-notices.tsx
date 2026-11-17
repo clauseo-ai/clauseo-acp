@@ -105,6 +105,10 @@ const DOWNLOAD_NOTICE = notice(6, {
   text: "The browser saved Judgment 12-03-2024.pdf in Clauseo's own folder for this matter.",
   kind: { download_outside_matter: { name: "Judgment 12-03-2024.pdf" } },
 });
+const SANDBOX_OFF =
+  "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.";
+/** Claude's sandbox couldn't start: it asks before commands and has no browser (once a thread). */
+const SANDBOX_OFF_NOTICE = notice(6, { text: SANDBOX_OFF, kind: "sandbox_off" });
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -222,5 +226,11 @@ export const TN: Entry[] = [
     words: threadWords(DOWNLOAD),
     screen: "room/thread",
     render: thread(DOWNLOAD_NOTICE),
+  },
+  {
+    id: "UC-510",
+    words: threadWords(SANDBOX_OFF),
+    screen: "room/thread",
+    render: thread(SANDBOX_OFF_NOTICE),
   },
 ];

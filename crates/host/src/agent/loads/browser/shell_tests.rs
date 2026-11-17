@@ -201,7 +201,11 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             forced_ask: false,
             data: &data,
             case_law: false,
-            browser,
+            browser: if browser {
+                crate::agent::loads::profile::ClaudeBrowser::Shell
+            } else {
+                crate::agent::loads::profile::ClaudeBrowser::None
+            },
             sandbox: None,
             matter: None,
             trusted_servers: &[],

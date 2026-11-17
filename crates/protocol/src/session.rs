@@ -348,6 +348,12 @@ open_data_enum! {
             /// The file's name in that folder: one component, no separator.
             name: String,
         },
+        /// Claude's sandbox could not be set up for this session on macOS or Linux (a `*` or `?`
+        /// in a path, a path that is not UTF-8, no short temp folder), so Claude runs in
+        /// `acceptEdits` and asks before running commands, and the session has no browser
+        /// (without the sandbox Claude's shell could reach the browser's debugging port). Once a
+        /// thread.
+        SandboxOff = "sandbox_off",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -363,6 +369,7 @@ open_data_enum! {
         NoticeKind::CodexFolderBlocked,
         NoticeKind::GuardStepBlocked,
         NoticeKind::GuardStepsMore { more: 3 },
+        NoticeKind::SandboxOff,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

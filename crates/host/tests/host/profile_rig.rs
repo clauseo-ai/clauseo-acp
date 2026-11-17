@@ -203,8 +203,8 @@ pub(crate) struct Hook {
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
     /// The shell browser's folder (`ProfileHook::browser_tool`).
     pub(crate) browser_tool: Option<PathBuf>,
-    /// The servers a Codex agent gets after `servers`, as the launch profile gives Codex alone
-    /// the `browser` entry (`clauseo_profile::servers::browser_mcp`).
+    /// The servers a Codex agent alone gets after `servers` (a test of Codex's `browser` entry
+    /// beside a Claude session offered none).
     pub(crate) codex_servers: Vec<McpServer>,
     /// Every agent's session `PATH` folders (`ProfileHook::agent_path`).
     pub(crate) agent_path: Vec<PathBuf>,
@@ -369,8 +369,9 @@ pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// `servers` as a Claude `session/new` carries them: without the `browser` entry, since Claude
-/// has no browser on any OS (`clauseo_profile::servers::no_browser`).
+/// `servers` as a Claude `session/new` carries them on this OS: without the `browser` entry
+/// where Claude has no browser at all (Windows, `clauseo_profile::servers::no_browser`), else
+/// all of them.
 pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
     let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
     servers
@@ -380,11 +381,15 @@ pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// A Claude session's header tools with web search on: web search alone, since Claude has no
-/// browser on any OS (`servers::no_browser`). `_browser` is the reason the browser state would
-/// carry, kept so each caller still says what a session with the browser would show.
-pub(crate) fn claude_tools(_browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
-    vec![tool(ClauseoTool::WebSearch, None)]
+/// A Claude session's header tools with web search on: web search, then `browser` (`browser`
+/// its reason) where Claude may have the browser (off Windows, `servers::no_browser`).
+pub(crate) fn claude_tools(browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
+    let browser = (!none_here).then(|| tool(ClauseoTool::Browser, browser));
+    [Some(tool(ClauseoTool::WebSearch, None)), browser]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of

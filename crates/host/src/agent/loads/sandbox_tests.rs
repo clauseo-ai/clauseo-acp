@@ -18,7 +18,7 @@ static NO_DENY: LaunchDeny = LaunchDeny {
 
 /// The paths of session `id` of the matter at `/Users/l/Clients/A`, with `<data>` under the
 /// lawyer's home as on a Mac.
-struct Session {
+pub(super) struct Session {
     matter: PathBuf,
     run: PathBuf,
     tmp: PathBuf,
@@ -41,7 +41,7 @@ const SHORT: &str = "/tmp/clsb-abcd1234";
 const PROJECT: &str = "/Users/l/Library/Application Support/Clauseo/agents/claude-acp/home/projects/-Users-l-Clients-A";
 
 impl Session {
-    fn new(id: &str) -> Self {
+    pub(super) fn new(id: &str) -> Self {
         let data = Path::new(DATA);
         let run = data.join("run").join(id);
         Self {
@@ -66,7 +66,7 @@ impl Session {
         }
     }
 
-    fn paths(&self) -> SandboxPaths<'_> {
+    pub(super) fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
             work: &self.work,
@@ -87,7 +87,7 @@ impl Session {
 }
 
 /// The sandbox for `paths` on macOS.
-fn mac(paths: &SandboxPaths<'_>) -> Result<ClaudeSandbox, Off> {
+pub(super) fn mac(paths: &SandboxPaths<'_>) -> Result<ClaudeSandbox, Off> {
     ClaudeSandbox::for_os(SandboxOs::Mac, paths)
 }
 
@@ -119,7 +119,11 @@ fn settings(
         forced_ask,
         data: &NO_DENY,
         case_law: false,
-        browser,
+        browser: if browser {
+            crate::agent::loads::profile::ClaudeBrowser::Shell
+        } else {
+            crate::agent::loads::profile::ClaudeBrowser::None
+        },
         sandbox,
         matter: None,
         trusted_servers: &[],
@@ -158,6 +162,9 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                 "allowedDomains": ["*"],
                 "deniedDomains": [
                     "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]",
+                    "::ffff:7f00:1", "[::ffff:7f00:1]", "::ffff:0:0", "[::ffff:0:0]",
+                    "::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "::ffff:0.0.0.0",
+                    "[::ffff:0.0.0.0]",
                 ],
             },
             "filesystem": {
@@ -168,8 +175,20 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{DATA}/agent-state/m-1/notes"),
                     SHORT,
                 ],
-                "denyWrite": ["/Users/l/Clients/A/.clauseo"],
-                "denyRead": ["~/", "/Volumes", "/Users/Shared", DATA, "/Users/l/Clients/B"],
+                "denyWrite": [
+                    "/Users/l/Clients/A/.clauseo",
+                    "/tmp/clauseo-ab-*",
+                    "/private/tmp/clauseo-ab-*",
+                ],
+                "denyRead": [
+                    "~/",
+                    "/Volumes",
+                    "/Users/Shared",
+                    DATA,
+                    "/Users/l/Clients/B",
+                    "/tmp/clauseo-ab-*",
+                    "/private/tmp/clauseo-ab-*",
+                ],
                 "allowRead": [
                     "/Users/l/Clients/A",
                     format!("{run}/work"),
@@ -311,7 +330,14 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
                 .any(|p| p.contains("[2024]") && !p.contains("[[]"))
         );
     }
-    assert_eq!(on_mac.deny_write, [format!("{escaped}/.clauseo")]);
+    assert_eq!(
+        on_mac.deny_write,
+        [
+            format!("{escaped}/.clauseo"),
+            "/tmp/clauseo-ab-*".to_owned(),
+            "/private/tmp/clauseo-ab-*".to_owned()
+        ]
+    );
     assert!(
         on_mac
             .deny_read
@@ -490,7 +516,7 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
-        browser: false,
+        browser: crate::agent::loads::profile::ClaudeBrowser::None,
         sandbox: None,
         matter: Some(&session.matter),
         trusted_servers: &[],
