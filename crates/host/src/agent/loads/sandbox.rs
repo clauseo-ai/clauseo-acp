@@ -176,8 +176,8 @@ impl Off {
 
     /// Whether a session with no sandbox for this reason gets no `browser` entry: every reason
     /// but Windows, since its shell could then reach the guard's Chrome and daemon
-    /// (`actor/turn/profile_loads/claude.rs`). Claude has no browser on Windows yet
-    /// (`clauseo_profile::servers::no_browser`).
+    /// (`actor/turn/profile_loads/claude.rs`). On Windows Claude keeps its entry: the
+    /// daemon serves no client without the guard's key, and Chrome has no debugging port.
     pub(crate) fn drops_browser(self) -> bool {
         self != Self::Windows
     }

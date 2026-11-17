@@ -462,7 +462,7 @@ fn no_command_breaks_out_and_the_hooks_sandbox_is_replaced() {
 
 /// No command runs outside the sandbox: there is no `excludedCommands`, whatever the session's
 /// keys, since Claude Code's exclusion check can be steered by a `VAR=` prefix, `env` or quoting
-/// (Claude has no browser on macOS and Linux for launch, decision record 0030).
+/// (Claude has no shell browser for launch, decision record 0030).
 #[test]
 fn no_command_is_excluded_from_the_sandbox() {
     let session = Session::new("s-1");

@@ -1,16 +1,15 @@
 //! Claude's browser is the guarded `browser` MCP entry, as Codex's is
-//! (`clauseo_profile::servers::browser_mcp`): off Windows a Claude session gets the entry filled,
+//! (`clauseo_profile::servers::browser_mcp`): on every OS a Claude session gets the entry filled,
 //! `mcp__browser` in its `allowedTools` (no prompt for ordinary browsing), Claude's own entry
-//! line in its instructions and `Available` in its header; on Windows none of it and the
-//! no-browser sentence. A matter Claude's sandbox cannot name (a `*` in its folder) leaves the
-//! sandbox off, so that session gets no entry, no allow rule, no browser in its header, the
-//! no-browser sentence and one notice saying why (it also asks before commands, which the same
-//! notice says; `claude_mode.rs` checks the mode).
+//! line in its instructions and `Available` in its header. A matter Claude's sandbox cannot name
+//! (a `*` in its folder) leaves the sandbox off, so that session gets no entry, no allow rule, no
+//! browser in its header, the no-browser sentence and one notice saying why (it also asks before
+//! commands, which the same notice says; `claude_mode.rs` checks the mode).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_profile::instructions::{BrowserPart, BrowserRoute, browser_part, browser_part_for};
+use clauseo_profile::instructions::{BrowserPart, BrowserRoute, browser_part_for};
 use clauseo_protocol::{
     AgentKind, ClauseoTool, DomainEvent, NoticeKind, StopReason, StreamId, ThreadId,
     ToolAvailability, ToolState,
@@ -98,37 +97,33 @@ fn turn(host: &Running, thread: ThreadId) -> (usize, Option<ToolState>) {
 }
 
 #[test]
-fn claude_gets_the_guarded_entry_unasked_off_windows() {
+fn claude_gets_the_guarded_entry_unasked() {
     let dir = Dir::new("browser_claude", &[]);
-    let windows = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
-    let expected = if windows {
-        params(&json!([]), &json!([]), browser_part(BrowserPart::Off))
-    } else {
-        let part = browser_part_for(BrowserPart::On, BrowserRoute::ClaudeEntry);
-        params(&json!([filled_browser()]), &json!(["mcp__browser"]), part)
-    };
+    assert!(!clauseo_profile::servers::no_browser(Some(
+        AgentKind::Claude
+    )));
+    let part = browser_part_for(BrowserPart::On, BrowserRoute::ClaudeEntry);
+    let expected = params(&json!([filled_browser()]), &json!(["mcp__browser"]), part);
     let host = host(&dir, "bcl-on", &expected, false);
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     let thread = host.create_thread(matter, CLAUDE);
     let (notices, browser) = turn(&host, thread);
     host.shutdown();
     assert_eq!(notices, 0);
-    if windows {
-        assert_eq!(browser, None);
-    } else {
-        let browser = browser.expect("the header shows the browser");
-        assert_eq!(browser.availability, ToolAvailability::Available);
-    }
+    let browser = browser.expect("the header shows the browser");
+    assert_eq!(browser.availability, ToolAvailability::Available);
 }
 
 /// A `*` in the matter's folder leaves Claude's sandbox off (`Off::Wildcard`), so the entry is
 /// dropped: no server, no allow rule, no browser in the header, the no-browser sentence, and one
-/// notice. Unix only: Windows names hold no `*`, and Claude has no browser there anyway.
+/// notice. Unix only: Windows names hold no `*`, and on Windows no sandbox was meant
+/// to be (`Off::Windows` keeps the entry).
 #[cfg(unix)]
 #[test]
 fn a_claude_session_without_its_sandbox_gets_no_browser_and_one_notice() {
     let dir = Dir::new("browser_claude_no_sandbox", &[]);
-    let expected = params(&json!([]), &json!([]), browser_part(BrowserPart::Off));
+    let off = clauseo_profile::instructions::browser_part(BrowserPart::Off);
+    let expected = params(&json!([]), &json!([]), off);
     let host = host(&dir, "bcl-off", &expected, true);
     let (_, thread, _) = matter_with_thread(&dir, &host, "A*", &[("brief.txt", "x\n")], CLAUDE);
     let (notices, browser) = turn(&host, thread);

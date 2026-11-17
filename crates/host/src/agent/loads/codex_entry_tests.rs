@@ -148,8 +148,8 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
 }
 
 /// Codex has the browser on every OS, Windows included (`no_browser`, the guard's session key
-/// from #1091): its entry goes out and its header holds the browser's state. Claude has no
-/// browser on Windows yet and the entry elsewhere. Runs on every OS: the OS is a parameter.
+/// from #1091): its entry goes out and its header holds the browser's state. Claude has it
+/// on every OS too. Runs on every OS: the OS is a parameter.
 #[test]
 fn codex_gets_the_entry_and_its_browser_state_on_every_os() {
     use clauseo_protocol::AgentKind;
@@ -157,7 +157,7 @@ fn codex_gets_the_entry_and_its_browser_state_on_every_os() {
     let chrome = PathBuf::from("/chrome");
     let ready = inputs(&dir, Some(&chrome));
     for windows in [false, true] {
-        assert_eq!(no_browser(Some(AgentKind::Claude), windows), windows);
+        assert!(!no_browser(Some(AgentKind::Claude), windows));
         assert!(!no_browser(None, windows));
         let none_here = no_browser(Some(AgentKind::Codex), windows);
         assert!(!none_here, "windows {windows}");
