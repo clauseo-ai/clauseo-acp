@@ -3,7 +3,8 @@
 //! Bearer, so the host never starts it. Desktop's refusal, `agent.firm_key_needed`, is one the
 //! host takes; and whatever desktop said, a Claude launch whose env has `ANTHROPIC_BASE_URL` and
 //! nothing that turns that sign-in off fails with the same code before anything is spawned. The
-//! `env` Claude Code applies from its settings files counts as the launch env's does.
+//! `env` Claude Code applies from its settings files counts as the launch env's does; one it
+//! cannot read refuses with `agent.settings_unreadable` unless the launch names an endpoint.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -144,6 +145,8 @@ fn claude_code_s_settings_files_count_as_the_launch_env_does() {
     let no_key = [("ANTHROPIC_API_KEY", "")];
     // No plan set the base URL, so the code is not the firm's.
     let refused = (StopReason::Failed, Some(ErrorCode::AgentEndpointKeyNeeded));
+    // A source that cannot be read, with no endpoint known: a code of its own.
+    let unreadable = (StopReason::Failed, Some(ErrorCode::AgentSettingsUnreadable));
 
     // A base URL only in the policy file, no key anywhere: nothing is spawned.
     let policy = format!(r#"{{"env": {{"ANTHROPIC_BASE_URL": "{GATEWAY}"}}}}"#);
@@ -173,13 +176,17 @@ fn claude_code_s_settings_files_count_as_the_launch_env_does() {
     let helper = r#"{"policyHelper": {"command": "x"}, "env": {"ANTHROPIC_API_KEY": "k"}}"#;
     write::write(&managed, helper.as_bytes());
     let before = launched();
-    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(one_turn(&host, matter), unreadable);
     assert_eq!(launched(), before, "nothing launched");
 
     // A policy file that does not parse, no key: refused; a key: it launches.
     write::write(&managed, b"{ not json");
     let before = launched();
-    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(one_turn(&host, matter), unreadable);
+    // With an endpoint the launch names (the hook's, so a plan's), that refusal's words hold.
+    hook.set(&[("ANTHROPIC_API_KEY", ""), ("ANTHROPIC_BASE_URL", GATEWAY)]);
+    let firm = (StopReason::Failed, Some(ErrorCode::AgentFirmKeyNeeded));
+    assert_eq!(one_turn(&host, matter), firm);
     assert_eq!(launched(), before, "nothing launched");
     hook.set(&[("ANTHROPIC_API_KEY", "stored-key")]);
     assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
@@ -189,7 +196,7 @@ fn claude_code_s_settings_files_count_as_the_launch_env_does() {
     write::create_dir_all(&managed);
     hook.set(&no_key);
     let before = launched();
-    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(one_turn(&host, matter), unreadable);
     assert_eq!(launched(), before, "nothing launched");
 
     // None there: it launches as ever.

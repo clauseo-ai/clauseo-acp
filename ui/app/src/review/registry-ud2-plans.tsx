@@ -121,9 +121,25 @@ const ENDPOINT_KEY: Scene = {
     first: both({ failed: { code: "agent.endpoint_key_needed", at: AT, host: "proxy.example" } }),
   },
 };
-/** The same with an address Clauseo can't read: no host on the card (agent.endpoint_key_needed). */
+/** The same with an address Clauseo can't read: no host on the card, the variable named (agent.endpoint_key_needed). */
 const ENDPOINT_UNREADABLE: Scene = {
-  setup: { first: both({ failed: { code: "agent.endpoint_key_needed", at: AT } }) },
+  setup: {
+    first: both({
+      failed: { code: "agent.endpoint_key_needed", at: AT, setting: "ANTHROPIC_BASE_URL" },
+    }),
+  },
+};
+/** A setting of Claude's Clauseo couldn't read, named on the card (agent.settings_unreadable). */
+const SETTINGS_UNREADABLE: Scene = {
+  setup: {
+    first: both({
+      failed: {
+        code: "agent.settings_unreadable",
+        at: AT,
+        setting: "/Library/Application Support/ClaudeCode/managed-settings.json",
+      },
+    }),
+  },
 };
 const found = (f: string): Scene => ({
   setup: { first: both({ signed_out: { found: f as never } }) },
@@ -211,8 +227,16 @@ export const UD2_PLANS: Entry[] = [
   entry(
     "UC-849",
     errorWords(
-      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
+      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called {setting}.",
     ),
     ENDPOINT_UNREADABLE,
+  ),
+  // UC-670: the card for a setting of Claude's Clauseo couldn't read, naming it (firm endpoint fix)
+  entry(
+    "UC-670",
+    errorWords(
+      "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it; it's {setting}.",
+    ),
+    SETTINGS_UNREADABLE,
   ),
 ];

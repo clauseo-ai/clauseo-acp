@@ -476,15 +476,45 @@ test("agent.endpoint_key_needed names the host on the card, never the firm's gat
   expect(t.setups()).toEqual([]);
 });
 
-test("agent.endpoint_key_needed with no host says the address can't be read, and sends to no key", async () => {
+test("agent.endpoint_key_needed with no host names the variable whose address can't be read, and sends to no key", async () => {
+  for (const setting of ["ANTHROPIC_BASE_URL", "CLAUDE_CODE_API_BASE_URL"]) {
+    const t = await at({ failed: { code: "agent.endpoint_key_needed", at: AT, setting } });
+    expect(block("claude")!.dataset["state"]).toBe("needs-key");
+    expect(words()).toContain(
+      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address,",
+    );
+    expect(words()).toContain(`the setting is called \u2068${setting}\u2069.`);
+    expect(words()).not.toContain("Add the key");
+    expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+    expect(t.setups()).toEqual([]);
+    await unmount();
+  }
+});
+
+test("agent.endpoint_key_needed with neither a host nor a setting (a socket) asks for the key", async () => {
   const t = await at({ failed: { code: "agent.endpoint_key_needed", at: AT } });
   expect(block("claude")!.dataset["state"]).toBe("needs-key");
   expect(words()).toContain(
-    "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address,",
+    "Claude can't start: this computer is set to send it to a different address, and no API key for that address is saved.",
   );
-  expect(words()).not.toContain("Add the key");
+  expect(words()).not.toContain("isn't a web address");
   expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
   expect(t.setups()).toEqual([]);
+});
+
+test("agent.settings_unreadable names the setting Clauseo couldn't read, or none, with no sign-in button", async () => {
+  const lead =
+    "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it";
+  const path = "C:\\Program Files\\ClaudeCode\\managed-settings.json";
+  const t = await at({ failed: { code: "agent.settings_unreadable", at: AT, setting: path } });
+  expect(block("claude")!.dataset["state"]).toBe("needs-key");
+  expect(words()).toContain(`${lead}; it's \u2068${path}\u2069.`);
+  expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+  expect(t.setups()).toEqual([]);
+  await unmount();
+  await at({ failed: { code: "agent.settings_unreadable", at: AT } });
+  expect(words()).toContain(`${lead}.`);
+  expect(words()).not.toContain("it's");
 });
 
 test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gives focus back to Sign out", async () => {

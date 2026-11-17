@@ -72,20 +72,54 @@ test("agent.endpoint_key_needed: with the settings window, Settings › Plans is
   expect(setups(t)).toEqual([]);
 });
 
-test("agent.endpoint_key_needed with no host: the address can't be read, and no button, even with the settings window", async () => {
-  const t = await mountFirstRun({
+/** The room's sign-in screen, with the settings window, for Claude's `failed`. */
+const withSettings = (failed: Extract<SignIn, { failed: unknown }>["failed"]) =>
+  mountFirstRun({
     openSettings: true,
-    first: [
-      info(true),
-      install(CLAUDE, READY),
-      signIn(CLAUDE, { failed: { code: "agent.endpoint_key_needed", at: AT } }),
-    ],
+    first: [info(true), install(CLAUDE, READY), signIn(CLAUDE, { failed })],
+  });
+
+test("agent.endpoint_key_needed with no host: names the variable, and no button, even with the settings window", async () => {
+  const t = await withSettings({
+    code: "agent.endpoint_key_needed",
+    at: AT,
+    setting: "CLAUDE_CODE_API_BASE_URL",
   });
   const state = byId("signin-state")?.textContent ?? "";
   expect(state).toContain(
     "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address,",
   );
+  expect(state).toContain("the setting is called \u2068CLAUDE_CODE_API_BASE_URL\u2069.");
   expect(state).not.toContain("Settings › Plans");
+  expect(byId("signin-state")?.querySelectorAll("button")).toHaveLength(0);
+  expect(setups(t)).toEqual([]);
+});
+
+test("agent.endpoint_key_needed with neither a host nor a setting (a socket): asks for the key, Settings › Plans its button", async () => {
+  const t = await withSettings({ code: "agent.endpoint_key_needed", at: AT });
+  const state = byId("signin-state")?.textContent ?? "";
+  expect(state).toContain("this computer is set to send it to a different address");
+  expect(state).not.toContain("isn't a web address");
+  const buttons = [...(byId("signin-state")?.querySelectorAll("button") ?? [])];
+  expect(buttons.map((b) => b.textContent)).toEqual(["Settings › Plans"]);
+  await press(buttons[0] ?? null);
+  expect(setups(t)).toEqual([]);
+});
+
+test("agent.settings_unreadable: names the setting, with no button even with the settings window", async () => {
+  const t = await withSettings({
+    code: "agent.settings_unreadable",
+    at: AT,
+    setting: "ANTHROPIC_BASE_URL",
+  });
+  const state = byId("signin-state")?.textContent ?? "";
+  expect(state).toContain(
+    "Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect.",
+  );
+  expect(state).toContain(
+    "Whoever looks after this computer can correct it; it's \u2068ANTHROPIC_BASE_URL\u2069.",
+  );
+  expect(state).not.toContain("Sign-in didn't finish");
   expect(byId("signin-state")?.querySelectorAll("button")).toHaveLength(0);
   expect(setups(t)).toEqual([]);
 });

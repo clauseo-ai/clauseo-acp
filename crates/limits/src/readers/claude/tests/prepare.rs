@@ -128,3 +128,40 @@ fn a_base_url_from_the_app_or_the_entry_with_no_key_runs_nothing() {
     assert!(read(&[url, key], &[]).is_ok());
     assert!(read(&[], &[url, key]).is_ok());
 }
+
+/// A Claude Code settings source that cannot be read, with no key, stops the read for its own
+/// reason, as where Claude would connect is unknown; an endpoint in the env keeps that reason,
+/// and a key lets it go.
+#[test]
+fn an_unreadable_settings_source_with_no_key_runs_nothing_for_its_own_reason() {
+    let scratch = Scratch::new("claude-prepare-unreadable");
+    let script = scratch.file(CLAUDE_SCRIPT, "");
+    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    scratch.file("data/agents/claude-acp/home/.claude.json", "{ not json");
+    let home = scratch.path("data/agents/claude-acp/home");
+    let run_dir = scratch.path("data/limits/run");
+    let read = |env: &[(&str, &str)]| {
+        let launch = AgentLaunch {
+            command: node(),
+            args: vec![script.to_string_lossy().into_owned()],
+            env: env
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        };
+        prepare(&launch, &run_dir, Some(&home), std::iter::empty())
+    };
+    let Err(unreadable) = read(&[]) else {
+        panic!("an unreadable source with no key runs");
+    };
+    assert!(
+        unreadable.contains("settings could not be read"),
+        "{unreadable}"
+    );
+    let url = [("ANTHROPIC_BASE_URL", "https://gateway.firm.example")];
+    let Err(endpoint) = read(&url) else {
+        panic!("a custom endpoint with no key runs");
+    };
+    assert!(endpoint.contains("custom endpoint"), "{endpoint}");
+    assert!(read(&[("ANTHROPIC_API_KEY", "k")]).is_ok());
+}

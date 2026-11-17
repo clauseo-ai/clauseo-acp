@@ -19,7 +19,10 @@
 //!   on top, stricter than Claude Code's: once a tier has set a key, token or provider switch, a
 //!   lower tier's that would turn the sign-in off is dropped. HKCU's `Settings` applies only
 //!   when no other tier has content; with one that has, only a custom endpoint of HKCU's is
-//!   kept (it can only refuse a launch that was safe). Claude Code does not always apply the
+//!   kept, with a blank key or token of HKCU's (they can only refuse a launch that was safe).
+//!   In each tier after the first with content, a policy document's non-blank helper key drops
+//!   that tier's names it governs, as Claude Code drops them ([`DROPPED_BY`]); a dropped name
+//!   does not hide a lower tier's. Claude Code does not always apply the
 //!   cached remote settings (it may wait to verify them), so when they set a checked name the
 //!   read also keeps the reading without them ([`SettingsEnv::readings`]), and a launch is
 //!   refused if either reading would offer the sign-in: the cache may add an endpoint, never
@@ -30,27 +33,30 @@
 //! list holding a date or data value anywhere makes the read [`unsure`](SettingsEnv::unsure): a
 //! base URL may be set. So does a policy helper
 //! (`policyHelper` or `policyHelpers`) in a policy document: Claude Code runs it at start and its
-//! output takes the policy tier's place, so the tier's own pairs are dropped too. A source that
+//! output takes the policy tier's place, so the tier's own pairs are dropped too. The read keeps
+//! why ([`Unreadable`]: its kind, and the setting's name or the file's path). After a property
+//! list that is unsure, the next is read too, for the pairs that can only refuse. A source that
 //! is not there changes nothing. Only the names the check reads are kept, a key's or token's
 //! value only as set or empty.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
-use std::io::{Cursor, ErrorKind, Read as _};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use super::unreadable::{REGISTRY_VALUES, Unreadable, UnreadableKind};
+
+mod files;
+
+pub use files::claude_managed_dir;
+#[cfg(test)]
+use files::plist_paths_for;
+use files::{holds_date_or_data, managed_files, plist_paths, read_file, without_bom};
+
 /// The largest settings file read: a larger one is not read, and makes the read unsure.
 pub(crate) const MAX_FILE: u64 = 1 << 20;
-
-/// The most `managed-settings.d` documents read; more make the read unsure.
-const MAX_DROP_INS: usize = 64;
-
-/// Claude Code's managed-preferences domain.
-#[cfg(any(target_os = "macos", test))]
-const DOMAIN: &str = "com.anthropic.claudecode";
 
 /// What a registry tier read gives: its settings text (`None` when it is not there), or `Err`
 /// when it is there but cannot be read.
@@ -61,6 +67,28 @@ const SECRET_NAMES: [&str; 2] = super::KEY_VARS;
 
 /// The keys of a policy document that name a policy helper.
 const HELPER_KEYS: [&str; 2] = ["policyHelper", "policyHelpers"];
+
+/// The provider switches an AWS helper key governs.
+const AWS_SWITCHES: &[&str] = &[
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+];
+
+/// Claude Code's helper keys and the names each one drops, set to non-blank text in a policy
+/// tier after the first with content, from that tier's `env` (names in this exact case).
+const DROPPED_BY: [(&str, &[&str]); 4] = [
+    ("apiKeyHelper", &["ANTHROPIC_BASE_URL"]),
+    ("awsAuthRefresh", AWS_SWITCHES),
+    ("awsCredentialExport", AWS_SWITCHES),
+    ("gcpAuthRefresh", &["CLAUDE_CODE_USE_VERTEX"]),
+];
+
+/// Why a read is unsure when it does not say.
+static UNKNOWN: Unreadable = Unreadable {
+    kind: UnreadableKind::Unreadable,
+    setting: None,
+};
 
 /// Where one launch's Claude Code finds its settings sources.
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +118,10 @@ pub struct SettingsEnv {
     pub(super) content: bool,
     /// Whether a policy document names a policy helper.
     pub(super) helper: bool,
+    /// Why the read is unsure (with a policy helper, before [`Self::policy`] makes it so).
+    pub(super) why: Option<Unreadable>,
+    /// The names a policy document's helper keys drop from its tier's `env` ([`DROPPED_BY`]).
+    pub(super) drops: BTreeSet<&'static str>,
     /// When the cached remote settings set a checked name, the pairs as they apply without that
     /// tier, which Claude Code may not apply: a second reading, checked as well.
     pub(super) without_remote: Option<Vec<(OsString, OsString)>>,
@@ -113,48 +145,92 @@ impl SettingsEnv {
         self.unsure
     }
 
-    /// A read that found nothing but could not tell where Claude Code's sources are: unsure.
+    /// Why the read is unsure, if it is.
+    pub fn unreadable(&self) -> Option<&Unreadable> {
+        self.unsure.then(|| self.why.as_ref().unwrap_or(&UNKNOWN))
+    }
+
+    /// A read that found nothing but could not tell where Claude Code's sources are, as there is
+    /// no home folder: unsure.
     pub fn unknown() -> Self {
-        Self {
-            unsure: true,
-            ..Self::default()
+        let mut env = Self::default();
+        env.mark(UnreadableKind::NoHome, None);
+        env
+    }
+
+    /// Makes the read unsure for `kind`, the setting named when known; the first why stays.
+    fn mark(&mut self, kind: UnreadableKind, setting: Option<&str>) {
+        self.unsure = true;
+        self.why.get_or_insert_with(|| Unreadable {
+            kind,
+            setting: setting.map(str::to_owned),
+        });
+    }
+
+    /// Runs `read`, naming `setting` as what could not be read when `read` made this read
+    /// unsure first and named nothing itself.
+    fn at(&mut self, setting: &str, read: impl FnOnce(&mut Self)) {
+        let named = self.why.is_some();
+        read(self);
+        if !named && let Some(why) = &mut self.why {
+            why.setting.get_or_insert_with(|| setting.to_owned());
         }
+    }
+
+    /// The JSON settings file at `path` (a `policy` document or not).
+    fn add_json_file(&mut self, path: &Path, policy: bool) {
+        let read = read_file(path);
+        self.at(&path.display().to_string(), |env| {
+            env.add_json(read, policy);
+        });
     }
 
     /// Reads `sources`; on a thread that may block on the disk.
     pub fn read(sources: &ClaudeSources<'_>) -> Self {
         let mut env = Self::default();
+        let read_at = |path: PathBuf| {
+            let read = read_file(&path);
+            (path, read)
+        };
         let legacy = sources
             .config
-            .map(|config| read_file(&config.join(".config.json")));
+            .map(|config| read_at(config.join(".config.json")));
         let global = match legacy {
-            None | Some(Ok(None)) => sources
+            None | Some((_, Ok(None))) => sources
                 .global
-                .map(|global| read_file(&global.join(".claude.json"))),
+                .map(|global| read_at(global.join(".claude.json"))),
             other => other,
         };
-        if let Some(global) = global {
-            env.add_json(global, false);
+        if let Some((path, read)) = global {
+            env.at(&path.display().to_string(), |env| env.add_json(read, false));
         }
         if let Some(config) = sources.config.filter(|_| sources.user) {
-            env.add_json(read_file(&config.join("settings.json")), false);
+            env.add_json_file(&config.join("settings.json"), false);
         }
         let mut files = Self::default();
-        match managed_files(sources.managed) {
-            Ok(paths) => {
-                for path in paths {
-                    files.add_json(read_file(&path), true);
-                }
+        if let Ok(paths) = managed_files(sources.managed) {
+            for path in paths {
+                files.add_json_file(&path, true);
             }
-            Err(()) => files.unsure = true,
+        } else {
+            let folder = sources.managed.join("managed-settings.d");
+            files.mark(
+                UnreadableKind::Unreadable,
+                Some(&folder.display().to_string()),
+            );
         }
         let mut remote = Self::default();
         if let Some(config) = sources.config {
-            remote.add_json(read_file(&config.join("remote-settings.json")), true);
+            remote.add_json_file(&config.join("remote-settings.json"), true);
         }
         let mut os = Self::default();
         if sources.os_policy {
-            os.add_plists(plist_paths().iter().map(|path| read_file(path)));
+            let paths = plist_paths();
+            os.add_plists(
+                paths
+                    .iter()
+                    .map(|path| (Some(path.as_path()), read_file(path))),
+            );
             let admin = [&files, &remote, &os]
                 .iter()
                 .any(|tier| tier.content || tier.unsure);
@@ -173,27 +249,37 @@ impl SettingsEnv {
     /// The policy tier's `env` from its tiers, highest first: the first tier to set a name in
     /// any case wins, and a lower tier's other spelling of the name gets the winner's value, as
     /// Claude Code writes it. Clauseo's own rule: once a tier has set a key, token or provider
-    /// switch, a lower tier's that would turn the sign-in off is dropped. A policy helper
-    /// anywhere drops every pair, as its output takes the tier's place, and makes the read unsure.
+    /// switch, a lower tier's that would turn the sign-in off is dropped. In each tier after
+    /// the first with content, the names its helper keys govern are skipped, as Claude Code
+    /// skips them, and hide no lower tier's. A policy helper anywhere drops every pair, as its
+    /// output takes the tier's place, and makes the read unsure.
     pub(super) fn policy(tiers: [Self; 3]) -> Self {
         let mut policy = Self::default();
         for tier in &tiers {
             policy.unsure |= tier.unsure;
             policy.content |= tier.content;
             policy.helper |= tier.helper;
+            if policy.why.is_none() {
+                policy.why.clone_from(&tier.why);
+            }
         }
         if policy.helper {
             policy.unsure = true;
             return policy;
         }
+        let first = tiers.iter().position(|tier| tier.content);
         // Each name set so far, upper-cased, with the winning tier's value.
         let mut seen: BTreeMap<String, OsString> = BTreeMap::new();
         let mut spelled: BTreeSet<OsString> = BTreeSet::new();
         let mut credential = false;
-        for tier in tiers {
+        for (index, tier) in tiers.into_iter().enumerate() {
             let mut named = BTreeMap::new();
             let mut sets_credential = false;
+            let skipped = first.is_some_and(|first| index > first);
             for (name, value) in tier.pairs {
+                if skipped && name.to_str().is_some_and(|name| tier.drops.contains(name)) {
+                    continue;
+                }
                 let upper = name.to_string_lossy().to_ascii_uppercase();
                 if let Some(winner) = seen.get(&upper) {
                     if spelled.insert(name.clone()) {
@@ -223,6 +309,35 @@ impl SettingsEnv {
         self.unsure |= other.unsure;
         self.content |= other.content;
         self.helper |= other.helper;
+        self.drops.extend(other.drops);
+        if self.why.is_none() {
+            self.why = other.why;
+        }
+    }
+
+    /// Keeps only the pairs that can only refuse a launch ([`refuse_only`]), and none of the
+    /// helper keys' effects: for a source Claude Code may not read.
+    fn refuse_only(&mut self) {
+        self.pairs.retain(|(name, value)| refuse_only(name, value));
+        self.drops.clear();
+        self.helper = false;
+    }
+
+    /// Notes a policy document's helper keys, `value_of` giving each one's text (`None`: not
+    /// there, `Ok(None)`: null, `Err`: of no text kind, which makes the read unsure).
+    fn add_helper_keys<'d>(
+        &mut self,
+        value_of: impl Fn(&str) -> Option<Result<Option<&'d str>, ()>>,
+    ) {
+        for (key, names) in DROPPED_BY {
+            match value_of(key) {
+                Some(Ok(Some(text))) if !super::js_trim(text).is_empty() => {
+                    self.drops.extend(names.iter().copied());
+                }
+                Some(Err(())) => self.mark(UnreadableKind::NotText, Some(key)),
+                _ => {}
+            }
+        }
     }
 
     /// A JSON settings document's `env`; `Err` (there, unreadable) or no JSON is unsure. A
@@ -234,52 +349,77 @@ impl SettingsEnv {
                 Ok(document) => {
                     let keys = document.as_object();
                     self.content |= keys.is_some_and(|keys| !keys.is_empty());
-                    self.helper |= policy
-                        && keys.is_some_and(|keys| {
-                            HELPER_KEYS.iter().any(|key| keys.contains_key(*key))
+                    if let Some(keys) = keys.filter(|_| policy) {
+                        if HELPER_KEYS.iter().any(|key| keys.contains_key(*key)) {
+                            self.add_policy_helper();
+                        }
+                        self.add_helper_keys(|key| {
+                            keys.get(key).map(|value| match value {
+                                Value::String(text) => Ok(Some(text.as_str())),
+                                Value::Null => Ok(None),
+                                _ => Err(()),
+                            })
                         });
+                    }
                     self.add_env(document.get("env"));
                 }
-                Err(_) => self.unsure = true,
+                Err(_) => self.mark(UnreadableKind::NotParsed, None),
             },
-            Err(()) => self.unsure = true,
+            Err(()) => self.mark(UnreadableKind::Unreadable, None),
         }
     }
 
+    /// A policy document names a policy helper: [`Self::policy`] drops the tier's pairs and makes
+    /// the read unsure.
+    fn add_policy_helper(&mut self) {
+        self.helper = true;
+        self.why.get_or_insert(Unreadable {
+            kind: UnreadableKind::PolicyHelper,
+            setting: None,
+        });
+    }
+
     /// The registry's `Settings` values, HKLM's then HKCU's: HKCU's applies only when neither
-    /// HKLM's nor another policy tier (`admin`) has content, else only a custom endpoint of
-    /// HKCU's is kept.
+    /// HKLM's nor another policy tier (`admin`) has content, else only the pairs of HKCU's that
+    /// can only refuse are kept ([`refuse_only`]).
     pub(super) fn add_registry_tiers(&mut self, values: Vec<TierRead>, admin: bool) {
         let mut values = values.into_iter();
         if let Some(hklm) = values.next() {
-            self.add_registry(hklm);
+            self.at(REGISTRY_VALUES[0], |env| env.add_registry(hklm));
         }
         let admin = admin || self.content || self.unsure;
         for hkcu in values {
             let mut user = Self::default();
-            user.add_registry(hkcu);
+            user.at(REGISTRY_VALUES[1], |user| user.add_registry(hkcu));
             if admin {
-                user.pairs.retain(|(name, value)| {
-                    let name = name.to_string_lossy().to_ascii_uppercase();
-                    super::routes(&name, value)
-                });
+                user.refuse_only();
             }
             self.extend(user);
         }
     }
 
-    /// The managed-preferences property lists, in Claude Code's order: the first with content
-    /// is the tier, and the later ones are not read. One that is unsure ends the search too.
-    pub(super) fn add_plists(
+    /// The managed-preferences property lists at their paths, in Claude Code's order: the first
+    /// with content is the tier, and the later ones are not read. After one that is unsure, the
+    /// next are read too, for their pairs that can only refuse ([`refuse_only`]), until one
+    /// with content: Claude Code may skip the one it cannot read.
+    pub(super) fn add_plists<'p>(
         &mut self,
-        reads: impl IntoIterator<Item = Result<Option<Vec<u8>>, ()>>,
+        reads: impl IntoIterator<Item = (Option<&'p Path>, Result<Option<Vec<u8>>, ()>)>,
     ) {
-        for read in reads {
+        let mut unsure = false;
+        for (path, read) in reads {
             let mut plist = Self::default();
-            plist.add_plist(read);
-            let found = plist.content || plist.unsure;
+            match path {
+                Some(path) => plist.at(&path.display().to_string(), |plist| plist.add_plist(read)),
+                None => plist.add_plist(read),
+            }
+            if unsure {
+                plist.refuse_only();
+            }
+            let content = plist.content;
+            unsure |= plist.unsure;
             self.extend(plist);
-            if found {
+            if content {
                 return;
             }
         }
@@ -290,12 +430,14 @@ impl SettingsEnv {
     /// prints with `JSON.parse`, which fails on it, so it may read the tier as empty.
     fn add_registry(&mut self, read: TierRead) {
         match read {
-            Ok(Some(text)) if text.starts_with('\u{FEFF}') => self.unsure = true,
+            Ok(Some(text)) if text.starts_with('\u{FEFF}') => {
+                self.mark(UnreadableKind::NotParsed, None);
+            }
             Ok(Some(text)) if !text.trim().is_empty() => {
                 self.add_json(Ok(Some(text.trim_end().as_bytes().to_vec())), true);
             }
             Ok(_) => {}
-            Err(()) => self.unsure = true,
+            Err(()) => self.mark(UnreadableKind::Unreadable, None),
         }
     }
 
@@ -308,29 +450,30 @@ impl SettingsEnv {
         let bytes = match read {
             Ok(Some(bytes)) if !bytes.is_empty() => bytes,
             Ok(_) => return,
-            Err(()) => {
-                self.unsure = true;
-                return;
-            }
+            Err(()) => return self.mark(UnreadableKind::Unreadable, None),
         };
         let Ok(value) = plist::Value::from_reader(Cursor::new(bytes)) else {
-            self.unsure = true;
-            return;
+            return self.mark(UnreadableKind::NotParsed, None);
         };
         if holds_date_or_data(&value) {
-            self.unsure = true;
-            return;
+            return self.mark(UnreadableKind::DateOrData, None);
         }
         let settings = value.as_dictionary();
         self.content |= settings.is_some_and(|keys| !keys.is_empty());
-        self.helper |=
-            settings.is_some_and(|keys| HELPER_KEYS.iter().any(|key| keys.contains_key(key)));
+        if let Some(keys) = settings {
+            if HELPER_KEYS.iter().any(|key| keys.contains_key(key)) {
+                self.add_policy_helper();
+            }
+            self.add_helper_keys(|key| {
+                keys.get(key)
+                    .map(|value| value.as_string().map(Some).ok_or(()))
+            });
+        }
         let Some(env) = settings.and_then(|settings| settings.get("env")) else {
             return;
         };
         let Some(env) = env.as_dictionary() else {
-            self.unsure = true;
-            return;
+            return self.mark(UnreadableKind::EnvNotObject, None);
         };
         for (name, value) in env {
             let text = match value {
@@ -358,19 +501,18 @@ impl SettingsEnv {
                     self.add_pair(name, text);
                 }
             }
-            Some(_) => self.unsure = true,
+            Some(_) => self.mark(UnreadableKind::EnvNotObject, None),
         }
     }
 
     /// One `env` entry, kept when the check reads its name; a value of no kind Claude Code
     /// reads as text is unsure.
     fn add_pair(&mut self, name: &str, text: Option<String>) {
-        if !super::checked(name) {
+        let Some(var) = super::checked_as(name) else {
             return;
-        }
+        };
         let Some(text) = text else {
-            self.unsure = true;
-            return;
+            return self.mark(UnreadableKind::NotText, Some(var));
         };
         let secret = SECRET_NAMES
             .iter()
@@ -385,106 +527,11 @@ impl SettingsEnv {
     }
 }
 
-/// The folder of Claude Code's `managed-settings.json` and `managed-mcp.json` on this OS.
-pub fn claude_managed_dir() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    return PathBuf::from("/Library/Application Support/ClaudeCode");
-    #[cfg(windows)]
-    return PathBuf::from(r"C:\Program Files\ClaudeCode");
-    #[cfg(not(any(windows, target_os = "macos")))]
-    return PathBuf::from("/etc/claude-code");
-}
-
-/// Claude Code's policy files in `managed`: `managed-settings.json`, then the drop-ins; `Err`
-/// when the drop-ins cannot be listed or are too many.
-fn managed_files(managed: &Path) -> Result<Vec<PathBuf>, ()> {
-    let mut files = vec![managed.join("managed-settings.json")];
-    let folder = managed.join("managed-settings.d");
-    let entries = match std::fs::read_dir(&folder) {
-        Ok(entries) => entries,
-        Err(error) if absent(error.kind()) => return Ok(files),
-        Err(_) => return Err(()),
-    };
-    let mut names = Vec::new();
-    for entry in entries {
-        let name = entry.map_err(drop)?.file_name();
-        let name = name.to_string_lossy();
-        if name.ends_with(".json") && !name.starts_with('.') {
-            names.push(name.into_owned());
-        }
-        if names.len() > MAX_DROP_INS {
-            return Err(());
-        }
-    }
-    names.sort();
-    files.extend(names.into_iter().map(|name| folder.join(name)));
-    Ok(files)
-}
-
-/// The managed-preferences files Claude Code reads on this machine: none but on macOS.
-fn plist_paths() -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let user = crate::policy::managed_prefs::login_user().ok().flatten();
-        plist_paths_for(user.as_deref())
-    }
-    #[cfg(not(target_os = "macos"))]
-    Vec::new()
-}
-
-/// The managed-preferences files for the login user `user` in Claude Code's order: the user's,
-/// then the computer's (the computer's alone without a user, as Claude Code skips the user's
-/// file when it finds no name). `file_paths` lists the computer's first, for its other callers.
-#[cfg(any(target_os = "macos", test))]
-pub(super) fn plist_paths_for(user: Option<&str>) -> Vec<PathBuf> {
-    use crate::policy::managed_prefs::{MANAGED_DIR, file_paths};
-    let mut paths = user
-        .and_then(|user| file_paths(DOMAIN, user).ok())
-        .unwrap_or_else(|| vec![Path::new(MANAGED_DIR).join(format!("{DOMAIN}.plist"))]);
-    paths.reverse();
-    paths
-}
-
-/// Whether `value` holds a date or data value at any depth, which plutil cannot turn into JSON.
-fn holds_date_or_data(value: &plist::Value) -> bool {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        match value {
-            plist::Value::Date(_) | plist::Value::Data(_) => return true,
-            plist::Value::Array(items) => stack.extend(items),
-            plist::Value::Dictionary(entries) => stack.extend(entries.values()),
-            _ => {}
-        }
-    }
-    false
-}
-
-/// `path`'s bytes: `None` when it is not there, `Err` when it is there but cannot be read or
-/// holds more than [`MAX_FILE`].
-pub(super) fn read_file(path: &Path) -> Result<Option<Vec<u8>>, ()> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) if absent(error.kind()) => return Ok(None),
-        Err(_) => return Err(()),
-    };
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE + 1)
-        .read_to_end(&mut bytes)
-        .map_err(drop)?;
-    if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_FILE) {
-        return Err(());
-    }
-    Ok(Some(bytes))
-}
-
-/// Whether an open's error says the file is not there (or its folder is not a folder).
-fn absent(kind: ErrorKind) -> bool {
-    matches!(kind, ErrorKind::NotFound | ErrorKind::NotADirectory)
-}
-
-/// `bytes` without a leading UTF-8 byte order mark.
-fn without_bom(bytes: &[u8]) -> &[u8] {
-    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+/// Whether the pair can only refuse a launch, whatever the launch's own variables: a custom
+/// endpoint or socket ([`super::routes`]), or a key or token kept as empty (blank).
+fn refuse_only(name: &OsStr, value: &OsStr) -> bool {
+    let name = name.to_string_lossy().to_ascii_uppercase();
+    super::routes(&name, value) || (super::KEY_VARS.contains(&name.as_str()) && value.is_empty())
 }
 
 #[cfg(test)]

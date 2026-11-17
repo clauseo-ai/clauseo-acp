@@ -153,8 +153,19 @@ fn prepare(
     let pairs = env
         .iter()
         .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
-    if clauseo_settings::own_signin_reaches_endpoint(pairs, &settings) {
-        return Err("a custom endpoint with no key would get Claude's own sign-in".to_owned());
+    match clauseo_settings::own_signin_refusal(pairs, &settings) {
+        Some(clauseo_settings::Refusal::Endpoint) => {
+            return Err("a custom endpoint with no key would get Claude's own sign-in".to_owned());
+        }
+        // Where Claude would connect is unknown: its own reason, the log naming only the kind.
+        Some(clauseo_settings::Refusal::Unreadable(why)) => {
+            tracing::warn!(
+                reason = why.kind.word(),
+                "limits: Claude Code's settings cannot be read, no key: no read"
+            );
+            return Err("Claude Code's settings could not be read, and no key is saved".to_owned());
+        }
+        None => {}
     }
     LaunchSpec::new(
         located.program,

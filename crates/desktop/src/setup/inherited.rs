@@ -4,7 +4,9 @@
 //! memory the agent is refused with `agent.endpoint_key_needed` (`refusal.rs`), and its card
 //! names the endpoint's host (`compose.rs`): no plan set it, so it is not called the firm's. An
 //! address with no host Clauseo can read shows no part of itself, on the card or in the log: it
-//! may hold a path, a query or a token.
+//! may hold a path, a query or a token. The card names the variable holding it instead, from
+//! Clauseo's own list. A socket alone (`ANTHROPIC_UNIX_SOCKET`, no base URL) is an endpoint
+//! with neither: a key lets it go, so the card asks for one.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -23,6 +25,9 @@ pub(crate) struct Inherited {
     /// Its host, or `None` when its address does not parse or has no host: then no part of the
     /// address is shown.
     pub(crate) host: Option<String>,
+    /// With no host, the variable whose address does not parse (one of [`BASE_URL_VARS`]); `None`
+    /// with a host, or for a socket with no base URL.
+    pub(crate) setting: Option<&'static str>,
 }
 
 /// Each of `known` whose launches get a custom endpoint from this process's environment or
@@ -83,18 +88,21 @@ pub(crate) fn inherited_host(
             named.then(|| value.to_string_lossy())
         })
     };
-    let url = BASE_URL_VARS
-        .into_iter()
-        .filter_map(address)
-        .find(|url| !url.is_empty() && !is_default_address(url));
+    let url = BASE_URL_VARS.into_iter().find_map(|var| {
+        address(var)
+            .filter(|url| !url.is_empty() && !is_default_address(url))
+            .map(|url| (var, url))
+    });
     let host = url
-        .and_then(|url| url::Url::parse(&url).ok())
+        .as_ref()
+        .and_then(|(_, url)| url::Url::parse(url).ok())
         .and_then(|url| {
             url.host_str()
                 .filter(|host| !host.is_empty())
                 .map(str::to_owned)
         });
-    Some(Inherited { host })
+    let setting = url.filter(|_| host.is_none()).map(|(var, _)| var);
+    Some(Inherited { host, setting })
 }
 
 #[cfg(test)]

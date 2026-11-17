@@ -78,7 +78,11 @@ fn an_endpoint_no_plan_set_with_no_key_is_refused_with_its_own_code() {
     let settle = |keychain: Keychain, own_signin: &[AgentId]| {
         let rig = rig_on(true, keychain);
         let host = Some("proxy.example".to_owned());
-        let inherited = std::collections::BTreeMap::from([(claude(), Inherited { host })]);
+        let endpoint = Inherited {
+            host,
+            setting: None,
+        };
+        let inherited = std::collections::BTreeMap::from([(claude(), endpoint)]);
         block_on(settle_after_load(
             &*rig.host,
             &rig.backend.keys,

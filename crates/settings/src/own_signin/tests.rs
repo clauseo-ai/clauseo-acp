@@ -54,8 +54,7 @@ fn from_settings(pairs: &[(&str, &str)], unsure: bool) -> SettingsEnv {
             .collect(),
         unsure,
         content: !pairs.is_empty(),
-        helper: false,
-        without_remote: None,
+        ..SettingsEnv::default()
     }
 }
 

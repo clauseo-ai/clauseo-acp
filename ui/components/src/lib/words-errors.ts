@@ -84,6 +84,7 @@ export type ErrorCode =
   | "agent.key_unreadable"
   | "agent.firm_key_needed"
   | "agent.endpoint_key_needed"
+  | "agent.settings_unreadable"
   | "matter.document_path_too_long"
   | "matter.protected_link"
   | "sandbox.setup_refused"
@@ -264,6 +265,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // provisional (firm endpoint fix, app thread's words): a base URL no plan set; the card's own is UC-825
   "agent.endpoint_key_needed":
     "Claude can't start: this computer is set to send it to a different address, and no API key for that address is saved. Add the key in Settings › Plans.",
+  // provisional (firm endpoint fix, the orchestrator's words): a setting Claude reads that Clauseo couldn't read; the
+  // card's own, naming the setting, is UC-670
+  "agent.settings_unreadable":
+    "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // provisional: the item's path joins it once PR6 carries it as a field
@@ -386,7 +391,11 @@ const versions = wordsOf("versions");
 
 /** UC-849's words (provisional): the one place they are set. */
 const UNREADABLE_ENDPOINT =
-  "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.";
+  "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called {setting}.";
+
+/** UC-670's words (provisional): the one place they are set. */
+const SETTINGS_UNREADABLE =
+  "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it; it's {setting}.";
 
 /** The card's words for `agent.endpoint_key_needed` (UC-825, provisional), naming the `host` Claude's connection is
  * set to. */
@@ -399,9 +408,34 @@ export function endpointKeyWords(lang: Lang, host: string): string {
 }
 
 /** The card's words for `agent.endpoint_key_needed` when the address Claude's connection is set to can't be read
- * (UC-849, provisional): no part of the address is shown, and no link, since nothing in Clauseo can fix it. */
-export function unreadableEndpointWords(lang: Lang): string {
-  return own(lang, UNREADABLE_ENDPOINT);
+ * (UC-849, provisional): no part of the address is shown, only the `setting` holding it (a name from Clauseo's own
+ * list), and no link, since nothing in Clauseo can fix it. */
+export function unreadableEndpointWords(lang: Lang, setting: string): string {
+  return own(lang, UNREADABLE_ENDPOINT, { setting: isolate(setting) });
+}
+
+/** The card's words for `agent.settings_unreadable`: naming the `setting` that couldn't be read (UC-670,
+ * provisional; a variable's name or a settings file's path, never a value), else the code's own line. No link: nothing
+ * in Clauseo can fix it. */
+export function settingsUnreadableWords(lang: Lang, setting: string | undefined): string {
+  return setting === undefined
+    ? errorWords(lang, "agent.settings_unreadable")
+    : own(lang, SETTINGS_UNREADABLE, { setting: isolate(setting) });
+}
+
+/** A Claude sign-in card's words for a launch refused for its key (`agent.firm_key_needed`,
+ * `agent.endpoint_key_needed` naming its host or the variable holding an address that can't be read, or neither for
+ * a socket) or for a setting that can't be read (`agent.settings_unreadable`). */
+export function keyCardWords(
+  lang: Lang,
+  failed: { code: string; host?: string | undefined; setting?: string | undefined },
+): string {
+  if (failed.code === "agent.settings_unreadable")
+    return settingsUnreadableWords(lang, failed.setting);
+  if (failed.code !== "agent.endpoint_key_needed") return errorWords(lang, failed.code);
+  if (failed.host !== undefined) return endpointKeyWords(lang, failed.host);
+  if (failed.setting !== undefined) return unreadableEndpointWords(lang, failed.setting);
+  return errorWords(lang, failed.code);
 }
 
 /** An error sentence in the language. */

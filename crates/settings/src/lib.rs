@@ -164,8 +164,9 @@ pub use mcp::{
     check_server, command_ok, env_name_ok, header_name_ok, keychain_account, url_ok,
 };
 pub use own_signin::{
-    ClaudeSources, SettingsEnv, claude_managed_dir, claude_registry_settings, is_default_address,
-    own_signin_reaches_endpoint, plan_keeps_own_signin,
+    ClaudeSources, Refusal, SettingsEnv, Unreadable, UnreadableKind, claude_managed_dir,
+    claude_registry_settings, is_default_address, own_signin_reaches_endpoint, own_signin_refusal,
+    plan_keeps_own_signin,
 };
 pub use plans::{
     PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, launch_is_clauseos, secret_shaped,

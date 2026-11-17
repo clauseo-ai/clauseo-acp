@@ -24,7 +24,7 @@
 //!    (`hook::sends_own_signin`) and no key is in memory, `Failed { code: agent.firm_key_needed }`:
 //!    its launches are refused (`refusal.rs`) until the firm's key is saved. Then, while its
 //!    launches get such an endpoint that no plan set (`inherited.rs`) and no key is in memory,
-//!    `Failed { code: agent.endpoint_key_needed, host }`, naming that endpoint's host.
+//!    `Failed { code: agent.endpoint_key_needed, host, setting }`, naming its host or variable.
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored), with
@@ -76,8 +76,8 @@ pub(crate) struct Facts {
     /// (`hook::sends_own_signin`), if it does: `agent.firm_key_needed` while no key is in memory.
     pub(crate) own_signin: Option<SystemTime>,
     /// Since when its launches get a custom endpoint no plan set (`inherited.rs`), and its host
-    /// (none when unreadable), if they do: `agent.endpoint_key_needed` while no key is in memory.
-    pub(crate) inherited: Option<(SystemTime, Option<String>)>,
+    /// or variable, if they do: `agent.endpoint_key_needed` while no key is in memory.
+    pub(crate) inherited: Option<(SystemTime, Inherited)>,
     /// Since when an automatic leave has been trying again, if one is (its first try's end).
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
@@ -108,32 +108,21 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return wire(agent, state);
     }
     if let Some(since) = facts.blocked {
-        return Some(SignIn::Failed {
-            code: ErrorCode::SigninPolicyUnreadable,
-            at: timestamp(since),
-            host: None,
-        });
+        return Some(failed(ErrorCode::SigninPolicyUnreadable, since));
     }
     let firm = facts.managed.or(facts.firm).is_some();
     if let Some(since) = facts.unreadable.or(facts.read_failed.filter(|_| firm)) {
-        return Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
-            at: timestamp(since),
-            host: None,
-        });
+        return Some(failed(ErrorCode::AgentKeyUnreadable, since));
     }
     if let Some(since) = facts.own_signin.filter(|_| facts.key.is_none()) {
-        return Some(SignIn::Failed {
-            code: ErrorCode::AgentFirmKeyNeeded,
-            at: timestamp(since),
-            host: None,
-        });
+        return Some(failed(ErrorCode::AgentFirmKeyNeeded, since));
     }
-    if let Some((since, host)) = facts.inherited.filter(|_| facts.key.is_none()) {
+    if let Some((since, endpoint)) = facts.inherited.filter(|_| facts.key.is_none()) {
         return Some(SignIn::Failed {
             code: ErrorCode::AgentEndpointKeyNeeded,
             at: timestamp(since),
-            host,
+            host: endpoint.host,
+            setting: endpoint.setting.map(str::to_owned),
         });
     }
     if let Some(since) = facts.managed.or(facts.firm) {
@@ -147,6 +136,16 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(state);
     }
     s18.and_then(|state| wire(agent, state))
+}
+
+/// `Failed` with `code` since `since`, naming no host or setting.
+fn failed(code: ErrorCode, since: SystemTime) -> SignIn {
+    SignIn::Failed {
+        code,
+        at: timestamp(since),
+        host: None,
+        setting: None,
+    }
 }
 
 /// A fixed word for `state`'s kind, for the log: never an email, a plan, a code or an address.
@@ -478,7 +477,7 @@ impl Compose {
                 .inherited
                 .as_ref()
                 .map_or(now, |(since, _)| *since);
-            known.facts.inherited = endpoint.map(|endpoint| (since, endpoint.host));
+            known.facts.inherited = endpoint.map(|endpoint| (since, endpoint));
         });
     }
 

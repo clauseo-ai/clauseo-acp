@@ -19,7 +19,7 @@ fn env_plist(name: &str, value: &str, other: &str) -> Vec<u8> {
 
 /// The policy tier when the login user `lawyer`'s profile is `user` and the computer's is
 /// `device` (`None`: not there), read in [`plist_paths_for`]'s order.
-fn os_tier(user: Option<Vec<u8>>, device: Option<Vec<u8>>) -> SettingsEnv {
+pub(super) fn os_tier(user: Option<Vec<u8>>, device: Option<Vec<u8>>) -> SettingsEnv {
     let paths = plist_paths_for(Some("lawyer"));
     let mut files: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
     let by_user = paths
@@ -34,7 +34,11 @@ fn os_tier(user: Option<Vec<u8>>, device: Option<Vec<u8>>) -> SettingsEnv {
         }
     }
     let mut os = SettingsEnv::default();
-    os.add_plists(paths.iter().map(|path| Ok(files.get(path).cloned())));
+    os.add_plists(
+        paths
+            .iter()
+            .map(|path| (Some(path.as_path()), Ok(files.get(path).cloned()))),
+    );
     SettingsEnv::policy([SettingsEnv::default(), os, SettingsEnv::default()])
 }
 
@@ -60,8 +64,8 @@ fn the_login_user_s_profile_comes_before_the_computer_s() {
 }
 
 /// A profile holding a date or data value anywhere, which plutil cannot turn into JSON, is
-/// unsure and keeps none of its pairs: its key does not count, so with a computer gateway and
-/// no key of the launch's own the launch is refused.
+/// unsure and keeps none of its pairs: its key does not count, so with a computer gateway (read
+/// past it) and no key of the launch's own the launch is refused.
 #[test]
 fn a_profile_with_a_date_or_data_value_is_unsure() {
     let device = || env_plist("ANTHROPIC_BASE_URL", GATEWAY, "");
@@ -72,9 +76,11 @@ fn a_profile_with_a_date_or_data_value_is_unsure() {
     ] {
         let user = env_plist("ANTHROPIC_API_KEY", "k", other);
         let read = os_tier(Some(user), Some(device()));
-        assert!(
-            read.unsure() && read.pairs().is_empty(),
-            "{other}: {read:?}"
+        assert!(read.unsure(), "{other}: {read:?}");
+        assert_eq!(
+            pairs(&read),
+            [pair("ANTHROPIC_BASE_URL", GATEWAY)],
+            "{other}"
         );
         assert!(reaches(&[], &read), "{other}");
         assert!(
@@ -106,7 +112,7 @@ fn a_higher_tier_s_spelling_gives_its_value_to_a_lower_tier_s() {
     );
     assert!(reaches(&[], &read));
     let mut os = SettingsEnv::default();
-    os.add_plists([Ok(Some(env_plist("anthropic_base_url", GATEWAY, "")))]);
+    os.add_plist_reads([Ok(Some(env_plist("anthropic_base_url", GATEWAY, "")))]);
     let read = SettingsEnv::policy([SettingsEnv::default(), os, policy_doc(default)]);
     assert!(reaches(&[], &read));
     // The same spelling below the winner adds nothing.
@@ -148,7 +154,7 @@ fn a_managed_key_of_only_a_byte_order_mark_is_no_key() {
         );
         assert!(reaches(&[], &read), "{blank:?}");
         let mut os = SettingsEnv::default();
-        os.add_plists([Ok(Some(env_plist("ANTHROPIC_API_KEY", blank, "")))]);
+        os.add_plist_reads([Ok(Some(env_plist("ANTHROPIC_API_KEY", blank, "")))]);
         assert!(
             reaches(&[("ANTHROPIC_BASE_URL", GATEWAY)], &os),
             "{blank:?}"

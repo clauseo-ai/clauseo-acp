@@ -396,6 +396,12 @@ error_codes! {
         Claude Code's settings) and no API key is saved: Claude Code would offer the lawyer's own \
         sign-in token to that endpoint, so no agent was started. Saving a key for it lets it \
         start.";
+    AgentSettingsUnreadable = "agent.settings_unreadable", retryable: false, meaning: "One of \
+        Claude Code's settings sources on this computer is there but could not be read (it \
+        cannot be opened, is too large, does not parse, or names a policy helper), and no API \
+        key is saved: where Claude would connect is unknown, and Claude Code could offer the \
+        lawyer's own sign-in token to a custom endpoint, so no agent was started. Correcting the \
+        setting, or saving a key, lets it start.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

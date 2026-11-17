@@ -1986,6 +1986,8 @@ export type ErrorCode =
 "agent.firm_key_needed" | 
 /** Claude's connection is set to a custom endpoint that no plan set (the app's own environment, or Claude Code's settings) and no API key is saved: Claude Code would offer the lawyer's own sign-in token to that endpoint, so no agent was started. Saving a key for it lets it start. */
 "agent.endpoint_key_needed" | 
+/** One of Claude Code's settings sources on this computer is there but could not be read (it cannot be opened, is too large, does not parse, or names a policy helper), and no API key is saved: where Claude would connect is unknown, and Claude Code could offer the lawyer's own sign-in token to a custom endpoint, so no agent was started. Correcting the setting, or saving a key, lets it start. */
+"agent.settings_unreadable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -6040,6 +6042,13 @@ export type SignIn =
 	 *  to, for the card to name; missing otherwise.
 	 */
 	host?: string,
+	/**
+	 *  The setting the card names, from Clauseo's own list, never a value: with
+	 *  `agent.endpoint_key_needed` and no host, the variable whose address does not parse;
+	 *  with `agent.settings_unreadable`, the variable or the settings file that could not be
+	 *  read. Missing otherwise.
+	 */
+	setting?: string,
 } }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**
  *  Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login

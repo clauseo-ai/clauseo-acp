@@ -50,6 +50,7 @@ pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
             code: ErrorCode::from_str_lossy(code.code()),
             at: timestamp(*at),
             host: None,
+            setting: None,
         },
         _ => return None,
     })

@@ -140,27 +140,8 @@ pub(super) fn launch(
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
-    // Desktop refuses a firm endpoint with no key first (`agent.firm_key_needed`). This checks the
-    // env the agent would get (the inherited one, the entry's, the hook's) with the `env` Claude
-    // Code applies over it from its settings files and policy tiers, read by the prep, and holds
-    // if desktop's refusal never reached the host or has not yet (a settings change lands in the
-    // launch hook before desktop's `refusal::sync_all`).
-    let env = spec
-        .env()
-        .iter()
-        .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
-    if claude && clauseo_settings::own_signin_reaches_endpoint(env, &prepared.settings.env) {
-        tracing::warn!(agent = %row.agent, planned, "a launch is refused: a custom endpoint, no key");
-        // The firm's words only when a plan set the base URL; else the card's own.
-        let code = if planned {
-            ErrorCode::AgentFirmKeyNeeded
-        } else {
-            ErrorCode::AgentEndpointKeyNeeded
-        };
-        return Err(Error::refused(
-            code,
-            "a custom endpoint with no key saved would get Claude's own sign-in",
-        ));
+    if claude {
+        own_signin_check(&row.agent, spec.env(), &prepared.settings.env, planned)?;
     }
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
@@ -197,6 +178,56 @@ pub(super) fn launch(
         fence_vars,
         probe,
     ))
+}
+
+/// Desktop refuses a firm endpoint with no key first (`agent.firm_key_needed`). This checks the
+/// env Claude would get (`env`: the inherited one, the entry's, the hook's) with the `env`
+/// Claude Code applies over it from its settings files and policy tiers (`settings`, read by the
+/// prep), and holds if desktop's refusal never reached the host or has not yet (a settings change
+/// lands in the launch hook before desktop's `refusal::sync_all`). `planned`: a plan set the
+/// base URL.
+fn own_signin_check(
+    agent: &impl std::fmt::Display,
+    env: &std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+    settings: &clauseo_settings::SettingsEnv,
+    planned: bool,
+) -> Result<(), Error> {
+    let env = env
+        .iter()
+        .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
+    match clauseo_settings::own_signin_refusal(env, settings) {
+        Some(clauseo_settings::Refusal::Endpoint) => {
+            tracing::warn!(
+                agent = %agent,
+                planned,
+                "a launch is refused: a custom endpoint, no key"
+            );
+            // The firm's words only when a plan set the base URL; else the card's own.
+            let code = if planned {
+                ErrorCode::AgentFirmKeyNeeded
+            } else {
+                ErrorCode::AgentEndpointKeyNeeded
+            };
+            Err(Error::refused(
+                code,
+                "a custom endpoint with no key saved would get Claude's own sign-in",
+            ))
+        }
+        // A source of Claude Code's settings could not be read, so where Claude would connect is
+        // unknown: its own code, the log naming only the kind of trouble.
+        Some(clauseo_settings::Refusal::Unreadable(why)) => {
+            tracing::warn!(
+                agent = %agent,
+                reason = why.kind.word(),
+                "a launch is refused: Claude Code's settings cannot be read, no key"
+            );
+            Err(Error::refused(
+                ErrorCode::AgentSettingsUnreadable,
+                "Claude Code's settings could not be read, and no key is saved",
+            ))
+        }
+        None => Ok(()),
+    }
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its

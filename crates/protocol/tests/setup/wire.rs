@@ -237,11 +237,13 @@ fn every_sign_in() -> Vec<SignIn> {
             code: ErrorCode::SigninPortBusy,
             at: at(5),
             host: None,
+            setting: None,
         },
         SignIn::Failed {
             code: ErrorCode::AgentAuthRequired,
             at: at(6),
             host: None,
+            setting: None,
         },
         SignIn::Switching {
             since: at(1_700_000_000_000),
@@ -425,6 +427,7 @@ fn setup_events_have_their_json_form() {
                     code: ErrorCode::SigninLinkExpired,
                     at: at(9),
                     host: None,
+                    setting: None,
                 },
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":{"failed":{"code":"signin.link_expired","at":9}}}}"#,

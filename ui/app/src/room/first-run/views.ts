@@ -122,6 +122,7 @@ export function gateView(
       code: signIn.failed.code,
       at: clock(signIn.failed.at),
       ...(signIn.failed.host === undefined ? {} : { host: signIn.failed.host }),
+      ...(signIn.failed.setting === undefined ? {} : { setting: signIn.failed.setting }),
     };
   }
   return { kind: "signed-out" };

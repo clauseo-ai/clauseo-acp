@@ -12,6 +12,7 @@ use clauseo_protocol::{
 
 use super::{Compose, Facts, compose, timestamp};
 use crate::setup::SetupEvents;
+use crate::setup::inherited::Inherited;
 
 fn claude() -> AgentId {
     AgentId::new("claude-acp").unwrap()
@@ -96,6 +97,7 @@ fn the_composition_table() {
         code: ErrorCode::SigninPolicyUnreadable,
         at: timestamp(at(T)),
         host: None,
+        setting: None,
     };
     let mut states: Vec<Option<SigninState>> = s18_states().into_iter().map(Some).collect();
     states.push(None);
@@ -200,7 +202,8 @@ fn s18_states_map_to_the_wire_with_the_plan_in_words() {
         Some(SignIn::Failed {
             code: ErrorCode::SigninPortBusy,
             at: timestamp(at(T)),
-            host: None
+            host: None,
+            setting: None,
         })
     );
     assert_eq!(compose(&claude(), None, Facts::default()), None);
@@ -354,6 +357,7 @@ fn a_key_or_an_endpoint_after_a_failed_sign_in_clears_the_failure() {
         code: ErrorCode::SigninCancelled,
         at: timestamp(at(T)),
         host: None,
+        setting: None,
     };
     assert_eq!(
         sent(&mut feed),
@@ -394,7 +398,8 @@ fn a_saved_key_clears_a_failure_but_a_running_sign_in_still_shows() {
             SignIn::Failed {
                 code: ErrorCode::SigninLinkExpired,
                 at: timestamp(at(T)),
-                host: None
+                host: None,
+                setting: None,
             },
             by(SignInMethod::ApiKey),
             SignIn::Queued,
@@ -459,7 +464,8 @@ fn a_firm_endpoint_with_no_key_shows_firm_key_needed_until_a_key_is_in_memory() 
         Some(SignIn::Failed {
             code: ErrorCode::AgentFirmKeyNeeded,
             at: timestamp(at(T)),
-            host: None
+            host: None,
+            setting: None,
         })
     );
     let keyed = Facts {
@@ -497,7 +503,13 @@ fn a_firm_endpoint_with_no_key_shows_firm_key_needed_until_a_key_is_in_memory() 
 fn an_endpoint_no_plan_set_with_no_key_names_its_host_until_a_key_is_in_memory() {
     let out = SigninState::SignedOut { found: None };
     let inherited = Facts {
-        inherited: Some((at(T), Some("proxy.example".to_owned()))),
+        inherited: Some((
+            at(T),
+            Inherited {
+                host: Some("proxy.example".to_owned()),
+                setting: None,
+            },
+        )),
         ..Facts::default()
     };
     assert_eq!(
@@ -506,6 +518,26 @@ fn an_endpoint_no_plan_set_with_no_key_names_its_host_until_a_key_is_in_memory()
             code: ErrorCode::AgentEndpointKeyNeeded,
             at: timestamp(at(T)),
             host: Some("proxy.example".to_owned()),
+            setting: None,
+        })
+    );
+    let unparsed = Facts {
+        inherited: Some((
+            at(T),
+            Inherited {
+                host: None,
+                setting: Some("CLAUDE_CODE_API_BASE_URL"),
+            },
+        )),
+        ..Facts::default()
+    };
+    assert_eq!(
+        compose(&claude(), Some(&out), unparsed),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentEndpointKeyNeeded,
+            at: timestamp(at(T)),
+            host: None,
+            setting: Some("CLAUDE_CODE_API_BASE_URL".to_owned()),
         })
     );
     let keyed = Facts {

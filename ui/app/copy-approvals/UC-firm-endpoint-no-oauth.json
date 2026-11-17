@@ -29,12 +29,30 @@
     "note": "new (firm endpoint fix): the Plans card and the room's sign-in screen for agent.endpoint_key_needed, naming the host Claude's connection is set to; on the room's screen \"Settings › Plans\" links to the settings window at Plans; provisional for Rohan, hi later"
   },
   "UC-849": {
-    "en": "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
+    "en": "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called {setting}.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "firm endpoint fix (provisional; orchestrator's words, Rohan batch review)",
-    "note": "Breaks the 'never send lawyers to IT' rule on purpose (orchestrator, 16 Nov): nothing in Clauseo can fix this setting. New (firm endpoint fix): the Plans card and the room's sign-in screen for agent.endpoint_key_needed when the address Claude's connection is set to can't be read; no part of it is shown and there is no link; provisional for Rohan, hi later"
+    "note": "Breaks the 'never send lawyers to IT' rule on purpose (orchestrator, 16 Nov): nothing in Clauseo can fix this setting. New (firm endpoint fix): the Plans card and the room's sign-in screen for agent.endpoint_key_needed when the address Claude's connection is set to can't be read; no part of it is shown and there is no link; provisional for Rohan, hi later; {setting} is ANTHROPIC_BASE_URL or CLAUDE_CODE_API_BASE_URL, whichever holds the address (a socket alone gets the code's own line instead)"
+  },
+  "U3-err-agent.settings_unreadable": {
+    "en": "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "firm endpoint fix (provisional; orchestrator's words, Rohan batch review)",
+    "note": "new (firm endpoint fix): a Claude launch refused because one of Claude Code's settings sources couldn't be read (unreadable, too large, doesn't parse, a policy helper), with no endpoint known and no saved key; the thread's line, which can't name the setting; breaks the 'never send lawyers to IT' rule on purpose, as UC-849 does; provisional for Rohan, hi later"
+  },
+  "UC-670": {
+    "en": "Claude can't start: Clauseo couldn't read one of this computer's settings for Claude, so it can't tell where Claude would connect. Whoever looks after this computer can correct it; it's {setting}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "firm endpoint fix (provisional; orchestrator's words, Rohan batch review)",
+    "note": "new (firm endpoint fix): the Plans card and the room's sign-in screen for agent.settings_unreadable, naming the setting that couldn't be read: a variable's name or a settings file's path from Clauseo's own list, never a value; no link, since nothing in Clauseo can fix it; provisional for Rohan, hi later"
   }
 }

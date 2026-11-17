@@ -67,6 +67,13 @@ fn pairs(env: &SettingsEnv) -> Vec<(String, String)> {
         .collect()
 }
 
+impl SettingsEnv {
+    /// [`SettingsEnv::add_plists`] with no paths.
+    fn add_plist_reads(&mut self, reads: impl IntoIterator<Item = Result<Option<Vec<u8>>, ()>>) {
+        self.add_plists(reads.into_iter().map(|read| (None, read)));
+    }
+}
+
 fn pair(name: &str, value: &str) -> (String, String) {
     (name.to_owned(), value.to_owned())
 }
@@ -352,7 +359,7 @@ fn a_policy_helper_in_a_policy_document_makes_the_read_unsure() {
         }
     }
     let mut plists = SettingsEnv::default();
-    plists.add_plists([Ok(Some(plist("<key>policyHelper</key><dict/>")))]);
+    plists.add_plist_reads([Ok(Some(plist("<key>policyHelper</key><dict/>")))]);
     let mut hklm = SettingsEnv::default();
     hklm.add_registry_tiers(vec![Ok(Some(r#"{"policyHelpers": []}"#.to_owned()))], false);
     let mut hkcu = SettingsEnv::default();
@@ -389,7 +396,7 @@ fn the_policy_tiers_join_highest_first() {
          <string>https://api.anthropic.com</string></dict>",
     );
     let mut mdm = SettingsEnv::default();
-    mdm.add_plists([Ok(Some(default_plist))]);
+    mdm.add_plist_reads([Ok(Some(default_plist))]);
     let mut hklm = SettingsEnv::default();
     let default = r#"{"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}}"#;
     hklm.add_registry_tiers(vec![Ok(Some(default.to_owned()))], false);
@@ -443,19 +450,19 @@ fn the_policy_tiers_join_highest_first() {
 }
 
 /// The first property list with content is the OS tier; a later one is not read. One with no
-/// content is passed over, and an unsure one ends the search.
+/// content is passed over; after an unsure one, only pairs that can only refuse are kept.
 #[test]
 fn the_first_property_list_with_content_is_the_tier() {
     let key = plist("<key>env</key><dict><key>ANTHROPIC_API_KEY</key><string>k</string></dict>");
     let other = plist("<key>permissions</key><dict/>");
     let mut first = SettingsEnv::default();
-    first.add_plists([Ok(Some(other)), Ok(Some(key.clone()))]);
+    first.add_plist_reads([Ok(Some(other)), Ok(Some(key.clone()))]);
     assert_eq!(first.pairs(), []);
     let mut empty_first = SettingsEnv::default();
-    empty_first.add_plists([Ok(Some(plist(""))), Ok(None), Ok(Some(key.clone()))]);
+    empty_first.add_plist_reads([Ok(Some(plist(""))), Ok(None), Ok(Some(key.clone()))]);
     assert_eq!(pairs(&empty_first), [pair("ANTHROPIC_API_KEY", "set")]);
     let mut unsure_first = SettingsEnv::default();
-    unsure_first.add_plists([Err(()), Ok(Some(key))]);
+    unsure_first.add_plist_reads([Err(()), Ok(Some(key))]);
     assert!(unsure_first.unsure());
     assert_eq!(unsure_first.pairs(), []);
 }
@@ -524,3 +531,4 @@ fn a_blank_key_is_kept_as_empty_and_the_address_variables_are_kept() {
 }
 
 mod tiers;
+mod unreadable;

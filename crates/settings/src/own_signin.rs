@@ -16,6 +16,8 @@
 //! `ANTHROPIC_BASE_URL` or `CLAUDE_CODE_API_BASE_URL` turns none of it off; the default address,
 //! `https://api.anthropic.com` in any spelling ([`is_default_address`]), is no custom endpoint.
 //! `ANTHROPIC_UNIX_SOCKET` set sends the API to a socket, and counts as a custom endpoint here.
+//! A source that could not be read refuses the launch with its own code
+//! ([`own_signin_refusal`]), unless a reading names an endpoint anyway.
 //! Bare mode and `apiKeyHelper` are not looked at: missing them only refuses a launch that was
 //! safe.
 //!
@@ -32,8 +34,10 @@ use crate::schema::{Plan, PlanProvider};
 #[cfg(windows)]
 mod registry;
 mod sources;
+mod unreadable;
 
 pub use sources::{ClaudeSources, SettingsEnv, claude_managed_dir};
+pub use unreadable::{Refusal, Unreadable, UnreadableKind};
 
 /// The variables that name the API's address.
 const BASE_URL_VARS: [&str; 2] = ["ANTHROPIC_BASE_URL", "CLAUDE_CODE_API_BASE_URL"];
@@ -77,29 +81,58 @@ pub fn own_signin_reaches_endpoint<'a>(
     env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>,
     settings: &SettingsEnv,
 ) -> bool {
-    reaches(env, settings, cfg!(windows))
+    own_signin_refusal(env, settings).is_some()
+}
+
+/// Why [`own_signin_reaches_endpoint`] holds, if it does: a reading that names an endpoint
+/// comes first, as its words are true whatever else could not be read; else the source that
+/// could not be read (`agent.settings_unreadable`).
+pub fn own_signin_refusal<'a, 's>(
+    env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>,
+    settings: &'s SettingsEnv,
+) -> Option<Refusal<'s>> {
+    refusal(env, settings, cfg!(windows))
+}
+
+/// [`own_signin_refusal`], names folded as on Windows when `windows`.
+fn refusal<'a, 's>(
+    env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>,
+    settings: &'s SettingsEnv,
+    windows: bool,
+) -> Option<Refusal<'s>> {
+    let env: Vec<(&OsStr, &OsStr)> = env.into_iter().collect();
+    let readings: Vec<(bool, bool)> = settings
+        .readings()
+        .map(|pairs| reading(&env, pairs, windows))
+        .collect();
+    if readings.iter().any(|&(endpoint, off)| endpoint && !off) {
+        return Some(Refusal::Endpoint);
+    }
+    let why = settings.unreadable()?;
+    readings
+        .iter()
+        .any(|&(_, off)| !off)
+        .then_some(Refusal::Unreadable(why))
 }
 
 /// [`own_signin_reaches_endpoint`], names folded as on Windows when `windows`: true when any
 /// of `settings`' readings would offer the sign-in.
+#[cfg(test)]
 fn reaches<'a>(
     env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>,
     settings: &SettingsEnv,
     windows: bool,
 ) -> bool {
-    let env: Vec<(&OsStr, &OsStr)> = env.into_iter().collect();
-    settings
-        .readings()
-        .any(|pairs| reading_reaches(&env, pairs, settings.unsure(), windows))
+    refusal(env, settings, windows).is_some()
 }
 
-/// One reading: `env` with `pairs` over it, the last value of a name winning.
-fn reading_reaches(
+/// One reading, `env` with `pairs` over it, the last value of a name winning: whether it
+/// names an endpoint, and whether something turns the sign-in off.
+fn reading(
     env: &[(&OsStr, &OsStr)],
     pairs: &[(OsString, OsString)],
-    unsure: bool,
     windows: bool,
-) -> bool {
+) -> (bool, bool) {
     let mut last: BTreeMap<String, OsString> = BTreeMap::new();
     let mut put = |name: &OsStr, value: &OsStr| {
         let Some(name) = name.to_str() else {
@@ -122,7 +155,7 @@ fn reading_reaches(
     }
     let endpoint = last.iter().any(|(name, value)| routes(name, value));
     let off = last.iter().any(|(name, value)| turns_off(name, value));
-    (endpoint || unsure) && !off
+    (endpoint, off)
 }
 
 /// Whether the pair `name` (upper case on Windows) = `value` sends the API elsewhere than the
@@ -177,12 +210,17 @@ pub fn is_default_address(url: &str) -> bool {
 
 /// Whether the check reads the variable `name` (any ASCII case).
 fn checked(name: &str) -> bool {
+    checked_as(name).is_some()
+}
+
+/// The variable `name` (any ASCII case) is, as the check spells it, if the check reads it.
+fn checked_as(name: &str) -> Option<&'static str> {
     BASE_URL_VARS
         .into_iter()
         .chain(std::iter::once(UNIX_SOCKET))
         .chain(KEY_VARS)
         .chain(PROVIDER_VARS)
-        .any(|var| name.eq_ignore_ascii_case(var))
+        .find(|var| name.eq_ignore_ascii_case(var))
 }
 
 /// The `Settings` values of Claude Code's registry policy, HKLM's then HKCU's: text when a

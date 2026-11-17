@@ -342,6 +342,12 @@ pub enum SignIn {
         /// to, for the card to name; missing otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host: Option<String>,
+        /// The setting the card names, from Clauseo's own list, never a value: with
+        /// `agent.endpoint_key_needed` and no host, the variable whose address does not parse;
+        /// with `agent.settings_unreadable`, the variable or the settings file that could not be
+        /// read. Missing otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        setting: Option<String>,
     },
     /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
     /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and

@@ -233,6 +233,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentEndpointKeyNeeded,
             "a custom endpoint no plan set needs a saved key",
         ),
+        failed(
+            ErrorCode::AgentSettingsUnreadable,
+            "Claude Code's settings could not be read, and no key is saved",
+        ),
     ]
 }
 

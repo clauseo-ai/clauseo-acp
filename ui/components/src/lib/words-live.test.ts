@@ -286,6 +286,7 @@ test("an agent's name fills no other code", () => {
 const SIGN_IN_CLAUDE_ONLY: readonly WordedCode[] = [
   "agent.firm_key_needed",
   "agent.endpoint_key_needed",
+  "agent.settings_unreadable",
 ];
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {

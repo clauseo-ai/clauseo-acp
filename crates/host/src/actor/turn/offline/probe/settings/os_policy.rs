@@ -113,7 +113,7 @@ fn registry_moved(values: &[TierRead]) -> bool {
 
 /// Logs that `tier` is there but cannot be read; true, as it moves the agent.
 fn unreadable(tier: &'static str) -> bool {
-    tracing::info!(
+    tracing::warn!(
         tier,
         "offline probe: a Claude Code policy tier cannot be read"
     );

@@ -53,8 +53,10 @@ export type GateView =
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
-  /** `host`: with agent.endpoint_key_needed, the endpoint Claude's connection is set to. */
-  | { kind: "failed"; code: string; at: string; host?: string }
+  /** `host`: with agent.endpoint_key_needed, the endpoint Claude's connection is set to. `setting`: with it and no
+   * host, the variable holding an address that can't be read; with agent.settings_unreadable, the setting that
+   * couldn't be read. */
+  | { kind: "failed"; code: string; at: string; host?: string; setting?: string }
   | { kind: "switching"; stuck: boolean }
   | { kind: "key" };
 

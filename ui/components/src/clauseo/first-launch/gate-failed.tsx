@@ -2,7 +2,12 @@
 import type { ReactNode } from "react";
 import { IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
-import { endpointKeyWords, errorWords, unreadableEndpointWords } from "../../lib/words-errors.ts";
+import {
+  endpointKeyWords,
+  errorWords,
+  settingsUnreadableWords,
+  unreadableEndpointWords,
+} from "../../lib/words-errors.ts";
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
@@ -22,7 +27,7 @@ export function Failed({
   settings = false,
 }: {
   plan: Plan;
-  view: { code: string; at: string; host?: string };
+  view: { code: string; at: string; host?: string; setting?: string };
   /** Whether "Settings › Plans" in the words can open the settings window there. */
   settings?: boolean;
   w: (key: FirstLaunchKey, slots?: Record<string, string | number>) => string;
@@ -135,19 +140,28 @@ export function Failed({
           <Say>{errorWords(lang, "agent.firm_key_needed")}</Say>
         </Act>
       );
-    case "agent.endpoint_key_needed":
-      // the same, for an endpoint no plan set: named by its host, never as the firm's. With no host the address
-      // can't be read: no part of it is shown, and no link, since a key wouldn't help
+    case "agent.endpoint_key_needed": {
+      // the same, for an endpoint no plan set: named by its host, never as the firm's. With no host but a setting the
+      // address can't be read: no part of it is shown, only the setting's name, and no link, since a key wouldn't
+      // help. With neither (a socket), the code's own line, whose key does help
+      const open = settings ? () => onAct({ act: "settings" }) : undefined;
       return (
         <Act>
-          {view.host === undefined ? (
-            <Say>{unreadableEndpointWords(lang)}</Say>
+          {view.host !== undefined ? (
+            linked(endpointKeyWords(lang, view.host), open)
+          ) : view.setting !== undefined ? (
+            <Say>{unreadableEndpointWords(lang, view.setting)}</Say>
           ) : (
-            linked(
-              endpointKeyWords(lang, view.host),
-              settings ? () => onAct({ act: "settings" }) : undefined,
-            )
+            linked(errorWords(lang, "agent.endpoint_key_needed"), open)
           )}
+        </Act>
+      );
+    }
+    case "agent.settings_unreadable":
+      // a setting Clauseo couldn't read: named when known, and no link, since nothing in Clauseo can fix it
+      return (
+        <Act>
+          <Say>{settingsUnreadableWords(lang, view.setting)}</Say>
         </Act>
       );
     default:
