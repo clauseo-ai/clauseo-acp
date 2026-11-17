@@ -159,6 +159,12 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
         ),
+        // The code is the frozen part; its lawyer-facing lines are provisional and live in the
+        // app's words, never in the log, so the detail here is a plain host-log text.
+        failed(
+            ErrorCode::AgentToolMissing,
+            "the launch check refused the agent",
+        ),
     ]
 }
 
