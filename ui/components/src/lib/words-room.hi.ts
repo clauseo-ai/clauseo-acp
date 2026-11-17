@@ -21,18 +21,18 @@ export const HI = {
   // the note's link: the install guide's Smart App Control section, through the link confirm
   "How to do this": "यह कैसे करें",
   // the wall's dimmed tiles (room/wall-away.ts), Hindi provisional (stage D, 2026-11-11). A file only online: the
-  // line on its tile, by the service that syncs the folder where it has a name, then its tip, the first sentence and
-  // how to keep it here. The OS's own menu names stay in English, as the OS shows them. The Mac's how-to is its own
-  // key, so it can go alone.
+  // line on its tile, by the service that syncs the folder where it has a name, then its tip: UC-915 (its Hindi
+  // later, so English until then), and on OneDrive, how to keep it here. The OS's own menu names stay in English, as
+  // the OS shows them. The Mac's how-to is its own key, so it can go alone.
   "Only in {service}": "केवल {service} में",
   "Only online": "केवल ऑनलाइन",
-  "Not on this computer, so Clauseo doesn't open it or save new versions of it.":
-    "यह इस कंप्यूटर पर नहीं है, इसलिए Clauseo इसे नहीं खोलता और इसके नए संस्करण नहीं सहेजता।",
   "To keep it here, right-click it in File Explorer and choose Always keep on this device.":
     "इसे यहाँ रखने के लिए File Explorer में इस पर राइट-क्लिक करें और Always keep on this device चुनें।",
   "To keep it here, Control-click it in Finder and choose Always Keep on This Device.":
     "इसे यहाँ रखने के लिए Finder में इस पर Control-क्लिक करें और Always Keep on This Device चुनें।",
-  "Download it to this computer to change that.": "इसे बदलने के लिए इसे इस कंप्यूटर पर डाउनलोड करें।",
+  // UC-915, the tip's first sentence (copy-approvals/UC-online-only-read.json): Hindi later, English until it comes
+  "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.":
+    null,
   // a folder Clauseo couldn't list: online only, or not allowed, which the host can't tell apart
   "Not opened": "नहीं खोला गया",
   "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.":

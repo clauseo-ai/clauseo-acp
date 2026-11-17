@@ -105,9 +105,10 @@ export const HI = {
   "A new conversation. It reads this matter's one paper.":
     "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
   // after it, the papers it can't read because they are only online (the wall's dimmed tiles), by the service that
-  // syncs the folder where it has a name; never with no paper to read. Hindi provisional (stage D, 2026-11-11)
-  "{n} more are only in {service}.": "{n} और दस्तावेज़ केवल {service} में हैं।",
-  "1 more is only in {service}.": "1 और दस्तावेज़ केवल {service} में है।",
+  // syncs the folder where it has a name; never with no paper to read. The two forms with a download sentence
+  // (UC-913, UC-914) have no Hindi yet: English until it comes (copy-approvals/UC-online-only-read.json)
+  "1 more is only in {service}. Reading it downloads it to this computer.": null,
+  "{n} more are only in {service}. Reading them downloads them to this computer.": null,
   "{n} more are only online.": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
   "1 more is only online.": "1 और दस्तावेज़ केवल ऑनलाइन है।",
   // in its place with no paper to read, when the matter's papers are all only online (folders not opened aren't

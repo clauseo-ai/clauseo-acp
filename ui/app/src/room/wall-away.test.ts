@@ -37,7 +37,7 @@ const ONE_DRIVE: FolderPlace = { synced: { service: "one_drive" } };
 const DROPBOX: FolderPlace = { synced: { service: "dropbox" } };
 const FIRST = rt(
   "en",
-  "Not on this computer, so Clauseo doesn't open it or save new versions of it.",
+  "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.",
 );
 
 test("files only online and folders not opened sit among the papers by path, with ids of their own", () => {
@@ -90,21 +90,27 @@ test("a file only online names the service that syncs the folder, or says online
   expect(awayWords("hi", "mac", "local", false).line).toBe("केवल ऑनलाइन");
 });
 
-test("its tip says why, then how to keep it: OneDrive on Windows, OneDrive on the Mac, else download it", () => {
+test("UC-915: a file only online's tip says Clauseo saves no new versions for now and that reading it downloads it, everywhere", () => {
+  for (const [platform, place] of [
+    ["linux", ONE_DRIVE],
+    ["windows", DROPBOX],
+    ["mac", "local"],
+  ] as const)
+    expect(awayWords("en", platform, place, false).tip).toBe(FIRST);
+  // Hindi later: the English stays
+  expect(awayWords("hi", "mac", "local", false).tip).toBe(FIRST);
+});
+
+test("on OneDrive the tip says what reading it does, then how to keep it here: on Windows, or on the Mac", () => {
   expect(awayWords("en", "windows", ONE_DRIVE, false).tip).toBe(
     `${FIRST} To keep it here, right-click it in File Explorer and choose Always keep on this device.`,
   );
   expect(awayWords("en", "mac", ONE_DRIVE, false).tip).toBe(
     `${FIRST} To keep it here, Control-click it in Finder and choose Always Keep on This Device.`,
   );
-  const elsewhere = `${FIRST} Download it to this computer to change that.`;
-  expect(awayWords("en", "linux", ONE_DRIVE, false).tip).toBe(elsewhere);
-  expect(awayWords("en", "windows", DROPBOX, false).tip).toBe(elsewhere);
-  expect(awayWords("en", "mac", "local", false).tip).toBe(elsewhere);
-  // the same first sentence in Hindi, the OS's menu names in English
+  // UC-915's Hindi is later, so its English stays; the OS's menu names stay in English too
   expect(awayWords("hi", "windows", ONE_DRIVE, false).tip).toBe(
-    "यह इस कंप्यूटर पर नहीं है, इसलिए Clauseo इसे नहीं खोलता और इसके नए संस्करण नहीं सहेजता। " +
-      "इसे यहाँ रखने के लिए File Explorer में इस पर राइट-क्लिक करें और Always keep on this device चुनें।",
+    `${FIRST} इसे यहाँ रखने के लिए File Explorer में इस पर राइट-क्लिक करें और Always keep on this device चुनें।`,
   );
 });
 
@@ -117,16 +123,40 @@ test("a folder not opened says so, wherever it lives", () => {
   expect(awayWords("hi", "mac", "local", true).line).toBe("नहीं खोला गया");
 });
 
-test("the count's sentence, in its four forms, and none at 0", () => {
-  expect(moreWords("en", ONE_DRIVE, 2)).toBe("2 more are only in OneDrive.");
-  expect(moreWords("en", ONE_DRIVE, 1)).toBe("1 more is only in OneDrive.");
+test("UC-913: one more paper only in a named service says reading it downloads it", () => {
+  expect(moreWords("en", ONE_DRIVE, 1)).toBe(
+    "1 more is only in OneDrive. Reading it downloads it to this computer.",
+  );
+  expect(moreWords("en", { synced: { service: "icloud" } }, 1)).toBe(
+    "1 more is only in iCloud Drive. Reading it downloads it to this computer.",
+  );
+  // Hindi later: the English until it comes
+  expect(moreWords("hi", ONE_DRIVE, 1)).toBe(
+    "1 more is only in OneDrive. Reading it downloads it to this computer.",
+  );
+});
+
+test("UC-914: several papers only in a named service say reading them downloads them", () => {
+  expect(moreWords("en", ONE_DRIVE, 2)).toBe(
+    "2 more are only in OneDrive. Reading them downloads them to this computer.",
+  );
+  expect(moreWords("en", ONE_DRIVE, 1200)).toBe(
+    "1,200 more are only in OneDrive. Reading them downloads them to this computer.",
+  );
+  expect(moreWords("hi", ONE_DRIVE, 2)).toBe(
+    mt("hi", "{n} more are only in {service}. Reading them downloads them to this computer.", {
+      n: 2,
+      service: "OneDrive",
+    }),
+  );
+});
+
+test("the count with no named service keeps its fallback, and none at 0", () => {
   expect(moreWords("en", "local", 2)).toBe("2 more are only online.");
   expect(moreWords("en", "network", 1)).toBe("1 more is only online.");
-  expect(moreWords("en", ONE_DRIVE, 1200)).toBe("1,200 more are only in OneDrive.");
+  expect(moreWords("en", { synced: { service: "other" } }, 1)).toBe("1 more is only online.");
   expect(moreWords("en", ONE_DRIVE, 0)).toBeNull();
-  expect(moreWords("hi", ONE_DRIVE, 2)).toBe(
-    mt("hi", "{n} more are only in {service}.", { n: 2, service: "OneDrive" }),
-  );
+  expect(moreWords("en", "local", 0)).toBeNull();
   expect(moreWords("hi", "local", 1)).toBe("1 और दस्तावेज़ केवल ऑनलाइन है।");
 });
 
