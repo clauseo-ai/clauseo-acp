@@ -83,14 +83,15 @@ pub const BROWSER_CLAUDE_MCP: &str = include_str!("../assets/instructions/browse
 /// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
 pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
 
-/// The line every Codex session gets after the instructions, whatever its browser: it says the
-/// shell is offline, so Codex is told before it tries. Claude never gets it.
+/// The line every Codex session gets after the instructions, whatever its browser: its shell starts
+/// offline, and a command that needs the internet asks for escalated permissions, which Codex's own
+/// reviewer answers. Claude never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
 /// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
 /// without web search ([`codex_shell_offline`]).
-pub const CODEX_SHELL_SEARCH: &str = "Use your web search and web fetch tools instead.";
+pub const CODEX_SHELL_SEARCH: &str = "Otherwise prefer web search, web fetch or the browser.";
 
 /// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
 /// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.

@@ -487,8 +487,9 @@ fn codex_offline_line_offers_web_search_only_with_it() {
     let off = instructions(OFF);
     assert_eq!(
         off,
-        "Rules.\n\nYour shell has no internet: never use curl, wget or another download \
-         command in it."
+        "Rules.\n\nYour shell starts offline: when a command needs the internet (a download, \
+         say), rerun it with `sandbox_permissions: \"require_escalated\"` and a one-line \
+         `justification`; Codex's reviewer checks it and the command gets network."
     );
     assert!(!off.contains(CODEX_SHELL_SEARCH) && !off.contains("web search"));
     assert!(line.ends_with(CODEX_SHELL_SEARCH));

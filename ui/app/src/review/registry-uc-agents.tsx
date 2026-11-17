@@ -17,7 +17,7 @@ const instructionWords = (file: string, en: string): WordsRef => ({
 
 const REFUSAL = instructionWords(
   "codex-refusal.txt",
-  "When the sandbox or Clauseo refuses a command or a save, tell the lawyer plainly in your answer what you could not do and why, for example \"I couldn't save the copy there: Clauseo keeps my work inside this matter's folders.\" Never leave a refusal out of your answer, and never try another way round it.",
+  "When Clauseo or Codex's reviewer refuses a command or a save, tell the lawyer plainly in your answer what you could not do and why, for example \"I couldn't save the copy there: Clauseo keeps my work inside this matter's folders.\" Never leave a refusal out of your answer, and never try another way round it.",
 );
 
 const MENTION = instructionWords(
