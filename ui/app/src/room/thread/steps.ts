@@ -28,6 +28,7 @@ import { taskOf } from "./task-words.ts";
 import { caseLawOf, toolNameOf, type CaseLaw } from "./tool-names.ts";
 import { caseLawDone, skillDone, toolDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
+import { helperOf, helperTaskOf } from "./helper-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -153,11 +154,12 @@ function namedOf(lang: Lang, entry: ToolCallEntry): string {
  * does. */
 export type GroupKind = StepKind | `case_law_${CaseLaw}`;
 
-/** A step's GroupKind: a case-law tool by what it does, a looking-online tool (tool-names.ts: the browser's, a web
- * search or fetch) as fetch, any other by its kind. */
+/** A step's GroupKind: a case-law tool by what it does, a helper's call (helper-words.ts) as other, though its kind is
+ * think, a looking-online tool (tool-names.ts: the browser's, a web search or fetch) as fetch, any other by its kind. */
 export function groupKindOf(call: ToolCallEntry): GroupKind {
   const law = caseLawOf(call.title);
   if (law !== null) return `case_law_${law}`;
+  if (helperOf(call)) return "other";
   if (toolNameOf(call.title)?.as === "fetch") return "fetch";
   return stepKindOf(kindOf(call));
 }
@@ -311,6 +313,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
+  // a helper's call (helper-words.ts) says the task it was given; with no task, today's words for the step below
+  const task = helperOf(entry) ? helperTaskOf(entry) : "";
+  if (task !== "")
+    return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task });
   // a skill is a guide read, never its internal name (skill-words.ts)
   const guide = skillDone(lang, entry, tried);
   if (guide !== null) return guide;
