@@ -23,8 +23,8 @@
 //!
 //! The variables checked are those of the launch's final env together with the `env` Claude Code
 //! applies over it from its settings files and policy tiers ([`SettingsEnv`], `sources.rs`), in
-//! each of its readings: with and without the cached remote settings, which Claude Code may not
-//! apply.
+//! each of its readings: with the cached remote settings as read, without them, with them as
+//! a tier with no pairs, and with them below the other tiers, as Claude Code may apply them.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};

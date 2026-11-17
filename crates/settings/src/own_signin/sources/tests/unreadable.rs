@@ -194,7 +194,12 @@ fn an_unsure_read_names_the_setting_it_could_not_read() {
         let temp = Temp::new(&format!("named-{index}"));
         temp.put(path, text);
         let file = path.strip_suffix("/inside").unwrap_or(path);
-        let setting = name.map_or_else(|| temp.0.join(file).display().to_string(), str::to_owned);
+        // Joined a component at a time, as the read does: Windows keeps a `/` given to `join`.
+        let at = || {
+            file.split('/')
+                .fold(temp.0.clone(), |path, part| path.join(part))
+        };
+        let setting = name.map_or_else(|| at().display().to_string(), str::to_owned);
         let read = temp.read(true);
         let why = Unreadable {
             kind,

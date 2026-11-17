@@ -20,15 +20,21 @@
 //!   lower tier's that would turn the sign-in off is dropped. HKCU's `Settings` applies only
 //!   when no other tier has content; with one that has, only a custom endpoint of HKCU's is
 //!   kept, with a blank key or token of HKCU's (they can only refuse a launch that was safe).
-//!   In each tier after the first with content, a policy document's non-blank helper key drops
-//!   that tier's names it governs, as Claude Code drops them ([`DROPPED_BY`]); a dropped name
-//!   does not hide a lower tier's. Claude Code does not always apply the
-//!   cached remote settings (it may wait to verify them), so when they set a checked name the
-//!   read also keeps the reading without them ([`SettingsEnv::readings`]), and a launch is
-//!   refused if either reading would offer the sign-in: the cache may add an endpoint, never
-//!   take one away (Clauseo's own, stricter rule).
+//!   In each tier after the first with content, a helper key whose value is non-blank text drops
+//!   the names it governs from that tier's `env`, in any case, as Claude Code drops them
+//!   ([`DROPPED_BY`]); a dropped name does not hide a lower tier's. The files are one tier: a
+//!   later file's helper key replaces an earlier one's, and a blank or null one clears it. A
+//!   document whose only keys are [`NO_CONTENT_KEYS`] has no content. Claude Code does not
+//!   always apply the cached remote settings as read (it may wait to verify them, and use them
+//!   meanwhile without their routing names, or demote them below the other tiers), so the read
+//!   keeps more readings ([`SettingsEnv::readings`]): without the cache when it sets a checked
+//!   name; when it has content, with it as a tier with content but no pairs, and with it last.
+//!   A launch is refused if any
+//!   reading would offer the sign-in: the cache may add an endpoint, never take one away
+//!   (Clauseo's own, stricter rule).
 //!
-//! A source that is there but cannot be read, is over [`MAX_FILE`] or does not parse, an `env`
+//! A source that is there but cannot be read, is over [`MAX_FILE`] (the cache: over
+//! [`MAX_REMOTE_FILE`]) or does not parse, an `env`
 //! that is no object, a checked name whose value is no string, number or boolean, or a property
 //! list holding a date or data value anywhere makes the read [`unsure`](SettingsEnv::unsure): a
 //! base URL may be set. So does a policy helper
@@ -50,13 +56,18 @@ use super::unreadable::{REGISTRY_VALUES, Unreadable, UnreadableKind};
 
 mod files;
 
+pub(super) use files::OsReads;
 pub use files::claude_managed_dir;
 #[cfg(test)]
 use files::plist_paths_for;
-use files::{holds_date_or_data, managed_files, plist_paths, read_file, without_bom};
+use files::{holds_date_or_data, managed_files, read_file, read_file_up_to, without_bom};
 
 /// The largest settings file read: a larger one is not read, and makes the read unsure.
 pub(crate) const MAX_FILE: u64 = 1 << 20;
+
+/// The largest cached remote settings file read, Claude Code's own limit for it: 8 MiB. Claude
+/// Code ignores a larger one; here it makes the read unsure (Clauseo's own, stricter rule).
+pub(crate) const MAX_REMOTE_FILE: u64 = 8 << 20;
 
 /// What a registry tier read gives: its settings text (`None` when it is not there), or `Err`
 /// when it is there but cannot be read.
@@ -68,6 +79,9 @@ const SECRET_NAMES: [&str; 2] = super::KEY_VARS;
 /// The keys of a policy document that name a policy helper.
 const HELPER_KEYS: [&str; 2] = ["policyHelper", "policyHelpers"];
 
+/// The keys that alone give a document no content, as Claude Code counts it.
+const NO_CONTENT_KEYS: [&str; 2] = ["managedSourcesBehavior", "wslInheritsWindowsSettings"];
+
 /// The provider switches an AWS helper key governs.
 const AWS_SWITCHES: &[&str] = &[
     "CLAUDE_CODE_USE_BEDROCK",
@@ -76,7 +90,8 @@ const AWS_SWITCHES: &[&str] = &[
 ];
 
 /// Claude Code's helper keys and the names each one drops, set to non-blank text in a policy
-/// tier after the first with content, from that tier's `env` (names in this exact case).
+/// tier after the first with content, from that tier's `env` (a name in any case: Claude Code
+/// upper-cases it first).
 const DROPPED_BY: [(&str, &[&str]); 4] = [
     ("apiKeyHelper", &["ANTHROPIC_BASE_URL"]),
     ("awsAuthRefresh", AWS_SWITCHES),
@@ -120,11 +135,11 @@ pub struct SettingsEnv {
     pub(super) helper: bool,
     /// Why the read is unsure (with a policy helper, before [`Self::policy`] makes it so).
     pub(super) why: Option<Unreadable>,
-    /// The names a policy document's helper keys drop from its tier's `env` ([`DROPPED_BY`]).
-    pub(super) drops: BTreeSet<&'static str>,
-    /// When the cached remote settings set a checked name, the pairs as they apply without that
-    /// tier, which Claude Code may not apply: a second reading, checked as well.
-    pub(super) without_remote: Option<Vec<(OsString, OsString)>>,
+    /// Each helper key read ([`DROPPED_BY`]) and whether its last value is non-blank text.
+    pub(super) helpers: BTreeMap<&'static str, bool>,
+    /// The other readings of the pairs, as Claude Code may apply the cached remote settings
+    /// ([`Self::readings`]).
+    pub(super) others: Vec<Vec<(OsString, OsString)>>,
 }
 
 impl SettingsEnv {
@@ -133,11 +148,12 @@ impl SettingsEnv {
         &self.pairs
     }
 
-    /// Each reading of the pairs to check: [`Self::pairs`], then the one without the cached
-    /// remote settings when they set a checked name. A launch is refused if either offers the
+    /// Each reading of the pairs to check: [`Self::pairs`]; without the cached remote settings
+    /// when they set a checked name; when they have content, with them as a tier with content
+    /// but no pairs, and with them below the other tiers. A launch is refused if any offers the
     /// sign-in.
     pub fn readings(&self) -> impl Iterator<Item = &[(OsString, OsString)]> {
-        std::iter::once(self.pairs.as_slice()).chain(self.without_remote.as_deref())
+        std::iter::once(self.pairs.as_slice()).chain(self.others.iter().map(Vec::as_slice))
     }
 
     /// Whether a source was there but could not be read: a base URL may be set.
@@ -187,6 +203,11 @@ impl SettingsEnv {
 
     /// Reads `sources`; on a thread that may block on the disk.
     pub fn read(sources: &ClaudeSources<'_>) -> Self {
+        Self::read_with(sources, sources.os_policy.then(OsReads::system))
+    }
+
+    /// [`Self::read`] with the OS policy tiers' reads given (`None`: not read).
+    pub(super) fn read_with(sources: &ClaudeSources<'_>, os_reads: Option<OsReads>) -> Self {
         let mut env = Self::default();
         let read_at = |path: PathBuf| {
             let read = read_file(&path);
@@ -221,28 +242,49 @@ impl SettingsEnv {
         }
         let mut remote = Self::default();
         if let Some(config) = sources.config {
-            remote.add_json_file(&config.join("remote-settings.json"), true);
+            let path = config.join("remote-settings.json");
+            let read = read_file_up_to(&path, MAX_REMOTE_FILE);
+            remote.at(&path.display().to_string(), |remote| {
+                remote.add_json(read, true);
+            });
         }
         let mut os = Self::default();
-        if sources.os_policy {
-            let paths = plist_paths();
+        if let Some(OsReads { plists, registry }) = os_reads {
             os.add_plists(
-                paths
+                plists
                     .iter()
-                    .map(|path| (Some(path.as_path()), read_file(path))),
+                    .map(|(path, read)| (Some(path.as_path()), read.clone())),
             );
             let admin = [&files, &remote, &os]
                 .iter()
                 .any(|tier| tier.content || tier.unsure);
-            os.add_registry_tiers(super::claude_registry_settings(), admin);
+            os.add_registry_tiers(registry, admin);
         }
-        let without_remote = (!remote.pairs.is_empty()).then(|| {
-            let mut pairs = env.pairs.clone();
-            pairs.extend(Self::policy([Self::default(), os.clone(), files.clone()]).pairs);
-            pairs
-        });
+        let reading = |policy: Self| [env.pairs.clone(), policy.pairs].concat();
+        let mut others = Vec::new();
+        if !remote.pairs.is_empty() {
+            others.push(reading(Self::policy([
+                Self::default(),
+                os.clone(),
+                files.clone(),
+            ])));
+        }
+        if remote.content {
+            // Before verifying it, Claude Code may use the cache without its routing names.
+            let stripped = Self {
+                pairs: Vec::new(),
+                ..remote.clone()
+            };
+            others.push(reading(Self::policy([stripped, os.clone(), files.clone()])));
+            // Claude Code may demote the cache below the other tiers.
+            others.push(reading(Self::policy([
+                os.clone(),
+                files.clone(),
+                remote.clone(),
+            ])));
+        }
         env.extend(Self::policy([remote, os, files]));
-        env.without_remote = without_remote;
+        env.others = others;
         env
     }
 
@@ -275,16 +317,18 @@ impl SettingsEnv {
         for (index, tier) in tiers.into_iter().enumerate() {
             let mut named = BTreeMap::new();
             let mut sets_credential = false;
+            let drops = tier.drops();
             let skipped = first.is_some_and(|first| index > first);
             for (name, value) in tier.pairs {
-                if skipped && name.to_str().is_some_and(|name| tier.drops.contains(name)) {
-                    continue;
-                }
                 let upper = name.to_string_lossy().to_ascii_uppercase();
                 if let Some(winner) = seen.get(&upper) {
                     if spelled.insert(name.clone()) {
                         policy.pairs.push((name, winner.clone()));
                     }
+                    continue;
+                }
+                // Claude Code's order: a name set above first, then the helper keys' names.
+                if skipped && drops.contains(upper.as_str()) {
                     continue;
                 }
                 let is_credential = super::KEY_VARS.contains(&upper.as_str())
@@ -309,7 +353,7 @@ impl SettingsEnv {
         self.unsure |= other.unsure;
         self.content |= other.content;
         self.helper |= other.helper;
-        self.drops.extend(other.drops);
+        self.helpers.extend(other.helpers);
         if self.why.is_none() {
             self.why = other.why;
         }
@@ -319,23 +363,35 @@ impl SettingsEnv {
     /// helper keys' effects: for a source Claude Code may not read.
     fn refuse_only(&mut self) {
         self.pairs.retain(|(name, value)| refuse_only(name, value));
-        self.drops.clear();
+        self.helpers.clear();
         self.helper = false;
     }
 
+    /// The names this tier's helper keys drop from its `env` ([`DROPPED_BY`]): those of each
+    /// key whose last value read is non-blank text.
+    fn drops(&self) -> BTreeSet<&'static str> {
+        DROPPED_BY
+            .iter()
+            .filter(|(key, _)| self.helpers.get(key) == Some(&true))
+            .flat_map(|(_, names)| names.iter().copied())
+            .collect()
+    }
+
     /// Notes a policy document's helper keys, `value_of` giving each one's text (`None`: not
-    /// there, `Ok(None)`: null, `Err`: of no text kind, which makes the read unsure).
+    /// there, `Ok(None)`: null, `Err`: of no text kind, which makes the read unsure). A later
+    /// document's value replaces an earlier one's, as Claude Code merges the files.
     fn add_helper_keys<'d>(
         &mut self,
         value_of: impl Fn(&str) -> Option<Result<Option<&'d str>, ()>>,
     ) {
-        for (key, names) in DROPPED_BY {
+        for (key, _) in DROPPED_BY {
             match value_of(key) {
-                Some(Ok(Some(text))) if !super::js_trim(text).is_empty() => {
-                    self.drops.extend(names.iter().copied());
+                Some(Ok(text)) => {
+                    let set = text.is_some_and(|text| !super::js_trim(text).is_empty());
+                    self.helpers.insert(key, set);
                 }
                 Some(Err(())) => self.mark(UnreadableKind::NotText, Some(key)),
-                _ => {}
+                None => {}
             }
         }
     }
@@ -348,7 +404,7 @@ impl SettingsEnv {
             Ok(Some(bytes)) => match serde_json::from_slice::<Value>(without_bom(&bytes)) {
                 Ok(document) => {
                     let keys = document.as_object();
-                    self.content |= keys.is_some_and(|keys| !keys.is_empty());
+                    self.content |= keys.is_some_and(|keys| has_content(keys.keys()));
                     if let Some(keys) = keys.filter(|_| policy) {
                         if HELPER_KEYS.iter().any(|key| keys.contains_key(*key)) {
                             self.add_policy_helper();
@@ -459,7 +515,7 @@ impl SettingsEnv {
             return self.mark(UnreadableKind::DateOrData, None);
         }
         let settings = value.as_dictionary();
-        self.content |= settings.is_some_and(|keys| !keys.is_empty());
+        self.content |= settings.is_some_and(|keys| has_content(keys.keys()));
         if let Some(keys) = settings {
             if HELPER_KEYS.iter().any(|key| keys.contains_key(key)) {
                 self.add_policy_helper();
@@ -525,6 +581,11 @@ impl SettingsEnv {
         self.pairs
             .push((OsString::from(name), OsString::from(value)));
     }
+}
+
+/// Whether a document with these keys has content: a key besides [`NO_CONTENT_KEYS`].
+fn has_content<'k>(mut keys: impl Iterator<Item = &'k String>) -> bool {
+    keys.any(|key| !NO_CONTENT_KEYS.contains(&key.as_str()))
 }
 
 /// Whether the pair can only refuse a launch, whatever the launch's own variables: a custom

@@ -545,12 +545,17 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     with content, the login user's before the computer's, or the Windows registry policy), then
     `managed-settings.json` and `managed-settings.d`. The first tier to set a name, in any
     case, wins, and a lower tier's other spelling of that name takes the winner's value, as
-    Claude Code writes it. In each tier after the first with content, a policy document's
-    helper key set to non-blank text makes Claude Code skip that tier's names it governs:
+    Claude Code writes it. A document whose only keys are `managedSourcesBehavior` or
+    `wslInheritsWindowsSettings` has no content, as Claude Code counts it. In each tier after
+    the first with content, a helper key set to non-blank text makes Claude Code skip that
+    tier's names it governs, a name in any case (it upper-cases the name first, and checks it
+    after a name set by a higher tier):
     `apiKeyHelper` its `ANTHROPIC_BASE_URL`, `awsAuthRefresh` and `awsCredentialExport` its
     `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_ANTHROPIC_AWS` and `CLAUDE_CODE_USE_MANTLE`,
     `gcpAuthRefresh` its `CLAUDE_CODE_USE_VERTEX`. A skipped name hides no lower tier's, so a
-    gateway below can come through; Clauseo skips them the same way. Three rules on top are
+    gateway below can come through; Clauseo skips them the same way. The managed files are one
+    tier, merged in order: a later file's helper key replaces an earlier one's, and a blank or
+    null one clears it, so the names skipped are those of the merged keys. Three rules on top are
     Clauseo's own, stricter than Claude Code's,
     and each can only refuse more. Once a tier has set a key, token or provider switch, a lower
     tier's that would turn the sign-in off is dropped (Claude Code 2.1.293 drops a lower tier's
@@ -567,11 +572,16 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     is recorded as eligible for it, and its view of a cache not yet verified strips every
     routing and credential name (the provider switches, every base URL including
     `CLAUDE_CODE_API_BASE_URL`, the key, the token and the socket). So the cache adds all of its
-    checked names or none of them, and when it sets one the launch is checked both with and
-    without it, and refused if either reading would offer the sign-in (a run on a Mac with no
-    sign-in sent its requests to a managed file's gateway under a cache naming the default
-    address). Claude Code also has a path that demotes the remote tier below the others; when
-    it applies is not resolved, and neither reading models it. With no `CLAUDE_CONFIG_DIR` (the host's own limits reader), the
+    checked names or none of them, and when it sets one the launch is checked without it too (a
+    run on a Mac with no sign-in sent its requests to a managed file's gateway under a cache
+    naming the default address). The stripped cache is still the first tier with content, so
+    a lower tier's helper keys still skip their names: when the cache has content, the launch
+    is also checked with it as a tier with content but no names. Claude Code also has a path
+    that demotes tiers: a demoted tier goes to the end of the tier list, so its `env` joins at
+    the bottom. When that applies to the cache is not pinned down, so with a cache with content
+    the launch is checked with it last as well. A launch is refused if any reading would offer
+    the sign-in. The cache is read up to 8 MiB, Claude Code's limit for it (Claude Code ignores
+    a larger one; Clauseo counts it as unreadable). With no `CLAUDE_CONFIG_DIR` (the host's own limits reader), the
     files are `~/.claude.json` and `~/.claude`'s. A source there that cannot be read (over
     1 MiB, not parsed, an `env` that is no object, a checked value that is no text, a profile's
     date or data value, a registry value starting with U+FEFF), or no home folder to find the

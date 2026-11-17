@@ -530,5 +530,6 @@ fn a_blank_key_is_kept_as_empty_and_the_address_variables_are_kept() {
     assert!(reaches(&[("ANTHROPIC_API_KEY", "")], &read));
 }
 
+mod readings;
 mod tiers;
 mod unreadable;

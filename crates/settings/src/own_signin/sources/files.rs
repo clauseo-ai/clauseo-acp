@@ -23,6 +23,34 @@ pub fn claude_managed_dir() -> PathBuf {
     return PathBuf::from("/etc/claude-code");
 }
 
+/// A file's read: its bytes, `None` when it is not there, `Err` when it cannot be read.
+pub(in crate::own_signin) type FileRead = Result<Option<Vec<u8>>, ()>;
+
+/// What the OS policy tiers hold.
+pub(in crate::own_signin) struct OsReads {
+    /// The managed-preferences property lists at their paths, in Claude Code's order.
+    pub(in crate::own_signin) plists: Vec<(PathBuf, FileRead)>,
+    /// The registry's `Settings` values, HKLM's then HKCU's.
+    pub(in crate::own_signin) registry: Vec<super::TierRead>,
+}
+
+impl OsReads {
+    /// This machine's.
+    pub(super) fn system() -> Self {
+        let plists = plist_paths()
+            .into_iter()
+            .map(|path| {
+                let read = read_file(&path);
+                (path, read)
+            })
+            .collect();
+        Self {
+            plists,
+            registry: crate::own_signin::claude_registry_settings(),
+        }
+    }
+}
+
 /// Claude Code's policy files in `managed`: `managed-settings.json`, then the drop-ins; `Err`
 /// when the drop-ins cannot be listed or are too many.
 pub(super) fn managed_files(managed: &Path) -> Result<Vec<PathBuf>, ()> {
@@ -90,16 +118,19 @@ pub(super) fn holds_date_or_data(value: &plist::Value) -> bool {
 /// `path`'s bytes: `None` when it is not there, `Err` when it is there but cannot be read or
 /// holds more than [`MAX_FILE`].
 pub(super) fn read_file(path: &Path) -> Result<Option<Vec<u8>>, ()> {
+    read_file_up_to(path, MAX_FILE)
+}
+
+/// [`read_file`] with `limit` for [`MAX_FILE`].
+pub(super) fn read_file_up_to(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, ()> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if absent(error.kind()) => return Ok(None),
         Err(_) => return Err(()),
     };
     let mut bytes = Vec::new();
-    file.take(MAX_FILE + 1)
-        .read_to_end(&mut bytes)
-        .map_err(drop)?;
-    if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_FILE) {
+    file.take(limit + 1).read_to_end(&mut bytes).map_err(drop)?;
+    if u64::try_from(bytes.len()).map_or(true, |len| len > limit) {
         return Err(());
     }
     Ok(Some(bytes))
