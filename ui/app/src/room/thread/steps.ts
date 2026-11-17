@@ -313,10 +313,16 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
-  // a helper's call (helper-words.ts) says the task it was given; with no task, today's words for the step below
-  const task = helperOf(entry) ? helperTaskOf(entry) : "";
-  if (task !== "")
-    return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task });
+  // a helper's call (helper-words.ts) says the task it was given; cut, the "…" ends the line without the full stop. With
+  // no task it says what an other step said before (it is counted as other, the folded line says so too)
+  if (helperOf(entry)) {
+    const task = helperTaskOf(entry);
+    if (task === "") return say("Did one other thing.", "Tried one other thing.");
+    return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task }).replace(
+      /…\.$/,
+      "…",
+    );
+  }
   // a skill is a guide read, never its internal name (skill-words.ts)
   const guide = skillDone(lang, entry, tried);
   if (guide !== null) return guide;
