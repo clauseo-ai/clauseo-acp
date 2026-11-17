@@ -76,6 +76,37 @@ pub(crate) fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
     std::os::unix::fs::symlink(target, link).unwrap();
 }
 
+/// Makes `link` a symlink to the file `target`, or returns false (with a note) where the OS
+/// refuses one: Windows without the symlink privilege or developer mode (error 1314).
+pub(crate) fn file_link(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    if let Err(err) = std::os::windows::fs::symlink_file(target, link) {
+        assert_eq!(err.raw_os_error(), Some(1314), "{err}");
+        println!("skipped: this Windows account may not make symlinks (error 1314)");
+        return false;
+    }
+    true
+}
+
+/// A link to the folder `target` at `link`: a symlink on Unix, a junction on Windows (no
+/// privilege needed).
+pub(crate) fn folder_link(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .unwrap();
+        assert!(made.success(), "mklink /J");
+    }
+}
+
 /// `fs::remove_dir_all`.
 pub(crate) fn remove_dir_all(path: impl AsRef<Path>) {
     std::fs::remove_dir_all(path).unwrap();

@@ -72,6 +72,10 @@ features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"]
 clauseo-matters = { path = ".", features = ["test-support"] }
 criterion = { workspace = true, features = ["cargo_bench_support"] }
 
+# `DeviceIoControl`: a folder made a reparse point of no link kind (matter/leftovers.rs tests).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_System_IO"] }
+
 # `setrlimit`: a write-back test under launchd's open-file limit (writeback/outcome_tests.rs).
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
 rustix = { workspace = true, features = ["fs", "process"] }

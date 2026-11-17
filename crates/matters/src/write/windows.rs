@@ -227,6 +227,64 @@ pub(super) fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
         .map_err(win32_io_error)
 }
 
+/// Tests: makes the empty folder `folder` a reparse point with `tag`, a tag of no Microsoft kind
+/// and no name surrogate (`FSCTL_SET_REPARSE_POINT` with a `REPARSE_GUID_DATA_BUFFER`), as a
+/// cloud-tagged folder is: std counts it as no link. As the desktop crate's `delete_app_data`
+/// tests make one.
+#[cfg(test)]
+pub(crate) fn set_foreign_reparse_tag(folder: &Path, tag: u32) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use windows::Win32::System::IO::DeviceIoControl;
+    /// `FSCTL_SET_REPARSE_POINT`.
+    const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+    /// `FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES`.
+    const ACCESS: u32 = 0x2 | 0x80 | 0x100;
+    /// `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`.
+    const FLAGS: u32 = 0x0200_0000 | 0x0020_0000;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(ACCESS)
+        .custom_flags(FLAGS)
+        .open(folder)?;
+    let data = *b"test";
+    // ReparseTag, ReparseDataLength, Reserved, ReparseGuid, then the data.
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&tag.to_le_bytes());
+    buffer.extend_from_slice(&u16::try_from(data.len()).unwrap().to_le_bytes());
+    buffer.extend_from_slice(&0u16.to_le_bytes());
+    buffer.extend_from_slice(b"clauseo-test-tag");
+    buffer.extend_from_slice(&data);
+    let len = u32::try_from(buffer.len()).unwrap();
+    let mut returned = 0u32;
+    // SAFETY: the handle is open for the call (`file` lives past it); `buffer` is live and
+    // `len` bytes long; no output buffer; `returned` is a live out-pointer, as a call without
+    // an OVERLAPPED needs.
+    unsafe {
+        DeviceIoControl(
+            HANDLE(file.as_raw_handle()),
+            FSCTL_SET_REPARSE_POINT,
+            Some(buffer.as_ptr().cast()),
+            len,
+            None,
+            0,
+            Some(&raw mut returned),
+            None,
+        )
+    }
+    .map_err(io::Error::from)
+}
+
+/// Tests: makes `link` a junction to the folder `target` (`mklink /J`, no privilege needed).
+#[cfg(test)]
+pub(crate) fn junction(target: &Path, link: &Path) {
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .status()
+        .unwrap();
+    assert!(made.success(), "mklink /J");
+}
+
 /// Tests: the DACL of `path` (not through a link; a folder too) as SDDL text.
 #[cfg(test)]
 pub(super) fn dacl_text(path: &Path) -> String {

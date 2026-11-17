@@ -211,6 +211,8 @@ static HIDE_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 
 #[cfg(windows)]
 mod windows;
+#[cfg(all(windows, test))]
+pub(crate) use windows::{junction, set_foreign_reparse_tag};
 
 #[cfg(unix)]
 mod keep;

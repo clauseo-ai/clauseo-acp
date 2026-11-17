@@ -164,6 +164,30 @@ fn a_hashed_backup_of_no_cached_name_is_kept() {
     assert_eq!(fx.read(other), b"old");
 }
 
+/// A hashed backup the store holds, with its long-named file there: the rewrite went through,
+/// so it is a stray, and removed.
+#[test]
+fn a_hashed_backup_whose_file_is_there_is_removed_as_a_stray() {
+    let fx = imported_long("backups-hashed-stray");
+    fx.write(LONG_BACKUP, "old");
+    fx.write(&long(), "new");
+    drop(reopened(&fx));
+    assert!(!fx.exists(LONG_BACKUP));
+    assert_eq!(fx.read(&long()), b"new");
+}
+
+/// A hashed backup of a cached name whose content the store does not hold is kept, and never
+/// put back when the long-named file is missing.
+#[test]
+fn a_hashed_backup_the_store_does_not_hold_is_kept_and_never_put_back() {
+    let fx = imported_long("backups-hashed-not-held");
+    fx.write(LONG_BACKUP, "never versioned");
+    support::remove_file(fx.file(&long()));
+    drop(reopened(&fx));
+    assert!(!fx.exists(&long()));
+    assert_eq!(fx.read(LONG_BACKUP), b"never versioned");
+}
+
 /// The worker's open (`recover_leftovers`) removes a crash's temp files in the matter folder
 /// and in the folders with files in the cache, on every OS; the lawyer's names that only look
 /// like them stay, and a plain open removes nothing.
@@ -213,4 +237,66 @@ fn a_temp_file_another_handle_holds_is_left_and_the_open_goes_on() {
     drop(held);
     recover_leftovers(&mut matter);
     assert!(!fx.exists(temp));
+}
+
+/// Names only near a temp's are kept by the worker's open: another case, digits that are not
+/// ASCII (Arabic-Indic), and a folder with a temp's exact name. Apart in two folders, so a folder
+/// that ignores case holds them all.
+#[test]
+fn the_open_leaves_names_that_only_look_like_temp_files() {
+    let fx = imported("leftovers-look-alike");
+    let kept = [".CLAUSEO-1.TMP", ".clauseo-\u{661}.tmp"];
+    for name in kept {
+        fx.write(name, "left");
+    }
+    fx.write("Papers/.clauseo-1.tmp/inside.docx", "left");
+    fx.write(".clauseo-2.tmp", "crash");
+    let mut matter = fx.open(&fx.folder).unwrap();
+    recover_leftovers(&mut matter);
+    assert!(!fx.exists(".clauseo-2.tmp"));
+    for name in kept {
+        assert_eq!(fx.read(name), b"left", "{name}");
+    }
+    assert_eq!(fx.read("Papers/.clauseo-1.tmp/inside.docx"), b"left");
+}
+
+/// A symlink with a temp's exact name is no temp file: the open leaves it and its target.
+#[test]
+fn the_open_leaves_a_symlink_at_a_temp_name() {
+    let fx = imported("leftovers-symlink");
+    let link = fx.file(".clauseo-1.tmp");
+    if !support::file_link(&fx.file("Papers/Lease.docx"), &link) {
+        return;
+    }
+    let mut matter = fx.open(&fx.folder).unwrap();
+    recover_leftovers(&mut matter);
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    assert_eq!(fx.read("Papers/Lease.docx"), b"old");
+}
+
+/// A cached folder the open finds replaced by a link (to a folder outside the matter) is not
+/// swept, nor any cached folder below it: the temps out there stay, while the matter's own go.
+#[test]
+fn the_open_never_follows_a_cached_folder_replaced_by_a_link() {
+    let fx = Fixture::new("leftovers-linked-folder");
+    fx.write("Papers/Lease.docx", "old");
+    fx.write("Papers/Sub/Brief.docx", "old");
+    drop(fx.import());
+    let outside = fx.dir.path().join("outside");
+    support::rename(fx.file("Papers"), &outside);
+    support::write(outside.join(".clauseo-0.tmp"), "theirs");
+    support::write(outside.join("Sub/.clauseo-1.tmp"), "theirs");
+    support::folder_link(&outside, &fx.file("Papers"));
+    fx.write(".clauseo-2.tmp", "crash");
+    let mut matter = fx.open(&fx.folder).unwrap();
+    recover_leftovers(&mut matter);
+    assert!(!fx.exists(".clauseo-2.tmp"));
+    assert_eq!(
+        std::fs::read(outside.join(".clauseo-0.tmp")).unwrap(),
+        b"theirs"
+    );
+    assert_eq!(
+        std::fs::read(outside.join("Sub/.clauseo-1.tmp")).unwrap(),
+        b"theirs"
+    );
 }
