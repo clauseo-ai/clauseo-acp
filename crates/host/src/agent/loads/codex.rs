@@ -58,8 +58,10 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// The `hooks` value for Codex's config that runs the pre-write guard, `program` with
 /// [`FLAG`](crate::pre_write_guard::FLAG) and, with `record`, [`RECORD_FLAG`] and that file
 /// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`) then
-/// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), before each
-/// `apply_patch` and `Bash`, trusted by its own `state` entry:
+/// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), and with
+/// `no_copy` [`NO_COPY_FLAG`] and that list then [`NO_COPY_ID_FLAG`] and its identity
+/// (`pre_write_guard/no_copy.rs`), before each `apply_patch` and `Bash`, trusted by its own
+/// `state` entry:
 ///
 /// ```json
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
@@ -77,9 +79,18 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// the lawyer is not told of its refusals. The codex hooks seam (`actor::turn::agents`,
 /// `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
 ///
+/// A list whose path or identity cannot go in the command goes out of it alone, as a record
+/// file does: the guard then looks at each target itself.
+///
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
 /// [`RECORD_ID_FLAG`]: crate::pre_write_guard::RECORD_ID_FLAG
-pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Option<Value> {
+/// [`NO_COPY_FLAG`]: crate::pre_write_guard::NO_COPY_FLAG
+/// [`NO_COPY_ID_FLAG`]: crate::pre_write_guard::NO_COPY_ID_FLAG
+pub fn codex_hook_config(
+    program: &Path,
+    record: Option<(&Path, &str)>,
+    no_copy: Option<(&Path, &str)>,
+) -> Option<Value> {
     let program = program.to_str()?;
     let hex = |id: &&str| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit());
     let record = record.and_then(|(file, id)| Some((file.to_str()?, Some(id).filter(hex)?)));
@@ -93,6 +104,23 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
         command = format!("{command} {flag} {} {id_flag} {id}", posix_quoted(file));
         windows.extend([
             flag.to_owned(),
+            ps_quoted(file),
+            id_flag.to_owned(),
+            ps_quoted(id),
+        ]);
+    }
+    let list = no_copy.and_then(|(file, id)| Some((file.to_str()?, Some(id).filter(hex)?)));
+    let (list_flag, id_flag) = (
+        crate::pre_write_guard::NO_COPY_FLAG,
+        crate::pre_write_guard::NO_COPY_ID_FLAG,
+    );
+    if let Some((file, id)) = list {
+        command = format!(
+            "{command} {list_flag} {} {id_flag} {id}",
+            posix_quoted(file)
+        );
+        windows.extend([
+            list_flag.to_owned(),
             ps_quoted(file),
             id_flag.to_owned(),
             ps_quoted(id),
@@ -270,7 +298,8 @@ mod tests {
 
     #[test]
     fn the_config_runs_the_guard_and_trusts_itself() {
-        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
+        let config =
+            codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None, None).unwrap();
         let windows = ps_command(&[
             "'/opt/clauseo/clauseo-desktop'".to_owned(),
             "--pre-write-guard".to_owned(),
@@ -314,7 +343,7 @@ mod tests {
             r"'C:\O''Brien & Sons; $x `y 100% (2024)'"
         );
         assert_eq!(ps_quoted("C:\u{2019}x"), "'C:\u{2019}\u{2019}x'");
-        let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None).unwrap();
+        let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None, None).unwrap();
         assert!(
             config["PreToolUse"][0]["hooks"][0]["commandWindows"]
                 .as_str()
@@ -351,7 +380,7 @@ mod tests {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
         let record = Path::new("/data/browser/guard/s 1/guard-blocks.jsonl");
         let id = "00000000000001030000000000000000000000000045c2a9";
-        let config = codex_hook_config(program, Some((record, id))).unwrap();
+        let config = codex_hook_config(program, Some((record, id)), None).unwrap();
         let hook = &config["PreToolUse"][0]["hooks"][0];
         let posix = format!(
             "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
@@ -384,7 +413,7 @@ mod tests {
             );
         }
         let odd = Path::new("/data/100%/guard-blocks.jsonl");
-        let odd = codex_hook_config(program, Some((odd, id))).unwrap();
+        let odd = codex_hook_config(program, Some((odd, id)), None).unwrap();
         let odd = &odd["PreToolUse"][0]["hooks"][0];
         assert!(
             odd["commandWindows"]
@@ -396,13 +425,75 @@ mod tests {
             "--record '/data/100%/guard-blocks.jsonl' --record-id {id}"
         )));
         for bad in ["", "12 && calc", "'x'", "00g1"] {
-            let config = codex_hook_config(program, Some((record, bad))).unwrap();
+            let config = codex_hook_config(program, Some((record, bad)), None).unwrap();
             let hook = &config["PreToolUse"][0]["hooks"][0];
             assert_eq!(
                 hook["command"], "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
                 "{bad:?}"
             );
         }
+    }
+
+    /// The session's no-copy list goes after the record, quoted for each shell, then its
+    /// identity, inside the hashed command; a `%` in its path goes in as it is, and an identity
+    /// of anything but hex digits leaves both commands without it.
+    #[test]
+    fn the_no_copy_list_and_its_identity_go_in_the_command_and_its_hash() {
+        let program = Path::new("/opt/clauseo/clauseo-desktop");
+        let record = Path::new("/data/browser/guard/s/guard-blocks.jsonl");
+        let list = Path::new("/data/browser/guard/s/no-copy.txt");
+        let (rid, lid) = ("0a", "1b");
+        let config = codex_hook_config(program, Some((record, rid)), Some((list, lid))).unwrap();
+        let hook = &config["PreToolUse"][0]["hooks"][0];
+        let posix = "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
+                     '/data/browser/guard/s/guard-blocks.jsonl' --record-id 0a --no-copy-list \
+                     '/data/browser/guard/s/no-copy.txt' --no-copy-list-id 1b";
+        let windows = ps_command(
+            &[
+                "'/opt/clauseo/clauseo-desktop'",
+                "--pre-write-guard",
+                "--record",
+                "'/data/browser/guard/s/guard-blocks.jsonl'",
+                "--record-id",
+                "'0a'",
+                "--no-copy-list",
+                "'/data/browser/guard/s/no-copy.txt'",
+                "--no-copy-list-id",
+                "'1b'",
+            ]
+            .map(str::to_owned),
+        );
+        assert_eq!(hook["command"], posix);
+        assert_eq!(hook["commandWindows"], windows);
+        for bad in ["", "1a-2b", "'x'"] {
+            let config = codex_hook_config(program, None, Some((list, bad))).unwrap();
+            let hook = &config["PreToolUse"][0]["hooks"][0];
+            assert_eq!(
+                hook["command"], "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
+                "{bad:?}"
+            );
+        }
+        let effective = if cfg!(windows) {
+            windows.as_str()
+        } else {
+            posix
+        };
+        let state = config["state"].as_object().unwrap();
+        let [(_, entry)] = state.iter().collect::<Vec<_>>()[..] else {
+            panic!("one trust entry: {state:?}");
+        };
+        assert_eq!(
+            entry["trusted_hash"],
+            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 30)
+        );
+        let odd = Path::new("/data/100%/no-copy.txt");
+        let odd = codex_hook_config(program, None, Some((odd, lid))).unwrap();
+        assert!(
+            odd["PreToolUse"][0]["hooks"][0]["commandWindows"]
+                .as_str()
+                .unwrap()
+                .contains("--no-copy-list '/data/100%/no-copy.txt' --no-copy-list-id '1b'")
+        );
     }
 }
 

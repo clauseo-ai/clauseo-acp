@@ -169,6 +169,27 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to reach outside this matter.":
     "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  // a file deleted during a step that Clauseo kept no copy of (only online, or too large), so no undo brings it back:
+  // the thread's notice and Versions' note on the change say the same; {file} named as Versions names files,
+  // {service} the folder's sync service (provisional, UC-720 to UC-724; Hindi later)
+  "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in {service}, so {service} may still have it among its deleted files.":
+    null,
+  "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in your cloud service, which may still have it among its deleted files.":
+    null,
+  "{file} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.":
+    null,
+  "{file} was deleted during this answer. Clauseo had no copy of it to bring back.": null,
+  "{n} more files Clauseo had no copy of were deleted during this answer.": null,
+  // a file Clauseo kept no copy of (only online, or too large) still there with another size or modification time:
+  // changed during the answer with no copy of how it was before; {file} and {service} as above (provisional, UC-728 to
+  // UC-731; Hindi later)
+  "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back.":
+    null,
+  "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. {service} may still have an earlier version.":
+    null,
+  "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. Your cloud service may still have an earlier version.":
+    null,
+  "{n} more files Clauseo had no earlier copy of were changed during this answer.": null,
   // Clauseo declined, unasked, a shell command of the agent's that needed the internet (Codex's
   // curl or wget); {name} as above (provisional, TN-13), and the AI where none is known
   // (provisional, TN-14)
@@ -199,6 +220,12 @@ export const HI = {
   "Clauseo stopped a step.": "Clauseo ने एक काम रोक दिया।",
   "Clauseo stopped one more step.": "Clauseo ने एक और काम रोका।",
   "Clauseo stopped {n} more steps.": "Clauseo ने {n} और काम रोके।",
+  // the guard stopped a step that would delete or replace a file Clauseo keeps no copy of (only online, or over
+  // the size cap), named as Versions names it ({file}); {name} as above (provisional, UC-726, UC-727)
+  "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.":
+    null,
+  "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.":
+    null,
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

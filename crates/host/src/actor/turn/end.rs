@@ -20,10 +20,9 @@
 //! meanwhile, so a cancel, an agent's exit (its detach joins the end) or a commit failure
 //! changes nothing but what that commit holds, and shutdown decides at once.
 
-use clauseo_matters::{CheckpointOutcome, TurnMeta};
+use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
-    AgentKind, CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FileChange,
-    FilesChanged, MatterId, StopReason, StreamId, ThreadId, TurnId,
+    AgentKind, ErrorCode, ExpiryReason, MatterId, StopReason, StreamId, ThreadId, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -34,13 +33,14 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
-    updates,
+    current, failure, host_stopping, matter_of, offline, queue, sign_in, state, steps, updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
-use crate::pipeline::MatterEvent;
+
+mod files;
+pub(super) use files::{after_events, changed_notice, gone_notice};
 
 /// A Codex turn whose end waits for a limits read (the module doc's Codex fallback).
 #[derive(Debug, Default)]
@@ -441,50 +441,6 @@ fn read_over(actor: &mut Actor, thread: ThreadId, turn: Option<TurnId>) {
     if let Some(result) = read.held.take() {
         on_after_turn(actor, thread, turn, result);
     }
-}
-
-/// The after-turn checkpoint's part of a close: matter `CheckpointRecorded { AfterTurn }` when
-/// R8 created it, `FilesChanged` when anything changed or was skipped, and `checkpoint_after`.
-/// A reused id the matter's log does not hold is recorded first, with the changes the lost
-/// commit held (the turn's before-turn checkpoint to that id); no tool-call paths are known
-/// for them, so each is flagged as possibly holding the lawyer's edits. The start-up repair's
-/// own checkpoint logs those changes even when the id is already recorded.
-pub(super) fn after_events(
-    actor: &Actor,
-    close: &mut TurnClose,
-    matter: MatterId,
-    thread: ThreadId,
-    done: TurnCheckpoint,
-) -> Result<(), Error> {
-    let turn = close.turn;
-    let unrecorded = known::unrecorded(actor, matter, &done)?;
-    let TurnCheckpoint { checkpoint, reused } = done;
-    let mut files = checkpoint.changes;
-    let id = checkpoint.outcome.id();
-    if let CheckpointOutcome::Created(id) = checkpoint.outcome {
-        let recorded =
-            CheckpointRecorded::new(id, CheckpointKind::AfterTurn, Some(thread), Some(turn))
-                .map_err(|error| Error::Internal(error.to_string()))?;
-        close.push_matter(matter, MatterEvent::checkpoint(recorded, checkpoint.commit));
-    }
-    let own = reused.as_ref().is_some_and(|reused| reused.own);
-    let lost = unrecorded.is_some() || own;
-    if let Some(recorded) = unrecorded {
-        close.push_matter(matter, recorded);
-    }
-    if lost {
-        let changes = reused.map(|reused| reused.changes).unwrap_or_default();
-        files.extend(changes.into_iter().map(FileChange::with_lawyer_edits));
-    }
-    if !files.is_empty() || !checkpoint.skipped.is_empty() {
-        close.files = Some(FilesChanged {
-            turn,
-            files,
-            skipped: checkpoint.skipped,
-        });
-    }
-    close.checkpoint_after = Some(id);
-    Ok(())
 }
 
 /// The turn is over: it lets go of the writer, which passes to the next queued turn; during

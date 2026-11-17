@@ -6,8 +6,10 @@
 //! `core/src/session/mod.rs:5141-5149`, `hooks/src/engine/command_runner.rs:384-433`), under each
 //! PowerShell found, the one Codex picks first. A `.codex` write is refused with a record line,
 //! from a data folder under `…\O'Brien & Sons Zoë Q\…` (a record path over 260 characters); a
-//! harmless step ends with 0; a held file under a Devanagari name, fifty times, and one in
-//! `Müller GmbH` are refused by name; a guard that isn't there ends with 2 and the shared line.
+//! harmless step ends with 0; with the session's no-copy list from that folder on the line, a
+//! delete of a file it names is refused with a record line; a held file under a Devanagari name,
+//! fifty times, and one in `Müller GmbH` are refused by name; a guard that isn't there ends with
+//! 2 and the shared line.
 //! The program is a console program, and its GUI twin (the same bytes, Subsystem 2) run by the
 //! same line gives no answer of the guard's: the check that these tests catch a GUI target.
 //! The trust hash is the one Codex computes (`config/src/fingerprint.rs`). Prints timings.
@@ -44,7 +46,7 @@ fn guard_for_app() -> PathBuf {
 /// The `commandWindows` line of the hook `codex_hook_config` builds for `program`.
 #[cfg(test)]
 fn line_for(program: &Path) -> String {
-    let config = clauseo_host::codex_hook_config(program, None).unwrap();
+    let config = clauseo_host::codex_hook_config(program, None, None).unwrap();
     config["PreToolUse"][0]["hooks"][0]["commandWindows"]
         .as_str()
         .unwrap()
@@ -216,7 +218,7 @@ fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folde
     assert!(record.as_os_str().len() > 260, "{record:?}");
 
     let guard = guard_for_app();
-    let config = clauseo_host::codex_hook_config(&guard, Some((&record, &id))).unwrap();
+    let config = clauseo_host::codex_hook_config(&guard, Some((&record, &id)), None).unwrap();
     let hook = &config["PreToolUse"][0]["hooks"][0];
     let command = hook["commandWindows"].as_str().unwrap();
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));
@@ -270,6 +272,57 @@ fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folde
         assert_eq!(line["reason"], "codex_folder", "{line}");
         assert_eq!(line["agent"], "codex", "{line}");
         assert_eq!(line["tool"], "Bash", "{line}");
+    }
+    a_listed_file_is_refused_a_delete(user.path(), &guard, (&record, &id), &shells);
+}
+
+/// The same line with the session's no-copy list, under the same folder with a space and an
+/// apostrophe: the list's path crosses PowerShell whole, so a delete of a file it names is
+/// refused, with a record line, under each shell.
+#[cfg(test)]
+fn a_listed_file_is_refused_a_delete(
+    cwd: &Path,
+    guard: &Path,
+    (record, id): (&Path, &str),
+    shells: &[String],
+) {
+    let folder = record.parent().unwrap();
+    let (list, list_id) =
+        clauseo_host::pre_write_guard::make_no_copy_list(folder, "add cloud-only Contract.docx\n")
+            .unwrap();
+    assert!(
+        list.to_str().unwrap().contains("O'Brien & Sons"),
+        "{}",
+        list.display()
+    );
+    let config =
+        clauseo_host::codex_hook_config(guard, Some((record, id)), Some((&list, &list_id)))
+            .unwrap();
+    let command = config["PreToolUse"][0]["hooks"][0]["commandWindows"]
+        .as_str()
+        .unwrap();
+    assert!(command.contains("--no-copy-list '"), "{command}");
+    let before = std::fs::read_to_string(record).unwrap().lines().count();
+    for shell in shells {
+        let input = codex_input(cwd, "Bash", "rm Contract.docx");
+        let (output, _) = as_codex_runs_it(shell, command, &input, cwd);
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
+        assert!(
+            errors.contains("Contract.docx can't be brought back"),
+            "{shell}: {errors}"
+        );
+    }
+    let text = std::fs::read_to_string(record).unwrap();
+    let added: Vec<serde_json::Value> = text
+        .lines()
+        .skip(before)
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(added.len(), shells.len(), "one line per refusal: {text:?}");
+    for line in &added {
+        assert_eq!(line["reason"], "no_copy", "{line}");
     }
 }
 

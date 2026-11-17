@@ -221,6 +221,25 @@ impl TurnStart<'_> {
         matches!(change.change(), ChangeKind::Modified)
             && self.commands.contains(change.path().as_str())
     }
+
+    /// Whether `change` deletes or renames a file a shell command of the turn deleted or moved
+    /// (`rm`, `Remove-Item`, `mv`: the host's `shell_writes::deletes`), by its whole path or a
+    /// folder holding it (`rm -r Drafts`; for a rename, both paths): the agent's, though no tool
+    /// call named it. Undo of a deleted file puts it back and removes nothing.
+    fn removed(&self, change: &FileChange) -> bool {
+        let named = |path: &str| {
+            self.commands.contains(path)
+                || self.commands.iter().any(|command| {
+                    path.strip_prefix(command.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
+        };
+        match change.change() {
+            ChangeKind::Deleted => named(change.path().as_str()),
+            ChangeKind::Renamed { from } => named(from.as_str()) && named(change.path().as_str()),
+            ChangeKind::Added | ChangeKind::Modified | ChangeKind::Unknown { .. } => false,
+        }
+    }
 }
 
 /// Whether a place a tool call names counts as one the agent wrote, so the after-turn
@@ -241,8 +260,8 @@ pub fn names_a_write(kind: ToolKind, status: ToolCallStatus, in_diff: bool) -> b
 
 /// `change`, flagged as possibly holding the lawyer's edits when no tool call wrote its path
 /// ([`names_a_write`]; for a rename: neither path) and no shell command of the turn wrote it,
-/// as a file the agent added (`start`: [`TurnStart::own`]) or modified
-/// ([`TurnStart::rewritten`]).
+/// as a file the agent added (`start`: [`TurnStart::own`]), modified
+/// ([`TurnStart::rewritten`]), or deleted or moved ([`TurnStart::removed`]).
 pub(crate) fn flag(
     change: FileChange,
     tools: &BTreeSet<MatterPath>,
@@ -250,7 +269,7 @@ pub(crate) fn flag(
 ) -> FileChange {
     let named = tools.contains(change.path())
         || matches!(change.change(), ChangeKind::Renamed { from } if tools.contains(from));
-    if named || start.own(&change) || start.rewritten(&change) {
+    if named || start.own(&change) || start.rewritten(&change) || start.removed(&change) {
         change
     } else {
         change.with_lawyer_edits()

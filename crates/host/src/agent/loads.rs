@@ -302,6 +302,10 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// The session's no-copy list and its identity (`pre_write_guard/no_copy.rs`), passed
+    /// after the folder with [`NO_COPY_FLAG`](crate::pre_write_guard::NO_COPY_FLAG); none when
+    /// it was not made, or its path is no UTF-8 string.
+    pub(crate) no_copy: Option<(&'a Path, &'a str)>,
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -314,7 +318,8 @@ pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|P
 pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
-/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
+/// (`crate::pre_write_guard`) and `--matter <matter>` (then the no-copy list and its identity,
+/// when the session has one) before each of [`GUARD_MATCHER`]'s tools;
 /// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
@@ -337,6 +342,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        no_copy,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -350,6 +356,14 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         crate::pre_write_guard::MATTER_FLAG,
         matter,
     ];
+    if let Some((file, id)) = no_copy.and_then(|(file, id)| Some((file.to_str()?, id))) {
+        args.extend([
+            crate::pre_write_guard::NO_COPY_FLAG,
+            file,
+            crate::pre_write_guard::NO_COPY_ID_FLAG,
+            id,
+        ]);
+    }
     let matcher = if ask_all {
         args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
         crate::agent::forced_ask::EVERY_TOOL

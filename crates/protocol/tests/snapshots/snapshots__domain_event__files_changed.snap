@@ -32,6 +32,12 @@ expression: "event(\"files_changed\")"
         "path": "big.zip",
         "reason": "over_size_cap"
       }
+    ],
+    "gone": [
+      {
+        "path": "Scans/brief.docx",
+        "reason": "cloud_only"
+      }
     ]
   }
 }

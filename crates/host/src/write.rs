@@ -398,6 +398,13 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     std::fs::write(path, bytes)
 }
 
+/// Makes the file `path` `len` bytes long with no data written (sparse where the file system
+/// allows), replacing it. For unit tests: a file over the size cap, read by no one.
+#[cfg(test)]
+pub(crate) fn sized_file(path: &Path, len: u64) -> io::Result<()> {
+    std::fs::File::create(path)?.set_len(len)
+}
+
 /// Renames `from` to `to`. For unit tests: the lawyer moving a folder.
 #[cfg(test)]
 pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {

@@ -155,6 +155,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         program: &program,
         matter: &matter,
         ask_all: false,
+        no_copy: None,
     });
     let entry = json!({
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
@@ -218,12 +219,46 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program,
         matter,
         ask_all: false,
+        no_copy: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);
     assert_eq!(guard_entry(hook(plain, odd)), None);
     let guard = Some(hook(odd, plain));
     let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard, None));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
+}
+
+/// The session's no-copy list and its identity go after the matter folder, before
+/// `--ask-all`; none when the session has no list.
+#[test]
+fn the_no_copy_list_and_its_identity_follow_the_matter() {
+    let list = std::path::Path::new("/data/browser/guard/s/no-copy.txt");
+    let hook = |ask_all, no_copy| GuardHook {
+        // unix-paths-ok: only spelled into the hook's args, never opened or joined
+        program: std::path::Path::new("/opt/clauseo"),
+        matter: std::path::Path::new("/m"),
+        ask_all,
+        no_copy,
+    };
+    let args = |entry: Option<Value>| entry.unwrap()["hooks"][0]["args"].clone();
+    assert_eq!(
+        args(guard_entry(hook(false, Some((list, "1b"))))),
+        json!([
+            "--pre-write-guard",
+            "--matter",
+            "/m",
+            "--no-copy-list",
+            "/data/browser/guard/s/no-copy.txt",
+            "--no-copy-list-id",
+            "1b"
+        ])
+    );
+    let asked = args(guard_entry(hook(true, Some((list, "1b")))));
+    assert_eq!(asked.as_array().unwrap().last().unwrap(), "--ask-all");
+    assert_eq!(
+        args(guard_entry(hook(false, None))),
+        json!(["--pre-write-guard", "--matter", "/m"])
+    );
 }
 
 #[test]

@@ -41,32 +41,70 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
     Ok(())
 }
 
-/// Makes the pre-write guard's record of its refusals for `run`, for any agent but Claude
-/// (`claude`), whose hook passes none (`updates/guard_blocks.rs`): the session's guard folder,
-/// create-new, then the file in it with `O_EXCL`
-/// ([`record::make`](crate::pre_write_guard::record::make)), and keeps the file and the identity
-/// it read from it in [`RunFolders::guard`]. It sits in `<data>/browser`, which no agent's shell
-/// or patch tool may write (Codex's fence denies it, `agent/codex_fence.rs` `DATA_DENIED`;
-/// Claude's deny rules, `Read` and `Edit` of `browser/**`), so only the host makes it. Anything
-/// already at the session's guard folder (a folder, a file, a symlink or a junction) refuses the
-/// launch, the run folder taken back, as [`make`] does. File system calls: off the actor.
+/// Makes the session's guard folder for `run`, create-new
+/// ([`record::make_folder`](crate::pre_write_guard::record::make_folder)), and in it, each with
+/// `O_EXCL`, the pre-write guard's record of its refusals, for any agent but Claude (`claude`),
+/// whose hook passes none (`updates/guard_blocks.rs`), kept with the identity read from it in
+/// [`RunFolders::guard`], and its no-copy list, for every agent
+/// ([`no_copy::make`](crate::pre_write_guard::no_copy::make)), kept in [`RunFolders::no_copy`].
+/// It sits in `<data>/browser`, which no agent's shell or patch tool may write (Codex's fence
+/// denies it, `agent/codex_fence.rs` `DATA_DENIED`; Claude's deny rules, `Read` and `Edit` of
+/// `browser/**`), so only the host makes it. A link at the session's guard folder (a symlink or
+/// a junction) refuses the launch, the run folder taken back, as [`make`] does; anything else
+/// that stops the folder or the list being made refuses any agent's launch but Claude's, which
+/// goes on without a list, with a warning (its hook needs no record, and the guard's live check
+/// still applies). File system calls: off the actor.
 pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Result<(), Error> {
-    if claude {
-        return Ok(());
-    }
-    match crate::pre_write_guard::record::make(data, &run.key.id()) {
-        Ok(made) => {
-            run.guard = Some(made);
+    use crate::pre_write_guard::{no_copy, record};
+    let session = run.key.id();
+    let made = if claude {
+        record::make_folder(data, &session).map(|folder| (folder, None))
+    } else {
+        record::make(data, &session)
+            .map(|(file, id)| (record::folder(data, &session), Some((file, id))))
+    };
+    // A list not made takes back the folder just made for it, as a record not made does.
+    let made = made.and_then(|(folder, guard)| match no_copy::make(&folder) {
+        Ok(list) => Ok((list, guard)),
+        Err(error) => {
+            drop(crate::write::remove_tree(&folder));
+            Err(error)
+        }
+    });
+    match made {
+        Ok((list, guard)) => {
+            run.guard = guard;
+            run.no_copy = Some(list);
+            Ok(())
+        }
+        // Claude's hook needs no record, only the list, and the guard's live check still
+        // applies without it: a folder or list it could not make for an I/O reason (a disk
+        // error, a stale folder or file at its place) launches Claude without a list. A link
+        // or junction at the session's guard folder still refuses it, as it refuses any agent.
+        Err(error) if claude && !is_link(&record::folder(data, &session)) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the guard's no-copy list was not made; Claude launches without it, and the \
+                 guard looks at each file itself"
+            );
+            run.guard = None;
+            run.no_copy = None;
             Ok(())
         }
         Err(error) => {
             run.remove();
             Err(Error::refused(
                 ErrorCode::AgentLaunchFailed,
-                format!("cannot make the guard's record file: {error}"),
+                format!("cannot make the guard's record file or no-copy list: {error}"),
             ))
         }
     }
+}
+
+/// Whether a link is at `path`: a symlink, dangling or not, or on Windows a junction or another
+/// reparse point; neither a real folder nor a regular file.
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_dir() && !meta.is_file())
 }
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
@@ -161,7 +199,9 @@ pub(super) fn remove_folders(run: &RunFolders) {
             this.and_then(Path::file_name) == Some(std::ffi::OsStr::new(name))
         })
     };
-    let guard = run.guard.as_ref().and_then(|(file, _)| file.parent());
+    let guard = (run.guard.as_ref().map(|(file, _)| file))
+        .or(run.no_copy.as_ref().map(|list| &list.file))
+        .and_then(|file| file.parent());
     let guard_parents = [
         crate::pre_write_guard::record::FOLDER,
         crate::browser::CONFIG_DIR,

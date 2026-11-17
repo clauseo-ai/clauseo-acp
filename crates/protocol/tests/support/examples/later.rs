@@ -6,8 +6,8 @@
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
-    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, SkippedFile, SkippedFileReason,
+    SteerOutcome, SteerResolved, StopReason, TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
@@ -327,38 +327,77 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo stopped 3 more steps.".to_owned(),
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Drafts/Scan.pdf was deleted during this step. Clauseo had no copy of it to \
+                   bring back."
+                .to_owned(),
+            kind: Some(NoticeKind::FilesGoneNoCopy {
+                files: vec![SkippedFile {
+                    path: MatterPath::new("Drafts/Scan.pdf").unwrap(),
+                    reason: SkippedFileReason::CloudOnly,
+                }],
+                more: 0,
+            }),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: the AI tried to delete or replace Scan.pdf. Clauseo \
+                   has no copy of it, so that couldn't be undone."
+                .to_owned(),
+            kind: Some(NoticeKind::NoCopyBlocked {
+                file: MatterPath::new("Scan.pdf").unwrap(),
+            }),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text:
+                "Drafts/Contract.docx was changed during this answer. Clauseo had no copy of how \
+                   it was before, so Undo can't bring the earlier version back."
+                    .to_owned(),
+            kind: Some(NoticeKind::FilesChangedNoCopy {
+                files: vec![SkippedFile {
+                    path: MatterPath::new("Drafts/Contract.docx").unwrap(),
+                    reason: SkippedFileReason::CloudOnly,
+                }],
+                more: 0,
+            }),
+        },
     ];
-    notices.extend(
-        [
-            (
-                PackSkipReason::NotTurnedOn,
-                "This matter is set to use it, but it isn't turned on.",
-            ),
-            (
-                PackSkipReason::NotAdmitted,
-                "The skill pack settings on this computer don't allow it.",
-            ),
-            (
-                PackSkipReason::Changed,
-                "Its files changed after it was turned on. Turn it on again.",
-            ),
-            (
-                PackSkipReason::Missing,
-                "Clauseo couldn't find it on this computer.",
-            ),
-            (
-                PackSkipReason::Invalid,
-                "Its files aren't a valid skill pack.",
-            ),
-            (
-                PackSkipReason::TooMany,
-                "Clauseo loads at most 8 skill packs at a time.",
-            ),
-        ]
-        .into_iter()
-        .map(|(reason, words)| skill_pack_notice(reason, words)),
-    );
+    notices.extend(skill_pack_notices());
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// A skill pack notice for each `PackSkipReason`, in the corpus's order.
+fn skill_pack_notices() -> impl Iterator<Item = Notice> {
+    [
+        (
+            PackSkipReason::NotTurnedOn,
+            "This matter is set to use it, but it isn't turned on.",
+        ),
+        (
+            PackSkipReason::NotAdmitted,
+            "The skill pack settings on this computer don't allow it.",
+        ),
+        (
+            PackSkipReason::Changed,
+            "Its files changed after it was turned on. Turn it on again.",
+        ),
+        (
+            PackSkipReason::Missing,
+            "Clauseo couldn't find it on this computer.",
+        ),
+        (
+            PackSkipReason::Invalid,
+            "Its files aren't a valid skill pack.",
+        ),
+        (
+            PackSkipReason::TooMany,
+            "Clauseo loads at most 8 skill packs at a time.",
+        ),
+    ]
+    .into_iter()
+    .map(|(reason, words)| skill_pack_notice(reason, words))
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.

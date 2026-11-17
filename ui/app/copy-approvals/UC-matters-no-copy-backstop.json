@@ -1,0 +1,98 @@
+{
+  "UC-720": {
+    "en": "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in {service}, so {service} may still have it among its deleted files.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file only online in a folder a named service syncs ({service}, sync-services.ts). Rendered alone"
+  },
+  "UC-721": {
+    "en": "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in your cloud service, which may still have it among its deleted files.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file only online where the room knows no service by name"
+  },
+  "UC-722": {
+    "en": "{file} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file over the size cap: no recycle-bin clause"
+  },
+  "UC-723": {
+    "en": "{file} was deleted during this answer. Clauseo had no copy of it to bring back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a reason this version doesn't know. Rendered alone"
+  },
+  "UC-724": {
+    "en": "{n} more files Clauseo had no copy of were deleted during this answer.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "After the five files the notice names (UC-720 to UC-723), the rest counted; the host names at most five, and all six when there are six, so {n} is never 1"
+  },
+  "UC-725": {
+    "en": "{file} was deleted; Clauseo had no copy to bring back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Versions' timeline: a short note on a change during which a file Clauseo kept no copy of was deleted (version-panel.tsx), beside the existing '{file} is too large to keep versions'; picking the change shows UC-720 to UC-723 in the band. Versions' words avoid 'step', so this note says none"
+  },
+  "UC-726": {
+    "en": "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::NoCopyBlocked: Clauseo's pre-write guard refused a step of the agent's that would delete a file Clauseo keeps no copy of, only online (a cloud placeholder) or over the 512 MB cap, or overwrite or move one that is still only online or over the cap now (pre_write_guard/no_copy.rs; actor/turn/updates/guard_blocks.rs), once a file a turn, within the guard's eight lines a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step with the guard's reason, so it gets no notice. {file} the file's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf). {name} is the agent as TN-11 names it"
+  },
+  "UC-727": {
+    "en": "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::NoCopyBlocked: Clauseo's pre-write guard refused a step of the agent's that would delete a file Clauseo keeps no copy of, only online (a cloud placeholder) or over the 512 MB cap, or overwrite or move one that is still only online or over the cap now (pre_write_guard/no_copy.rs; actor/turn/updates/guard_blocks.rs), once a file a turn, within the guard's eight lines a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step with the guard's reason, so it gets no notice. {file} the file's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf). The AI where the room knows no agent name. Rendered alone"
+  },
+  "UC-728": {
+    "en": "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesChangedNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is still in the folder at the after-turn checkpoint with another size or modification time (matters gone.rs changed), so Clauseo holds no copy of how it was before and Undo can't bring that version back. A file only downloaded (same size and modification time) gets none. {file} named as Versions names files (fileName); a file over the cap, or any reason but cloud-only"
+  },
+  "UC-729": {
+    "en": "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. {service} may still have an earlier version.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesChangedNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is still in the folder at the after-turn checkpoint with another size or modification time (matters gone.rs changed), so Clauseo holds no copy of how it was before and Undo can't bring that version back. A file only downloaded (same size and modification time) gets none. {file} named as Versions names files (fileName); a file only online in a folder a named service syncs ({service}, sync-services.ts). Rendered alone"
+  },
+  "UC-730": {
+    "en": "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. Your cloud service may still have an earlier version.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "Host notice NoticeKind::FilesChangedNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is still in the folder at the after-turn checkpoint with another size or modification time (matters gone.rs changed), so Clauseo holds no copy of how it was before and Undo can't bring that version back. A file only downloaded (same size and modification time) gets none. {file} named as Versions names files (fileName); a file only online where the room knows no service by name"
+  },
+  "UC-731": {
+    "en": "{n} more files Clauseo had no earlier copy of were changed during this answer.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "matters-no-copy-backstop (settled wording from the wording owner, 17 Nov; provisional for Rohan's OK)",
+    "note": "After the five files the notice names (UC-728 to UC-730), the rest counted; the host names at most five, and all six when there are six, so {n} is never 1"
+  }
+}

@@ -32,6 +32,10 @@ mod skipped;
 mod first_read;
 
 #[cfg(test)]
+#[path = "matters/gone.rs"]
+mod gone;
+
+#[cfg(test)]
 #[path = "matters/start_record.rs"]
 mod start_record;
 

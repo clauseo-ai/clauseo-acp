@@ -138,6 +138,12 @@
 //! `cat .codex/config.toml` too, since an agent has no reason to touch a folder Clauseo refuses
 //! it. Claude Code needs no such rule: its `settingSources` leave out project settings.
 //!
+//! One more rule for both agents, after those (`no_copy.rs`), for a file Clauseo holds no copy
+//! of (cloud-only, over the size cap; the session's list after [`NO_COPY_FLAG`], trusted only as
+//! the file the host made, or what the guard sees of the file itself): a delete is refused; an
+//! overwrite, an edit or a move is refused only while the file is still online-only or over the
+//! cap. The turn's end names the rest: such a file deleted or changed in place.
+//!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
 //! (Codex's hook), one line in that file for the host to show the lawyer (`record.rs`); stdout
@@ -162,6 +168,7 @@ mod answers;
 mod ask;
 mod codex;
 mod names;
+pub(crate) mod no_copy;
 mod reach;
 pub(crate) mod record;
 mod shell;
@@ -210,6 +217,26 @@ pub fn make_record(data: &Path, session: &str) -> std::io::Result<(PathBuf, Stri
     record::make(data, session).map(|(file, id)| (file, id.hex()))
 }
 
+/// Makes the session's no-copy list in its guard folder `folder` (made by [`make_record`]), as
+/// the launch prep does (`no_copy.rs` `make`), then appends `lines` (`add <reason> <path>`
+/// each) through the identity it was made with, as the host does after a checkpoint. The file
+/// and its identity, written for [`NO_COPY_ID_FLAG`].
+pub fn make_no_copy_list(folder: &Path, lines: &str) -> std::io::Result<(PathBuf, String)> {
+    let list = no_copy::make(folder)?;
+    std::io::Write::write_all(
+        &mut crate::write::open_append_record(&list.file, list.id)?,
+        lines.as_bytes(),
+    )?;
+    Ok((list.file, list.id.hex()))
+}
+
+/// The argument that names the session's list of the files Clauseo holds no copy of
+/// (`no_copy.rs`), followed by the file.
+pub const NO_COPY_FLAG: &str = no_copy::FLAG;
+
+/// The argument that names the identity of the file after [`NO_COPY_FLAG`], followed by it.
+pub const NO_COPY_ID_FLAG: &str = no_copy::ID_FLAG;
+
 /// How many of a shell command's words are looked at.
 pub const MAX_WORDS: usize = 64;
 
@@ -249,7 +276,13 @@ fn run_timed(
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
         Ok(_) => {
             timings::mark("read");
-            refusal(&bytes, matter_arg(args).as_deref())
+            let matter = matter_arg(args);
+            // The held-open and `.codex` rules first, then the no-copy one.
+            refusal(&bytes, matter.as_deref()).map(|found| {
+                found.or_else(|| {
+                    no_copy::refusal(&bytes, matter.as_deref(), || no_copy::List::of_args(args))
+                })
+            })
         }
         Err(_) => Err(Ignored::Unreadable),
     };

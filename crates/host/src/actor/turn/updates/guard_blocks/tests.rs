@@ -184,6 +184,45 @@ fn only_a_paper_the_matter_holds_is_named() {
     );
 }
 
+/// A refusal of a file Clauseo holds no copy of is named as a held paper is, by the same rules:
+/// its name alone, cut and shown by #1122's rule, only when the matter holds it.
+#[test]
+fn a_file_with_no_copy_is_named_by_its_own_kind_only_when_the_matter_holds_it() {
+    let folder = Folder::new("matter-no-copy");
+    let no_copy = |file: &str| Record {
+        reason: Reason::NoCopy,
+        ..held(file)
+    };
+    let long = format!("Drafts/{}.pdf", "x".repeat(80));
+    write::write_file(&folder.matter().join(&long), b"pdf").unwrap();
+    let lines = [
+        line(&no_copy("Drafts/B.docx")),
+        line(&no_copy("Drafts/Missing.pdf")),
+        line(&Record {
+            path: None,
+            ..no_copy("A.docx")
+        }),
+        line(&no_copy(&long)),
+    ];
+    append(&folder.file(), &lines.concat());
+    let kinds = folder.read(&mut 0);
+    assert_eq!(
+        kinds[..3],
+        [
+            NoticeKind::NoCopyBlocked {
+                file: MatterPath::new("B.docx").unwrap()
+            },
+            NoticeKind::GuardStepBlocked,
+            NoticeKind::GuardStepBlocked,
+        ]
+    );
+    let NoticeKind::NoCopyBlocked { file } = &kinds[3] else {
+        panic!("{kinds:?}");
+    };
+    assert_eq!(file.as_str().chars().count(), MAX_NAME, "{file}");
+    assert!(file.as_str().contains('…'), "{file}");
+}
+
 /// A name shows on one line with nothing that hides, breaks or turns it, by #1122's rule
 /// (`shown.rs`): bidi controls (U+202A to U+202E, U+2066 to U+2069), the line and paragraph
 /// separators, zero-width and control characters and `\` written out as escapes; a

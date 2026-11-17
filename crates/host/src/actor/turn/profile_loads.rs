@@ -24,6 +24,7 @@ use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
+use crate::pre_write_guard::no_copy::NoCopyList;
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -218,6 +219,7 @@ pub(super) fn session_loads(
         matter: Some(matter),
         trusted_servers: &trusted,
     });
+    let list = run.no_copy.as_ref().map(NoCopyList::hook_arg);
     let guard = actor
         .pre_write_guard
         .as_deref()
@@ -225,6 +227,7 @@ pub(super) fn session_loads(
             program,
             matter,
             ask_all: forced_ask,
+            no_copy: list.as_ref().map(|(file, id)| (*file, id.as_str())),
         });
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.
@@ -275,10 +278,9 @@ pub(super) fn session_loads(
         .chain(case_law_state)
         .collect();
     super::super::header_tools::hold(actor, thread, tools);
-    let directories = if kind == Some(AgentKind::Codex) {
-        codex_directories(&run)
-    } else {
-        Vec::new()
+    let directories = match kind {
+        Some(AgentKind::Codex) => codex_directories(&run),
+        _ => Vec::new(),
     };
     Ok((meta, servers, directories))
 }

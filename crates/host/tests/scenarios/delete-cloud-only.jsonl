@@ -1,0 +1,10 @@
+{"scenario":"delete-cloud-only","description":"One turn whose shell deletes notes.txt, a cloud-only placeholder Clauseo kept no copy of (the test's probe sees it as cloud-only while notes.txt.cloud.tmp is beside it), and edits brief.txt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"delete_file":{"path":"notes.txt"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-rm-notes","title":"rm notes.txt","name":"Bash","kind":"execute","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"I deleted the notes."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

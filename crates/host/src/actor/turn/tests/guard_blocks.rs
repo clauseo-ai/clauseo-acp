@@ -3,7 +3,10 @@
 //! next update or at the turn's end; the same paper refused again in the turn is told once; a
 //! paper the matter does not hold is told unnamed; every step without a notice of its own (a
 //! repeat, named or not, or one past eight a turn) is in one count at the turn's end; a Claude
-//! session is never told, since Claude shows the blocked call as a failed step of its own.
+//! session is never told, since Claude shows the blocked call as a failed step of its own. And
+//! the no-copy list end to end: the launch makes it, the before-turn checkpoint lists a file over
+//! the size cap on it, the real guard refuses its delete and records it, and the next turn tells
+//! it.
 
 use clauseo_protocol::{AgentKind, DomainEvent, MatterPath, NoticeKind, ThreadId, Timestamp};
 
@@ -203,4 +206,73 @@ fn a_claude_session_is_never_told() {
         ),
         Vec::new()
     );
+}
+
+/// The no-copy list the launch made, as it reads now.
+fn no_copy_list(
+    rig: &Rig,
+    thread: ThreadId,
+) -> (crate::pre_write_guard::no_copy::NoCopyList, String) {
+    let run = rig.actor.threads[&thread]
+        .turn
+        .run
+        .as_ref()
+        .expect("a run folder");
+    let list = run.no_copy.clone().expect("the list the launch made");
+    let text = std::fs::read_to_string(&list.file).unwrap();
+    (list, text)
+}
+
+#[test]
+fn a_file_with_no_copy_is_listed_refused_recorded_and_told() {
+    use crate::pre_write_guard::no_copy::HEADER;
+    let mut rig = Rig::start("turn-guard-no-copy", &script(&lines()));
+    let thread = rig.thread();
+    let _first = send_prompt(&mut rig, 10, thread);
+    until_told(&mut rig, thread);
+    assert_eq!(
+        no_copy_list(&rig, thread).1,
+        HEADER,
+        "nothing without a copy yet"
+    );
+    let state = &rig.actor.threads[&thread].turn;
+    let matter = state.agent.as_ref().expect("an agent").folder.clone();
+    let run = state.run.as_ref().expect("a run folder");
+    let (record, record_id) = run.guard.clone().expect("the record the launch made");
+    assert_eq!(no_copy_list(&rig, thread).0.file.parent(), record.parent());
+    // One byte over the cap, sparse: the checkpoint skips it unread.
+    write::sized_file(&matter.join("Big.bin"), clauseo_matters::FILE_CAP_BYTES + 1).unwrap();
+    let _second = send_prompt(&mut rig, 11, thread);
+    until_told(&mut rig, thread);
+    let (list, text) = no_copy_list(&rig, thread);
+    assert_eq!(text, format!("{HEADER}add over-size-cap Big.bin\n"));
+    // The guard as Codex's hook runs it, with the record and the list the launch made.
+    let args: Vec<std::ffi::OsString> = [
+        "--record".into(),
+        record.into_os_string(),
+        "--record-id".into(),
+        record_id.hex().into(),
+        "--no-copy-list".into(),
+        list.file.into_os_string(),
+        "--no-copy-list-id".into(),
+        list.id.hex().into(),
+    ]
+    .into();
+    let hook = serde_json::json!({
+        "cwd": matter.to_str().unwrap(),
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -f Big.bin"},
+    });
+    let mut errors = Vec::new();
+    let code =
+        crate::pre_write_guard::run(&args, hook.to_string().as_bytes(), Vec::new(), &mut errors);
+    let said = String::from_utf8(errors).unwrap();
+    assert_eq!(code, crate::pre_write_guard::DENY, "{said}");
+    assert!(said.starts_with("Big.bin can't be brought back"), "{said}");
+    let _third = send_prompt(&mut rig, 12, thread);
+    until_told(&mut rig, thread);
+    let log = rig.log(thread);
+    rig.finish();
+    let file = MatterPath::new("Big.bin").unwrap();
+    assert_eq!(notices(&log), [(NoticeKind::NoCopyBlocked { file }, 3)]);
 }

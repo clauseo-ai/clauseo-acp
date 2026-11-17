@@ -1,9 +1,11 @@
 //! The commit that closes a turn. Every path that ends a turn (step 7, a turn that never
 //! started, a dequeued turn, the retry of a failed end, start-up repair) builds one
 //! [`TurnClose`] and pushes it with [`TurnClose::push_into`], which keeps the order rules:
-//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`,
-//! `TurnFailed`, `TurnEnded`, `TurnStoppedAtLimit`, and the detach last, so R6 leaves the
-//! thread in the state the detach gives.
+//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`
+//! (then the notice of files gone with no copy, and that of files changed with no earlier copy,
+//! `end/files.rs`), `TurnFailed`, `TurnEnded`,
+//! `TurnStoppedAtLimit`, and the detach last, so R6 leaves the thread in the state the detach
+//! gives.
 //!
 //! A stop at the limit whose reset time a limits read is to give has no `TurnStoppedAtLimit`
 //! in its close: [`log_limit_stop`] logs it alone once the read is done and the close is
@@ -12,14 +14,15 @@
 
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
-    ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
-    StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, SkippedFile,
+    StopReason, StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId,
+    TurnStoppedAtLimit,
 };
 
 use super::super::Actor;
 use super::out::Out;
 use super::skipped::{self, Skipped};
-use super::{LimitMark, cancel};
+use super::{LimitMark, cancel, end};
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 use crate::pipeline::MatterEvent;
@@ -104,6 +107,9 @@ pub(super) struct TurnClose {
     /// Events of the matter's stream: checkpoint records (with their rows) and outside edits.
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
+    /// Files the before-turn checkpoint kept no copy of that the turn changed in place
+    /// (`end/files.rs` `changed_notice`), told right after `FilesChanged`.
+    pub(super) changed_no_copy: Vec<SkippedFile>,
     pub(super) checkpoint_after: Option<CheckpointId>,
     /// The turn's limit signal; `TurnStoppedAtLimit` when it stops `AtLimit`. `None` when a
     /// limits read gives that event after the close.
@@ -124,6 +130,7 @@ impl TurnClose {
             complete_tools: Skipped::None,
             matter: None,
             files: None,
+            changed_no_copy: Vec::new(),
             checkpoint_after: None,
             limit: None,
             detach: None,
@@ -155,6 +162,12 @@ impl TurnClose {
         }
         if let Some(files) = &self.files {
             out.push(actor, files.clone())?;
+            if let Some(notice) = end::gone_notice(&files.gone) {
+                out.push(actor, notice)?;
+            }
+        }
+        if let Some(notice) = end::changed_notice(&self.changed_no_copy) {
+            out.push(actor, notice)?;
         }
         if let Some((code, detail)) = &self.failure {
             let detail = detail.clone().map(|detail| detail_of(actor, detail));
