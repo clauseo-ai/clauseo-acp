@@ -71,21 +71,20 @@ fn own_value(key: &str, value: &Value) -> bool {
 }
 
 /// Writes `<home>/settings.json` as exactly what Clauseo ships: [`CLAUDE_HOME_SETTINGS`], and of
-/// what the file held before (a plain file whose JSON is an object; a link is not read) only
-/// [`CLAUDE_OWN_KEYS`] with a value of their kind. Every other key goes. Nothing is written when
-/// the file already says exactly that. The file is replaced atomically, a link there replaced and
-/// never followed. An error (a folder at the name, a full disk) is the caller's to refuse the
-/// launch on. File system calls: off the actor.
+/// what the file held before (a plain file that reads and whose JSON is an object; a link is
+/// not read) only [`CLAUDE_OWN_KEYS`] with a value of their kind. Every other key goes. Nothing
+/// is written when the file already says exactly that. The file is replaced atomically, a link
+/// there replaced and never followed; what cannot be replaced (a folder at the name, a file
+/// Windows will not let go) is renamed aside ([`clear::set_aside`]) and the file written fresh.
+/// An error (that rename or the fresh write failing too, a full disk) is the caller's to refuse
+/// the launch on. File system calls: off the actor.
 pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
     let path = home.join(CLAUDE_SETTINGS_FILE);
     let plain = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
-    let before = if plain {
-        match serde_json::from_slice::<Value>(&std::fs::read(&path)?) {
-            Ok(Value::Object(settings)) => Some(settings),
-            _ => None,
-        }
-    } else {
-        None
+    let held = plain.then(|| std::fs::read(&path).ok()).flatten();
+    let before = match held.map(|bytes| serde_json::from_slice::<Value>(&bytes)) {
+        Some(Ok(Value::Object(settings))) => Some(settings),
+        _ => None,
     };
     let mut settings = Map::new();
     if let Some(before) = &before {
@@ -102,7 +101,20 @@ pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     let bytes = serde_json::to_vec_pretty(&Value::Object(settings))?;
-    crate::write::replace_private_file(&path, &bytes)
+    // A file that cannot be replaced (a folder at the name, a file Windows will not let go) is
+    // moved aside and written fresh; only when that fails too is it the caller's error.
+    match crate::write::replace_private_file(&path, &bytes) {
+        Ok(()) => Ok(()),
+        Err(first) => match clear::set_aside(home, CLAUDE_SETTINGS_FILE) {
+            Ok(Some(aside)) => {
+                if clear::remove_entry(&aside).is_err() {
+                    tracing::warn!("Claude's old settings file stays aside for now");
+                }
+                crate::write::replace_private_file(&path, &bytes)
+            }
+            Ok(None) | Err(_) => Err(first),
+        },
+    }
 }
 
 /// The launch's refusal when [`write_claude_settings`] failed, with a warn line naming the
@@ -121,3 +133,6 @@ pub(crate) fn settings_unwritten(error: &std::io::Error) -> crate::error::Error 
 
 #[cfg(test)]
 mod tests;
+
+mod clear;
+pub(crate) use clear::{LOADED as CLAUDE_HOME_LOADED, clear_home};
