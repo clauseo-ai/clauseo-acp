@@ -68,9 +68,12 @@
 //!
 //! **Without a list, or with one the guard does not trust**, a delete is judged by the live check
 //! alone: it still refuses a file that is cloud-only or over the cap now, but no longer a listed
-//! file downloaded earlier in the turn, nor a folder holding one (`rm -r Exhibits`, `rm -rf .`).
-//! On Windows the list file has the protection of Clauseo's other data-folder files there (the
-//! command-text rules; there is no fence), so on Windows the live check is the part to rely on.
+//! file downloaded earlier in the turn, nor a folder holding one. On Windows the live check is the
+//! part to rely on.
+//!
+//! **Scope.** A full list (at [`MAX_BYTES`]) takes no more lines, so a file that becomes no-copy,
+//! or stops being one, after that is not reflected until the next session. The start-up repair
+//! of a crashed turn and a retried turn end do not repeat the changed-in-place or deleted notices.
 //!
 //! A refusal names the file as the list spells it, and it is recorded for the lawyer like the
 //! held-open one (`record.rs` `Reason::NoCopy`).
@@ -311,8 +314,10 @@ pub(crate) fn fitting(changes: &str, len: u64) -> &str {
     if changes.len() <= room {
         return changes;
     }
-    let head = changes.get(..room).unwrap_or_default();
-    head.rfind('\n')
+    // Cut by bytes at the last newline within `room`: a newline is never inside a character.
+    let head = changes.as_bytes().get(..room).unwrap_or_default();
+    head.iter()
+        .rposition(|byte| *byte == b'\n')
         .map_or("", |at| changes.get(..=at).unwrap_or_default())
 }
 
@@ -348,27 +353,31 @@ fn arg(args: &[OsString], flag: &str) -> Option<OsString> {
 /// What a refused call would have done to a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Act {
-    /// Deleted it (`rm`, `Remove-Item`, a patch's `Delete File`, a folder holding it).
+    /// Deleted it (`rm`, `Remove-Item`, a patch's `Delete File`, a folder holding it), a file
+    /// the session's list names: no copy of it at this answer's start.
     Delete,
+    /// Deleted it, a file the list does not name that is cloud-only or over the size cap now.
+    DeleteNow,
     /// Overwritten, edited or moved it, while it is cloud-only or over the size cap.
     Overwrite,
 }
 
 /// What the agent is told when it may not delete or overwrite `path`, for `why`: true in each
-/// case (a listed file being deleted may be on the disk now, so a cloud file is "kept only
-/// online", never "not downloaded"), and never a promise that asking unlocks it.
+/// case (a listed file is told as it was at this answer's start, since it may have been
+/// downloaded or shrunk since; a file refused by the live check as it is now), and never a
+/// promise that asking unlocks it.
 pub(super) fn reason(path: &MatterPath, why: SkippedFileReason, act: Act) -> String {
-    let because = match why {
-        SkippedFileReason::OverSizeCap => "it is larger than 512 MB",
-        SkippedFileReason::CloudOnly
-        | SkippedFileReason::UnreadFolder
-        | SkippedFileReason::Unknown => match act {
-            Act::Delete => "it was only online, not on this computer, when this answer began",
-            Act::Overwrite => "it is only online, a cloud file not downloaded to this computer",
-        },
+    let large = why == SkippedFileReason::OverSizeCap;
+    let because = match (act, large) {
+        (Act::Delete, true) => "it was larger than 512 MB when this answer began",
+        (Act::Delete, false) => "it was only online, not on this computer, when this answer began",
+        (Act::DeleteNow | Act::Overwrite, true) => "it is larger than 512 MB",
+        (Act::DeleteNow | Act::Overwrite, false) => {
+            "it is only online, a cloud file not downloaded to this computer"
+        }
     };
     match act {
-        Act::Delete => format!(
+        Act::Delete | Act::DeleteNow => format!(
             "{path} can't be brought back if it is deleted: Clauseo keeps no copy of it, because \
              {because}. Clauseo does not let you delete it. Tell the lawyer; they can delete it \
              themselves."
@@ -507,7 +516,7 @@ fn deleted(list: &List, folder: &Path, resolved: &Path, touched: bool) -> Option
     touched
         .then(|| live(resolved))
         .flatten()
-        .map(|why| refused((inside, why)))
+        .map(|why| Refusal::NoCopy(inside, why, Act::DeleteNow))
 }
 
 /// Whether `resolved` is the matter `folder` itself (`rm -rf .`), or a folder above it; the

@@ -133,6 +133,38 @@ fn a_list_past_the_limit_is_read_to_its_last_whole_line() {
     assert_eq!(fitting(changes, MAX_BYTES + 5), "");
 }
 
+/// A cut at the limit that lands inside a character of a non-ASCII name still keeps the whole
+/// lines before it.
+#[test]
+fn a_cut_inside_a_non_ascii_name_keeps_the_lines_before_it() {
+    for (first, second) in [
+        (
+            "add cloud-only Müller.docx\n",
+            "add cloud-only Akte/नोटिस.pdf\n",
+        ),
+        (
+            "add cloud-only Akte/नोटिस.pdf\n",
+            "add cloud-only Müller.docx\n",
+        ),
+    ] {
+        let changes = format!("{first}{second}");
+        let inside = second
+            .char_indices()
+            .find(|(_, c)| !c.is_ascii())
+            .unwrap()
+            .0
+            + 1;
+        assert!(!changes.is_char_boundary(first.len() + inside));
+        let room = u64::try_from(first.len() + inside).unwrap();
+        assert_eq!(fitting(&changes, MAX_BYTES - room), first, "{changes}");
+        let inside = first.char_indices().find(|(_, c)| !c.is_ascii()).unwrap().0 + 1;
+        let room = u64::try_from(inside).unwrap();
+        assert_eq!(fitting(&changes, MAX_BYTES - room), "", "{changes}");
+        let room = u64::try_from(changes.len()).unwrap();
+        assert_eq!(fitting(&changes, MAX_BYTES - room), changes);
+    }
+}
+
 /// F8: the list is read only when the call deletes something; a read, a listing or a write (the
 /// hook runs before every tool under forced ask) never pays for it.
 #[test]

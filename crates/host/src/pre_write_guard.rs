@@ -140,10 +140,11 @@
 //!
 //! And Codex's own home, when its hook names it with [`CODEX_HOME_FLAG`]: see `codex.rs`.
 //!
-//! One more rule for both agents, after those (`no_copy.rs`): a delete, move or overwrite of a
-//! file Clauseo holds no copy of (cloud-only, over the size cap; the session's list after
-//! [`NO_COPY_FLAG`], trusted only as the file the host made, or what the guard sees of the file
-//! itself) is refused, so no undo is needed that could not be done.
+//! One more rule for both agents, after those (`no_copy.rs`), for a file Clauseo holds no copy
+//! of (cloud-only, over the size cap; the session's list after [`NO_COPY_FLAG`], trusted only as
+//! the file the host made, or what the guard sees of the file itself): a delete is refused; an
+//! overwrite, an edit or a move is refused only while the file is still online-only or over the
+//! cap. The turn's end names the rest: such a file deleted or changed in place.
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
@@ -223,6 +224,19 @@ pub const RECORD_ID_FLAG: &str = record::ID_FLAG;
 /// when anything is already at the folder's place.
 pub fn make_record(data: &Path, session: &str) -> std::io::Result<(PathBuf, String)> {
     record::make(data, session).map(|(file, id)| (file, id.hex()))
+}
+
+/// Makes the session's no-copy list in its guard folder `folder` (made by [`make_record`]), as
+/// the launch prep does (`no_copy.rs` `make`), then appends `lines` (`add <reason> <path>`
+/// each) through the identity it was made with, as the host does after a checkpoint. The file
+/// and its identity, written for [`NO_COPY_ID_FLAG`].
+pub fn make_no_copy_list(folder: &Path, lines: &str) -> std::io::Result<(PathBuf, String)> {
+    let list = no_copy::make(folder)?;
+    std::io::Write::write_all(
+        &mut crate::write::open_append_record(&list.file, list.id)?,
+        lines.as_bytes(),
+    )?;
+    Ok((list.file, list.id.hex()))
 }
 
 /// The argument that names the session's list of the files Clauseo holds no copy of
