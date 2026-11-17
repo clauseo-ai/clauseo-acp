@@ -18,6 +18,7 @@ import type { Conversations, ConversationsView } from "./conversations.ts";
 import {
   AGENT_DEFAULT_VALUE,
   DEFAULT_VALUE,
+  draftPickables,
   draftValue,
   pickables,
   resolvedDefault,
@@ -72,7 +73,7 @@ export function menusOf(
 
 /** A new conversation's menus, while the open conversation is a draft: undefined otherwise. Before a plan's agent has
  * reported its options (its first conversation reports them), the host's seed: one row a menu, "{agent}'s default" for the
- * model and "Default effort" for the effort. */
+ * model and "Default effort" for the effort, each left out when the matter remembers a pick for its option. */
 export function useDraftMenus(
   talks: ConversationsView,
   conversations: Conversations,
@@ -89,7 +90,7 @@ export function useDraftMenus(
     const remembered = kind === undefined ? undefined : prefs?.[kind];
     return menusOf(
       lang,
-      pickables(options),
+      draftPickables(pickables(options), remembered),
       (p) => draftValue(p, picked?.[p.id], remembered?.[p.id]),
       (p, value) => conversations.pick(p.id, value),
       // a new conversation's, for its plan: another plan's values come in silently

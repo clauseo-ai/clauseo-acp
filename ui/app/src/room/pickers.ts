@@ -48,6 +48,20 @@ export const DEFAULT_VALUE = "default";
  * sends it to the agent and refuses a SetConfigOption of it, so a draft never sends it either. */
 export const AGENT_DEFAULT_VALUE = "clauseo-agent-default";
 
+/** The options a draft's pickers show: a seeded option is left out when the matter remembers a pick for it, since that
+ * pick runs, not the agent's default the seed would name; with the agent's options lost, the draft shows no picker for
+ * it, as before the seed. */
+export function draftPickables(
+  shown: readonly Pickable[],
+  remembered: Readonly<Record<string, string>> | undefined,
+): readonly Pickable[] {
+  if (remembered === undefined) return shown;
+  const kept = shown.filter(
+    (p) => p.current !== AGENT_DEFAULT_VALUE || remembered[p.id] === undefined,
+  );
+  return kept.length === shown.length ? shown : kept;
+}
+
 /** What an option's "Default" row stands for, when the agent says: claude-agent-acp gives its model's Default row the
  * resolved model's name as the description ("Opus 5.5", session-model.js), and its effort's Default row none, since
  * Claude Code settles the effort itself and says nothing of it. Undefined with no Default row (codex-acp's values are
