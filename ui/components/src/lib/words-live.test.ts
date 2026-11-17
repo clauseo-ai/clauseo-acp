@@ -365,3 +365,71 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
   );
 });
+
+// agent.tool_missing: Windows' line (also a caller with no place) says where Windows Security lets the file back;
+// the Mac's and Linux's say it in general. Each names the thread's agent.
+test("agent.tool_missing: Windows' line names Windows Security, the Mac's and Linux's don't; each names the thread's agent", () => {
+  const code = "agent.tool_missing";
+  const win = (a: string) =>
+    `${a} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.`;
+  const mac = (a: string) =>
+    `${a} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.`;
+  const on = (platform: "windows" | "mac" | "linux") => ({ platform, parent: null });
+  expect(errorWords("en", code)).toBe(win("Claude"));
+  expect(errorWords("en", code, undefined, on("windows"))).toBe(win("Claude"));
+  for (const p of ["mac", "linux"] as const) {
+    expect(errorWords("en", code, undefined, on(p))).toBe(mac("Claude"));
+    expect(errorWords("en", code, CODEX, on(p))).toBe(mac("ChatGPT"));
+    expect(errorWords("en", code, named("gemini"), on(p))).toBe(mac("gemini"));
+    for (const none of [null, "", "  "])
+      expect(errorWords("en", code, named(none), on(p))).toBe(mac("The AI"));
+  }
+  // No Hindi yet: the English stands.
+  expect(errorWords("hi", code)).toBe(win("Claude"));
+  expect(errorWords("hi", code, undefined, on("mac"))).toBe(mac("Claude"));
+  expect(errorWords("en", code, CODEX)).toBe(win("ChatGPT"));
+  expect(errorWords("en", code, named("gemini"))).toBe(win("gemini"));
+  for (const none of [null, "", "  "])
+    expect(errorWords("en", code, named(none))).toBe(win("The AI"));
+  // no other line names Claude
+  expect(win("ChatGPT")).not.toContain("Claude can");
+});
+
+// matter.claude_tasks_file and matter.git_folder: the Mac's line adds how to show a dot folder in Finder; Windows,
+// Linux and a caller with no place get the line itself.
+test.each([["matter.claude_tasks_file"], ["matter.git_folder"]])(
+  "%s: the Mac's line says how Finder shows a dot folder; the other computers' don't",
+  (code) => {
+    const base = errorWords("en", code);
+    const finder =
+      " Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.";
+    expect(base).toContain("Claude can work here.");
+    expect(errorWords("en", code, undefined, { platform: "mac", parent: null })).toBe(
+      base + finder,
+    );
+    for (const platform of ["windows", "linux"] as const)
+      expect(errorWords("en", code, undefined, { platform, parent: null })).toBe(base);
+    // No Hindi yet: the English stands.
+    expect(errorWords("hi", code, undefined, { platform: "mac", parent: null })).toBe(
+      base + finder,
+    );
+  },
+);
+
+test("matter.git_folder names the thread's agent, on the Mac too", () => {
+  const code = "matter.git_folder";
+  const line = (agent: Parameters<typeof errorWords>[2]) => errorWords("en", code, agent);
+  expect(line(undefined)).toContain("doesn't start Claude in a folder");
+  const mac = errorWords(
+    "en",
+    code,
+    { kind: "codex", name: null },
+    { platform: "mac", parent: null },
+  );
+  expect(mac).toContain("and ChatGPT can work here.");
+  expect(mac).toContain("press Command-Shift-period in Finder");
+  expect(line({ kind: "codex", name: null })).toContain("and ChatGPT can work here.");
+  expect(line({ kind: undefined, name: "gemini" })).toContain("doesn't start gemini in a folder");
+  expect(line({ kind: undefined, name: " " })).toContain("and the AI can work here.");
+  expect(line({ kind: "claude", name: null })).not.toContain("{agent}");
+});

@@ -18,10 +18,7 @@ use super::super::commands::CommandCtx;
 use super::super::input::Input;
 use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
-use super::{
-    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, offline, session, state,
-    steps,
-};
+use super::{AgentReply, TurnInput, current, end, host_stopping, lost, offline, session, state};
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
@@ -31,12 +28,19 @@ use crate::sent::SentView;
 mod ended;
 mod launch;
 mod path;
+mod recheck;
+mod restart;
 mod start_failure;
+mod waiting;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
+pub(super) use recheck::folder_recheck;
+pub(super) use restart::{restart_if_marked, restart_if_moved};
 pub(super) use start_failure::launch_failed;
+use waiting::fail_waiting;
+pub(super) use waiting::{fail_all, run_waiting};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -321,98 +325,6 @@ pub(super) fn next_agent_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Step 4 for a turn whose agent was started in another folder than its matter's row now names
-/// (the matter was relocated since): stops that agent and starts a new one in the new folder for
-/// the turn, which goes back to step 2 and keeps the writer. `false` when the agent's folder is
-/// the matter's, or there is no running agent.
-pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
-    let Ok(row) = actor.check_thread(thread).map(|entry| entry.row.matter) else {
-        return false;
-    };
-    let Ok(folder) = actor
-        .check_matter(row)
-        .map(|entry| PathBuf::from(&entry.row.folder_path))
-    else {
-        return false;
-    };
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return false;
-    };
-    if agent.folder == folder || agent.stage == Stage::Stopping {
-        return false;
-    }
-    tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
-    restart_for(actor, thread, turn);
-    true
-}
-
-/// Step 4 for a prompted turn (typed, or taken from the queue) whose agent is marked to relaunch
-/// (`idle::Relaunch`, a Tools change): with nothing else on that agent (no question or call
-/// open, no output held for a turn of its own) it stops and a new one starts for the turn, as
-/// [`restart_if_moved`] does, so the prompt goes with the new inputs. An agent-started turn
-/// that has opened is never cut: it is the current turn then, not this one. A command Claude put
-/// in the background (a steer during a Bash call) that has not reported yet is cut: the host
-/// sees it only when it reports, so the relaunch ends it and its result never comes. A relaunch
-/// within `cap_min_idle` of a turn that closed after a steer during a tool call is logged.
-/// `false` when nothing was restarted.
-pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
-    let Some(state) = state(actor, thread) else {
-        return false;
-    };
-    let prompted = state
-        .current
-        .as_ref()
-        .is_some_and(|current| current.turn == turn && current.own.is_none());
-    let held = super::own_turn::output_waits(&state.own_held);
-    let Some(agent) = state.agent.as_deref() else {
-        return false;
-    };
-    let open = !(agent.permissions.is_empty()
-        && agent.elicitations.is_empty()
-        && agent.url_elicitations.is_empty());
-    let up = agent.stage == Stage::Attached && !agent.link.closed();
-    let Some(why) = agent.idle.relaunch else {
-        return false;
-    };
-    if !prompted || held || open || !up || super::idle::calls(agent) > 0 {
-        return false;
-    }
-    let steered_end = agent.idle.steered_end;
-    tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent relaunched for a prompt");
-    let now = actor.now().mono;
-    let window = actor.turn_path.idle.window();
-    if let Some(at) = steered_end
-        && now.saturating_sub(at) <= window
-    {
-        let since_ms = u64::try_from(now.saturating_sub(at).as_millis()).unwrap_or(u64::MAX);
-        tracing::info!(
-            target: LIFECYCLE,
-            %thread,
-            since_ms,
-            "agent relaunched soon after a steer during a tool call; a background command may end"
-        );
-    }
-    restart_for(actor, thread, turn);
-    true
-}
-
-/// Stops `thread`'s agent and starts a new one for `turn`, which goes back to step 2 and keeps
-/// the writer (`Restarting`).
-fn restart_for(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    agent.stop_cause = StopCause::Restarting;
-    let waiting = std::mem::take(&mut agent.waiting);
-    agent.after_stop.extend(waiting);
-    agent.after_stop.push(Waiting::Turn(turn));
-    if let Some(current) = current(actor, thread) {
-        current.phase = TurnPhase::Launching;
-    }
-}
-
 /// Runs an agent call as a task that posts its result.
 pub(super) fn call(
     actor: &Actor,
@@ -498,7 +410,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             picked,
             fell_back,
         } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
-        // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
+        // `Refused`: a session call's re-check (`.codex`, the `git` that does nothing) refused it,
+        // so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
         }
@@ -518,83 +431,6 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
                 agent.replay = None;
             }
             session::new_session(actor, thread);
-        }
-    }
-}
-
-pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
-        fail_waiting(actor, thread, &waiting, &lost("the agent"));
-        return;
-    };
-    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
-    let Some(session) = agent.session.clone() else {
-        fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
-        return;
-    };
-    match waiting {
-        Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
-        Waiting::Config(ctx, option, value)
-            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
-        {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "config option {option} sets the mode, and this matter's folder is \
-                     unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
-        Waiting::Config(ctx, option, value) => {
-            super::idle::call_started(actor, thread);
-            call(actor, thread, id, async move {
-                let result = client.set_config_option(&session, option.clone(), value.clone());
-                let (pick, result) = ((option, value), result.await);
-                AgentReply::Config { ctx, pick, result }
-            });
-        }
-        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "mode {mode} would approve changes without asking, and this matter's folder \
-                     is unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
-        Waiting::Mode(ctx, mode) => {
-            super::idle::call_started(actor, thread);
-            call(actor, thread, id, async move {
-                let result = client.set_mode(&session, mode.clone()).await;
-                AgentReply::Mode { ctx, mode, result }
-            });
-        }
-    }
-}
-
-/// The choice id `value` names, for a select option; `None` for a boolean.
-fn select(value: &ConfigValue) -> Option<&str> {
-    match value {
-        ConfigValue::Select(choice) => Some(choice.as_str()),
-        ConfigValue::Boolean(_) => None,
-    }
-}
-
-/// Fails each of `waiting` with `error`.
-pub(super) fn fail_all(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, error: &Error) {
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
-    }
-}
-
-fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &Error) {
-    match waiting {
-        Waiting::Turn(turn) => steps::on_launch_failed(actor, thread, *turn, error),
-        Waiting::Config(ctx, ..) | Waiting::Mode(ctx, ..) => {
-            let error = Error::refused(error.code(), error.to_string());
-            actor.finish_command(ctx.id, Err(error));
         }
     }
 }

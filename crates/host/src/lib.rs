@@ -301,8 +301,8 @@ pub use config::mcp::{
 };
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT,
-    LAUNCH_WAIT_LIMIT, LIVE_AGENTS, LaunchWait, NoProfile, PackRequest, ProfileHook, Sandbox,
-    SessionKey,
+    LAUNCH_WAIT_LIMIT, LIVE_AGENTS, LaunchWait, NoGit, NoProfile, PackRequest, ProfileHook,
+    Sandbox, SessionKey,
 };
 #[cfg(feature = "test-support")]
 pub use config::{TestProxy, WithMatterTrash, WithPlaceholderProbe};

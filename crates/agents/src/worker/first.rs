@@ -84,6 +84,8 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
             // Codex's unsigned rg.exe moves off PATH under Smart App Control, or back once it
             // is off (Windows; never fails). The receipt vouches for the folder either way.
             crate::sac::settle(config, &installed.folder, &agent);
+            // A git program in Codex's own folders goes, so a restart clears the host's refusal.
+            crate::stray_git::remove(&installed.folder);
             let version = installed.version.clone();
             worker
                 .shared

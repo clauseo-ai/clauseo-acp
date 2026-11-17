@@ -68,6 +68,12 @@ mod cancel;
 #[path = "host/cancel_leftovers.rs"]
 mod cancel_leftovers;
 #[cfg(test)]
+#[path = "host/claude_files.rs"]
+mod claude_files;
+#[cfg(test)]
+#[path = "host/claude_launch_env.rs"]
+mod claude_launch_env;
+#[cfg(test)]
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
@@ -321,6 +327,9 @@ mod mcp_tools_failures;
 #[cfg(test)]
 #[path = "host/mcp_trust.rs"]
 mod mcp_trust;
+#[cfg(test)]
+#[path = "host/no_git.rs"]
+mod no_git;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;

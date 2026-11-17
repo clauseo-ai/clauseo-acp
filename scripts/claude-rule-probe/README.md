@@ -98,3 +98,13 @@ sends no verdict, so a command no rule allows asks the local classifier. Off Win
 path is a relative one, inside the working folder. Git Bash's `/c/…` is absolute there, so
 those cases are left out. An unquoted trailing `\` goes to a classifier: Claude Code reads its
 own parse, not the text.
+
+## Pin bump rows
+
+- At every Claude Code pin bump, print `system/init`'s `tools` on each system (Mac, Linux, Windows
+  with Windows PowerShell 5.1, Windows with PowerShell 7) for the launch's own `tools` and
+  `disallowedTools` (`crates/host/src/agent/loads/tools.rs`), and compare it with the expected
+  list there (`tools_tests.rs` pins it per system): a tool the new pin adds, renames or drops is
+  decided there before the bump lands.
+- At the same pin bump, check that a tool left out of `tools` is still refused when a profile's
+  own `allowedTools` names it (`ListAgents`), from the main agent and from a helper.

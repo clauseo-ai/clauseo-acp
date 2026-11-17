@@ -29,10 +29,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         .and_then(|agent| {
             let session = agent.session.clone()?;
             Some((
-                (
-                    agent.id,
-                    agent.codex.is_some().then(|| agent.folder.clone()),
-                ),
+                (agent.id, super::agents::folder_recheck(agent)),
                 (agent.link.client.clone(), agent.link.descendants().clone()),
                 agent.link.fence(),
                 session,
@@ -101,14 +98,16 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     current.before_prompt = Some(std::rc::Rc::clone(&before));
     let clock = std::sync::Arc::clone(&actor.clock);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
+    let no_git = no_git_of(actor, thread);
     let list_clock = std::sync::Arc::clone(&actor.clock);
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
-            // descendants are listed, both off the actor, before the prompt goes out: a
+            // A Codex or Claude agent's matter folder is checked again first (`.codex`, or
+            // Claude's refused entries), and every agent's `git` that does nothing, and the
+            // agent's descendants are listed, all off the actor, before the prompt goes out: a
             // cancelled turn ends what is new since this listing.
             let (checked, listed) = join(
-                codex::prepare::recheck(clock, matter, check),
+                codex::prepare::recheck(clock, matter, check, no_git),
                 leftovers::snapshot(descendants, list_clock),
             )
             .await;
@@ -137,4 +136,15 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             let _gone = post.try_send(Input::Turn(input));
         }
     });
+}
+
+/// What a call of `thread`'s agent checks of the `git` that does nothing first
+/// (`launch_checks::no_git_check`); nothing for a thread that is gone.
+pub(super) fn no_git_of(
+    actor: &Actor,
+    thread: ThreadId,
+) -> Result<Option<crate::agent::no_git::Check>, crate::agent::no_git::Unusable> {
+    actor.threads.get(&thread).map_or(Ok(None), |entry| {
+        super::launch_checks::no_git_check(actor, &entry.row.agent)
+    })
 }

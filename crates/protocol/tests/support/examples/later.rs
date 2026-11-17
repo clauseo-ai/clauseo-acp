@@ -119,6 +119,14 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderPermission,
             "the privacy settings keep Clauseo from opening the matter folder",
         ),
+        failed(
+            ErrorCode::MatterClaudeTasksFile,
+            "the matter folder holds .claude/scheduled_tasks.json",
+        ),
+        failed(
+            ErrorCode::MatterGitFolder,
+            "the matter folder holds a .git folder",
+        ),
     ]
     .into_iter()
     .chain(agent_failures())
@@ -158,6 +166,12 @@ fn agent_failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
+        ),
+        // The code is the frozen part; its lawyer-facing lines are provisional and live in the
+        // app's words, never in the log, so the detail here is a plain host-log text.
+        failed(
+            ErrorCode::AgentToolMissing,
+            "the launch check refused the agent",
         ),
     ]
 }

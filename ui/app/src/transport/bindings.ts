@@ -1979,6 +1979,12 @@ export type ErrorCode =
 "blackline.format_unknown" | 
 /** The agent could not get through to its service while answering, and the computer did not seem offline: the service, or a proxy or firewall in front of it, refused, timed out or blocked the connection, or its name did not resolve. The answer so far is kept; asking again can work. */
 "agent.unreachable" | 
+/** A program Clauseo puts on the agent's PATH is missing or changed (a virus scanner may have quarantined it), so the agent was not started; the app copies it again when it is opened. */
+"agent.tool_missing" | 
+/** The matter folder holds `.claude/scheduled_tasks.json`; Clauseo doesn't start Claude in a matter that holds it. */
+"matter.claude_tasks_file" | 
+/** The matter folder holds a `.git` folder (or file); Clauseo doesn't start Claude in a matter that holds it. */
+"matter.git_folder" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

@@ -95,9 +95,7 @@ pub(crate) fn launch_env(
     env.extend(own);
     env.extend(hook_env);
     env.extend(forced);
-    if !path_prepend.is_empty() {
-        prepend_path(&mut env, path_prepend);
-    }
+    prepend_path(&mut env, path_prepend);
     env
 }
 
@@ -120,7 +118,9 @@ pub(crate) fn spec_of(
 /// else the agent's settings, else the inherited one), found ignoring ASCII case and written
 /// back under its own name (`Path` on Windows stays `Path`), or a new `PATH` holding only
 /// `folders`. A folder that cannot be joined (it holds the separator) is left out, with a
-/// warning that counts them.
+/// warning that counts them. Every entry of the merged `PATH` that is empty or not absolute
+/// (`.`, `bin`, `..\tools`, on Windows `C:tools` and `\tools`) is dropped, counted in a debug
+/// line. With no `folders` and no `PATH`, nothing is added.
 #[expect(
     clippy::disallowed_methods,
     reason = "the agent's PATH value is split once, to put stetdoc's and the hook's folders first; nothing is looked up on it"
@@ -140,14 +140,24 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[Pa
             "folders that hold the PATH separator cannot go on the agent's PATH"
         );
     }
-    if joinable.is_empty() {
-        return;
-    }
-    let rest = env.get(&name).cloned().unwrap_or_default();
-    let parts = joinable
-        .into_iter()
+    let Some(rest) = env
+        .get(&name)
         .cloned()
-        .chain(std::env::split_paths(&rest).filter(|part| !part.as_os_str().is_empty()));
+        .or_else(|| (!joinable.is_empty()).then(OsString::new))
+    else {
+        return;
+    };
+    let given = std::env::split_paths(&rest).count();
+    let kept: Vec<PathBuf> = std::env::split_paths(&rest)
+        .filter(|part| part.is_absolute())
+        .collect();
+    if kept.len() < given && !rest.is_empty() {
+        tracing::debug!(
+            dropped = given - kept.len(),
+            "relative or empty folders left off the agent's PATH"
+        );
+    }
+    let parts = joinable.into_iter().cloned().chain(kept);
     match std::env::join_paths(parts) {
         Ok(joined) => {
             env.insert(name, joined);

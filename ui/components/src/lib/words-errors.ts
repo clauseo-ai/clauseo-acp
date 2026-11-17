@@ -6,6 +6,8 @@
 import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
+import { TOOL_MAC, TOOL_MISSING } from "./words-errors-tool.ts";
+import { DOT_MAC, GIT_FOLDER, TASKS_FILE } from "./words-errors-dot.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -120,12 +122,15 @@ export type ErrorCode =
   | "agent.unreachable"
   | "mcp.import_too_large"
   | "matter.folder_backslash"
+  | "matter.claude_tasks_file"
+  | "matter.git_folder"
   | "agent.folder_inaccessible"
   | "blackline.nested_table"
   | "blackline.cannot_compare"
   | "blackline.not_readable"
   | "blackline.too_large"
   | "blackline.format_unknown"
+  | "agent.tool_missing"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -361,6 +366,16 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // provisional (U3-err-agent.tool_missing): a file Clauseo keeps for the agent isn't as Clauseo left it, so the host
+  // didn't start Claude; Windows' line, the Mac's and Linux's is words-errors-tool.ts's, the other agents' are in PLANNED
+  "agent.tool_missing": TOOL_MISSING.claude,
+  // provisional (U3-err-matter.claude_tasks_file): the host didn't start Claude, or sent no prompt, for a matter whose
+  // folder holds .claude/scheduled_tasks.json; the Mac's line adds how Finder shows a dot folder (words-errors-dot.ts);
+  // the other agents' lines are in PLANNED
+  "matter.claude_tasks_file": TASKS_FILE.claude,
+  // provisional (U3-err-matter.git_folder): the same for a .git folder or file in the matter's folder; the other
+  // agents' lines are in PLANNED
+  "matter.git_folder": GIT_FOLDER.claude,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -387,6 +402,16 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
 const PLANNED: Partial<
   Record<WordedCode, { chatgpt: ErrorKey; named: ErrorKey; nameless: ErrorKey }>
 > = {
+  "matter.claude_tasks_file": {
+    chatgpt: TASKS_FILE.chatgpt,
+    named: TASKS_FILE.named,
+    nameless: TASKS_FILE.nameless,
+  },
+  "matter.git_folder": {
+    chatgpt: GIT_FOLDER.chatgpt,
+    named: GIT_FOLDER.named,
+    nameless: GIT_FOLDER.nameless,
+  },
   "agent.launch_failed": {
     chatgpt: "ChatGPT didn't start. Your question is kept.",
     named: "{name} didn't start. Your question is kept.",
@@ -454,6 +479,12 @@ const PLANNED: Partial<
     nameless:
       "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
   },
+  // provisional (see ERROR_WORDS); the Mac's and Linux's lines are words-errors-tool.ts's
+  "agent.tool_missing": {
+    chatgpt: TOOL_MISSING.chatgpt,
+    named: TOOL_MISSING.named,
+    nameless: TOOL_MISSING.nameless,
+  },
 };
 
 /** The codes PLANNED gives a sentence per agent. */
@@ -499,7 +530,9 @@ export type { BackslashPlace };
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
  * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
- * a caller that knows the matter; left out, its line names the folder's own name and Finder. */
+ * a caller that knows the matter; left out, its line names the folder's own name and Finder. Its platform also picks
+ * agent.tool_missing's line on the Mac and Linux (words-errors-tool.ts), and the Mac's line of
+ * matter.claude_tasks_file and matter.git_folder (words-errors-dot.ts). */
 export function errorWords(
   lang: Lang,
   code: string,
@@ -511,6 +544,19 @@ export function errorWords(
   if (code === "matter.folder_backslash" && place !== undefined) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
+  }
+  const mac =
+    (place?.platform === "mac" || place?.platform === "linux") && Object.hasOwn(TOOL_MAC, code)
+      ? TOOL_MAC[code]
+      : undefined;
+  if (mac !== undefined) {
+    const { key, name } = byAgent(mac, agent);
+    return own(lang, key as keyof typeof HI, name === undefined ? undefined : { name });
+  }
+  const dot = place?.platform === "mac" && Object.hasOwn(DOT_MAC, code) ? DOT_MAC[code] : undefined;
+  if (dot !== undefined) {
+    const { key, name } = byAgent(dot, agent);
+    return own(lang, key as keyof typeof HI, name === undefined ? undefined : { name });
   }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);

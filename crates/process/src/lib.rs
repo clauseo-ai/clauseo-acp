@@ -124,6 +124,12 @@ pub use stdin::AgentStdin;
 pub use timer::ManualTimer;
 pub use timer::{AsyncIoTimer, Timer};
 
+/// The file names Windows runs for the command `git`, compared ignoring case: the host refuses
+/// a Windows Codex launch while one sits in a folder of its install's Codex packages, and the
+/// agents' start-up removes them there (`clauseo-host`'s `agent/no_git/codex_install.rs`,
+/// `clauseo-agents`' `stray_git.rs`).
+pub const WINDOWS_GIT_PROGRAMS: [&str; 4] = ["git.exe", "git.com", "git.bat", "git.cmd"];
+
 /// The start times, as wall time, of the running processes named `name`: the executable's
 /// file name on macOS (`Microsoft Word`, from libproc's `proc_pidpath`, byte for byte),
 /// the image name on Windows (`WINWORD.EXE`, ignoring ASCII case). An empty list when none runs.

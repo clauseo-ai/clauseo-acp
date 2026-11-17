@@ -51,3 +51,10 @@ pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
 pub(crate) fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
+
+/// Makes the file `path` read-only.
+pub(crate) fn make_read_only(path: &Path) -> io::Result<()> {
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(path, permissions)
+}

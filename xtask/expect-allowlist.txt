@@ -354,10 +354,14 @@ crates/matters/src/trash/windows_tests.rs - unsafe_code
 
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
+crates/host/src/config/wiring/no_git.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/idle.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/parts.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/agent/no_git/tests.rs a_junction_in_a_codex_install_folder_is_refused clippy::disallowed_methods
+crates/host/src/agent/no_git/tests.rs a_linked_vendor_folder_is_refused clippy::disallowed_methods
+crates/agents/src/stray_git.rs tests::a_vendor_junction_is_left_alone clippy::disallowed_methods
 crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
 crates/host/src/actor/query/blackline/parse/tests/partial.rs joining_wrapped_lines_is_linear clippy::disallowed_methods
@@ -460,6 +464,8 @@ crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs write clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs run clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs start clippy::disallowed_methods
+crates/mcp/tests/no_git.rs run_as_git::write clippy::disallowed_methods
+crates/mcp/tests/no_git.rs run_as_git::run clippy::disallowed_methods
 crates/mcp/src/browser_guard.rs pause clippy::disallowed_methods
 crates/mcp/src/browser_guard.rs now clippy::disallowed_methods
 crates/mcp/src/browser_guard/session.rs end_agent unused_variables
@@ -498,6 +504,7 @@ crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods
 crates/mcp/tests/guard/real_chrome.rs - clippy::disallowed_methods
 # R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
 crates/profile/src/write.rs - clippy::disallowed_methods
+crates/profile/src/write.rs writable clippy::permissions_set_readonly_false
 crates/profile/tests/skills/write.rs - clippy::disallowed_methods
 # stetdoc's kill test: a real stetdoc stub on the real clock, polled until its pid is gone.
 crates/profile/tests/skills/stetdoc_kill.rs - clippy::disallowed_methods
@@ -523,6 +530,7 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 # S17: clauseo-agents' write module, its one clock, the user-Node search, free disk space and
 # the Windows proxy registry read.
 crates/agents/src/write.rs - clippy::disallowed_methods
+crates/agents/src/write.rs writable clippy::permissions_set_readonly_false
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/quit.rs - clippy::disallowed_methods
 crates/agents/tests/install/resume.rs - clippy::disallowed_methods

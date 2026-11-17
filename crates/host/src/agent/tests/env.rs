@@ -7,6 +7,13 @@ use crate::agent::launch_spec;
 
 use super::absolute_program;
 
+/// A `PATH` folder absolute on this OS, which the launch keeps (a relative one is dropped).
+const USR_BIN: &str = if cfg!(windows) {
+    r"C:\usr\bin"
+} else {
+    "/usr/bin"
+};
+
 /// The spec is the child's whole environment (the launcher clears the host's), so it drops every
 /// inherited `GIT_*`, `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` in any case, and keeps what
 /// an agent needs to find its tools and config: `PATH`, `HOME`, and Windows's `USERPROFILE`,
@@ -23,7 +30,7 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
         ("APPDATA", "C:\\Users\\ada\\AppData\\Roaming"),
         ("HOME", "/home/ada"),
         ("LOCALAPPDATA", "C:\\Users\\ada\\AppData\\Local"),
-        ("PATH", "/usr/bin"),
+        ("PATH", USR_BIN),
         ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
         ("SSHFS_OPTS", "kept: not an SSH_ prefix"),
         ("SystemRoot", "C:\\Windows"),
@@ -183,4 +190,44 @@ fn launch_spec_drops_node_options_and_node_path_from_every_source() {
     .unwrap();
     let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
     assert_eq!(names, ["PATH"]);
+}
+
+/// Empty and relative `PATH` entries (`.`, `bin`, `../tools`, an empty one, on Windows
+/// `\tools` and `C:tools`) never reach an agent, with folders put first or none.
+#[test]
+fn launch_spec_drops_empty_and_relative_path_entries() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    };
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let rooted = std::env::temp_dir().join("tools");
+    let mut parts = vec![".", "", "bin", "../tools"];
+    if cfg!(windows) {
+        parts.extend([r"\tools", "C:tools"]);
+    }
+    parts.push(rooted.to_str().unwrap());
+    let inherited = parts.join(sep);
+    let path_of = |prepend: &[std::path::PathBuf]| {
+        let spec = launch_spec(
+            &agent,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            &[],
+            [(OsString::from("PATH"), OsString::from(&inherited))].into_iter(),
+            std::env::temp_dir(),
+            prepend,
+        )
+        .unwrap();
+        let path = spec.env().get(&OsString::from("PATH")).unwrap().clone();
+        path.to_str()
+            .unwrap()
+            .split(sep)
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(path_of(&[]), std::slice::from_ref(&rooted));
+    let first = std::env::temp_dir().join("no-git");
+    assert_eq!(path_of(std::slice::from_ref(&first)), [first, rooted]);
 }

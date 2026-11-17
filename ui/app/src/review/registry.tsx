@@ -75,6 +75,8 @@ import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 import { BACKSLASH_ENTRIES } from "./registry-backslash.tsx";
+import { TOOL_ENTRIES } from "./registry-tool.tsx";
+import { DOT_ENTRIES } from "./registry-dot.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
@@ -560,6 +562,8 @@ export const REGISTRY: readonly Entry[] = [
   ...U16B,
   ...FOLDER_RIGHTS,
   ...BACKSLASH_ENTRIES,
+  ...TOOL_ENTRIES,
+  ...DOT_ENTRIES,
   ...FOLDER_CHOOSER,
   ...TN,
   ...UBL,

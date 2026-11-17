@@ -15,6 +15,8 @@ use crate::browser::rd_policy::RdPolicy;
 
 use super::EgressProxy;
 
+mod no_git;
+pub use no_git::NoGit;
 mod stetdoc;
 pub(crate) use stetdoc::Stetdoc;
 
@@ -98,6 +100,8 @@ pub(crate) struct LaunchWiring {
     /// The stetdoc the Word blackline and tracked changes run (`HostConfig::with_stetdoc`);
     /// `None`: refused.
     pub(crate) stetdoc: Option<Stetdoc>,
+    /// The `git` that does nothing (`HostConfig::with_no_git`); `None`: none goes on `PATH`.
+    pub(crate) no_git: Option<NoGit>,
 }
 
 impl Default for LaunchWiring {
@@ -128,6 +132,7 @@ impl Default for LaunchWiring {
             held: HeldRuns::default(),
             blocklist: None,
             stetdoc: None,
+            no_git: None,
         }
     }
 }

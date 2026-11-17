@@ -30,6 +30,15 @@ use crate::{AccountRead, ReadFailure, ReadOutcome, write};
 pub(crate) const HELPER: &str = include_str!("../../helper/claude-usage.mjs");
 /// The variable naming Claude Code's config folder, its login's home.
 const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
+/// What every read sets in the helper's environment, over any of the same name from the entry
+/// or the inherited environment, as `host`'s Claude launches do (`agent::loads::
+/// claude_launch_vars`, which `limits` cannot depend on).
+pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 4] = [
+    ("CLAUDE_CODE_DISABLE_CRON", "1"),
+    ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
+    ("CLAUDE_CODE_HARBOR_KITE", "0"),
+    ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+];
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(25);
 /// The most windows one read keeps.
@@ -118,7 +127,11 @@ fn prepare(
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = claude_home.map(|home| (OsStr::new(CLAUDE_CONFIG_DIR), home.as_os_str()));
-    let env = spec_env(&launch.env, inherited, forced, &[]);
+    let mut env = spec_env(&launch.env, inherited, forced, &[]);
+    for (name, value) in CLAUDE_FORCED_VARS {
+        env.retain(|key, _| !key.eq_ignore_ascii_case(name));
+        env.insert(OsString::from(name), OsString::from(value));
+    }
     LaunchSpec::new(
         located.program,
         vec![helper.into_os_string()],

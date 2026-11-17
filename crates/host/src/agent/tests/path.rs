@@ -9,6 +9,13 @@ use clauseo_settings::AgentLaunch;
 
 use crate::agent::{PYTHON_VARS, launch_spec, session_path};
 
+/// A `PATH` folder absolute on this OS, which the launch keeps (a relative one is dropped).
+const USR_BIN: &str = if cfg!(windows) {
+    r"C:\usr\bin"
+} else {
+    "/usr/bin"
+};
+
 /// The profile hook's folders (`ProfileHook::agent_path`, Clauseo's Python runtime) go after
 /// stetdoc's and before the merged `PATH`, in their order; a relative one is skipped, and only
 /// when one of the hook's goes on do `PYTHONHOME` and `PYTHONPATH` go.
@@ -56,7 +63,7 @@ fn the_hook_folders_go_between_stetdoc_and_the_merged_path() {
             Vec::new()
         };
         let inherited = [
-            ("Path", "/usr/bin"),
+            ("Path", USR_BIN),
             ("PYTHONHOME", "/elsewhere"),
             ("PYTHONPATH", "/elsewhere/lib"),
         ];
@@ -87,7 +94,7 @@ fn the_hook_folders_go_between_stetdoc_and_the_merged_path() {
     assert_eq!(
         run(vec![bin.clone(), root.clone()]),
         (
-            Some(format!("{first}{sep}{bin_s}{sep}{root_s}{sep}/usr/bin")),
+            Some(format!("{first}{sep}{bin_s}{sep}{root_s}{sep}{USR_BIN}")),
             None,
             None
         )
@@ -96,7 +103,7 @@ fn the_hook_folders_go_between_stetdoc_and_the_merged_path() {
     assert_eq!(
         run(Vec::new()),
         (
-            Some(format!("{first}{sep}/usr/bin")),
+            Some(format!("{first}{sep}{USR_BIN}")),
             Some("/elsewhere".to_owned()),
             Some("/elsewhere/lib".to_owned())
         )

@@ -11,13 +11,14 @@
 //! (the picked-folder query answers `check_failed` instead), and the log says what was waited
 //! on, for how long, and how it ended once it did.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, MatterId};
 use futures::future::{Either, select};
 
+use crate::agent::no_git;
 use crate::clock::Clock;
 use crate::error::Error;
 
@@ -155,26 +156,41 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
     }
 }
 
-/// The `.codex` re-check of a Codex agent's matter folder before a prompt or a session call, off
-/// the actor: `stored`, the folder the agent runs in, is resolved through links again each
-/// time, so a link pointed elsewhere since the launch is checked where it now points. `None`
-/// (any other agent) passes at once, with no thread. `matter` is for the log.
+/// What a session's matter folder is checked against before each prompt or session call: a
+/// Codex agent's `.codex` refusal (`super::refuse_codex_folder`), a Claude agent's entries
+/// (`agent::claude_files::refuse_claude_entries`).
+pub(crate) type Refusal = fn(&Path) -> Result<(), Error>;
+
+/// The re-check of an agent's matter folder before a prompt or a session call, off the actor,
+/// with its kind's [`Refusal`]: `stored`, the folder the agent runs in, is resolved through
+/// links again each time, so a link pointed elsewhere since the launch is checked where it now
+/// points. Then, for an agent with a kind, `no_git`'s check again (`agent::no_git::check_all`):
+/// a program gone or changed since the launch refuses the call with `agent.tool_missing`.
+/// Neither (an agent with no kind) passes at once, with no thread. `matter` is for the log.
 pub(crate) async fn recheck(
     clock: Arc<dyn Clock>,
     matter: Option<MatterId>,
-    stored: Option<PathBuf>,
+    stored: Option<(PathBuf, Refusal)>,
+    no_git: Result<Option<no_git::Check>, no_git::Unusable>,
 ) -> Result<(), Error> {
-    match stored {
-        Some(stored) => {
-            off_actor(
-                clock,
-                Job::short("the .codex re-check", matter),
-                move || super::refuse_codex_folder(&crate::agent::session_folder(&stored)),
-            )
-            .await
-        }
-        None => Ok(()),
+    let no_git = no_git.map_err(no_git::refusal)?;
+    if stored.is_none() && no_git.is_none() {
+        return Ok(());
     }
+    off_actor(
+        clock,
+        Job::short("the call's re-check", matter),
+        move || {
+            if let Some((stored, refusal)) = &stored {
+                refusal(&crate::agent::session_folder(stored))?;
+            }
+            match &no_git {
+                Some(check) => no_git::check_all(check).map(drop).map_err(no_git::refusal),
+                None => Ok(()),
+            }
+        },
+    )
+    .await
 }
 
 /// The failure when the work did not answer in time. Not `matter.folder_missing`: the folder

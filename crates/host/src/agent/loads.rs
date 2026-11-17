@@ -37,6 +37,9 @@ mod subagents_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tls_roots;
+pub(crate) mod tools;
+#[cfg(test)]
+mod tools_tests;
 
 pub use codex::{GUARD_EXE, codex_guard_program, codex_hook_config};
 
@@ -125,6 +128,59 @@ pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 /// where the next writes. Unset, the folder a call's `cd` reaches would carry to the next.
 pub(crate) const CLAUDE_SHELL_FOLDER_VAR: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
 
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
+pub(crate) const CLAUDE_CRON_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_CRON";
+
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
+pub(crate) const CLAUDE_GIT_STATUS_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS";
+
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
+pub(crate) const GIT_STATUS_SETTING: &str = "includeGitInstructions";
+
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
+pub(crate) const CLAUDE_MESSAGING_OFF_VAR: &str = "CLAUDE_CODE_HARBOR_KITE";
+
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
+pub(crate) const CLAUDE_MARKETPLACE_OFF_VAR: &str =
+    "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL";
+
+// A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
+// and in the limits reader's `CLAUDE_FORCED_VARS`, with a test in `tools_tests.rs`.
+
+/// The variables every Claude launch sets, each in the adapter's own environment
+/// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
+/// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 4] = [
+    (CLAUDE_CRON_OFF_VAR, "1"),
+    (CLAUDE_GIT_STATUS_OFF_VAR, "1"),
+    (CLAUDE_MESSAGING_OFF_VAR, "0"),
+    (CLAUDE_MARKETPLACE_OFF_VAR, "1"),
+];
+
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
+pub(crate) const CROSS_SESSION_SETTING: &str = "crossSessionInbound";
+
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
+pub(crate) const REMOTE_CONTROL_OFF_SETTING: &str = "disableRemoteControl";
+
+/// The keys every Claude launch sets in its flag settings ([`session_meta`]), over a hook's.
+pub(crate) fn claude_flag_settings() -> [(&'static str, Value); 3] {
+    [
+        (GIT_STATUS_SETTING, Value::Bool(false)),
+        (CROSS_SESSION_SETTING, Value::from("refuse")),
+        (REMOTE_CONTROL_OFF_SETTING, Value::Bool(true)),
+    ]
+}
+
+/// The variables every Claude launch sets in its own environment, over any of the same name
+/// from the settings, the hook or the inherited environment: [`CLAUDE_LAUNCH_VARS`].
+pub(crate) fn claude_launch_vars() -> BTreeMap<OsString, OsString> {
+    CLAUDE_LAUNCH_VARS
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
+}
+
 /// Who decides which MCP servers a session gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum McpControl {
@@ -168,11 +224,12 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
-/// - [`CLAUDE_SHELL_FOLDER_VAR`] `"1"` in `claudeCode.options.env` (claude-agent-acp 0.89.1
-///   spreads it over its own env for the SDK's spawn of Claude Code, `acp-agent.js:7302-7304`)
-///   and, with `keys` (a Claude agent), in `claudeCode.options.settings.env` (flag settings,
-///   over a user's or project's). A hook value at `settings` or its `env` that is not an
-///   object is then replaced.
+/// - [`CLAUDE_SHELL_FOLDER_VAR`] and each of [`CLAUDE_LAUNCH_VARS`], in
+///   `claudeCode.options.env` (claude-agent-acp 0.89.1 spreads it over its own env for the
+///   SDK's spawn of Claude Code, `acp-agent.js:7302-7304`) and, with `keys` (a Claude agent),
+///   in `claudeCode.options.settings.env` (flag settings, over a user's or project's), with
+///   [`claude_flag_settings`] beside it. A hook value at `settings` or its `env` that is
+///   not an object is then replaced.
 /// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
 ///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
@@ -183,8 +240,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
 ///   then starts in (`default`, `auto`, `plan`, or `acceptEdits` in forced ask) is switched to
 ///   [`claude_mode`] after the start, since `_meta` cannot set it.
-/// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
-///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
+/// - `claudeCode.options.extraArgs`: `setting-sources`, [`MODE_FLAGS`] and [`TOOL_FLAGS`] taken
+///   out, in both forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
@@ -215,6 +272,9 @@ pub(crate) fn session_meta(
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
     super::one_shell::meta_env(&mut env, keys.is_some() && cfg!(windows));
+    for (name, value) in CLAUDE_LAUNCH_VARS {
+        env.insert(name.to_owned(), Value::from(value));
+    }
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
@@ -225,6 +285,7 @@ pub(crate) fn session_meta(
         extra.retain(|flag, _| {
             let taken_out = is_flag(flag, SETTING_SOURCES_FLAG)
                 || MODE_FLAGS.iter().any(|name| is_flag(flag, name))
+                || TOOL_FLAGS.iter().any(|name| is_flag(flag, name))
                 || (control == McpControl::Managed
                     && MANAGED_MCP_FLAGS.iter().any(|name| is_flag(flag, name)));
             !taken_out
@@ -257,7 +318,13 @@ pub(crate) fn session_meta(
         let mut settings_env = take_object(&mut settings, "env");
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
         super::one_shell::meta_env(&mut settings_env, cfg!(windows));
+        for (name, value) in CLAUDE_LAUNCH_VARS {
+            settings_env.insert(name.to_owned(), Value::from(value));
+        }
         settings.insert("env".to_owned(), Value::Object(settings_env));
+        for (key, value) in claude_flag_settings() {
+            settings.insert(key.to_owned(), value);
+        }
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
@@ -277,6 +344,17 @@ pub(crate) const ALLOW_BYPASS_OPTION: &str = "allowDangerouslySkipPermissions";
 
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";
+
+/// The `extraArgs` flags that would set the tools or the flag settings beside
+/// `claudeCode.options`' own keys (an extra flag goes after the SDK's own and would win).
+const TOOL_FLAGS: [&str; 6] = [
+    "tools",
+    "allowedTools",
+    "allowed-tools",
+    "disallowedTools",
+    "disallowed-tools",
+    "settings",
+];
 
 /// The Claude Code flags that set the permission mode or allow bypass. An extra flag goes after
 /// the SDK's own `--permission-mode`, so it would win over [`CLAUDE_MODE`] and over

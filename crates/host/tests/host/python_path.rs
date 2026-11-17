@@ -19,6 +19,13 @@ use crate::profile_rig::{
 };
 use crate::support::Dir;
 
+/// The user's `PATH`, one folder absolute on this OS (a rootless one never reaches an agent).
+const USER_BIN: &str = if cfg!(windows) {
+    r"C:\usr\bin"
+} else {
+    "/usr/bin"
+};
+
 /// A hook that puts `dirs` on every agent's session `PATH` (`ProfileHook::agent_path`, as
 /// desktop does with Clauseo's Python runtime) and adds nothing else.
 struct PathHook {
@@ -70,7 +77,7 @@ fn launched_with_hook_path(label: &str, dirs: Vec<PathBuf>) -> (PathBuf, Vec<Hoo
     let inherited: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| !ours.iter().any(|own| name.eq_ignore_ascii_case(own)))
         .chain([
-            ("PATH".into(), "/usr/bin".into()),
+            ("PATH".into(), USER_BIN.into()),
             ("PYTHONHOME".into(), "/elsewhere".into()),
             ("PYTHONPATH".into(), "/elsewhere/lib".into()),
         ])
@@ -124,7 +131,7 @@ fn expected_path(ours: &[PathBuf], codex: bool) -> Vec<PathBuf> {
         .iter()
         .chain(&helper)
         .cloned()
-        .chain([PathBuf::from("/usr/bin")])
+        .chain([PathBuf::from(USER_BIN)])
     {
         if !part.as_os_str().is_empty() && !kept.contains(&part) {
             kept.push(part);

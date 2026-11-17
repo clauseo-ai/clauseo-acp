@@ -141,8 +141,12 @@ any ACP message, including permission requests with misleading text.
 
 - `designed`: The sandbox wraps the whole agent process (adapter and agent), not only its shell
   commands
-- `designed`: Auto mode is on by default only where the sandbox is active; in tier C the adapters'
-  ask modes apply and the matter shows Not protected
+- `built`: Every Claude session outside forced ask starts in Claude Code's auto mode, on every
+  system (`agent/loads.rs` `CLAUDE_MODE`); where Claude's shell sandbox runs (macOS, Linux with it
+  on) the sandbox stands behind it, and on Windows only Claude Code's classifier, the deny rules
+  and the guard do. In tier C the matter shows Not protected
+- `built`: Claude is offered an explicit list of built-in tools, and the ones left out are denied
+  by name too (`agent/loads/tools.rs`)
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one
@@ -157,6 +161,13 @@ any ACP message, including permission requests with misleading text.
   `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` and denies the whole `Bash` tool (decision record 0030,
   2026-11-16); every Windows acceptance row runs on a Git-free machine with 5.1 only and with
   `pwsh` 7 installed
+- `built`: The agent's PATH holds a git that does nothing (Clauseo's own binary, copied to
+  `<data>/tools/no-git`, read-only to agents), first on every Claude and Codex launch and in their
+  shells. Clauseo's own git use is the host's: its history uses git in-process and never reads
+  the agent's PATH. Covered: the copy is checked (present, unchanged, alone in its folder) at each
+  launch, prompt and session call, and a failed check refuses with `agent.tool_missing`; on
+  Windows, Codex looks in its own folders before PATH, and Clauseo checks those at each launch
+  and call too.
 - `designed`: The launch self-test (#1167) refuses a launch whose pre-write guard cannot start
 
 ## Sandbox
