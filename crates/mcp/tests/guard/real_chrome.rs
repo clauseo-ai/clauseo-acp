@@ -25,7 +25,7 @@
 )]
 
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -139,9 +139,16 @@ fn command_on(
     cdp: &str,
 ) -> Command {
     let mcp = ["mcp", "--tools", "core"].map(OsStr::new);
-    let args = guard_args(scratch, &binaries.0, &mcp)
+    let mut args: Vec<OsString> = guard_args(scratch, &binaries.0, &mcp)
         .into_iter()
-        .map(|arg| if arg == CDP_PORT { cdp.into() } else { arg });
+        .map(|arg| if arg == CDP_PORT { cdp.into() } else { arg })
+        .collect();
+    // After `browser-guard --agent-browser <file> --cwd <cwd>`, as the host puts it.
+    let downloads = matter_downloads(scratch);
+    write::create_dir_all(scratch.path().join("matter")).unwrap();
+    let tail = args.split_off(5);
+    args.extend([OsString::from("--downloads"), downloads.into()]);
+    args.extend(tail);
     let mut command = Command::new(GUARD);
     command
         .args(args)
@@ -165,6 +172,13 @@ fn command_on(
     let start_ms = if quiet { "90000" } else { "45000" };
     command.env("CLAUSEO_TEST_GUARD_START_MS", start_ms);
     command
+}
+
+/// The matter's downloads folder the guard is given (`--downloads`), as the host gives it:
+/// `<scratch>/matter/downloads`. The matter is made; the folder is the guard's to make, at the
+/// first download only.
+pub(crate) fn matter_downloads(scratch: &Scratch) -> PathBuf {
+    scratch.path().join("matter").join("downloads")
 }
 
 /// Sends a request and returns its result, skipping notifications; fails on an error or a tool
@@ -276,7 +290,7 @@ fn a_page_opens_through_the_guard_with_real_chrome() {
     // Every download arrives, and none under a protected name, in any case. Chrome may already
     // have made one unique (`claude (1).MD` beside `CLAUDE.md`), so names are checked by rule
     // and contents by the name each link sent.
-    let downloads = scratch.cwd().join("downloads");
+    let downloads = matter_downloads(&scratch);
     let sent: BTreeSet<String> = DOWNLOADS
         .iter()
         .map(|name| format!("planted by a web page as {name}\n"))

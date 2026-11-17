@@ -135,13 +135,22 @@ fn a_starting_mover_removes_leftovers_of_a_killed_copy() {
     let left = ".clauseo-dl-0123456789abcdef";
     write::write(&downloads.join(left), "half a copy").unwrap();
     write::write(&fallback.join(left), "half a copy").unwrap();
-    let kept = [
-        ".clauseo-dl-0123456789ABCDEF",
+    // The uppercase twin of the leftover is a different file only on a case-sensitive volume
+    // (most Linux ones); on NTFS or APFS's default it opens the leftover itself. It is kept
+    // there: the guard only ever names its files in lowercase (`is_temporary`, `write/copy.rs`).
+    let twin = ".clauseo-dl-0123456789ABCDEF";
+    let case_sensitive = !downloads.join(twin).exists();
+    let mut kept = vec![
+        ".clauseo-dl-0123456789abcdeg",
+        ".clauseo-dl-0123456789abcde",
         ".clauseo-dl-0123",
         ".clauseo-dl-0123456789abcdef0",
         "report.pdf",
     ];
-    for name in kept {
+    if case_sensitive {
+        kept.push(twin);
+    }
+    for name in &kept {
         write::write(&downloads.join(name), "kept").unwrap();
     }
     write::create_dir_all(&downloads.join(".clauseo-dl-fedcba9876543210")).unwrap();
@@ -160,7 +169,7 @@ fn a_starting_mover_removes_leftovers_of_a_killed_copy() {
         Arc::default(),
     );
     mover.finish();
-    let mut expected: Vec<&str> = kept.to_vec();
+    let mut expected = kept.clone();
     expected.push(".clauseo-dl-fedcba9876543210");
     #[cfg(unix)]
     expected.push(".clauseo-dl-1111111111111111");

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use super::{Session, binaries, call, command, handshake};
+use super::{Session, binaries, call, command, handshake, matter_downloads};
 use crate::page_proxy::{HEADING, PageProxy};
 use crate::support::{Guard, Scratch};
 
@@ -47,6 +47,10 @@ fn an_idle_chrome_contacts_no_host_but_the_page() {
         .filter(|request| !request.starts_with("GET http://page.test/"))
         .collect();
     assert!(background.is_empty(), "background hosts: {background:?}");
+    // Nothing was downloaded, so neither the guard, agent-browser nor Chrome made the matter's
+    // downloads folder: no empty folder in the matter for a sync client to copy.
+    let downloads = matter_downloads(&scratch);
+    assert!(!downloads.exists(), "{} was made", downloads.display());
     session.assert_gone(&scratch);
 }
 
