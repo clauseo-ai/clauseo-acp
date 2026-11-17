@@ -392,8 +392,9 @@ error_codes! {
         the package's size, entry count or compression ratio, an XML part's size, depth or node \
         count), so its tracked changes were not read or decided.";
     AgentStartOffline = "agent.start_offline", retryable: true, meaning: "The agent did not start: \
-        it answered a start request with an error naming a connection failure, and the host's \
-        probe of its service did not get through. Asking again can work once back online.";
+        its start failed on its connection or went silent past its bound, the window says the \
+        computer is offline, and the host's probe of its service did not get through. Asking again \
+        can work once back online.";
     AgentAnswerFailed = "agent.answer_failed", retryable: true, meaning: "The agent answered the \
         question with an error no other code reads, or Codex gave up on a connection the host does \
         not read as offline. The answer so far is kept; asking again can work.";
