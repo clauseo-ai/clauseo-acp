@@ -88,27 +88,16 @@ impl NoteState {
     }
 }
 
-/// The notes' text for the next prompt: the owed offline-shell note (`shell_network.rs`), then
-/// the undo note; both stay until [`sent`].
+/// The undo note's text for the next prompt; it stays until [`sent`].
 pub(super) fn text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure(actor, thread);
     let state = state(actor, thread)?;
-    let undo = undo_note::note_text(state.note.told.as_deref().unwrap_or_default());
-    let owed = state.offline_owed;
-    let owed = owed.then(|| {
-        let web_search = crate::actor::header_tools::web_search_on(actor, thread);
-        super::shell_network::owed_note(web_search)
-    });
-    match (owed, undo) {
-        (Some(owed), Some(undo)) => Some(format!("{owed}\n{undo}")),
-        (owed, undo) => owed.or(undo),
-    }
+    undo_note::note_text(state.note.told.as_deref().unwrap_or_default())
 }
 
 /// The note goes out with `turn`'s prompt: it is held aside until that turn has ended.
 pub(super) fn sent(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(state) = state(actor, thread) {
-        state.offline_owed = false;
         let note = &mut state.note;
         let told = note.told.replace(Vec::new()).unwrap_or_default();
         note.sent = Some((turn, told));

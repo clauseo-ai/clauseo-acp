@@ -1,4 +1,4 @@
-{"scenario":"codex-no-network-amendment","description":"Codex (codex-acp 2.2.2 shapes) asks to run a command with network amendments, allow and deny (dist/index.js:32186-32194): the host declines it unseen (shell_network.rs), so neither amendment reaches the lawyer or the agent","on_stdin_close":"exit"}
+{"scenario":"codex-no-network-amendment","description":"Codex (codex-acp 2.2.2 shapes) asks to run a command with network amendments, allow and deny (dist/index.js:32186-32194): the card offers neither amendment (agent/codex_options.rs) and the lawyer declines it, so neither reaches the agent","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}

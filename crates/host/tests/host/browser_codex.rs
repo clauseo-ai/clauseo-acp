@@ -202,10 +202,6 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_browser() {
     };
     assert!(instructions.contains(line), "{instructions}");
     assert!(!instructions.contains("agent-browser"), "{instructions}");
-    assert!(
-        !instructions.contains("require_escalated"),
-        "{instructions}"
-    );
     // Claude never gets the entry (its `session/new` carried none).
     let claude_browser = claude_header
         .iter()

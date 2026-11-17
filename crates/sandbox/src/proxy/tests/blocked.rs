@@ -38,11 +38,6 @@ pub(super) fn current() -> Arc<Current> {
     Arc::new(Current::new(list(MADE, ENTRIES)))
 }
 
-/// A loaded list naming one host no test asks for, for an open-mode rig given no list.
-pub(super) fn placeholder() -> Arc<Current> {
-    Arc::new(Current::new(list(MADE, &["listed-nowhere.test p"])))
-}
-
 /// A rig with the list loaded, allowing `allow`, each resolving to 192.0.2.10, where an echo
 /// server answers on 443.
 fn block_rig(allow: &[&'static str], silent: &[&'static str]) -> Rig {
@@ -63,7 +58,7 @@ pub(super) fn blocked(host: &str, port: u16, listed: &str, tag: Tag) -> Denial {
     blocked_at(host, port, listed, tag, MADE)
 }
 
-fn blocked_at(host: &str, port: u16, listed: &str, tag: Tag, made: &str) -> Denial {
+pub(super) fn blocked_at(host: &str, port: u16, listed: &str, tag: Tag, made: &str) -> Denial {
     Denial::Blocked {
         host: host.to_owned(),
         port,

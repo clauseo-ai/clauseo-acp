@@ -24,10 +24,11 @@
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. For an entry that asks for it, the session's proxy did not open, so it has no port and
 //!    no password file (`{proxy_secret_file}`, the browser listener's, which the launch prep
-//!    writes once the proxy opened; a file not written counts as no proxy): `NoProxy`, or
-//!    `BlockListNotLoaded` when it refused to start because no block list is loaded (its open
-//!    mode would let every site through). The proxy opens only after 6 found everything, and
-//!    only for such an entry (`actor/turn/launch_checks/egress.rs`).
+//!    writes once the proxy opened; a file not written counts as no proxy): `NoProxy`, or the
+//!    proxy's own reason when the launch prep gives one (none does now: a missing block list
+//!    no longer stops the proxy, so `BlockListNotLoaded` is not produced). The proxy opens
+//!    only after 6 found everything, and only for such an entry
+//!    (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -104,7 +105,7 @@ pub(crate) struct BrowserInputs<'a> {
     /// or the file was not written. The password itself never reaches the entry.
     pub(crate) secret_file: Option<&'a Path>,
     /// Why that proxy did not open, when it gave the browser its own reason in place of
-    /// `NoProxy` (`BlockListNotLoaded`: open mode with no block list loaded).
+    /// `NoProxy`. The launch prep gives none now (`EgressPrep::open`); kept as plumbing.
     pub(crate) proxy_refused: Option<ToolsUnavailableReason>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
     pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,

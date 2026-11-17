@@ -41,7 +41,6 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
-mod shell_network;
 pub(super) mod sign_in;
 mod skipped;
 mod state;
@@ -125,8 +124,6 @@ pub(crate) struct TurnState {
     text: ThreadText,
     /// The undo note the next prompt starts with (`note.rs`).
     note: note::NoteState,
-    /// The offline-shell note did not reach the agent; it goes first in the next prompt.
-    offline_owed: bool,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
@@ -385,7 +382,6 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             turn,
             reach,
         } => offline::on_probed(actor, thread, turn, reach),
-        TurnInput::OfflineNoteOwed(thread) => shell_network::owe_note(actor, thread),
         TurnInput::Log {
             thread,
             why,
