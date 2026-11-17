@@ -1,5 +1,5 @@
 //! A matter job's kind, taken before the job runs: its name for the log, its clean-up and its
-//! reply when it panics or does not run (`crash.rs`).
+//! reply when it panics or does not run (`crash.rs`); and a reply's name for the log.
 
 use std::path::PathBuf;
 
@@ -127,6 +127,31 @@ impl Kind {
             } else {
                 RevisionsDone::Listed(Err(error))
             })),
+        }
+    }
+}
+
+impl MatterReply {
+    /// The variant's name, for the log: its fields hold paths and file names.
+    pub(crate) const fn name(&self) -> &'static str {
+        match self {
+            Self::Created(_) => "Created",
+            Self::Imported(_) => "Imported",
+            Self::Opened(_) => "Opened",
+            Self::Located(_) => "Located",
+            Self::BeforeTurn(_) => "BeforeTurn",
+            Self::AfterTurn(_) => "AfterTurn",
+            Self::Undone(_) => "Undone",
+            Self::Restored(_) => "Restored",
+            Self::Compared(_) => "Compared",
+            Self::Previewed(_) => "Previewed",
+            Self::HeldOpen(..) => "HeldOpen",
+            Self::Papers(_) => "Papers",
+            Self::EditedSince(_) => "EditedSince",
+            Self::StillGone(_) => "StillGone",
+            Self::Discarded(_) => "Discarded",
+            Self::SidesWritten(_) => "SidesWritten",
+            Self::Revisions(_) => "Revisions",
         }
     }
 }

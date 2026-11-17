@@ -244,31 +244,6 @@ pub(crate) enum MatterReply {
     Revisions(Box<crate::revisions::RevisionsDone>),
 }
 
-impl MatterReply {
-    /// The variant's name, for the log: its fields hold paths and file names.
-    pub(crate) const fn name(&self) -> &'static str {
-        match self {
-            Self::Created(_) => "Created",
-            Self::Imported(_) => "Imported",
-            Self::Opened(_) => "Opened",
-            Self::Located(_) => "Located",
-            Self::BeforeTurn(_) => "BeforeTurn",
-            Self::AfterTurn(_) => "AfterTurn",
-            Self::Undone(_) => "Undone",
-            Self::Restored(_) => "Restored",
-            Self::Compared(_) => "Compared",
-            Self::Previewed(_) => "Previewed",
-            Self::HeldOpen(..) => "HeldOpen",
-            Self::Papers(_) => "Papers",
-            Self::EditedSince(_) => "EditedSince",
-            Self::StillGone(_) => "StillGone",
-            Self::Discarded(_) => "Discarded",
-            Self::SidesWritten(_) => "SidesWritten",
-            Self::Revisions(_) => "Revisions",
-        }
-    }
-}
-
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
 /// lost that checkpoint (a crash, or a commit that failed, between R8 and the log).
 #[derive(Debug)]
