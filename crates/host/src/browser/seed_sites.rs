@@ -4,6 +4,10 @@
 //! [`FETCH_ONLY_SITES`]) while `tools.web_search` is on. There is no bare `WebFetch` allow: a
 //! fetch from any other host goes to the permission mode, so Anthropic's auto-mode check judges it
 //! in auto mode and a card asks in an ask mode (decision record 0030, "Claude's web fetches").
+//! Text the agent puts in a URL to a seeded site reaches that site's operator (up to 2,000
+//! characters per fetch, any number of fetches); this list limits where fetches go, not what
+//! they carry. It covers `WebFetch` only, not the shell, nor Claude Code's own preapproved
+//! developer-documentation hosts.
 //!
 //! Claude Code 2.1.293 matches a `domain:` rule with no `*` against the URL's host exactly,
 //! lower-cased and without a trailing dot: `domain:sci.gov.in` does not cover `www.sci.gov.in`

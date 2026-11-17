@@ -4,7 +4,8 @@
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site, and no bare `WebFetch` (a hook's is dropped, with any `WebFetch` rule holding `*`), so
+//!   site, and no bare `WebFetch` (a hook's `WebFetch` rule stays only as a plain
+//!   `WebFetch(domain:<host>)`, and a hook entry Claude Code would split in two is dropped), so
 //!   a fetch from any other host goes to the permission mode (decision record 0030), and
 //!   `mcp__case-law__<tool>` per search and read tool (`case_law::UNASKED_TOOLS`) only in a
 //!   session that got the `case-law` entry (any hook rule for that server is dropped
@@ -205,6 +206,7 @@ pub(crate) struct ClaudeKeys<'a> {
 pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys<'_>) {
     let mut disallowed = take_array(options, "disallowedTools");
     let mut allowed = take_array(options, "allowedTools");
+    allowed.retain(|rule| rule.as_str().is_none_or(is_one_rule));
     if keys.web_search.on {
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
@@ -408,14 +410,46 @@ fn forced_ask_settings(settings: &mut Map<String, Value>) {
     settings.insert("sandbox".to_owned(), Value::Object(sandbox));
 }
 
-/// Whether an `allowedTools` rule is for a built-in web tool: `WebSearch`, `WebFetch`, or a
-/// `WebSearch(…)` or `WebFetch(…)` rule.
-/// A `WebFetch` allow rule that covers more than named hosts: the bare tool, or a rule holding
-/// `*` (`WebFetch(domain:*)`, `WebFetch(domain:*.in)`), which Claude Code reads as a pattern.
-fn is_open_fetch_rule(rule: &str) -> bool {
-    rule == "WebFetch" || (rule.starts_with("WebFetch(") && rule.contains('*'))
+/// Whether a hook's `allowedTools` entry is one rule as Claude Code reads it. The CLI splits
+/// `--allowedTools` on commas and whitespace outside parentheses and trims each piece, so
+/// `"Read,WebFetch"`, `"Read WebFetch"` or `" WebFetch"` would smuggle in a bare tool; an entry
+/// like that, or one with unbalanced parentheses, is dropped.
+fn is_one_rule(rule: &str) -> bool {
+    let mut depth = 0_usize;
+    for c in rule.chars() {
+        match c {
+            '(' => depth = depth.saturating_add(1),
+            ')' => match depth.checked_sub(1) {
+                Some(d) => depth = d,
+                None => return false,
+            },
+            ',' if depth == 0 => return false,
+            c if depth == 0 && c.is_whitespace() => return false,
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
+/// A `WebFetch` allow rule that is not one named host: anything starting `WebFetch` but
+/// `WebFetch(domain:<host>)` with the host in lower-case letters, digits, `.` and `-`.
+/// Claude Code reads `WebFetch`, `WebFetch()` and `WebFetch(*)` as the bare tool, and a
+/// `domain:` rule holding `*` as a pattern.
+fn is_open_fetch_rule(rule: &str) -> bool {
+    let host = rule
+        .strip_prefix("WebFetch(domain:")
+        .and_then(|rest| rest.strip_suffix(')'));
+    rule.starts_with("WebFetch")
+        && !host.is_some_and(|host| {
+            !host.is_empty()
+                && host
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+        })
+}
+
+/// Whether an `allowedTools` rule is for a built-in web tool: `WebSearch`, `WebFetch`, or a
+/// `WebSearch(…)` or `WebFetch(…)` rule.
 fn is_web_rule(rule: &str) -> bool {
     WEB_TOOLS.iter().any(|tool| {
         rule.strip_prefix(tool)

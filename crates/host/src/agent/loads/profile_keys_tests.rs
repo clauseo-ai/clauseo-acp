@@ -91,12 +91,21 @@ fn the_allow_list_is_exactly_the_permissions_list() {
     assert_eq!(options.get("disallowedTools"), None);
 }
 
-/// A hook's bare `WebFetch`, or a `WebFetch` rule holding `*`, would let every host through
-/// unasked: dropped while web search is on. A hook's named host stays.
+/// A hook's bare `WebFetch`, any form Claude Code reads as one, or a `WebFetch` rule holding `*`,
+/// would let every host through unasked: dropped while web search is on. A hook's named host
+/// stays.
 #[test]
 fn a_hooks_open_webfetch_rules_are_dropped() {
     let hook = json!({"allowedTools": [
         "WebFetch",
+        "WebFetch()",
+        "WebFetch(*)",
+        " WebFetch",
+        "WebFetch ",
+        "Read,WebFetch",
+        "Read WebFetch",
+        "WebFetch(domain:x",
+        "WebFetch(domain:FIRM.example)",
         "WebFetch(domain:*)",
         "WebFetch(domain:*.in)",
         "WebFetch(domain:firm.example)",
@@ -111,11 +120,48 @@ fn a_hooks_open_webfetch_rules_are_dropped() {
                 .all(|rule| *rule != "WebFetch" && !rule.contains('*')),
             "{allowed:?}"
         );
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| rule.starts_with("WebFetch(domain:")
+                    || rule.starts_with("WebSearch")
+                    || rule.starts_with("mcp__")),
+            "{allowed:?}"
+        );
         assert_eq!(
             allowed[..2],
             ["WebFetch(domain:firm.example)", "mcp__browser"]
         );
         assert!(allowed.contains(&"WebFetch(domain:www.sci.gov.in)"));
+    }
+}
+
+/// One row per form the reviewer named: each is dropped on its own, whatever else the hook sent.
+#[test]
+fn each_bare_webfetch_form_is_dropped_alone() {
+    for form in [
+        "WebFetch()",
+        "WebFetch(*)",
+        " WebFetch",
+        "WebFetch ",
+        "Read,WebFetch",
+        "Read WebFetch",
+        "WebFetch(domain:x",
+    ] {
+        let hook = json!({"allowedTools": [form, "Bash(git status)"]});
+        let options = options(&hook, &keys(ON, Login::FirstParty));
+        let allowed = strings(&options["allowedTools"]);
+        assert!(!allowed.contains(&form), "{form:?}: {allowed:?}");
+        assert!(
+            allowed.contains(&"Bash(git status)"),
+            "{form:?}: {allowed:?}"
+        );
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| !rule.contains(',') && rule.trim() == *rule),
+            "{form:?}: {allowed:?}"
+        );
     }
 }
 
