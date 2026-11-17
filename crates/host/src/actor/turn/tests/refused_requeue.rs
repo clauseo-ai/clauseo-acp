@@ -1,12 +1,13 @@
 //! A turn refused before it started never reopens by itself (`own_turn/refused.rs`): with agent
 //! output held between turns (a background command's update, a helper's permission card) and a
-//! refusal that lasts (here the matter's folder renamed, `matter.folder_missing`; a failed
-//! checkpoint, `matter.checkpoint_failed`, takes the same path), the first agent-started turn is
-//! refused once, the held output dropped and its cards answered, the agent stopped, and no
-//! other turn opens: exactly one `turn_failed`. And the belt: however they come to fail, no
-//! more than `refused::CAP` agent-started turns fail in a row before the agent is stopped.
+//! refusal that lasts (on Unix the matter's folder renamed, `matter.folder_missing`; on Windows,
+//! where the agent's working folder can't be renamed, a file held with no sharing,
+//! `matter.checkpoint_failed`), the first agent-started turn is refused once, the held output
+//! dropped and its cards answered, the agent stopped, and no other turn opens: exactly one
+//! `turn_failed`. A refused prompt of the lawyer's stops nothing. And the belt: however they
+//! come to fail, no more than `refused::CAP` agent-started turns fail in a row before the agent
+//! is stopped.
 
-#[cfg(unix)]
 use std::time::Duration;
 
 use clauseo_acp::{AcpEvent, AgentUpdate, Origin, PendingKey};
@@ -19,9 +20,10 @@ use super::agents::send_prompt;
 use super::idle::advance;
 use super::idle::{TWO_ANSWERS, live, rig, until_idle};
 use super::rig::Rig;
-#[cfg(unix)]
 use crate::actor::Actor;
+use crate::actor::input::Input;
 use crate::actor::turn::own_turn::{self, refused};
+use crate::agent::AgentInput;
 #[cfg(unix)]
 use crate::agent::OwnerStep;
 #[cfg(unix)]
@@ -74,19 +76,63 @@ fn failures(rig: &mut Rig, thread: ThreadId) -> Vec<ErrorCode> {
         .collect()
 }
 
-/// What makes the next before-turn checkpoint refuse, given the matter's folder; what it returns
-/// is held until the test ends.
-type Refuse = fn(&std::path::Path) -> Option<std::fs::File>;
+/// What makes the next before-turn checkpoint refuse, given the matter's folder; the files it
+/// returns are held open until the test ends.
+type Refuse = fn(&std::path::Path) -> Vec<std::fs::File>;
 
-/// Renames the matter's folder: `matter.folder_missing`.
-fn rename_folder(folder: &std::path::Path) -> Option<std::fs::File> {
+/// Renames the matter's folder: `matter.folder_missing`. Unix: on Windows the agent's working
+/// folder inside it can't be renamed.
+#[cfg(unix)]
+fn rename_folder(folder: &std::path::Path) -> Vec<std::fs::File> {
     crate::write::rename(folder, &folder.with_file_name("Scratch (renamed)")).unwrap();
-    None
+    Vec::new()
 }
 
-/// A first turn ends, the folder is renamed, then `held` comes between turns.
+/// The refusal a test drives, and its code: the folder renamed on Unix, a file held with no
+/// sharing on Windows.
+#[cfg(unix)]
+fn refusal() -> (Refuse, ErrorCode) {
+    (rename_folder, ErrorCode::MatterFolderMissing)
+}
+
+/// The refusal a test drives on Windows, and its code.
+#[cfg(windows)]
+fn refusal() -> (Refuse, ErrorCode) {
+    (
+        hold_a_file_with_no_sharing,
+        ErrorCode::MatterCheckpointFailed,
+    )
+}
+
+/// Where the agent's working folder is once [`refusal`] ran on the matter's `folder`.
+fn agent_folder(folder: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(unix) {
+        folder.with_file_name("Scratch (renamed)")
+    } else {
+        folder.to_owned()
+    }
+}
+
+/// The matter's folder as stored.
+fn folder_of(rig: &Rig) -> std::path::PathBuf {
+    std::path::PathBuf::from(&rig.actor.matters[&rig.matter()].row.folder_path)
+}
+
+/// Handles inputs until `thread` has no turn, no close and nothing in flight.
+fn until_settled(rig: &mut Rig, thread: ThreadId) {
+    rig.run_until("nothing in flight", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none()
+            && state.closing.is_none()
+            && actor.work.commits == 0
+            && actor.work.matter_jobs == 0
+    });
+}
+
+/// A first turn ends, [`refusal`] runs, then `held` comes between turns.
 fn refused_once_with(name: &str, held: fn() -> AcpEvent) {
-    refused_once_by(name, held, rename_folder, ErrorCode::MatterFolderMissing);
+    let (refuse, code) = refusal();
+    refused_once_by(name, held, refuse, code);
 }
 
 /// A first turn ends, `refuse` runs, then `held` comes between turns, up to ten times over while
@@ -97,8 +143,7 @@ fn refused_once_by(name: &str, held: fn() -> AcpEvent, refuse: Refuse, code: Err
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
-    let folder = std::path::PathBuf::from(&rig.actor.matters[&rig.matter()].row.folder_path);
-    let _holding = refuse(&folder);
+    let _holding = refuse(&folder_of(&rig));
     // Only a live agent sends: once the refusal has stopped it, nothing more comes.
     for _ in 0..10 {
         if !live(&rig.actor, thread) {
@@ -106,13 +151,7 @@ fn refused_once_by(name: &str, held: fn() -> AcpEvent, refuse: Refuse, code: Err
         }
         own_turn::hold_for_test(&mut rig.actor, thread, held());
         own_turn::open_if_idle(&mut rig.actor, thread);
-        rig.run_until("nothing in flight", |actor| {
-            let state = &actor.threads[&thread].turn;
-            state.current.is_none()
-                && state.closing.is_none()
-                && actor.work.commits == 0
-                && actor.work.matter_jobs == 0
-        });
+        until_settled(&mut rig, thread);
     }
     assert_eq!(failures(&mut rig, thread), vec![code]);
     assert_eq!(own_turn::waiting(&mut rig.actor, thread), 0, "nothing held");
@@ -128,18 +167,93 @@ fn a_background_update_between_turns_with_the_folder_gone_fails_once() {
 }
 
 #[test]
-fn a_helper_card_between_turns_with_the_folder_gone_fails_once_and_is_answered() {
+fn a_helper_card_between_turns_with_the_folder_gone_fails_once() {
     refused_once_with("refused-once-card", helper_card);
+}
+
+/// The first prompt ends; then the agent asks a permission between turns, and waits for the
+/// answer: reject-once, which it records by starting a child that writes `answered.pid` in the
+/// agent's working folder (any other answer ends it). Not `write_file`: that writes under the
+/// session's `cwd` as sent, the folder's old name once it is renamed.
+const ASKS_BETWEEN_TURNS: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"request":{"id":"perm-9","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-9","title":"Run the helper","kind":"execute","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-9","result":{"outcome":{"outcome":"selected","optionId":"reject-once"}}}}
+{"spawn_child":{"pid_file":"answered.pid","own_group":false}}
+"#;
+
+/// A real permission request of the agent's, held between turns while the refusal lasts: its
+/// agent-started turn is refused once, and the agent gets the request's reject-once answer on
+/// its own connection.
+#[test]
+fn a_held_permission_request_is_answered_reject_once_on_its_agent() {
+    let mut rig = rig("refused-card-answered", ASKS_BETWEEN_TURNS, "exit");
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    rig.hold_next("the permission request", |_, input| {
+        matches!(
+            input,
+            Input::Agent {
+                input: AgentInput::Event(event),
+                ..
+            } if matches!(event.as_ref(), AcpEvent::PermissionRequested { .. })
+        )
+    });
+    until_idle(&mut rig, thread);
+    let (refuse, code) = refusal();
+    let folder = folder_of(&rig);
+    let _holding = refuse(&folder);
+    rig.release_held();
+    until_settled(&mut rig, thread);
+    let answered = agent_folder(&folder).join("answered.pid");
+    poll_until(&mut rig, "the agent's answer", |_| answered.exists());
+    assert_eq!(failures(&mut rig, thread), vec![code]);
+    rig.run_until("the agent stopped", |actor| !live(actor, thread));
+    rig.finish();
+}
+
+/// A refused prompt of the lawyer's stops nothing: the agent stays live.
+#[test]
+fn a_refused_prompt_of_the_lawyers_leaves_the_agent_running() {
+    let mut rig = rig("refused-prompt-live", TWO_ANSWERS, "exit");
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    let (refuse, code) = refusal();
+    let _holding = refuse(&folder_of(&rig));
+    send_prompt(&mut rig, 11, thread);
+    until_settled(&mut rig, thread);
+    assert_eq!(failures(&mut rig, thread), vec![code]);
+    assert!(live(&rig.actor, thread), "the agent was stopped");
+    rig.finish();
+}
+
+/// What the agent sent between turns goes with it when it ends: no card of it waits to be
+/// answered on the next agent, whose request keys start again at 1.
+#[test]
+fn held_output_goes_when_its_agent_ends() {
+    let mut rig = rig("refused-held-ended", TWO_ANSWERS, "exit");
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    own_turn::hold_for_test(&mut rig.actor, thread, helper_card());
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 1);
+    crate::actor::turn::agents::stop(&mut rig.actor, thread);
+    rig.run_until("the agent ended", |actor| {
+        actor.threads[&thread].turn.agent.is_none()
+    });
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 0, "nothing held");
+    rig.finish();
 }
 
 /// A new file in the matter that another program holds open with no sharing at all (share mode
 /// 0): the before-turn checkpoint can't read it and fails, `matter.checkpoint_failed`.
 #[cfg(windows)]
-fn hold_a_file_with_no_sharing(folder: &std::path::Path) -> Option<std::fs::File> {
+fn hold_a_file_with_no_sharing(folder: &std::path::Path) -> Vec<std::fs::File> {
     let path = folder.join("Draft – Reply (v3).docx");
     crate::write::write_file(&path, b"draft").unwrap();
     let held = crate::write::open_no_share(&path).unwrap();
-    Some(held)
+    vec![held]
 }
 
 #[cfg(windows)]
@@ -153,27 +267,26 @@ fn a_file_held_with_no_sharing_between_turns_fails_once() {
     );
 }
 
-/// The belt: agent-started turns refused in a row with the same code stop the agent at the
-/// `CAP`th, not before; a turn of the lawyer's between ends the run.
+/// The belt, through the real path: agent-started turns whose start is not logged (the store
+/// refuses their `TurnStarted`) fail in a row with the same code, which stops nothing on its
+/// own; the `CAP`th stops the agent.
 #[test]
 fn the_cap_on_refused_agent_started_turns_stops_the_agent() {
     let mut rig = rig("refused-cap", TWO_ANSWERS, "exit");
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
-    // An agent-started turn is current (its open is synchronous) while each refusal is counted.
-    own_turn::hold_for_test(&mut rig.actor, thread, background_update());
-    own_turn::open_if_idle(&mut rig.actor, thread);
-    assert!(
-        own_turn::is_own(&mut rig.actor, thread),
-        "an agent-started turn opened"
-    );
-    let code = ErrorCode::MatterFileLocked;
-    for n in 1..refused::CAP {
-        refused::unstarted_failed(&mut rig.actor, thread, code);
-        assert!(live(&rig.actor, thread), "still live after {n}");
+    let cap = usize::try_from(refused::CAP).unwrap();
+    rig.fail(cap, |event| matches!(event, DomainEvent::TurnStarted(_)));
+    for n in 1..=cap {
+        assert!(live(&rig.actor, thread), "stopped before refusal {n}");
+        own_turn::hold_for_test(&mut rig.actor, thread, background_update());
+        own_turn::open_if_idle(&mut rig.actor, thread);
+        until_settled(&mut rig, thread);
     }
-    refused::unstarted_failed(&mut rig.actor, thread, code);
+    let failed = failures(&mut rig, thread);
+    assert_eq!(failed.len(), cap, "{failed:?}");
+    assert!(failed.iter().all(|code| *code == failed[0]), "{failed:?}");
     assert!(!live(&rig.actor, thread), "stopped at the cap");
     rig.run_until("the agent stopped", |actor| {
         actor.threads[&thread].turn.agent.is_none() && actor.work.commits == 0
@@ -195,7 +308,6 @@ const OWN_SESSION_COMMAND: &str = r#"{"expect":{"method":"session/prompt","as":"
 /// tree kill ends the listed ones after the group.
 /// Handles what the tasks post until `done` holds, looking every 5 ms for up to 10 s: for a
 /// step that posts no input (a listing thread's answer, the owner task's step).
-#[cfg(unix)]
 pub(super) fn poll_until(rig: &mut Rig, what: &str, mut done: impl FnMut(&mut Actor) -> bool) {
     for _ in 0..2000 {
         rig.drain();
