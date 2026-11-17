@@ -128,6 +128,28 @@ test("key-unreadable on the start window, late: the key's words, the Plans line 
   expect(text()).not.toContain("Sign in with Claude");
 });
 
+// The Mac mini run of e6c3fb85b: after Remove key in Plans, desktop's detection found Claude Code's login, and the
+// start window drew no Claude row (login_found had no line there); it shows the found line with Use it
+test("key-denied on the start window, then Remove key: Claude's row comes back with the found login's Use it", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [
+      info(true),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { failed: { code: "agent.key_denied", at: AT } }),
+    ],
+  });
+  expect(byId("signin-foot")?.dataset["state"]).toBe("key-unreadable");
+  await play(t, signIn(CLAUDE, { login_found: { from: "claude_code" } }));
+  const row = document.querySelector(`[data-testid="plan-row"][data-agent="${CLAUDE}"]`);
+  expect(row?.textContent).toContain(
+    "Clauseo found your Claude account from Claude Code and will use it here.",
+  );
+  expect(text()).not.toContain("couldn't read the saved API key");
+  await press(byId("signin-foot-use"));
+  expect(setups(t)).toEqual([{ use_found_login: { agent: CLAUDE } }]);
+});
+
 // The review of 37eaf3f1b: a plan the firm locks has no row, and its install finishing in this
 // window set the "{name} is ready" tick (readyHere) whatever its key; an unreadable key never does
 test("key-unreadable on the start window, a plan the firm locks: no ready tick after its install finished here", async () => {

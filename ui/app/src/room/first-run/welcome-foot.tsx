@@ -2,8 +2,8 @@
 // then ChatGPT's): the install's line while the plan isn't here yet (install.tsx, with "Sign in with {name}" while it is
 // missing), and once it is installed but not signed in, the plan's "Sign in with {name}" in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
 // without opening a matter. No gate stands on the first screen: the line says the gate's own words for a sign-in under
-// way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, a login
-// found, switching accounts) leave the foot as it was. A plan whose sign-in waits (the setup store's `queued`, behind
+// way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, switching
+// accounts) leave the foot as it was; a login found says the gate's line with its Use it. A plan whose sign-in waits (the setup store's `queued`, behind
 // the other plan's sign-in, or desktop's, behind its own download) keeps its download's line with a Cancel that stops
 // the wait and leaves the download going, and once it is here says when its browser opens. The composer shows the
 // other plan's line the same way. A plan the firm's policy locks shows no control. Settings' Plans has its own Sign
@@ -15,6 +15,7 @@ import {
   type InstallActs,
   type InstallTestIds,
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
+import { APP } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -31,13 +32,14 @@ import {
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
-import { installActs } from "./acts.ts";
+import { installActs, planOf } from "./acts.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
 /** The line's presses: the install's, the room gate's Sign in, and its Cancel. */
 export type FootActs = InstallActs & {
   signIn: () => void;
   retryKey: () => void;
+  useFound: () => void;
   cancel: () => void;
 };
 
@@ -50,6 +52,8 @@ export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): 
   // an unreadable key's Try again: the same start_sign_in, which desktop refuses and reads the key again, but no
   // choice of plan, so the papers line keeps naming both plans (the real-Mac run of #1162 lost "or ChatGPT")
   retryKey: () => store.signIn(agent, { again: true }),
+  // a found login's Use it, as the room gate's: use_found_login
+  useFound: () => store.command({ use_found_login: { agent } }),
   cancel: () => store.cancelSignIn(agent),
 });
 
@@ -287,6 +291,28 @@ export function welcomeFoot(
             name,
             null,
           );
+    // a login found on this computer (detection, as after Remove key in Plans): its line and Use
+    // it, as the room gate says it, so the plan keeps its row (Mac mini run of #1162: none showed)
+    case "login-found": {
+      const app = APP[planOf(agent)];
+      const found =
+        view.email === undefined
+          ? fl(lang, "Clauseo found your {name} account from {app} and will use it here.", {
+              name,
+              app,
+            })
+          : fl(
+              lang,
+              "Clauseo found your {name} account ({email}) from {app} and will use it here.",
+              {
+                name,
+                app,
+                email: view.email,
+              },
+            );
+      const use = { words: fl(lang, "Use it"), press: acts.useFound, testId: "signin-foot-use" };
+      return named(line(found, view.kind, use), lang, name, null, "none");
+    }
     // the sign-in status check runs: its words, and Sign in busy until it answers
     case "checking":
       return checkingLine(lang, name, ids, true);
