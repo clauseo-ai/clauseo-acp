@@ -17,7 +17,7 @@
 //! another's draft default. An option the report drops goes; one with no kept current takes the
 //! report's.
 //!
-//! An agent with no session yet has none kept: a Claude or ChatGPT agent then gives its seed
+//! An agent with no session yet has none kept: a Claude or Codex agent then gives its seed
 //! (`seed.rs`, the agent's own default, never sent), so its first conversation's draft shows the
 //! pickers too; any other agent gives none. The seed is only ever shown, never kept: what is
 //! kept comes from a session's reports alone, so the first session's start replaces it whole,

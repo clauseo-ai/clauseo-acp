@@ -1,6 +1,6 @@
 //! `agent-options.json`: options persist across a new `AgentOptions`, the same options write
 //! nothing, and a damaged, oversized or other-version file counts as none, so a Claude or
-//! ChatGPT agent gives its seed: its model and effort ids, each at the agent's own default alone.
+//! Codex agent gives its seed: its model and effort ids, each at the agent's own default alone.
 
 use clauseo_protocol::{ConfigCategory, ConfigChoice, ConfigOption, ConfigOptionKind};
 

@@ -58,14 +58,16 @@ fn an_unknown_pick_on_a_fresh_folder_is_logged_and_the_default_runs() {
         .collect();
     assert_eq!(
         dropped,
-        [
-            "the agent does not take a config pick; dropped agent=claude-acp model=claude-gone-9 effort=-"
-        ],
+        ["the agent does not take a config pick; dropped agent=claude-acp model=- effort=-"],
         "{log}"
     );
     assert!(
         !log.contains(AGENT_DEFAULT),
         "the seed's default is never a pick: {log}"
+    );
+    assert!(
+        !log.contains("claude-gone-9"),
+        "an unlisted value is never logged: {log}"
     );
     assert!(!log.contains("picks sent before first prompt"), "{log}");
 }
