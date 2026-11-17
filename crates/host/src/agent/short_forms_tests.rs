@@ -12,9 +12,19 @@ fn abs(path: &str) -> PathBuf {
     PathBuf::from(crate::testing::abs(path))
 }
 
+/// This system's rules with no remote mounts: a path counts as network by its text alone, never
+/// by the mount table of the machine the tests run on (where an unlisted root file system type
+/// makes every path remote).
+fn local_net() -> NetEnv {
+    NetEnv {
+        remote_mounts: Vec::new(),
+        ..NetEnv::current()
+    }
+}
+
 #[test]
 fn a_short_form_goes_after_its_path_once() {
-    let net = NetEnv::current();
+    let net = local_net();
     let long = abs("/Users/clauseo-lawyer/Matters/B");
     let short = abs("/Users/CLAUSE~1/Matters/B");
     let given = short.clone();
@@ -33,7 +43,7 @@ fn a_short_form_goes_after_its_path_once() {
 /// A volume with short names off gives the path back as it is: nothing is added.
 #[test]
 fn a_volume_without_short_names_adds_nothing() {
-    let net = NetEnv::current();
+    let net = local_net();
     let paths = vec![
         abs("/Users/l/Matters/B"),
         abs("/Users/l/AppData/Local/Clauseo"),
@@ -49,7 +59,7 @@ fn a_volume_without_short_names_adds_nothing() {
 /// counted for the warning.
 #[test]
 fn a_missing_folder_is_not_counted_and_an_unread_one_is() {
-    let net = NetEnv::current();
+    let net = local_net();
     let (gone, there) = (abs("/Users/l/Matters/Gone"), abs("/Users/l/Matters/B"));
     let (found, unread) =
         short_forms_counted(vec![gone.clone(), there.clone()], &net, &|path: &Path| {
@@ -65,7 +75,7 @@ fn a_missing_folder_is_not_counted_and_an_unread_one_is() {
 
 #[test]
 fn a_network_path_is_never_asked() {
-    let net = NetEnv::current();
+    let net = local_net();
     let asked = Cell::new(0);
     let share = PathBuf::from(r"\\server\share\Matters\B");
     let net = NetEnv {
