@@ -1,0 +1,554 @@
+// agent-browser-build.mjs: our build of agent-browser, upstream's source at the commit
+// crates/desktop/agent-browser.toml pins plus the patches in crates/desktop/agent-browser/patches/
+// (crates/desktop/agent-browser/README.md says what they do and how to bump them).
+//
+//   node crates/desktop/sidecars/agent-browser-build.mjs check
+//   node crates/desktop/sidecars/agent-browser-build.mjs build --target <triple> --out <dir>
+//   node crates/desktop/sidecars/agent-browser-build.mjs tag
+//   node crates/desktop/sidecars/agent-browser-build.mjs toolchain
+//
+// `check` downloads GitHub's source archive of `upstream_commit`, refuses it unless its SHA-256 is
+// `upstream_tarball_sha256` and the archive names that commit, extracts it to a temporary folder,
+// and applies every patch in order with `git apply`, after a `git apply --check` of each. It runs
+// on any machine with node, tar and git: it is the check that the patches apply cleanly to the
+// pinned tag. It then refuses the result unless the patched cli/Cargo.toml and cli/Cargo.lock
+// both give the crate the version `patched_tag` names (0003 sets it), so a rebuild that counts
+// the tag up cannot report the old version. The temporary folder is removed whatever happens.
+//
+// `build` does the same, then builds the patched source for one of the six release triples with
+// `cargo build --release --locked --target <triple>` in its cli/ folder, writes
+// `<dir>/agent-browser-<triple>[.exe]` and `<dir>/agent-browser-<triple>.json`, the build record:
+// the triple, the exe's SHA-256 and size, `rustc -vV`, the MSVC tools and linker versions where
+// they can be found, the upstream commit, the archive's and each patch's SHA-256, and prints the
+// pin's two lines for that triple. Then it runs the patched source's own test suite
+// (`cargo test --locked --target <triple>`, as upstream's CI runs it; on Windows this is where the
+// pipe's restricted-token, session key and hardening tests run). The tests come after the binary
+// so a failing test still leaves it for later jobs (a real-Intel job tests the x64 macOS one), but
+// `build` then still exits non-zero, so the leg stays red and nothing is published
+// (`releaseThenTest`). A failed release build exits non-zero without running the tests.
+// .github/workflows/agent-browser-build.yml runs it on a runner per triple (native, except x64
+// macOS, cross-compiled on an ARM64 Mac).
+//
+// An x86_64 macOS build tested on an ARM64 Mac runs its tests under Rosetta, so its CLI subprocess
+// tests get 60 s each instead of 10, and AB_TEST_ROSETTA=1 turns off the one test that outlasts
+// a fixed timeout (`testEnv`).
+//
+// `build` refuses to run when `git status` shows uncommitted changes in the patches folder, and
+// when the toolchain's `rustc -vV` commit-hash is not the pin's `rustc_commit`.
+//
+// The build aims to be reproducible: the toolchain is rust-toolchain.toml's channel
+// (RUSTUP_TOOLCHAIN, as the source folder is outside this repository), the target dir sits outside
+// the source tree, and the rustflags are --remap-path-prefix for the source, cargo's home and the
+// target dir, plus on Windows `-C target-feature=+crt-static` (no VC++ runtime DLLs, as
+// .github/scripts/pe-crt-imports.mjs checks) and `-C link-arg=/Brepro` (a hash where the link
+// time would go).
+// SOURCE_DATE_EPOCH is the upstream commit's time, read from the archive. A runner image with a
+// newer linker (MSVC, Xcode or binutils) can still change the bytes, so the pinned sha256 is what
+// a release trusts, not a rebuild.
+//
+// `tag` prints the pin's patched_tag and `toolchain` the toolchain channel, for the workflow.
+//
+// Node built-ins only, like its neighbours; tar, git and cargo run as child processes. Tests:
+// `agent-browser-build.test.mjs` next to this file, run with
+// `node --test 'crates/desktop/sidecars/*.test.mjs'`, by hand (the xtask check is frozen).
+
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
+import { ourAssetUrl, parsePin } from './agent-browser.mjs';
+import { getBytes } from './fetch.mjs';
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const PIN = join(REPO, 'crates', 'desktop', 'agent-browser.toml');
+const PATCHES = join(REPO, 'crates', 'desktop', 'agent-browser', 'patches');
+const TOOLCHAIN = join(REPO, 'rust-toolchain.toml');
+
+/** The triples `build` takes: the six release targets, which the pin takes from our build. */
+export const TARGETS = [
+  'aarch64-apple-darwin',
+  'x86_64-apple-darwin',
+  'x86_64-unknown-linux-gnu',
+  'aarch64-unknown-linux-gnu',
+  'x86_64-pc-windows-msvc',
+  'aarch64-pc-windows-msvc',
+];
+
+/** The binary's file name suffix on `triple`. */
+const exe = (triple) => (triple.includes('-windows-') ? '.exe' : '');
+
+const USAGE = [
+  'usage: node crates/desktop/sidecars/agent-browser-build.mjs check',
+  '       node crates/desktop/sidecars/agent-browser-build.mjs build --target <triple> --out <dir>',
+  '       node crates/desktop/sidecars/agent-browser-build.mjs tag | toolchain',
+].join('\n');
+
+/** A command line that is not one of USAGE's; main exits 2 on it. */
+class UsageError extends Error {}
+
+/**
+ * The command line, as `{ command }` or, for build, `{ command, target, out }`. Throws a
+ * UsageError on anything else: an unknown command or flag, a flag twice or without its value,
+ * or a target that is not one of TARGETS.
+ *
+ * @param {string[]} argv the arguments after the script's path
+ */
+export function parseArgs(argv) {
+  const [command, ...rest] = argv;
+  if (command === 'check' || command === 'tag' || command === 'toolchain') {
+    if (rest.length > 0) throw new UsageError(`${command} takes no arguments\n${USAGE}`);
+    return { command };
+  }
+  if (command !== 'build') throw new UsageError(USAGE);
+  const options = {};
+  for (let i = 0; i < rest.length; i += 2) {
+    const [flag, value] = [rest[i], rest[i + 1]];
+    if (flag !== '--target' && flag !== '--out') throw new UsageError(`unknown flag ${flag}\n${USAGE}`);
+    if (value === undefined || value.startsWith('--')) throw new UsageError(`${flag} needs a value`);
+    const key = flag.slice(2);
+    if (Object.hasOwn(options, key)) throw new UsageError(`${flag} twice`);
+    options[key] = value;
+  }
+  if (options.target === undefined || options.out === undefined) {
+    throw new UsageError(`build needs --target and --out\n${USAGE}`);
+  }
+  if (!TARGETS.includes(options.target)) {
+    throw new UsageError(`--target must be one of ${TARGETS.join(', ')}, not ${options.target}`);
+  }
+  return { command, target: options.target, out: options.out };
+}
+
+const PATCH = /^(\d{4})-[a-z0-9][a-z0-9-]*\.patch$/;
+
+/**
+ * The patch folder's file names in the order they apply: NNNN-<name>.patch, numbered 0001 up
+ * with no gap. Dot files (.gitkeep) are skipped; any other file, a gap, a number twice or no
+ * patch at all throws, so a misnamed patch is never left out silently.
+ *
+ * @param {string[]} names the folder's entries
+ * @returns {string[]}
+ */
+export function orderPatches(names) {
+  const patches = names.filter((name) => !name.startsWith('.'));
+  for (const name of patches) {
+    if (!PATCH.test(name)) throw new Error(`patches/${name} is not named NNNN-<name>.patch`);
+  }
+  if (patches.length === 0) throw new Error('patches/ holds no patch');
+  const sorted = [...patches].sort();
+  sorted.forEach((name, i) => {
+    const want = String(i + 1).padStart(4, '0');
+    if (PATCH.exec(name)[1] !== want) {
+      throw new Error(`patches/${name} is out of sequence: patch ${i + 1} must start ${want}-`);
+    }
+  });
+  return sorted;
+}
+
+/** The SHA-256 of `bytes`, lowercase hex. */
+export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+/** Throws unless `bytes` hash to `expected`; `label` names them in the message. */
+export function checkSha(bytes, expected, label) {
+  const actual = sha256(bytes);
+  if (actual !== expected) {
+    throw new Error(`${label}: sha256 is ${actual}, the pin says ${expected}; refused`);
+  }
+}
+
+/** A pax header's records, `<length> <key>=<value>\n` each, as an object. */
+function paxRecords(data) {
+  const records = {};
+  let at = 0;
+  while (at < data.length) {
+    const space = data.indexOf(0x20, at);
+    const length = Number(data.subarray(at, space).toString('ascii'));
+    if (space < 0 || !Number.isInteger(length) || length <= 0) break;
+    const record = data.subarray(space + 1, at + length - 1).toString('utf8');
+    const equals = record.indexOf('=');
+    records[record.slice(0, equals)] = record.slice(equals + 1);
+    at += length;
+  }
+  return records;
+}
+
+/**
+ * What the gzipped tar `gz` says about itself: `commit`, the commit id GitHub's archive puts in
+ * its global pax header (null without one), `mtime`, the first entry's time in Unix seconds
+ * (GitHub stamps every entry with the commit's time), and `symlinks`, the symbolic links'
+ * names, which the extraction leaves out (Windows tar cannot always make them).
+ *
+ * @param {Buffer} gz
+ * @returns {{ commit: string | null, mtime: number | null, symlinks: string[] }}
+ */
+export function tarInfo(gz) {
+  const tar = gunzipSync(gz);
+  let commit = null;
+  let mtime = null;
+  let pax = null; // the next entry's extended header, if any
+  const symlinks = [];
+  for (let at = 0; at + 512 <= tar.length; ) {
+    const header = tar.subarray(at, at + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const field = (from, to) => {
+      const bytes = header.subarray(from, to);
+      const end = bytes.indexOf(0);
+      return bytes.subarray(0, end < 0 ? bytes.length : end).toString('utf8');
+    };
+    if (field(257, 262) !== 'ustar') throw new Error(`the archive has a non-ustar header at ${at}`);
+    const size = parseInt(field(124, 136).trim() || '0', 8);
+    const type = field(156, 157) || '0';
+    const data = tar.subarray(at + 512, at + 512 + size);
+    if (type === 'g') {
+      commit = paxRecords(data).comment ?? commit;
+    } else if (type === 'x') {
+      pax = paxRecords(data);
+    } else {
+      const prefix = field(345, 500);
+      const name = pax?.path ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+      mtime ??= parseInt(field(136, 148).trim(), 8);
+      if (type === '2') symlinks.push(name);
+      pax = null;
+    }
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return { commit, mtime, symlinks };
+}
+
+/** rust-toolchain.toml's channel. */
+export function toolchainChannel(text) {
+  const match = /^channel\s*=\s*"([^"]+)"\s*$/m.exec(text);
+  if (!match) throw new Error('rust-toolchain.toml has no channel = "..."');
+  return match[1];
+}
+
+/**
+ * The environment of the cargo build for `triple` (see the header): `env` without RUSTFLAGS,
+ * plus the target dir, the encoded rustflags (0x1f between flags keeps a path with spaces whole),
+ * SOURCE_DATE_EPOCH and RUSTUP_TOOLCHAIN.
+ *
+ * @param {{ triple: string, src: string, targetDir: string, epoch: number, channel: string,
+ *   env?: Record<string, string | undefined>, home?: string }} where
+ */
+export function buildEnv({ triple, src, targetDir, epoch, channel, env = process.env, home = homedir() }) {
+  const cargoHome = env.CARGO_HOME ?? join(home, '.cargo');
+  const windows = triple.endsWith('-pc-windows-msvc');
+  const flags = [
+    ...(windows ? ['-C', 'target-feature=+crt-static', '-C', 'link-arg=/Brepro'] : []),
+    `--remap-path-prefix=${src}=/agent-browser`,
+    `--remap-path-prefix=${cargoHome}=/cargo`,
+    `--remap-path-prefix=${targetDir}=/target`,
+  ];
+  const out = {
+    ...env,
+    CARGO_TARGET_DIR: targetDir,
+    CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f'),
+    SOURCE_DATE_EPOCH: String(epoch),
+    RUSTUP_TOOLCHAIN: channel,
+  };
+  delete out.RUSTFLAGS;
+  return out;
+}
+
+/** The pin's two lines for `triple`, to paste under its table. */
+export function pinLines(triple, pin, digest) {
+  return `url = "${ourAssetUrl(triple, pin)}"\nsha256 = "${digest}"`;
+}
+
+/** Removes the temporary folder; a failure is logged, never thrown over the real error. */
+async function cleanup(work, log) {
+  await rm(work, { recursive: true, force: true, maxRetries: 3 }).catch((error) =>
+    log(`agent-browser: could not remove ${work}: ${error.message}`),
+  );
+}
+
+/** Runs `command`, its output on ours; throws unless it exits 0. */
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { stdio: 'inherit', ...options });
+  if (result.error) throw new Error(`${command} did not start: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}`);
+}
+
+/** The first line of `command`'s output, or null when it cannot run. */
+function firstLine(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: 'utf8', ...options });
+  if (result.error) return null;
+  const text = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  return text.split(/\r?\n/).find((line) => line.trim() !== '') ?? null;
+}
+
+/** The last line of `command`'s output (cc -v ends with its version), or null. */
+function lastLine(command, args) {
+  const result = spawnSync(command, args, { encoding: 'utf8' });
+  if (result.error) return null;
+  const lines = `${result.stdout ?? ''}${result.stderr ?? ''}`.split(/\r?\n/).filter((l) => l.trim());
+  return lines.at(-1) ?? null;
+}
+
+/**
+ * Where the temporary folder goes. Upstream's tests bind Unix sockets under
+ * `<source>/cli/target/t/`, and a socket path has at most 104 bytes on macOS, where the
+ * runner's TMPDIR (/var/folders/...) alone is about 50: so /tmp there, and short names
+ * (`ab-XXXXXX/s`). The tests set the socket folder themselves, so AGENT_BROWSER_SOCKET_DIR would
+ * not help.
+ */
+export function workParent(platform = process.platform) {
+  return platform === 'darwin' ? '/tmp' : tmpdir();
+}
+
+/**
+ * Downloads, checks and extracts the pinned source, then applies the patches, each after a
+ * `git apply --check`. Returns the temporary folder (the caller removes it), the source folder
+ * in it, the commit time and the patches with their hashes.
+ */
+async function prepare({ pin, patchDir, log, fetch }) {
+  const names = orderPatches(await readdir(patchDir));
+  const commit = pin.upstreamCommit;
+  const url = `https://github.com/vercel-labs/agent-browser/archive/${commit}.tar.gz`;
+  log(`downloading ${url}`);
+  const gz = await getBytes(url, { label: 'agent-browser: the upstream source', fetch, log });
+  checkSha(gz, pin.upstreamTarballSha256, 'agent-browser: the upstream source');
+  const info = tarInfo(gz);
+  if (info.commit !== commit) {
+    throw new Error(`agent-browser: the archive names commit ${info.commit}, the pin ${commit}`);
+  }
+
+  const work = await realpath(await mkdtemp(join(workParent(), 'ab-')));
+  try {
+    // tar runs in the folder with a relative name: GNU tar reads `C:` in a path as a host.
+    await writeFile(join(work, 'upstream.tar.gz'), gz);
+    const excludes = info.symlinks.map((name) => `--exclude=${name}`);
+    run('tar', ['-xzf', 'upstream.tar.gz', ...excludes], { cwd: work });
+    await rm(join(work, 'upstream.tar.gz'));
+    // A short name: see workParent.
+    const src = join(work, 's');
+    await rename(join(work, `agent-browser-${commit}`), src);
+    if (!existsSync(join(src, 'cli', 'Cargo.toml'))) throw new Error(`${src} has no cli/Cargo.toml`);
+
+    // The ceiling keeps git from finding a repository above the temporary folder.
+    const git = { cwd: src, env: { ...process.env, GIT_CEILING_DIRECTORIES: work } };
+    const patches = [];
+    for (const name of names) {
+      const path = join(patchDir, name);
+      run('git', ['-c', 'core.autocrlf=false', 'apply', '--check', path], git);
+      run('git', ['-c', 'core.autocrlf=false', 'apply', path], git);
+      patches.push({ name, sha256: sha256(await readFile(path)) });
+      log(`applied ${name}`);
+    }
+    const cli = join(src, 'cli');
+    const lock = existsSync(join(cli, 'Cargo.lock')) ? await readFile(join(cli, 'Cargo.lock'), 'utf8') : '';
+    checkVersion(await readFile(join(cli, 'Cargo.toml'), 'utf8'), lock, pin.patchedTag);
+    return { work, src, epoch: info.mtime, patches };
+  } catch (error) {
+    await cleanup(work, log);
+    throw error;
+  }
+}
+
+/**
+ * The linker's version: on Windows the MSVC tools version and link.exe's banner, as far as
+ * vswhere finds them; on macOS `ld -v`; on Linux `cc -v` and `ld --version`. Nulls if not found.
+ */
+function linkerVersions(env) {
+  if (process.platform === 'darwin') return { msvc_tools: null, link: firstLine('ld', ['-v']) };
+  if (process.platform !== 'win32') {
+    return { msvc_tools: null, link: firstLine('ld', ['--version']), cc: lastLine('cc', ['-v']) };
+  }
+  const none = { msvc_tools: null, link: null };
+  const vswhere = join(env['ProgramFiles(x86)'] ?? '', 'Microsoft Visual Studio', 'Installer', 'vswhere.exe');
+  if (!existsSync(vswhere)) return none;
+  const install = firstLine(vswhere, ['-latest', '-products', '*', '-property', 'installationPath']);
+  if (!install) return none;
+  const versionFile = join(install, 'VC', 'Auxiliary', 'Build', 'Microsoft.VCToolsVersion.default.txt');
+  const tools = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : null;
+  if (!tools) return none;
+  for (const host of ['HostX64', 'HostARM64']) {
+    for (const arch of ['x64', 'arm64']) {
+      const link = join(install, 'VC', 'Tools', 'MSVC', tools, 'bin', host, arch, 'link.exe');
+      if (existsSync(link)) return { msvc_tools: tools, link: firstLine(link, []) };
+    }
+  }
+  return { msvc_tools: tools, link: null };
+}
+
+/** The seconds upstream's CLI subprocess tests (tests/mcp_call_cli.rs) wait under Rosetta. */
+export const ROSETTA_TEST_TIMEOUT_SECS = '60';
+
+/**
+ * `env` for `cargo test`: an x86_64 macOS build tested on an ARM64 Mac runs its tests under
+ * Rosetta, where the first launches of the binary are slow, so the CLI subprocess tests get
+ * AB_TEST_SUBPROCESS_TIMEOUT_SECS=60 instead of their 10 s, unless it is set already. It also sets
+ * AB_TEST_ROSETTA=1, which turns off tests/session_validation_cli.rs's MCP doctor test (patch
+ * 0002): the doctor outlasts the MCP call's 120 s command timeout, a constant in upstream's code
+ * (DEFAULT_TIMEOUT_MS in src/mcp.rs) that no variable raises. Here and
+ * not in the workflow: the workflow file is read from the branch it is dispatched on, this
+ * script from the commit it builds.
+ */
+export function testEnv(env, triple, host = { platform: process.platform, arch: process.arch }) {
+  const rosetta = triple === 'x86_64-apple-darwin' && host.platform === 'darwin' && host.arch === 'arm64';
+  if (!rosetta) return env;
+  return {
+    ...env,
+    AB_TEST_SUBPROCESS_TIMEOUT_SECS: env.AB_TEST_SUBPROCESS_TIMEOUT_SECS || ROSETTA_TEST_TIMEOUT_SECS,
+    AB_TEST_ROSETTA: '1',
+  };
+}
+
+/** The value of `key = "..."` among the lines of the first section headed `header` that `match`es. */
+function sectionValue(text, header, key, match = () => true) {
+  for (const section of text.replace(/\r\n/g, '\n').split(/^(?=\[)/m)) {
+    const [head, ...lines] = section.split('\n');
+    if (head.trim() !== header || !match(lines)) continue;
+    for (const line of lines) {
+      const [name, ...rest] = line.split('=');
+      const value = rest.join('=').trim();
+      if (name.trim() === key && /^"[^"]*"$/.test(value)) return value.slice(1, -1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Throws unless the patched `cli/Cargo.toml` (`[package]`) and `cli/Cargo.lock` (the
+ * agent-browser package) both say the version `patchedTag` names: agent-browser-v<version>.
+ */
+export function checkVersion(cargoToml, cargoLock, patchedTag) {
+  const expected = patchedTag.replace(/^agent-browser-v/, '');
+  const isOurs = (lines) => lines.some((line) => line.trim() === 'name = "agent-browser"');
+  const found = [
+    ['cli/Cargo.toml', sectionValue(cargoToml, '[package]', 'version')],
+    ['cli/Cargo.lock', sectionValue(cargoLock, '[[package]]', 'version', isOurs)],
+  ];
+  for (const [file, version] of found) {
+    if (version !== expected) {
+      throw new Error(`agent-browser: the patched ${file} says version ${version}, but patched_tag ${patchedTag} needs ${expected}; update the version patch`);
+    }
+  }
+}
+
+/** Throws unless `status`, `git status --porcelain` for the patches folder, is empty. */
+export function checkCommitted(status, dir) {
+  if (status.trim() !== '') {
+    throw new Error(`agent-browser: ${dir} has uncommitted changes; build only from committed patches:\n${status.trim()}`);
+  }
+}
+
+/** The 40-hex commit-hash in `rustc -vV`'s output, or null. */
+export function rustcCommit(verbose) {
+  return /^commit-hash: ([0-9a-f]{40})\s*$/m.exec(verbose)?.[1] ?? null;
+}
+
+/** `build`: see the header. Returns the record it wrote. */
+async function build({ target, out }, { pin, patchDir, log, fetch }) {
+  const channel = toolchainChannel(await readFile(TOOLCHAIN, 'utf8'));
+  // Only committed patches: a build from a working tree with edits there is refused. Untracked
+  // files are listed whatever status.showUntrackedFiles says.
+  const statusArgs = ['status', '--porcelain', '--untracked-files=all', '--', patchDir];
+  const status = spawnSync('git', statusArgs, { cwd: REPO, encoding: 'utf8' });
+  if (status.error || status.status !== 0) {
+    throw new Error(`agent-browser: git status failed for ${patchDir}; build only from a git checkout`);
+  }
+  checkCommitted(status.stdout, patchDir);
+  const { work, src, epoch, patches } = await prepare({ pin, patchDir, log, fetch });
+  try {
+    const targetDir = join(work, 'target');
+    const env = buildEnv({ triple: target, src, targetDir, epoch, channel });
+    // The toolchain rustup gives for the channel must be the pinned one (rustc_commit).
+    const verbose = spawnSync('rustc', ['-vV'], { encoding: 'utf8', env });
+    const found = verbose.status === 0 ? rustcCommit(verbose.stdout) : null;
+    if (found !== pin.rustcCommit) {
+      throw new Error(`agent-browser: rustc's commit-hash is ${found}, the pin's rustc_commit is ${pin.rustcCommit}`);
+    }
+    const cli = join(src, 'cli');
+    return await releaseThenTest({
+      release: () => release({ target, out, cli, pin, patches, epoch, targetDir, env, verbose, log }),
+      test: () => run('cargo', ['test', '--locked', '--target', target], { cwd: cli, env: testEnv(env, target) }),
+    });
+  } finally {
+    await cleanup(work, log);
+  }
+}
+
+/**
+ * `build`'s order: the release build (with the binary, its record and the pin lines) first, then
+ * the tests. A failed release build rejects before the tests run. Failed tests reject too, after
+ * the binary is in place, so the command exits non-zero and the leg stays red (publishing needs
+ * every leg green), while a later job can still test the binary. Resolves to the record.
+ */
+export async function releaseThenTest({ release, test }) {
+  const record = await release();
+  try {
+    await test();
+  } catch (error) {
+    throw new Error(`agent-browser: the tests failed (the binary was written, not to be published): ${error.message}`);
+  }
+  return record;
+}
+
+/** The release build of `build`: the binary and its record in `out`; returns the record. */
+async function release({ target, out, cli, pin, patches, epoch, targetDir, env, verbose, log }) {
+  run('cargo', ['build', '--release', '--locked', '--target', target], { cwd: cli, env });
+
+  const outDir = resolve(out);
+  await mkdir(outDir, { recursive: true });
+  const name = `agent-browser-${target}${exe(target)}`;
+  const binary = join(outDir, name);
+  await copyFile(join(targetDir, target, 'release', `agent-browser${exe(target)}`), binary);
+  const bytes = await readFile(binary);
+  const digest = sha256(bytes);
+  const record = {
+    triple: target,
+    sha256: digest,
+    size: bytes.length,
+    patched_tag: pin.patchedTag,
+    version: pin.version,
+    upstream_commit: pin.upstreamCommit,
+    upstream_tarball_sha256: pin.upstreamTarballSha256,
+    patches,
+    source_date_epoch: epoch,
+    rustflags: env.CARGO_ENCODED_RUSTFLAGS.split('\x1f'),
+    rustc: verbose.stdout.trim(),
+    ...linkerVersions(process.env),
+    runner_image: process.env.ImageOS ? `${process.env.ImageOS} ${process.env.ImageVersion}` : null,
+  };
+  await writeFile(join(outDir, `agent-browser-${target}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  log(`${name} sha256 ${digest} (${bytes.length} bytes)`);
+  log(`the pin's lines for [${target}], once the release is published:`);
+  log(pinLines(target, pin, digest));
+  return record;
+}
+
+/**
+ * Runs one command line. `options` replace the pin, the patch folder, the log and the network,
+ * for the tests.
+ */
+export async function main(argv, options = {}) {
+  const { pinPath = PIN, patchDir = PATCHES, log = console.log, fetch } = options;
+  const args = parseArgs(argv);
+  if (args.command === 'toolchain') {
+    log(toolchainChannel(await readFile(TOOLCHAIN, 'utf8')));
+    return;
+  }
+  const pin = parsePin(await readFile(pinPath, 'utf8'));
+  if (args.command === 'tag') {
+    log(pin.patchedTag);
+    return;
+  }
+  if (args.command === 'check') {
+    const { work, patches } = await prepare({ pin, patchDir, log, fetch });
+    await cleanup(work, log);
+    log(`ok: ${patches.length} patch(es) apply cleanly to ${pin.upstreamCommit} (v${pin.version})`);
+    return;
+  }
+  await build(args, { pin, patchDir, log, fetch });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error.message);
+    process.exit(error instanceof UsageError ? 2 : 1);
+  });
+}

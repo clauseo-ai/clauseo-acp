@@ -3,12 +3,14 @@
 //!
 //! agent-browser holds the relay's URL (`AGENT_BROWSER_CDP`, `devtools.rs`), and an error or a
 //! reply of its that prints the URL would otherwise put the secret in the agent's logs, which a
-//! command in Codex's sandbox may read. The proxy's password never reaches it, but Chrome sends
+//! command in Codex's sandbox may read. On Windows it holds the session key too
+//! (`AGENT_BROWSER_SESSION_KEY`, `env.rs`), which keeps every process without it off its
+//! daemon's pipe. The proxy's password never reaches it, but Chrome sends
 //! it in each request's `Proxy-Authorization` header, which CDP can show. So [`MARK`] takes
 //! the place of:
 //! - the whole URL, its letters in any case;
-//! - the secret (64 hex digits) in any case, wherever it appears;
-//! - a run of [`MIN_PREFIX`] or more characters that is the secret's start, in any case: a
+//! - the secret and the session key (64 hex digits each) in any case, wherever they appear;
+//! - a run of [`MIN_PREFIX`] or more characters that is the start of either, in any case: a
 //!   message cut short;
 //! - the proxy's password, as the URL's secret ([`Secrets::literal`]), and its base64
 //!   `Proxy-Authorization` value, whole or a start of it that runs [`MIN_PREFIX`] characters
@@ -55,13 +57,21 @@ pub(crate) const MARK: &[u8] = b"[secret redacted]";
 /// by chance.
 pub(crate) const MIN_PREFIX: usize = 16;
 
-/// The relay's URL and its secret (the URL's last path segment), or one literal as both.
+/// One secret taken out of the text: its bytes, and the shortest start of them taken out on its
+/// own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Entry {
+    bytes: Vec<u8>,
+    min_start: usize,
+}
+
+/// The relay's URL and the secrets taken out with it: its secret (the URL's last path segment)
+/// and, on Windows, the session key; or one literal as both (the proxy's password). The first
+/// entry is the URL's secret (or the literal), and [`Secrets::start_after`] changes only it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Secrets {
     url: Vec<u8>,
-    secret: Vec<u8>,
-    /// The shortest start of `secret` taken out on its own.
-    min_start: usize,
+    entries: Vec<Entry>,
 }
 
 /// Whether a pattern is at the start of some text.
@@ -74,15 +84,26 @@ enum Found {
 }
 
 impl Secrets {
-    /// The URL in agent-browser's environment `env`; none when it has none (a one-shot
-    /// agent-browser).
+    /// The URL in agent-browser's environment `env`, its secret and, on Windows, the session key;
+    /// none when it has no URL (a one-shot agent-browser, which gets no key either:
+    /// `env::agent_env`).
     pub(crate) fn of(env: &BTreeMap<String, OsString>) -> Option<Secrets> {
         let url = env.get(env::CDP).and_then(|url| url.to_str())?;
         let secret = url.rsplit('/').next().unwrap_or_default();
+        let key = env
+            .get(env::SESSION_KEY)
+            .and_then(|key| key.to_str())
+            .filter(|key| !key.is_empty());
         (!url.is_empty() && !secret.is_empty()).then(|| Secrets {
             url: url.as_bytes().to_vec(),
-            secret: secret.as_bytes().to_vec(),
-            min_start: MIN_PREFIX,
+            entries: [Some(secret), key]
+                .into_iter()
+                .flatten()
+                .map(|hex| Entry {
+                    bytes: hex.as_bytes().to_vec(),
+                    min_start: MIN_PREFIX,
+                })
+                .collect(),
         })
     }
 
@@ -91,24 +112,27 @@ impl Secrets {
     pub(crate) fn literal(bytes: &[u8]) -> Secrets {
         Secrets {
             url: bytes.to_vec(),
-            secret: bytes.to_vec(),
-            min_start: MIN_PREFIX,
+            entries: vec![Entry {
+                bytes: bytes.to_vec(),
+                min_start: MIN_PREFIX,
+            }],
         }
     }
 
-    /// The same, but a start of it is taken out only when it runs [`MIN_PREFIX`] characters
-    /// past its first `fixed`, which are no secret.
-    pub(crate) fn start_after(self, fixed: usize) -> Secrets {
-        Secrets {
-            min_start: fixed.saturating_add(MIN_PREFIX),
-            ..self
+    /// The same, but a start of the secret (the first entry) is taken out only when it runs
+    /// [`MIN_PREFIX`] characters past its first `fixed`, which are no secret. Other entries,
+    /// the session key, keep [`MIN_PREFIX`].
+    pub(crate) fn start_after(mut self, fixed: usize) -> Secrets {
+        if let Some(first) = self.entries.first_mut() {
+            first.min_start = fixed.saturating_add(MIN_PREFIX);
         }
+        self
     }
 
-    /// Whether `text` starts with the URL, the secret or a long enough start of the secret.
+    /// Whether `text` starts with the URL, one of the secrets or a long enough start of one.
     /// Undecided only while `text` may still grow (`more`).
     fn at_start(&self, text: &[u8], more: bool) -> Found {
-        if self.url.is_empty() || self.secret.is_empty() {
+        if self.url.is_empty() {
             return Found::No;
         }
         if text.len() >= self.url.len() {
@@ -126,17 +150,28 @@ impl Secrets {
         {
             return Found::Undecided;
         }
-        let same = text
-            .iter()
-            .zip(&self.secret)
-            .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
-            .count();
-        if same == self.secret.len() {
-            Found::Hit(same)
-        } else if more && same == text.len() {
+        let (mut undecided, mut longest) = (false, None::<usize>);
+        for entry in &self.entries {
+            if entry.bytes.is_empty() {
+                continue;
+            }
+            let same = text
+                .iter()
+                .zip(&entry.bytes)
+                .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+                .count();
+            if same == entry.bytes.len() {
+                return Found::Hit(same);
+            }
+            undecided |= more && same == text.len();
+            if same >= entry.min_start {
+                longest = longest.max(Some(same));
+            }
+        }
+        if undecided {
             Found::Undecided
-        } else if same >= self.min_start {
-            Found::Hit(same)
+        } else if let Some(len) = longest {
+            Found::Hit(len)
         } else {
             Found::No
         }
@@ -272,238 +307,4 @@ impl Redactor {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::ffi::OsString;
-
-    use super::{MARK, Redactor, Secrets, line, remember};
-    use crate::browser_guard::devtools::base64;
-    use crate::browser_guard::proxy_auth::{self, Password};
-
-    const SECRET: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
-    /// An obviously fake proxy password.
-    const PASSWORD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";
-
-    /// Remembers the fake password's two forms, as the guard's start does, and returns its
-    /// `Proxy-Authorization` value.
-    fn hide_password() -> String {
-        proxy_auth::hide(&Password::parse(PASSWORD).unwrap());
-        base64(format!("clauseo:{PASSWORD}").as_bytes())
-    }
-
-    fn url() -> String {
-        format!("ws://127.0.0.1:50123/devtools/browser/{SECRET}")
-    }
-
-    fn secrets() -> Secrets {
-        let env = BTreeMap::from([("AGENT_BROWSER_CDP".to_owned(), OsString::from(url()))]);
-        Secrets::of(&env).unwrap()
-    }
-
-    fn mark() -> String {
-        String::from_utf8(MARK.to_vec()).unwrap()
-    }
-
-    /// Everything the redactor gives out for `input` read `step` bytes at a time.
-    fn redacted(input: &str, step: usize) -> String {
-        let mut redactor = Redactor::new(secrets());
-        let mut out = Vec::new();
-        for chunk in input.as_bytes().chunks(step) {
-            out.extend(redactor.push(chunk));
-        }
-        out.extend(redactor.finish());
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn the_url_and_the_secret_never_reach_the_guards_stderr_however_the_reads_split() {
-        let mark = mark();
-        let input = format!(
-            "error: cannot connect to {} (refused)\nsecret {SECRET} alone\nno secret here\n\
-             ends on a URL: {}",
-            url(),
-            url()
-        );
-        let expected = format!(
-            "error: cannot connect to {mark} (refused)\nsecret {mark} alone\nno secret here\n\
-             ends on a URL: {mark}"
-        );
-        for step in [1, 2, 7, 63, 64, 65, 4096] {
-            let out = redacted(&input, step);
-            assert_eq!(out, expected, "reads of {step} bytes");
-            assert!(!out.contains(&SECRET[..16]), "reads of {step} bytes");
-        }
-    }
-
-    #[test]
-    fn the_secret_in_any_case_and_its_cut_short_start_are_taken_out_too() {
-        let mark = mark();
-        let upper = SECRET.to_ascii_uppercase();
-        let url_upper = url().to_ascii_uppercase();
-        let cut = &SECRET[..16];
-        let short = &SECRET[..15];
-        let input = format!(
-            "A {upper} B\nC {url_upper}\nD browser/{cut}\u{2026}\nE x{} y\nF {short} kept\n\
-             G ab{SECRET}cd\n",
-            &SECRET[..40]
-        );
-        let expected = format!(
-            "A {mark} B\nC {mark}\nD browser/{mark}\u{2026}\nE x{mark} y\nF {short} kept\n\
-             G ab{mark}cd\n"
-        );
-        for step in [1, 3, 16, 17, 4096] {
-            assert_eq!(redacted(&input, step), expected, "reads of {step} bytes");
-        }
-    }
-
-    #[test]
-    fn a_line_goes_out_when_it_ends_and_text_without_a_url_is_unchanged() {
-        let mut redactor = Redactor::new(secrets());
-        assert_eq!(redactor.push(b"warn: slow\n"), b"warn: slow\n");
-        // Hex that is not the secret's start goes out once it cannot be.
-        assert_eq!(redactor.push(b"id 0012"), b"id 0012");
-        // A one-shot agent-browser has no URL: nothing to take out.
-        assert_eq!(Secrets::of(&BTreeMap::new()), None);
-    }
-
-    /// agent-browser's MCP replies: a line with the secret stays the same JSON with the mark in
-    /// its place; a line without one, invalid UTF-8 included, is passed on as it came.
-    #[test]
-    fn stdout_lines_keep_their_json_and_their_bytes() {
-        remember(&secrets());
-        let reply = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "result": {"content": [{"type": "text", "text": format!(
-                "connected to {} ({}...)", url(), &SECRET[..20].to_ascii_uppercase()
-            )}]},
-        })
-        .to_string();
-        let out = line(reply.as_bytes()).expect("the line held the secret");
-        let parsed: serde_json::Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(
-            parsed["result"]["content"][0]["text"],
-            format!("connected to {} ({}...)", mark(), mark())
-        );
-        assert!(
-            !String::from_utf8_lossy(&out)
-                .to_ascii_lowercase()
-                .contains(&SECRET[..16])
-        );
-        let plain: &[u8] =
-            b"{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"text\":\"00112233445566 \xff\"}}";
-        assert_eq!(line(plain), None);
-    }
-
-    #[test]
-    fn the_password_is_hidden_on_stdout_on_stderr_and_in_the_guards_notes() {
-        hide_password();
-        let mark = mark();
-        let text = format!(
-            "proxy said {PASSWORD} and {}",
-            PASSWORD.to_ascii_uppercase()
-        );
-        let expected = format!("proxy said {mark} and {mark}");
-        let out = line(text.as_bytes()).expect("the line held the password");
-        assert_eq!(String::from_utf8(out).unwrap(), expected);
-        assert_eq!(
-            redacted(&format!("{text}\n"), 4096),
-            format!("{expected}\n")
-        );
-        assert_eq!(super::redacted(&text), expected);
-    }
-
-    #[test]
-    fn the_proxy_authorization_value_is_hidden_whole_however_the_reads_split() {
-        let basic = hide_password();
-        let mark = mark();
-        let header = format!("Proxy-Authorization: Basic {basic}\nnext\n");
-        for step in [1, 5, 16, 95, 96, 97, 4096] {
-            assert_eq!(
-                redacted(&header, step),
-                format!("Proxy-Authorization: Basic {mark}\nnext\n"),
-                "reads of {step} bytes"
-            );
-        }
-        let reply =
-            serde_json::json!({"headers": {"Proxy-Authorization": format!("Basic {basic}")}})
-                .to_string();
-        let out = String::from_utf8(line(reply.as_bytes()).unwrap()).unwrap();
-        assert!(out.contains(&format!("Basic {mark}")) && !out.contains(&basic));
-    }
-
-    /// Every Basic value for the user `clauseo` starts the same 12 characters, so a start of
-    /// the credential is taken out only past them: another value sharing its first 16 (and so
-    /// the password's first 4 hex digits) is left as it is, and a cut-short real one is not.
-    #[test]
-    fn another_basic_value_with_the_same_start_is_not_hidden() {
-        let basic = hide_password();
-        let mark = mark();
-        let other = base64(format!("clauseo:feed{}", &SECRET[..60]).as_bytes());
-        assert_eq!(other[..16], basic[..16]);
-        assert_ne!(other[..17], basic[..17]);
-        let header = format!("Proxy-Authorization: Basic {other}\n");
-        assert_eq!(line(header.as_bytes()), None);
-        for step in [1, 16, 17, 4096] {
-            assert_eq!(redacted(&header, step), header, "reads of {step} bytes");
-        }
-        // 27 characters: the user's 12 and 15 more, too short to tell.
-        let short = format!("Basic {}...", &basic[..27]);
-        assert_eq!(line(short.as_bytes()), None);
-        let cut = format!("Basic {}...", &basic[..28]);
-        assert_eq!(
-            String::from_utf8(line(cut.as_bytes()).unwrap()).unwrap(),
-            format!("Basic {mark}...")
-        );
-    }
-
-    #[test]
-    fn the_password_split_across_reads_is_still_hidden() {
-        hide_password();
-        let mark = mark();
-        let input = format!("a {PASSWORD} b\nc {}\u{2026}\n", &PASSWORD[..20]);
-        for step in [1, 2, 7, 16, 63, 64, 65] {
-            let out = redacted(&input, step);
-            assert_eq!(
-                out,
-                format!("a {mark} b\nc {mark}\u{2026}\n"),
-                "reads of {step} bytes"
-            );
-            assert!(!out.contains(&PASSWORD[..16]), "reads of {step} bytes");
-        }
-    }
-
-    #[test]
-    fn a_literal_is_taken_out_with_a_long_enough_start() {
-        let hex = Secrets::literal(SECRET.as_bytes());
-        assert_eq!(
-            super::scan(&SECRET.as_bytes()[..16], std::slice::from_ref(&hex), false).1,
-            16
-        );
-        let found = super::scan(&SECRET.as_bytes()[..16], &[hex], false).0;
-        assert_eq!(found, Some(MARK.to_vec()));
-        let later = Secrets::literal(SECRET.as_bytes()).start_after(40);
-        assert_eq!(
-            super::scan(
-                &SECRET.as_bytes()[..55],
-                std::slice::from_ref(&later),
-                false
-            )
-            .0,
-            None
-        );
-        let found = super::scan(
-            &SECRET.as_bytes()[..56],
-            std::slice::from_ref(&later),
-            false,
-        )
-        .0;
-        assert_eq!(found, Some(MARK.to_vec()));
-        assert_eq!(
-            super::scan(SECRET.as_bytes(), &[later], false).0,
-            Some(MARK.to_vec())
-        );
-        // An empty literal matches nothing.
-        assert_eq!(super::scan(b"abc", &[Secrets::literal(b"")], false).0, None);
-    }
-}
+mod tests;

@@ -22,6 +22,9 @@ use super::proxy_auth::Password;
 use crate::write;
 use crate::write::secret::Refused;
 
+mod session_key;
+pub(crate) use session_key::{SESSION_KEY, agent_env, new_session_key};
+
 /// Which family's rules apply: the names, the folders and how names compare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Os {

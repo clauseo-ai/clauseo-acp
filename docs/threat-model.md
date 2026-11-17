@@ -258,6 +258,14 @@ anything the agent starts.
   a firm's cloud settings are never skipped, offline included. Scope: Codex's home; what Codex
   loads from elsewhere (`$HOME/.agents/skills`, `/etc/codex`, macOS managed preferences) is
   handled elsewhere
+- `built` (Windows, our agent-browser build): agent-browser's daemon serves only a client that
+  proves the per-session key, over a pipe whose DACL admits the user and SYSTEM, and refuses a
+  restricted (sandboxed) token. Limit: the key stops the bundled CLI run by hand and raw pipe
+  clients, not an unsandboxed process of the same user that injects code. Some threads of the
+  hardened processes (the MCP server's output reader, loader and thread-pool threads from
+  process start) keep the default thread DACL, so such a process can take one over and read the
+  key, and the install is per-user, so it could replace the binary anyway
+  ([README](../crates/desktop/agent-browser/README.md))
 
 ## Egress proxy
 

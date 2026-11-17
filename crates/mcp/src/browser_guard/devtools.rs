@@ -38,6 +38,9 @@ mod proc_info;
 mod routes;
 pub(crate) mod seam;
 
+/// The OS's random source as 64 lower-case hex digits, for the session key too (`env.rs`).
+pub(crate) use handshake::new_secret;
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Chain, Cursor, Read, Write};

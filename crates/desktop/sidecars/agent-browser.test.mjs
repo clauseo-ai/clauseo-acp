@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
-import { fetchAgentBrowser, parsePin } from "./agent-browser.mjs";
+import { fetchAgentBrowser, ourAssetUrl, parsePin } from "./agent-browser.mjs";
 
 const root = await mkdtemp(join(tmpdir(), "agent-browser-test-"));
 after(() => rm(root, { recursive: true, force: true }));
@@ -20,6 +20,18 @@ after(() => rm(root, { recursive: true, force: true }));
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const VERSION = "0.41.1";
 const PREFIX = `https://github.com/vercel-labs/agent-browser/releases/download/v${VERSION}`;
+const TAG = `agent-browser-v${VERSION}-clauseo.1`;
+const OURS = `https://github.com/clauseo-ai/clauseo-acp/releases/download/${TAG}`;
+const COMMIT = "5868f7c05020e047c00e68e4abf9253cce864f41";
+const TARBALL = "ca59c4590a5a265d106c494d7726b9cde8575536d31834709dd525da8d778f6f";
+/** The five keys before the first table, as a well-formed pin holds them. */
+const TOP = [
+  `version = "${VERSION}"`,
+  `patched_tag = "${TAG}"`,
+  `upstream_commit = "${COMMIT}"`,
+  `rustc_commit = "${"d".repeat(40)}"`,
+  `upstream_tarball_sha256 = "${TARBALL}"`,
+].join("\n");
 const BODY = Buffer.from("#!fake agent-browser binary\n");
 
 let counter = 0;
@@ -29,7 +41,7 @@ async function pinFile(url, digest, triple = "x86_64-unknown-linux-gnu") {
   const path = join(root, `pin-${counter}.toml`);
   await writeFile(
     path,
-    `version = "${VERSION}"\n\n[${triple}]\nurl = "${url}"\nsha256 = "${digest}"\n`,
+    `${TOP}\n\n[${triple}]\nurl = "${url}"\nsha256 = "${digest}"\n`,
   );
   return path;
 }
@@ -230,7 +242,7 @@ describe("fetchAgentBrowser", () => {
 
   test("a triple with none = true returns null and writes nothing", async () => {
     const pinPath = join(root, "none.toml");
-    await writeFile(pinPath, `version = "${VERSION}"\n\n[x86_64-unknown-linux-gnu]\nnone = true\n`);
+    await writeFile(pinPath, `${TOP}\n\n[x86_64-unknown-linux-gnu]\nnone = true\n`);
     const { fetch, calls } = stubFetch();
     const dest = await destIn("agent-browser-x86_64-unknown-linux-gnu");
     assert.equal(await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), null);
@@ -238,11 +250,98 @@ describe("fetchAgentBrowser", () => {
     assert.equal(await exists(dest), false);
   });
 
-  test("a Windows triple's destination takes .exe as the caller gives it", async () => {
-    const pinPath = await pinFile(`${PREFIX}/agent-browser-win32-x64.exe`, sha(BODY), "x86_64-pc-windows-msvc");
-    const { fetch } = stubFetch(BODY);
+  test("a Windows triple downloads our build, its destination taking .exe as the caller gives it", async () => {
+    const url = `${OURS}/agent-browser-x86_64-pc-windows-msvc.exe`;
+    const pinPath = await pinFile(url, sha(BODY), "x86_64-pc-windows-msvc");
+    const { fetch, calls } = stubFetch(BODY);
     const dest = await destIn("agent-browser-x86_64-pc-windows-msvc.exe");
     await fetchAgentBrowser("x86_64-pc-windows-msvc", dest, { fetch, pinPath, env: {} });
+    assert.equal(calls[0].url, url);
+    assert.deepEqual(await readFile(dest), BODY);
+  });
+
+  test("a Windows url off both releases, or with another triple's asset, throws before any download", async () => {
+    const bad = [
+      `https://github.com/vercel-labs/agent-browser/releases/download/${TAG}/agent-browser-x86_64-pc-windows-msvc.exe`,
+      `${OURS}/agent-browser-aarch64-pc-windows-msvc.exe`,
+      `${OURS}/agent-browser-win32-x64.exe`,
+      `https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v${VERSION}-clauseo.2/agent-browser-x86_64-pc-windows-msvc.exe`,
+      `https://github.com/someone/clauseo-acp/releases/download/${TAG}/agent-browser-x86_64-pc-windows-msvc.exe`,
+      `${OURS}/agent-browser-x86_64-pc-windows-msvc.exe?x=1`,
+    ];
+    for (const url of bad) {
+      const pinPath = await pinFile(url, sha(BODY), "x86_64-pc-windows-msvc");
+      const { fetch, calls } = stubFetch(BODY);
+      const dest = await destIn("agent-browser-x86_64-pc-windows-msvc.exe");
+      await assert.rejects(fetchAgentBrowser("x86_64-pc-windows-msvc", dest, { fetch, pinPath, env: {} }), /pinned url/, url);
+      assert.equal(calls.length, 0, url);
+    }
+  });
+
+  test("a Linux url on our release takes agent-browser-<triple>, with no .exe", async () => {
+    const good = `${OURS}/agent-browser-x86_64-unknown-linux-gnu`;
+    const pinPath = await pinFile(good, sha(BODY));
+    const { fetch, calls } = stubFetch(BODY);
+    const dest = await destIn("agent-browser-linux-x64");
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} });
+    assert.deepEqual(calls.map((c) => c.url), [good]);
+    for (const url of [`${good}.exe`, `${OURS}/agent-browser-linux-x64`, `${OURS}/agent-browser-aarch64-unknown-linux-gnu`]) {
+      const badPin = await pinFile(url, sha(BODY));
+      const stub = stubFetch(BODY);
+      await assert.rejects(
+        fetchAgentBrowser("x86_64-unknown-linux-gnu", await destIn("x"), { fetch: stub.fetch, pinPath: badPin, env: {} }),
+        /pinned url/,
+        url,
+      );
+      assert.equal(stub.calls.length, 0, url);
+    }
+  });
+
+  test("a Windows table may still name upstream's release (for a triple handed back upstream)", async () => {
+    const url = `${PREFIX}/agent-browser-win32-x64.exe`;
+    const pinPath = await pinFile(url, sha(BODY), "x86_64-pc-windows-msvc");
+    const { fetch, calls } = stubFetch(BODY);
+    await fetchAgentBrowser("x86_64-pc-windows-msvc", await destIn("a.exe"), { fetch, pinPath, env: {} });
+    assert.deepEqual(calls.map((c) => c.url), [url]);
+  });
+
+  test("the all-zero placeholder sha256 throws before any download, naming the workflow", async () => {
+    const pinPath = await pinFile(
+      `${OURS}/agent-browser-aarch64-pc-windows-msvc.exe`,
+      "0".repeat(64),
+      "aarch64-pc-windows-msvc",
+    );
+    const { fetch, calls } = stubFetch(BODY);
+    const dest = await destIn("agent-browser-aarch64-pc-windows-msvc.exe");
+    await assert.rejects(
+      fetchAgentBrowser("aarch64-pc-windows-msvc", dest, { fetch, pinPath, env: { GH_TOKEN: "ghs_test" } }),
+      /placeholder; run \.github\/workflows\/agent-browser-build\.yml/,
+    );
+    assert.equal(calls.length, 0);
+    assert.equal(await exists(dest), false);
+  });
+
+  test("with GH_TOKEN a Windows build comes from our release, by patched_tag", async () => {
+    const pinPath = await pinFile(
+      `${OURS}/agent-browser-aarch64-pc-windows-msvc.exe`,
+      sha(BODY),
+      "aarch64-pc-windows-msvc",
+    );
+    const assetApi = "https://api.github.com/repos/clauseo-ai/clauseo-acp/releases/assets/9";
+    const release = { assets: [{ name: "agent-browser-aarch64-pc-windows-msvc.exe", url: assetApi }] };
+    const server = scripted([() => Response.json(release), () => new Response(BODY, { status: 200 })]);
+    const dest = await destIn("agent-browser-aarch64-pc-windows-msvc.exe");
+    await fetchAgentBrowser("aarch64-pc-windows-msvc", dest, {
+      fetch: server.fetch,
+      pinPath,
+      env: { GH_TOKEN: "ghs_test" },
+      wait: waits().wait,
+      log: () => {},
+    });
+    assert.deepEqual(server.calls.map((c) => c.url), [
+      `https://api.github.com/repos/clauseo-ai/clauseo-acp/releases/tags/${TAG}`,
+      assetApi,
+    ]);
     assert.deepEqual(await readFile(dest), BODY);
   });
 
@@ -296,10 +395,13 @@ describe("fetchAgentBrowser", () => {
 });
 
 describe("parsePin", () => {
-  test("reads the real pin: six triples, each with a url and a sha256, none used", async () => {
+  test("reads the real pin: the upstream source, six triples, each with a url and a sha256", async () => {
     const text = await readFile(new URL("../agent-browser.toml", import.meta.url), "utf8");
     const pin = parsePin(text);
     assert.equal(pin.version, VERSION);
+    assert.equal(pin.patchedTag, TAG);
+    assert.equal(pin.upstreamCommit, COMMIT);
+    assert.equal(pin.upstreamTarballSha256, TARBALL);
     assert.deepEqual(
       [...pin.triples.keys()].sort(),
       [
@@ -312,8 +414,16 @@ describe("parsePin", () => {
       ],
     );
     for (const [triple, entry] of pin.triples) {
-      assert.equal(entry.none, undefined, `${triple} has no build upstream`);
+      assert.equal(entry.none, undefined, `${triple} has no build`);
       assert.match(entry.sha256, /^[0-9a-f]{64}$/, triple);
+      // macOS and Windows take our build today, Linux upstream's (see the pin's header).
+      if (triple.endsWith("-unknown-linux-gnu")) {
+        assert.ok(entry.url.startsWith(`${PREFIX}/agent-browser-linux-`), triple);
+        continue;
+      }
+      const ext = triple.endsWith("-pc-windows-msvc") ? ".exe" : "";
+      assert.equal(entry.url, ourAssetUrl(triple, pin), triple);
+      assert.equal(entry.url, `${OURS}/agent-browser-${triple}${ext}`, triple);
     }
   });
 
@@ -321,13 +431,25 @@ describe("parsePin", () => {
     const cases = {
       "no version": `[x86_64-unknown-linux-gnu]\nurl = "https://github.com/a"\nsha256 = "${"0".repeat(64)}"\n`,
       "not semver": `version = "v1"\n`,
-      "missing sha256": `version = "1.0.0"\n[t]\nurl = "https://github.com/a"\n`,
-      "upper-case hex": `version = "1.0.0"\n[t]\nurl = "https://github.com/a"\nsha256 = "${"A".repeat(64)}"\n`,
-      "unknown key": `version = "1.0.0"\n[t]\nurl = "https://github.com/a"\nsha256 = "${"0".repeat(64)}"\nsize = "1"\n`,
-      "duplicate table": `version = "1.0.0"\n[t]\nnone = true\n[t]\nnone = true\n`,
-      "none with url": `version = "1.0.0"\n[t]\nnone = true\nurl = "https://github.com/a"\n`,
-      "inline table": `version = "1.0.0"\n[t]\nurl = { a = "b" }\n`,
-      "trailing comment": `version = "1.0.0"\n[t]\nnone = true # why\n`,
+      "no patched_tag": TOP.replace(/^patched_tag.*\n/m, ""),
+      "patched_tag of another version": TOP.replace(TAG, "agent-browser-v0.41.2-clauseo.1"),
+      "patched_tag numbered 0": TOP.replace(TAG, `agent-browser-v${VERSION}-clauseo.0`),
+      "patched_tag with a dot wildcard": TOP.replace(TAG, "agent-browser-v0x41x1-clauseo.1"),
+      "short upstream_commit": TOP.replace(COMMIT, COMMIT.slice(1)),
+      "upper-case upstream_tarball_sha256": TOP.replace(TARBALL, TARBALL.toUpperCase()),
+      "no upstream_tarball_sha256": TOP.replace(/\nupstream_tarball_sha256.*$/, ""),
+      "no rustc_commit": TOP.replace(/^rustc_commit.*\n/m, ""),
+      "short rustc_commit": TOP.replace("d".repeat(40), "d".repeat(39)),
+      "a top key twice": `${TOP}\nupstream_commit = "${COMMIT}"\n`,
+      "an unknown top key": `${TOP}\nupstream = "x"\n`,
+      "a top key inside a table": `${TOP}\n[t]\nnone = true\npatched_tag = "${TAG}"\n`,
+      "missing sha256": `${TOP}\n[t]\nurl = "https://github.com/a"\n`,
+      "upper-case hex": `${TOP}\n[t]\nurl = "https://github.com/a"\nsha256 = "${"A".repeat(64)}"\n`,
+      "unknown key": `${TOP}\n[t]\nurl = "https://github.com/a"\nsha256 = "${"0".repeat(64)}"\nsize = "1"\n`,
+      "duplicate table": `${TOP}\n[t]\nnone = true\n[t]\nnone = true\n`,
+      "none with url": `${TOP}\n[t]\nnone = true\nurl = "https://github.com/a"\n`,
+      "inline table": `${TOP}\n[t]\nurl = { a = "b" }\n`,
+      "trailing comment": `${TOP}\n[t]\nnone = true # why\n`,
     };
     for (const [name, text] of Object.entries(cases)) {
       assert.throws(() => parsePin(text), /agent-browser\.toml/, name);
