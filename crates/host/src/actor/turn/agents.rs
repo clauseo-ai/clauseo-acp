@@ -275,6 +275,7 @@ pub(super) fn launch_now(
         "agent launched"
     );
     let agent = Agent {
+        always: always.in_matter(&folder, &matter_spellings),
         id,
         link,
         stage: Stage::Initializing,
@@ -311,7 +312,6 @@ pub(super) fn launch_now(
         matter_spellings,
         idle: super::idle::Mark::on_profile(profile),
         guard_blocks: super::updates::guard_blocks::Reads::default(),
-        always: always.in_matter(&folder, &matter_spellings),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
