@@ -8,8 +8,6 @@
 use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
 use std::path::Path;
 
-use rustix::fs::{CWD, FileType, Mode, mknodat};
-
 use super::in_place_tests::{record_stat, refused_write_back, saved};
 use super::outcome_tests::{Matter, blob, matter, path, write_back};
 use super::{Failed, Op};
@@ -188,31 +186,51 @@ fn a_file_swapped_since_it_was_opened_is_refused_and_both_left_alone() {
     assert_eq!(bytes(&file), "another file");
 }
 
-/// A FIFO where the file was: the open does not wait for a writer, and it is refused as
-/// unconfirmed (not a regular file).
-#[test]
-fn a_fifo_target_is_refused_without_waiting() {
-    let mut matter = matter("torn-fifo");
-    saved(&mut matter, "Lease.docx", "lease now");
+/// The matter's file `Lease.docx`, saved, then replaced by a special file `make` puts at its
+/// path, with that file's stat recorded as the checkpoint's: a write in place of it is tried.
+fn special_target(matter: &mut Matter, make: impl FnOnce(&Path)) -> std::path::PathBuf {
+    saved(matter, "Lease.docx", "lease now");
     let file = matter.folder.join("Lease.docx");
     write::remove_file(&file).unwrap();
-    mknodat(CWD, &file, FileType::Fifo, Mode::from_raw_mode(0o644), 0).unwrap();
-    record_stat(&mut matter, 0, "Lease.docx");
-    let ops = [Op::Write(
-        path("Lease.docx"),
-        blob(&mut matter, "lease then"),
-    )];
-    let done = refused_write_back(&matter, &ops).unwrap();
+    make(&file);
+    record_stat(matter, 0, "Lease.docx");
+    file
+}
+
+/// Writes `Lease.docx` with its rename refused, and checks it was refused as unconfirmed.
+fn refused_as_unconfirmed(matter: &mut Matter) {
+    let ops = [Op::Write(path("Lease.docx"), blob(matter, "lease then"))];
+    let done = refused_write_back(matter, &ops).unwrap();
     assert_eq!(
         done.unfinished.refused,
         [(path("Lease.docx"), RefusedBecause::SavedCopyUnconfirmed)]
     );
-    assert!(
-        std::fs::symlink_metadata(&file)
-            .unwrap()
-            .file_type()
-            .is_fifo()
-    );
+}
+
+/// A socket file where the file was (a special file on every Unix): never written in place,
+/// refused as unconfirmed, and left as it was.
+#[test]
+fn a_special_file_target_is_refused_and_left_as_it_was() {
+    let mut matter = matter("torn-socket");
+    let file = special_target(&mut matter, |file| write::socket_file(file).unwrap());
+    refused_as_unconfirmed(&mut matter);
+    let kind = std::fs::symlink_metadata(&file).unwrap().file_type();
+    assert!(kind.is_socket(), "{kind:?}");
+}
+
+/// A FIFO where the file was: the open does not wait for a writer, and it is refused as
+/// unconfirmed (not a regular file). Where rustix makes one (Linux, FreeBSD).
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[test]
+fn a_fifo_target_is_refused_without_waiting() {
+    use rustix::fs::{CWD, FileType, Mode, mknodat};
+    let mut matter = matter("torn-fifo");
+    let file = special_target(&mut matter, |file| {
+        mknodat(CWD, file, FileType::Fifo, Mode::from_raw_mode(0o644), 0).unwrap();
+    });
+    refused_as_unconfirmed(&mut matter);
+    let kind = std::fs::symlink_metadata(&file).unwrap().file_type();
+    assert!(kind.is_fifo(), "{kind:?}");
 }
 
 /// A delete the folder refuses for its permissions (a folder that denies removing its files):
