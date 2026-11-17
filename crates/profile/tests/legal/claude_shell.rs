@@ -27,7 +27,12 @@ fn only_claude_on_macos_is_told_which_commands_its_sandbox_blocks() {
     let profile = super::launch_profile(&std::env::temp_dir().join("claude-shell-line"));
     // "Working at scale", when it ships, comes after the line (legal/subagents.rs).
     let scale = super::subagents::claude_scale_suffix();
-    let text = profile.instructions_for(AgentKind::Claude);
+    // R22's line against posing as a browser comes first, on every OS.
+    let text = format!(
+        "{}\n\n{}",
+        profile.instructions_for(AgentKind::Claude),
+        clauseo_profile::instructions::CLAUDE_WEB.trim()
+    );
     assert_eq!(
         profile.claude_instructions_for(true),
         format!("{text}\n\n{line}{scale}")

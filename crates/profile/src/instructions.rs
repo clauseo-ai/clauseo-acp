@@ -82,7 +82,9 @@ pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-s
 /// found `curl` (a download, or a check that a link is alive) the commonest repeated "run outside
 /// the sandbox" card on a Mac, so the line names the download commands on macOS and Windows,
 /// sends all web work to the browser tools (whose downloads land in `<matter>/downloads`) and
-/// says what to do without a browser (Codex on Windows today). Claude never gets it.
+/// says what to do without a browser (Codex on Windows today). It also holds R22's rule against
+/// posing as a person's browser when a site refuses (Claude's wording: [`CLAUDE_WEB`]). Claude
+/// never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
@@ -131,6 +133,12 @@ pub const CODEX_PDF: &str = include_str!("../assets/instructions/codex-pdf.txt")
 pub fn codex_pdf() -> &'static str {
     CODEX_PDF.trim()
 }
+
+/// The line every Claude session gets right after the instructions, on every OS: R22's rule
+/// against posing as a browser. A page its web fetch tool or the site refuses is never retried
+/// with a browser user-agent or another disguise; the lawyer is told and given the link. Codex
+/// gets its own wording in [`CODEX_SHELL_OFFLINE`].
+pub const CLAUDE_WEB: &str = include_str!("../assets/instructions/claude-web.txt");
 
 /// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
 /// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off

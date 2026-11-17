@@ -227,3 +227,31 @@ fn codex_is_sent_to_the_browser_for_web_work_and_never_to_curl() {
         assert!(codex.contains("`curl`") && codex.contains("`wget`") && codex.contains("`iwr`"));
     }
 }
+
+/// R22: a page the fetch tool or the site refuses is never retried in disguise. Claude's line
+/// comes right after the instructions and Codex's sits in its offline line, on every OS and
+/// whatever the browser part, each in the reviewed words; neither agent gets the other's.
+#[test]
+fn each_agent_is_told_never_to_pose_as_a_browser_when_a_site_refuses() {
+    use clauseo_profile::instructions::{CLAUDE_WEB, CODEX_SHELL_OFFLINE};
+    let claude_line = "If the fetch tool or the site refuses a page, never retry with a browser \
+                       user-agent or any other disguise; tell the lawyer which one refused and \
+                       give the link to open.";
+    let codex_line = "If a page cannot be opened or the site refuses, never retry by posing as a \
+                      person's browser; use Clauseo's browser if available, otherwise tell the \
+                      lawyer which refused and give the link.";
+    assert_eq!(CLAUDE_WEB.trim(), claude_line);
+    assert!(
+        CODEX_SHELL_OFFLINE.contains(codex_line),
+        "{CODEX_SHELL_OFFLINE}"
+    );
+    let profile = profile();
+    for macos in [false, true] {
+        let claude = profile.claude_instructions_for(macos);
+        let codex = profile.codex_instructions_for(macos);
+        assert_eq!(claude.matches(claude_line).count(), 1, "{claude}");
+        assert_eq!(codex.matches(codex_line).count(), 1, "{codex}");
+        assert!(!claude.contains(codex_line) && !codex.contains(claude_line));
+    }
+    assert!(!profile.instructions().contains("disguise"));
+}

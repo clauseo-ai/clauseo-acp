@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL, SCALE_CLAUDE,
-    STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_pdf, codex_shell, connectors_part,
-    word_count,
+    BrowserPart, CLAUDE_SHELL_MACOS, CLAUDE_WEB, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
+    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_pdf, codex_shell,
+    connectors_part, word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
@@ -24,14 +24,15 @@ const LEGAL_MAX: usize = 1360;
 /// 0058's cap, kept.
 const SHARED_MAX: usize = 1800;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
-/// legal part, the shell line and "Working at scale".
-const CLAUDE_MAX: usize = 2250;
+/// legal part, R22's line against posing as a browser, the shell line and "Working at scale".
+/// Room for that browser-refusal line and #1215's shell line (0058, amended).
+const CLAUDE_MAX: usize = 2290;
 /// Codex's whole `developer_instructions`, the worst case on each OS: the tools part with the
 /// stetdoc line, the legal part, the offline line, the refusal line, the shell line (macOS), the
 /// built-in skills index and the PDF line the desktop adds with Clauseo's PDF tools on its `PATH`.
-/// 0058's amendment for the PDF and web lines: 2,086 words on macOS and 2,030 on Windows.
+/// Room for the PDF line, the PDF and web steering and R22's browser-refusal rule (0058, amended).
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-const CODEX_MAX: usize = 2100;
+const CODEX_MAX: usize = 2120;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -108,22 +109,28 @@ fn claude_standing_text_budget() {
         &profile.claude_instructions_for(true),
         browser_part(BrowserPart::NotInstalled),
     );
-    for part in [LEGAL, STETDOC_CLI, CLAUDE_SHELL_MACOS, SCALE_CLAUDE] {
+    for part in [
+        LEGAL,
+        STETDOC_CLI,
+        CLAUDE_WEB,
+        CLAUDE_SHELL_MACOS,
+        SCALE_CLAUDE,
+    ] {
         let head = part.trim().lines().next().unwrap();
         assert!(text.contains(head.split('{').next().unwrap()), "{head}");
     }
     let count = word_count(&text);
     assert!(
         count <= CLAUDE_MAX,
-        "Claude's standing text has {count} words"
+        "Claude worst case {count} words, cap {CLAUDE_MAX}"
     );
 }
 
 /// Codex's standing text: everything in `developer_instructions` with the built-in index and the
 /// PDF line (the desktop's, `setup/hook.rs`, with Clauseo's PDF tools on its `PATH`), on macOS
 /// with its shell line and on Windows without: every line that can ship, so the cap is what a
-/// lawyer's ChatGPT really gets. The browser part is the longest Codex can get, the `browser`
-/// MCP entry's.
+/// lawyer's Codex session really gets. The browser part is the longest Codex can get, the
+/// `browser` MCP entry's.
 #[test]
 fn codex_standing_text_budget() {
     let profile = profile();
@@ -149,7 +156,7 @@ fn codex_standing_text_budget() {
         let count = word_count(&text);
         assert!(
             count <= CODEX_MAX,
-            "Codex's standing text has {count} words (macOS: {macos})"
+            "Codex worst case (macOS: {macos}) {count} words, cap {CODEX_MAX}"
         );
     }
 }

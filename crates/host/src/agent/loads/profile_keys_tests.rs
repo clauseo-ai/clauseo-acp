@@ -478,7 +478,7 @@ fn codex_offline_line_offers_web_search_only_with_it() {
     let off = instructions(OFF);
     let kept = line.strip_suffix(CODEX_SHELL_SEARCH).unwrap().trim_end();
     assert!(
-        kept.ends_with("with no browser, tell the lawyer."),
+        kept.ends_with("tell the lawyer which refused and give the link."),
         "{kept}"
     );
     assert_eq!(off, format!("Rules.\n\n{kept}"));

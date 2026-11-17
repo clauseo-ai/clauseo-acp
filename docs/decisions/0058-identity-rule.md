@@ -124,6 +124,15 @@ goes 24 to 56, so that all web work goes to the browser tools, never to `curl`, 
 repeated card in stage E's census. Measured: 2,038 + 48 = 2,086 on macOS and 2,030 on Windows.
 The cap goes from 2,000 to 2,100.
 
+Amended 2026-11-17 (R22's rule against posing as a browser, the same branch): each agent is told
+never to retry a refused page in disguise. Claude gets "If the fetch tool or the site refuses a
+page, never retry with a browser user-agent or any other disguise; tell the lawyer which one
+refused and give the link to open." on its own line after the instructions. Codex gets "If a page
+cannot be opened or the site refuses, never retry by posing as a person's browser; use Clauseo's
+browser if available, otherwise tell the lawyer which refused and give the link." inside its
+offline line. Claude's cap goes from 2,250 to 2,290, which also makes room for #1215's shell line.
+Codex's cap goes from 2,100 to 2,120, the PDF line included.
+
 ## Status
 
 accepted
