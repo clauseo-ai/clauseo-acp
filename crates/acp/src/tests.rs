@@ -388,3 +388,43 @@ fn rpc_data_keeps_codex_s_message() {
     );
     assert_eq!(Error::Closed.rpc_data(), None);
 }
+
+/// The account refused Codex's reviewer: only a `session/prompt` error that names
+/// `approvals_reviewer` and the reviewer, in its `data` (codex-acp's shape) or its message.
+#[test]
+fn auto_review_refused_reads_only_the_reviewer_refusal() {
+    let refusal = "invalid thread settings override: invalid value for `approvals_reviewer`: \
+                   `AutoReview` is not in the allowed set [User] (set by MDM)";
+    let rpc = |method: &str, message: &str, data: Option<&str>| Error::Rpc {
+        method: method.to_owned(),
+        code: -32603,
+        message: message.to_owned(),
+        data: "keys: details".to_owned(),
+        data_text: data.map(str::to_owned),
+        data_fields: crate::RpcData::default(),
+    };
+    let details = json!({"details": refusal}).to_string();
+    assert!(rpc("session/prompt", "Internal error", Some(&details)).auto_review_refused());
+    assert!(rpc("session/prompt", refusal, None).auto_review_refused());
+    assert!(
+        rpc(
+            "session/prompt",
+            "Internal error",
+            Some("approvals_reviewer auto_review")
+        )
+        .auto_review_refused()
+    );
+    // Another refusal, another call or another error: none.
+    let sandbox = "invalid value for `sandbox_mode`: `DangerFullAccess` is not in the allowed set";
+    assert!(!rpc("session/prompt", "Internal error", Some(sandbox)).auto_review_refused());
+    assert!(
+        !rpc(
+            "session/prompt",
+            "Internal error",
+            Some("approvals_reviewer")
+        )
+        .auto_review_refused()
+    );
+    assert!(!rpc("session/set_mode", refusal, None).auto_review_refused());
+    assert!(!Error::Closed.auto_review_refused());
+}

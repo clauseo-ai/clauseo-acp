@@ -1,0 +1,7 @@
+{"scenario":"codex-prompt-other-error","description":"Codex in mode agent whose prompt fails with another requirements refusal (sandbox_mode, not the reviewer): the client must not switch the mode nor send the prompt again.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","error":{"code":-32603,"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `sandbox_mode`: `DangerFullAccess` is not in the allowed set [ReadOnly] (set by MDM managed_config.toml)"}}}}

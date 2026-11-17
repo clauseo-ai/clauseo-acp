@@ -1,8 +1,8 @@
 //! A Codex agent (`codex-acp`, played by the `codex-*` scenarios): its mode before the first
 //! prompt, its launch variables, `session/resume`, and its file changes, permissions, limit and
 //! sign-in failures through the host. The guard's trust check is in `codex_guard.rs`, the
-//! `.codex` refusal in `codex_folder.rs`, `ListAgents` in `list_agents.rs` and the plans in
-//! `codex_plans.rs`.
+//! `.codex` refusal in `codex_folder.rs`, `ListAgents` in `list_agents.rs`, the plans in
+//! `codex_plans.rs` and the reviewer's fallback in `codex_reviewer.rs` (a submodule here).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -18,6 +18,9 @@ use serde_json::{Value, json};
 use crate::observe::Events;
 use crate::permissions::answer_from;
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
+
+#[path = "codex_reviewer.rs"]
+mod reviewer;
 
 /// The agent id that makes an agent Codex.
 pub(crate) const CODEX: &str = "codex-acp";

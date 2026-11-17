@@ -208,6 +208,31 @@ impl Error {
         method == "session/prompt" && crate::map::rpc_says_too_long(data_fields)
     }
 
+    /// Whether the agent refused the prompt because the account may not use Codex's reviewer: an
+    /// RPC error to `session/prompt` whose message or `data` names `approvals_reviewer` and the
+    /// reviewer. codex 0.162.1 checks the turn's `approvalsReviewer` against the requirements
+    /// before the turn starts and answers "invalid thread settings override: invalid value for
+    /// `approvals_reviewer`: `AutoReview` is not in the allowed set …" (`config/src/
+    /// config_requirements.rs:1863-1871`, `app-server/src/request_processors/
+    /// turn_processor.rs:884-904`); codex-acp passes it on under `data` (`dist/index.js:
+    /// 25697-25708`). Nothing ran, so the prompt may go again in another mode.
+    pub fn auto_review_refused(&self) -> bool {
+        let Self::Rpc {
+            method,
+            message,
+            data_text,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        let says = |text: &str| {
+            text.contains("approvals_reviewer")
+                && (text.contains("AutoReview") || text.contains("auto_review"))
+        };
+        method == PROMPT_METHOD && (says(message) || data_text.as_deref().is_some_and(says))
+    }
+
     /// The code a client sees. An error the agent answered a start request with
     /// ([`START_METHODS`]: `initialize`, `authenticate`, `session/new`, `session/load`,
     /// `session/resume`) is `agent.launch_failed`: the agent did not start, and its answer read
