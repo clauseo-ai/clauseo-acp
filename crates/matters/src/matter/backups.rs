@@ -146,16 +146,30 @@ struct Found {
 }
 
 /// Puts back or clears the backups crashed rewrites left in the folder of `matter` (see
-/// `matter/backups.rs`). Windows only, from the host's matter worker as it opens the matter;
-/// built on every OS for tests.
+/// `matter/backups.rs`). Windows only, through [`recover_leftovers`] as the host's matter worker
+/// opens the matter; built on every OS for tests.
 pub fn recover_backups(matter: &mut Matter) {
     let probe = matter.settings.probe.as_ref();
     recover(&mut matter.core, &matter.folder, probe);
 }
 
-/// [`recover_backups`] of `folder`.
-fn recover(core: &mut Core, folder: &Path, probe: &dyn PlaceholderProbe) {
-    // Each folder with the names the cache holds in it.
+/// Clears what a crash left in the folder of `matter`, from the open of the host's matter worker
+/// (the matter's one writer, before any job, so no write of its own is in flight): on every OS
+/// the temp files of an unfinished write (exactly `.clauseo-<digits>.tmp`, regular files, in the
+/// folders [`recover_backups`] goes through, [`write::sweep_temps`]), and on Windows the
+/// backups ([`recover_backups`]). A temp file that cannot be removed (held open by another
+/// process on Windows) stays, tried once and logged as a count; nothing here fails the open.
+pub fn recover_leftovers(matter: &mut Matter) {
+    for dir in folders(&matter.core, &matter.folder).keys() {
+        write::sweep_temps(dir);
+    }
+    #[cfg(windows)]
+    recover_backups(matter);
+}
+
+/// The matter folder and every folder the stat cache has a file in, each with the names the
+/// cache holds in it.
+fn folders(core: &Core, folder: &Path) -> BTreeMap<PathBuf, Vec<String>> {
     let mut dirs: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     dirs.insert(folder.to_owned(), Vec::new());
     for entry in &core.cache.entries {
@@ -165,8 +179,13 @@ fn recover(core: &mut Core, folder: &Path, probe: &dyn PlaceholderProbe) {
         };
         dirs.entry(dir).or_default().push(name.to_owned());
     }
+    dirs
+}
+
+/// [`recover_backups`] of `folder`.
+fn recover(core: &mut Core, folder: &Path, probe: &dyn PlaceholderProbe) {
     let mut done = Recovered::default();
-    for (dir, cached) in dirs {
+    for (dir, cached) in folders(core, folder) {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };

@@ -4,7 +4,7 @@
 //! back where the file is missing and removed where it is there; any other is left alone.
 //! `Matter::open` alone touches none of them.
 
-use clauseo_matters::{Matter, recover_backups};
+use clauseo_matters::{Matter, recover_backups, recover_leftovers};
 
 use crate::fixture::Fixture;
 use crate::support;
@@ -162,4 +162,55 @@ fn a_hashed_backup_of_no_cached_name_is_kept() {
     drop(reopened(&fx));
     assert!(!fx.exists(&long()));
     assert_eq!(fx.read(other), b"old");
+}
+
+/// The worker's open (`recover_leftovers`) removes a crash's temp files in the matter folder
+/// and in the folders with files in the cache, on every OS; the lawyer's names that only look
+/// like them stay, and a plain open removes nothing.
+#[test]
+fn the_open_removes_temp_files_a_crash_left_and_nothing_else() {
+    let fx = imported("leftovers-temps");
+    let temps = [".clauseo-0.tmp", "Papers/.clauseo-37.tmp"];
+    let kept = [
+        "notes.tmp",
+        "Papers/.clauseo-a.tmp",
+        "Papers/.clauseo-3.tmp.docx",
+        "Papers/clauseo-4.tmp",
+        "Papers/.clauseo-.tmp",
+        BACKUP,
+    ];
+    for name in temps.iter().chain(&kept) {
+        fx.write(name, "left");
+    }
+    let mut matter = fx.open(&fx.folder).unwrap();
+    for name in temps {
+        assert!(fx.exists(name), "{name}");
+    }
+    recover_leftovers(&mut matter);
+    for name in temps {
+        assert!(!fx.exists(name), "{name}");
+    }
+    for name in kept {
+        assert_eq!(fx.read(name), b"left", "{name}");
+    }
+    assert_eq!(fx.read("Papers/Lease.docx"), b"old");
+}
+
+/// Windows: a temp file another handle holds without sharing delete (another process writing
+/// it) stays, and the open goes on; once released, the next open removes it.
+#[cfg(test)]
+#[cfg(windows)]
+#[test]
+fn a_temp_file_another_handle_holds_is_left_and_the_open_goes_on() {
+    let fx = imported("leftovers-held");
+    let temp = "Papers/.clauseo-0.tmp";
+    fx.write(temp, "part");
+    // Read sharing only: no other open may delete it while the handle lives.
+    let held = support::hold_as_word(fx.file(temp));
+    let mut matter = fx.open(&fx.folder).unwrap();
+    recover_leftovers(&mut matter);
+    assert_eq!(fx.read(temp), b"part");
+    drop(held);
+    recover_leftovers(&mut matter);
+    assert!(!fx.exists(temp));
 }
