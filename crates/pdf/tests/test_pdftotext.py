@@ -41,6 +41,25 @@ for name in ("BUDGET", "MAX_OCR", "STALE"):
         setattr(m, name, type(getattr(m, name))(os.environ["TEST_" + name]))
 if "TEST_WORKERS" in os.environ:
     m.workers = lambda: int(os.environ["TEST_WORKERS"])
+if "TEST_TEXT_FAIL" in os.environ:
+    import pypdfium2
+    opened = m.open_doc
+
+    class Doc:
+        def __init__(self, doc):
+            self.doc = doc
+
+        def __len__(self):
+            return len(self.doc)
+
+        def __getitem__(self, i):
+            if i + 1 == int(os.environ["TEST_TEXT_FAIL"]):
+                raise pypdfium2.PdfiumError("Failed to load page")
+            return self.doc[i]
+
+        def close(self):
+            self.doc.close()
+    m.open_doc = lambda *args: Doc(opened(*args))
 if "TEST_RENDER_FAIL" in os.environ:
     render = m.pgm
 
@@ -86,7 +105,7 @@ hindi = os.environ.get("FAKE_HINDI") == "1" and "hin" in args[3]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write("%s %s\n" % (args[3], width))
 text = "\u0928\u094d\u092f\u093e\u092f\u093e\u0932\u092f " * 5 if hindi else "recognised words "
-sys.stdout.write("%sw%s\n" % (text, width))
+sys.stdout.write("%sw%s\n%s" % (text, width, "\f" if os.environ.get("FAKE_FF") else ""))
 """
 
 # The fake engine is a "#!python" script, and Windows runs only an .exe; there the real-engine
@@ -122,12 +141,15 @@ def pdf_bytes(pages):
                 b"(" + line.encode("latin-1") + b") Tj T* " for line in page[1]) + b"ET"
             res = b"/Font << /F1 %d 0 R >>" % font
         elif kind == "tounicode":
-            # Helvetica whose ToUnicode map sends A, B and C to ESC, BEL and C1's NEL.
+            # Helvetica whose ToUnicode map sends the capitals given (by default A, B and C to
+            # ESC, BEL and C1's NEL) to other code points.
+            chars = page[2] if len(page) > 2 else {"A": "001B", "B": "0007", "C": "0085"}
+            pairs = b" ".join(b"<%02X> <%s>" % (ord(k), v.encode()) for k, v in chars.items())
             cmap = (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName "
                     b"/T def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange "
-                    b"3 beginbfchar <41> <001B> <42> <0007> <43> <0085> endbfchar 1 beginbfrange "
+                    b"%d beginbfchar %s endbfchar 1 beginbfrange "
                     b"<61> <7A> <0061> endbfrange endcmap CMapName currentdict /CMap "
-                    b"defineresource pop end end")
+                    b"defineresource pop end end" % (len(chars), pairs))
             uni = add(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(cmap), cmap))
             tfont = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode %d 0 R >>"
                         % uni)
@@ -684,12 +706,40 @@ class PdfToText(unittest.TestCase):
             self.assertEqual(file.read(), "10")
 
     @fake_engine
-    def test_tesseract_chatter_stays_out_of_stderr(self):
-        self.pdf([("blank", 200)])
-        code, _, err = self.run_tool("doc.pdf", "-")
+    def test_tesseract_chatter_stays_out_of_stderr_and_out_of_a_failure(self):
+        self.pdf([("blank", 200), ("blank", 210)])
+        code, out, err = self.run_tool("doc.pdf", "-", FAKE_FAIL_WIDTH=876, TEST_WORKERS=1)
         self.assertEqual(code, 0, err)
-        self.assertNotIn("Error in pix", err)
-        self.assertNotIn("Estimating", err)
+        self.assertIn("OCR: page 2 failed: tesseract: Error: page broke\n", err)
+        for text in (out, err):
+            self.assertNotIn("Error in pix", text)
+            self.assertNotIn("Estimating", text)
+
+    def test_a_form_feed_in_a_pages_text_becomes_a_line_break(self):
+        self.pdf([("tounicode", "abcdefghijklmnopqrstuvwxyzAabc", {"A": "000C"}),
+                  ("blank", 200)])
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_ENGINE=os.path.join(self.dir, "x"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.split("\f")[0].split("\n", 1)[1], "abcdefghijklmnopqrstuvwxyz\nabc")
+        self.assertEqual(out.count("\f"), 2)
+
+    @fake_engine
+    def test_tesseracts_trailing_form_feed_is_not_a_page_break(self):
+        self.pdf([("blank", 200), ("blank", 210)])
+        code, out, err = self.run_tool("doc.pdf", "-", FAKE_FF=1)
+        self.assertEqual((code, out), (0, ocr(1, 834) + "\f" + ocr(2, 876, "eng") + "\f"), err)
+        mirror = self.mirror("doc.pdf")
+        self.assertEqual(mirror.split("\n", 1)[1], ocr(1, 834) + "\f" + ocr(2, 876, "eng") + "\f")
+
+    def test_a_page_pdfium_cannot_load_is_named_and_the_others_are_kept(self):
+        self.pdf([("text", [f"This is page number {n} of the typed bundle."]) for n in (1, 2, 3)])
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_TEXT_FAIL=2)
+        self.assertEqual(code, 0, err)
+        self.assertIn("page number 1", out)
+        self.assertIn("page number 3", out)
+        self.assertIn("[page 2 of doc.pdf: not read (PDFium: PdfiumError: Failed to load page); "
+                      "run the same command again", out)
+        self.assertIn("1 failed", out.split("\n")[0])
 
     def test_partial_output_says_so_on_its_first_line(self):
         self.pdf([("text", [f"This is page number {n} of the typed bundle."]) for n in (1, 2)]
@@ -712,8 +762,12 @@ class PdfToText(unittest.TestCase):
             "doc.pdf", "-", TEST_ENGINE=engine,
             TEST_TESSDATA=os.path.join(folder, "tessdata"))
         self.assertEqual(code, 0, err)
-        for word in ("HIGH", "COURT", "DELHI", "petition", "allowed", "costs"):
-            self.assertIn(word, out)
+        # Exactly: the page's marker, its two lines (blank lines aside), and one \f.
+        marker, words = out.split("\n", 1)
+        self.assertEqual(marker, "[page 1: no text layer; recognised by OCR (tesseract, "
+                         "eng+hin), errors are possible]")
+        self.assertTrue(words.endswith("\f") and words.count("\f") == 1, repr(words))
+        self.assertEqual([ln.strip() for ln in words[:-1].split("\n") if ln.strip()], lines)
 
 
 def wait_for_pids(path, want, seconds=30):
@@ -780,14 +834,14 @@ class WindowsEngine(unittest.TestCase):
                                 stderr=subprocess.PIPE)
         [pid] = wait_for_pids(pids, 1, 60)
         handle = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-        proc.kill()
-        proc.communicate(timeout=30)
-        if handle:
-            try:
-                self.assertEqual(k32.WaitForSingleObject(handle, 10_000), 0,
-                                 f"tesseract {pid} outlived pdftotext.exe")
-            finally:
-                k32.CloseHandle(handle)
+        self.assertTrue(handle, f"tesseract {pid} could not be opened while it ran")
+        try:
+            proc.kill()
+            proc.communicate(timeout=30)
+            self.assertEqual(k32.WaitForSingleObject(handle, 10_000), 0,
+                             f"tesseract {pid} outlived pdftotext.exe")
+        finally:
+            k32.CloseHandle(handle)
 
 
 if __name__ == "__main__":

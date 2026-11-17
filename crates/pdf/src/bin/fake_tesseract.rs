@@ -4,7 +4,8 @@
 //! --tessdata-dir <dir>`, no `TESSDATA_PREFIX`, `OMP_THREAD_LIMIT=1`, a PGM on stdin), appends
 //! its pid to `FAKE_PIDS`, writes leptonica's chatter on stderr, fails on a page `FAKE_FAIL_WIDTH`
 //! wide, sleeps `FAKE_SLEEP` seconds, logs `<langs> <width>` to `FAKE_LOG` and prints words
-//! naming the width (Hindi ones with `FAKE_HINDI=1` and `hin` asked for).
+//! naming the width (Hindi ones with `FAKE_HINDI=1` and `hin` asked for), then a form feed with
+//! `FAKE_FF` set, as the real one ends its page.
 #![expect(
     clippy::disallowed_methods,
     reason = "a test fake: it appends to the files its test names and sleeps as told"
@@ -74,7 +75,12 @@ fn main() -> ExitCode {
         "recognised words ".to_owned()
     };
     let mut out = std::io::stdout().lock();
-    if writeln!(out, "{text}w{width}").is_err() {
+    let page_break = if var("FAKE_FF").is_empty() {
+        ""
+    } else {
+        "\x0c"
+    };
+    if writeln!(out, "{text}w{width}").is_err() || write!(out, "{page_break}").is_err() {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
