@@ -27,9 +27,9 @@ The app track's 400 to 499 is used up. Parts went to other threads, as their row
 
 When a thread runs out of its block, it asks the app track, which hands out a sub-range of 900 to 999. Every hand-out gets a row here.
 
-| Thread                                                                  | UC ids           | Handed out |
-| ----------------------------------------------------------------------- | ---------------- | ---------- |
-| app track (helper step: UC-906, UC-907 in use; UC-908 to UC-919 unused) | UC-900 to UC-919 | 2026-11-17 |
+| Thread                                                                      | UC ids           | Handed out |
+| --------------------------------------------------------------------------- | ---------------- | ---------- |
+| app track (helper step: UC-906, UC-907; others given out as their PRs land) | UC-900 to UC-919 | 2026-11-17 |
 
 ## Other prefixes: closed to new ids
 
