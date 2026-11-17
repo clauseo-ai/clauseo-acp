@@ -369,24 +369,7 @@ pub(crate) fn undo(
     // A step kept here can leave a file that another step's write would now replace (a delete
     // of `memo.txt` kept, a write of `Memo.txt` acting): check the names again.
     keep_respelled(folder, &mut acting, &mut kept)?;
-    let after_files = core.files_of(request.after)?;
-    let mut edited_since = Vec::new();
-    for step in &acting {
-        let edited = step.ops.iter().any(|op| {
-            let then = find(&after_files, op.path().as_str()).map(|file| file.blob);
-            let now = core
-                .cache
-                .get(op.path().as_str())
-                .and_then(|entry| match entry.state {
-                    EntryState::Read(blob) => Some(blob),
-                    EntryState::Unread(_) | EntryState::Skipped => None,
-                });
-            now != then
-        });
-        if edited {
-            edited_since.push(step.path.clone());
-        }
-    }
+    let edited_since = edited_after(core, request.after, &acting)?;
     let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
     let writeback::Deleted {
         paths: deleted,
@@ -427,6 +410,34 @@ pub(crate) fn undo(
         removals,
         refused,
     })
+}
+
+/// The paths of the `acting` steps whose files the cache holds otherwise than checkpoint `after`
+/// did (written or deleted since): [`Undone::edited_since`].
+fn edited_after(
+    core: &Core,
+    after: CheckpointId,
+    acting: &[&Step],
+) -> Result<Vec<MatterPath>, Error> {
+    let after_files = core.files_of(after)?;
+    let mut edited_since = Vec::new();
+    for step in acting {
+        let edited = step.ops.iter().any(|op| {
+            let then = find(&after_files, op.path().as_str()).map(|file| file.blob);
+            let now = core
+                .cache
+                .get(op.path().as_str())
+                .and_then(|entry| match entry.state {
+                    EntryState::Read(blob) => Some(blob),
+                    EntryState::Unread(_) | EntryState::Skipped => None,
+                });
+            now != then
+        });
+        if edited {
+            edited_since.push(step.path.clone());
+        }
+    }
+    Ok(edited_since)
 }
 
 /// `paths` sorted by path bytes, each once.
