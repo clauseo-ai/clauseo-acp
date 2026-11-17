@@ -430,7 +430,7 @@ fn every_list_of_commands_agrees() {
         allowed(&marks),
         "capabilities/marks.json"
     );
-    // The settings window gets its eight, all among the release commands.
+    // The settings window gets its nine, all among the release commands.
     assert_eq!(
         granted(dir, "settings.json", "settings")
             .into_iter()
@@ -489,7 +489,7 @@ fn every_list_of_commands_agrees() {
 
 /// The commands `capabilities/settings.json` grants the settings window (0028, and 0048's
 /// `setup`).
-const SETTINGS_COMMANDS: [&str; 8] = [
+const SETTINGS_COMMANDS: [&str; 9] = [
     "dispatch",
     "query",
     "open_stream",
@@ -498,6 +498,7 @@ const SETTINGS_COMMANDS: [&str; 8] = [
     "display_info",
     "setup",
     "quit_app",
+    "pick_skill",
 ];
 
 /// Whether Tauri refused `answer` before any command ran.
@@ -509,7 +510,7 @@ fn denied(answer: &Result<Value, Value>) -> bool {
         .is_some_and(|text| text.contains("not allowed"))
 }
 
-/// Through Tauri's own access check: the settings window reaches exactly its eight commands and is
+/// Through Tauri's own access check: the settings window reaches exactly its nine commands and is
 /// refused every other one, `open_settings` and `subscribe` among them, and the e2e and marks
 /// commands in their builds too. `main`'s `open_settings` opens it, once however often it is
 /// called.
@@ -527,11 +528,12 @@ fn the_settings_window_is_allowed_exactly_its_commands() {
     let allowed = set(&SETTINGS_COMMANDS);
     // Empty arguments: an allowed command fails to decode them, or answers; it is never refused
     // by the access check. The ones that would act (a dialog, a window) are only ever refused.
-    // `quit_app` is left out: granted here, it would end the mock app.
+    // `quit_app` is left out: granted here, it would end the mock app; `pick_skill` too: granted
+    // here, it would draw the folder dialog.
     // every_list_of_commands_agrees checks its grant in the capability.
     for command in COMMANDS
         .iter()
-        .filter(|command| **command != "quit_app")
+        .filter(|command| **command != "quit_app" && **command != "pick_skill")
         .chain(&E2E_COMMANDS)
         .chain(&MARKS_COMMANDS)
     {

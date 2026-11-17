@@ -527,6 +527,7 @@ impl Actor {
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
             Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
+            Input::SkillDone(done) => settings::add_skill::on_done(self, *done),
             Input::Update(input) => update::on_input(self, input),
             Input::Recorded(recorded) => last_exit::on_recorded(self, *recorded),
             Input::Connector(input) => connectors::on_input(self, *input),

@@ -27,6 +27,7 @@ use clauseo_protocol::{
 use clauseo_settings::{SkillsExtra, SkillsSettings};
 
 use super::super::super::Actor;
+use super::super::super::settings::packs::Admission;
 use super::super::state;
 use crate::log_file::Cause;
 
@@ -60,7 +61,7 @@ impl PackSkip {
     pub(crate) fn reason(self) -> PackSkipReason {
         match self {
             Self::NotTurnedOn => PackSkipReason::NotTurnedOn,
-            Self::NotAdmitted => PackSkipReason::NotAdmitted,
+            Self::NotAdmitted | Self::Load(Skip::NotAdmitted) => PackSkipReason::NotAdmitted,
             Self::Load(Skip::Changed) => PackSkipReason::Changed,
             Self::Load(Skip::TooMany) => PackSkipReason::TooMany,
             Self::Load(Skip::Refused(Refusal::Missing)) => PackSkipReason::Missing,
@@ -72,7 +73,7 @@ impl PackSkip {
     fn words(self) -> String {
         match self {
             Self::NotTurnedOn => "This matter is set to use it, but it isn't turned on.".to_owned(),
-            Self::NotAdmitted => {
+            Self::NotAdmitted | Self::Load(Skip::NotAdmitted) => {
                 "The skill pack settings on this computer don't allow it.".to_owned()
             }
             Self::Load(Skip::Changed) => {
@@ -130,8 +131,10 @@ impl PackRequest {
     /// The request for a thread whose matter's list is `matter`, under `skills`. Packs come in
     /// `skills.enabled` order. A pack policy does not admit (`extra` `off`, or `curated`
     /// without it) is skipped as not admitted, and an id the matter names that `skills.enabled`
-    /// does not hold as not turned on.
-    pub fn new(skills: &SkillsSettings, matter: Option<&PackList>) -> Self {
+    /// does not hold as not turned on. When `lawyer_decides` (no firm policy decides what is
+    /// admitted), a pack the lawyer's own `skills.extra` leaves out is asked for all the same,
+    /// to load only if it was added on this computer (`PackEntry::added_only`).
+    pub fn new(skills: &SkillsSettings, matter: Option<&PackList>, lawyer_decides: bool) -> Self {
         let named = |id: &str| {
             matter.is_none_or(|list| list.as_slice().iter().any(|pack| pack.as_str() == id))
         };
@@ -144,10 +147,13 @@ impl PackRequest {
                 SkillsExtra::Any => true,
             };
             match PackHash::parse(hash) {
-                _ if !admitted => skipped.push((id.clone(), PackSkip::NotAdmitted)),
+                _ if !admitted && !lawyer_decides => {
+                    skipped.push((id.clone(), PackSkip::NotAdmitted));
+                }
                 Some(hash) => entries.push(PackEntry {
                     id: id.clone(),
                     hash,
+                    added_only: !admitted,
                 }),
                 // The settings keep only `sha256:<64 hex>`, so this is never reached.
                 None => skipped.push((id.clone(), PackSkip::NotTurnedOn)),
@@ -190,7 +196,8 @@ pub(super) fn pack_prep(actor: &Actor, agent: &AgentId, matter: Option<&PackList
     if AgentKind::of(agent).is_none() {
         return PackPrep::default();
     }
-    let request = PackRequest::new(&actor.effective.settings().skills, matter);
+    let lawyer_decides = !Admission::of(&actor.effective).firm_decides();
+    let request = PackRequest::new(&actor.effective.settings().skills, matter, lawyer_decides);
     PackPrep {
         write: actor.profile.pack_write(agent, &request),
         skipped: request.skipped,

@@ -136,6 +136,7 @@ pub(crate) fn entry(pack: &Pack) -> PackEntry {
     PackEntry {
         id: pack.id().to_owned(),
         hash: pack.hash().clone(),
+        added_only: false,
     }
 }
 

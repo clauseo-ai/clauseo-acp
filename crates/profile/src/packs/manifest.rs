@@ -28,7 +28,7 @@ pub const URL_MAX: usize = 2048;
 const RENDERED_MAX: usize = 64;
 
 /// Every key the manifest has.
-const KEYS: [&str; 10] = [
+const KEYS: [&str; 11] = [
     "format",
     "id",
     "name",
@@ -39,7 +39,12 @@ const KEYS: [&str; 10] = [
     "last_reviewed",
     "instruction_only",
     "skills",
+    "added_here",
 ];
+
+/// The keys a pack added on this computer (`added_here`) leaves out: it has no source, version,
+/// author or licence of its own.
+const NOT_ADDED: [&str; 4] = ["source_url", "version", "author", "licence"];
 
 /// A pack's manifest, checked. The display fields never go into an agent's instructions or a
 /// log line; only `id` and the skill names do.
@@ -63,6 +68,9 @@ pub struct PackManifest {
     pub instruction_only: bool,
     /// Its skills' names, in the order listed.
     pub skills: Vec<String>,
+    /// Whether the lawyer added it on this computer (`added_here: true`, written by
+    /// `added::build`); then `source_url`, `version`, `author` and `licence` are empty.
+    pub added_here: bool,
 }
 
 /// The manifest in `bytes`, or why it is refused (for the tests; the pack's refusal is
@@ -82,6 +90,28 @@ pub fn parse(bytes: &[u8]) -> Result<PackManifest, ManifestError> {
     if !is_pack_id(&id) {
         return Err(BadId);
     }
+    let added_here = match top.get("added_here") {
+        None => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(BadField("added_here")),
+    };
+    if added_here {
+        if let Some(key) = NOT_ADDED.iter().find(|key| top.contains_key(**key)) {
+            return Err(BadField(key));
+        }
+        return Ok(PackManifest {
+            name: display(&top, "name")?,
+            version: String::new(),
+            author: String::new(),
+            licence: String::new(),
+            source_url: String::new(),
+            last_reviewed: last_reviewed(&top)?,
+            instruction_only: instruction_only(&top)?,
+            skills: skills(&top, &id)?,
+            id,
+            added_here,
+        });
+    }
     let source_url = string(&top, "source_url")?;
     let url_ok = source_url.len() <= URL_MAX
         && source_url.strip_prefix("https://").is_some_and(|rest| {
@@ -90,14 +120,8 @@ pub fn parse(bytes: &[u8]) -> Result<PackManifest, ManifestError> {
     if !url_ok {
         return Err(BadField("source_url"));
     }
-    let last_reviewed = string(&top, "last_reviewed")?
-        .parse::<Date>()
-        .ok()
-        .ok_or(BadField("last_reviewed"))?;
-    let instruction_only = top
-        .get("instruction_only")
-        .and_then(Value::as_bool)
-        .ok_or(BadField("instruction_only"))?;
+    let last_reviewed = last_reviewed(&top)?;
+    let instruction_only = instruction_only(&top)?;
     let skills = skills(&top, &id)?;
     Ok(PackManifest {
         name: display(&top, "name")?,
@@ -109,7 +133,23 @@ pub fn parse(bytes: &[u8]) -> Result<PackManifest, ManifestError> {
         last_reviewed,
         instruction_only,
         skills,
+        added_here,
     })
+}
+
+/// `last_reviewed`, a date.
+fn last_reviewed(top: &Map<String, Value>) -> Result<Date, ManifestError> {
+    string(top, "last_reviewed")?
+        .parse::<Date>()
+        .ok()
+        .ok_or(ManifestError::BadField("last_reviewed"))
+}
+
+/// `instruction_only`, a boolean.
+fn instruction_only(top: &Map<String, Value>) -> Result<bool, ManifestError> {
+    top.get("instruction_only")
+        .and_then(Value::as_bool)
+        .ok_or(ManifestError::BadField("instruction_only"))
 }
 
 /// Why a manifest is refused.

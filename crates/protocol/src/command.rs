@@ -423,6 +423,29 @@ pub enum HostCommand {
         /// Whether to turn it on.
         on: bool,
     },
+    /// Add a skill from this computer as a skill pack, and turn it on (decision record 0040).
+    /// `path` is a folder holding `SKILL.md`, or a `SKILL.md` file itself. Off the host thread,
+    /// the host reads it (symlinks skipped, never followed), makes the pack's id from the
+    /// frontmatter's `name`, writes its own `clauseo-pack.json` marked as added on this computer,
+    /// copies the files with `SKILL.md`'s frontmatter cut to `name` and `description`, then
+    /// records the pack's hash in `skills.enabled`. Adding a skill whose id is a pack added on
+    /// this computer replaces it. Answers `Done`, and every app subscriber gets
+    /// `HostEvent::SettingsChanged`. Refused with `skill.no_skill_md` or `skill.invalid`, and with
+    /// `settings.locked` when the firm's policy locks `skills.enabled` or does not admit the
+    /// pack; nothing changes on a refusal. Only the settings window sends it, with a path
+    /// `pick_skill` returned.
+    AddSkill {
+        /// The folder or `SKILL.md` file, as `pick_skill` returned it.
+        path: String,
+    },
+    /// Remove the skill pack `id` added on this computer: deletes its folder and its
+    /// `skills.enabled` entry. Answers `Done`, and every app subscriber gets
+    /// `HostEvent::SettingsChanged`. Refused with `settings.refused` for a pack not added on
+    /// this computer. Only the settings window sends it.
+    RemoveSkill {
+        /// The pack.
+        id: PackId,
+    },
     /// Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
     /// and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
     /// firm's policy sets is refused whole with `settings.locked`; nothing changes. Before the

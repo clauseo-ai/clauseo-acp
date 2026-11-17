@@ -220,7 +220,6 @@ pub fn run() -> tauri::Result<()> {
     // The scoreboard's t0, before anything else the app does.
     #[cfg(feature = "e2e")]
     e2e::mark_start();
-    let context = context::<tauri::Wry>();
     let builder = tauri::Builder::default().manage(host_log);
     // Where the quit stands (quit.rs), read by the run loop and the second start's callback.
     let exit = Arc::new(Exit::default());
@@ -272,6 +271,7 @@ pub fn run() -> tauri::Result<()> {
             commands::answer_permission,
             commands::pick_folder,
             commands::pick_folder_or_choose,
+            commands::pick_skill,
             commands::chooser_starts,
             commands::chooser_list,
             commands::chooser_choose,
@@ -336,7 +336,7 @@ pub fn run() -> tauri::Result<()> {
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
         })
-        .build(context)?;
+        .build(context::<tauri::Wry>())?;
     app.run(move |app, event| match event {
         RunEvent::ExitRequested { api, code, .. } if !exit.stopped.load(Ordering::Acquire) => {
             api.prevent_exit();

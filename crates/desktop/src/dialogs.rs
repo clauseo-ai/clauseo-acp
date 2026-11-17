@@ -223,6 +223,40 @@ impl<R: Runtime> Picker for NativePicker<'_, R> {
     }
 }
 
+/// The native folder dialog for "Add a skill", over the Settings window when it is open. It
+/// picks folders only: the dialog plugin draws a folder dialog or a file dialog, never one for
+/// both, so a lone `SKILL.md` is added by picking the folder that holds it. It keeps no last
+/// pick, so the matter picker's start folder stays the matters'.
+pub(crate) struct SkillPicker<R: Runtime> {
+    app: AppHandle<R>,
+}
+
+impl<R: Runtime> SkillPicker<R> {
+    /// A picker drawing on `app`.
+    pub(crate) fn new(app: AppHandle<R>) -> Self {
+        Self { app }
+    }
+}
+
+impl<R: Runtime> Picker for SkillPicker<R> {
+    fn pick(&self) -> BoxFuture<'_, Option<PathBuf>> {
+        let (tx, rx) = oneshot::channel();
+        let mut dialog = self.app.dialog().file();
+        let label = owner_label(
+            Owner::SettingsOrMain,
+            self.app.get_webview_window(SETTINGS_WINDOW).is_some(),
+        );
+        if let Some(parent) = self.app.get_webview_window(label) {
+            dialog = dialog.set_parent(&parent);
+        }
+        dialog.pick_folder(move |picked| {
+            // The command may have gone; then nobody reads the answer.
+            let _gone = tx.send(picked.and_then(|path| path.into_path().ok()));
+        });
+        Box::pin(async move { rx.await.ok().flatten() })
+    }
+}
+
 /// The native "always allow" confirm, drawn by Rust in the app's language.
 pub(crate) struct NativeConfirm<'a, R: Runtime> {
     app: AppHandle<R>,

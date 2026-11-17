@@ -49,6 +49,10 @@ pub struct PackStatus {
     /// read whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
+    /// Whether the lawyer added it on this computer (`AddSkill`): admitted whatever the
+    /// lawyer's own `skills.extra` says, and `RemoveSkill` deletes it.
+    #[serde(default)]
+    pub added_here: bool,
 }
 
 /// Whether a pack loads in the next launch.
