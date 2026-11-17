@@ -25,14 +25,15 @@ const LEGAL_MAX: usize = 1360;
 const SHARED_MAX: usize = 1800;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
 /// legal part, R22's line against posing as a browser, the shell line and "Working at scale".
-/// Room for that browser-refusal line and #1215's shell line (0058, amended).
-const CLAUDE_MAX: usize = 2290;
+/// Measured worst 2263; the room over main's 2250 is for the browser-refusal rule (0058, amended).
+const CLAUDE_MAX: usize = 2285;
 /// Codex's whole `developer_instructions`, the worst case on each OS: the tools part with the
 /// stetdoc line, the legal part, the offline line, the refusal line, the shell line (macOS), the
 /// built-in skills index and the PDF line the desktop adds with Clauseo's PDF tools on its `PATH`.
-/// Room for the PDF line, the PDF and web steering and R22's browser-refusal rule (0058, amended).
+/// Measured worst 2139 (macOS; 2091 on Windows); the room over main's 2040 is for the PDF line
+/// and the browser-refusal rule (0058, amended).
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-const CODEX_MAX: usize = 2120;
+const CODEX_MAX: usize = 2160;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
