@@ -368,6 +368,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let homes = read.homes();
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = homes;
+    // Claude Code's user settings, written as a launch writes them before each sign-in run.
+    config.signin.claude_settings = Some(Arc::new(clauseo_host::write_claude_home_settings));
     config.managed = read.managed;
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;

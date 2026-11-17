@@ -126,6 +126,14 @@ pub(crate) fn write_claude_settings(home: &Path) -> std::io::Result<()> {
     }
 }
 
+/// [`write_claude_settings`] for the app: the sign-in jobs run it before each Claude Code
+/// process they start (`clauseo_agents::SigninConfig::claude_settings`), so a login, a status
+/// check or a logout reads only the user settings Clauseo ships. File system calls: off the
+/// host thread.
+pub fn write_claude_home_settings(home: &Path) -> std::io::Result<()> {
+    write_claude_settings(home)
+}
+
 /// The launch's refusal when [`write_claude_settings`] failed, with a warn line naming the
 /// cause, never the path: a settings file left as it was could loosen the session, so the agent
 /// is not started.

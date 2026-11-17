@@ -171,7 +171,8 @@ mod write;
 pub mod testing;
 
 pub use config::{
-    AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
+    AgentsConfig, ClaudeSettings, Clock, InstallConfig, Network, NodeSearch, RefreshFn,
+    SigninConfig, SystemClock,
 };
 #[cfg(feature = "test-support")]
 pub use config::{FreeBytes, RenameFault};
