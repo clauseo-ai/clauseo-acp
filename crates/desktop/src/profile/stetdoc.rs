@@ -20,6 +20,9 @@
 //! launch may mix the two: a Codex launch may get the new skills index over the files the old
 //! profile wrote. The next launch is consistent.
 //!
+//! The test-only `stetdoc-slow-test` build can hold the background tries' first launches, so a
+//! real app shows the relaunch (`stetdoc/slow.rs`); no release build has it.
+//!
 //! It also finds the stetdoc to run: the bundled one ([`bundled_stetdoc`]), or in a debug
 //! build the first on `PATH` ([`stetdoc_program`]).
 
@@ -35,6 +38,9 @@ use clauseo_profile::skills::stetdoc::start::{self, InFlight, Later, Limits, Sta
 use futures::channel::oneshot;
 
 use super::{STETDOC, first_on_path, is_program};
+
+#[cfg(feature = "stetdoc-slow-test")]
+mod slow;
 
 /// The rendered profile the hook reads at each call, put in place whole when the background
 /// check ends, with its generation (0 at the start, one more at each change) and the waits for
@@ -181,6 +187,9 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
                 browser,
             } = recheck;
             let launcher = PassthroughLauncher::new(SpawnOptions::new());
+            // The test-only build holds the first tries (`slow.rs`).
+            #[cfg(feature = "stetdoc-slow-test")]
+            let launcher = slow::Slow::from_env(launcher);
             let later = Later {
                 limits: &later,
                 held,

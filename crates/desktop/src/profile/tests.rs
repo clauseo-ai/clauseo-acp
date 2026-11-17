@@ -19,6 +19,7 @@ use crate::test_support::Scratch;
 
 mod bundled;
 mod helper;
+mod slow_gate;
 // Its stetdoc stand-ins are shell scripts.
 #[cfg(unix)]
 mod release;
