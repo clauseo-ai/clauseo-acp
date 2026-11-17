@@ -77,6 +77,7 @@ export type FakeCall =
       option: AgentChoiceId;
     }
   | { call: "pick_folder" }
+  | { call: "pick_skill" }
   | FakeChooserCall
   | { call: "open_external"; url: string; shown?: string; alwaysAsk?: true }
   | { call: "quit_app" }
@@ -132,6 +133,9 @@ export type FakeHost = FakeDisplayHost & {
   openPrivacySettings?: () => void | Promise<void>;
   openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
+  /** With it, the fake has Settings › Skills' picker (`pickSkill`), and this answers each pick: a path, or null for
+   * Cancel; throwing refuses. Without it the fake has no `pickSkill`, like a host without skills. Read when made. */
+  pickSkill?: () => string | null | Promise<string | null>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
    * it the fake has no `openSettings`, like a host without the window. Read when the fake is made. */
   openSettings?: () => void | Promise<void>;
@@ -183,6 +187,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #fullScreen = new FullScreenFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
+  /** Settings › Skills' picker, when `host.pickSkill` scripts it. */
+  readonly pickSkill: (() => Promise<string | null>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
   readonly onSetup: ((listener: (event: SetupEvent) => void) => () => void) | undefined;
   readonly setup: ((command: SetupCommand) => Promise<void>) | undefined;
@@ -207,6 +213,13 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
         : async (section = null) => {
             this.calls.push({ call: "open_settings", section });
             await this.#answer(() => this.host.openSettings?.());
+          };
+    this.pickSkill =
+      host.pickSkill === undefined
+        ? undefined
+        : async () => {
+            this.calls.push({ call: "pick_skill" });
+            return (await this.#answer(() => this.host.pickSkill?.())) ?? null;
           };
     const setup = host.setup;
     this.onSetup =

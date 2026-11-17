@@ -14,12 +14,14 @@ import {
   IconSafeWorkspace,
   IconSearch,
   IconSend,
+  IconToolEdit,
   IconTryAgain,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
+import { sk } from "@clauseo/components/lib/words-skills.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -48,6 +50,8 @@ import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
 import { ToolsSection } from "./sections/mcp-tools-load.tsx";
 import { toolsShown } from "./sections/tools-model.ts";
+import { SkillsSection } from "./sections/skills-load.tsx";
+import { skillsShown } from "./sections/skills-shown.ts";
 import { WorkspaceSection } from "./sections/workspace-load.tsx";
 import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
@@ -59,6 +63,7 @@ export const SECTION_ORDER = [
   "usage",
   "connectors",
   "tools",
+  "skills",
   "matters",
   "workspace",
   "language",
@@ -158,6 +163,20 @@ export const SECTIONS: readonly SectionEntry[] = [
       ),
     shown: (ctx) => toolsShown(ctx.transport),
     Body: ToolsSection,
+  },
+  {
+    // UC-970 to UC-978: the skill packs, and Add a skill, where the transport has the skill picker. No side note, so the
+    // list stays out of the first load
+    id: "skills",
+    name: (lang) => sk(lang, "Skills"),
+    icon: IconToolEdit,
+    lead: (lang) =>
+      sk(
+        lang,
+        "Skills teach Claude and ChatGPT to do a task your way. Add a folder that holds a SKILL.md file, or the SKILL.md file itself.",
+      ),
+    shown: (ctx) => skillsShown(ctx.transport),
+    Body: SkillsSection,
   },
   {
     // UC: this computer's protection, where the transport carries its wire; built now, live once R17 PR-B admits
