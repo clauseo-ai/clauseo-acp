@@ -158,7 +158,7 @@ pub(crate) const TABLES_MAX: usize = 50;
 /// counted; that it may differ where it could not tell, or past the cap; and
 /// [`BlacklineNotice::HeaderOrFooterNotCompared`] for a header's or footer's text one version
 /// only has that is not in `shown`, the older and newer texts of the headers and footers the
-/// blackline shows (`Read::header_texts`), or for one with no text or a picture
+/// blackline shows (`Read::header_texts`), or for one with a picture
 /// ([`TablesCompared::lone_header_unseen`]). When the headers' view failed, no part is shown and
 /// the notice is said for every such text: stetdoc's list of changes names only a header's
 /// marked changes, and the header of a section the other version lacks has none.
