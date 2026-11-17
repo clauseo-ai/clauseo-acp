@@ -1,0 +1,10 @@
+{
+  "UC-711": {
+    "en": "When the lawyer mentions a paper with @, read it before you answer; for a Word document, use stetdoc.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "mention-read (provisional; Rohan batch review)",
+    "note": "Model-facing: both agents' instructions on every OS (crates/profile/assets/instructions/tools.txt). English alone: the agent answers in the lawyer's language."
+  }
+}
