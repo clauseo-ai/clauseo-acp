@@ -135,7 +135,6 @@ fn codex_standing_text_budget() {
     }
     assert!(text.ends_with(index.trim_end()));
     let count = word_count(&text);
-    eprintln!("Codex's standing text: {count} of {CODEX_MAX} words");
     assert!(
         count <= CODEX_MAX,
         "Codex's standing text has {count} words"
