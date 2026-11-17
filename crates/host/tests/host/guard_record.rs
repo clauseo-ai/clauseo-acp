@@ -76,25 +76,33 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     let windows = hook["commandWindows"].as_str().unwrap();
     // One PowerShell line: the guard by the call operator, its paths in single quotes. On
     // Windows the hook names the console program beside the app (`codex_guard_program`).
+    // Then the no-copy list beside the record, and its identity (`pre_write_guard/no_copy.rs`).
     let program = clauseo_host::codex_guard_program(Path::new(PROGRAM));
     let program = program.display();
     // Codex's home goes last, for the guard to refuse a target there.
     let home = dir.data_dir().join("agents").join("codex-acp").join("home");
-    let (record, id) = windows
+    let parts = windows
         .strip_prefix(&format!(
             "$global:LASTEXITCODE = -1; & '{program}' --pre-write-guard --record '"
         ))
         .and_then(|rest| rest.split_once("' --record-id '"))
-        .and_then(|(record, rest)| {
-            let (id, rest) = rest.split_once("' --codex-home '")?;
+        .and_then(|(record, rest)| Some((record, rest.split_once("' --no-copy-list '")?)))
+        .and_then(|(file, (id, rest))| Some((file, id, rest.split_once("' --no-copy-list-id '")?)))
+        .and_then(|(file, id, (list, rest))| {
+            let (list_id, rest) = rest.split_once("' --codex-home '")?;
             let quoted_home = rest.split_once("';")?.0;
-            (quoted_home == home.display().to_string()).then_some((record, id))
-        })
-        .unwrap_or_else(|| panic!("{windows}"));
-    let record = PathBuf::from(record);
+            (quoted_home == home.display().to_string()).then_some((file, id, (list, list_id)))
+        });
+    let Some((record, id, (list, list_id))) = parts else {
+        panic!("{windows}")
+    };
+    let [record, list] = [record, list].map(PathBuf::from);
+    assert_eq!(list, record.with_file_name("no-copy.txt"));
     let posix = format!(
-        "'{program}' --pre-write-guard --record '{}' --record-id {id} --codex-home '{}'",
+        "'{program}' --pre-write-guard --record '{}' --record-id {id} --no-copy-list '{}' \
+         --no-copy-list-id {list_id} --codex-home '{}'",
         record.display(),
+        list.display(),
         home.display()
     );
     assert_eq!(hook["command"], posix);
@@ -135,18 +143,18 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
         );
     }
     let guard = clauseo_host::codex_guard_program(Path::new(PROGRAM));
-    let expected =
-        clauseo_host::codex_hook_config_with_home(&guard, Some((&record, id)), Some(&home));
+    let lists = (Some((&*record, id)), Some((&*list, list_id)));
+    let expected = clauseo_host::codex_hook_config_with_home(&guard, lists.0, lists.1, Some(&home));
     assert_eq!(config["hooks"], expected.unwrap());
     host.shutdown();
     assert!(!folder.exists(), "the guard folder goes with the session");
 }
 
-/// Claude's hook passes no record: its session makes no guard folder and no record file
-/// anywhere under the data folder, while it is live. (The launch makes the record whether or not
-/// a guard program is set, so none is set here.)
+/// Claude's hook passes no record: its session makes no record file anywhere under the data
+/// folder, while it is live, only its guard folder with the no-copy list. (The launch makes the
+/// record whether or not a guard program is set, so none is set here.)
 #[test]
-fn a_claude_session_makes_no_guard_folder_or_record() {
+fn a_claude_session_makes_no_record() {
     let dir = Dir::new(
         "guard_record_claude",
         &[("claude-acp", Scenario::Bundled("claude-prompt-stream"))],
@@ -155,7 +163,9 @@ fn a_claude_session_makes_no_guard_folder_or_record() {
     let (_, events, turn) = one_turn(&dir, &host, "claude-acp");
     events.assert_no_mismatch();
     assert_eq!(events.turn_ended(turn).unwrap().stop, StopReason::EndTurn);
-    assert!(!dir.data_dir().join("browser").join("guard").exists());
+    let guards = files_under(&dir.data_dir().join("browser").join("guard"));
+    let names: Vec<_> = guards.iter().filter_map(|file| file.file_name()).collect();
+    assert_eq!(names, ["no-copy.txt"], "{guards:?}");
     let records: Vec<PathBuf> = files_under(dir.data_dir())
         .into_iter()
         .filter(|file| file.ends_with("guard-blocks.jsonl"))

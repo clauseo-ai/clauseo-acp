@@ -1,4 +1,4 @@
-//! A PowerShell command split into simple commands, for [`super::add_script`]: the plain forms
+//! A PowerShell command split into simple commands, for [`super::add_input`]: the plain forms
 //! an agent writes (`cd "C:\Matter"; stetdoc edit 'Main Agreement.docx' --ops ops.json`).
 //!
 //! Read by the reader every PowerShell reader in the host shares (`pre_write_guard`'s

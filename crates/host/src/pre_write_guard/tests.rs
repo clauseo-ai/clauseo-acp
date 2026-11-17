@@ -555,6 +555,7 @@ mod devanagari;
 mod fixtures;
 mod gaps;
 mod nesting;
+mod no_copy;
 mod powershell;
 mod record;
 mod timings;

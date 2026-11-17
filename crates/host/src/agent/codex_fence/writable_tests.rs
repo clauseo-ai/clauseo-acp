@@ -79,7 +79,8 @@ impl Launch {
         };
         keys_now.extend(keys(&self.locations, session, windows));
         let program = self.root.join("app").join("clauseo");
-        let hooks = match crate::codex_hook_config_with_home(&program, None, Some(&self.home)) {
+        let hooks = match crate::codex_hook_config_with_home(&program, None, None, Some(&self.home))
+        {
             Some(Value::Object(hooks)) => Some(hooks),
             _ => None,
         };

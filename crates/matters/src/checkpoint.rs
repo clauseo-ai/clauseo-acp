@@ -272,6 +272,7 @@ impl Core {
             |path: &str| find_by_path(&old_tree, path, |file| file.path.as_str()).is_some();
         let mut reads = first_reads(&tip_record, &entries, &versioned);
         let gone = crate::gone::gone(&tip_record, &entries, &record, &versioned);
+        let no_copy = crate::gone::no_copy(&record);
         let mut changes = diff_reads(&old_tree, &new_tree, &over_cap, &reads)?;
         let head = self.timeline.head();
         let tip = self.timeline.tip();
@@ -301,6 +302,7 @@ impl Core {
                 changes,
                 skipped,
                 gone,
+                no_copy,
             });
         }
         if self.timeline.contains(spec.entry.id) {
@@ -362,6 +364,7 @@ impl Core {
             changes,
             skipped,
             gone,
+            no_copy,
         })
     }
 

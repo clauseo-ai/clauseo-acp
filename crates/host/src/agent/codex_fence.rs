@@ -474,6 +474,9 @@ pub(crate) fn keys(
 #[path = "codex_fence/listed_tests.rs"]
 mod listed_tests;
 #[cfg(test)]
+#[path = "codex_fence/no_copy_tests.rs"]
+mod no_copy_tests;
+#[cfg(test)]
 #[path = "codex_fence/tests.rs"]
 pub(crate) mod tests;
 #[cfg(test)]

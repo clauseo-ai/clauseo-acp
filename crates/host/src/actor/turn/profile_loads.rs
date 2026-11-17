@@ -27,6 +27,7 @@ use sandbox::session_sandbox;
 
 #[path = "profile_loads_sandbox.rs"]
 mod sandbox;
+use crate::pre_write_guard::no_copy::NoCopyList;
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -171,6 +172,26 @@ fn trusted_sent(
     trusted
 }
 
+/// The pre-write guard's hook for this session, when the host has the guard: the matter folder,
+/// forced ask, and the session's no-copy list with its identity (`list`, from
+/// [`NoCopyList::hook_arg`]). Split from [`session_loads`] for clippy's 120 lines.
+fn guard_hook<'a>(
+    actor: &'a Actor,
+    matter: &'a Path,
+    forced_ask: bool,
+    list: Option<&'a (&'a Path, String)>,
+) -> Option<loads::GuardHook<'a>> {
+    actor
+        .pre_write_guard
+        .as_deref()
+        .map(|program| loads::GuardHook {
+            program,
+            matter,
+            ask_all: forced_ask,
+            no_copy: list.map(|(file, id)| (*file, id.as_str())),
+        })
+}
+
 /// The `_meta`, MCP servers and extra roots for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
@@ -251,14 +272,8 @@ pub(super) fn session_loads(
         matter: Some(matter),
         trusted_servers: &trusted,
     });
-    let guard = actor
-        .pre_write_guard
-        .as_deref()
-        .map(|program| loads::GuardHook {
-            program,
-            matter,
-            ask_all: forced_ask,
-        });
+    let list = run.no_copy.as_ref().map(NoCopyList::hook_arg);
+    let guard = guard_hook(actor, matter, forced_ask, list.as_ref());
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.
     if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {
@@ -309,10 +324,9 @@ pub(super) fn session_loads(
         .chain(case_law_state)
         .collect();
     super::super::header_tools::hold(actor, thread, tools);
-    let directories = if kind == Some(AgentKind::Codex) {
-        codex_directories(&run)
-    } else {
-        Vec::new()
+    let directories = match kind {
+        Some(AgentKind::Codex) => codex_directories(&run),
+        _ => Vec::new(),
     };
     Ok((meta, servers, directories))
 }

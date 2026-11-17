@@ -1,6 +1,6 @@
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
-use super::gone;
+use super::{gone, no_copy};
 use crate::history::Oid;
 use crate::skip_record::{SkipEntry, SkipRecord};
 use crate::stat::{CacheEntry, EntryState, FileTime, Stat};
@@ -154,4 +154,21 @@ fn nothing_skipped_before_is_nothing_gone() {
         ),
         []
     );
+}
+
+#[test]
+fn every_skipped_file_is_one_without_a_copy_and_a_stale_one_is_not() {
+    let mut now = record(
+        vec![
+            skip("Big.zip", 18, 100, LARGE),
+            skip("Scan.pdf", 18, 100, CLOUD),
+        ],
+        &["Unread"],
+    );
+    now.stale = vec![skip("Lease.docx", 18, 100, CLOUD)];
+    assert_eq!(
+        no_copy(&now),
+        vec![file("Big.zip", LARGE), file("Scan.pdf", CLOUD)]
+    );
+    assert_eq!(no_copy(&SkipRecord::default()), []);
 }

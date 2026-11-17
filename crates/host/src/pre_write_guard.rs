@@ -140,6 +140,11 @@
 //!
 //! And Codex's own home, when its hook names it with [`CODEX_HOME_FLAG`]: see `codex.rs`.
 //!
+//! One more rule for both agents, after those (`no_copy.rs`): a delete, move or overwrite of a
+//! file Clauseo holds no copy of (cloud-only, over the size cap; the session's list after
+//! [`NO_COPY_FLAG`], trusted only as the file the host made, or what the guard sees of the file
+//! itself) is refused, so no undo is needed that could not be done.
+//!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block, and, with [`RECORD_FLAG`] and a file and [`RECORD_ID_FLAG`] with the file's identity
 //! (Codex's hook), one line in that file for the host to show the lawyer (`record.rs`); stdout
@@ -164,6 +169,7 @@ mod answers;
 mod ask;
 mod codex;
 mod names;
+pub(crate) mod no_copy;
 mod reach;
 pub(crate) mod record;
 mod shell;
@@ -219,6 +225,13 @@ pub fn make_record(data: &Path, session: &str) -> std::io::Result<(PathBuf, Stri
     record::make(data, session).map(|(file, id)| (file, id.hex()))
 }
 
+/// The argument that names the session's list of the files Clauseo holds no copy of
+/// (`no_copy.rs`), followed by the file.
+pub const NO_COPY_FLAG: &str = no_copy::FLAG;
+
+/// The argument that names the identity of the file after [`NO_COPY_FLAG`], followed by it.
+pub const NO_COPY_ID_FLAG: &str = no_copy::ID_FLAG;
+
 /// How many of a shell command's words are looked at.
 pub const MAX_WORDS: usize = 64;
 
@@ -258,8 +271,15 @@ fn run_timed(
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
         Ok(_) => {
             timings::mark("read");
+            let matter = matter_arg(args);
             let home = codex_home_arg(args);
-            refusal(&bytes, matter_arg(args).as_deref(), home.as_deref())
+            // The held-open, `.codex` and Codex-home rules first, then the no-copy one.
+            refusal(&bytes, matter.as_deref(), home.as_deref()).map(|found| {
+                found.or_else(|| {
+                    let list = no_copy::List::of_args(args);
+                    no_copy::refusal(&bytes, matter.as_deref(), &list)
+                })
+            })
         }
         Err(_) => Err(Ignored::Unreadable),
     };

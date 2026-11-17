@@ -75,16 +75,14 @@ pub(super) fn launch(
     );
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
-    let record = prepared
-        .run
-        .guard
-        .as_ref()
-        .map(|(file, id)| (file.clone(), id.hex()));
+    // The record and the no-copy list, each with its identity in hex (`write::RecordId`).
+    let (guard, list) = (prepared.run.guard.as_ref(), prepared.run.no_copy.as_ref());
+    let record = guard.map(|(file, id)| (file.as_path(), id.hex()));
+    let list = list.map(crate::pre_write_guard::no_copy::NoCopyList::hook_arg);
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
-        let record = record
-            .as_ref()
-            .map(|(file, id)| (file.as_path(), id.as_str()));
-        let hooks = codex_hooks(actor, record, &prepared.home);
+        let record = record.as_ref().map(|(file, id)| (*file, id.as_str()));
+        let list = list.as_ref().map(|(file, id)| (*file, id.as_str()));
+        let hooks = codex_hooks(actor, record, list, &prepared.home);
         let guard = hooks.is_some();
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
@@ -187,6 +185,7 @@ pub(super) fn launch(
 fn codex_hooks(
     actor: &Actor,
     record: Option<(&std::path::Path, &str)>,
+    no_copy: Option<(&std::path::Path, &str)>,
     home: &std::path::Path,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Some(hooks) = &actor.codex_hooks {
@@ -194,7 +193,7 @@ fn codex_hooks(
     }
     // On Windows the console program beside the app, which PowerShell waits for.
     let program = agent::loads::codex_guard_program(actor.pre_write_guard.as_deref()?);
-    let config = agent::loads::codex_hook_config_with_home(&program, record, Some(home));
+    let config = agent::loads::codex_hook_config_with_home(&program, record, no_copy, Some(home));
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::warn!(
             "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \

@@ -30,15 +30,16 @@
 //! Kept in memory for the turn only, never logged.
 
 use std::collections::BTreeSet;
-use std::iter::Peekable;
 use std::path::Path;
-use std::str::Chars;
 
 use crate::stetdoc_args;
 
 pub(crate) mod deletes;
 mod folder;
+mod posix;
 mod powershell;
+
+use posix::segments;
 
 /// The most targets one turn keeps.
 const MAX_TARGETS: usize = 1024;
@@ -80,6 +81,37 @@ pub(crate) fn add_input(
     dialect: Dialect,
     start: Option<&str>,
 ) {
+    add_input_as(targets, raw_input, dialect, start, Kind::Writes);
+}
+
+/// [`add_input`] for the paths a delete program names alone ([`deletes::deletes`]: `rm`,
+/// `Remove-Item`, ...; no move), for the pre-write guard's folder rule
+/// (`pre_write_guard/no_copy.rs`).
+pub(crate) fn add_deleted_input(
+    targets: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+) {
+    add_input_as(targets, raw_input, dialect, start, Kind::Deletes);
+}
+
+/// Which targets a reading adds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// Every write target.
+    Writes,
+    /// Only what a delete program names.
+    Deletes,
+}
+
+fn add_input_as(
+    targets: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+    kind: Kind,
+) {
     let Ok(serde_json::Value::Object(input)) = serde_json::from_str(raw_input) else {
         return;
     };
@@ -88,7 +120,9 @@ pub(crate) fn add_input(
         .find_map(|key| input.get(*key).and_then(serde_json::Value::as_str))
         .or(start);
     match input.get("command") {
-        Some(serde_json::Value::String(script)) => add_script(targets, cwd, script, dialect),
+        Some(serde_json::Value::String(script)) => {
+            add_script_as(targets, cwd, script, dialect, kind);
+        }
         Some(serde_json::Value::Array(items)) => {
             let Some(argv) = items
                 .iter()
@@ -102,11 +136,11 @@ pub(crate) fn add_input(
                     if ["-c", "-lc", "-ic"].contains(&flag.as_str())
                         && ["sh", "bash", "zsh", "dash"].contains(&base(shell)) =>
                 {
-                    add_script(targets, cwd, script, Dialect::Posix);
+                    add_script_as(targets, cwd, script, Dialect::Posix, kind);
                 }
                 _ => {
                     let words: Vec<Word> = argv.into_iter().map(Word::plain).collect();
-                    add_segment(targets, cwd, &words, &[]);
+                    add_segment(targets, cwd, &words, &[], kind);
                 }
             }
         }
@@ -116,11 +150,17 @@ pub(crate) fn add_input(
 
 /// Adds the targets of the shell script `script`, written in `dialect` and run in `cwd` (`""`:
 /// the matter's folder, `None` unknown).
-pub(crate) fn add_script(
+#[cfg(test)]
+fn add_script(targets: &mut BTreeSet<String>, cwd: Option<&str>, script: &str, dialect: Dialect) {
+    add_script_as(targets, cwd, script, dialect, Kind::Writes);
+}
+
+fn add_script_as(
     targets: &mut BTreeSet<String>,
     cwd: Option<&str>,
     script: &str,
     dialect: Dialect,
+    kind: Kind,
 ) {
     let segments = match dialect {
         Dialect::Posix => segments(script),
@@ -129,7 +169,7 @@ pub(crate) fn add_script(
     let mut folder = folder::Folder::new(cwd);
     for segment in &segments {
         if let Some((cwd, words)) = folder.read(segment, dialect) {
-            add_segment(targets, cwd.as_deref(), words, &segment.redirects);
+            add_segment(targets, cwd.as_deref(), words, &segment.redirects, kind);
         }
     }
 }
@@ -196,15 +236,20 @@ struct Segment {
     nested: bool,
 }
 
-/// Adds one simple command's targets, run in `cwd` (`None`: unknown, so only absolute
-/// targets count).
+/// Adds one simple command's targets of `kind`, run in `cwd` (`None`: unknown, so only
+/// absolute targets count).
 fn add_segment(
     targets: &mut BTreeSet<String>,
     cwd: Option<&str>,
     words: &[Word],
     redirects: &[Word],
+    kind: Kind,
 ) {
-    let mut found: Vec<&Word> = redirects.iter().collect();
+    let mut found: Vec<&Word> = if kind == Kind::Writes {
+        redirects.iter().collect()
+    } else {
+        Vec::new()
+    };
     // Leading assignments and wrappers that run the rest as the command.
     let start = words
         .iter()
@@ -214,7 +259,25 @@ fn add_segment(
         })
         .unwrap_or(words.len());
     let argv = words.get(start..).unwrap_or_default();
-    if let Some((program, args)) = argv.split_first()
+    if kind == Kind::Deletes {
+        if let Some((program, args)) = argv.split_first()
+            && deletes::deletes(&program.text)
+        {
+            // A folder deleted with a trailing separator (`rm -r Exhibits/`) is that folder.
+            for word in deletes::removed(&program.text, args)
+                .into_iter()
+                .filter_map(|i| args.get(i))
+                .filter(|word| word.clear)
+            {
+                let trimmed = word.text.trim_end_matches(['/', '\\']);
+                add(
+                    targets,
+                    cwd,
+                    if trimmed.is_empty() { "/." } else { trimmed },
+                );
+            }
+        }
+    } else if let Some((program, args)) = argv.split_first()
         && is_stetdoc(&program.text)
     {
         // stetdoc's own forms (`crate::stetdoc_args`): its default output and `--in-place`
@@ -355,213 +418,6 @@ fn is_assignment(word: &str) -> bool {
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && !name.starts_with(|c: char| c.is_ascii_digit())
     })
-}
-
-/// The words of the segment being read, and where the word being read goes.
-#[derive(Default)]
-struct Reader {
-    out: Vec<Segment>,
-    segment: Segment,
-    word: String,
-    /// A word has begun (an empty quoted word counts).
-    started: bool,
-    /// It holds no expansion, glob or `~` so far.
-    unclear: bool,
-    /// It is a redirect's target.
-    redirect: bool,
-    /// How many parentheses are open.
-    depth: usize,
-}
-
-impl Reader {
-    fn push(&mut self, c: char) {
-        self.started = true;
-        self.word.push(c);
-    }
-
-    fn end_word(&mut self) {
-        if self.started {
-            let word = Word {
-                text: std::mem::take(&mut self.word),
-                clear: !self.unclear,
-            };
-            if self.redirect {
-                self.segment.redirects.push(word);
-            } else {
-                self.segment.words.push(word);
-            }
-            self.redirect = false;
-        }
-        self.started = false;
-        self.unclear = false;
-    }
-
-    /// Ends the segment being read at `sep` (`Sep::End` at the command's end).
-    fn end_segment(&mut self, sep: Sep) {
-        self.end_word();
-        self.redirect = false;
-        let mut segment = std::mem::take(&mut self.segment);
-        if !segment.words.is_empty() || !segment.redirects.is_empty() {
-            segment.ender = sep;
-            segment.nested = self.depth > 0;
-            self.out.push(segment);
-        }
-        match sep {
-            Sep::Open => self.depth += 1,
-            Sep::Close => self.depth = self.depth.saturating_sub(1),
-            Sep::Then | Sep::And | Sep::Or | Sep::Pipe | Sep::Background | Sep::End => {}
-        }
-    }
-}
-
-/// The simple commands of `script`, as a POSIX shell splits it.
-fn segments(script: &str) -> Vec<Segment> {
-    let mut r = Reader::default();
-    let mut heredocs: Vec<Heredoc> = Vec::new();
-    let mut chars = script.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                r.started = true;
-                for q in chars.by_ref() {
-                    if q == '\'' {
-                        break;
-                    }
-                    r.word.push(q);
-                }
-            }
-            '"' => {
-                r.started = true;
-                while let Some(q) = chars.next() {
-                    match q {
-                        '"' => break,
-                        '\\' if matches!(chars.peek(), Some('"' | '\\' | '$' | '`')) => {
-                            r.word.extend(chars.next());
-                        }
-                        '$' | '`' => {
-                            r.unclear = true;
-                            r.word.push(q);
-                        }
-                        _ => r.word.push(q),
-                    }
-                }
-            }
-            '\\' => {
-                r.started = true;
-                r.word.extend(chars.next());
-            }
-            '$' | '`' | '*' | '?' | '[' | '{' => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '~' if !r.started => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '>' => {
-                // `2>`: the number before it is no word
-                if r.started && !r.unclear && r.word.chars().all(|d| d.is_ascii_digit()) {
-                    r.word.clear();
-                    r.started = false;
-                }
-                r.end_word();
-                if chars.peek() == Some(&'>') {
-                    chars.next();
-                }
-                if chars.peek() == Some(&'&') {
-                    // `>&2`: a copy of another output, no file
-                    chars.next();
-                    while chars.next_if(|d| d.is_ascii_digit() || *d == '-').is_some() {}
-                } else {
-                    r.redirect = true;
-                }
-            }
-            '<' => {
-                // the input's file is read, not written: its word is dropped
-                r.end_word();
-                let mut extra = 0;
-                while chars.next_if_eq(&'<').is_some() {
-                    extra += 1;
-                }
-                if extra == 1 {
-                    // `<<WORD` or `<<-WORD`: the lines after this one are its body, not commands
-                    let strip_tabs = chars.next_if_eq(&'-').is_some();
-                    while chars.next_if(|d| *d == ' ' || *d == '\t').is_some() {}
-                    let word = heredoc_word(&mut chars);
-                    heredocs.push(Heredoc { word, strip_tabs });
-                } else {
-                    while chars.next_if(|d| *d == ' ' || *d == '<').is_some() {}
-                    while chars
-                        .next_if(|d| !d.is_whitespace() && !";&|<>".contains(*d))
-                        .is_some()
-                    {}
-                }
-            }
-            ';' | '&' | '|' | '\n' | '(' | ')' => {
-                let double = matches!(c, '&' | '|') && chars.next_if_eq(&c).is_some();
-                r.end_segment(sep_of(c, double));
-                if c == '\n' {
-                    skip_heredoc_bodies(&mut chars, &mut heredocs);
-                }
-            }
-            c if c.is_whitespace() => r.end_word(),
-            _ => r.push(c),
-        }
-    }
-    r.end_segment(Sep::End);
-    r.out
-}
-
-/// The separator `c` (doubled: `&&`, `||`).
-fn sep_of(c: char, double: bool) -> Sep {
-    match (c, double) {
-        ('&', true) => Sep::And,
-        ('&', false) => Sep::Background,
-        ('|', true) => Sep::Or,
-        ('|', false) => Sep::Pipe,
-        ('(', _) => Sep::Open,
-        (')', _) => Sep::Close,
-        _ => Sep::Then,
-    }
-}
-
-/// A heredoc opened on a line: its delimiter word, and whether `<<-` strips leading tabs.
-struct Heredoc {
-    word: String,
-    strip_tabs: bool,
-}
-
-/// A heredoc's delimiter, read up to a blank or an operator with its quotes taken off
-/// (`'EOF'`, `"EOF"` and `EOF` are all `EOF`).
-fn heredoc_word(chars: &mut Peekable<Chars<'_>>) -> String {
-    let mut word = String::new();
-    while let Some(c) = chars.next_if(|d| !d.is_whitespace() && !";&|<>()".contains(*d)) {
-        match c {
-            '\'' => word.extend(chars.by_ref().take_while(|q| *q != '\'')),
-            '"' => word.extend(chars.by_ref().take_while(|q| *q != '"')),
-            '\\' => word.extend(chars.next()),
-            _ => word.push(c),
-        }
-    }
-    word
-}
-
-/// Skips the bodies of the heredocs opened on the line just ended, in order. Each runs up to
-/// the line that is its delimiter (leading tabs taken off first for `<<-`), or to the end.
-fn skip_heredoc_bodies(chars: &mut Peekable<Chars<'_>>, heredocs: &mut Vec<Heredoc>) {
-    for doc in heredocs.drain(..) {
-        loop {
-            let line: String = chars.by_ref().take_while(|c| *c != '\n').collect();
-            let content = if doc.strip_tabs {
-                line.trim_start_matches('\t')
-            } else {
-                line.as_str()
-            };
-            if content == doc.word || chars.peek().is_none() {
-                break;
-            }
-        }
-    }
 }
 
 #[cfg(test)]

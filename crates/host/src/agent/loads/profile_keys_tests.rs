@@ -305,6 +305,7 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
         program: Path::new("/app/clauseo"),
         matter: Path::new("/matters/a"),
         ask_all: false,
+        no_copy: None,
     };
     let keys = keys(OFF, Login::Bedrock);
     let meta = Value::Object(session_meta(

@@ -64,5 +64,27 @@
     "at": "2026-11-15",
     "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
     "note": "Versions' timeline: a short note on a change during which a file Clauseo kept no copy of was deleted (version-panel.tsx), beside the existing '{file} is too large to keep versions'; picking the change shows UC-720 to UC-723 in the band. Versions' words avoid 'step', so this note says none"
+  },
+  "UC-726": {
+    "en": "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने {file} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::NoCopyBlocked: Clauseo's pre-write guard refused a step of the agent's that would delete, move or overwrite a file Clauseo keeps no copy of, only online (a cloud placeholder) or over the 512 MB cap (pre_write_guard/no_copy.rs; actor/turn/updates/guard_blocks.rs), once a file a turn, within the guard's eight lines a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step with the guard's reason, so it gets no notice. {file} the file's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf). {name} is the agent as TN-11 names it"
+  },
+  "UC-727": {
+    "en": "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने {file} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::NoCopyBlocked: Clauseo's pre-write guard refused a step of the agent's that would delete, move or overwrite a file Clauseo keeps no copy of, only online (a cloud placeholder) or over the 512 MB cap (pre_write_guard/no_copy.rs; actor/turn/updates/guard_blocks.rs), once a file a turn, within the guard's eight lines a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step with the guard's reason, so it gets no notice. {file} the file's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf). The AI where the room knows no agent name. Rendered alone"
   }
 }

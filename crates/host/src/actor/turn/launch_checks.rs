@@ -46,7 +46,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_process::TreeWatch;
 use clauseo_profile::{PacksWritten, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 
@@ -209,6 +208,8 @@ pub(crate) struct RunFolders {
     /// Where the run's Claude session calls write their flag settings (`agent::launch_settings`,
     /// `<data>/launch-settings/<run id>.json`); gone with the run folder.
     pub(crate) launch_settings: crate::agent::launch_settings::Target,
+    /// The guard's no-copy list, once made, in the guard folder (`folders.rs` `make_guard`).
+    pub(crate) no_copy: Option<crate::pre_write_guard::no_copy::NoCopyList>,
 }
 
 impl RunFolders {
@@ -251,6 +252,7 @@ impl RunFolders {
                 folder: crate::agent::launch_settings::folder(data),
                 run: key.id(),
             },
+            no_copy: None,
         }
     }
 
@@ -532,14 +534,6 @@ pub(super) fn on_prepared(
     }
 }
 
-/// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
-/// has ended. The notes folder stays.
-pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
-    if let Some(run) = state(actor, thread).and_then(|state| state.run.take()) {
-        discard(actor, thread, run, Some(tree));
-    }
-}
-
 mod browser;
 mod claim;
 use claim::claim;
@@ -551,7 +545,7 @@ mod straggler;
 pub(crate) use straggler::HeldRuns;
 mod removal;
 use removal::discard;
-pub(super) use removal::on_run_removed;
+pub(super) use removal::{on_run_removed, remove_run};
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

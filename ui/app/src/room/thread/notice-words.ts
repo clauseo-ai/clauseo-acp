@@ -68,7 +68,7 @@ function packSkipped(pack: string, reason: string, w: NoticeWords): string | nul
 }
 
 /** The line for a step Clauseo's pre-write guard stopped (the host's held_open_blocked with its paper's name,
- * codex_folder_blocked, guard_step_blocked with no paper named, or guard_steps_more counting the turn's steps past
+ * no_copy_blocked with the name of a file Clauseo keeps no copy of, codex_folder_blocked, guard_step_blocked with no paper named, or guard_steps_more counting the turn's steps past
  * those told): the agent named as the outside-matter line names it, the AI where none is known; the paper named as
  * Versions names it. A kind of another shape gives null. */
 function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): string | null {
@@ -95,6 +95,23 @@ function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): stri
             name,
           },
         );
+  const noCopy =
+    typeof kind === "object" && kind !== null && "no_copy_blocked" in kind
+      ? kind.no_copy_blocked
+      : undefined;
+  if (noCopy !== undefined) {
+    if (typeof noCopy.file !== "string") return null;
+    const file = namesOf([noCopy.file])(noCopy.file);
+    return name === null
+      ? w.th(
+          "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+          { file },
+        )
+      : w.th(
+          "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+          { name, file },
+        );
+  }
   const held =
     typeof kind === "object" && kind !== null && "held_open_blocked" in kind
       ? kind.held_open_blocked

@@ -466,6 +466,45 @@ fn the_guard_record_is_denied_to_claudes_tools_and_sandbox() {
     assert!(check(root, &[], Some(&link)).touches_data(), "ln {path}");
 }
 
+/// The guard's no-copy list, beside its record, is denied to Claude's tools and sandbox by the
+/// same rules, sandboxed or not: a write, and a link planted at its place, are refused.
+#[test]
+fn the_guard_no_copy_list_is_denied_to_claudes_tools_and_sandbox() {
+    use crate::pre_write_guard::{no_copy, record};
+    let data = std::path::PathBuf::from("/d");
+    let list = record::folder(&data, "s1").join(no_copy::FILE_NAME);
+    for sandboxed in [true, false] {
+        let rules = claude_deny_rules(&LaunchDeny::fixed(vec![data.clone()]), sandboxed);
+        for tool in ["Read", "Edit"] {
+            let covers = |rule: &String| {
+                (rule.strip_prefix(&format!("{tool}(/")))
+                    .and_then(|rest| rest.strip_suffix("/**)"))
+                    .is_some_and(|folder| list.starts_with(folder))
+            };
+            assert!(
+                rules.iter().any(covers),
+                "{tool}, sandboxed {sandboxed}: {rules:?}"
+            );
+        }
+    }
+    let dir = layout("guard-no-copy");
+    let root = dir.path();
+    let list = root
+        .join("data/browser/guard/s1")
+        .join(crate::pre_write_guard::no_copy::FILE_NAME);
+    write::create_dir_all(list.parent().unwrap()).unwrap();
+    write::write_file(&list, b"").unwrap();
+    let path = text(&list);
+    assert!(check(root, &[&path], None).touches_data(), "Write {path}");
+    for command in [
+        format!("ln profile.txt {path}"),
+        format!("echo x >> {path}"),
+    ] {
+        let input = json!({ "command": command });
+        assert!(check(root, &[], Some(&input)).touches_data(), "{command}");
+    }
+}
+
 /// The own run folder's `agent-browser` folder (its profile and downloads) is in no launch
 /// rule; another session's is, with its whole run folder.
 #[test]

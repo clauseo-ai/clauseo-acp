@@ -1,7 +1,9 @@
 //! The guard's answers other than letting a tool go quietly: the shared line, a refusal and its
 //! reason ([`Refusal`]), and input it ignores ([`Ignored`]) with its line.
 
-use clauseo_protocol::MatterPath;
+use clauseo_protocol::{MatterPath, SkippedFileReason};
+
+use super::no_copy;
 
 /// What the agent reads when the guard could not run, ended with neither of its codes, or (as
 /// Codex's hook) could not read its input.
@@ -65,6 +67,8 @@ pub(super) enum Refusal {
     /// A shell command nests `$(…)` too deep, or holds too much nested text, to be read
     /// (`words::MAX_NESTING`, `words::MAX_NESTED_BYTES`).
     Unread,
+    /// A target is a file Clauseo holds no copy of (`no_copy.rs`), and why.
+    NoCopy(MatterPath, SkippedFileReason),
 }
 
 impl Refusal {
@@ -90,6 +94,7 @@ impl Refusal {
             Self::Unread => "Clauseo can't read this command: it is nested too deep or is too \
                              long. Split it into smaller commands."
                 .to_owned(),
+            Self::NoCopy(path, why) => no_copy::reason(path, *why),
         }
     }
 }

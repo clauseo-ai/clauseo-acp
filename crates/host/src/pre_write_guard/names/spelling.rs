@@ -85,7 +85,7 @@ pub(super) fn stored_spelling(
 
 /// `text` as this system's file system tells names apart: APFS ignores case and Unicode form
 /// ([`apfs_key`]), NTFS case alone; ext4 neither.
-fn disk_key(text: &str) -> String {
+pub(in crate::pre_write_guard) fn disk_key(text: &str) -> String {
     if cfg!(target_os = "macos") {
         apfs_key(text)
     } else if cfg!(windows) {

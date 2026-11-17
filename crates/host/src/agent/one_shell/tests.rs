@@ -173,6 +173,7 @@ fn meta(forced_ask: bool) -> Value {
         program: Path::new(r"C:\Program Files\Clauseo\clauseo.exe"),
         matter: Path::new(MATTER),
         ask_all: forced_ask,
+        no_copy: None,
     };
     let meta = session_meta(
         hook.as_object().cloned(),

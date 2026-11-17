@@ -186,6 +186,11 @@ pub struct Checkpoint {
     /// folder now, sorted by path, each with why it had not been versioned: Clauseo holds no
     /// copy of them, so no undo can bring them back (`gone.rs`). Empty when reused.
     pub gone: Vec<SkippedFile>,
+    /// Every file this checkpoint's walk found but did not version (cloud-only, over the size
+    /// cap), sorted by path, each with why: Clauseo holds no copy of them, so no undo could bring
+    /// one back after a delete or an overwrite. The before-turn checkpoint's list is what the
+    /// pre-write guard refuses to let an agent delete or overwrite (`gone.rs` [`crate::gone`]).
+    pub no_copy: Vec<SkippedFile>,
 }
 
 /// An undo of one step: the changes between two checkpoints, file by file.

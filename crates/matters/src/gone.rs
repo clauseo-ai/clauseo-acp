@@ -55,5 +55,18 @@ pub(crate) fn gone(
         .collect()
 }
 
+/// Every file the walk's record `now` has as skipped, each with why, sorted by path bytes: the
+/// files Clauseo holds no copy of at this checkpoint (`Checkpoint::no_copy`). A `stale` file is
+/// not one: its earlier version is in the tree.
+pub(crate) fn no_copy(now: &SkipRecord) -> Vec<SkippedFile> {
+    now.skipped
+        .iter()
+        .map(|skip| SkippedFile {
+            path: skip.path.clone(),
+            reason: skip.reason,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

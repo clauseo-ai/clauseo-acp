@@ -7,12 +7,20 @@ use clauseo_protocol::ThreadId;
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
-use super::super::TurnInput;
+use super::super::{TurnInput, state};
 use super::{RunFolders, egress, relay, straggler};
 use crate::agent::codex;
 use crate::config::SessionKey;
 use crate::error::Error;
 use crate::log_file::Cause;
+
+/// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
+/// has ended. The notes folder stays.
+pub(in super::super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
+    if let Some(run) = state(actor, thread).and_then(|state| state.run.take()) {
+        discard(actor, thread, run, Some(tree));
+    }
+}
 
 /// Removes `run` (`thread`'s launch's run folder) off the actor and frees its browser claims,
 /// relay and proxy there; the notes folder stays. The session has ended, or never started a
