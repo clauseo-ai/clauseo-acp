@@ -1014,21 +1014,6 @@ jobs:
           path: ${{ runner.temp }}/dry-updater.key.pub
           if-no-files-found: error
 
-      # A clean Windows has no VC++ Redistributable, so a PE importing VCRUNTIME140.dll won't start
-      # there (ADR 0035, "The C runtime"). Every exe the upload below ships, fetched ones too, and
-      # any DLL placed beside them or in the bundle's resources. None ships today (WebView2Loader is
-      # linked statically on msvc; bundle.resources is the block-list), so one that appears is
-      # checked here before anyone has to remember it.
-      - name: Check that no shipped Windows binary imports the VC++ runtime
-        if: runner.os == 'Windows'
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          dlls=("$RELEASE_DIR"/*.dll crates/desktop/binaries/*.dll crates/desktop/blocklist/*.dll)
-          [ ${#dlls[@]} -gt 0 ] || echo "No DLL beside the exes or in the bundle's resources: no DLL ships"
-          node .github/scripts/pe-crt-imports.mjs "$RELEASE_DIR/Clauseo.exe" \
-            crates/desktop/binaries/*-"$TARGET".exe ${dlls[@]+"${dlls[@]}"}
-
       # Codex's hook line runs clauseo-guard under PowerShell, which waits only for a console
       # program (crates/host/src/bin/clauseo-guard.rs): the built sidecar, as sidecars.mjs placed it,
       # must have PE Subsystem 3, and the overlay must list it for the installers.
@@ -1043,6 +1028,21 @@ jobs:
               console.log("::error::the overlay lists no binaries/clauseo-guard in externalBin");
               process.exit(1);
             }'
+
+      # A clean Windows has no VC++ Redistributable, so a PE importing VCRUNTIME140.dll won't start
+      # there (ADR 0035, "The C runtime"). Every exe the upload below ships, fetched ones too, and
+      # any DLL placed beside them or in the bundle's resources. None ships today (WebView2Loader is
+      # linked statically on msvc; bundle.resources is the block-list), so one that appears is
+      # checked here before anyone has to remember it.
+      - name: Check that no shipped Windows binary imports the VC++ runtime
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dlls=("$RELEASE_DIR"/*.dll crates/desktop/binaries/*.dll crates/desktop/blocklist/*.dll)
+          [ ${#dlls[@]} -gt 0 ] || echo "No DLL beside the exes or in the bundle's resources: no DLL ships"
+          node .github/scripts/pe-crt-imports.mjs "$RELEASE_DIR/Clauseo.exe" \
+            crates/desktop/binaries/*-"$TARGET".exe ${dlls[@]+"${dlls[@]}"}
 
       # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
       # sign-windows to sign and bundle. Paths are kept from the repo root, so the download puts
