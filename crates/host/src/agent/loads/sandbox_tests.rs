@@ -15,6 +15,8 @@ static NO_DENY: LaunchDeny = LaunchDeny {
     kept: Vec::new(),
     own_reads: Vec::new(),
     edit_denied: Vec::new(),
+    guarded: Vec::new(),
+    claude_home: None,
 };
 
 /// The paths of session `id` of the matter at `/Users/l/Clients/A`, with `<data>` under the

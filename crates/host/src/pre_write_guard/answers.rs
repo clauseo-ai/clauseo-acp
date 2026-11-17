@@ -59,6 +59,10 @@ pub(super) enum Refusal {
     CodexFolder,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
+    /// A file tool writes, or a shell command that does more than read names, one of the
+    /// protected paths (`protected.rs`): Claude's own settings, instructions, skills and plugins,
+    /// or a plugin folder of Clauseo's.
+    Protected,
 }
 
 impl Refusal {
@@ -75,6 +79,9 @@ impl Refusal {
                 .to_owned(),
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
+                .to_owned(),
+            Self::Protected => "Clauseo doesn't let the agent change Claude's own settings or \
+                                Clauseo's plugin files."
                 .to_owned(),
         }
     }

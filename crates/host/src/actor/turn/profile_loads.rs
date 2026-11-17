@@ -221,11 +221,7 @@ pub(super) fn session_loads(
     let guard = actor
         .pre_write_guard
         .as_deref()
-        .map(|program| loads::GuardHook {
-            program,
-            matter,
-            ask_all: forced_ask,
-        });
+        .map(|program| loads::GuardHook::of(program, matter, forced_ask, &run.data_deny));
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.
     if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {

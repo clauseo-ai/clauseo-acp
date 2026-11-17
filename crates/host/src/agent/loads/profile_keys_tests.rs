@@ -29,6 +29,8 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     kept: Vec::new(),
     own_reads: Vec::new(),
     edit_denied: Vec::new(),
+    guarded: Vec::new(),
+    claude_home: None,
 };
 
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
@@ -157,6 +159,8 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
         program: Path::new("/app/clauseo"),
         matter: Path::new("/matters/a"),
         ask_all: false,
+        protected: &[],
+        home: None,
     };
     let keys = keys(OFF, Login::Bedrock);
     let meta = Value::Object(session_meta(

@@ -155,6 +155,8 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         program: &program,
         matter: &matter,
         ask_all: false,
+        protected: &[],
+        home: None,
     });
     let entry = json!({
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
@@ -206,6 +208,48 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
+/// Claude's entry passes its config folder and each protected path after the matter, and after
+/// `--ask-all` in forced ask: Claude's settings, instructions, skills and plugins in its home
+/// and both plugin folders (`guard_protected`).
+#[test]
+fn the_guard_entry_passes_the_config_folder_and_the_protected_paths() {
+    let home = std::path::Path::new("/d/agents/claude-acp/home");
+    let packs = std::path::Path::new("/d/run/r/skill-packs");
+    let protected = super::guard_protected(home, std::path::Path::new("/d"), packs);
+    let want: Vec<std::path::PathBuf> = [
+        "/d/agents/claude-acp/home/settings.json",
+        "/d/agents/claude-acp/home/settings.local.json",
+        "/d/agents/claude-acp/home/CLAUDE.md",
+        "/d/agents/claude-acp/home/skills",
+        "/d/agents/claude-acp/home/plugins",
+        "/d/profile/claude-plugin",
+        "/d/run/r/skill-packs",
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    assert_eq!(protected, want);
+    for ask_all in [false, true] {
+        let entry = guard_entry(GuardHook {
+            program: std::path::Path::new(&crate::testing::abs("/opt/clauseo")),
+            matter: std::path::Path::new("/m"),
+            ask_all,
+            protected: &protected,
+            home: Some(home),
+        })
+        .unwrap();
+        let mut args = vec!["--pre-write-guard", "--matter", "/m"];
+        if ask_all {
+            args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
+        }
+        args.extend(["--claude-home", home.to_str().unwrap()]);
+        for path in &protected {
+            args.extend(["--protected", path.to_str().unwrap()]);
+        }
+        assert_eq!(entry["hooks"][0]["args"], json!(args), "{ask_all}");
+    }
+}
+
 /// A program or matter path that is not UTF-8 cannot go in JSON: no entry, rather than a lossy
 /// one.
 #[cfg(unix)]
@@ -218,6 +262,8 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program,
         matter,
         ask_all: false,
+        protected: &[],
+        home: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);
     assert_eq!(guard_entry(hook(plain, odd)), None);
