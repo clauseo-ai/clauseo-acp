@@ -199,6 +199,26 @@ test("cloud-only files, by the service's name where synced and online where not"
   expect(text("scan-cloud-only")).toBe("1 file is kept only online and downloads as it's read.");
 });
 
+test("papers all kept online only: the cloud-only line, and never 'The folder is empty.'", async () => {
+  await pick(
+    await mount(
+      scanning([
+        scanned({
+          place: { synced: { service: "icloud" } },
+          files: 0,
+          bytes: 0,
+          cloud_only: 2,
+          done: true,
+        }),
+      ]),
+    ),
+  );
+  expect(text("scan-cloud-only")).toBe(
+    "2 files are kept only in iCloud Drive and download as they're read.",
+  );
+  expect(text("scan")).not.toContain("The folder is empty.");
+});
+
 test("a network folder adds no line of UD2's own", async () => {
   await pick(await mount(scanning([scanned({ place: "network", done: true })])));
   expect(byId("place-notice")).toBeNull();
