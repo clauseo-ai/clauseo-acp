@@ -241,11 +241,12 @@ export async function previewRestore(
   return "restore_preview" in r ? r.restore_preview : null;
 }
 
-/** What a refusal names for matter.file_folder_clash's words, for the file being restored: null for another code, and
- * when the host named no entry in the way (an older host). */
+/** What a refusal names for matter.file_folder_clash's words: the entry in the way, then the file restored (file, the
+ * one Versions asked for, where a host names only the first). A folder in the way has the file's own path. Null for
+ * another code, and when the host named no entry (an older host). */
 export function clashOf(e: Pick<HostError, "code" | "files">, file: string | null): Clash | null {
-  const at = e.code === "matter.file_folder_clash" ? e.files?.[0] : undefined;
-  return at === undefined ? null : { at, folder: at === file };
+  const [at, of = file] = e.code === "matter.file_folder_clash" ? (e.files ?? []) : [];
+  return at === undefined ? null : { at, folder: at === of };
 }
 
 /** compare_versions' answer for a version with the folder now: the files that differ, or the code it failed with (an

@@ -22,6 +22,7 @@ import {
   type Script,
   type VersionsHarness,
 } from "./testing.ts";
+import { clashOf } from "./reading.ts";
 import { restorable, restoreDone } from "./state.ts";
 
 let h: VersionsHarness | null = null;
@@ -48,6 +49,26 @@ const one = (path: string): RestorePreview => ({
   locked: [],
 });
 const ONE_FILE = { files: { paths: ["brief.txt"] } };
+/** The marker of cp4, a restore of brief.txt alone from cp2. */
+const MADE = { from: "cp2", checkpoint: "cp4", scope: ONE_FILE };
+/** The marker of cp5, the undo of cp4 (back at cp3), listing what it did. */
+const undoMarker = (did: { written?: string[]; removed?: string[]; deleted?: string[] }) =>
+  upsert({
+    marker: {
+      order: 50,
+      event: uuid(50, 9),
+      ts: NOON + 5 * 60_000,
+      kind: {
+        version_restored: {
+          from: "cp3",
+          checkpoint: "cp5",
+          scope: ONE_FILE,
+          undoes: "cp4",
+          ...did,
+        },
+      },
+    },
+  });
 
 /** Versions open on cp2, compared with now, the folder differing in `changes`; preview: preview_restore's answer (a
  * function may throw a refusal), by default one that writes the first file. */
@@ -94,7 +115,7 @@ test("a changed document goes back alone: the dialog says the copy now is replac
         order: 40,
         event: uuid(40, 9),
         ts: NOON + 4 * 60_000,
-        kind: { version_restored: { from: "cp2", checkpoint: "cp4", scope: ONE_FILE } },
+        kind: { version_restored: { ...MADE, written: ["brief.txt"] } },
       },
     }),
   ]);
@@ -240,7 +261,7 @@ test("the keyboard presses Restore this document; Cancel gives the focus back to
         order: 40,
         event: uuid(40, 9),
         ts: NOON + 4 * 60_000,
-        kind: { version_restored: { from: "cp2", checkpoint: "cp4", scope: ONE_FILE } },
+        kind: { version_restored: { ...MADE, written: ["brief.txt"] } },
       },
     }),
   ]);
@@ -265,12 +286,16 @@ test("Undo of a one-document restore says that document is back as it was", asyn
         order: 40,
         event: uuid(40, 9),
         ts: NOON + 4 * 60_000,
-        kind: { version_restored: { from: "cp2", checkpoint: "cp4", scope: ONE_FILE } },
+        kind: { version_restored: { ...MADE, written: ["brief.txt"] } },
       },
     }),
   ]);
   await h.click(document.body.querySelector(".ver-restored-undo"));
   await h.click(h.one("dialog-confirm"));
+  await h.deliver(MATTER_STREAM, [
+    upsert(version(5, "restore")),
+    undoMarker({ written: ["brief.txt"] }),
+  ]);
   // that document alone: an edit to another since the restore stays
   expect(h.queried("preview_restore").at(-1)).toEqual({
     preview_restore: { matter: MATTER, checkpoint: "cp3", scope: ONE_FILE, undoes: "cp4" },
@@ -290,14 +315,16 @@ test("Undo of a one-document restore says that document is back as it was", asyn
 test("a done line whose version is no longer in the timeline names the document alone", async () => {
   const { doneLine } = await import("./words.ts");
   const { freshSnapshot } = await import("./state.ts");
-  const s = freshSnapshot(NOON, "UTC");
+  // the restore's marker, cp10, says it wrote the document
+  const written = { file: "Drafts/brief.txt", wrote: true, removed: false, forGood: false };
+  const s = { ...freshSnapshot(NOON, "UTC"), oneFile: new Map([["cp10", written]]) };
   const cal = { today: "2026-11-02", words: () => "" } as never;
   expect(
     doneLine("en", cal, s, {
       kind: "restoredFile",
       to: "cp9",
       file: "Drafts/brief.txt",
-      outcome: { kind: "nothing" },
+      outcome: { kind: "wrote", checkpoint: "cp10" },
     }),
   ).toBe("Restored '\u2068brief.txt\u2069'.");
 });
@@ -308,7 +335,7 @@ const MARKED = upsert({
     order: 40,
     event: uuid(40, 9),
     ts: NOON + 4 * 60_000,
-    kind: { version_restored: { from: "cp2", checkpoint: "cp4", scope: ONE_FILE } },
+    kind: { version_restored: { ...MADE, written: ["brief.txt"] } },
   },
 });
 const doneText = () =>
@@ -416,15 +443,20 @@ test("a document renamed since comes back at its old name, and the dialog says t
   );
 });
 
-test("an Undo of a one-document restore says what it did to the document, by its preview and the host's marker", async () => {
+test("an Undo of a one-document restore says what the host's marker says it did, never what the preview expected", async () => {
   const { doneLine } = await import("./words.ts");
   const { freshSnapshot } = await import("./state.ts");
   const fresh = freshSnapshot(NOON, "UTC");
-  // the undo's marker, cp5: none yet, the paper put in the bin, or deleted for good
-  const marked = (forGood: boolean | null) =>
-    forGood === null
+  // the undo's marker, cp5: none, or what it lists it did to the paper
+  const marked = (did: { wrote?: boolean; removed?: boolean; forGood?: boolean } | null) =>
+    did === null
       ? fresh
-      : { ...fresh, oneFile: new Map([["cp5", { file: "brief.txt", forGood }]]) };
+      : {
+          ...fresh,
+          oneFile: new Map([
+            ["cp5", { file: "brief.txt", wrote: false, removed: false, forGood: false, ...did }],
+          ]),
+        };
   const cal = { today: "2026-11-02", words: () => "" } as never;
   const undo = (p: Partial<RestorePreview>) =>
     restoreDone(
@@ -432,26 +464,88 @@ test("an Undo of a one-document restore says what it did to the document, by its
       { kind: "wrote", checkpoint: "cp5" },
       NOON,
     );
-  const removed = { changes: [], removes: ["brief.txt"] };
+  // the dialog's preview expected a removal every time: the line says what the marker says was done
+  const removing = { changes: [], removes: ["brief.txt"] };
   const said = (
-    p: Partial<RestorePreview>,
-    forGood: boolean | null = false,
+    did: { wrote?: boolean; removed?: boolean; forGood?: boolean } | null,
     platform: "mac" | "windows" = "mac",
-  ) => doneLine("en", cal, marked(forGood), undo(p), platform);
-  expect(said({})).toBe("Undid the restore. '\u2068brief.txt\u2069' is back as it was before.");
-  expect(said(removed)).toBe(
+  ) => doneLine("en", cal, marked(did), undo(removing), platform);
+  expect(said({ wrote: true })).toBe(
+    "Undid the restore. '\u2068brief.txt\u2069' is back as it was before.",
+  );
+  expect(said({ removed: true })).toBe(
     "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo moved it to the Trash.",
   );
-  expect(said(removed, false, "windows")).toBe(
+  expect(said({ removed: true }, "windows")).toBe(
     "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
   );
-  // the bin couldn't take it, or the host hasn't said yet: removed, with a copy in Versions, never the bin
   const gone =
     "Undid the restore. '\u2068brief.txt\u2069' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.";
-  expect(said(removed, true)).toBe(gone);
-  expect(said(removed, true, "windows")).toBe(gone);
-  expect(said(removed, null)).toBe(gone);
-  expect(said({ changes: [] })).toBe(
-    "Nothing was undone: '\u2068brief.txt\u2069' has changed since the restore, so Clauseo left it as it is.",
+  expect(said({ removed: true, forGood: true })).toBe(gone);
+  expect(said({ removed: true, forGood: true }, "windows")).toBe(gone);
+  // the host left the paper (a marker listing neither), or answered with no marker at all
+  const nothing =
+    "Nothing was undone: Clauseo couldn't safely put '\u2068brief.txt\u2069' back, so it left it as it is.";
+  expect(said({})).toBe(nothing);
+  expect(said(null)).toBe(nothing);
+});
+
+test("saved in Word while the Undo dialog was open: the host leaves the document, and the line says nothing was undone", async () => {
+  h = await comparing([file("brief.txt", { change: "deleted" })], {
+    // the restore brings it back; its undo, asked, would remove it
+    preview: (q: { preview_restore: { undoes?: string } }) => ({
+      restore_preview:
+        q.preview_restore.undoes === undefined
+          ? { ...one("brief.txt"), changes: [file("brief.txt", { change: "added" })] }
+          : { ...one("brief.txt"), changes: [], removes: ["brief.txt"] },
+    }),
+    dispatch: (c) => ({
+      version_restored: { checkpoint: c.restore_version?.undoes === undefined ? "cp4" : "cp5" },
+    }),
+  });
+  await h.click(h.one("version-restore-file"));
+  await h.click(h.one("dialog-confirm"));
+  await h.deliver(MATTER_STREAM, [upsert(version(4, "restore")), MARKED]);
+  await h.click(document.body.querySelector(".ver-restored-undo"));
+  expect(dialog()?.textContent).toContain("will be removed");
+  // the lawyer saves it in Word, then presses Undo: the host finds it changed and writes nothing
+  await h.click(h.one("dialog-confirm"));
+  await h.deliver(MATTER_STREAM, [upsert(version(5, "restore")), undoMarker({})]);
+  expect(doneText()).toContain(
+    "Nothing was undone: Clauseo couldn't safely put '\u2068brief.txt\u2069' back, so it left it as it is.",
   );
+  expect(doneText()).not.toContain("removed it");
+  expect(doneText()).not.toContain("Trash");
+});
+
+test("saved in Word as Restore was pressed: the host writes nothing and no marker comes, and the line says so", async () => {
+  h = await comparing([file("brief.txt")], {
+    // the host answers with the newest version, cp3, and writes no marker
+    dispatch: () => ({ version_restored: { checkpoint: "cp3" } }),
+  });
+  await h.click(h.one("version-restore-file"));
+  await h.click(h.one("dialog-confirm"));
+  await h.settle();
+  expect(doneText()).toContain(
+    "Nothing was restored: Clauseo left '\u2068brief.txt\u2069' as it is.",
+  );
+  expect(doneText()).not.toMatch(/^Restored/m);
+});
+
+test("a clash says which of the two it is from the host's two paths, a whole-matter restore's too", () => {
+  const clash = (files: string[]) => ({ code: "matter.file_folder_clash" as const, files });
+  // a folder now has the paper's name: the entry in the way is the paper's own path
+  expect(clashOf(clash(["Drafts/brief.txt", "Drafts/brief.txt"]), null)).toEqual({
+    at: "Drafts/brief.txt",
+    folder: true,
+  });
+  // its folder is now a file
+  expect(clashOf(clash(["Drafts", "Drafts/brief.txt"]), null)).toEqual({
+    at: "Drafts",
+    folder: false,
+  });
+  // a host that names only the entry: the file Versions asked for decides
+  expect(clashOf(clash(["brief.txt"]), "brief.txt")).toEqual({ at: "brief.txt", folder: true });
+  expect(clashOf({ code: "matter.file_locked", files: ["brief.txt"] }, "brief.txt")).toBeNull();
+  expect(clashOf(clash([]), "brief.txt")).toBeNull();
 });

@@ -98,8 +98,8 @@ fn file_locked_names_its_files_and_no_path_in_the_message() {
     assert_eq!(wire(Error::Closed).files(), []);
 }
 
-/// A matter's `FileFolderClash` names the entry in the way in `files`, for the app to name the
-/// folder or file to rename.
+/// A matter's `FileFolderClash` names the entry in the way, then the file restored, in `files`,
+/// for the app to name the folder or file to rename and to tell which of the two it is.
 #[test]
 fn a_file_folder_clash_names_the_entry_in_the_way() {
     let clash = || {
@@ -110,7 +110,13 @@ fn a_file_folder_clash_names_the_entry_in_the_way() {
     };
     for error in [wire(clash()), clash().to_wire()] {
         assert_eq!(error.code(), ErrorCode::MatterFileFolderClash);
-        assert_eq!(error.files(), [MatterPath::new("Drafts").unwrap()]);
+        assert_eq!(
+            error.files(),
+            [
+                MatterPath::new("Drafts").unwrap(),
+                MatterPath::new("Drafts/Notice.docx").unwrap()
+            ]
+        );
     }
 }
 

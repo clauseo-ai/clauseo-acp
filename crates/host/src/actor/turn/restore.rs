@@ -75,18 +75,22 @@ pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostC
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let checked =
-                loaded.and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]));
-            if let Err(error) = checked {
-                give_up(actor, matter, ctx, error);
-                actor.release(stream);
-                return;
-            }
             // An undo of a restore of chosen files puts back those alone, as the log records
-            // that restore, whatever the request's scope: a Versions that hasn't paged in its
-            // marker asks for the whole matter.
+            // that restore, whatever the request's scope (a Versions that hasn't paged in its
+            // marker asks for the whole matter); one of a restore with no record is refused.
+            let checked = loaded
+                .and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]))
+                .and_then(|()| undone_scope(actor, matter, undoes));
+            let undone = match checked {
+                Ok(undone) => undone,
+                Err(error) => {
+                    give_up(actor, matter, ctx, error);
+                    actor.release(stream);
+                    return;
+                }
+            };
             let mut ask = ask;
-            if let Some(undone) = undone_scope(actor, matter, undoes) {
+            if let Some(undone) = undone {
                 ask.scope = undone;
             }
             // Recorded first (`last_exit.rs`): sent once the record is durable.

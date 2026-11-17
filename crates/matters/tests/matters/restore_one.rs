@@ -265,3 +265,31 @@ fn undoing_a_restore_that_brought_a_file_back_says_whether_it_went_for_good() {
         assert_eq!(undone.deleted, for_good, "blocked: {blocked}");
     }
 }
+
+/// A folder made where the chosen file goes after the plan checked it (here, as the plan asks
+/// whether the file is cloud-only, after the walk asked once) refuses the restore as the clash
+/// it is, at the last check before writing: after the outside-edits version was kept (so not by
+/// the plan), and never as `matter.file_locked`. Nothing is written.
+#[test]
+fn a_folder_made_after_the_plan_is_refused_as_a_clash_before_writing() {
+    let (fx, mut matter) = versioned("restore-one-folder-after-plan");
+    fx.write("a.txt", "three, by hand");
+    fx.probe.swap_for_folder(fx.file("a.txt"), 2);
+    let chosen = only("a.txt");
+
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
+        .unwrap_err();
+    assert!(fx.probe.swapped(), "the probe made the folder");
+    assert!(
+        matches!(&err, Error::FileFolderClash { path, in_way }
+            if path == &chosen[0] && in_way == &chosen[0]),
+        "{err:?}"
+    );
+    assert_eq!(err.code(), ErrorCode::MatterFileFolderClash);
+    // the outside-edits version was kept first: the plan passed, and the last check refused
+    assert_eq!(ids(&matter), [cid(1), cid(3), cid(4)]);
+    assert!(fx.file("a.txt").is_dir());
+    assert_eq!(fx.read("b.txt"), b"bee, edited");
+    assert_no_temp_files(&fx.folder);
+}

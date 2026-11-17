@@ -23,6 +23,7 @@ import type {
   ThreadId,
   Timestamp,
 } from "../../transport/protocol.ts";
+import type { OneFile } from "../matter-stream.ts";
 import { serviceName } from "../sync-services.ts";
 import { clockOf } from "../when.ts";
 import {
@@ -30,7 +31,6 @@ import {
   type Ask,
   type Clash,
   type Done,
-  type FileUndid,
   type Snapshot,
   type Unsaved,
 } from "./state.ts";
@@ -322,41 +322,37 @@ export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
   };
 }
 
-/** What undoing a one-file restore did to that paper, by its preview: put it back, removed it (it wasn't in the matter
- * before the restore), or nothing (it changed since the restore). A removed paper names the computer's bin (binned:
- * its platform) only when the host says it went there; one deleted for good, the bin unable to take it, or one the
- * host hasn't said of yet, is removed with a copy in Versions, which is true either way. */
-function undidFileLine(
-  lang: Lang,
-  paper: string,
-  undid: FileUndid | undefined,
-  binned: Platform | null,
-) {
-  if (undid === "none")
-    return vt(
-      lang,
-      "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.",
-      { paper },
-    );
-  if (undid !== "removed")
-    return vt(lang, "Undid the restore. '{paper}' is back as it was before.", { paper });
-  if (binned === null)
-    return vt(
-      lang,
-      "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.",
-      { paper },
-    );
-  return binned === "windows"
-    ? vt(
+/** What undoing a one-file restore did to that paper, as the undo's marker lists (mark): put it back, removed it (it
+ * wasn't in the matter before the restore), or nothing (no marker, or one that lists neither: the host left it). A
+ * removed paper names the computer's bin (its platform) only when the marker says it went there; one deleted for good,
+ * the bin unable to take it, is removed with a copy in Versions. */
+function undidFileLine(lang: Lang, paper: string, mark: OneFile | undefined, platform: Platform) {
+  if (mark?.removed === true) {
+    if (mark.forGood)
+      return vt(
         lang,
-        "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
-        { paper },
-      )
-    : vt(
-        lang,
-        "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Trash.",
+        "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo removed it. A copy stays in Versions.",
         { paper },
       );
+    return platform === "windows"
+      ? vt(
+          lang,
+          "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
+          { paper },
+        )
+      : vt(
+          lang,
+          "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Trash.",
+          { paper },
+        );
+  }
+  if (mark?.wrote === true)
+    return vt(lang, "Undid the restore. '{paper}' is back as it was before.", { paper });
+  return vt(
+    lang,
+    "Nothing was undone: Clauseo couldn't safely put '{paper}' back, so it left it as it is.",
+    { paper },
+  );
 }
 
 /** The line under the band for what the room last did; without its Undo, which the band adds. platform: the
@@ -389,6 +385,11 @@ export function doneLine(
       const to = versionOf(s, done.to);
       const time = to === undefined ? "" : timeOf(lang, to);
       const paper = fileName(done.file);
+      // what the restore did, as its marker says: no marker, or one that didn't write it, wrote nothing
+      const mark =
+        done.outcome.kind === "wrote" ? s.oneFile.get(done.outcome.checkpoint) : undefined;
+      if (mark?.wrote !== true)
+        return vt(lang, "Nothing was restored: Clauseo left '{paper}' as it is.", { paper });
       if (done.moved === true)
         return vt(
           lang,
@@ -407,10 +408,9 @@ export function doneLine(
     }
     case "undidRestore":
       if (done.file !== null) {
-        // the bin only once the undo's marker says the paper went there, not deleted for good
+        // what the undo did, as its marker says: never what the dialog's preview expected
         const mark = done.checkpoint === undefined ? undefined : s.oneFile.get(done.checkpoint);
-        const binned = mark !== undefined && !mark.forGood;
-        return undidFileLine(lang, fileName(done.file), done.undid, binned ? platform : null);
+        return undidFileLine(lang, fileName(done.file), mark, platform);
       }
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),

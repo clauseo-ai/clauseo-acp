@@ -20,7 +20,6 @@ import type {
   FolderPlace,
   MatterSummary,
   RestorePreview,
-  RestoreScope,
   SkippedFile,
   StepEntry,
   ViewEntry,
@@ -29,7 +28,7 @@ import type {
 import type { Entry } from "./entry.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import { NO_STAND_INS, type StandIns } from "../room/versions/stand-ins.ts";
-import { marking, type Mark } from "./registry-u8-mark.ts";
+import { marking, restoreMarker, type Mark } from "./registry-u8-mark.ts";
 import { RoomClicking } from "./states.tsx";
 import { threadWords, versionWords, type WordsRef } from "./words.ts";
 
@@ -75,31 +74,6 @@ const version = (
     ts,
     files,
     ...(turn === undefined ? {} : { thread: THREAD, turn }),
-  },
-});
-
-/** The host's marker for a restore: `checkpoint` restored the matter to `from`. */
-const restoreMarker = (
-  order: number,
-  from: string,
-  checkpoint: string,
-  undoes?: string,
-  scope: RestoreScope = "matter",
-  deleted: string[] = [],
-): ViewEntry => ({
-  marker: {
-    order,
-    event: uuid(order, 9),
-    ts: Date.now(),
-    kind: {
-      version_restored: {
-        from,
-        checkpoint,
-        scope,
-        ...(undoes === undefined ? {} : { undoes }),
-        ...(deleted.length === 0 ? {} : { deleted }),
-      },
-    },
   },
 });
 
@@ -169,6 +143,8 @@ export type Matter = {
   clash?: string;
   /** An undo of a restore deletes what it removes for good, the bin unable to take it (its marker's deleted). */
   forGood?: boolean;
+  /** restore_version writes nothing (the newest version answers, with no marker). */
+  wroteNothing?: boolean;
 };
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
@@ -302,12 +278,18 @@ export function versionsHost(m: Matter): FakeTransport {
           retryable: false,
           files: [m.clash],
         };
+      // the paper changed in Word as Restore was pressed: the host wrote nothing, so no version and no marker
+      if (m.wroteNothing === true) return { version_restored: { checkpoint: "cp4" } };
       // the host writes the restore's version and its marker, then answers
       seq += 1;
       const at = seq;
       const { scope, undoes } = envelope.command.restore_version ?? {};
       const chosen = typeof scope === "object" ? scope.files.paths : [];
-      const forGood = m.forGood === true && undoes !== undefined ? chosen : [];
+      // an undo removes what the restore brought back, puts back what it changed, or leaves the paper
+      const gone = undoes !== undefined && chosen.some((p) => m.removes?.includes(p));
+      const left = undoes !== undefined && (m.undoChanges ?? preview.changes).length === 0;
+      const did = { written: gone || left ? [] : chosen, removed: gone ? chosen : [] };
+      const forGood = m.forGood === true ? did.removed : [];
       queueMicrotask(() =>
         transport.deliver(
           event(
@@ -315,7 +297,9 @@ export function versionsHost(m: Matter): FakeTransport {
               at,
               [
                 upsert(version(5, "restore", Date.now())),
-                upsert(restoreMarker(50, to, "cp5", undefined, scope, forGood)),
+                upsert(
+                  restoreMarker(50, to, "cp5", undefined, scope, { ...did, deleted: forGood }),
+                ),
                 // a version gone from the matter's window since: the line can't say its time
                 ...(m.forgets === true ? [{ remove: { entry_id: `version:${to}` } }] : []),
               ],

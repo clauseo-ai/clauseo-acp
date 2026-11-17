@@ -507,7 +507,7 @@ export class VersionsController {
     if (outcome.kind === "refused") {
       const again = (p: string) => this.#preview(p, undoes, file);
       await this.#refused(
-        outcome.code,
+        this.#code(outcome, file),
         outcome.current ? () => lockedRestore(ask, outcome, again) : undefined,
       );
       return;

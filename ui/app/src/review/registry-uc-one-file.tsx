@@ -1,4 +1,4 @@
-// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-392 to UC-399, and UC-428): Restore
+// UC's entries for restoring one document from Versions (UC-316 to UC-325, UC-341, UC-392 to UC-399, and UC-428): Restore
 // this document beside the
 // documents that differ from now, the restore dialog it opens for that document alone, and the line once it is done,
 // in the room with Versions open over registry-u8.tsx's host, after the presses that bring each state. The English
@@ -136,7 +136,7 @@ export const UC_ONE_FILE: Entry[] = [
   state(
     "UC-395",
     versionWords(
-      "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.",
+      "Nothing was undone: Clauseo couldn't safely put '{paper}' back, so it left it as it is.",
     ),
     EDITED_SINCE,
     UNDOING_TODAY,
@@ -165,6 +165,13 @@ export const UC_ONE_FILE: Entry[] = [
     ),
     RENAMED,
     ASK_EARLIER,
+  ),
+  // the paper changed as Restore was pressed (saved in Word, say), so the host wrote nothing
+  state(
+    "UC-341",
+    versionWords("Nothing was restored: Clauseo left '{paper}' as it is."),
+    { ...MODIFIED, wroteNothing: true },
+    [...ASK_EARLIER, CONFIRM],
   ),
   // the version restored to has left the matter's window by the time the line is said
   state("UC-428", versionWords("Restored '{paper}'."), { ...MODIFIED, forgets: true }, [

@@ -480,9 +480,10 @@ pub struct HostError {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
     /// The matter's files the failure is about: for `matter.file_locked`, the files held open,
-    /// sorted; for `matter.file_folder_clash`, the one entry in the way (the chosen file's own
-    /// path when a folder now has it, else its folder that is now a file). Missing when it names
-    /// none. For `matter.file_locked` the files are here, not in `message`.
+    /// sorted; for `matter.file_folder_clash`, the entry in the way (the file's own path when a
+    /// folder now has it, else its folder that is now a file), then the file being restored.
+    /// Missing when it names none. For `matter.file_locked` the files are here, not in
+    /// `message`.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     files: Vec<MatterPath>,
 }
@@ -520,7 +521,8 @@ impl HostError {
     }
 
     /// The matter's files the failure is about: for `matter.file_locked`, the files held open;
-    /// for `matter.file_folder_clash`, the entry in the way. Empty when it names none.
+    /// for `matter.file_folder_clash`, the entry in the way, then the file being restored. Empty
+    /// when it names none.
     pub fn files(&self) -> &[MatterPath] {
         &self.files
     }
