@@ -57,7 +57,7 @@ pub(crate) fn current(options: &[ConfigOption], option: &str) -> Option<String> 
 }
 
 /// The values of the select option `option` in `options`.
-fn values(options: &[ConfigOption], option: &str) -> Vec<String> {
+pub(crate) fn values(options: &[ConfigOption], option: &str) -> Vec<String> {
     options
         .iter()
         .find(|offered| offered.id == option)
@@ -88,7 +88,7 @@ pub(crate) fn logged(events: &Events) -> Vec<ConfigOption> {
 }
 
 /// The options `ListAgents` gives `claude-acp`.
-fn agent_options(host: &Running) -> Vec<ConfigOption> {
+pub(crate) fn agent_options(host: &Running) -> Vec<ConfigOption> {
     let QueryResult::Agents(agents) = host.query(HostQuery::ListAgents).unwrap() else {
         panic!("ListAgents answered another result");
     };
@@ -190,9 +190,10 @@ fn a_first_conversation_keeps_the_options_and_a_pick_becomes_the_matters() {
         summary(&host, matter).agent_prefs,
         Some(claude_prefs(&[("model", "opus"), ("effort", "high")]))
     );
+    // The kept current stays the session's start (`pickers_default.rs`).
     assert_eq!(
         current(&agent_options(&host), "effort").as_deref(),
-        Some("high")
+        Some("default")
     );
     host.shutdown();
 
@@ -201,8 +202,8 @@ fn a_first_conversation_keeps_the_options_and_a_pick_becomes_the_matters() {
     dir.set_agents(&[(CLAUDE, Scenario::Bundled("pickers-picked"))]);
     let host = dir.start(1);
     let kept = agent_options(&host);
-    assert_eq!(current(&kept, "model").as_deref(), Some("opus"));
-    assert_eq!(current(&kept, "effort").as_deref(), Some("high"));
+    assert_eq!(current(&kept, "model").as_deref(), Some("default"));
+    assert_eq!(current(&kept, "effort").as_deref(), Some("default"));
     let second = create_thread(&host, matter, None);
     let events = turn(&host, second, "And clause 5?");
     // One logged list, the start's with the picks set: the update the agent sent while they were

@@ -295,6 +295,7 @@ pub(super) fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> 
 /// (`picks.rs`); any other attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     super::profile_loads::show_tools(actor, thread);
+    actor.agent_options.started(thread, &start.config_options);
     if !start.config_options.is_empty() {
         super::picks::drop_held(actor, thread, "the session's answer is newer");
     }

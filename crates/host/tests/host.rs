@@ -376,6 +376,9 @@ mod permissions;
 #[path = "host/pickers.rs"]
 mod pickers;
 #[cfg(test)]
+#[path = "host/pickers_default.rs"]
+mod pickers_default;
+#[cfg(test)]
 #[path = "host/pickers_early.rs"]
 mod pickers_early;
 #[cfg(test)]
