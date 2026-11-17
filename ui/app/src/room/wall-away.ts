@@ -111,7 +111,7 @@ export function awayWords(
         : null;
   const says = rt(
     lang,
-    "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.",
+    "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.",
   );
   return {
     line: service === null ? rt(lang, "Only online") : rt(lang, "Only in {service}", { service }),

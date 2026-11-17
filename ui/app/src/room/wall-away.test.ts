@@ -37,7 +37,7 @@ const ONE_DRIVE: FolderPlace = { synced: { service: "one_drive" } };
 const DROPBOX: FolderPlace = { synced: { service: "dropbox" } };
 const FIRST = rt(
   "en",
-  "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.",
+  "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.",
 );
 
 test("files only online and folders not opened sit among the papers by path, with ids of their own", () => {
@@ -90,7 +90,7 @@ test("a file only online names the service that syncs the folder, or says online
   expect(awayWords("hi", "mac", "local", false).line).toBe("केवल ऑनलाइन");
 });
 
-test("UC-915: a file only online's tip says Clauseo keeps no versions and that reading it downloads it, everywhere", () => {
+test("UC-915: a file only online's tip says Clauseo saves no new versions for now and that reading it downloads it, everywhere", () => {
   for (const [platform, place] of [
     ["linux", ONE_DRIVE],
     ["windows", DROPBOX],

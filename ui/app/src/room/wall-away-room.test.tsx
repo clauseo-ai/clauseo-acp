@@ -142,7 +142,7 @@ test("files only online and a folder not opened show dimmed among the papers, op
     "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.",
   );
   expect(describedBy(away[1]!)).toBe(
-    "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it. " +
+    "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it. " +
       "To keep it here, right-click it in File Explorer and choose Always keep on this device.",
   );
   // the papers' tiles still open

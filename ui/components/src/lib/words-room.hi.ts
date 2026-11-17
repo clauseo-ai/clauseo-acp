@@ -31,7 +31,7 @@ export const HI = {
   "To keep it here, Control-click it in Finder and choose Always Keep on This Device.":
     "इसे यहाँ रखने के लिए Finder में इस पर Control-क्लिक करें और Always Keep on This Device चुनें।",
   // UC-915, the tip's first sentence (copy-approvals/UC-online-only-read.json): Hindi later, English until it comes
-  "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.":
+  "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.":
     null,
   // a folder Clauseo couldn't list: online only, or not allowed, which the host can't tell apart
   "Not opened": "नहीं खोला गया",
