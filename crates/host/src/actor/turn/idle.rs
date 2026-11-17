@@ -33,8 +33,13 @@
 //!   is marked (`Relaunch::ProfileChanged`, [`mark_stale`]). That mark has no grace of its own:
 //!   with no prompt the agent stops at the idle limit, as any idle agent does, so work it goes
 //!   on with after its turn keeps its full idle limit, as before the change. Its next prompt
-//!   relaunches it on the new profile, unless a background command of its last turn may still
-//!   run ([`holds_relaunch`]); then that prompt goes to it as it is.
+//!   relaunches it on the new profile, unless background work of its last turn may still run
+//!   ([`background_may_run`], [`holds_relaunch`]); then that prompt goes to it as it is. Only
+//!   the idle stop spares background work for sure. A prompt after the change still cuts, for
+//!   now, a command or helper the agent put in the background on its own (no steer from the
+//!   lawyer), and steered work still running `cap_min_idle` (60 s) after its turn's end: the
+//!   host sees neither until it reports. The tracking of background work, once it lands, closes
+//!   both in [`background_may_run`].
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -135,15 +140,24 @@ impl Relaunch {
 }
 
 /// Whether `agent`'s mark waits rather than relaunch it for a prompt at `now`: a config, mode
-/// or relay call is in flight, or, for a profile change, its last turn closed within `window`
-/// after a steer during a tool call (`steered_end`), so a command Claude put in the background
-/// may still run.
+/// or relay call is in flight, or, for a profile change, background work of its last turn may
+/// still run ([`background_may_run`]).
 pub(super) fn holds_relaunch(agent: &agents::Agent, now: Duration, window: Duration) -> bool {
-    let background = agent
+    let profile = agent.idle.relaunch == Some(Relaunch::ProfileChanged);
+    calls(agent) > 0 || (profile && background_may_run(agent, now, window))
+}
+
+/// Whether background work of `agent`'s last turn may still run at `now`. Today the host knows
+/// of one case only: that turn closed within `window` after a steer during a tool call
+/// (`steered_end`), so a command Claude put in the background may not have reported yet. Work
+/// the agent put in the background on its own, and steered work past `window`, read as ended.
+/// The tracking of background work (which keeps it alive and tells when it ends) plugs in here
+/// in one line, and every caller gets it.
+pub(super) fn background_may_run(agent: &agents::Agent, now: Duration, window: Duration) -> bool {
+    agent
         .idle
         .steered_end
-        .is_some_and(|at| now.saturating_sub(at) <= window);
-    calls(agent) > 0 || (agent.idle.relaunch == Some(Relaunch::ProfileChanged) && background)
+        .is_some_and(|at| now.saturating_sub(at) <= window)
 }
 
 /// Marks `thread`'s live agent to stop once nothing is pending, for `why` (a Tools mark already

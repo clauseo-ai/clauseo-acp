@@ -117,7 +117,9 @@ pub trait ProfileHook: Send {
     /// The host reads it before a launch's skills writes, and an agent launched on an older
     /// generation is marked to relaunch once [`Self::changed`] tells of a newer one: its next
     /// question relaunches it on the new profile, and with none it stops at the idle limit,
-    /// never mid-turn. No I/O.
+    /// never mid-turn. A lagging one is safe: when [`Self::changed`] ends while this still
+    /// says the old value, the host takes the lower of the two and only watches again, so it
+    /// never relaunches in a loop. No I/O.
     fn generation(&self) -> u64 {
         0
     }
