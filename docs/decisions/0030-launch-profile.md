@@ -583,7 +583,9 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     bounds, for one data spelling and for two (two is the ordinary Windows machine:
     `ai.clauseo.desktop` is never an 8.3 name, so any volume that makes short names gives it
     `AICLAU~1.DES` as well), are under **600,000 B at 8 matters, 700,000 B at 50 and 810,000 B
-    at 200** (the ask line less 10%). Reason: a lawyer with an ordinary number of matters on an
+    at 200** (the ask line less 10%), except 200 matters with two spellings, which until that
+    spelling's rules are cut has its own caps: 975,000 B estimated, 900,000 B like for like with
+    the measured context. Reason: a lawyer with an ordinary number of matters on an
     ordinary Windows machine must never be pushed into ask mode.
     `data_fence/shell_deny_budget_tests.rs` checks them on the laptop-like folder. A launch over a bound is cut down by rules, and the
     bound is never raised. To meet them, other matters get no shell text rules (their Read and

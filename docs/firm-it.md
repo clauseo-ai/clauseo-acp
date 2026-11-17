@@ -1034,15 +1034,25 @@ syncs nor loads the account's claude.ai skills. There is no switch for it until 
 reviewed. Your firm's skills reach Clauseo as skill packs
 ([decision 0040](decisions/0040-skill-packs.md)).
 
-### What the fence between matters is not
+### What the fence between matters is and is not
 
-On a machine without Clauseo's sandbox (tier C), there is no isolation between matters. The
-agent runs as the lawyer and can read any folder the lawyer can, including other matters'
-folders on disk. What Clauseo fences is its own data: other conversations in its search index,
-other sessions' working copies, other matters' notes and the agents' credentials. That is not
-a wall between matters. The agent may read Clauseo's `profile` folder: it holds only the
-built-in plugin, the same for every matter. Run folders and matters created after a session started are not in
-that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
+On a machine without Clauseo's sandbox (tier C), the agent runs as the lawyer. Clauseo fences
+each session's agent from the other matters the app knows. On every system, Claude's file tools
+are refused other matters' folders by Claude's own deny rules, and Clauseo refuses Claude's
+requests for permission to reach them. On macOS and Linux, Claude's sandbox and Codex's profile
+also deny those folders to the agents' commands. A matter the lawyer lets a conversation read is
+open to it for reading only. On Windows, Codex is told which matters it may open, and its sandbox
+limits where its commands can write.
+
+Clauseo also fences its own data: other conversations in its search index, other sessions'
+working copies, other matters' notes and the agents' credentials. The agent may read Clauseo's
+`profile` folder: it holds only the built-in plugin, the same for every matter.
+
+The fence is not a boundary the operating system draws between matters on Windows. It is made
+of the agents' permission rules and Clauseo's own checks, and it covers what the next section
+lists. It covers only folders Clauseo knows as matters. Run folders and matters created after a
+session started are not in that session's Claude deny rules until its next launch; Clauseo's
+own permission check refuses them when Claude asks
 ([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
 
 ### Matters on Windows and on a Mac

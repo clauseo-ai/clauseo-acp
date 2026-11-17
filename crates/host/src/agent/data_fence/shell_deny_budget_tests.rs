@@ -40,6 +40,17 @@ const SHORT_DATA: &str = r"AppData\Local\AICLAU~1.DES";
 /// finding: cut rules, never raise the bound.
 const BOUNDS: [(usize, usize); 3] = [(8, 600_000), (50, 700_000), (200, 810_000)];
 
+/// The 200-matter, two-spelling row, over its [`BOUNDS`] entry until the second spelling's rules
+/// are cut: its own caps, so that growth there fails. The estimate like for like with the
+/// measured context (the pin's) stays under 900,000 B: 10% under the real figure at most (the
+/// pin), so the real figure under 1,000,000 B. The whole estimate, the own folders' glob denies
+/// too, stays under [`TWO_SPELLINGS_AT_200`].
+const PINNED_AT_200: usize = 900_000;
+
+/// The whole estimate's cap at 200 matters with two spellings: what it costs now, plus about
+/// 1.5%.
+const TWO_SPELLINGS_AT_200: usize = 975_000;
+
 /// The context a launch's rules cost: each deny rule's JSON (its backslashes doubled) plus 33 B,
 /// or about 225 B for a `Read` or `Edit` rule (root and pattern too); 3 KB fixed. Allow rules
 /// cost nothing in auto mode, so they are not passed.
@@ -150,7 +161,8 @@ fn launch(matters: usize, short: bool, prefix: bool) -> Launch {
 
 /// The context at 1, 8, 50 and 200 matters, with one data spelling and with two, and with a
 /// matter whose folder is a text prefix of the open one's: under [`BOUNDS`] at 8, 50 and 200
-/// matters, whichever way (1 matter is printed, not bounded). Every row is printed for the PR
+/// matters, whichever way, except 200 with two spellings, which has its own cap
+/// ([`TWO_SPELLINGS_AT_200`]; 1 matter is printed, not bounded). Every row is printed for the PR
 /// (`--no-capture`) before any is checked: context, settings bytes, deny and allow counts.
 #[test]
 fn a_windows_launch_stays_within_the_auto_mode_context() {
@@ -189,8 +201,11 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
             continue;
         };
         if *matters == 200 && *short {
-            // known: over the 810,000 B bound, pending the orchestrator's decision on rule cuts
-            // for the second spelling
+            assert!(
+                *context < TWO_SPELLINGS_AT_200,
+                "{matters} matters, short, prefix {prefix}: {context} >= {TWO_SPELLINGS_AT_200}; \
+                 {seen:?}"
+            );
             continue;
         }
         assert!(
@@ -254,6 +269,12 @@ fn the_estimate_is_pinned_to_the_measured_context() {
     // follow-up (matter-fence-budget-cuts, right behind growth) re-measures on its head, costs
     // each rule by its JSON, and makes the check one-sided again.
     for (matters, short, estimate, sent) in rows {
+        if matters == 200 && short {
+            assert!(
+                estimate < PINNED_AT_200,
+                "{matters} {short}: {estimate} >= {PINNED_AT_200}"
+            );
+        }
         assert!(
             estimate >= sent - sent / 10,
             "{matters} {short}: {estimate} more than 10% under {sent}"

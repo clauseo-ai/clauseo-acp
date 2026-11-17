@@ -286,9 +286,11 @@ anything the agent starts.
   Codex's profile deny on macOS and Linux, and the host's auto-deny of permission requests. On
   Windows the other matters have no Bash or PowerShell text rules, which keeps a launch's
   auto-mode context under Claude Code 2.1.293's 1,040,000 B (`data_fence::shell_deny_budget_tests`:
-  under 600,000 B at 8 matters, 700,000 B at 50 and 810,000 B at 200, with one data spelling or
-  two; decision record 0030, "Auto-mode context"); Claude Code checks the file paths of its
-  common file commands (about 40 Bash commands and PowerShell's file cmdlets) against the Read
+  under 600,000 B at 8 matters and 700,000 B at 50 with one data spelling or two, and 810,000 B
+  at 200 with one; at 200 with two, the estimate like for like with the measured context is
+  capped at 900,000 B and the whole estimate at 975,000 B; decision record 0030, "Auto-mode
+  context"); Claude Code checks the file paths of its common file commands (about 40 Bash
+  commands and PowerShell's file cmdlets) against the Read
   and Edit denies. No folder above another matter is in any rule: an `Edit` deny of a folder
   covers everything inside it. On macOS, moving such a folder is the sandbox's to refuse while
   Claude's sandbox is on; when it is off (`NoTemp`, `NotUtf8`, `Wildcard`, `CoversOwn`) each
