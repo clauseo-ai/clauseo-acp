@@ -203,7 +203,7 @@ fn nothing_is_swept_or_made_through_a_linked_run_or_agent_state() {
 }
 
 /// `{matter_notes}`: a notes path whose matter folder is a link is refused, as one whose
-/// `agent-state` is (above): the launch fails with `agent.launch_failed` naming the link, and
+/// `agent-state` is (above): the launch fails with `agent.home_failed` naming the link, and
 /// nothing is made through it. A notes folder made earlier at another mode is set to 0700.
 #[cfg(unix)]
 #[test]
@@ -217,7 +217,7 @@ fn the_notes_folder_is_private_and_never_made_through_a_linked_matter() {
     write::create_dir_all(matter.parent().unwrap()).unwrap();
     write::symlink(&outside, &matter).unwrap();
     let error = launch.make(&data, &RunSweep::default()).unwrap_err();
-    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentHomeFailed);
     assert!(error.to_string().contains("link"), "{error}");
     assert!(
         error.to_string().contains(&matter.display().to_string()),

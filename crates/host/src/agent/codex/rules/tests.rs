@@ -109,7 +109,7 @@ fn the_launch_refuses_when_rules_cannot_be_removed() {
     }
     let error = prepare_launch(&any_check(), &matter, &data, &home).unwrap_err();
     write::set_mode(&locked, 0o700).unwrap();
-    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentHomeFailed);
     assert!(
         error
             .to_string()

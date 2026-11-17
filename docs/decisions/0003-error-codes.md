@@ -169,12 +169,15 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `skill.no_skill_md` | The skill to add has no `SKILL.md`: the path is neither a folder holding one nor a `SKILL.md` file; nothing was added. | no | host (`AddSkill`, decision record 0040) |
 | `skill.invalid` | The skill to add could not be made a skill pack: it could not be read, it is over 5,000,000 bytes or 200 files, or it breaks a skill pack rule (no name or description in its `SKILL.md`, a script while scripts are off, and the like); nothing was added. | no | host (`AddSkill`; the log line holds the rule's code) |
 | `matter.file_folder_clash` | A restore of chosen files names a file whose name is now a folder, or one of whose folders is now a file, so nothing was restored or written. | no | matters (a `RestoreVersion` or `PreviewRestore` with a `files` scope, naming the entry in the way, then the file, in `HostError::files`; a whole-matter restore keeps such a file instead, and is refused only for one that clashes after its plan) |
+| `agent.home_failed` | Clauseo could not prepare the agent's own folder under its data folder (its home, or a folder of its session), so the agent was not started. Asking again can work. | yes | host (a Codex or Claude home under `<data>/agents/<id>/home` that can't be made, made private, or cleared of Codex's `rules`, or whose `config.toml` can't be written, `agent/codex.rs` `agent_home_failed`; a session's `run`, temporary or notes folder that can't be made, or a work or notes folder that can't be readied, `actor/turn/launch_checks/folders.rs` `make` and `ready_own`). Before, it read as `agent.launch_failed`; a process that does not spawn stays that code |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
 launch can work; `store.locked` is not, because the lawyer must close the other Clauseo first;
 `matter.checkpoint_failed` is, because the usual cause (another program holding the repository lock)
-passes; `matter.turn_running` is, as `thread.turn_running` is.
+passes; `matter.turn_running` is, as `thread.turn_running` is; `agent.home_failed` is, as
+`agent.launch_failed` is, because a folder another program held or scanned at the launch can be
+free at the next one.
 
 `matter.folder_missing` became retryable, and its meaning gained "or did not answer in time", on
 2026-11-07 for #617, at the orchestrator's request. The widened meaning clarifies "its drive is

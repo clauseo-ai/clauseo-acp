@@ -347,6 +347,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Permission | `ErrorCode::PermissionNotPending`, `ErrorCode::PermissionUnknownOption` | no |
 | Elicitation | `ErrorCode::ElicitationNotPending`, `ErrorCode::ElicitationInvalidValues` | no |
 | Agent | `ErrorCode::AgentLaunchFailed`, `ErrorCode::AgentExited` | yes |
+| Agent not started: Clauseo couldn't prepare its own folder under the data folder (its home, or its session's folders); the stop line names the agent and offers Try again | `ErrorCode::AgentHomeFailed` | yes |
 | Agent | `ErrorCode::AgentProtocolError`, `ErrorCode::AgentAuthRequired`, `ErrorCode::AgentUnsupportedVersion` | no |
 | Claude refused: its guard can't be set up in a forced-ask folder (reinstall) | `ErrorCode::AgentGuardMissing` | no |
 | Store | `ErrorCode::StoreIo` | yes |
