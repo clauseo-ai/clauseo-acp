@@ -57,6 +57,7 @@ pub(in super::super) fn ready_profile(
                 .unwrap_or_else(|| first_preferences(staging, downloads));
             merge(&mut preferences, quiet::preferences());
             merge(&mut preferences, logon::preferences());
+            without_cert_decisions(&mut preferences);
             let kept = read_json(&local_state).map(without_flags);
             write_new(
                 profile,
@@ -95,6 +96,20 @@ fn without_flags(mut local_state: serde_json::Value) -> serde_json::Value {
         browser.remove("enabled_labs_experiments_origin_lists");
     }
     local_state
+}
+
+/// `preferences` without the certificate decisions Chrome remembers
+/// (`profile.content_settings.exceptions.ssl_cert_decisions`, `components/content_settings/core/
+/// browser/content_settings_registry.cc`): a "proceed" past a certificate warning, from before
+/// [`quiet::preferences`]' `ssl` or written into the file between starts, would let a page with
+/// that certificate load with no warning at all.
+fn without_cert_decisions(preferences: &mut serde_json::Value) {
+    if let Some(exceptions) = preferences
+        .pointer_mut("/profile/content_settings/exceptions")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        exceptions.remove("ssl_cert_decisions");
+    }
 }
 
 /// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above,

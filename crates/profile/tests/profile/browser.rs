@@ -146,6 +146,9 @@ fn only_the_browser_part_names_agent_browser() {
         "confidential matter text",
         "The eval tool is off",
         "Save a file from the web by clicking its link in the browser.",
+        // A certificate warning: the lawyer hears it plainly, and no other route is tried.
+        "Certificate error: stop, tell the lawyer the site's certificate couldn't be verified;",
+        "never retry or suggest going past the warning.",
         "close tool",
     ] {
         assert!(codex_on.contains(rule), "{rule}: {codex_on}");

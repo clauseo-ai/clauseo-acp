@@ -139,7 +139,13 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     }
     for weakening in [
         "--disable-web-security",
+        // With its `-spki-list` form: each lets a certificate warning be skipped, past the
+        // profile's `ssl` preferences, as do the next four.
         "--ignore-certificate-errors",
+        "--ignore-ssl-errors",
+        "--ignore-urlfetcher-cert-requests",
+        "--allow-insecure-localhost",
+        "--test-type",
         "--disable-site-isolation-trials",
         "--allow-running-insecure-content",
     ] {
@@ -149,6 +155,16 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
         );
     }
     assert!(args.contains(&"--isolate-origins=https://accounts.google.com".to_owned()));
+    // One profile, the guard's: a second `--user-data-dir` would win over it, with its own
+    // `Preferences`.
+    let profiles: Vec<&String> = args
+        .iter()
+        .filter(|a| a.starts_with("--user-data-dir"))
+        .collect();
+    assert_eq!(
+        profiles,
+        ["--user-data-dir=/state/browser/chrome-profile-1-0000abcd"]
+    );
     let updater: Vec<&String> = args
         .iter()
         .filter(|a| a.starts_with("--component-updater="))
@@ -162,6 +178,11 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     assert_eq!(preferences["safebrowsing"]["enabled"], false);
     assert_eq!(preferences["net"]["network_prediction_options"], 2);
     assert_eq!(preferences["plugins"]["always_open_pdf_externally"], true);
+    assert_eq!(preferences["ssl"]["error_override_allowed"], false);
+    assert_eq!(
+        preferences["ssl"]["error_override_allowed_for_origins"],
+        serde_json::json!([])
+    );
 }
 
 /// On every OS, as root and in a container, Chrome's arguments name no switch or feature that

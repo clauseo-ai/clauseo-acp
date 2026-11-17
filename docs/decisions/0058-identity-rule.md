@@ -99,7 +99,7 @@ get), in `crates/profile/tests/legal/budgets.rs`:
 | `legal.md` | 1,327 | 1,360 (kept; the count rounds up to 1,350) |
 | The text both agents share: tools part with the stetdoc line, `legal.md` | 1,719 | 1,800 (kept; the count rounds up to 1,750) |
 | Claude's `systemPrompt.append` on macOS: tools part with the stetdoc line, `legal.md`, shell line, "Working at scale" | 2,216 | 2,250 (new) |
-| Codex's `developer_instructions` on macOS: tools part with the stetdoc line, `legal.md`, offline line, refusal line, macOS line, built-in skills index | 1,996 | 2,000 (the 1,800 cap counted only the shared text and the index) |
+| Codex's `developer_instructions` on macOS: tools part with the stetdoc line, `legal.md`, offline line, refusal line, macOS line, built-in skills index | 2,016 | 2,040 (2,000 until the browser part's certificate-error rule, 20 words, took it from 1,996; the 1,800 cap before counted only the shared text and the index) |
 | The paper reader's prompt (all a helper gets) | 188 | 200 (new) |
 | The researcher's prompt (RH2 629, RH3 649) | 649 | 650 (new) |
 

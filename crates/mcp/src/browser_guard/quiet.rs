@@ -5,7 +5,8 @@
 //! idle run on iris; with these, none.
 //!
 //! Nothing else weakens a security control; Safe Browsing's warnings are given up (ADR 0029).
-//! No certificate, sandbox, web-security or site isolation change. Safe Browsing is off, so its
+//! No sandbox, web-security or site isolation change. One certificate change, which tightens:
+//! a certificate warning has no way past it ([`preferences`]'s `ssl`). Safe Browsing is off, so its
 //! list updates and lookups never leave. Where the browser goes is bounded by the guard's URL
 //! filter (`filter.rs`) and the session's egress proxy, with its deny list and block list,
 //! which every host entry now gives, the plain client's Codex entry included (decision records
@@ -89,5 +90,13 @@ pub(crate) fn preferences() -> serde_json::Value {
         // A PDF link downloads rather than opening in Chrome's viewer, so agent-browser's
         // `download` gets its download event.
         "plugins": {"always_open_pdf_externally": true},
+        // A certificate warning cannot be clicked or typed (`thisisunsafe`) past: the profile
+        // preferences behind the SSLErrorOverrideAllowed and SSLErrorOverrideAllowedForOrigins
+        // policies (`chrome/common/pref_names.h`), set here in the guard's own profile and never
+        // as a policy, so the lawyer's Chrome and Edge are untouched. Chrome for Testing 147 then
+        // builds the warning with `overridable` false: no "Proceed" link, and the typed phrase
+        // does nothing (the real-Chrome test's `certificate` rows). Every start writes them
+        // again (`chrome/profile.rs`), with any remembered "proceed" decision taken out.
+        "ssl": {"error_override_allowed": false, "error_override_allowed_for_origins": []},
     })
 }
