@@ -491,6 +491,8 @@ pub(super) fn on_matter_reply(
         MatterTag::Restore(ask) => {
             if let MatterReply::Restored(result) = reply {
                 turn::on_restored(actor, &ask, result.map(|done| *done));
+            } else if let MatterReply::RestoreRecorded(result) = reply {
+                turn::on_recorded(actor, ask, result.map(|done| *done));
             } else {
                 tracing::error!(
                     reply = reply.name(),

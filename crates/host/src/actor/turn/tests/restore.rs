@@ -15,12 +15,8 @@ use crate::actor::turn::{End, end};
 use crate::pipeline::tests::support::notice;
 use crate::undo_note::Told;
 
-/// A Scratch thread whose one turn rewrote `brief.txt`; returns the thread and the restore
-/// command that puts the after-turn version back.
-fn rewritten(rig: &mut Rig) -> (ThreadId, HostCommand) {
-    let thread = rig.thread();
-    rig.running_turn(thread);
-    rig.write_file("brief.txt", "The lease ends in June.");
+/// Ends `thread`'s running turn, with its after-turn checkpoint.
+fn end_running(rig: &mut Rig, thread: ThreadId) {
     let done = End {
         stop: StopReason::EndTurn,
         failure: None,
@@ -29,6 +25,15 @@ fn rewritten(rig: &mut Rig) -> (ThreadId, HostCommand) {
     };
     end::end_turn(&mut rig.actor, thread, done);
     until_ended(rig, thread);
+}
+
+/// A Scratch thread whose one turn rewrote `brief.txt`; returns the thread and the restore
+/// command that puts the after-turn version back.
+fn rewritten(rig: &mut Rig) -> (ThreadId, HostCommand) {
+    let thread = rig.thread();
+    rig.running_turn(thread);
+    rig.write_file("brief.txt", "The lease ends in June.");
+    end_running(rig, thread);
     // The lawyer edits the file after the turn; the restore puts the turn's version back.
     rig.write_file("brief.txt", "The lease ends in July.");
     let before = rig
@@ -173,6 +178,10 @@ fn a_restore_commit_failing_twice_still_notes_the_files() {
 fn a_restore_asked_from_a_blocked_conversation_is_still_recorded_by_the_matter() {
     let mut rig = Rig::start("turn-restore-blocked-thread", "");
     let (thread, restore) = rewritten(&mut rig);
+    // A second turn's after-turn checkpoint records the lawyer's edit, so the restore's first
+    // job has nothing to log: that commit would wait behind the held one below.
+    rig.running_turn(thread);
+    end_running(&mut rig, thread);
     let HostCommand::RestoreVersion {
         matter,
         checkpoint,

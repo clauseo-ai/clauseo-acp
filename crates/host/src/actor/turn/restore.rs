@@ -1,12 +1,14 @@
 //! `RestoreVersion`: the matter's writer must be free and is held for the whole restore; the
-//! version must be one of the matter's; R8 restores it on the matter's thread; one commit of
-//! the matter's stream logs it. A restore belongs to no thread, so the writer's holder is
-//! [`Holder::Restore`]; the same commit records it in the stream of the conversation it was asked
-//! from, when the command names one of the matter's and that stream is not blocked by an earlier
-//! store failure (the conversation's line is best-effort; the matter's record is not). One that
-//! `undoes` an earlier restore also removes the files that restore added, while they hold what
-//! it wrote. The writer and the note wait until that commit is durable; a failed one is sent
-//! once more when the matter's stream drains, as an undo's is.
+//! version must be one of the matter's; R8 first records the folder as it is, which the
+//! matter's stream logs before anything is written (`record.rs`); then R8 restores the version
+//! on the matter's thread; one commit of the matter's stream logs it. A restore belongs to no
+//! thread, so the writer's holder is [`Holder::Restore`]; the same commit records it in the
+//! stream of the conversation it was asked from, when the command names one of the matter's and
+//! that stream is not blocked by an earlier store failure (the conversation's line is
+//! best-effort; the matter's record is not). One that `undoes` an earlier restore also removes
+//! the files that restore added, while they hold what it wrote. The writer and the note wait
+//! until that commit is durable; a failed one is sent once more when the matter's stream
+//! drains, as an undo's is.
 
 use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
@@ -26,8 +28,10 @@ use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
 use crate::undo_note::RestoreNote;
 
+mod record;
 mod revisions;
 
+pub(crate) use record::{logged as record_logged, on_recorded};
 pub(crate) use revisions::{RevisionsAsk, decide_revisions, on_decided};
 
 /// A restore between its checks and R8's answer.
@@ -106,7 +110,7 @@ pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostC
                 actor.now().wall,
             );
             let then = move |actor: &mut Actor, _recorded: Result<(), Error>| {
-                if let Err(error) = send_restore(actor, ask) {
+                if let Err(error) = record::send(actor, ask) {
                     give_up(actor, matter, ctx, error);
                 }
                 actor.release(stream);
@@ -154,17 +158,23 @@ fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
     Err(Error::refused(ErrorCode::MatterTurnRunning, message))
 }
 
-/// Mints the two checkpoint ids and sends the restore to the matter's thread.
-fn send_restore(actor: &mut Actor, ask: RestoreAsk) -> Result<(), Error> {
+/// The job of `ask`, with two checkpoint ids minted now: each of a restore's two jobs has its
+/// own, so the restore's outside-edits checkpoint is new only for what changed after the first.
+fn job(actor: &mut Actor, ask: &RestoreAsk) -> Result<RestoreJob, Error> {
     let now = actor.now().wall;
-    let job = RestoreJob {
+    Ok(RestoreJob {
         from: ask.from,
         scope: ask.scope.clone(),
         outside_edits: actor.ids.mint(now)?,
         checkpoint: actor.ids.mint(now)?,
         at: now,
         undoes: ask.undoes,
-    };
+    })
+}
+
+/// Sends the restore to the matter's thread, once its first job's checkpoint is logged.
+fn send_restore(actor: &mut Actor, ask: RestoreAsk) -> Result<(), Error> {
+    let job = job(actor, &ask)?;
     let matter = ask.matter;
     actor
         .matter_worker(matter)?

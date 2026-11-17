@@ -141,10 +141,14 @@ export function askedAgain(
   return { act, id, preview, undoes, file, moved, stage: "confirm", failed: null };
 }
 
-/** Whether two previews would write the same: the same files, each changed the same way, and the same files removed. */
+/** Whether two previews would write the same: the same files, each changed the same way over the same content
+ * there now (a paper saved again is another change, though still "modified"), and the same files removed. */
 export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>
   a.changes.length === b.changes.length &&
-  a.changes.every((c, i) => c.path === b.changes[i]?.path && c.change === b.changes[i]?.change) &&
+  a.changes.every((c, i) => {
+    const o = b.changes[i];
+    return c.path === o?.path && c.change === o.change && c.before === o.before;
+  }) &&
   (a.removes ?? []).join("\n") === (b.removes ?? []).join("\n");
 
 /** A turn whose change couldn't be kept as a version: its conversation, its first file and when it ended. */

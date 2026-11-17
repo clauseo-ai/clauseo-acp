@@ -133,3 +133,42 @@ pub(crate) fn held_at_replace_write(path: &std::path::Path) -> bool {
     }
     true
 }
+
+/// The files [`fail_restore_write`] armed, by absolute path.
+static FAIL_RESTORE_WRITE: std::sync::Mutex<Vec<std::path::PathBuf>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// From now on, for the whole process, the next `Matter::restore` that would write or delete
+/// the file `path` (absolute) fails after its outside-edits checkpoint, before it writes
+/// anything, with a sharing violation: where a crash during its write-back would stop it. Once
+/// per call. Process-wide, as the host restores on a matter thread; it suits nextest's one
+/// process per test.
+pub fn fail_restore_write(path: impl Into<std::path::PathBuf>) {
+    let mut armed = FAIL_RESTORE_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    armed.push(path.into());
+}
+
+/// Before a restore in `folder` writes `targets`: the armed failure of the first one armed,
+/// once.
+pub(crate) fn before_restore_write(
+    folder: &std::path::Path,
+    targets: &[clauseo_protocol::MatterPath],
+) -> Result<(), crate::Error> {
+    let mut armed = FAIL_RESTORE_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for target in targets {
+        let path = folder.join(target.as_str());
+        if let Some(at) = armed.iter().position(|one| *one == path) {
+            armed.remove(at);
+            return Err(crate::Error::io(
+                "write",
+                path,
+                std::io::Error::from_raw_os_error(32),
+            ));
+        }
+    }
+    Ok(())
+}

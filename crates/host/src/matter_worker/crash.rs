@@ -189,7 +189,8 @@ fn failed_in_history(settings: &Settings, reply: &MatterReply) -> bool {
         MatterReply::BeforeTurn(Err(error))
         | MatterReply::AfterTurn(Err(error))
         | MatterReply::Undone(Err(error))
-        | MatterReply::Restored(Err(error)) => error,
+        | MatterReply::Restored(Err(error))
+        | MatterReply::RestoreRecorded(Err(error)) => error,
         MatterReply::Revisions(done) => match &**done {
             RevisionsDone::Decided(Err(error)) => error,
             RevisionsDone::Decided(Ok(_)) | RevisionsDone::Listed(_) => return false,
@@ -202,6 +203,7 @@ fn failed_in_history(settings: &Settings, reply: &MatterReply) -> bool {
         | MatterReply::AfterTurn(Ok(_))
         | MatterReply::Undone(Ok(_))
         | MatterReply::Restored(Ok(_))
+        | MatterReply::RestoreRecorded(Ok(_))
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
         | MatterReply::HeldOpen(_)

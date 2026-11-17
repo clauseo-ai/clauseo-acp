@@ -28,6 +28,9 @@ pub(crate) enum Tag {
     Turn(turn::TurnTag),
     /// The retry of the commit logging a restore of this matter.
     Restore(MatterId),
+    /// The commit logging a restore's first checkpoint, before the restore writes
+    /// (`turn/restore/record.rs`).
+    RestoreRecord(Box<turn::RestoreAsk>),
     /// The commit logging snoozes' wakes (`triage/wake.rs`).
     Wake,
 }

@@ -16,7 +16,7 @@ use crate::stat::Stat;
 use crate::trash::{Removals, Removing, Trash};
 use crate::types::Settings;
 use crate::walk::{self, FoundKind};
-use crate::{Error, fsync, locks, write};
+use crate::{Error, clash, fsync, locks, write};
 
 #[cfg(test)]
 #[cfg(windows)]
@@ -152,7 +152,7 @@ pub(crate) fn respelled(
         let ours = matches!(op, Op::Write(..))
             && deleted
                 .iter()
-                .any(|(gone, metadata)| same_entry(gone, metadata, &abs, &other));
+                .any(|(gone, metadata)| clash::same_entry(gone, metadata, &abs, &other));
         if !ours {
             clashes.push(path.clone());
         }
@@ -160,22 +160,6 @@ pub(crate) fn respelled(
     clashes.sort();
     clashes.dedup();
     Ok(clashes)
-}
-
-/// Whether the entries found at `a` and `b` are one file: same device and inode on Unix;
-/// elsewhere, where std gives no file id, paths equal but for case.
-fn same_entry(a: &Path, a_meta: &Metadata, b: &Path, b_meta: &Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let _ = (a, b);
-        a_meta.dev() == b_meta.dev() && a_meta.ino() == b_meta.ino()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (a_meta, b_meta);
-        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
-    }
 }
 
 /// Whether the entry at `abs` is one the crate never reads or writes, by the walk's rule:
@@ -216,37 +200,6 @@ pub(crate) fn writable(
         }
     }
     Ok(true)
-}
-
-/// The entry in the folder of the other kind that `path` meets, by its matter path: a folder
-/// where the file goes (`path` itself), or a file, pipe, socket or device where one of its
-/// folders goes (that folder's path). `None` when it meets none; a link, or nothing, on the way
-/// is no clash ([`writable`] refuses a link).
-pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<Option<MatterPath>, Error> {
-    let mut at = folder.to_owned();
-    let mut seen: Vec<&str> = Vec::new();
-    let mut parts = path.as_str().split('/').peekable();
-    while let Some(part) = parts.next() {
-        at.push(part);
-        seen.push(part);
-        let kind = match std::fs::symlink_metadata(&at) {
-            Ok(metadata) => metadata.file_type(),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(Error::io("stat", &at, err)),
-        };
-        if kind.is_symlink() {
-            return Ok(None);
-        }
-        let last = parts.peek().is_none();
-        // a folder where the file goes, or anything but a folder (a file, a pipe, a socket)
-        // where one of its folders goes
-        if (last && kind.is_dir()) || (!last && !kind.is_dir()) {
-            let in_way =
-                MatterPath::new(&seen.join("/")).map_err(|err| Error::history("clash", err))?;
-            return Ok(Some(in_way));
-        }
-    }
-    Ok(None)
 }
 
 /// Carries out `ops` so that a failure while writing changes nothing, and a deletion never
@@ -400,9 +353,9 @@ impl Unfinished {
 type Written = (Vec<MatterPath>, Removals, Vec<MatterPath>);
 
 /// [`apply_or_partial`]'s steps: the deletions made, their count and those deleted for good, or
-/// the error and whether the folder changed. `dirs` gets each folder a write stages into; `owner_only` each file
-/// renamed into place whose step after the rename failed. Every staged file is renamed or
-/// dropped (its temp file removed) when it returns.
+/// the error and whether the folder changed. `dirs` gets each folder a write stages into;
+/// `owner_only` each file renamed into place whose step after the rename failed. Every staged
+/// file is renamed or dropped (its temp file removed) when it returns.
 fn write_all(
     core: &Core,
     folder: &Path,

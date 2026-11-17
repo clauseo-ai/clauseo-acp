@@ -1,7 +1,8 @@
-//! [`Matter::restore`], apart from `matter.rs` to keep that file under the size limit.
+//! [`Matter::restore`] and [`Matter::restore_record`], its steps before it writes, apart from
+//! `matter.rs` to keep that file under the size limit.
 
 use super::{Matter, json};
-use crate::types::{Restore, Restored};
+use crate::types::{Checkpoint, Restore, Restored};
 use crate::{Error, restore};
 
 #[expect(
@@ -21,5 +22,17 @@ impl Matter {
     pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
         json::check(&self.folder, self.id)?;
         restore::restore(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// The first steps of [`Matter::restore`] alone: checks the request, plans against the
+    /// folder, checks every target and every lock, and takes the `outside-edits` checkpoint
+    /// (`Reused`, naming the last checkpoint, when the folder equals it). Refuses as the
+    /// restore does; writes no file. A restore of the same version that follows, with fresh
+    /// ids, reuses that checkpoint unless the folder changed since: so the host can log the
+    /// copy a restore replaces before a crash during the write could lose it from Versions.
+    /// `request.checkpoint` is checked as the restore checks it, and not used.
+    pub fn restore_record(&mut self, request: &Restore<'_>) -> Result<Checkpoint, Error> {
+        json::check(&self.folder, self.id)?;
+        restore::record(&mut self.core, &self.folder, &self.settings, request)
     }
 }
