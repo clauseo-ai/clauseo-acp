@@ -7,7 +7,9 @@
 //! data folder (`agent/data_fence.rs`) is rejected unasked, with a notice (`outside.rs`).
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
-//! allowed once with nothing logged ([`trusted_tool_to_allow`]).
+//! allowed once with nothing logged ([`trusted_tool_to_allow`]). Claude Code's own ask before a
+//! read inside a matter stored by its network address is allowed once with nothing logged, after
+//! the data-folder check (`share_reads.rs`).
 
 use std::path::PathBuf;
 
@@ -32,10 +34,12 @@ use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
 
 mod codex_auto;
+mod share_reads;
 
 use codex_auto::{
     allow_browser_tool, allow_trusted_tool, browser_tool_to_allow, trusted_tool_to_allow,
 };
+use share_reads::{allow_own_read, own_read_to_allow};
 
 /// A permission request from the agent, kept until it is logged.
 #[derive(Debug, Clone)]
@@ -61,6 +65,8 @@ pub(super) fn reject_option(options: &[PermissionOption]) -> Option<&PermissionO
 pub(super) struct HeldOpenCheck {
     ask: PermissionAsk,
     turn: TurnId,
+    /// The tool call's name and the option to answer with unseen, for an own-share read.
+    own_read: Option<(Option<String>, AgentChoiceId)>,
 }
 
 /// A permission request (`AcpEvent::PermissionRequested`). Outside the live turn it is
@@ -133,18 +139,29 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
             tracing::info!(%thread, dropped, "a Codex permission request lost options that outlive the session");
         }
     }
-    // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
-    // start or updates named it; unknown when none did.
+    // The tool the request's tool call runs (Claude Code's `Bash`, `PowerShell`, `Read`, …),
+    // as its start or updates named it; unknown when none did.
     let tool_name = current(actor, thread)
         .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
         .map(str::to_owned);
+    let own_read = own_read_to_allow(
+        actor,
+        thread,
+        &ask,
+        tool_name.as_deref(),
+        raw_input.as_ref(),
+    )
+    .map(|option| (tool_name.clone(), option));
     let shell = data_fence::ShellKind::of_tool(tool_name.as_deref());
     let fence = fence_check(actor, thread, &paths, raw_input.as_ref(), shell);
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
     if paths.is_empty() && fence.is_none() {
-        log_for_lawyer(actor, thread, ask);
+        match own_read {
+            Some((tool, option)) => allow_own_read(actor, thread, ask.key, tool.as_deref(), option),
+            None => log_for_lawyer(actor, thread, ask),
+        }
         return;
     }
     let sent = (|| -> Result<(), Error> {
@@ -158,6 +175,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         let check = HeldOpenCheck {
             ask: ask.clone(),
             turn,
+            own_read,
         };
         let tag = MatterTag::Turn(TurnJob {
             thread,
@@ -251,15 +269,20 @@ fn tool_call_paths(actor: &Actor, thread: ThreadId, ask: &PermissionAsk) -> Vec<
 /// The matter thread checked a permission request's paths. Still in the same live turn, a path
 /// in Clauseo's data folder gets the request rejected unasked (`outside.rs`), a file
 /// held open gets it refused for the lawyer ([`refuse_held_open`]); neither, and the request is
-/// logged for the lawyer. Once that turn is over, that one request is answered
-/// `cancelled` (the others of the session, and any later turn, are left alone).
+/// logged for the lawyer, or allowed unseen when it is an own-share read (`share_reads.rs`). Once
+/// that turn is over, that one request is answered `cancelled` (the others of the session, and
+/// any later turn, are left alone).
 pub(super) fn on_held_open(
     actor: &mut Actor,
     thread: ThreadId,
     check: HeldOpenCheck,
     checked: PathsChecked,
 ) {
-    let HeldOpenCheck { ask, turn } = check;
+    let HeldOpenCheck {
+        ask,
+        turn,
+        own_read,
+    } = check;
     if live_turn(actor, thread) != Some(turn) {
         if let Some(agent) = agent(actor, thread) {
             let client = agent.link.client.clone();
@@ -298,7 +321,10 @@ pub(super) fn on_held_open(
                 );
             }
         }
-        None => log_for_lawyer(actor, thread, ask),
+        None => match own_read {
+            Some((tool, option)) => allow_own_read(actor, thread, ask.key, tool.as_deref(), option),
+            None => log_for_lawyer(actor, thread, ask),
+        },
     }
 }
 

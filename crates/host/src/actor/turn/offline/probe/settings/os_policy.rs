@@ -29,6 +29,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::agent::network_matter::admin_policy::AdminDoc;
+
 #[cfg(windows)]
 mod registry;
 
@@ -46,6 +48,33 @@ pub(super) type TierRead = Result<Option<String>, ()>;
 /// Whether this machine's OS policy tiers move Claude Code; on the launch prep's thread.
 pub(super) fn moved() -> bool {
     plists_moved(&plist_paths()) || registry_moved(&registry_values())
+}
+
+/// This machine's OS policy documents for `agent::network_matter::admin_policy`: the
+/// managed-preferences files, then HKLM's `Settings` value (not HKCU's: no admin tier), read
+/// as a JSON document; an empty value is nothing, as [`registry_moved`] reads it.
+pub(super) fn admin_docs() -> Vec<AdminDoc> {
+    let registry = admin_registry_values().into_iter().map(|value| {
+        AdminDoc::Json(value.map(|text| {
+            let text = text.filter(|text| !text.trim().is_empty())?;
+            Some(text.trim_end().as_bytes().to_vec())
+        }))
+    });
+    plist_paths()
+        .iter()
+        .map(|path| AdminDoc::Plist(super::read(path)))
+        .chain(registry)
+        .collect()
+}
+
+/// HKLM's `Settings` value alone: none but on Windows.
+fn admin_registry_values() -> Vec<TierRead> {
+    #[cfg(windows)]
+    {
+        vec![registry::hklm_value()]
+    }
+    #[cfg(not(windows))]
+    Vec::new()
 }
 
 /// The managed-preferences files Claude Code reads on this machine: none but on macOS.

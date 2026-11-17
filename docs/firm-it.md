@@ -1473,6 +1473,30 @@ source Clauseo can't read locks crash reports off with the other security keys. 
 crash report switch, and a `privacy.crash_reports` in their own `settings.json` is not used.
 Policy is read at start-up, so a change applies on the next start.
 
+## 13. Matters stored by a network address
+
+Claude Code asks before every file read in a folder it reaches by a network address
+(`\\server\share\…`). For a matter Clauseo stores that way, Clauseo answers those asks itself when
+the read stays inside the matter folder, on the server and share the matter was added with, so the
+lawyer isn't asked again and again. Changes still ask, and reads anywhere else are handled as
+before. Mapping a drive letter to the share and opening the matter through it (Locate folder)
+avoids the asks altogether ([decision 0030](decisions/0030-launch-profile.md), "Forced ask in an
+unprotected matter", 2026-11-16; `crates/host/src/agent/network_matter/`).
+
+- **With an administrator policy for Claude Code, Clauseo answers none of these asks.** That means
+  any of: `managed-settings.json` or `managed-settings.d\*.json` in `C:\Program Files\ClaudeCode`
+  (on a Mac, `/Library/Application Support/ClaudeCode`, or a `com.anthropic.claudecode` managed
+  preferences profile), the `Settings` value under `HKLM\SOFTWARE\Policies\ClaudeCode`, or
+  server-managed settings from your Claude organisation. Such a policy can make Claude ask before
+  a read on purpose, and Clauseo can't tell that ask from the network one, so the lawyer is asked
+  as Claude Code decides. Clauseo checks at each launch of Claude. Claude Code itself picks up a
+  policy change during a session, but Clauseo only at the next launch: after adding a policy,
+  have lawyers start a new conversation, or restart Clauseo.
+- **With Windows set to follow remote symbolic links, Clauseo answers none of them either.** That
+  is `fsutil behavior set SymlinkEvaluation R2R:1` or `R2L:1`, or the group policy "Selectively
+  allow the evaluation of a symbolic link" turning either on. By default Windows follows neither,
+  so a link inside a matter can't lead a read to another server.
+
 ## Later
 
 Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated

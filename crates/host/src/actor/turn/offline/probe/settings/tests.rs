@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::AgentKind;
 use serde_json::json;
 
-use super::{MAX_FILE, Moved, claude_moved, claude_shell_carries, codex_moved, meta_moved, routes};
+use super::{
+    MAX_FILE, Moved, Reads, claude_moved, claude_shell_carries, codex_moved, meta_moved, routes,
+};
 use crate::actor::turn::offline::probe::{ReachClass, Target};
 use crate::write;
 
@@ -283,5 +285,59 @@ fn a_policy_false_for_the_shell_folder_variable_keeps_the_folder_across_calls() 
     assert!(claude_shell_carries(&managed));
     put(&drop_in, "{ not json");
     assert!(claude_shell_carries(&managed));
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// A Claude launch's administrator policy tier (`agent::network_matter::admin_policy`): the
+/// managed folder's `managed-settings.json` and drop-ins, and the Claude home's
+/// `remote-settings.json`, each counting with content, or when it can't be parsed; never for
+/// Codex.
+#[test]
+fn a_policy_document_with_content_is_an_admin_tier() {
+    let root = folder("admin_tier");
+    let config = root.join("config");
+    let reads = |claude: bool| Reads {
+        managed: root.join("managed"),
+        codex: Vec::new(),
+        claude,
+        os_policy: false,
+    };
+    let tier = |claude: bool| {
+        reads(claude).read(None, Some(&config)).admin_tier == super::AdminTier::Present
+    };
+    assert_eq!(
+        super::SettingsRead::default().admin_tier,
+        super::AdminTier::Present
+    );
+    assert!(!tier(true));
+    let file = root.join("managed").join("managed-settings.json");
+    put(&file, "{}");
+    assert!(!tier(true));
+    put(&file, r#"{"permissions": {"ask": ["Read"]}}"#);
+    assert!(tier(true));
+    assert!(!tier(false));
+    put(&file, "{ not json");
+    assert!(tier(true));
+    write::remove_file(&file).unwrap();
+    let drop_in = root
+        .join("managed")
+        .join("managed-settings.d")
+        .join("10-x.json");
+    put(&drop_in, r#"{"model": "x"}"#);
+    assert!(tier(true));
+    write::remove_file(&drop_in).unwrap();
+    put(
+        &root
+            .join("managed")
+            .join("managed-settings.d")
+            .join(".hidden.json"),
+        "{ x",
+    );
+    assert!(!tier(true));
+    let remote = config.join("remote-settings.json");
+    put(&remote, "{}");
+    assert!(!tier(true));
+    put(&remote, r#"{"permissions": {"deny": ["WebFetch"]}}"#);
+    assert!(tier(true));
     write::remove_dir_all(&root).unwrap();
 }

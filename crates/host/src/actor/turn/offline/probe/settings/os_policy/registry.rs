@@ -28,6 +28,11 @@ pub(super) fn settings_values() -> Vec<TierRead> {
     vec![value(HKEY_LOCAL_MACHINE), value(HKEY_CURRENT_USER)]
 }
 
+/// HKLM's `Settings` value alone, the administrator's tier.
+pub(super) fn hklm_value() -> TierRead {
+    value(HKEY_LOCAL_MACHINE)
+}
+
 /// `hive`'s `Settings` value: its text when a `REG_SZ` or `REG_EXPAND_SZ` (unexpanded, as
 /// `reg.exe` prints it), `None` when it, its key or a string type is not there (Claude Code
 /// reads no other type), `Err` when it cannot be read or is over [`super::super::MAX_FILE`]
