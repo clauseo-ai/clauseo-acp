@@ -15,12 +15,6 @@
 //! ended job failed, and `TerminateJobObject` returns before the processes are gone, whose files
 //! (the profile, the executables) stay open until they are.
 //!
-//! The guard's hardened copy (`harden.rs`) is the one process started outside such a job
-//! ([`start_copy`]): it stays in the guard's own jobs, as any child does, and makes its own job
-//! for Chrome and agent-browser. Its first process waits for it, and the copy watches that
-//! process as its parent (`parent.rs`), so whichever way the first process ends, the copy ends
-//! the browser and cleans up; a job that ended the copy with it would skip that cleanup.
-//!
 //! `clauseo-process` makes its job the same way, but for its async child and with dependencies
 //! this crate may not take (`ARCHITECTURE.md`), so the few job calls are repeated here.
 #![expect(
@@ -31,29 +25,19 @@
 mod child;
 mod spawn;
 
-use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use windows::Win32::Foundation::{
-    DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE, WAIT_OBJECT_0,
-};
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::JobObjects::{
     CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject,
 };
-use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SYNCHRONIZE, WaitForSingleObject,
-};
 use windows::core::PCWSTR;
-
-use super::harden::Hardened;
 
 pub(crate) use child::{Child, ChildStderr, ChildStdin};
 pub(crate) use spawn::{Io, Launch, inheritable, windows_dirs};
@@ -72,8 +56,6 @@ pub(crate) struct Job {
     /// The job's handle: a new job's after each [`Job::kill`]. Held locked while a child is
     /// created in it, so an end never swaps it in the middle of a creation.
     job: Mutex<OwnedHandle>,
-    /// The descriptors every child starts with (`harden.rs`); none only in this module's tests.
-    hardened: Option<Hardened>,
 }
 
 impl Job {
@@ -81,11 +63,7 @@ impl Job {
     /// (`job/spawn.rs`).
     pub(crate) fn spawn(&self, launch: &Launch<'_>) -> io::Result<Child> {
         let job = self.lock();
-        spawn::spawn(
-            Some(HANDLE(job.as_raw_handle())),
-            self.hardened.as_ref(),
-            launch,
-        )
+        spawn::spawn(HANDLE(job.as_raw_handle()), launch)
     }
 
     /// Ends every process in the job (Chrome, agent-browser and its daemon), waits until none
@@ -129,23 +107,11 @@ impl Job {
         self.job.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// A new job that ends its processes when its last handle closes, whose children all
-    /// start with `hardened`'s descriptors. No breakaway flag is set, so a process in it cannot
-    /// start one outside it.
-    pub(crate) fn new(hardened: Hardened) -> io::Result<Job> {
-        Self::make(Some(hardened))
-    }
-
-    /// A job whose children start unhardened, for this module's tests.
-    #[cfg(test)]
-    pub(crate) fn unhardened() -> io::Result<Job> {
-        Self::make(None)
-    }
-
-    fn make(hardened: Option<Hardened>) -> io::Result<Job> {
+    /// A new job that ends its processes when its last handle closes. No breakaway flag is set,
+    /// so a process in it cannot start one outside it.
+    pub(crate) fn new() -> io::Result<Job> {
         Ok(Job {
             job: Mutex::new(make_job()?),
-            hardened,
         })
     }
 }
@@ -210,91 +176,5 @@ fn active_processes(job: HANDLE) -> Option<u32> {
     Some(info.ActiveProcesses)
 }
 
-/// The guard's hardened copy, as its first process holds it: by a handle that may only wait for
-/// it and read its exit code.
-#[derive(Debug)]
-pub(crate) struct HardenedCopy(OwnedHandle);
-
-impl HardenedCopy {
-    /// Waits for the copy to exit and returns its exit code.
-    pub(crate) fn wait(&self) -> io::Result<u32> {
-        let handle = HANDLE(self.0.as_raw_handle());
-        // SAFETY: `handle` is open with SYNCHRONIZE while `self` lives; the wait takes no pointer.
-        if unsafe { WaitForSingleObject(handle, INFINITE) } != WAIT_OBJECT_0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut code = 0_u32;
-        // SAFETY: `handle` is open with PROCESS_QUERY_LIMITED_INFORMATION; `code` is a live u32
-        // the call writes.
-        unsafe { GetExitCodeProcess(handle, &raw mut code) }.map_err(io::Error::from)?;
-        Ok(code)
-    }
-}
-
-/// Starts the guard's hardened copy (`harden.rs`): this program again, as
-/// `browser-guard --hardened-copy <args...>`, with this process's environment, folder and
-/// standard handles, and `hardened`'s descriptors from its creation. Keeps only a handle that
-/// may wait for it and read its exit code: the all-access one `CreateProcessW` returns is
-/// closed at once, so no process that could take a handle of this one gets that one.
-pub(crate) fn start_copy(hardened: &Hardened, args: &[OsString]) -> io::Result<HardenedCopy> {
-    let program = std::env::current_exe()?;
-    let cwd = std::env::current_dir()?;
-    let mut env = BTreeMap::new();
-    for (name, value) in std::env::vars_os() {
-        let name = name.into_string().map_err(|name| {
-            io::Error::other(format!(
-                "the environment variable name {} is not Unicode",
-                name.display()
-            ))
-        })?;
-        env.insert(name, value);
-    }
-    let copy_args: Vec<OsString> = ["browser-guard", super::harden::HARDENED_COPY]
-        .into_iter()
-        .map(OsString::from)
-        .chain(args.iter().cloned())
-        .collect();
-    let mut child = spawn::spawn(
-        None,
-        Some(hardened),
-        &Launch {
-            program: &program,
-            args: &copy_args,
-            cwd: &cwd,
-            env: &env,
-            stdin: Io::Inherit,
-            stdout: Io::Inherit,
-            stderr: Io::Inherit,
-            inherit: &[],
-        },
-    )?;
-    let mut limited = HANDLE::default();
-    // SAFETY: the current process's pseudo handle needs no closing; `child`'s handle is open
-    // for the call, and `limited` is a live HANDLE the call writes. Not inheritable.
-    let duplicated = unsafe {
-        let me = GetCurrentProcess();
-        DuplicateHandle(
-            me,
-            HANDLE(child.as_raw_handle()),
-            me,
-            &raw mut limited,
-            (PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION).0,
-            false,
-            DUPLICATE_HANDLE_OPTIONS(0),
-        )
-    };
-    if let Err(error) = duplicated {
-        // A copy this process cannot wait for must not run on.
-        drop(child.kill());
-        return Err(io::Error::from(error));
-    }
-    // SAFETY: `limited` is the open handle DuplicateHandle just made, which nothing else owns.
-    let copy = HardenedCopy(unsafe { OwnedHandle::from_raw_handle(limited.0) });
-    drop(child);
-    Ok(copy)
-}
-
-#[cfg(test)]
-mod harden_tests;
 #[cfg(test)]
 mod tests;

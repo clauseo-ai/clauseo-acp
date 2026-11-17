@@ -16,8 +16,8 @@
 //!   handle values in `--remote-debugging-io-pipes=<read>,<write>`
 //!   (`devtools_agent_host_impl.cc`, `AdoptPipes`, `AdoptHandle`: `StringToUint`,
 //!   `Uint32ToHandle`, a `FILE_TYPE_PIPE` check). The two go in the child's handle list with its
-//!   standard handles and nothing else (`job/spawn.rs`), and the browser starts hardened
-//!   (`harden.rs`).
+//!   standard handles and nothing else (`job/spawn.rs`), and the browser starts in the guard's
+//!   job with the user's default process DACL.
 //!
 //! The browser is ready once it answers the guard's `Browser.getVersion` on the pipe within the
 //! start wait; one that exits first or never answers (a firm policy that turned debugging off)

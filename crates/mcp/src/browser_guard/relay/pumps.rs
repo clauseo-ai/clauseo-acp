@@ -80,11 +80,9 @@ fn forward_stderr(child: &mut Child, secrets: Option<redact::Secrets>) {
     }
 }
 
-/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`), hardened from
-/// its first instruction by the job's descriptors (`harden.rs`). Its own children (the CLI's
-/// daemon, which holds the relay's URL too) start with agent-browser's defaults: hardening them
-/// is the patched agent-browser's part (route 2's W2), each process setting the same DACL on
-/// itself and passing it to its children.
+/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`) with the
+/// user's default process DACL. Its own children (the CLI's daemon, which holds the relay's URL
+/// too) are in the job as well and start with agent-browser's defaults.
 #[cfg(windows)]
 pub(crate) fn spawn_child(
     program: &Path,

@@ -559,12 +559,12 @@ impl Guard {
 }
 
 impl Drop for Guard {
-    /// Kills the guard, unless a failed test on Windows drops it: there the guard is its first
-    /// process, which only waits for its hardened copy (`src/browser_guard/harden.rs`), so a kill
-    /// leaves the copy and its children running until the copy notices, holding files in the
-    /// test's folder, whose removal then fails (`os error 5`, `os error 32`) and hides the
-    /// failure's own message. There the guard's stdin closes instead, as at the end of a test,
-    /// and the drop waits for the guard to end itself, with everything it started.
+    /// Kills the guard, unless a failed test on Windows drops it: there a kill skips the guard's
+    /// own stop, and the processes in its job (`src/browser_guard/job.rs`) end only after its
+    /// handle closes, still holding files in the test's folder, whose removal then fails
+    /// (`os error 5`, `os error 32`) and hides the failure's own message. There the guard's stdin
+    /// closes instead, as at the end of a test, and the drop waits for the guard to end itself,
+    /// with everything it started.
     fn drop(&mut self) {
         if cfg!(windows) && std::thread::panicking() {
             self.close_stdin();

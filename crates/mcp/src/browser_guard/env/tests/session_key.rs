@@ -10,7 +10,7 @@ use super::{get, source_for};
 use crate::browser_guard::relay::redact::{MARK, Redactor, Secrets};
 
 /// Drawn fresh from the OS's random source, given only to the agent-browser connected to the
-/// browser (which the guard creates hardened in its job), never to the one-shot or Chrome, never
+/// browser (which the guard creates in its job), never to the one-shot or Chrome, never
 /// taken from the host, and taken out of agent-browser's output.
 #[test]
 fn the_session_key_goes_only_to_the_connected_agent_browser_and_never_out() {

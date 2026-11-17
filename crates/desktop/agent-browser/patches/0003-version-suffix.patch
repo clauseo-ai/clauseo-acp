@@ -1,11 +1,11 @@
-version: 0.41.1-clauseo.1
+version: 0.41.1-clauseo.3
 
 Clauseo's patch to vercel-labs/agent-browser v0.41.1, applied after 0001 and 0002, every OS. Our
 build reports its own version, so the CLI's daemon version check tells a patched daemon from an
 unpatched one (and `agent-browser --version` says which build runs).
 
 diff --git a/cli/Cargo.lock b/cli/Cargo.lock
-index e9f1ad0..62fa3c9 100644
+index e9f1ad0e53b8e4d54b729b32b53f76810eb9ab25..6afe424f21f1ad2c3303f2cf243007766fd1a099 100644
 --- a/cli/Cargo.lock
 +++ b/cli/Cargo.lock
 @@ -45,7 +45,7 @@ dependencies = [
@@ -13,19 +13,19 @@ index e9f1ad0..62fa3c9 100644
  [[package]]
  name = "agent-browser"
 -version = "0.41.1"
-+version = "0.41.1-clauseo.1"
++version = "0.41.1-clauseo.3"
  dependencies = [
   "aes-gcm",
   "async-trait",
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
-index e9200b0..1944ce5 100644
+index e9200b0..67b108e 100644
 --- a/cli/Cargo.toml
 +++ b/cli/Cargo.toml
 @@ -1,6 +1,6 @@
  [package]
  name = "agent-browser"
 -version = "0.41.1"
-+version = "0.41.1-clauseo.1"
++version = "0.41.1-clauseo.3"
  edition = "2021"
  description = "Fast browser automation CLI for AI agents"
  license = "Apache-2.0"

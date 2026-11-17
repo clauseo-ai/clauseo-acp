@@ -86,7 +86,7 @@ fn echo(job: &Job, dir: &Path) -> Child {
 #[test]
 fn a_child_runs_in_the_job_with_its_arguments_environment_and_folder() {
     let dir = scratch("env");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let args: Vec<OsString> = [
         "",
         "two words",
@@ -150,7 +150,7 @@ fn a_child_runs_in_the_job_with_its_arguments_environment_and_folder() {
 #[test]
 fn pipes_carry_lines_both_ways_and_closing_the_job_ends_the_child() {
     let dir = scratch("pipes");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let mut child = echo(&job, &dir);
     assert!(in_job(child.as_raw_handle(), &job));
     let mut stdin = child.stdin.take().unwrap();
@@ -176,7 +176,7 @@ fn pipes_carry_lines_both_ways_and_closing_the_job_ends_the_child() {
 #[test]
 fn the_jobs_end_and_kill_end_the_child_with_code_1() {
     let dir = scratch("kill");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let mut first = echo(&job, &dir);
     let mut second = echo(&job, &dir);
     let held = (first.stdin.take(), second.stdin.take());
@@ -185,7 +185,7 @@ fn the_jobs_end_and_kill_end_the_child_with_code_1() {
     assert_eq!(second.wait().unwrap().code(), Some(1));
     // An ended child's kill is no error, as with std's.
     second.kill().unwrap();
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let mut third = echo(&job, &dir);
     let _held_too = third.stdin.take();
     third.kill().unwrap();
@@ -200,7 +200,7 @@ fn the_jobs_end_and_kill_end_the_child_with_code_1() {
 #[test]
 fn a_child_starts_in_the_job_after_its_end() {
     let dir = scratch("again");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     for _ in 0..2 {
         let mut child = echo(&job, &dir);
         let held = child.stdin.take();
@@ -215,7 +215,7 @@ fn a_child_starts_in_the_job_after_its_end() {
 #[test]
 fn a_program_that_cannot_start_is_an_error() {
     let dir = scratch("missing");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let missing = job.spawn(&Launch {
         program: &dir.join("missing.exe"),
         args: &[],
@@ -233,7 +233,7 @@ fn a_program_that_cannot_start_is_an_error() {
 #[test]
 fn a_relative_program_or_a_batch_file_is_refused() {
     let dir = scratch("refused");
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let batch = dir.join("run.cmd");
     write::write(&batch, "@echo off\r\n").unwrap();
     let relative = PathBuf::from(r"examples\echo_stub.exe");
@@ -310,7 +310,7 @@ fn holds(process: RawHandle, ours: &OwnedHandle) -> bool {
 fn an_inheritable_handle_outside_the_list_stays_out_of_the_child() {
     let dir = scratch("handles");
     let event = inheritable_event();
-    let job = Job::unhardened().unwrap();
+    let job = Job::new().unwrap();
     let mut listed = echo(&job, &dir);
     let held = listed.stdin.take();
     assert!(!holds(listed.as_raw_handle(), &event));
@@ -342,7 +342,7 @@ fn agent_stand_in() {
     let Some(dir) = std::env::var_os(AGENT) else {
         return;
     };
-    let guard = Job::unhardened().unwrap();
+    let guard = Job::new().unwrap();
     let mut child = echo(&guard, Path::new(&dir));
     let _held = child.stdin.take();
     assert!(in_job(child.as_raw_handle(), &guard));
@@ -361,7 +361,7 @@ fn agent_stand_in() {
 #[test]
 fn closing_the_agents_job_ends_the_child_made_in_the_guards_job() {
     let dir = scratch("nested");
-    let outer = Job::unhardened().unwrap();
+    let outer = Job::new().unwrap();
     let env: BTreeMap<String, OsString> = std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value)))
         .filter(|(name, _)| name != AGENT)
