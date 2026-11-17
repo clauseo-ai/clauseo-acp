@@ -653,8 +653,10 @@ export type BlockedSiteId = string;
  */
 export type BrowserInstallFailure = 
 /**
- *  The network failed: curl could not connect, the server answered an error, or the
- *  transfer stalled (slower than 1 byte a second for 60 s).
+ *  The network failed: curl could not connect or resolve the host, the connection broke,
+ *  the server failed (an HTTP 5xx), or the transfer stalled (slower than 1 byte a second
+ *  for 60 s) or ran past its time bound. The lawyer's download tries again a few times
+ *  first, so the app hears it only once those tries are spent.
  */
 "network" | 
 /**
@@ -662,7 +664,10 @@ export type BrowserInstallFailure =
  *  larger than the 400 MiB cap.
  */
 "size_mismatch" | 
-/**  Less than about 1 GB is free in the app data folder. */
+/**
+ *  Less than about 1 GB is free in the app data folder, or the disk filled up during the
+ *  download or the unpacking.
+ */
 "disk_space" | 
 /**
  *  The version list named a URL or version the host does not accept: not `https`, not
@@ -686,6 +691,16 @@ export type BrowserInstallFailure =
 "unsupported" | 
 /**  The lawyer cancelled, or the app quit, during the download. */
 "cancelled" | 
+/**
+ *  The secure connection failed: the server's certificate was not trusted, or TLS could
+ *  not be set up. Not tried again.
+ */
+"tls" | 
+/**
+ *  The server refused the request with an HTTP 4xx (such as 403 or 404). Not tried
+ *  again.
+ */
+"server_refused" | 
 /**
  *  The firm does not allow it: its Clauseo policy forbids the download
  *  (`browser.allow_download` false, or a policy source that cannot be read), or its

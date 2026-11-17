@@ -1,14 +1,14 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome (or
 // Edge, on Windows), what to install, in full, and on a Mac (or Linux) Clauseo's own browser: Get a browser for
-// Clauseo is the consent, then how far its download has got, its bar and Cancel (or the wait for the network, with
-// Cancel), then that it is ready; or that the firm doesn't allow it. Under the browser the firm's policy blocks, or whose policy Clauseo
-// couldn't check, the reason in full; for the policy not checked, Try again, which asks the host to read it now and
-// waits (disabled, busy) until the read ends, then the row follows what it found: Ready for new conversations.
-// A tool
-// the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
-// there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
-// (tool-line.tsx).
+// Clauseo is the consent, with a line above it when the last download failed (TLS, a refused address, the server's
+// error, a full disk, no network); then how far its download has got, its bar and Cancel (or
+// the wait for the network, with Cancel), then that it is ready; or that the firm doesn't allow it. Under the browser
+// the firm's policy blocks, or whose policy Clauseo couldn't check, the reason in full; for the policy not checked,
+// Try again, which asks the host to read it now and waits (disabled, busy) until the read ends, then the row follows
+// what it found: Ready for new conversations. A tool the lawyer turned off is turned on in Settings: one Open Settings
+// at the popover's foot, however many rows are off there, its tooltip saying what a change reaches. Its own chunk,
+// loaded as the status line first shows the tool line (tool-line.tsx).
 import { useId, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
 import {
   DownloadBar,
@@ -54,8 +54,8 @@ function CancelInstall({ text, onCancel }: { text: string; onCancel: () => void 
   );
 }
 
-/** Clauseo's own browser under the browser row with none: the offer, the download with Cancel, the wait for the
- * network with Cancel, the firm's policy, or ready. */
+/** Clauseo's own browser under the browser row with none: the offer (with its line, when it has one), the download with
+ * Cancel, the wait for the network with Cancel, the firm's policy, or ready. */
 function Install({
   part,
   onInstall,
@@ -68,19 +68,26 @@ function Install({
   switch (part.kind) {
     case "offer":
       return (
-        <div className="tool-row-sub flex items-center gap-s2">
-          <Button
-            kind="tone"
-            size="small"
-            data-testid="tool-install"
-            data-waiting={part.waiting}
-            disabled={part.waiting}
-            aria-busy={part.waiting}
-            onClick={onInstall}
-          >
-            <IconDownload size={16} />
-            {part.button}
-          </Button>
+        <div className="tool-row-sub grid gap-s2">
+          {part.line !== null && (
+            <p className="text-small text-muted" data-testid="tool-install-line">
+              {part.line}
+            </p>
+          )}
+          <div className="flex items-center gap-s2">
+            <Button
+              kind="tone"
+              size="small"
+              data-testid="tool-install"
+              data-waiting={part.waiting}
+              disabled={part.waiting}
+              aria-busy={part.waiting}
+              onClick={onInstall}
+            >
+              <IconDownload size={16} />
+              {part.button}
+            </Button>
+          </div>
         </div>
       );
     case "getting":

@@ -34,6 +34,18 @@ export const HI = {
     "आपकी फ़र्म Clauseo को ब्राउज़र डाउनलोड करने की अनुमति नहीं देती।",
   "Clauseo's browser is ready. Start a new conversation to use it.":
     "Clauseo का ब्राउज़र तैयार है। इसका उपयोग करने के लिए एक नई बातचीत शुरू करें।",
+  // under the offer, the last download's failure in a way the lawyer can act on (UC-586 to UC-590; provisional Hindi,
+  // app track final)
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.":
+    "Clauseo ब्राउज़र डाउनलोड करने के लिए सुरक्षित रूप से कनेक्ट नहीं कर सका। सहायता के लिए अपनी फ़र्म की IT टीम से पूछें।",
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.":
+    "डाउनलोड का पता अस्वीकार कर दिया गया, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.":
+    "Google के डाउनलोड सर्वर ने त्रुटि लौटाई, इसलिए Clauseo ब्राउज़र डाउनलोड नहीं कर सका। बाद में फिर से प्रयास करें।",
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.":
+    "ब्राउज़र डाउनलोड करने के लिए इस कंप्यूटर पर पर्याप्त खाली जगह नहीं है। लगभग 1\u00a0GB जगह खाली करें और फिर से प्रयास करें।",
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.":
+    "Clauseo ब्राउज़र डाउनलोड करने के लिए इंटरनेट तक नहीं पहुँच सका। अपना कनेक्शन जाँचें और फिर से प्रयास करें।",
   // under the browser whose policy Clauseo couldn't check: read it again now
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help

@@ -4,22 +4,30 @@
 // `browser_install` events, which say where it stands; the latest is in every catch-up. A machine before any download
 // hears nothing, so the row offers the download until a state says otherwise.
 //
-// A failure comes as `failed { code, message }`: the row reads only `code`, and only one code changes what it shows:
-// `firm_forbids`, the firm's policy, after which nothing is offered. Every other failure, `cancelled` included, is the
-// offer again, with no words of its own. `message` is the host's, for the log only, never on screen. A second install
-// while one runs is answered `done` by the host and starts nothing.
-import type { BrowserInstallState } from "../transport/protocol.ts";
+// A failure comes as `failed { code, message }`: the row reads only `code`. `firm_forbids`, the firm's policy, is the
+// one after which nothing is offered. `tls`, `host_refused` (a refused address), `server_refused` (an HTTP error from
+// the server), `disk_space` and `network` (the host's retries ran out) are the offer again, with a line saying why.
+// Every other failure, `cancelled` included, is the offer again, with no words of its own. `message` is the host's,
+// for the log only, never on screen. A second install while one runs is answered `done` by the host and starts nothing.
+import type { BrowserInstallFailure, BrowserInstallState } from "../transport/protocol.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { nextHostOf, type AppEvent } from "./host-next.ts";
 
 /** Where the download stands, as the row shows it: under way (`behind`: the copy on the computer is more than one
  * security release behind, so this is its update), unpacking, waiting for the network, the firm's policy forbidding
- * it, or done. Null is the offer: no download yet, or the last one cancelled or failed. */
+ * it, or done. The failures with a line of their own (`tls`, `host_refused`, `server_refused`, `disk_space`,
+ * `network`) are the offer with that line above it. Null is the offer: no download yet, or the last one cancelled or
+ * failed with no line. */
 export type InstallProgress =
   | { downloading: { bytes: number; total: number; behind: boolean } }
   | "unpacking"
   | "offline"
   | "forbidden"
+  | "tls"
+  | "host_refused"
+  | "server_refused"
+  | "disk_space"
+  | "network"
   | "done";
 
 /** The download as the row reads it: where it stands; whether the lawyer pressed the offer and the host has not said
@@ -35,7 +43,24 @@ const IDLE: BrowserInstall = { progress: null, pressed: false, total: 0, behind:
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
-/** The host's state as the row reads it; null for the offer (any failure but the firm's, and a state this version
+/** A failure's progress: the firm's policy, the failures with a line of their own, or null (the plain offer, for every
+ * other code, and a code from a newer host). */
+function failureOf(code: BrowserInstallFailure): InstallProgress | null {
+  switch (code) {
+    case "firm_forbids":
+      return "forbidden";
+    case "tls":
+    case "host_refused":
+    case "server_refused":
+    case "disk_space":
+    case "network":
+      return code;
+    default:
+      return null;
+  }
+}
+
+/** The host's state as the row reads it; null for the plain offer (a failure with no line, and a state this version
  * doesn't know). */
 export function progressOf(state: BrowserInstallState): InstallProgress | null {
   if (state === "unpacking" || state === "done" || state === "offline") return state;
@@ -44,8 +69,7 @@ export function progressOf(state: BrowserInstallState): InstallProgress | null {
     const { bytes, total, behind } = state.downloading;
     return { downloading: { bytes: num(bytes), total: num(total), behind: behind === true } };
   }
-  if ("failed" in state && state.failed !== undefined)
-    return state.failed.code === "firm_forbids" ? "forbidden" : null;
+  if ("failed" in state && state.failed !== undefined) return failureOf(state.failed.code);
   return null;
 }
 

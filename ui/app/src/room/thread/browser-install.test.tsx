@@ -2,8 +2,9 @@
 // Clauseo's own browser in the tool line's popover over FakeTransport: under the browser with none, on a Mac (and the
 // fake host's Linux), Get a browser for Clauseo sends install_browser; the host's `browser_install` app events (and its
 // catch-up) then show how far the download has got, with Cancel sending cancel_browser_install, the wait for the
-// network, the update when the copy is behind, the firm's policy and done; any other failure is the offer again. Never
-// on Windows.
+// network, the update when the copy is behind, the firm's policy and done. The failures with words of their own (TLS, a
+// refused address, the server's error, a full disk, no network after the retries) are the offer with its line above
+// it; any other failure is the offer again. Never on Windows.
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test } from "vitest";
@@ -19,6 +20,16 @@ afterEach(async () => {
 });
 
 const MB = 1_000_000;
+const TLS =
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.";
+const HOST_REFUSED =
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.";
+const SERVER_REFUSED =
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.";
+const DISK_SPACE =
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.";
+const NETWORK =
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.";
 const MISSING: ToolState = {
   tool: "browser",
   availability: { unavailable: { reason: "browser_not_installed" } } as ToolState["availability"],
@@ -67,7 +78,9 @@ test.each([undefined, "mac"] as const)(
     h = await open(platform);
     const offer = inRow("tool-install");
     expect(offer?.textContent).toBe("Get a browser for Clauseo");
-    expect(said("tool-row-full")).toBe("Install Google Chrome, then start a new conversation.");
+    expect(said("tool-row-full")).toBe(
+      "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.",
+    );
     await h.click(offer);
     expect(sent()).toEqual(["install_browser"]);
     expect(inRow("tool-install")?.getAttribute("aria-busy")).toBe("true");
@@ -145,7 +158,69 @@ test("done: ready, and a new conversation uses it", async () => {
   expect(inRow("tool-install")).toBeNull();
 });
 
-test.each(["network", "disk_space", "signature", "unpack", "unknown"] as const)(
+test("a refused address and an HTTP error show different lines, each with the offer under it", async () => {
+  h = await open("mac", [{ failed: { code: "host_refused", message: "log only" } }]);
+  expect(said("tool-install-line")).toBe(HOST_REFUSED);
+  expect(said("tool-install")).toBe("Get a browser for Clauseo");
+  // the install-Chrome note stays, as for the plain offer
+  expect(said("tool-row-full")).toBe(
+    "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.",
+  );
+  await play({ failed: { code: "server_refused", message: "log only" } });
+  expect(said("tool-install-line")).toBe(SERVER_REFUSED);
+  expect(said("tool-install")).toBe("Get a browser for Clauseo");
+  expect(SERVER_REFUSED).not.toBe(HOST_REFUSED);
+  // and the offer under it starts a download
+  await h.click(inRow("tool-install"));
+  expect(sent()).toEqual(["install_browser"]);
+  await play({ downloading: { bytes: 1 * MB, total: 2 * MB, behind: false } });
+  expect(inRow("tool-install-line")?.textContent).toBe(
+    "Getting Clauseo's browser: 1\u00a0MB of 2\u00a0MB (50%)",
+  );
+  expect(inRow("tool-install")).toBeNull();
+});
+
+test.each([
+  ["tls", { failed: { code: "tls", message: "log only" } }, TLS],
+  ["server_refused", { failed: { code: "server_refused", message: "log only" } }, SERVER_REFUSED],
+  ["host_refused", { failed: { code: "host_refused", message: "log only" } }, HOST_REFUSED],
+  ["disk_space", { failed: { code: "disk_space", message: "log only" } }, DISK_SPACE],
+  ["network", { failed: { code: "network", message: "log only" } }, NETWORK],
+] as const)(
+  "a %s failure is the offer with its line above it, and the offer starts another",
+  async (_code, state, line) => {
+    h = await open("mac");
+    await play(state);
+    expect(said("tool-install-line")).toBe(line);
+    expect(said("tool-install")).toBe("Get a browser for Clauseo");
+    expect(document.body.textContent).not.toContain("log only");
+    await h.click(inRow("tool-install"));
+    expect(sent()).toEqual(["install_browser"]);
+  },
+);
+
+test("a line of the offer in Hindi", async () => {
+  h = await mountRoom({
+    display: { language: "hi" },
+    next: {
+      parts: ["app"],
+      query: () => Promise.reject(new Error("not scripted")),
+      first: () => [{ browser_install: { state: { failed: { code: "tls", message: "" } } } }],
+    },
+  });
+  const head = header();
+  head.header!.tools = [MISSING];
+  await h.deliverAwaited([reset([], head)]);
+  await act(() => settled());
+  await h.click(h.one("tool-line"));
+  await act(() => settled());
+  expect(said("tool-install-line")).toBe(
+    "Clauseo ब्राउज़र डाउनलोड करने के लिए सुरक्षित रूप से कनेक्ट नहीं कर सका। सहायता के लिए अपनी फ़र्म की IT टीम से पूछें।",
+  );
+  expect(said("tool-install")).toBe("Clauseo के लिए ब्राउज़र डाउनलोड करें");
+});
+
+test.each(["signature", "unpack", "unknown", "size_mismatch", "cancelled"] as const)(
   "a %s failure is the offer again, with no line, and it starts another",
   async (code) => {
     h = await open("mac", [{ failed: { code, message: "log only" } }]);

@@ -1,16 +1,17 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
-// install and that a new conversation then finds it, and on a Mac (or Linux) Clauseo's own browser: its offer, how far
-// its download has got, with Cancel, or why there is none (browser-install.ts); under the browser the firm's policy
-// blocks, whose policy Clauseo couldn't check, or whose safe connection or unsafe-site list didn't start, the reason in
-// full, and for the policy not checked, Try again (browser-policy.ts). Pure, so the tests can read every state; loaded
-// with the popover only.
+// install and that a new conversation then finds it, and on a Mac (or Linux) Clauseo's own browser: its offer, with a
+// line above it when the last download failed in a way the lawyer can act on (TLS, a refused address, the server's
+// error, a full disk, no network after the retries); how far a download has got, with Cancel; or
+// why there is none (browser-install.ts); under the browser the firm's policy blocks, whose policy Clauseo couldn't
+// check, or whose safe connection or unsafe-site list didn't start, the reason in full, and for the policy not checked,
+// Try again (browser-policy.ts). Pure, so the tests can read every state; loaded with the popover only.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
-import type { BrowserInstall } from "./browser-install.ts";
+import type { BrowserInstall, InstallProgress } from "./browser-install.ts";
 import type { BrowserPolicy } from "./browser-policy.ts";
 import { glyphState, reasonOf, toolName, type BrowserState, type KnownTool } from "./tools.ts";
 
@@ -19,8 +20,9 @@ export type RecheckPart = { button: string; waiting: boolean };
 
 /** Clauseo's own browser under the browser row with none on the computer, its words resolved. */
 export type InstallPart =
-  /** Get a browser for Clauseo; `waiting` (disabled, busy) from the press until the host says where it stands. */
-  | { kind: "offer"; button: string; waiting: boolean }
+  /** Get a browser for Clauseo, with `line` above it (why it is offered again, in words) or null for the plain offer;
+   * `waiting` (disabled, busy) from the press until the host says where it stands. */
+  | { kind: "offer"; line: string | null; button: string; waiting: boolean }
   /** The download under way or unpacking: `behind` (its update's words) or null, how far in words (empty until the
    * size is known), its bar, and Cancel. */
   | {
@@ -105,6 +107,19 @@ const INSTALL_MAC: ToolsKey =
 const INSTALL_WINDOWS: ToolsKey =
   "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
+/** Above the offer, why it is offered again: the last download failed in a way the lawyer can act on, in full (UC-586 to
+ * UC-590). */
+const TLS: ToolsKey =
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.";
+const HOST_REFUSED: ToolsKey =
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.";
+const SERVER_REFUSED: ToolsKey =
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.";
+const DISK_SPACE: ToolsKey =
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.";
+const NETWORK: ToolsKey =
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.";
+
 /** The browser's reason in full: what to install with none on the computer, its policy keeping it off, or its safe
  * connection or unsafe-site list not started; else null. */
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
@@ -131,8 +146,27 @@ function recheckPart(lang: Lang, policy: BrowserPolicy | null | undefined): Rech
 
 const mb = (bytes: number) => Math.round(bytes / 1e6);
 
+/** The line above the offer for a progress that offers again with words of its own; null for the plain offer. */
+function offerLine(lang: Lang, progress: InstallProgress | null): string | null {
+  switch (progress) {
+    case "tls":
+      return tw(lang, TLS);
+    case "host_refused":
+      return tw(lang, HOST_REFUSED);
+    case "server_refused":
+      return tw(lang, SERVER_REFUSED);
+    case "disk_space":
+      return tw(lang, DISK_SPACE);
+    case "network":
+      return tw(lang, NETWORK);
+    default:
+      return null;
+  }
+}
+
 /** Clauseo's own browser under the browser row with none, by the download's state: the offer until one starts, and
- * again after a cancel or a failure (which needs no words of its own); never on Windows, whose browser is Edge. */
+ * again after a cancel or a failure (with a line above it when the failure has words of its own, else none); never on
+ * Windows, whose browser is Edge. */
 export function installPart(
   lang: Lang,
   platform: Platform,
@@ -141,9 +175,17 @@ export function installPart(
   if (install == null || platform === "windows") return null;
   const p = install.progress;
   const cancel = ui(lang, "Cancel");
-  if (p === null)
+  if (
+    p === null ||
+    p === "tls" ||
+    p === "host_refused" ||
+    p === "server_refused" ||
+    p === "disk_space" ||
+    p === "network"
+  )
     return {
       kind: "offer",
+      line: offerLine(lang, p),
       button: tw(lang, "Get a browser for Clauseo"),
       waiting: install.pressed,
     };

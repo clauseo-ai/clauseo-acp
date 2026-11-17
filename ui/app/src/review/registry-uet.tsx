@@ -4,7 +4,7 @@
 // tooltip and an accessible name shows with its tooltip open, its control focused from the keyboard. The firm's
 // browser policy re-read is faked: the host plays its `browser_policy` reports (room/browser-policy.ts) once the
 // thread's view is in, as is the download of Clauseo's own browser (its `browser_install` reports, room/browser-install.ts;
-// UC-580 to UC-585, stage E, in UC_OWN_BROWSER). What to install for the browser follows the host's OS: a Mac unless the
+// UC-580 to UC-590, stage E, in UC_OWN_BROWSER). What to install for the browser follows the host's OS: a Mac unless the
 // entry says Windows.
 import { Composer } from "@clauseo/components/clauseo/composer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
@@ -282,9 +282,10 @@ const getting = (behind: boolean): HostPlay => ({
   install: [{ downloading: { bytes: 84 * MB, total: 162 * MB, behind } }],
 });
 
-/** Clauseo's own browser under the browser row with none on a Mac (stage E's UC-580 to UC-585): the offer, the download
+/** Clauseo's own browser under the browser row with none on a Mac (stage E's UC-580 to UC-590): the offer, the download
  * with Cancel, its update when the copy on the computer is behind, the wait for the network, the firm's policy, and
- * ready. Cancel is the approved word of words-ui.ts, so it has no entry here. */
+ * ready; then the offer with its line, for each failure with words of its own. Cancel is the
+ * approved word of words-ui.ts, so it has no entry here. */
 export const UC_OWN_BROWSER: Entry[] = [
   entry("UC-580", popWords("Get a browser for Clauseo"), NONE),
   entry(
@@ -312,5 +313,45 @@ export const UC_OWN_BROWSER: Entry[] = [
     {
       install: ["done"],
     },
+  ),
+  entry(
+    "UC-586",
+    popWords(
+      "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "tls", message: "" } }] },
+  ),
+  entry(
+    "UC-587",
+    popWords(
+      "The download address was refused, so Clauseo couldn't get the browser. Try again later.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "host_refused", message: "" } }] },
+  ),
+  entry(
+    "UC-588",
+    popWords(
+      "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "server_refused", message: "" } }] },
+  ),
+  entry(
+    "UC-589",
+    popWords(
+      "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "disk_space", message: "" } }] },
+  ),
+  entry(
+    "UC-590",
+    popWords(
+      "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.",
+    ),
+    NONE,
+    { install: [{ failed: { code: "network", message: "" } }] },
   ),
 ];

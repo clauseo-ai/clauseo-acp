@@ -1,17 +1,35 @@
 // Clauseo's own browser under the browser row with none, read purely: the store's reading of the host's
 // `browser_install` events and the two commands it sends, and the row's words for every state, on a Mac, on Linux,
-// and never on Windows.
+// and never on Windows. The failures with a line of their own (UC-586 to UC-590: TLS, a refused address, the server's
+// error, a full disk, no network) are the offer with that line above it; the firm's policy (UC-584) and the rest are as
+// before.
 import { expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { BrowserInstallState } from "../transport/protocol.ts";
-import { BrowserInstallStore, progressOf, type BrowserInstall } from "./browser-install.ts";
+import {
+  BrowserInstallStore,
+  installRunning,
+  progressOf,
+  type BrowserInstall,
+} from "./browser-install.ts";
 import { toolRow, type ToolRowRoom } from "./tool-rows.ts";
 import type { KnownTool } from "./tools.ts";
 
 const MB = 1_000_000;
 const MISSING: KnownTool = { tool: "browser", state: "browser_not_installed" };
 const IDLE: BrowserInstall = { progress: null, pressed: false, total: 0, behind: false };
-const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
+const INSTALL_MAC =
+  "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.";
+const TLS =
+  "Clauseo couldn't connect securely to get the browser. Ask your firm's IT team for help.";
+const HOST_REFUSED =
+  "The download address was refused, so Clauseo couldn't get the browser. Try again later.";
+const SERVER_REFUSED =
+  "Google's download server answered with an error, so Clauseo couldn't get the browser. Try again later.";
+const DISK_SPACE =
+  "There isn't enough free space on this computer to get the browser. Free up about 1\u00a0GB and try again.";
+const NETWORK =
+  "Clauseo couldn't reach the internet to get the browser. Check your connection and try again.";
 
 const room = (install: BrowserInstall | null, platform: ToolRowRoom["platform"] = "mac") =>
   ({ settings: true, platform, install }) satisfies ToolRowRoom;
@@ -23,7 +41,7 @@ const at = (progress: BrowserInstall["progress"], more: Partial<BrowserInstall> 
   ...more,
 });
 
-test("the host's state as the row reads it: every failure but the firm's is the offer again", () => {
+test("the host's state as the row reads it: the firm's policy and the failures with a line; every other failure is the offer again", () => {
   expect(progressOf({ downloading: { bytes: 5, total: 10, behind: true } })).toEqual({
     downloading: { bytes: 5, total: 10, behind: true },
   });
@@ -31,7 +49,20 @@ test("the host's state as the row reads it: every failure but the firm's is the 
   expect(progressOf("offline")).toBe("offline");
   expect(progressOf("done")).toBe("done");
   expect(progressOf({ failed: { code: "firm_forbids", message: "policy" } })).toBe("forbidden");
-  for (const code of ["cancelled", "network", "disk_space", "unsupported", "unknown"] as const)
+  expect(progressOf({ failed: { code: "tls", message: "" } })).toBe("tls");
+  expect(progressOf({ failed: { code: "server_refused", message: "" } })).toBe("server_refused");
+  expect(progressOf({ failed: { code: "disk_space", message: "" } })).toBe("disk_space");
+  expect(progressOf({ failed: { code: "network", message: "" } })).toBe("network");
+  // a refused address and an HTTP error are different lines
+  expect(progressOf({ failed: { code: "host_refused", message: "" } })).toBe("host_refused");
+  for (const code of [
+    "cancelled",
+    "size_mismatch",
+    "unpack",
+    "signature",
+    "unsupported",
+    "unknown",
+  ] as const)
     expect(progressOf({ failed: { code, message: "" } })).toBeNull();
   // a state from a newer host
   expect(progressOf("something_newer" as BrowserInstallState)).toBeNull();
@@ -41,10 +72,11 @@ test("the offer: Get a browser for Clauseo, under what to install, waiting from 
   expect(words(IDLE)).toMatchObject({
     reason: "Install Chrome",
     note: INSTALL_MAC,
-    install: { kind: "offer", button: "Get a browser for Clauseo", waiting: false },
+    install: { kind: "offer", line: null, button: "Get a browser for Clauseo", waiting: false },
   });
   expect(words(at(null, { pressed: true })).install).toEqual({
     kind: "offer",
+    line: null,
     button: "Get a browser for Clauseo",
     waiting: true,
   });
@@ -98,6 +130,36 @@ test("offline: the wait, with Cancel", () => {
   });
 });
 
+test("each failure with a line: the offer with its line above it, what to install still said; a refused address and an HTTP error differ", () => {
+  const offer = (line: string) => ({
+    kind: "offer",
+    line,
+    button: "Get a browser for Clauseo",
+    waiting: false,
+  });
+  for (const [progress, line] of [
+    ["tls", TLS],
+    ["host_refused", HOST_REFUSED],
+    ["server_refused", SERVER_REFUSED],
+    ["disk_space", DISK_SPACE],
+    ["network", NETWORK],
+  ] as const) {
+    const row = words(at(progress));
+    expect(row.note).toBe(INSTALL_MAC);
+    expect(row.reason).toBe("Install Chrome");
+    expect(row.install).toEqual(offer(line));
+  }
+  // the plain offer has no line
+  expect(words(IDLE).install).toEqual({
+    kind: "offer",
+    line: null,
+    button: "Get a browser for Clauseo",
+    waiting: false,
+  });
+  // a press waits as the plain offer does
+  expect(words(at("tls", { pressed: true })).install).toMatchObject({ waiting: true });
+});
+
 test("the firm forbids it: the line and no offer, what to install still said", () => {
   const row = words(at("forbidden"));
   expect(row.note).toBe(INSTALL_MAC);
@@ -120,7 +182,7 @@ test("done: ready for new conversations, and a new conversation uses it", () => 
 });
 
 test("never on Windows, without an app feed, or under any other state", () => {
-  for (const progress of [null, "offline", "done", "forbidden"] as const)
+  for (const progress of [null, "offline", "done", "forbidden", "host_refused"] as const)
     expect(words(at(progress), "windows").install).toBeNull();
   expect(words(null).install).toBeNull();
   for (const state of ["available", "off", "locked_off", "browser_policy_unreadable"] as const)
@@ -130,6 +192,13 @@ test("never on Windows, without an app feed, or under any other state", () => {
 test("in Hindi", () => {
   const hi = (install: BrowserInstall) => toolRow("hi", MISSING, room(install)).install;
   expect(hi(IDLE)).toMatchObject({ button: "Clauseo के लिए ब्राउज़र डाउनलोड करें" });
+  expect(hi(at("tls"))).toMatchObject({
+    line: "Clauseo ब्राउज़र डाउनलोड करने के लिए सुरक्षित रूप से कनेक्ट नहीं कर सका। सहायता के लिए अपनी फ़र्म की IT टीम से पूछें।",
+    button: "Clauseo के लिए ब्राउज़र डाउनलोड करें",
+  });
+  expect(hi(at("disk_space"))).toMatchObject({
+    line: "ब्राउज़र डाउनलोड करने के लिए इस कंप्यूटर पर पर्याप्त खाली जगह नहीं है। लगभग 1\u00a0GB जगह खाली करें और फिर से प्रयास करें।",
+  });
   expect(hi(at({ downloading: { bytes: 84 * MB, total: 162 * MB, behind: false } }))).toMatchObject(
     {
       text: "Clauseo का ब्राउज़र डाउनलोड हो रहा है: 162\u00a0MB में से 84\u00a0MB (52%)",
@@ -177,6 +246,33 @@ test("the offer sends install_browser once and waits; Cancel sends cancel_browse
     "cancel_browser_install",
     "cancel_browser_install",
   ]);
+});
+
+test("a line's offer starts a download, and the firm's policy as the first event offers nothing", () => {
+  for (const state of [
+    { failed: { code: "tls", message: "" } },
+    { failed: { code: "server_refused", message: "" } },
+    { failed: { code: "host_refused", message: "" } },
+    { failed: { code: "disk_space", message: "" } },
+    { failed: { code: "network", message: "" } },
+  ] as const) {
+    const { transport, store: s } = store();
+    transport.appEvent({ browser_install: { state } });
+    expect(s.get().progress).not.toBeNull();
+    s.install();
+    expect(s.get().pressed).toBe(true);
+    expect(sent(transport)).toEqual(["install_browser"]);
+    expect(installRunning(s.get())).toBe(false);
+  }
+  // a catch-up that says the firm forbids it, with no press before: forbidden, and nothing to start
+  const { transport, store: s } = store();
+  transport.appEvent({
+    browser_install: { state: { failed: { code: "firm_forbids", message: "" } } },
+  });
+  expect(s.get().progress).toBe("forbidden");
+  s.install();
+  expect(s.get()).toMatchObject({ progress: "forbidden", pressed: false });
+  expect(sent(transport)).toEqual([]);
 });
 
 test("unpacking keeps the download's size and update; the firm's policy offers nothing to start", () => {
