@@ -152,7 +152,7 @@ fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         let roots = roots(dir.path(), platform);
         assert_eq!(
-            find_with(&roots, false),
+            find_with(&roots, false, false),
             None,
             "{platform:?}: Edge while not allowed"
         );
@@ -169,8 +169,8 @@ fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
     // An allowed Edge comes before a Program Files Chrome; a disallowed one leaves Chrome.
     let chrome = touch(&dir.path().join("pf"), WIN_CHROME);
     let win = roots(dir.path(), Platform::WindowsX64);
-    assert_eq!(find_with(&win, true), Some(edge.clone()));
-    assert_eq!(find_with(&win, false), Some(chrome.clone()));
+    assert_eq!(find_with(&win, true, false), Some(edge.clone()));
+    assert_eq!(find_with(&win, false, false), Some(chrome.clone()));
     assert_eq!(
         windows_installed(&win).usable,
         [(Browser::Edge, edge), (Browser::Chrome, chrome.clone())]
@@ -200,7 +200,10 @@ fn windows_installed_is_empty_off_windows() {
 fn windows_edge_is_never_looked_for_on_mac() {
     let dir = TempDir::new("chrome-mac-no-edge");
     touch(&dir.path().join("pf86"), WIN_EDGE);
-    assert_eq!(find_with(&roots(dir.path(), Platform::MacX64), true), None);
+    assert_eq!(
+        find_with(&roots(dir.path(), Platform::MacX64), true, false),
+        None
+    );
 }
 
 /// On a Mac with no Chrome: Edge, Brave, then Chromium, each in `/Applications` before
@@ -220,7 +223,7 @@ fn mac_other_chromium_browsers_come_after_chrome_in_order() {
     let edge = touch(&home, MAC_EDGE);
     assert_eq!(find(&mac()), Some(edge));
     // Windows' Edge switch does not touch the Mac's list.
-    assert!(find_with(&mac(), false).is_some());
+    assert!(find_with(&mac(), false, false).is_some());
     let chrome = touch(&home, MAC_CHROME);
     assert_eq!(find(&mac()), Some(chrome));
     // Each browser's places, in order.
@@ -498,4 +501,56 @@ fn a_linked_browsers_folder_is_not_followed() {
     write::symlink(&elsewhere, &dir.path().join("app/browsers")).unwrap();
     assert!(binary.is_file());
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+}
+
+/// The test row's switch, with the feature on: the installed Chrome, Edge, Brave and Chromium are
+/// passed over, Clauseo's own download is still found, and only `1` turns it on.
+#[cfg(feature = "test-browser-search")]
+#[test]
+fn the_test_switch_hides_installed_browsers_but_not_the_download() {
+    use std::ffi::OsStr;
+    let dir = TempDir::new("chrome-test-switch");
+    for app in [MAC_CHROME, MAC_EDGE, MAC_BRAVE, MAC_CHROMIUM] {
+        touch(&dir.path().join("root"), app);
+    }
+    let roots = roots(dir.path(), Platform::MacArm64);
+    assert!(
+        find_with(&roots, true, false).is_some(),
+        "found without the switch"
+    );
+    assert_eq!(
+        find_with(&roots, true, true),
+        None,
+        "Chrome, Edge, Brave and Chromium hidden, nothing else"
+    );
+    let cft = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_MAC_ARM}"),
+    );
+    assert_eq!(find_with(&roots, true, true), Some(cft));
+    assert!(super::test_switch::says(Some(OsStr::new("1"))));
+    for value in [None, Some("0"), Some(""), Some("yes")] {
+        assert!(
+            !super::test_switch::says(value.map(OsStr::new)),
+            "{value:?}"
+        );
+    }
+    assert_eq!(
+        super::test_switch::VAR,
+        "CLAUSEO_TEST_IGNORE_INSTALLED_BROWSERS"
+    );
+}
+
+/// Without the feature (every release), the variable does nothing: no value turns the switch on.
+#[cfg(not(feature = "test-browser-search"))]
+#[test]
+fn without_the_feature_the_test_switch_is_always_off() {
+    use std::ffi::OsStr;
+    for value in [Some("1"), Some("0"), None] {
+        assert!(
+            !super::test_switch::says(value.map(OsStr::new)),
+            "{value:?}"
+        );
+    }
+    assert!(!super::test_switch::ignore_installed());
 }

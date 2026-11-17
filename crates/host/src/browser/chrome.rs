@@ -296,11 +296,14 @@ impl ChromeRoots {
 /// The Chrome this machine offers, or `None` (`BrowserNotInstalled`). File system calls: off
 /// the actor.
 pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
-    find_with(roots, EDGE_ALLOWED)
+    find_with(roots, EDGE_ALLOWED, test_switch::ignore_installed())
 }
 
-/// [`find`] with Windows' Edge switch given, so its test covers both values.
-fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
+/// [`find`] with Windows' Edge switch and the test row's switch ([`test_switch`]) given, so its
+/// tests cover each value. `ignore_installed` passes over the browsers installed on a macOS or
+/// Linux machine (Chrome, and Edge, Brave and Chromium); Clauseo's own download stays a
+/// candidate.
+fn find_with(roots: &ChromeRoots, edge_allowed: bool, ignore_installed: bool) -> Option<PathBuf> {
     if roots.platform.is_windows() {
         return windows_installed_with(roots, edge_allowed)
             .usable
@@ -309,12 +312,17 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
             .map(|(_, path)| path);
     }
     let usable = |path: &PathBuf| usable(roots.platform, path);
-    roots
-        .installed()
+    let (installed, others) = if ignore_installed {
+        tracing::warn!("test-browser-search: the installed browsers are passed over");
+        (Vec::new(), Vec::new())
+    } else {
+        (roots.installed(), roots.others())
+    };
+    installed
         .into_iter()
         .find(usable)
         .or_else(|| chrome_for_testing(roots))
-        .or_else(|| roots.others().into_iter().find(usable))
+        .or_else(|| others.into_iter().find(usable))
 }
 
 /// Whether `binary` can be taken: a regular file and, on macOS, inside its expected bundle.
@@ -481,6 +489,8 @@ pub(crate) fn version(text: &str) -> Option<Vec<u64>> {
 fn is_file(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
+
+pub(crate) mod test_switch;
 
 #[cfg(test)]
 mod tests;
