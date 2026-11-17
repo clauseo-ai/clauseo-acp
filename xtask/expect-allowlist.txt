@@ -349,6 +349,8 @@ crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the
 crates/matters/src/no_download/macos.rs - unsafe_code
 # Added by R20a: matters' calls to GetVolumePathNameW and GetDriveTypeW (a folder on a network drive).
 crates/matters/src/place/windows.rs - unsafe_code
+# Added by #1144: Matter::restore in its own file (matter.rs is at its 600-line limit).
+crates/matters/src/matter/restores.rs Matter clippy::multiple_inherent_impl
 # matters' Recycle Bin through IFileOperation (COM), its progress sink's implement macro, and the
 # Windows test that puts its thread in the multithreaded apartment first.
 crates/matters/src/trash/windows.rs - unsafe_code

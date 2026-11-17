@@ -11,6 +11,7 @@ pub(crate) mod leftovers;
 pub use discard::remove_marker_of;
 pub(crate) mod json;
 pub use json::{check_marker, read_marker};
+mod restores;
 
 use discard::Fresh;
 
@@ -28,8 +29,8 @@ use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
     Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, ReplaceFile,
-    Replaced, Restore, RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta,
-    UndoRequest, Undone, VersionFile,
+    Replaced, RestoreFiles, RestorePlan, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    VersionFile,
 };
 use crate::{Error, MissingReason, compare, papers, refuse, replace, restore, scan, undo, write};
 
@@ -436,20 +437,6 @@ impl Matter {
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
         undo::undo(&mut self.core, &self.folder, &self.settings, request)
-    }
-
-    /// Restores version `request.from`: the whole matter or chosen files. Checks the request,
-    /// plans against the folder and checks every target and every lock before committing or
-    /// writing anything (`matter.file_locked` names the locked files); takes an `outside-edits`
-    /// checkpoint if the folder changed since the last checkpoint; writes each file through a
-    /// synced temp file, checks that no target changed since that checkpoint, renames them into
-    /// place, and takes a `restore` checkpoint (no thread, no turn). Files added since stay, and
-    /// nothing is deleted, but the files a restore it undoes added ([`Restore::undoes`]).
-    /// Cloud-only, over-cap and excluded files are never read or written. See [`Restore`] for
-    /// the ids and retrying, [`RestorePlan`] for what is kept.
-    pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
-        json::check(&self.folder, self.id)?;
-        restore::restore(&mut self.core, &self.folder, &self.settings, request)
     }
 
     /// Replaces the file `request.path` with `request.new`, made outside the folder from the
