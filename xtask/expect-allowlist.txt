@@ -498,6 +498,7 @@ crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods
 crates/mcp/tests/guard/real_chrome.rs - clippy::disallowed_methods
 # R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
 crates/profile/src/write.rs - clippy::disallowed_methods
+crates/profile/src/write.rs remove_any clippy::permissions_set_readonly_false
 crates/profile/tests/skills/write.rs - clippy::disallowed_methods
 # stetdoc's kill test: a real stetdoc stub on the real clock, polled until its pid is gone.
 crates/profile/tests/skills/stetdoc_kill.rs - clippy::disallowed_methods
