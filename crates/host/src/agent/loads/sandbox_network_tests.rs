@@ -1,5 +1,5 @@
-//! `sandbox_network`: the shell's allowlist is the seeded fetch sites, the needed hosts and, in
-//! `auto`, the matter's kept sites, and nothing wider.
+//! `sandbox_network`: the shell's allowlist is the seeded fetch sites and the needed hosts,
+//! nothing wider, and strict in every mode but forced ask.
 
 use std::collections::BTreeSet;
 
@@ -7,12 +7,14 @@ use serde_json::{Map, Value, json};
 
 use super::sandbox::DENIED_DOMAINS;
 use super::sandbox_network::{
-    SHELL_NEEDED_HOSTS, Strict, allowed_domains, fed_kept_hosts, is_plain_host, launch_network,
-    network,
+    SHELL_NEEDED_HOSTS, Strict, allowed_domains, is_plain_host, launch_network, network,
+    plain_hosts,
 };
+use super::{CLAUDE_FALLBACK_MODE, CLAUDE_MODE, claude_mode};
+use crate::agent::forced_ask::ASK_MODE;
 use crate::browser::seed_sites::WEB_FETCH_SITES;
 
-fn kept(hosts: &[&str]) -> Vec<String> {
+fn extra(hosts: &[&str]) -> Vec<String> {
     hosts.iter().map(|host| (*host).to_owned()).collect()
 }
 
@@ -29,8 +31,8 @@ fn the_list_is_the_seeded_fetch_sites_and_the_needed_hosts() {
 
 #[test]
 fn the_list_is_sorted_and_each_host_once() {
-    for kept_hosts in [&[][..], &["sci.gov.in", "example.org", "example.org"][..]] {
-        let hosts = allowed_domains(kept_hosts);
+    for extra_hosts in [&[][..], &["sci.gov.in", "example.org", "example.org"][..]] {
+        let hosts = allowed_domains(extra_hosts);
         assert!(hosts.windows(2).all(|pair| pair[0] < pair[1]), "{hosts:?}");
     }
 }
@@ -90,7 +92,7 @@ fn every_entry_is_a_valid_host_name() {
 }
 
 #[test]
-fn a_kept_site_goes_in_only_as_a_plain_host() {
+fn an_extra_host_goes_in_only_as_a_plain_host() {
     for host in ["example.org", "files.court.example.in", "a-b.co"] {
         assert!(is_plain_host(host), "{host}");
     }
@@ -124,20 +126,24 @@ fn a_kept_site_goes_in_only_as_a_plain_host() {
     assert!(!is_plain_host(&long));
 }
 
-/// `auto` feeds the plain kept sites; the ask modes feed none.
+/// Only the plain extra hosts go in.
 #[test]
-fn kept_sites_are_fed_only_under_strict() {
-    let kept_hosts = kept(&["example.org", "*.evil.org", "localhost", "files.example.in"]);
-    assert_eq!(
-        fed_kept_hosts(Strict::On, &kept_hosts),
-        ["example.org", "files.example.in"]
-    );
-    assert!(fed_kept_hosts(Strict::Off, &kept_hosts).is_empty());
+fn only_plain_extra_hosts_go_in() {
+    let hosts = extra(&["example.org", "*.evil.org", "localhost", "files.example.in"]);
+    assert_eq!(plain_hosts(&hosts), ["example.org", "files.example.in"]);
 }
 
+/// Strict in every mode but forced ask. The launch outside forced ask is in auto
+/// ([`CLAUDE_MODE`]) and may fall back to acceptEdits ([`CLAUDE_FALLBACK_MODE`]) or be
+/// switched to the default mode later; settings are fixed at launch, so each keeps strict.
+/// Forced ask launches in the default mode ([`ASK_MODE`]) and alone keeps the card.
 #[test]
-fn strict_is_on_in_auto_and_off_in_forced_ask() {
-    assert_eq!(Strict::at_launch(false), Strict::On);
+fn strict_in_auto_accept_edits_and_the_default_but_not_forced_ask() {
+    assert_eq!(claude_mode(false), CLAUDE_MODE);
+    for mode in [CLAUDE_MODE, CLAUDE_FALLBACK_MODE, "default"] {
+        assert_eq!(Strict::at_launch(false), Strict::On, "{mode}");
+    }
+    assert_eq!(claude_mode(true), ASK_MODE);
     assert_eq!(Strict::at_launch(true), Strict::Off);
 }
 
@@ -171,11 +177,11 @@ fn with_sandbox() -> Map<String, Value> {
     settings
 }
 
-/// The launch in `auto`: strict, and the kept sites in the list.
+/// A launch outside forced ask: strict, the plain extra hosts in the list.
 #[test]
-fn an_auto_launch_is_strict_and_lists_the_kept_sites() {
+fn a_launch_outside_forced_ask_is_strict() {
     let mut settings = with_sandbox();
-    launch_network(&mut settings, false, &kept(&["example.org", "*"]));
+    launch_network(&mut settings, false, &extra(&["example.org", "*"]));
     assert_eq!(settings["sandbox"]["enabled"], json!(true));
     assert_eq!(
         settings["sandbox"]["network"],
@@ -183,11 +189,12 @@ fn an_auto_launch_is_strict_and_lists_the_kept_sites() {
     );
 }
 
-/// The launch in forced ask: no strict, no kept sites, the hook's `*` gone all the same.
+/// A forced-ask launch: no strict, so an unlisted host is a card; the hook's `*` gone all the
+/// same.
 #[test]
-fn a_forced_ask_launch_asks_and_lists_no_kept_site() {
+fn a_forced_ask_launch_is_not_strict() {
     let mut settings = with_sandbox();
-    launch_network(&mut settings, true, &kept(&["example.org"]));
+    launch_network(&mut settings, true, &[]);
     assert_eq!(settings["sandbox"]["network"], network(Strict::Off, &[]));
 }
 
@@ -195,6 +202,6 @@ fn a_forced_ask_launch_asks_and_lists_no_kept_site() {
 #[test]
 fn no_sandbox_gets_no_network_object() {
     let mut settings = Map::new();
-    launch_network(&mut settings, false, &kept(&["example.org"]));
+    launch_network(&mut settings, false, &extra(&["example.org"]));
     assert!(settings.is_empty());
 }

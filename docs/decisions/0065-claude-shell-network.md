@@ -16,9 +16,9 @@ What Claude Code 2.1.293 does, read from its binary and `sdk.d.ts`:
   `WebFetch(domain:x)` rule without `*` also matches the URL's host exactly, and `*.x` the same
   way. The seeds hold no `*`.
 - An unlisted host raises a `SandboxNetworkAccess` request. In `auto`, the mode a Clauseo session
-  launches in, that request goes to Anthropic's classifier and never to the host: no card, and
-  the matter's kept sites cannot answer it. In `default` (forced ask) and `acceptEdits` it is a
-  card, and one Yes covers that host, on every port and path, for the session.
+  launches in, that request goes to Anthropic's classifier and never to the host, so no card
+  appears. In `default` (forced ask) and `acceptEdits` it is a card, and one Yes covers that
+  host, on every port and path, for the session. Stage C saw this live on 2.1.293.
 - `network.strictAllowlist: true` refuses an unlisted host instead of asking. It is honoured
   from `--settings` and gates sandboxed commands only, never `WebFetch`.
 - `allowedDomains` is merged with `WebFetch(domain:…)` allow rules from the settings files
@@ -33,32 +33,33 @@ What Claude Code 2.1.293 does, read from its binary and `sdk.d.ts`:
   rules reach, no wider and no narrower.
 - `deniedDomains` (loopback and the any-address) stays. `allowLocalBinding` and
   `allowUnixSockets` stay unset.
-- In `auto`: `strictAllowlist: true`, and the matter's kept sites at launch go into the list
-  and, as `WebFetch(domain:<host>)` allow rules, beside the seeds. A kept site is fed only as a
-  plain lower-case host name. Removing a kept site takes effect, in both `WebFetch` and the
-  shell, from the next conversation.
-- In forced ask: no strict and no kept sites. An unlisted host is a card; stage B's arm answers
-  a kept site's card, so a Remove acts at once.
-- A conversation launched in `auto` keeps strict after a switch to forced ask, or a fallback to
-  `acceptEdits`, until it is next launched: stricter, not weaker.
+- `strictAllowlist: true` in every mode but forced ask, decided at launch. An unlisted host
+  from the shell is refused, never a card: not the classifier's call in `auto`, and not a card
+  in the `acceptEdits` fallback. Forced ask keeps the card, one per site.
+- A conversation launched outside forced ask keeps strict after a switch to forced ask, until
+  it is next launched: stricter, not weaker.
+- No per-matter sites go into the list. A per-computer site list, a separate change, will feed
+  it later.
 - Windows has no Claude sandbox: a shell command's network is judged by Anthropic's classifier
   alone. The host's Windows shell scan is a belt over it (URL tokens and network verbs checked
   against the same list, giving an ask), not a fence.
 
 ## Consequences
 
-- A shell command in `auto` reaches the seeded and kept sites and nothing else; a site the
-  lawyer has not kept fails as a refused connection, which Claude reports. A kept site is how
-  the lawyer opens another one.
-- `SHELL_NEEDED_HOSTS` grows only from evidence (stage C's census). Package indexes and code
-  hosts stay out unless that census shows legal work needs them.
-- A later Claude Code that changes the matching, the `auto` routing of `SandboxNetworkAccess`, or
+- Outside forced ask, a shell command reaches the seeded sites and nothing else. Any other site
+  fails as a refused connection (exit 56, "host is not on the allow list"), which Claude reports.
+- `SHELL_NEEDED_HOSTS` grows only from evidence. Stage C's census found 109 `curl` calls in 19
+  of 152 conversations, mostly to unseeded legal sources, which are being added to the seed list.
+  Package indexes and code hosts stay out unless a census shows legal work needs them.
+- A later Claude Code that changes the matching, the routing of `SandboxNetworkAccess`, or
   `strictAllowlist` must be re-read before the version bump.
 - The matter folder's `.claude/settings.json` and `.claude/settings.local.json` cannot widen
   the list: Claude Code loads only the user settings (`settingSources: ["user"]`), and
   `--settings` sets `allowUnsandboxedCommands: false`, under which project settings'
-  `allowedDomains` and `WebFetch(domain:…)` rules are ignored too. Nothing of Clauseo's writes a
-  settings file into a client's folder (decision record 0063).
+  `allowedDomains` and `WebFetch(domain:…)` rules are ignored too. Claude's own "Yes, and don't
+  ask again" option still writes `.claude/settings.local.json` in the matter folder until
+  "Always for this matter", kept by the host, replaces it (decision record 0063, a separate
+  change).
 
 ## Status
 

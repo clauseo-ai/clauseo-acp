@@ -2,19 +2,17 @@
 //! a sandboxed Bash command may reach (decision record 0065, "Claude's shell network").
 //!
 //! - `allowedDomains` ([`allowed_domains`]): the seeded legal sites Claude may also fetch unasked
-//!   ([`WEB_FETCH_SITES`]) plus [`SHELL_NEEDED_HOSTS`], and in `auto` the matter's kept sites
-//!   at launch ([`fed_kept_hosts`]); sorted, each once. It was `["*"]`.
+//!   ([`WEB_FETCH_SITES`]) plus [`SHELL_NEEDED_HOSTS`], sorted, each once. It was `["*"]`.
+//!   The launch may add extra hosts ([`plain_hosts`]); today it adds none.
 //! - `deniedDomains`: loopback and the any-address ([`DENIED_DOMAINS`]), unchanged; a deny wins
 //!   over an allow in Claude Code's proxy.
-//! - `strictAllowlist` ([`Strict`]): on when the session launches in `auto`, off in forced ask
-//!   (`default`). In `auto`, Claude Code 2.1.293 sends an unlisted host's
-//!   `SandboxNetworkAccess` request to its classifier, never to the host, so no card would reach
-//!   the lawyer and the matter's kept sites could not answer it; strict makes the proxy refuse it
-//!   instead. Strict gates sandboxed commands only: an unlisted `WebFetch` still goes to the
-//!   classifier (which fails closed when it is unavailable). Off, in `default` (and in
-//!   `acceptEdits`), the request is a card, and one Yes covers that host, on every port and
-//!   path, for the rest of the session. A session that falls back to `acceptEdits` after a
-//!   launch in `auto`, or is switched to forced ask, keeps strict until the next launch:
+//! - `strictAllowlist` ([`Strict`]): on in every mode but forced ask, decided at launch. So an
+//!   unlisted host from the shell is refused, never a card: in `auto` Claude Code 2.1.293 would
+//!   otherwise send its `SandboxNetworkAccess` request to its classifier, and in `acceptEdits`
+//!   (the fallback) to a card. Strict gates sandboxed commands only: an unlisted `WebFetch`
+//!   still goes to the mode. Forced ask (`default`) keeps the card, one per site, and one Yes
+//!   covers that host, on every port and path, for the rest of the session. A conversation
+//!   launched outside forced ask and switched to it later keeps strict until its next launch:
 //!   stricter, not weaker.
 //! - `allowLocalBinding` and `allowUnixSockets`: unset.
 //!
@@ -27,9 +25,7 @@
 //! Claude Code also merges `WebFetch(domain:…)` allow rules from the settings files it loads
 //! into this list. The seeds are not among them: they go in as `allowedTools` (a `cliArg` rule,
 //! `profile::claude_options`), not as a settings file's `permissions.allow`, so the list here
-//! names them itself. A matter's kept sites go in only in `auto`, at launch, so there the
-//! lawyer's Remove acts from the next conversation; in the ask modes the host answers their
-//! cards and a Remove acts at once.
+//! names them itself.
 //!
 //! Windows has no Claude sandbox, so none of this applies there: a shell command's network is
 //! judged by Anthropic's classifier alone (docs/threat-model.md, "Claude's shell network").
@@ -49,27 +45,22 @@ pub(crate) const SHELL_NEEDED_HOSTS: &[&str] = &[];
 /// (`network.strictAllowlist`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Strict {
-    /// An unlisted host goes to the permission mode: a card in `default` and `acceptEdits`.
+    /// An unlisted host goes to the permission mode: a card in forced ask.
     Off,
-    /// An unlisted host is refused without asking: `auto`, where the classifier would otherwise
-    /// judge it with no card.
+    /// An unlisted host is refused without asking: every mode but forced ask.
     On,
 }
 
 impl Strict {
-    /// The launch's choice ([`super::claude_mode`]): on when the session starts in
-    /// [`super::CLAUDE_MODE`] (`auto`), off in forced ask (`default`). A switch to forced ask
-    /// later in the conversation keeps it on until the next launch: stricter, not weaker.
+    /// The launch's choice: off in forced ask, on otherwise, whichever mode the session then
+    /// runs in (`auto`, the `acceptEdits` fallback, or one the lawyer switches to). Settings
+    /// are fixed at launch, so a later switch to forced ask keeps it on until the next launch.
     pub(crate) fn at_launch(forced_ask: bool) -> Self {
-        if super::claude_mode(forced_ask) == super::CLAUDE_MODE {
-            Self::On
-        } else {
-            Self::Off
-        }
+        if forced_ask { Self::Off } else { Self::On }
     }
 }
 
-/// Whether `host` may go in the list as a matter's kept site: a plain lower-case DNS name of two
+/// Whether `host` may go in the list as an extra host: a plain lower-case DNS name of two
 /// or more labels (letters, digits, inner hyphens; at most 63 bytes a label, 253 in all) whose
 /// last label is not all digits, and not loopback or another denied host. So no wildcard, IP
 /// address, port, scheme, path or trailing dot: an entry reaches exactly its host.
@@ -94,28 +85,23 @@ pub(crate) fn is_plain_host(host: &str) -> bool {
         && !DENIED_DOMAINS.contains(&host)
 }
 
-/// The matter's kept sites the launch feeds in: under [`Strict::On`] (`auto`) each of
-/// `kept_hosts` that [`is_plain_host`], else none. In the ask modes the card answers a kept
-/// site (stage B's arm), so the lawyer's Remove acts at once there; in `auto` it acts from the
-/// next conversation.
-pub(crate) fn fed_kept_hosts(strict: Strict, kept_hosts: &[String]) -> Vec<&str> {
-    match strict {
-        Strict::Off => Vec::new(),
-        Strict::On => kept_hosts
-            .iter()
-            .map(String::as_str)
-            .filter(|host| is_plain_host(host))
-            .collect(),
-    }
+/// The extra hosts the launch adds, each of `extra_hosts` that [`is_plain_host`]; any other is
+/// left out.
+pub(crate) fn plain_hosts(extra_hosts: &[String]) -> Vec<&str> {
+    extra_hosts
+        .iter()
+        .map(String::as_str)
+        .filter(|host| is_plain_host(host))
+        .collect()
 }
 
-/// `network.allowedDomains`: [`WEB_FETCH_SITES`], [`SHELL_NEEDED_HOSTS`] and `kept_hosts`,
-/// sorted, each once. `kept_hosts` is what [`fed_kept_hosts`] gave.
-pub(crate) fn allowed_domains<'a>(kept_hosts: &[&'a str]) -> Vec<&'a str> {
+/// `network.allowedDomains`: [`WEB_FETCH_SITES`], [`SHELL_NEEDED_HOSTS`] and `extra_hosts`,
+/// sorted, each once. `extra_hosts` is what [`plain_hosts`] gave.
+pub(crate) fn allowed_domains<'a>(extra_hosts: &[&'a str]) -> Vec<&'a str> {
     let mut hosts: Vec<&'a str> = WEB_FETCH_SITES
         .iter()
         .chain(SHELL_NEEDED_HOSTS)
-        .chain(kept_hosts)
+        .chain(extra_hosts)
         .copied()
         .collect();
     hosts.sort_unstable();
@@ -124,9 +110,9 @@ pub(crate) fn allowed_domains<'a>(kept_hosts: &[&'a str]) -> Vec<&'a str> {
 }
 
 /// The sandbox's `network` object (see the module doc).
-pub(crate) fn network(strict: Strict, kept_hosts: &[&str]) -> Value {
+pub(crate) fn network(strict: Strict, extra_hosts: &[&str]) -> Value {
     let mut network = json!({
-        "allowedDomains": allowed_domains(kept_hosts),
+        "allowedDomains": allowed_domains(extra_hosts),
         "deniedDomains": DENIED_DOMAINS,
     });
     if strict == Strict::On
@@ -138,16 +124,16 @@ pub(crate) fn network(strict: Strict, kept_hosts: &[&str]) -> Value {
 }
 
 /// Puts the launch's `network` object in the flag settings' `sandbox`, when there is one (a
-/// session with Claude's sandbox): strict in `auto` with the fed kept sites
-/// ([`Strict::at_launch`], [`fed_kept_hosts`]), the plain list otherwise.
+/// session with Claude's sandbox): strict unless in forced ask ([`Strict::at_launch`]), with
+/// the plain ones of `extra_hosts` ([`plain_hosts`]).
 pub(crate) fn launch_network(
     settings: &mut Map<String, Value>,
     forced_ask: bool,
-    kept_hosts: &[String],
+    extra_hosts: &[String],
 ) {
     let strict = Strict::at_launch(forced_ask);
-    let fed = fed_kept_hosts(strict, kept_hosts);
+    let extra = plain_hosts(extra_hosts);
     if let Some(sandbox) = settings.get_mut("sandbox").and_then(Value::as_object_mut) {
-        sandbox.insert("network".to_owned(), network(strict, &fed));
+        sandbox.insert("network".to_owned(), network(strict, &extra));
     }
 }

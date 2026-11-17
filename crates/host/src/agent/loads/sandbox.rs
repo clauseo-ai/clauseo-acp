@@ -51,8 +51,8 @@
 //!   unsandboxed past the ask rules. Clauseo's own shim, named by its absolute path, is the
 //!   after-launch way back (decision record 0030).
 //! - `network` ([`super::sandbox_network`], decision record 0065): the seeded legal sites and
-//!   the hosts the shell needs, here without `strictAllowlist` or kept sites; the launch then
-//!   puts in the object for its mode (`profile::claude_options`).
+//!   the hosts the shell needs, here without `strictAllowlist`; the launch then puts in the
+//!   object for its mode, strict unless in forced ask (`profile::claude_options`).
 //!   `network.deniedDomains` keeps loopback out even through Claude Code's own proxy, which runs
 //!   outside the sandbox: the browser's debugging port and agent-browser's daemon listen there.
 //!   A direct loopback connect is refused by the sandbox already (stage C, the same day).
