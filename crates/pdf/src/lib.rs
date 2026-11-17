@@ -35,8 +35,63 @@ mod job;
 pub const SCRIPT: &str = include_str!("clauseo_pdf.py");
 
 /// The Python script `pdftotext` runs: the text layer over `pypdfium2`, the other pages OCR'd
-/// by the runtime's tesseract, kept in the matter's notes (`CLAUSEO_OCR_DIR`).
-pub const PDFTOTEXT: &str = include_str!("pdftotext.py");
+/// by the runtime's tesseract, kept in the matter's notes (`CLAUSEO_OCR_DIR`). It is
+/// `pdftotext.py` without its blank and comment-only lines ([`strip_comment_lines`]), so the
+/// script fits a Windows command line with room to grow; the comments stay in the source.
+pub const PDFTOTEXT: &str = match std::str::from_utf8(PDFTOTEXT_BYTES) {
+    Ok(text) => text,
+    // Never: whole lines of UTF-8 are UTF-8 (a test checks the script is not empty).
+    Err(_) => "",
+};
+
+/// `pdftotext.py` as written, comments and all.
+const PDFTOTEXT_SOURCE: &[u8] = include_bytes!("pdftotext.py");
+
+/// The length of [`PDFTOTEXT`], from a first pass that writes nothing.
+const PDFTOTEXT_LEN: usize = strip_comment_lines(PDFTOTEXT_SOURCE, &mut []);
+
+/// [`PDFTOTEXT`]'s bytes, from the second pass: a slice, so the array is not a `const` copied at
+/// each use (and not a `static`, which a `const` reading it makes clippy 0.1.99 panic on).
+const PDFTOTEXT_BYTES: &[u8] = &{
+    let mut out = [0; PDFTOTEXT_LEN];
+    strip_comment_lines(PDFTOTEXT_SOURCE, &mut out);
+    out
+};
+
+/// Copies `src`'s lines into `out` (when it is not empty) but those that are blank or hold only
+/// a comment: nothing but spaces, tabs, `\r`, `\v` or `\f`, then `#` or the line's end. Returns
+/// the length kept. Run at compile time: a `const`, not a build script, so nothing is written
+/// to `OUT_DIR`. A dropped line inside a triple-quoted string would change the script; the
+/// Python tests check the stripped copy parses to the same AST as the source.
+const fn strip_comment_lines(src: &[u8], out: &mut [u8]) -> usize {
+    let write = !out.is_empty();
+    let (mut start, mut kept) = (0, 0);
+    while start < src.len() {
+        let mut end = start;
+        while end < src.len() && src[end] != b'\n' {
+            end += 1;
+        }
+        if end < src.len() {
+            end += 1; // the line keeps its '\n'
+        }
+        let mut first = start;
+        while first < end && matches!(src[first], b' ' | b'\t' | b'\r' | 0x0b | 0x0c) {
+            first += 1;
+        }
+        if first < end && src[first] != b'#' && src[first] != b'\n' {
+            let mut i = start;
+            while i < end {
+                if write {
+                    out[kept] = src[i];
+                }
+                kept += 1;
+                i += 1;
+            }
+        }
+        start = end;
+    }
+    kept
+}
 
 /// The receipt every installed Clauseo Python runtime folder holds (`clauseo_agents`'
 /// `python.rs`, `PYTHON_RECEIPT`).

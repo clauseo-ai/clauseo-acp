@@ -216,6 +216,17 @@ def scan_image(lines):
     return image
 
 
+def embedded(source):
+    """`source` as the launcher embeds it (lib.rs, strip_comment_lines): without the lines that
+    hold only spaces, tabs, \\r, \\v or \\f, then a `#` or the line's end."""
+    def kept(line):
+        rest = line.lstrip(" \t\r\x0b\x0c")
+        return rest not in ("", "\n") and not rest.startswith("#")
+    lines = source.split("\n")
+    lines = [line + "\n" for line in lines[:-1]] + [lines[-1]]
+    return "".join(line for line in lines if kept(line))
+
+
 def script():
     spec = importlib.util.spec_from_file_location("pdftotext_module", SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -505,6 +516,19 @@ class PdfToText(unittest.TestCase):
     def test_the_script_parses(self):
         with open(SCRIPT, encoding="utf-8") as file:
             ast.parse(file.read())
+
+    def test_the_embedded_copy_without_comment_lines_is_the_same_program(self):
+        # The launcher embeds the script without its blank and comment-only lines (lib.rs,
+        # strip_comment_lines; src/tests.rs checks PDFTOTEXT against this rule). A dropped line
+        # inside a triple-quoted string would change that string, and so the AST.
+        with open(SCRIPT, encoding="utf-8", newline="") as file:
+            source = file.read()
+        stripped = embedded(source)
+        self.assertLess(len(stripped), len(source))
+        self.assertEqual(ast.dump(ast.parse(source)), ast.dump(ast.parse(stripped)))
+        self.assertLess(len(stripped.encode()) + sum(stripped.count(c) for c in '"\\'), 30_000)
+        self.assertNotEqual(ast.dump(ast.parse('x = """a\n\nb"""\n')),
+                            ast.dump(ast.parse(embedded('x = """a\n\nb"""\n'))))
 
     @fake_engine
     def test_a_slow_engine_is_stopped_inside_the_budget(self):
