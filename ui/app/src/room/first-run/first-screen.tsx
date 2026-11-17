@@ -111,10 +111,12 @@ export function FirstScreen({
       // an unreadable key's row offers Try again, which reads the key, never a sign-in
       signs: !keyUnreadable(setup),
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
-      // with no row for the plan, since its install was never seen turning ready here)
+      // with no row for the plan, since its install was never seen turning ready here); never while
+      // its saved key is unreadable (a plan the firm locks has no row then, and no tick either)
       ready:
-        setup?.readyHere === true ||
-        ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn)),
+        !keyUnreadable(setup) &&
+        (setup?.readyHere === true ||
+          ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn))),
     };
   });
   // the papers line names the one plan in play, else both
