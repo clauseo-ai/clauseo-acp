@@ -43,6 +43,13 @@ const PHASE_LINE: &str = "[session/create] ";
 /// `data`'s key names, never the message or a value. The agent's end then logs its stderr
 /// summary ([`log_start_tail`]).
 pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) {
+    // A start step's refusal restated below keeps its sign-in hint, read in its text and `data`.
+    let restated_code = super::super::sign_in::code_of(
+        actor,
+        ErrorCode::AgentLaunchFailed,
+        &error.to_string(),
+        error.rpc_data(),
+    );
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -79,7 +86,7 @@ pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error
             EXITED_AT_START,
         ))
     } else if rpc && error.code() == ErrorCode::AgentProtocolError {
-        Some(Error::refused(ErrorCode::AgentLaunchFailed, error.detail()))
+        Some(Error::refused(restated_code, error.detail()))
     } else {
         None
     };
