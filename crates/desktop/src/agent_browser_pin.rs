@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn windows_on_upstreams_x64_asset_is_refused() {
         let ours = "https://github.com/clauseo-ai/clauseo-acp/releases/download/\
-                    agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-pc-windows-msvc.exe";
+                    agent-browser-v0.41.1-clauseo.3/agent-browser-aarch64-pc-windows-msvc.exe";
         let upstream = "https://github.com/vercel-labs/agent-browser/releases/download/\
                         v0.41.1/agent-browser-win32-x64.exe";
         assert!(PIN.contains(ours), "the ARM64 table holds our url");
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn macos_on_upstreams_asset_is_refused() {
         let ours = "https://github.com/clauseo-ai/clauseo-acp/releases/download/\
-                    agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-apple-darwin\"";
+                    agent-browser-v0.41.1-clauseo.3/agent-browser-aarch64-apple-darwin\"";
         let upstream = "https://github.com/vercel-labs/agent-browser/releases/download/\
                         v0.41.1/agent-browser-darwin-arm64\"";
         assert!(PIN.contains(ours), "the ARM64 macOS table holds our url");
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn the_top_keys_are_checked() {
         let cases = [
-            ("-clauseo.1\"", "-clauseo.0\""),
+            ("-clauseo.3\"", "-clauseo.0\""),
             (
                 "patched_tag = \"agent-browser-v0.41.1",
                 "patched_tag = \"agent-browser-v0.41.2",

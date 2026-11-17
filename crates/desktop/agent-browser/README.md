@@ -22,7 +22,9 @@ The pin holds the same three values (`version`, `upstream_commit`, `upstream_tar
 
 Each is a `git diff` from upstream's repository root (paths `a/cli/src/...`), applied with
 `git apply` inside the extracted folder, in number order. A later fix is a new numbered file, not
-an edit to a published one.
+an edit to a published one. One exception: for clauseo.3, 0002 was rewritten without the
+process hardening (see below); clauseo.1's patches stay at the tag
+`agent-browser-v0.41.1-clauseo.1`.
 
 `patches/0001-stream-disabled-switch.patch` (every OS; 6 files, +72/-17): upstream always starts
 the daemon's stream server, a loopback HTTP server whose API can drive the session. With
@@ -32,60 +34,57 @@ daemon started with streaming on is not reused by a CLI that has it off. This is
 upstream; if upstream takes it, macOS can go back to upstream's binary (the pin accepts an
 upstream url for any triple).
 
-`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 20 files, +2983/-160,
-most of it five new modules and their tests):
+`patches/0002-windows-pipe-and-session-key.patch` (Windows code paths only; 18 files, +1749/-143,
+most of it four new modules and their tests):
 - the CLI reaches the daemon over the named pipe `\\.\pipe\clauseo-ab-<128-bit random hex>`
   instead of loopback TCP, with four instances listening at once. `<session>.pipe` in the socket
   folder records the pipe id with the daemon's pid and creation time, and an HMAC of them with
   the session key; the name is never on a command line, and a record without a valid HMAC is
-  ignored. The first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, its DACL lets only
-  the user and SYSTEM in, and the daemon disconnects, before writing a byte, any client whose
-  process token is restricted (as a sandbox's is) or cannot be checked;
+  ignored. The first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, and its DACL lets
+  only the user and SYSTEM in;
 - the session key: the launcher (Clauseo's browser guard) passes 32 random bytes per session in
   `AGENT_BROWSER_SESSION_KEY`. Every connection starts with a mutual challenge-response: each
   side sends a fresh nonce and proves the key with HMAC-SHA256 over both nonces and the session
   name, checked in constant time, so the key never crosses the pipe. The daemon serves no client
   without the key, and the CLI talks to no daemon of another session or key. The key stops the
   bundled CLI run by hand and raw clients of the pipe. It does not stop an unsandboxed process of
-  the same user that injects code (see the limits below). Each process takes the key out of its own environment first thing
-  and gives it back only to the children it starts hardened (the daemon, the MCP server's CLI
-  runs); it is never in a file or a log. Without a valid key the CLI and the daemon refuse to
+  the same user (see the limits below). Each process takes the key out of its own environment
+  first thing and gives it back only to the daemon it starts and the MCP server's CLI runs; it
+  is never in a file or a log. Without a valid key the CLI and the daemon refuse to
   run on Windows. HMAC-SHA256 comes from the `hmac` and `sha2` crates already in upstream's
   `Cargo.lock`;
 - the CLI also refuses a pipe whose server is not the recorded daemon (same pid and creation
-  time, this executable, an unrestricted token), and connects at identification level only;
-- a live daemon keeps its files and is never replaced by a second one; the `taskkill` fallback
-  is gone (the protected DACL denies PROCESS_TERMINATE anyway);
-- every agent-browser process (MCP server, CLI, daemon) sets the protected DACL
-  `D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW)` on itself first thing,
-  and `D:P(A;;0x1FFFFF;;;SY)(A;;0x100800;;;<user SID>)(A;;0x100800;;;OW)` (no THREAD_RESUME,
-  GET_CONTEXT or SET_CONTEXT) on its main thread; the daemon's runtime threads get the thread
-  DACL as they start, and the CLI and the daemon are started through CreateProcessW with both
-  as their process and first-thread descriptors;
+  time, this executable), and connects at identification level only;
+- a live daemon keeps its files and is never replaced by a second one while it answers;
+- no process or thread DACL and no restricted-token checks: every process keeps Windows'
+  default descriptors and starts its children with `std::process::Command`, as upstream does.
+  Clauseo is no safer than the agent's own mode here. clauseo.1's 0002 (named
+  `0002-windows-pipe-and-hardening.patch`) gave every process a DACL that denied
+  PROCESS_DUP_HANDLE to the process itself. upstream's `CdpClient::connect`
+  (`cli/src/native/cdp/client.rs:252`, socket2's `try_clone`, which is
+  `WSADuplicateSocketW(sock, GetCurrentProcessId())`) then failed in the daemon with "Failed to
+  duplicate CDP socket: An invalid argument was supplied. (os error 10022)";
 - streaming, `inspect` and the dashboard are always off on Windows.
 
 Any other child agent-browser starts (Chrome, engines, ffmpeg, plugins, probes) starts through
-upstream's own code, with agent-browser's environment less the session key, and with the default
-process DACL. In Clauseo none of them is reachable on Windows: the guard starts Chrome itself and
+upstream's own code, with agent-browser's environment less the session key. In Clauseo none of them is reachable on Windows: the guard starts Chrome itself and
 gives agent-browser its endpoint (`AGENT_BROWSER_CDP`), so the daemon launches no browser, and
 the guard refuses `--engine`.
 
 Limits of 0002 on Windows:
-- Some threads of the hardened processes keep the default thread DACL: the MCP server's output
-  reader threads (`mcp.rs`, `spawn_reader`) and the loader and thread-pool threads Windows makes
-  at process start. An unsandboxed process of the same user can open such a thread, take it over
-  and read the session key from the process. The install is per-user, so that process could also
-  replace the agent-browser binary. The key and the DACLs stop sandboxed processes, raw pipe
-  clients and the CLI run by hand, not code running unsandboxed as the user. A sandboxed process
-  can read those threads' registers (GET_CONTEXT) but not change them.
+- The processes have Windows' default DACL, so any process of the same user can open them,
+  read their memory (and the session key in it), duplicate their handles or end them. Codex's
+  unelevated sandbox runs as the user's own SID, so that includes a sandboxed command. The key
+  and the pipe DACL stop raw pipe clients and the CLI run by hand, not a process that reads
+  another's memory. The install is per-user, so such a process could replace the binary anyway.
 - Deleting `<session>.pipe` while the daemon runs makes the next CLI (`ensure_daemon`) start a
   second daemon; the first one stays until its idle timeout. This needs write access to the socket
   folder (`<data>\browser\run` in Clauseo).
-- A daemon that does not answer can't be killed by a later CLI (the protected DACL denies
-  PROCESS_TERMINATE); the CLI says so and the daemon stops after its idle timeout.
+- A daemon that does not answer but still runs is not replaced: the CLI says so and the daemon
+  stops after its idle timeout.
 
 `patches/0003-version-suffix.patch` (every OS; 2 files): our build reports version
-`0.41.1-clauseo.1`, so the CLI's daemon version check tells a patched daemon from an unpatched
+`0.41.1-clauseo.3`, so the CLI's daemon version check tells a patched daemon from an unpatched
 one. `agent-browser-build.mjs` refuses the patched source unless its `cli/Cargo.toml` and
 `cli/Cargo.lock` both say the version the pin's `patched_tag` names, so a `-clauseo.2` rebuild
 cannot report `.1`.
@@ -123,8 +122,7 @@ Each target builds on its own runner: x86_64 Windows on `windows-2025`, ARM64 Wi
 `macos-15` (x86_64 cross-compiled, as release.yml builds the app). Each runs
 `node crates/desktop/sidecars/agent-browser-build.mjs build --target <triple> --out <dir>`:
 `cargo build --release --locked` in `cli/`, then the patched source's own tests
-(`cargo test --locked`; on Windows these include the pipe's restricted-token test, the session
-key tests and the hardening tests). Failed tests still fail the leg, so nothing is published,
+(`cargo test --locked`; on Windows these include the pipe and session key tests). Failed tests still fail the leg, so nothing is published,
 but the binary is written first, for later jobs to test. The tests exercise the test-profile
 build, not the released binary. The build runs
 with rust-toolchain.toml's toolchain, path remaps and `SOURCE_DATE_EPOCH` set to the commit's
