@@ -164,10 +164,9 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|source| Error::Spawn {
-        program: spec.program().to_owned(),
-        source,
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|source| spawn_error(spec, source))?;
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
@@ -202,4 +201,22 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         stderr: StderrPump::new(stderr, Arc::clone(&ring)),
         handle: Handle::new(child, tree, root, stdin, ring, redactor, stdin_grace, live),
     })
+}
+
+/// The error of a spawn of `spec` the OS refused with `source`. The OS answers a working folder
+/// it cannot enter with the same errors as a program it cannot find or may not run, so the
+/// folder is read first: gone is [`Error::NoWorkingFolder`], unreadable an [`Error::Os`] step,
+/// and only a folder that reads leaves the error the program's.
+fn spawn_error(spec: &LaunchSpec, source: std::io::Error) -> Error {
+    match std::fs::read_dir(spec.cwd()) {
+        Ok(_) => Error::Spawn {
+            program: spec.program().to_owned(),
+            source,
+        },
+        Err(folder) if folder.kind() == std::io::ErrorKind::NotFound => Error::NoWorkingFolder,
+        Err(_) => Error::Os {
+            what: "could not enter the working folder",
+            source,
+        },
+    }
 }

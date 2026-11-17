@@ -19,6 +19,10 @@ enum Play {
     Agent(Scenario),
     /// Names a program that does not exist, so the OS refuses to start it.
     NoProgram,
+    /// Names a file in the run's folder that may not run (no execute permission), so the OS
+    /// refuses it: permission denied.
+    #[cfg(unix)]
+    NotRunnable,
 }
 
 /// A launcher that plays one [`Play`] per launch, in order, the last one again once they run
@@ -55,6 +59,13 @@ impl Launcher for Sequence {
                 vec![OsString::from("--scenario"), OsString::from(scenario.arg())],
             ),
             Play::NoProgram => (spec.cwd().join("no-such-agent"), Vec::new()),
+            #[cfg(unix)]
+            Play::NotRunnable => {
+                let program = spec.cwd().join("not-runnable");
+                crate::write::write(&program, b"#!/bin/sh\nexit 0\n");
+                crate::write::set_mode(&program, 0o644);
+                (program, Vec::new())
+            }
         };
         let spec = LaunchSpec::new(program, args, spec.env().clone(), spec.cwd().to_path_buf())?;
         self.inner.launch(&spec)
@@ -169,5 +180,18 @@ fn relaunch_that_cannot_spawn_ends_the_turn() {
         Play::Agent(Scenario::Bundled("exit-mid-turn")),
         Play::NoProgram,
         &[ErrorCode::AgentProgramMissing],
+    );
+}
+
+/// The relaunch's program is there but may not run: permission denied, through the host, is
+/// `agent.program_blocked`.
+#[cfg(unix)]
+#[test]
+fn relaunch_that_may_not_run_ends_the_turn_program_blocked() {
+    relaunch_fails(
+        "relaunch_that_may_not_run_ends_the_turn_program_blocked",
+        Play::Agent(Scenario::Bundled("exit-mid-turn")),
+        Play::NotRunnable,
+        &[ErrorCode::AgentProgramBlocked],
     );
 }
