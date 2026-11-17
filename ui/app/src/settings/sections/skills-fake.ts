@@ -4,13 +4,19 @@
 import type {
   CommandEnvelope,
   CommandOutcome,
+  HostCommand,
   HostQuery,
+  PackStatus,
   QueryResult,
 } from "../../transport/protocol.ts";
-import type { SkillCommand, SkillPack } from "./skills-contract.ts";
+
+type SkillCommand = Extract<
+  HostCommand,
+  { set_skill_pack: unknown } | { add_skill: unknown } | { remove_skill: unknown }
+>;
 
 /** A pack as the host lists it: on, unless `more` says otherwise. */
-export const pack = (id: string, name: string, more: Partial<SkillPack> = {}): SkillPack => ({
+export const pack = (id: string, name: string, more: Partial<PackStatus> = {}): PackStatus => ({
   id,
   name,
   state: "on",
@@ -18,7 +24,7 @@ export const pack = (id: string, name: string, more: Partial<SkillPack> = {}): S
 });
 
 /** The packs the shots and tests start from: one added here, one from an address, one changed and one unusable. */
-export const PACKS: SkillPack[] = [
+export const PACKS: PackStatus[] = [
   pack("notice-drafting", "Notice drafting", { added_here: true }),
   pack("cheque-bounce", "Cheque bounce replies", {
     state: "off",
@@ -33,7 +39,7 @@ export const PACKS: SkillPack[] = [
 ];
 
 export class FakeSkills {
-  packs: SkillPack[];
+  packs: PackStatus[];
   /** What the picker answers next: a path, or null for Cancel. */
   pick: string | null = "/Users/r/Skills/bail-applications";
   /** The next command's refusal, then none. */
@@ -41,7 +47,7 @@ export class FakeSkills {
   /** Every skill command sent, in order. */
   readonly sent: SkillCommand[] = [];
 
-  constructor(packs: readonly SkillPack[] = []) {
+  constructor(packs: readonly PackStatus[] = []) {
     this.packs = packs.map((p) => ({ ...p }));
   }
 
@@ -53,21 +59,23 @@ export class FakeSkills {
         throw new Error("not scripted");
       },
       dispatch: (envelope: CommandEnvelope): CommandOutcome => {
-        const command = envelope.command as unknown as SkillCommand;
-        if (!("add_skill" in command || "remove_skill" in command || "set_skill_pack" in command))
+        const sent = envelope.command;
+        if (!("add_skill" in sent || "remove_skill" in sent || "set_skill_pack" in sent))
           return "done";
+        const command = sent as SkillCommand;
         this.sent.push(command);
         const refusal = this.refuseNext;
         if (refusal !== null) {
           this.refuseNext = null;
           throw { code: refusal, message: "refused", retryable: false };
         }
-        if ("add_skill" in command) {
+        if (command.add_skill !== undefined) {
           const id = command.add_skill.path.split(/[\\/]/).pop() ?? "skill";
           this.packs.push(pack(id, id, { state: "off", added_here: true }));
-        } else if ("remove_skill" in command)
-          this.packs = this.packs.filter((p) => p.id !== command.remove_skill.id);
-        else {
+        } else if (command.remove_skill !== undefined) {
+          const { id } = command.remove_skill;
+          this.packs = this.packs.filter((p) => p.id !== id);
+        } else if (command.set_skill_pack !== undefined) {
           const { id, on } = command.set_skill_pack;
           this.packs = this.packs.map((p) =>
             p.id === id ? { ...p, state: on ? "on" : "off" } : p,

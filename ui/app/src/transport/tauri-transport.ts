@@ -8,7 +8,7 @@
 // holds, an event that is not patches, a stream_failed report). The store's acks of one flush and the message count go to the bridge as one
 // call, a microtask after the flush; messages that carried nothing and no flush followed are acked on the next
 // animation frame with no positions.
-import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, isTauri } from "@tauri-apps/api/core";
 import { commands, type Ack, type PageMarks, type StreamMessage } from "./bindings.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
@@ -452,14 +452,9 @@ export class TauriTransport
   async openSettings(section: SettingsSection | null = null): Promise<void> {
     await call(commands.openSettings(section));
   }
-  /** Settings › Skills' picker: invoked by name until `pick_skill` is in the generated bindings, then
-   * `call(commands.pickSkill())`. */
+  /** Settings › Skills' folder picker (`pick_skill`): the folder's path, or null when cancelled. */
   async pickSkill(): Promise<string | null> {
-    try {
-      return await invoke<string | null>("pick_skill");
-    } catch (error) {
-      throw toHostError(error);
-    }
+    return call(commands.pickSkill());
   }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
     return this.#subs.add(stream, after, subscriber);

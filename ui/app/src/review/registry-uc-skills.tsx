@@ -26,17 +26,15 @@ export const UC_SKILLS: Entry[] = [
   entry("UC-970", "Skills", "list"),
   entry(
     "UC-971",
-    "Skills teach Claude and ChatGPT to do a task your way. Add a folder that holds a SKILL.md file, or the SKILL.md file itself.",
+    "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.",
     "list",
   ),
   entry("UC-972", "Add a skill", "list"),
   entry("UC-973", "Added on this computer", "list"),
   entry("UC-974", "No skills added yet.", "empty"),
-  entry(
-    "UC-975",
-    "That folder has no SKILL.md file. Choose the folder that holds one, or the file itself.",
-    { refused: "skill.no_skill_md" },
-  ),
+  entry("UC-975", "That folder has no SKILL.md file. Choose the folder that holds one.", {
+    refused: "skill.no_skill_md",
+  }),
   entry("UC-976", "Clauseo couldn't make that change. Your skills are as they were.", {
     refused: "skill.invalid",
   }),
