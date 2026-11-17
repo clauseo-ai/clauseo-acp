@@ -194,6 +194,29 @@ fn the_hash_differs_per_agent_and_per_platform() {
     assert_eq!(snapshot.install_hash(&id("other"), linux()), None);
 }
 
+/// codex-acp's install hash carries the shell-network patch's tag
+/// (`install::codex_patch::TAG`), so an install made before the patch is in another folder and
+/// is redone once; Claude's, which nothing patches, is the same as before.
+#[test]
+fn codex_install_hash_carries_the_patch_tag_and_claudes_does_not() {
+    let snapshot = Snapshot::embedded();
+    for platform in Platform::ALL {
+        let untagged = |agent: &AgentId| {
+            let pins = snapshot.pins(agent).unwrap();
+            let platform = platform.to_string();
+            short_hash(&[
+                agent.as_str().as_bytes(),
+                pins.lock().as_bytes(),
+                platform.as_bytes(),
+            ])
+        };
+        let codex_hash = snapshot.install_hash(&codex(), platform).unwrap();
+        assert_ne!(codex_hash, untagged(&codex()), "{platform}");
+        let claude_hash = snapshot.install_hash(&claude(), platform).unwrap();
+        assert_eq!(claude_hash, untagged(&claude()), "{platform}");
+    }
+}
+
 #[test]
 fn reserved_ids_are_refused() {
     let snapshot = Snapshot::embedded();

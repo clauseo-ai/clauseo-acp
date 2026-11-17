@@ -165,7 +165,6 @@ impl AgentPins {
     }
 
     /// Every entry but the root, by path.
-    #[cfg(test)]
     pub(crate) fn packages(&self) -> &[LockedPackage] {
         &self.packages
     }

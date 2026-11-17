@@ -177,6 +177,8 @@ pub use config::{
 #[cfg(feature = "test-support")]
 pub use config::{FreeBytes, RenameFault};
 pub use fileid::same_file;
+#[cfg(feature = "test-support")]
+pub use install::codex_patch::CodexPatchForTests;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};

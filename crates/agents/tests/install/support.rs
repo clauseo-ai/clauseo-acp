@@ -56,6 +56,13 @@ pub(crate) const SAC_RG: &str = "vendor/x86_64-pc-windows-msvc/codex-path/rg.exe
 /// Its bytes.
 pub(crate) const FAKE_RG: &[u8] = b"a stand-in for codex's rg.exe\n";
 
+/// `dep-a`'s copy of codex-acp 2.2.2's modes, below the package folder, for the shell-network
+/// patch's tests (`codex_patch.rs`).
+pub(crate) const CODEX_MODES: &str = "dist/modes.js";
+/// Its bytes: `dist/index.js:34264-34319` of codex-acp 2.2.2.
+pub(crate) const CODEX_MODES_JS: &[u8] =
+    include_bytes!("../../src/install/codex_patch/modes-2.2.2.js");
+
 /// The registry path of package `name`'s tarball.
 pub(crate) fn tarball_path(name: &str) -> String {
     format!("/{name}/-/{name}-1.0.0.tgz")
@@ -104,8 +111,13 @@ pub(crate) fn tarballs() -> BTreeMap<&'static str, Vec<u8>> {
         let files: Vec<(&str, &[u8])> = if name.starts_with("adapter-") {
             vec![("dist/index.js", script)]
         } else if name == "dep-a" {
-            // Codex's Windows layout, for the Smart App Control tests (`sac.rs`).
-            vec![("index.js", b"module.exports = 1;\n"), (SAC_RG, FAKE_RG)]
+            // Codex's Windows layout, for the Smart App Control tests (`sac.rs`), and its
+            // modes, for the shell-network patch's (`codex_patch.rs`).
+            vec![
+                ("index.js", b"module.exports = 1;\n"),
+                (SAC_RG, FAKE_RG),
+                (CODEX_MODES, CODEX_MODES_JS),
+            ]
         } else {
             vec![("index.js", b"module.exports = 1;\n")]
         };

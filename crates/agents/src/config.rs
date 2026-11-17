@@ -44,6 +44,10 @@ pub struct AgentsConfig {
     /// and the pinned layouts, on any OS (`sac`). Outside `test-support` the field does not exist.
     #[cfg(feature = "test-support")]
     pub sac_for_tests: Option<crate::sac::SacForTests>,
+    /// Tests only: the file and pins codex-acp's patch uses instead of its own, for one agent
+    /// (`install::codex_patch`). Outside `test-support` the field does not exist.
+    #[cfg(feature = "test-support")]
+    pub codex_patch_for_tests: Option<crate::install::codex_patch::CodexPatchForTests>,
 }
 
 impl AgentsConfig {
@@ -64,6 +68,8 @@ impl AgentsConfig {
             ready_for_tests: BTreeMap::new(),
             #[cfg(feature = "test-support")]
             sac_for_tests: None,
+            #[cfg(feature = "test-support")]
+            codex_patch_for_tests: None,
         }
     }
 }
