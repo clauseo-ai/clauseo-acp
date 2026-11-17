@@ -108,6 +108,28 @@ fn the_pdftotext_script_fits_a_windows_command_line() {
     );
 }
 
+#[test]
+fn the_pdftotext_script_is_its_source_without_its_comments() {
+    // The same rule as the const fn, written another way; tests/test_pdftotext.py checks that
+    // the result parses to the same AST as the source (no line of a string was dropped).
+    let source = include_str!("pdftotext.py");
+    let want: String = source
+        .split_inclusive('\n')
+        .filter(|line| {
+            let rest = line.trim_start_matches([' ', '\t', '\r', '\u{b}', '\u{c}']);
+            !(rest.is_empty() || rest.starts_with(['#', '\n']))
+        })
+        .map(|line| match line.find("  # ") {
+            Some(at) => format!("{}\n", line[..at].trim_end_matches(' ')),
+            None => line.to_owned(),
+        })
+        .collect();
+    assert!(!PDFTOTEXT.contains("  # "));
+    assert_eq!(PDFTOTEXT, want);
+    assert!(PDFTOTEXT.starts_with("import "), "{}", &PDFTOTEXT[..40]);
+    assert!(PDFTOTEXT.len() < source.len());
+}
+
 /// A script's length as one Windows command-line argument: each `"` and `\` escaped.
 fn escaped(script: &str) -> usize {
     script.len() + script.matches(['"', '\\']).count()
