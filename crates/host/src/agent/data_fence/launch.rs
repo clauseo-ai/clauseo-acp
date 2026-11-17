@@ -238,11 +238,12 @@ fn names(place: &Path) -> Option<Vec<String>> {
         .collect()
 }
 
-/// The folders whose entries grow with the matters (run folders, matters' state, Claude's
-/// projects), whose other entries [`walk`] names in groups ([`group_prefix`]).
-const GROUPED: [&[&str]; 3] = [
+/// The folders whose entries grow with the matters (run folders, matters' state and histories,
+/// Claude's projects), whose other entries [`walk`] names in groups ([`group_prefix`]).
+const GROUPED: [&[&str]; 4] = [
     &["run"],
     &["agent-state"],
+    &["matters"],
     &["agents", "claude-acp", "home", "projects"],
 ];
 

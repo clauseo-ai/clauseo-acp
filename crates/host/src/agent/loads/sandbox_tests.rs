@@ -179,6 +179,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{run}/skill-packs"),
                     format!("{DATA}/agent-state/m-1/notes"),
                     format!("{DATA}/profile/claude-plugin/skills"),
+                    format!("{DATA}/matters/m-1/history.git"),
                     format!("{run}/clauseo-env.sh"),
                     format!("{DATA}/tls/roots.pem"),
                     "/Applications/Clauseo.app/Contents/Helpers/stetdoc",
@@ -522,4 +523,30 @@ fn only_the_trust_roots_file_opens() {
     session.ca_file = None;
     let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
+}
+
+/// This matter's version history opens for reading, never for writing, and no other matter's.
+#[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
+fn only_this_matters_history_opens_and_only_to_read() {
+    let sandbox = mac(&Session::new("s-1").paths()).unwrap();
+    let history = format!("{DATA}/matters/m-1/history.git");
+    assert!(
+        sandbox.allow_read.contains(&history),
+        "{:?}",
+        sandbox.allow_read
+    );
+    assert!(
+        !sandbox
+            .allow_write
+            .iter()
+            .any(|path| path.contains("/matters"))
+    );
+    let matters: Vec<&String> = sandbox
+        .allow_read
+        .iter()
+        .filter(|p| p.contains("/matters"))
+        .collect();
+    assert_eq!(matters, [&history]);
+    assert!(sandbox.deny_read.contains(&DATA.to_owned()));
 }

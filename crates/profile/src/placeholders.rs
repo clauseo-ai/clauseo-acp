@@ -22,6 +22,9 @@
 pub const WORK_FOLDER: &str = "{work_folder}";
 /// The matter's notes folder, `<data>/agent-state/<matter id>/notes` (R22). Instructions only.
 pub const MATTER_NOTES: &str = "{matter_notes}";
+/// The matter's version history, `<data>/matters/<matter id>/history.git`, which the agents read
+/// with `git`. Instructions only.
+pub const MATTER_HISTORY: &str = "{matter_history}";
 /// The session's browser state folder, `<data>/run/<session id>/browser`, as the browser
 /// guard's `--cwd`. The host joins it with the platform's own separators and fills it with a
 /// `dunce`-simplified path (no `\\?\` prefix on Windows), as one whole argument.
@@ -90,7 +93,13 @@ pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
 
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
-pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, BROWSER];
+pub const IN_INSTRUCTIONS: [&str; 5] = [
+    WORK_FOLDER,
+    MATTER_NOTES,
+    MATTER_HISTORY,
+    CONNECTORS,
+    BROWSER,
+];
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].

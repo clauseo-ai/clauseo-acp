@@ -43,7 +43,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use clauseo_profile::placeholders::{
-    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
 };
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
@@ -524,16 +524,22 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
     Ok(())
 }
 
-/// The instructions with `{work_folder}`, `{matter_notes}`, `{connectors}` and `{browser}`
-/// filled, in one pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in
-/// the log.
+/// The instructions with `{work_folder}`, `{matter_notes}`, `{matter_history}` (found from the
+/// notes, `agent::history`), `{connectors}` and `{browser}` filled, in one pass. An unfillable
+/// token is a host bug: `agent.launch_failed`, naming it in the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
+    let history = crate::agent::history::matter_history(Path::new(folders.notes));
+    let history = history
+        .as_deref()
+        .and_then(Path::to_str)
+        .unwrap_or_default();
     placeholders::fill(
         text,
         &IN_INSTRUCTIONS,
         &[
             (WORK_FOLDER, folders.work),
             (MATTER_NOTES, folders.notes),
+            (MATTER_HISTORY, history),
             (CONNECTORS, folders.connectors),
             (BROWSER, folders.browser),
         ],

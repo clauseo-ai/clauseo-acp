@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use clauseo_profile::RenderedSkill;
 use clauseo_profile::instructions::{LEGAL, word_count};
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
 };
 use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
@@ -32,7 +32,7 @@ use clauseo_settings::Locations;
 use sha2::{Digest as _, Sha256};
 
 /// The ten headings of the legal part, in order (R22, "The instructions").
-const HEADINGS: [&str; 10] = [
+const HEADINGS: [&str; 11] = [
     "Identity and audience",
     "Intake",
     "Evidence",
@@ -40,6 +40,7 @@ const HEADINGS: [&str; 10] = [
     "Working notes",
     "Review before delivery",
     "Matter brief upkeep",
+    "Version history",
     "Conduct",
     "How turns end",
     "Untrusted content",
@@ -238,6 +239,7 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
             &[
                 (WORK_FOLDER, "W"),
                 (MATTER_NOTES, "M"),
+                (MATTER_HISTORY, "H"),
                 (CONNECTORS, part),
                 (BROWSER, ""),
             ],
