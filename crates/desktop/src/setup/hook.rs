@@ -23,6 +23,8 @@
 //! host puts them after stetdoc's. On the same condition, Codex's instructions end with the lines
 //! that tell it to render PDF pages and read PDF text with them
 //! (`clauseo_profile::instructions::codex_pdf`).
+//! And to their launch env, `TESSDATA_PREFIX` = the runtime's tesseract language folder, when
+//! the slot holds one (unless the profile or the plan sets it).
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
@@ -44,7 +46,7 @@ use zeroize::Zeroizing;
 
 use super::keys::KeySlot;
 use super::network::{NetworkSlot, with_loopback};
-use super::python_path::PythonSlot;
+use super::python_path::{PythonFolders, PythonSlot};
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
@@ -102,11 +104,16 @@ impl SetupHook {
     }
 
     /// The Python runtime's folders, as the setup thread last put them in the slot.
-    fn python_dirs(&self) -> Vec<PathBuf> {
+    fn python_folders(&self) -> PythonFolders {
         self.python
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// The Python runtime's command folders, as the setup thread last put them in the slot.
+    fn python_dirs(&self) -> Vec<PathBuf> {
+        self.python_folders().path
     }
 
     /// The PDF tools' folder when it was found and `python` (the runtime's folders) has any:
@@ -257,6 +264,12 @@ impl ProfileHook for SetupHook {
         let mut env = self.profile.launch_env(agent);
         if let Some(kind) = AgentKind::of(agent) {
             env.extend(self.setup_env(agent, kind));
+            // tesseract reads its languages from here (macOS has no fallback); a value the
+            // profile or the plan sets stays.
+            if let Some(tessdata) = self.python_folders().tessdata {
+                env.entry(OsString::from("TESSDATA_PREFIX"))
+                    .or_insert_with(|| tessdata.into_os_string());
+            }
         }
         env
     }

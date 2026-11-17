@@ -60,7 +60,7 @@ use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
     Follower, NetworkRoute, NetworkSlot, OS_FALLBACK, ProxyEnv, follow, os_lookup, resolve,
 };
-use super::python_path::{PythonPath, PythonSlot};
+use super::python_path::{PythonFolders, PythonPath, PythonSlot};
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::refusal::{follow_keys, lift_at_start, settle_after_load};
@@ -477,7 +477,10 @@ fn python_path(config: &AgentsConfig, slot: PythonSlot) -> PythonPath {
     config.install.refresh = None;
     let python = PythonPath::new(
         slot,
-        Arc::new(move || clauseo_agents::python_path_dirs(&config)),
+        Arc::new(move || PythonFolders {
+            path: clauseo_agents::python_path_dirs(&config),
+            tessdata: clauseo_agents::python_tessdata_dir(&config),
+        }),
     );
     python.fill();
     python

@@ -121,16 +121,59 @@ fn the_python_folders_go_to_claude_and_codex_only_as_the_slot_holds_them() {
         PathBuf::from("/data/agents/runtime/clauseo-python/clauseo-bin"),
         PathBuf::from("/data/agents/runtime/clauseo-python"),
     ];
-    python.write().unwrap().clone_from(&dirs);
+    python.write().unwrap().path.clone_from(&dirs);
     assert_eq!(hook.agent_path(&agents[0]), dirs);
     assert_eq!(hook.agent_path(&agents[1]), dirs);
     assert_eq!(hook.agent_path(&agents[2]), Vec::<PathBuf>::new());
     // Emptied again (any state but Ready): none.
-    python.write().unwrap().clear();
+    python.write().unwrap().path.clear();
     assert_eq!(hook.agent_path(&agents[0]), Vec::<PathBuf>::new());
     // A hook built with no slot gives none.
     let bare = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default());
     assert_eq!(bare.agent_path(&agents[0]), Vec::<PathBuf>::new());
+}
+
+/// Claude and Codex get `TESSDATA_PREFIX`, the runtime's tesseract language folder, while the
+/// slot holds one (the runtime ready with its folder there); no other agent gets it, and none
+/// gets it while the runtime is missing. A value the plan sets stays.
+#[test]
+fn the_tessdata_prefix_goes_to_claude_and_codex_while_the_runtime_has_its_folder() {
+    let python = PythonSlot::default();
+    let claude = id("claude-acp");
+    let plan = Plan {
+        env: [("TESSDATA_PREFIX".to_owned(), "/firm/tessdata".to_owned())].into(),
+        ..Plan::default()
+    };
+    let plans = Arc::new(RwLock::new(BTreeMap::from([(claude.clone(), plan)])));
+    let hook = SetupHook::new(
+        Arc::new(OnceLock::new()),
+        Arc::clone(&plans),
+        Arc::default(),
+    )
+    .with_python(Arc::clone(&python));
+    let name = OsString::from("TESSDATA_PREFIX");
+    let tessdata = PathBuf::from("/data/agents/runtime/clauseo-python/bin/tessdata");
+    // The runtime missing: no variable, and the firm plan's own value only.
+    assert_eq!(
+        hook.launch_env(&claude).get(&name),
+        Some(&OsString::from("/firm/tessdata"))
+    );
+    plans.write().unwrap().clear();
+    assert_eq!(hook.launch_env(&claude).get(&name), None);
+    assert_eq!(hook.launch_env(&id("codex-acp")).get(&name), None);
+    python.write().unwrap().tessdata = Some(tessdata.clone());
+    assert_eq!(
+        hook.launch_env(&id("codex-acp")).get(&name),
+        Some(&tessdata.clone().into_os_string())
+    );
+    assert_eq!(
+        hook.launch_env(&claude).get(&name),
+        Some(&tessdata.into_os_string())
+    );
+    assert_eq!(hook.launch_env(&id("gemini-acp")).get(&name), None);
+    // Back to no runtime: no variable again.
+    python.write().unwrap().tessdata = None;
+    assert_eq!(hook.launch_env(&id("codex-acp")).get(&name), None);
 }
 
 /// The bundled pdftoppm and pdfinfo run the Python runtime, so their folder goes on Claude's and
@@ -147,17 +190,17 @@ fn the_pdf_tools_folder_follows_the_python_folders_for_claude_and_codex() {
         assert_eq!(hook.agent_path(agent), Vec::<PathBuf>::new(), "{agent}");
     }
     let bin = PathBuf::from("/data/agents/runtime/clauseo-python/bin");
-    python.write().unwrap().push(bin.clone());
+    python.write().unwrap().path.push(bin.clone());
     assert_eq!(hook.agent_path(&agents[0]), [bin.clone(), pdf.clone()]);
     assert_eq!(hook.agent_path(&agents[1]), [bin.clone(), pdf]);
     assert_eq!(hook.agent_path(&agents[2]), Vec::<PathBuf>::new());
-    python.write().unwrap().clear();
+    python.write().unwrap().path.clear();
     assert_eq!(hook.agent_path(&agents[1]), Vec::<PathBuf>::new());
     // Not found (a debug build, a bundle without it): the Python folders alone.
     let without = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default())
         .with_python(Arc::clone(&python))
         .with_pdf_tools(None);
-    python.write().unwrap().push(bin.clone());
+    python.write().unwrap().path.push(bin.clone());
     assert_eq!(without.agent_path(&agents[0]), [bin]);
 }
 
@@ -215,6 +258,7 @@ fn codex_gets_the_pdf_line_only_with_the_pdf_tools_on_its_path() {
     python
         .write()
         .unwrap()
+        .path
         .push(PathBuf::from("/data/agents/runtime/clauseo-python/bin"));
     assert_eq!(instructions(&found), format!("Base.\n\n{line}"));
     assert_eq!(instructions(&missing), "Base.");

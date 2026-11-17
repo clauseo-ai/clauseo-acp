@@ -128,7 +128,7 @@ fn a_refused_python_names_what_refused_it_and_carries_no_code_or_hosts() {
 #[test]
 fn the_python_folders_fill_on_ready_and_empty_on_any_other_state() {
     let rig = rig(true);
-    let folders = || rig.python.read().unwrap().clone();
+    let folders = || rig.python.read().unwrap().path.clone();
     let pump = |state: PythonState| {
         block_on(
             rig.backend

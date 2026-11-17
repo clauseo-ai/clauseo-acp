@@ -32,6 +32,9 @@ pub(crate) const PYTHON_RECEIPT: &str = "clauseo-python.json";
 pub(crate) const PYTHON_MANIFEST: &str = "clauseo-python-manifest.txt";
 /// The prefix of every Python archive's name, and so of its runtime folder.
 const FOLDER_PREFIX: &str = "clauseo-python-";
+/// The target of the archive check's line: host.log keeps info only from `clauseo_*` crates'
+/// `::lifecycle` targets.
+const LIFECYCLE: &str = "clauseo_agents::lifecycle";
 
 /// `<data_dir>/agents/runtime`.
 fn runtime_root(data_dir: &Path) -> PathBuf {
@@ -87,6 +90,29 @@ pub fn python_path_dirs(config: &AgentsConfig) -> Vec<PathBuf> {
         return Vec::new();
     }
     runtime_path_dirs(&dir, config.platform.os)
+}
+
+/// The tesseract language folder of the runtime folder `dir` for `os`, for `TESSDATA_PREFIX`: the
+/// `tessdata` beside tesseract, which is in [`runtime_command_dir`] (`bin/tessdata` on macOS,
+/// `clauseo-bin\tessdata` on Windows; see `python-runtime/README.md`).
+pub(crate) fn runtime_tessdata_dir(dir: &Path, os: Os) -> PathBuf {
+    runtime_command_dir(dir, os).join("tessdata")
+}
+
+/// The tesseract language folder inside the installed Python runtime, for `TESSDATA_PREFIX`
+/// ([`runtime_tessdata_dir`]). `Some` only when the runtime passes its receipt check, as
+/// [`python_path_dirs`], and the folder is there. It reads the disk: desktop calls it on its
+/// setup thread only, never from the launch hook.
+pub fn python_tessdata_dir(config: &AgentsConfig) -> Option<PathBuf> {
+    let archive = config.snapshot.python_archive(config.platform)?;
+    let dir = runtime_dir(&config.data_dir, archive);
+    if !python_runtime_valid(&dir, archive, config.platform.os) {
+        return None;
+    }
+    let tessdata = runtime_tessdata_dir(&dir, config.platform.os);
+    std::fs::symlink_metadata(&tessdata)
+        .is_ok_and(|meta| meta.is_dir())
+        .then_some(tessdata)
 }
 
 /// [`python_path_dirs`]' folders inside the runtime folder `dir` for `os`, those that are
@@ -341,7 +367,9 @@ fn open_checked(path: &Path, archive: &PythonArchive) -> Result<std::fs::File, E
     let mut hasher = archive.expected().hasher();
     let read = crate::download::hash_read((&mut file).take(archive.size() + 1), &mut hasher)?;
     file.rewind()?;
-    if read == archive.size() && hasher.matches(archive.expected()) {
+    let matched = read == archive.size() && hasher.matches(archive.expected());
+    log_verdict(archive, matched);
+    if matched {
         return Ok(file);
     }
     drop(file);
@@ -349,6 +377,34 @@ fn open_checked(path: &Path, archive: &PythonArchive) -> Result<std::fs::File, E
     Err(ExtractError::Malformed(
         "Python's archive no longer matches its pinned checksum; it was deleted".into(),
     ))
+}
+
+/// The archive check's verdict for host.log: the archive's name, the first 12 hex digits of its
+/// pinned SHA-256 and `match` (INFO) or `mismatch` (WARN). Never the whole digest, nor any byte
+/// of the file.
+fn log_verdict(archive: &PythonArchive, matched: bool) {
+    let digest = archive.sha256_hex();
+    let expected = digest.get(..12).unwrap_or(&digest);
+    let archive = archive.name();
+    if matched {
+        let verdict = "match";
+        tracing::info!(
+            target: LIFECYCLE,
+            archive,
+            expected,
+            verdict,
+            "python runtime: archive checked"
+        );
+    } else {
+        let verdict = "mismatch";
+        tracing::warn!(
+            target: LIFECYCLE,
+            archive,
+            expected,
+            verdict,
+            "python runtime: archive checked"
+        );
+    }
 }
 
 /// Removes every Python runtime folder and temp folder under `<data_dir>/agents/runtime` but
