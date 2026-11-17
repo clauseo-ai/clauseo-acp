@@ -180,6 +180,9 @@ Var ClauseoRepair
 ; 28: both installers, every mode, when Clauseo.exe isn't in $INSTDIR after the files are placed
 ; (CLAUSEO_APP_EXE_CHECK): Windows security removed or blocked it as setup wrote it.
 !define CLAUSEO_EXIT_APP_EXE_REMOVED 28
+; 29 (CLAUSEO_EXIT_FILE_IN_USE): both installers, every mode, when a file Section Install must
+; replace stays in use; defined in the template's block place-file (installer.nsi), which holds
+; without these hooks.
 
 ; The setup exe's --remove --uninstall exit 10 (SetupExit::AdminCopyLeft): the protection is
 ; removed, but the admin copy, or part of it, stays; the tool wrote the step and its error code

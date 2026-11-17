@@ -252,6 +252,8 @@ pub(super) struct Machine {
     pub(super) found: Vec<String>,
     /// The paths, once expanded, whose `Delete` fails (a file in use).
     pub(super) locked: Vec<String>,
+    /// How many more `File` lines can't open their file (held open by another program).
+    pub(super) held: usize,
     /// An `Abort` ran: nothing after it does, as the section it ends.
     pub(super) aborted: bool,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -284,6 +286,7 @@ impl Machine {
             files: Vec::new(),
             found: Vec::new(),
             locked: Vec::new(),
+            held: 0,
             aborted: false,
             inline: HashMap::new(),
             after: HashMap::new(),

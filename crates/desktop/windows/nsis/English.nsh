@@ -17,7 +17,8 @@
 ; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07), and
 ; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07), then the one
 ; both installers show when Windows security removed Clauseo.exe (clauseoAppRemovedByAv,
-; 2026-11-09).
+; 2026-11-09), and the one they show when a file they must replace stays in use
+; (clauseoFileInUse, 2026-11-17).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -119,6 +120,11 @@ LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 process
 ; CLAUSEO_APP_EXE_CHECK); both installers, every mode: a box, skipped by /S, then exit code 28
 ; and the install fails. Provisional (2026-11-09).
 LangString clauseoAppRemovedByAv ${LANG_ENGLISH} "Windows Security stopped part of Clauseo while it was installing, so Clauseo can't open. Open Windows Security, choose Protection history, allow Clauseo, then install Clauseo again."
+; clauseoFileInUse: a file the installer must replace still couldn't be opened for writing after
+; three tries 2 s apart (installer.nsi, block place-file): something holds it open or locks it.
+; Both installers, every mode: a details line, a box (none under /S), exit code 29 and the
+; install fails. Provisional (2026-11-17), for Rohan's page before merge.
+LangString clauseoFileInUse ${LANG_ENGLISH} "Clauseo couldn't finish installing, because another program has one of its files open. Restart this computer, then try again."
 
 ; The reinstall page's and the WebView2 section's words, which were Tauri's stock English
 ; (installer.nsi, Tauri's template; the installer only, never the uninstaller). The reinstall page

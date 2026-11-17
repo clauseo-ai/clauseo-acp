@@ -84,6 +84,7 @@ What a silent (`/S`) install can return:
 | 24 | Per-machine install: installed, but the set-up program wasn't placed because Clauseo was running in the session that ran the installer |
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 | 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
+| 29 | Install: stopped, because a file in the install folder that it had to replace, such as `Clauseo.exe`, stayed open or locked by another program through three tries over about 4 seconds; Programs and Features keeps the version that was there. Restart the computer, or close what holds the file, then install again |
 
 With the Safe workspace, a silent per-user install exits 22 by design: it can't show the Windows
 prompt, so the Safe workspace isn't set up. Deployment tools such as Intune and SCCM treat any
@@ -102,15 +103,17 @@ What an interactive install can also return:
 | 20 | Installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 | 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
+| 29 | Install: stopped, because a file in the install folder that it had to replace, such as `Clauseo.exe`, stayed open or locked by another program through three tries over about 4 seconds; Programs and Features keeps the version that was there. Restart the computer, or close what holds the file, then install again |
 
 An interactive per-machine install never sets 23: it shows a box when placing the set-up program failed, and a
 line in its details list when it was still running. It shows a box with 24 and 25 too, but not
-with 25 under `/P` or `/UPDATE`. With 28 every mode shows a box except `/S`, and the install
-stops as failed: no finish page, and nothing to start.
+with 25 under `/P` or `/UPDATE`. With 28 and 29 every mode shows a box except `/S`, and the
+install stops as failed: no finish page, and nothing to start. With 29 the details list names
+the file, and the earlier `Clauseo.exe` stays in place when it was the file held.
 
 A passive (`/P`) install shows no box and sets no exit code for Safe workspace's outcomes, except
-the per-machine installer's 24, which every mode sets. Both installers set 28 in every mode,
-`/P` included, with its box.
+the per-machine installer's 24, which every mode sets. Both installers set 28 and 29 in every mode,
+`/P` included, with their box.
 
 What a per-machine uninstall can also return: 25 and 26 in any mode (a box unless `/S`; for 25,
 unless `/P` or `/UPDATE` too), 27 under `/S` only:
@@ -1128,6 +1131,7 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 | 20 | Install: installed, but this run wrote `clauseo-sandbox-setup.exe` to `C:\Program Files\Clauseo\Sandbox` and Windows security removed it (`/S` and interactive; not `/P`) |
 | 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
 | 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
+| 29 | Install: stopped, because a file in the install folder that it had to replace, such as `Clauseo.exe`, stayed open or locked by another program through three tries over about 4 seconds; Programs and Features keeps the version that was there. Restart the computer, or close what holds the file, then install again |
 
 Intune reports 20 as a failed install unless you add it to the app's return codes. A per-machine
 uninstall runs in place, so its `QuietUninstallString`,

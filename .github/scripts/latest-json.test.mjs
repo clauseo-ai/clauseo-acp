@@ -388,6 +388,27 @@ test("release.yml's arm64 install smoke runs after sign-windows on windows-11-ar
   const order = ["_x64-machine-setup.exe", "_arm64-machine-setup.exe", "0xAA64", "QuietUninstallString"];
   const at = order.map((part) => script.indexOf(part));
   assert.ok(at.every((i, n) => i !== -1 && (n === 0 || at[n - 1] < i)), JSON.stringify(at));
+  // Restart Manager's list of what holds Clauseo.exe, printed just before the arm64 install, and
+  // again if it fails (then the failure is rethrown); RmNotices only writes notices and catches
+  // its own failures, so the query never fails the smoke by itself.
+  const arm64 = smoke.findIndex((line) => line.includes("_arm64-machine-setup.exe"));
+  assert.deepEqual(smoke.slice(arm64 - 2, arm64 + 5), [
+    `RmNotices 'before the arm64 install' "$dir\\Clauseo.exe"`,
+    "try {",
+    'Run "$legs/release-aarch64-pc-windows-msvc/Clauseo_${env:VERSION}_arm64-machine-setup.exe" \'/S\'',
+    "} catch {",
+    `RmNotices 'after the failed arm64 install' "$dir\\Clauseo.exe"`,
+    "throw",
+    "}",
+  ]);
+  const notices = smoke.slice(smoke.indexOf("function RmNotices($when, $path) {"));
+  assert.deepEqual(notices.slice(1, 6), [
+    "if (-not $rm) { return }",
+    'try { $users = @([RmUsers]::Of($path)) } catch { $users = @("the query failed: $($_.Exception.Message)") }',
+    'if ($users.Count -eq 0) { Write-Host "::notice::$when, Restart Manager: nothing uses $path" }',
+    'foreach ($user in $users) { Write-Host "::notice::$when, Restart Manager on ${path}: $user" }',
+    "}",
+  ]);
 });
 
 /** A job's lines without comments, each `\`-continued command joined into one line. */
