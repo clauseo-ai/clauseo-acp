@@ -134,6 +134,10 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     targets: Vec::new(),
     kept: Vec::new(),
     own_reads: Vec::new(),
+    edit_denied: Vec::new(),
+    guarded: Vec::new(),
+    guarded_edit: Vec::new(),
+    claude_home: None,
 };
 
 /// A Claude session's `_meta`, the hook setting other values for both variables and a `Bash`
@@ -171,6 +175,9 @@ fn meta(forced_ask: bool) -> Value {
         program: Path::new(r"C:\Program Files\Clauseo\clauseo.exe"),
         matter: Path::new(MATTER),
         ask_all: forced_ask,
+        protected: &[],
+        protected_edit: &[],
+        home: None,
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -236,7 +243,10 @@ fn every_hook_clauseo_writes_is_exec_form() {
                 }
             }
         }
-        assert_eq!(seen, 1, "the guard's entry: {hooks:?}");
+        assert_eq!(
+            seen, 2,
+            "the guard's entry and its ConfigChange entry: {hooks:?}"
+        );
         assert_eq!(
             meta["claudeCode"]["options"]["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["args"]
                 [2],
