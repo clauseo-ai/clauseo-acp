@@ -43,7 +43,7 @@ test("Claude's sandbox not starting gives one line for its asking and its missin
 
 test("ChatGPT's auto mode unavailable gives ChatGPT's line; Claude's and an unknown agent's stay Claude's", () => {
   expect(noticeLine("auto_mode_unavailable", en, { kind: "codex", name: "codex-acp" })).toBe(
-    "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+    "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.",
   );
   expect(noticeLine("auto_mode_unavailable", en, { kind: "claude", name: "claude-acp" })).toBe(
     "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
