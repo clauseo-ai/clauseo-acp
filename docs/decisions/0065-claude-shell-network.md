@@ -46,8 +46,26 @@ What Claude Code 2.1.293 does, read from its binary and `sdk.d.ts`:
 
 ## Consequences
 
-- Outside forced ask, a shell command reaches the seeded sites and nothing else. Any other site
-  fails as a refused connection (exit 56, "host is not on the allow list"), which Claude reports.
+- Once #1153 has merged, every macOS or Linux launch that runs carries the sandbox: a matter
+  path holding `*` or `?`, a path that is not UTF-8, or no short temp folder refuses the launch
+  instead of running it in `acceptEdits` with no sandbox. From then on, outside forced ask, a
+  shell command reaches the seeded sites and nothing else. Any other site fails as a refused
+  connection (exit 56, "host is not on the allow list"), which Claude reports. Before #1153, a
+  launch that falls back to no sandbox has no network list at all, and a command the lawyer
+  approves there reaches every host. This change depends on #1153 for that case.
+- With web search off, `allowedDomains` is empty: under strict the shell reaches no host.
+- Claude Code also adds `WebFetch(domain:…)` allow rules from the settings it loads (the
+  launch's `--settings`, and the managed and user settings files) to the list, so a wildcard
+  rule there would bring every host back. The user settings file is the gap the threat model
+  names (an agent with no kind reads the lawyer's own `~/.claude`). #1198's
+  rule-string check already drops from `allowedTools` every hook `WebFetch` rule but
+  `WebFetch(domain:[a-z0-9.-]+)`, and `allowedTools` is not merged. The flag settings'
+  `permissions.allow` keeps a hook's `WebFetch` rule only as `WebFetch(domain:<host>)` with a
+  plain lower-case host (no wildcard, IP address or loopback), and keeps no web rule with web
+  search off (`profile::keep_plain_fetch_rules`). A test checks that the shell's list is the
+  seeded sites plus a hook's one named host, never a wildcard.
+- Claude is told that commands reach only Clauseo's listed sites (`claude-shell-macos.txt`), so
+  it does not ask the lawyer to approve a host that nothing can grant.
 - `SHELL_NEEDED_HOSTS` grows only from evidence. Stage C's census found 109 `curl` calls in 19
   of 152 conversations, mostly to unseeded legal sources, which are being added to the seed list.
   Package indexes and code hosts stay out unless a census shows legal work needs them.

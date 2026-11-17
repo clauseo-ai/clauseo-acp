@@ -259,6 +259,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
     deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
+    super::sandbox_network::keep_plain_fetch_rules(&mut settings, keys.web_search.on);
     if keys.browser {
         browser_ask_settings(&mut settings);
     }
@@ -268,7 +269,12 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
     if let Some(sandbox) = keys.sandbox {
         super::sandbox::sandbox_settings(&mut settings, sandbox);
-        super::sandbox_network::launch_network(&mut settings, keys.forced_ask, &[]);
+        super::sandbox_network::launch_network(
+            &mut settings,
+            keys.forced_ask,
+            keys.web_search.on,
+            &[],
+        );
     }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);

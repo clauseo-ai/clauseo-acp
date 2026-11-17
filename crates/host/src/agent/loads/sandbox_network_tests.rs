@@ -133,18 +133,59 @@ fn only_plain_extra_hosts_go_in() {
     assert_eq!(plain_hosts(&hosts), ["example.org", "files.example.in"]);
 }
 
-/// Strict in every mode but forced ask. The launch outside forced ask is in auto
-/// ([`CLAUDE_MODE`]) and may fall back to acceptEdits ([`CLAUDE_FALLBACK_MODE`]) or be
-/// switched to the default mode later; settings are fixed at launch, so each keeps strict.
-/// Forced ask launches in the default mode ([`ASK_MODE`]) and alone keeps the card.
+/// Strict in every mode but forced ask, each mode's launch checked through its network object.
+/// Settings are fixed at launch: auto ([`CLAUDE_MODE`]) is the launch outside forced ask, and
+/// the acceptEdits fallback ([`CLAUDE_FALLBACK_MODE`]) and a later switch to the default mode
+/// run on that launch's settings. Forced ask launches in the default mode ([`ASK_MODE`]).
 #[test]
 fn strict_in_auto_accept_edits_and_the_default_but_not_forced_ask() {
-    assert_eq!(claude_mode(false), CLAUDE_MODE);
-    for mode in [CLAUDE_MODE, CLAUDE_FALLBACK_MODE, "default"] {
-        assert_eq!(Strict::at_launch(false), Strict::On, "{mode}");
+    // (the mode the session runs in, the mode it launched in, strict expected)
+    let cases = [
+        (CLAUDE_MODE, claude_mode(false), true),
+        (CLAUDE_FALLBACK_MODE, claude_mode(false), true),
+        ("default", claude_mode(false), true),
+        (ASK_MODE, claude_mode(true), false),
+    ];
+    for (mode, launched, strict) in cases {
+        let forced_ask = launched == ASK_MODE;
+        assert_eq!(forced_ask, !strict, "{mode} launched as {launched}");
+        let mut settings = with_sandbox();
+        launch_network(&mut settings, forced_ask, true, &[]);
+        let network = &settings["sandbox"]["network"];
+        assert_eq!(
+            network.get("strictAllowlist") == Some(&json!(true)),
+            strict,
+            "{mode}: {network}"
+        );
+        assert_eq!(
+            network["allowedDomains"],
+            json!(allowed_domains(&[])),
+            "{mode}"
+        );
     }
-    assert_eq!(claude_mode(true), ASK_MODE);
-    assert_eq!(Strict::at_launch(true), Strict::Off);
+    assert_eq!(claude_mode(false), CLAUDE_MODE);
+}
+
+/// With `tools.web_search` off the shell's list is empty in every mode: strict and empty
+/// reaches no host; forced ask still asks per site.
+#[test]
+fn web_off_empties_the_shells_list() {
+    for forced_ask in [false, true] {
+        let mut settings = with_sandbox();
+        launch_network(&mut settings, forced_ask, false, &extra(&["example.org"]));
+        let network = &settings["sandbox"]["network"];
+        assert_eq!(network["allowedDomains"], json!([]), "{forced_ask}");
+        assert_eq!(
+            network["deniedDomains"],
+            json!(DENIED_DOMAINS),
+            "{forced_ask}"
+        );
+        assert_eq!(
+            network.get("strictAllowlist").is_some(),
+            !forced_ask,
+            "{forced_ask}"
+        );
+    }
 }
 
 #[test]
@@ -181,7 +222,7 @@ fn with_sandbox() -> Map<String, Value> {
 #[test]
 fn a_launch_outside_forced_ask_is_strict() {
     let mut settings = with_sandbox();
-    launch_network(&mut settings, false, &extra(&["example.org", "*"]));
+    launch_network(&mut settings, false, true, &extra(&["example.org", "*"]));
     assert_eq!(settings["sandbox"]["enabled"], json!(true));
     assert_eq!(
         settings["sandbox"]["network"],
@@ -194,7 +235,7 @@ fn a_launch_outside_forced_ask_is_strict() {
 #[test]
 fn a_forced_ask_launch_is_not_strict() {
     let mut settings = with_sandbox();
-    launch_network(&mut settings, true, &[]);
+    launch_network(&mut settings, true, true, &[]);
     assert_eq!(settings["sandbox"]["network"], network(Strict::Off, &[]));
 }
 
@@ -202,6 +243,6 @@ fn a_forced_ask_launch_is_not_strict() {
 #[test]
 fn no_sandbox_gets_no_network_object() {
     let mut settings = Map::new();
-    launch_network(&mut settings, false, &extra(&["example.org"]));
+    launch_network(&mut settings, false, true, &extra(&["example.org"]));
     assert!(settings.is_empty());
 }

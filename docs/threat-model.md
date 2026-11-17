@@ -154,7 +154,7 @@ any ACP message, including permission requests with misleading text.
   fetch runs in the Claude process, outside the Bash sandbox and the guard hook, so in auto mode
   that check is the only thing between a poisoned document and a `WebFetch` that carries matter
   text in its URL. The sandboxed shell is a separate path, held to the seeded sites with a strict
-  allowlist in auto mode, plus the Windows belt in the shell scan ("Claude's shell network"
+  allowlist in every mode except forced ask, plus the Windows belt in the shell scan ("Claude's shell network"
   below, [0065](decisions/0065-claude-shell-network.md)). Claude Code also fetches its own short list of
   developer-documentation hosts without asking ("Preapproved host", about 100 hosts such as
   docs.python.org; Clauseo doesn't set `CLAUDE_CODE_EVAL_CONFINED`). The drop of open fetch rules
@@ -294,9 +294,11 @@ document, aimed at sending the lawyer's documents to a site of the attacker's ch
 - `built` (macOS, Linux): Claude Code's sandbox sends each sandboxed command's traffic through
   its own proxy, which lets through without asking only the seeded legal sites Claude may also
   fetch unasked, plus the hosts the shell needs (empty until stage C's census)
-  (`agent/loads/sandbox_network.rs`, [0065](decisions/0065-claude-shell-network.md)). It was
-  every host. Each entry matches its host exactly, the same reach as the seeded
-  `WebFetch(domain:…)` rules. Loopback and the any-address stay denied whatever the list says
+  (`agent/loads/sandbox_network.rs`, [0065](decisions/0065-claude-shell-network.md)), and
+  nothing when web search is off. It was every host. Each entry matches its host exactly, the same reach as the seeded
+  `WebFetch(domain:…)` rules. Loopback and the any-address stay denied whatever the list says.
+  A hook's `WebFetch` allow rule in the flag settings, which Claude Code merges into the list,
+  stays only as one plain host (`WebFetch(domain:<host>)`), and none with web search off
 - `built` (macOS, Linux): In every mode but forced ask, any other host is refused without
   asking (`network.strictAllowlist`, decided at launch): never a card, and never the
   classifier's call. Without strict, Claude Code would send an unlisted host from the shell to

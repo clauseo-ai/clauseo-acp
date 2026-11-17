@@ -3,6 +3,7 @@
 //!
 //! - `allowedDomains` ([`allowed_domains`]): the seeded legal sites Claude may also fetch unasked
 //!   ([`WEB_FETCH_SITES`]) plus [`SHELL_NEEDED_HOSTS`], sorted, each once. It was `["*"]`.
+//!   With `tools.web_search` off it is empty ([`launch_network`]).
 //!   The launch may add extra hosts ([`plain_hosts`]); today it adds none.
 //! - `deniedDomains`: loopback and the any-address ([`DENIED_DOMAINS`]), unchanged; a deny wins
 //!   over an allow in Claude Code's proxy.
@@ -22,10 +23,12 @@
 //! URL's host exactly too (`*.x` the same way), so the plain hosts here reach exactly what the
 //! seeded `WebFetch` rules reach, no wider and no narrower; no `*.` form is added.
 //!
-//! Claude Code also merges `WebFetch(domain:…)` allow rules from the settings files it loads
-//! into this list. The seeds are not among them: they go in as `allowedTools` (a `cliArg` rule,
-//! `profile::claude_options`), not as a settings file's `permissions.allow`, so the list here
-//! names them itself.
+//! Claude Code also merges `WebFetch(domain:…)` allow rules from the settings it loads (the
+//! flag settings among them) into this list. The seeds are not among them: they go in as
+//! `allowedTools` (a `cliArg` rule, `profile::claude_options`), not as a settings file's
+//! `permissions.allow`, so the list here names them itself. The flag settings'
+//! `permissions.allow` keeps a hook's `WebFetch` rule only as one plain host, and none with
+//! the web off ([`keep_plain_fetch_rules`]), so no wildcard comes back that way.
 //!
 //! Windows has no Claude sandbox, so none of this applies there: a shell command's network is
 //! judged by Anthropic's classifier alone (docs/threat-model.md, "Claude's shell network").
@@ -125,15 +128,50 @@ pub(crate) fn network(strict: Strict, extra_hosts: &[&str]) -> Value {
 
 /// Puts the launch's `network` object in the flag settings' `sandbox`, when there is one (a
 /// session with Claude's sandbox): strict unless in forced ask ([`Strict::at_launch`]), with
-/// the plain ones of `extra_hosts` ([`plain_hosts`]).
+/// the plain ones of `extra_hosts` ([`plain_hosts`]). With `tools.web_search` off (`web_on`
+/// false) `allowedDomains` is empty, so a strict launch's shell reaches no host at all.
 pub(crate) fn launch_network(
     settings: &mut Map<String, Value>,
     forced_ask: bool,
+    web_on: bool,
     extra_hosts: &[String],
 ) {
     let strict = Strict::at_launch(forced_ask);
     let extra = plain_hosts(extra_hosts);
-    if let Some(sandbox) = settings.get_mut("sandbox").and_then(Value::as_object_mut) {
-        sandbox.insert("network".to_owned(), network(strict, &extra));
+    let mut object = network(strict, &extra);
+    if !web_on && let Some(fields) = object.as_object_mut() {
+        fields.insert("allowedDomains".to_owned(), json!([]));
     }
+    if let Some(sandbox) = settings.get_mut("sandbox").and_then(Value::as_object_mut) {
+        sandbox.insert("network".to_owned(), object);
+    }
+}
+
+/// The flag settings' `permissions.allow` keeps a `WebFetch` rule only as one plain host,
+/// `WebFetch(domain:<host>)` with [`is_plain_host`], and no `WebFetch` or `WebSearch` rule at
+/// all when `tools.web_search` is off (`web_on` false). Claude Code adds the hosts of those
+/// rules to this list (the module doc), so a hook's `WebFetch(domain:*)` or bare `WebFetch`
+/// there would give the shell every host back.
+pub(crate) fn keep_plain_fetch_rules(settings: &mut Map<String, Value>, web_on: bool) {
+    let Some(allow) = settings
+        .get_mut("permissions")
+        .and_then(|permissions| permissions.get_mut("allow"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    allow.retain(|rule| {
+        let Some(rule) = rule.as_str() else {
+            return true;
+        };
+        if rule.starts_with("WebFetch") {
+            web_on
+                && rule
+                    .strip_prefix("WebFetch(domain:")
+                    .and_then(|rest| rest.strip_suffix(')'))
+                    .is_some_and(is_plain_host)
+        } else {
+            web_on || !rule.starts_with("WebSearch")
+        }
+    });
 }

@@ -532,3 +532,6 @@ fn only_the_trust_roots_file_opens() {
     let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
+
+#[path = "sandbox_network_settings_tests.rs"]
+mod network_settings;
