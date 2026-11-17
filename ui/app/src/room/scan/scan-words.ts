@@ -37,9 +37,9 @@ export function sizeOf(lang: Lang, bytes: number): { unit: "KB" | "MB"; n: strin
 }
 
 /** The counts so far: UD2-01, or UD2-02 for one file; UC-135 and UC-136 in KB under 1 MB. A finished scan that found no
- * file says so (UC-137), and a scan that has found none yet says nothing: never "0 files, 0 MB". */
+ * file, cloud-only ones too, says so (UC-137), and a scan that has found none yet says nothing: never "0 files, 0 MB". */
 export function countsLine(lang: Lang, s: FolderScanned): string | null {
-  if (s.files <= 0) return s.done ? sc(lang, "The folder is empty.") : null;
+  if (s.files <= 0) return s.done && s.cloud_only <= 0 ? sc(lang, "The folder is empty.") : null;
   const size = sizeOf(lang, s.bytes);
   if (size.unit === "KB")
     return s.files === 1
