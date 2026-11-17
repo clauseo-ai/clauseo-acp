@@ -46,6 +46,7 @@ mod skipped;
 mod state;
 mod steps;
 mod text;
+mod timer;
 mod undo;
 pub(crate) mod undo_preview;
 mod updates;
@@ -90,6 +91,8 @@ pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
 pub(crate) use state::history_settles;
 pub(crate) use state::{busy, keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
+use timer::TimerKind;
+pub(crate) use timer::{TurnTimer, timer};
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -332,36 +335,6 @@ enum Then {
     },
 }
 
-/// A turn timer: the display and durable batches, the rate window, the cancel, a limits read.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TurnTimer {
-    thread: ThreadId,
-    kind: TimerKind,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TimerKind {
-    Display,
-    Durable,
-    Rate,
-    Cancel(TurnId),
-    LimitRead(TurnId),
-    /// The wait after a connection failure ran out (`offline.rs`).
-    Offline(TurnId),
-    /// The quiet arm's check of a live turn (`offline/quiet.rs`).
-    Quiet(TurnId),
-    /// A steer's answer did not come in time (`queue/steer.rs`).
-    Steer(clauseo_protocol::MessageId),
-    /// The next read of Claude's transcript for unconfirmed steers (`queue/confirm.rs`).
-    SteerCheck,
-    /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
-    StopWait(u64),
-    /// An agent-started turn went quiet (`own_turn.rs`).
-    OwnQuiet(TurnId),
-    /// A cancelled agent-started turn's late window may close (`own_turn/late.rs`).
-    OwnLate,
-}
-
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
 #[derive(Debug)]
 pub(crate) struct TurnJob {
@@ -381,7 +354,10 @@ enum JobKind {
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
-        AgentInput::Event(event) => updates::on_event(actor, thread, event),
+        AgentInput::Event(event) => {
+            agents::start_timer::heard(actor, thread, None);
+            updates::on_event(actor, thread, event);
+        }
         AgentInput::Ended(ended) => agents::on_ended(actor, thread, ended),
     }
 }
@@ -393,7 +369,10 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             thread,
             agent,
             reply,
-        } => agents::on_reply(actor, thread, agent, reply),
+        } => {
+            agents::start_timer::heard(actor, thread, Some(agent));
+            agents::on_reply(actor, thread, agent, reply);
+        }
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
@@ -420,25 +399,6 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             }
             LogFor::Restores(since) => note::on_restores(actor, thread, since, result),
         },
-    }
-}
-
-/// A timer armed with `Actor::arm_timer` fired.
-pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
-    let TurnTimer { thread, kind } = timer;
-    match kind {
-        TimerKind::Display => text::on_display_timer(actor, thread),
-        TimerKind::Durable => text::on_durable_timer(actor, thread),
-        TimerKind::Rate => updates::on_rate_timer(actor, thread),
-        TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
-        TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
-        TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
-        TimerKind::Quiet(turn) => offline::quiet::on_timer(actor, thread, turn),
-        TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
-        TimerKind::SteerCheck => queue::on_steer_check_timer(actor, thread),
-        TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
-        TimerKind::OwnQuiet(turn) => own_turn::on_quiet(actor, thread, turn),
-        TimerKind::OwnLate => own_turn::on_late_timer(actor, thread),
     }
 }
 

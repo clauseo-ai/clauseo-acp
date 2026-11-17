@@ -8,6 +8,9 @@
 // long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, and U6F-22 to U6F-24 agent.quiet's,
 // UC-531 to UC-533 agent.unreachable's (offline truth), never a send's refusal: the stop line under the answer so far,
 // with Try again. U6F-25 to U6F-27 are matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's
+// UC-356 to UC-358 are agent.start_offline's, a start that failed on its connection with the host's probe agreeing;
+// UC-359 to UC-361 agent.answer_failed's, an error the agent answered the question with: the stop line, with Try again;
+// UC-362 to UC-364 agent.setting_refused's, the lawyer's mode or setting change the agent didn't accept.
 // (drafts), the same way.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -84,6 +87,18 @@ const folderStopped = (code: ErrorCode, agent: AgentId) => () => (
   />
 );
 
+/** A turn `agent` ended with agent.answer_failed (an error answer to the question): the stop line, with Try again. */
+const answerFailed = (agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.answer_failed" })],
+        agent,
+      })
+    }
+  />
+);
+
 /** A nameless line, alone: no thread the room opens lacks a name, so it is shown as the sentence the room would say. */
 const nameless = (code: ErrorCode) => (lang: Lang) => (
   <main lang={lang} className="review-alone">
@@ -122,13 +137,13 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-01",
-    words: errorWords("ChatGPT didn't start. Your question is kept."),
+    words: errorWords("ChatGPT didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.launch_failed", "codex-acp"),
   },
   {
     id: "U6F-02",
-    words: errorWords("{name} didn't start. Your question is kept."),
+    words: errorWords("{name} didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.launch_failed", "gemini"),
   },
@@ -170,7 +185,7 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-09",
-    words: errorWords("The AI didn't start. Your question is kept."),
+    words: errorWords("The AI didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: nameless("agent.launch_failed"),
   },
@@ -263,6 +278,66 @@ export const U6F: Entry[] = [
     words: errorWords("The AI stopped answering. Try again."),
     screen: "room/thread",
     render: nameless("agent.quiet"),
+  },
+  {
+    id: "UC-356",
+    words: errorWords(
+      "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "codex-acp"),
+  },
+  {
+    id: "UC-357",
+    words: errorWords(
+      "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "gemini"),
+  },
+  {
+    id: "UC-358",
+    words: errorWords(
+      "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: nameless("agent.start_offline"),
+  },
+  {
+    id: "UC-359",
+    words: errorWords("ChatGPT stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("codex-acp"),
+  },
+  {
+    id: "UC-360",
+    words: errorWords("{name} stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("gemini"),
+  },
+  {
+    id: "UC-361",
+    words: errorWords("The AI stopped with an error. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.answer_failed"),
+  },
+  {
+    id: "UC-362",
+    words: errorWords("ChatGPT didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "codex-acp"),
+  },
+  {
+    id: "UC-363",
+    words: errorWords("{name} didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "gemini"),
+  },
+  {
+    id: "UC-364",
+    words: errorWords("The AI didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: nameless("agent.setting_refused"),
   },
   {
     id: "U6F-25",

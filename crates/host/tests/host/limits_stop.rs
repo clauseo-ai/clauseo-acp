@@ -423,14 +423,14 @@ fn codex_error_at_the_limit_ends_the_turn_at_the_limit() {
     rig.host.shutdown();
 }
 
-/// The turn failed with `agent.protocol_error`, as before the fallback, with no stop.
-fn assert_protocol_error(rig: &mut Rig, turn: TurnId) {
+/// The turn failed with `agent.answer_failed`, as before the fallback, with no stop.
+fn assert_answer_failed(rig: &mut Rig, turn: TurnId) {
     let ended = rig.events.until_turn_ended(turn);
     rig.host.settle();
     rig.events.drain_ready();
     assert_eq!(ended.stop, StopReason::Failed);
     let failed = turn_failed(&rig.events, turn).unwrap();
-    assert_eq!(failed.code, ErrorCode::AgentProtocolError);
+    assert_eq!(failed.code, ErrorCode::AgentAnswerFailed);
     assert_eq!(rig.events.count(is_stop), 0, "{}", rig.events.dump());
     assert_eq!(
         rig.reads.count(AgentKind::Codex),
@@ -444,7 +444,7 @@ fn codex_error_under_the_limit_fails_as_before() {
     let (mut rig, turn) = codex_error("codex_error_under_the_limit_fails_as_before");
     rig.reads
         .answer(AgentKind::Codex, usage(AgentKind::Codex, 40.0, None));
-    assert_protocol_error(&mut rig, turn);
+    assert_answer_failed(&mut rig, turn);
     rig.host.shutdown();
 }
 
@@ -458,7 +458,7 @@ fn codex_error_whose_read_never_answers_ends_after_ten_seconds() {
     rig.events.drain_ready();
     assert!(rig.events.turn_ended(turn).is_none(), "ended before 10 s");
     rig.host.clock.advance(Duration::from_millis(1));
-    assert_protocol_error(&mut rig, turn);
+    assert_answer_failed(&mut rig, turn);
     rig.host.shutdown();
 }
 
@@ -493,7 +493,7 @@ fn codex_error_held_for_its_read_ends_once_through_cancel_and_shutdown() {
     let failed = turn_failed(&events, turn).unwrap();
     assert_eq!(
         failed.code,
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentAnswerFailed,
         "{}",
         events.dump()
     );

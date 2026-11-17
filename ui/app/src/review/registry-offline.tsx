@@ -17,6 +17,7 @@ import { errorWords } from "./words.ts";
  * below. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
   code === "agent.offline" ||
+  code === "agent.answer_failed" ||
   code === "agent.service_error" ||
   code === "agent.quiet" ||
   code === "agent.unreachable" ||
@@ -120,6 +121,29 @@ const UNREACHABLE: Entry[] = [
   },
 ];
 
+/** agent.answer_failed is never a send's refusal either: Claude's stop line under the answer so far, with Try again
+ * and never Restart. ChatGPT's, an agent's by its name and the nameless line are UC-359 to UC-361. */
+const ANSWER_FAILED: Entry[] = [
+  {
+    id: "U3-err-agent.answer_failed",
+    words: errorWords("Claude stopped with an error. Try again."),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [
+              userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+              agentText(6, 1, "Clause nine requires **notice in writing**, served at"),
+              step(9, { stop: "failed", failure: "agent.answer_failed" }),
+            ],
+          })
+        }
+      />
+    ),
+  },
+];
+
 /** A turn Claude couldn't start in the matter's folder, never a send's refusal: the question and the stop line under it,
  * with Try again and never Restart. Draft English (Rohan to approve). ChatGPT's, an agent's by its name and the
  * nameless line are U6F-25 to U6F-30. */
@@ -151,6 +175,7 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   "agent.offline": OFFLINE,
   "agent.service_error": SERVICE,
   "agent.quiet": QUIET,
+  "agent.answer_failed": ANSWER_FAILED,
   "agent.unreachable": UNREACHABLE,
   "matter.folder_backslash": folderStop(
     "matter.folder_backslash",

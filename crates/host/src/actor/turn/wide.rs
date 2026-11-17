@@ -21,12 +21,21 @@ pub(crate) struct TurnPath {
     /// Whether the agent's service answers, asked before a watch only the window armed ends
     /// a turn (`offline/probe.rs`); tests set a fixed answer.
     pub(super) probe: super::offline::probe::ReachProbe,
+    /// The starting agents' bounds, by agent id (`agents/start_timer.rs`).
+    pub(super) start_bounds: std::collections::HashMap<u64, super::agents::start_timer::Bound>,
+    /// The failed starts waiting for that probe, by thread (`offline/start.rs`).
+    pub(super) start_probes:
+        std::collections::HashMap<clauseo_protocol::ThreadId, super::offline::start::StartProbe>,
     /// Whether a live turn of a Claude or Codex agent is watched for silence
     /// (`offline/quiet.rs`): on, but off in unit tests unless a test turns it on.
     pub(super) quiet_watch: bool,
     /// The `config.toml` files Codex reads beside its home's (`offline/probe/settings.rs`): the
     /// OS's, none in unit tests unless a test sets them.
     pub(super) codex_config_files: Vec<std::path::PathBuf>,
+    /// Unit tests that hold a launch past the start's bound on purpose (the idle stop's) turn
+    /// it off (`agents/start_timer.rs`).
+    #[cfg(test)]
+    pub(super) no_start_bound: bool,
     /// The kind the unit tests' `fake-agent` plays for the offline probe and the quiet arm.
     #[cfg(test)]
     pub(super) kind_for_tests: Option<clauseo_protocol::AgentKind>,

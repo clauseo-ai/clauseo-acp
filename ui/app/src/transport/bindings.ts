@@ -1989,6 +1989,18 @@ export type ErrorCode =
 "agent.unreachable" | 
 /** The Word file is over the matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: the package's size, entry count or compression ratio, an XML part's size, depth or node count), so its tracked changes were not read or decided. */
 "word.too_large" | 
+/** The agent did not start: it answered a start request with an error naming a connection failure, and the host's probe of its service did not get through. Asking again can work once back online. */
+"agent.start_offline" | 
+/** The agent answered the question with an error no other code reads, or Codex gave up on a connection the host does not read as offline. The answer so far is kept; asking again can work. */
+"agent.answer_failed" | 
+/** The session offered no mode Clauseo runs the agent in, so nothing was sent: an unsupported agent version. */
+"agent.mode_missing" | 
+/** The agent refused the lawyer's own mode or setting change on a running session; nothing changed. */
+"agent.setting_refused" | 
+/** The computer refused to run the agent's program (permission, Windows policy or antivirus). */
+"agent.program_blocked" | 
+/** The OS found no agent program to run (not found), so the agent did not start. */
+"agent.program_missing" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

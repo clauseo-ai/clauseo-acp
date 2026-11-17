@@ -157,8 +157,32 @@ fn agent_failures() -> Vec<DomainEvent> {
             "the agent could not open the matter folder as its working folder",
         ),
         failed(
+            ErrorCode::AgentStartOffline,
+            "a start request failed on its connection; the probe did not get through",
+        ),
+        failed(
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
+        ),
+        failed(
+            ErrorCode::AgentAnswerFailed,
+            "acp: the agent answered session/prompt with error -32603: Internal error",
+        ),
+        failed(
+            ErrorCode::AgentModeMissing,
+            "Claude Code reported no modes, so Clauseo cannot run it in its \"default\" mode",
+        ),
+        failed(
+            ErrorCode::AgentSettingRefused,
+            "the agent answered session/set_mode with error -32603",
+        ),
+        failed(
+            ErrorCode::AgentProgramBlocked,
+            "could not start node: Permission denied (os error 13)",
+        ),
+        failed(
+            ErrorCode::AgentProgramMissing,
+            "could not start node: No such file or directory (os error 2)",
         ),
     ]
 }

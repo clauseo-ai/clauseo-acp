@@ -156,12 +156,12 @@ const named = (name: string | null) => ({ kind: undefined, name });
 const PLANNED_LINES = [
   [
     "agent.launch_failed",
-    "ChatGPT didn't start. Your question is kept.",
-    "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-    "gemini didn't start. Your question is kept.",
-    "gemini शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-    "The AI didn't start. Your question is kept.",
-    "AI शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "ChatGPT didn't start. Try again. Your question is kept.",
+    "ChatGPT शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "gemini didn't start. Try again. Your question is kept.",
+    "gemini शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "The AI didn't start. Try again. Your question is kept.",
+    "AI शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.protocol_error",
@@ -171,6 +171,42 @@ const PLANNED_LINES = [
     "gemini ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
     "The AI sent something Clauseo can't read.",
     "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+  ],
+  [
+    "agent.answer_failed",
+    "ChatGPT stopped with an error. Try again.",
+    "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "gemini stopped with an error. Try again.",
+    "gemini एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "The AI stopped with an error. Try again.",
+    "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  ],
+  [
+    "agent.mode_missing",
+    "This version of Codex doesn't work with Clauseo.",
+    "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "This version of gemini doesn't work with Clauseo.",
+    "gemini का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "This version of the AI doesn't work with Clauseo.",
+    "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  ],
+  [
+    "agent.setting_refused",
+    "ChatGPT didn't accept that change. Try again.",
+    "ChatGPT ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "gemini didn't accept that change. Try again.",
+    "gemini ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "The AI didn't accept that change. Try again.",
+    "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  ],
+  [
+    "agent.start_offline",
+    "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "You're offline, so gemini didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए gemini शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए AI शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.auth_required",
@@ -278,7 +314,7 @@ test("an agent's name fills no other code", () => {
   );
   // a settings id is shown as the lawyer wrote it, even one the words' own rules would ban
   expect(errorWords("en", "agent.launch_failed", named("my-agent"))).toBe(
-    "my-agent didn't start. Your question is kept.",
+    "my-agent didn't start. Try again. Your question is kept.",
   );
 });
 
@@ -364,4 +400,42 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
   expect(errorWords("en", "matter.folder_backslash")).toBe(
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
   );
+});
+
+// agent.program_missing says the same on every computer; agent.program_blocked's Windows line (also Linux's, and a
+// caller with no place) points to Windows Security, the Mac's doesn't. Each names the thread's agent.
+test("agent.program_missing and agent.program_blocked: each names the thread's agent; only blocked's Mac line differs", () => {
+  const mac = { platform: "mac", parent: null } as const;
+  const missing =
+    "A program Claude needs is missing from this computer, so Claude didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.";
+  expect(errorWords("en", "agent.program_missing")).toBe(missing);
+  expect(errorWords("en", "agent.program_missing", undefined, mac)).toBe(missing);
+  expect(errorWords("hi", "agent.program_missing")).toBe(missing);
+  expect(errorWords("en", "agent.program_missing", CODEX)).toMatch(
+    /^A program ChatGPT needs .* so ChatGPT didn't start\./,
+  );
+  expect(errorWords("en", "agent.program_missing", named("gemini"))).toMatch(
+    /^A program gemini needs .* so gemini didn't start\./,
+  );
+  const code = "agent.program_blocked";
+  const win =
+    "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.";
+  expect(errorWords("en", code)).toBe(win);
+  for (const platform of ["windows", "linux"] as const)
+    expect(errorWords("en", code, undefined, { platform, parent: null })).toBe(win);
+  expect(errorWords("en", code, undefined, mac)).toBe(
+    "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+  );
+  expect(errorWords("hi", code)).toBe(win);
+  expect(errorWords("en", code, CODEX, mac)).toMatch(
+    /ChatGPT needs .* allow it there, then try again\./,
+  );
+  expect(errorWords("en", code, named("gemini"))).toMatch(/gemini needs .* Windows Security/);
+  for (const none of [null, "", "  "]) {
+    expect(errorWords("en", code, named(none))).toMatch(/the AI needs .* so the AI didn't start/);
+    expect(errorWords("en", code, named(none), mac)).toMatch(/the AI needs .* allow it there/);
+    expect(errorWords("en", "agent.program_missing", named(none))).toMatch(
+      /^A program the AI needs/,
+    );
+  }
 });

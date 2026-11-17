@@ -1,0 +1,209 @@
+{
+  "UC-356": {
+    "en": "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through; a send's refusal, the question kept"
+  },
+  "UC-357": {
+    "en": "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए {name} शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through; a send's refusal, the question kept"
+  },
+  "UC-358": {
+    "en": "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए AI शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through; a send's refusal, the question kept"
+  },
+  "UC-359": {
+    "en": "ChatGPT stopped with an error. Try again.",
+    "hi": "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed: an error the agent answered the question with (was \"sent something Clauseo can't read\"); Try again under the answer, never Restart"
+  },
+  "UC-360": {
+    "en": "{name} stopped with an error. Try again.",
+    "hi": "{name} एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed for an agent of no kind by its name"
+  },
+  "UC-361": {
+    "en": "The AI stopped with an error. Try again.",
+    "hi": "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed with no name at all"
+  },
+  "UC-362": {
+    "en": "ChatGPT didn't accept that change. Try again.",
+    "hi": "ChatGPT ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.setting_refused: the agent answered the lawyer's mode or setting change with an error (was \"sent something Clauseo can't read\")"
+  },
+  "UC-363": {
+    "en": "{name} didn't accept that change. Try again.",
+    "hi": "{name} ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.setting_refused for an agent of no kind by its name"
+  },
+  "UC-364": {
+    "en": "The AI didn't accept that change. Try again.",
+    "hi": "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.setting_refused with no name at all"
+  },
+  "U3-err-agent.program_missing": {
+    "en": "A program Claude needs is missing from this computer, so Claude didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent didn't start because its program is missing from this computer (agent.program_missing, the OS answered not found); Claude's line, also for an agent not known"
+  },
+  "U3-err-agent.program_missing.chatgpt": {
+    "en": "A program ChatGPT needs is missing from this computer, so ChatGPT didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_missing for ChatGPT"
+  },
+  "U3-err-agent.program_missing.named": {
+    "en": "A program {name} needs is missing from this computer, so {name} didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_missing for an agent of no kind by its name"
+  },
+  "U3-err-agent.program_missing.nameless": {
+    "en": "A program the AI needs is missing from this computer, so the AI didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_missing for an agent with no name at all"
+  },
+  "U3-err-agent.program_blocked": {
+    "en": "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent didn't start because the computer refused to run its program (agent.program_blocked: permission denied, Windows policy or antivirus); Claude's line off the Mac, also for an agent not known"
+  },
+  "U3-err-agent.program_blocked.mac": {
+    "en": "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked's line on the Mac"
+  },
+  "U3-err-agent.program_blocked.chatgpt": {
+    "en": "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked off the Mac, for chatgpt"
+  },
+  "U3-err-agent.program_blocked.chatgpt.mac": {
+    "en": "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked on the Mac, for chatgpt"
+  },
+  "U3-err-agent.program_blocked.named": {
+    "en": "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked off the Mac, for named"
+  },
+  "U3-err-agent.program_blocked.named.mac": {
+    "en": "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked on the Mac, for named"
+  },
+  "U3-err-agent.program_blocked.nameless": {
+    "en": "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked off the Mac, for nameless"
+  },
+  "U3-err-agent.program_blocked.nameless.mac": {
+    "en": "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "note": "agent.program_blocked on the Mac, for nameless"
+  }
+}

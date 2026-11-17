@@ -19,7 +19,8 @@ export const HI = {
   "That question was already answered, or it has expired.":
     "उस प्रश्न का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
   "Those answers don't fit the question.": "ये उत्तर प्रश्न से मेल नहीं खाते।",
-  "Claude didn't start. Your question is kept.": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  "Claude didn't start. Try again. Your question is kept.":
+    "Claude शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   "Claude sent something Clauseo can't read.": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "Sign in with Claude first. Your question is kept.":
     "पहले Claude से साइन इन करें। आपका प्रश्न रखा गया है।",
@@ -30,9 +31,12 @@ export const HI = {
   // the agent.* sentences above for a thread on the ChatGPT plan (Codex), for an agent of no kind by its name, and
   // with no name at all (PLANNED). The lawyer signs in to Codex outside Clauseo until stage D's sign-in, so
   // auth_required says where, with no button.
-  "ChatGPT didn't start. Your question is kept.": "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-  "{name} didn't start. Your question is kept.": "{name} शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-  "The AI didn't start. Your question is kept.": "AI शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  "ChatGPT didn't start. Try again. Your question is kept.":
+    "ChatGPT शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "{name} didn't start. Try again. Your question is kept.":
+    "{name} शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "The AI didn't start. Try again. Your question is kept.":
+    "AI शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   "ChatGPT sent something Clauseo can't read.": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "{name} sent something Clauseo can't read.": "{name} ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "The AI sent something Clauseo can't read.": "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
@@ -187,6 +191,28 @@ export const HI = {
     "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
   // Cancel in the native confirm before an MCP server is saved (provisional Hindi)
   "You chose Cancel, so nothing was saved.": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
+  // agent.answer_failed: the agent answered the question with an error no other code reads (provisional Hindi)
+  "Claude stopped with an error. Try again.": "Claude एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "ChatGPT stopped with an error. Try again.": "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "{name} stopped with an error. Try again.": "{name} एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "The AI stopped with an error. Try again.": "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  // agent.setting_refused: the agent didn't accept the lawyer's mode or setting change (provisional Hindi)
+  "Claude didn't accept that change. Try again.":
+    "Claude ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "ChatGPT didn't accept that change. Try again.":
+    "ChatGPT ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "{name} didn't accept that change. Try again.":
+    "{name} ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "The AI didn't accept that change. Try again.": "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  // agent.start_offline: the start failed on its connection, confirmed by the host's probe (provisional Hindi)
+  "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.":
+    "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.":
+    "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.":
+    "आप ऑफ़लाइन हैं, इसलिए {name} शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.":
+    "आप ऑफ़लाइन हैं, इसलिए AI शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   // agent.service_error: the agent's service had a problem and it gave up on the turn (#1030). ChatGPT's approved
   // (orchestrator, 2026-11-12); Claude's, {name}'s and the AI's derived from it (provisional Hindi)
   "Claude had a problem on its side. Try again.": "Claude की ओर से कोई समस्या आई। फिर से कोशिश करें।",
@@ -263,6 +289,31 @@ export const HI = {
   // word.too_large: a file over a size limit, in place of its tracked changes (provisional Hindi)
   "This file is too large for Clauseo to show its tracked changes.":
     "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
+  // provisional (U3-err-agent.program_missing and .program_blocked, their agents' and .mac lines): Hindi later
+  "A program Claude needs is missing from this computer, so Claude didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program ChatGPT needs is missing from this computer, so ChatGPT didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program {name} needs is missing from this computer, so {name} didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program the AI needs is missing from this computer, so the AI didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

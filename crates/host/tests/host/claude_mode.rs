@@ -174,7 +174,7 @@ fn a_failed_switch_to_auto_and_to_accept_edits_sends_no_prompt() {
     fails_before_prompt(
         "claude_mode_refused",
         "claude-mode-refused",
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentLaunchFailed,
     );
 }
 
@@ -183,7 +183,7 @@ fn a_session_with_no_modes_fails_before_any_prompt() {
     fails_before_prompt(
         "claude_mode_none",
         "claude-mode-none",
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentModeMissing,
     );
 }
 
@@ -192,7 +192,7 @@ fn a_session_offering_neither_auto_nor_accept_edits_fails_before_any_prompt() {
     fails_before_prompt(
         "claude_mode_no_accept_edits",
         "claude-mode-no-accept-edits",
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentModeMissing,
     );
 }
 

@@ -12,6 +12,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::serde_util::BorrowedStr;
 use crate::{Error, MatterId, MatterPath};
 
+mod wire;
+
 /// Writes `ErrorCode` and its methods from one table: variant, dotted string, retryable, and the
 /// meaning, which is both the variant's doc comment and what `meaning()` returns. The record in
 /// `docs/decisions/0003-error-codes.md` has the same text in its meaning column.
@@ -391,6 +393,20 @@ error_codes! {
         matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: \
         the package's size, entry count or compression ratio, an XML part's size, depth or node \
         count), so its tracked changes were not read or decided.";
+    AgentStartOffline = "agent.start_offline", retryable: true, meaning: "The agent did not start: \
+        it answered a start request with an error naming a connection failure, and the host's \
+        probe of its service did not get through. Asking again can work once back online.";
+    AgentAnswerFailed = "agent.answer_failed", retryable: true, meaning: "The agent answered the \
+        question with an error no other code reads, or Codex gave up on a connection the host does \
+        not read as offline. The answer so far is kept; asking again can work.";
+    AgentModeMissing = "agent.mode_missing", retryable: false, meaning: "The session offered no \
+        mode Clauseo runs the agent in, so nothing was sent: an unsupported agent version.";
+    AgentSettingRefused = "agent.setting_refused", retryable: true, meaning: "The agent refused \
+        the lawyer's own mode or setting change on a running session; nothing changed.";
+    AgentProgramBlocked = "agent.program_blocked", retryable: false, meaning: "The computer \
+        refused to run the agent's program (permission, Windows policy or antivirus).";
+    AgentProgramMissing = "agent.program_missing", retryable: false, meaning: "The OS found no \
+        agent program to run (not found), so the agent did not start.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
@@ -543,47 +559,5 @@ impl HostError {
         } else {
             ErrorCode::CommandInvalid
         }
-    }
-}
-
-/// `HostError` as read, before its code is looked up.
-#[derive(Deserialize)]
-struct HostErrorWire<'a> {
-    #[serde(borrow)]
-    code: BorrowedStr<'a>,
-    message: String,
-    retryable: bool,
-    #[serde(default)]
-    matter: Option<MatterId>,
-    #[serde(default)]
-    files: Vec<MatterPath>,
-}
-
-impl<'de> Deserialize<'de> for HostError {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = HostErrorWire::deserialize(deserializer)?;
-        let raw = wire.code.as_str();
-        Ok(match ErrorCode::lookup(raw) {
-            // `lookup` finds `Unknown` for the string "unknown", which has no `retryable` of its
-            // own: the peer's value stays, as it does for a code this version does not know.
-            Some(code) => Self {
-                code,
-                message: wire.message,
-                retryable: if code == ErrorCode::Unknown {
-                    wire.retryable
-                } else {
-                    code.is_retryable()
-                },
-                matter: wire.matter,
-                files: wire.files,
-            },
-            None => Self {
-                code: ErrorCode::Unknown,
-                message: format!("{raw}: {}", wire.message),
-                retryable: wire.retryable,
-                matter: wire.matter,
-                files: wire.files,
-            },
-        })
     }
 }
