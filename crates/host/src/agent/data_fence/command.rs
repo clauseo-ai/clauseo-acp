@@ -405,17 +405,6 @@ fn is_recursive(name: &str, args: &[String], shell: ShellKind) -> bool {
         })
 }
 
-/// The command name of each simple command of a command line, its scripts' included
-/// ([`segments`]): the word past assignments and [`WRAPPERS`] (`sudo`, `env A=b`…), as its last
-/// path part, lowercased, without `.exe` ([`command_name`]); and of each command a script
-/// block in it starts ([`commands`]).
-pub(crate) fn command_names(line: &str, windows: bool) -> Vec<String> {
-    segments(line, windows)
-        .iter()
-        .flat_map(|words| commands(words, windows).into_iter().map(|(name, _)| name))
-        .collect()
-}
-
 /// Every word of a command line, quotes removed, for the data folder's text.
 pub(crate) fn command_words(line: &str, windows: bool) -> Vec<String> {
     segments(line, windows).into_iter().flatten().collect()

@@ -297,8 +297,6 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
 /// The once-a-turn notes a turn has given, each at most once.
 #[derive(Debug, Default)]
 pub(super) struct Told {
-    /// The agent was told its shell stays offline this turn (`shell_network.rs`).
-    pub(super) offline: bool,
     /// A data-fence refusal of the turn was told to the lawyer and the agent (`outside.rs`).
     pub(super) outside: bool,
 }

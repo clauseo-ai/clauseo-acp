@@ -1,8 +1,7 @@
 //! Codex permission cards never make a standing rule or a session one (`agent/codex_options.rs`):
 //! a command loses `accept_execpolicy_amendment`, a file change `allow_for_session`, an MCP tool
 //! `allow_always` and `allow_session`, an id codex-acp does not have is dropped, and an answer
-//! naming any of them is refused as one the agent did not offer. A network amendment never
-//! reaches the card: the host declines that request unseen (`actor/turn/shell_network.rs`).
+//! naming any of them is refused as one the agent did not offer; so is a network amendment.
 //! Each scenario's `expect_response` is the only answer the agent may get.
 
 use clauseo_protocol::{
@@ -92,17 +91,35 @@ fn a_codex_command_card_never_offers_the_prefix_rule() {
     host.shutdown();
 }
 
-/// A command offering network amendments is declined unseen: no card, and the agent gets
-/// `decline`, never an amendment.
+/// A command offering network amendments reaches the card without them, each refused when
+/// named, and the agent gets the lawyer's answer, never an amendment.
 #[test]
 fn a_codex_network_amendment_never_reaches_the_card_or_the_agent() {
     let (_dir, host, thread, mut events) =
         codex_turn("codex_no_network", "codex-no-network-amendment");
     let (turn, _) = host.prompt(thread, "Fetch it.");
+    assert_eq!(
+        offered(&mut events, 0),
+        ["allow_once", "decline", "cancel"],
+        "{}",
+        events.dump()
+    );
+    for option in [
+        "apply_network_policy_amendment:0",
+        "apply_network_policy_amendment:1",
+    ] {
+        host.refused(
+            answer(thread, &events, 0, option),
+            ErrorCode::PermissionUnknownOption,
+        );
+    }
+    assert_eq!(
+        host.ok(answer(thread, &events, 0, "decline")),
+        CommandOutcome::Done
+    );
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
-    assert!(events.permission_requests().is_empty(), "{}", events.dump());
     host.shutdown();
 }
 
