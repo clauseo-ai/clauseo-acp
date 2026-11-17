@@ -2,8 +2,9 @@
 // (new-conversation-line.tsx) and their tests: a dimmed tile for each file list_papers left out because it is only
 // online (skipped, reason cloud_only; a file over the size cap stays out) and for each folder it couldn't list
 // (unread), placed among the papers by path as the host sorts them, a folder where "<folder>/" sorts. Each says why on
-// its tile, and in its tip how to keep it on this computer. The new conversation's count adds how many more are only
-// online; folders never count, as what they hold isn't known. A listing that stops short counts what it lists.
+// its tile, and in its tip what reading it does (and, on OneDrive, how to keep it on this computer). The new
+// conversation's count adds how many more are only online (with a named service, that reading them downloads them);
+// folders never count, as what they hold isn't known. A listing that stops short counts what it lists.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { count } from "@clauseo/components/lib/money.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -107,10 +108,14 @@ export function awayWords(
             lang,
             "To keep it here, Control-click it in Finder and choose Always Keep on This Device.",
           )
-        : rt(lang, "Download it to this computer to change that.");
+        : null;
+  const says = rt(
+    lang,
+    "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.",
+  );
   return {
     line: service === null ? rt(lang, "Only online") : rt(lang, "Only in {service}", { service }),
-    tip: `${rt(lang, "Not on this computer, so Clauseo doesn't open it or save new versions of it.")} ${how}`,
+    tip: how === null ? says : `${says} ${how}`,
   };
 }
 
@@ -143,8 +148,13 @@ export function moreWords(lang: Lang, place: FolderPlace, n: number): string | n
   const service = serviceName(place);
   if (service !== null)
     return n === 1
-      ? mt(lang, "1 more is only in {service}.", { service })
-      : mt(lang, "{n} more are only in {service}.", { n: count(n), service });
+      ? mt(lang, "1 more is only in {service}. Reading it downloads it to this computer.", {
+          service,
+        })
+      : mt(lang, "{n} more are only in {service}. Reading them downloads them to this computer.", {
+          n: count(n),
+          service,
+        });
   return n === 1
     ? mt(lang, "1 more is only online.")
     : mt(lang, "{n} more are only online.", { n: count(n) });
