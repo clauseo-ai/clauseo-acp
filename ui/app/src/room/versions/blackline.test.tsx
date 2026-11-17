@@ -217,17 +217,17 @@ test("what the sheet doesn't mark says so: each changed link by its text, then a
     "The web address behind 'the bank's site' changed.",
     "A comment's text changed. Open both versions in Word to see it.",
     "Text in a text box changed. Open both versions in Word to see it.",
-    "The formatting of some tables, rows or cells changed.",
+    "Formatting changed in some tables, rows or cells.",
   ]);
   expect(page()?.querySelectorAll("[data-change]")).toHaveLength(2);
 });
 
-test("changes outside what's shown say so over the sheet, naming a footnote or header that couldn't be shown", async () => {
+test("changes outside what's shown say so over the sheet, naming a footnote or header Clauseo couldn't mark up", async () => {
   h = await comparing(() => ({
     word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },
   }));
   expect(lines()).toEqual([
-    "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
+    "Some changes aren't shown here, such as in a footnote or header Clauseo couldn't mark up. Open both versions in Word to see them.",
   ]);
 });
 
@@ -348,7 +348,7 @@ test("the table notice names each table and what changed in it; past four, the f
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 2: borders, shading; table 1 in the header (first page): merged cells; table 1 in the footnotes: row height; and 3 more.",
+    "Formatting changed in table 2: borders, shading; table 1 in the header (first page): merged cells; table 1 in the footnotes: row height, and in 3 more.",
   ]);
 });
 
@@ -366,7 +366,7 @@ test("past the host's cap the table line counts every changed table: 60 changed,
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 1: borders; table 2: borders; table 3: borders; and 57 more.",
+    "Formatting changed in table 1: borders; table 2: borders; table 3: borders, and in 57 more.",
     MAY_DIFFER,
   ]);
 });
@@ -379,7 +379,7 @@ test("a table notice with no table named, or only tables in places this version 
       changed_tables: [{ place: "somewhere_new", number: 1, formats: ["borders"] }],
     },
   }));
-  expect(lines()).toEqual(["The formatting of some tables, rows or cells changed."]);
+  expect(lines()).toEqual(["Formatting changed in some tables, rows or cells."]);
 });
 
 test("a place that couldn't be shown says so where it stood; a formatting change and hidden text are named over their words", async () => {

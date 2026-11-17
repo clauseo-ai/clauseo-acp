@@ -32,7 +32,7 @@ export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
     case "changes_outside_text":
       return vt(
         lang,
-        "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
+        "Some changes aren't shown here, such as in a footnote or header Clauseo couldn't mark up. Open both versions in Word to see them.",
       );
     case "header_or_footer_not_compared":
       return vt(
@@ -44,7 +44,7 @@ export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
     case "text_box_changed":
       return vt(lang, "Text in a text box changed. Open both versions in Word to see it.");
     case "cell_format_changed":
-      return vt(lang, "The formatting of some tables, rows or cells changed.");
+      return vt(lang, "Formatting changed in some tables, rows or cells.");
     case "may_differ":
     case "unknown":
       return vt(lang, "Some of this may look different in Word.");
@@ -182,7 +182,7 @@ export function tablesLine(
   if (named.length === all && all <= TABLES_NAMED)
     return vt(lang, "Formatting changed in {tables}.", { tables: named.join("; ") });
   const shown = named.slice(0, TABLES_NAMED - 1);
-  return vt(lang, "Formatting changed in {tables}; and {n} more.", {
+  return vt(lang, "Formatting changed in {tables}, and in {n} more.", {
     tables: shown.join("; "),
     n: all - shown.length,
   });

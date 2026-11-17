@@ -97,8 +97,8 @@ const OWN = {
   "Some numbers here may not match the ones Word shows.":
     "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
   "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
-  "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.":
-    "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे किसी ऐसे फ़ुटनोट या हेडर में जिसे दिखाया नहीं जा सका। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
+  "Some changes aren't shown here, such as in a footnote or header Clauseo couldn't mark up. Open both versions in Word to see them.":
+    "कुछ बदलाव यहाँ नहीं दिखाए गए हैं, जैसे किसी ऐसे फ़ुटनोट या हेडर में जिसके बदलाव Clauseo चिह्नित नहीं कर सका। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
   "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.":
     "एक हेडर या फ़ुटर की तुलना नहीं की जा सकी, इसलिए उसके बदलाव यहाँ नहीं दिखाए गए हैं। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
   // what changed that the marked-up document doesn't mark: a link's web address, a comment's or a text box's text,
@@ -108,12 +108,12 @@ const OWN = {
     "एक टिप्पणी का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
   "Text in a text box changed. Open both versions in Word to see it.":
     "एक टेक्स्ट बॉक्स का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
-  "The formatting of some tables, rows or cells changed.":
-    "कुछ तालिकाओं, पंक्तियों या सेल की फ़ॉर्मैटिंग बदल गई है।",
+  "Formatting changed in some tables, rows or cells.":
+    "कुछ तालिकाओं, पंक्तियों या सेल में फ़ॉर्मैटिंग बदल गई है।",
   // which tables' formatting changed, and how (UC-452 to UC-464); {tables} lists them apart by semicolons, each with its
   // groups after a colon; provisional
   "Formatting changed in {tables}.": "{tables} में फ़ॉर्मैटिंग बदल गई है।",
-  "Formatting changed in {tables}; and {n} more.": "{tables}; और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+  "Formatting changed in {tables}, and in {n} more.": "{tables} में, और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
   "table {n}": "तालिका {n}",
   "table {n} in the {part}": "{part} में तालिका {n}",
   "table {n} in the footnotes": "फ़ुटनोट में तालिका {n}",
@@ -125,7 +125,7 @@ const OWN = {
   "merged cells": "मर्ज किए गए सेल",
   "row height": "पंक्ति की ऊँचाई",
   "other formatting": "अन्य फ़ॉर्मैटिंग",
-  // the heading over each footnote, endnote, header or footer that changed, after the body (UC-392 to UC-399,
+  // the heading over each footnote, endnote, header or footer that changed, after the body (UC-949 to UC-956,
   // UC-450); provisional
   "Footnote {n}": "फ़ुटनोट {n}",
   "Endnote {n}": "एंडनोट {n}",
