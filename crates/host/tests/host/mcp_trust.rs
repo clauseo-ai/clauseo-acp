@@ -354,7 +354,7 @@ fn codex_runs_case_law_search_unasked_only_with_our_entry() {
 #[test]
 fn codex_recharge_offers_only_this_call() {
     assert_eq!(
-        recharge_cards("mcp_trust_recharge_session", true),
+        recharge_cards("mcp_trust_recharge_session", true, true),
         [vec!["allow_once".to_owned(), "cancel".to_owned()]]
     );
 }
@@ -364,20 +364,34 @@ fn codex_recharge_offers_only_this_call() {
 #[test]
 fn an_unnamed_codex_tool_offers_only_this_call() {
     assert_eq!(
-        recharge_cards("mcp_trust_recharge_unnamed", false),
+        recharge_cards("mcp_trust_recharge_unnamed", false, true),
         [vec!["allow_once".to_owned(), "cancel".to_owned()]]
     );
 }
 
-/// The options of the card for Codex's `recharge` request, its call announced first or not.
-fn recharge_cards(name: &str, announced: bool) -> Vec<Vec<String>> {
+/// The same unannounced card with no `allow_session` among its options: it offers only this
+/// call too.
+#[test]
+fn an_unnamed_codex_tool_without_a_session_option_offers_only_this_call() {
+    assert_eq!(
+        recharge_cards("mcp_trust_recharge_unnamed_once", false, false),
+        [vec!["allow_once".to_owned(), "cancel".to_owned()]]
+    );
+}
+
+/// The options of the card for Codex's `recharge` request, its call announced first or not,
+/// with codex-acp's `allow_session` among its options or not.
+fn recharge_cards(name: &str, announced: bool, session: bool) -> Vec<Vec<String>> {
     use crate::case_law::{Connector, wire};
     let connector = Connector::new(true);
     let dir = Dir::new(name, &[]);
-    let opts = json!([{"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
+    let mut opts = json!([{"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
         {"optionId": "allow_session", "name": "Allow for this session", "kind": "allow_always"},
         {"optionId": "allow_always", "name": "Always allow", "kind": "allow_always"},
         {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}]);
+    if !session && let Some(list) = opts.as_array_mut() {
+        list.retain(|option| option["optionId"] != "allow_session");
+    }
     let mut added = vec![
         json!({"update": {"update": {"sessionUpdate": "tool_call", "toolCallId": "tc-recharge",
             "title": "mcp.case-law.recharge", "kind": "execute", "status": "in_progress",

@@ -82,7 +82,7 @@ byte: `rawInput.command` as the agent sent it (Claude's `Bash`/`PowerShell` inpu
   interpreter, preprocessor flag or file-reading config can come in by not being named. A write
   lands through a link the agent places after the check (in a destination folder, or in the race
   below), and a recursive copy or move could put `AGENTS.md`, `.codex` or `.agents` at any
-  depth; a read that loses the race reads, and the data fence still holds.
+  depth.
 - Every option is one the program's entry lists, with a value of the kind it says (a number, a
   text the program never opens, or a path). One-letter flags may be joined (`-la`) only when none
   takes a value; `--name=value` only for a listed long option; PowerShell takes no
@@ -342,16 +342,17 @@ Claude in `auto` raised no card in any task of the record.
 
 ### Residuals
 
-- A check of what a command reaches is the state when it runs on the matter thread; a link made
-  between the check and the run is not seen. An agent with a background loop in its sandbox
-  (Codex's unified exec, Claude's background Bash on Windows) can flip a link in that window
-  and retry. Since only reading programs are kept, a lost race is a read: it reaches no further
-  than the data fence lets the agent read anyway, and writes nothing.
-- On Windows the HMAC key sits in Credential Manager, which has no per-program access control,
-  and Claude there has no sandbox: a process running as the lawyer, the agent's own shell
-  included, can read the key and sign a rules file. The HMAC holds against a file copied,
-  planted or edited without the key; on Windows it does not hold against the agent. Only
-  reading programs can be kept, so a forged command rule still only reads.
+- A kept command is checked twice on the matter thread: when its card is about to offer
+  "Always", and when the host answers a later request from the rule. A change to the file
+  system between that check and the command's run is outside what this layer covers.
+- On Windows this layer does not defend the kept-rules file against a change made outside
+  Clauseo. The layer that covers the file there is the data fence (decision 0030,
+  `agent/data_fence.rs`): Claude Code's deny rules for its file tools and for the shell
+  commands it recognises (`DENIED` lists `agent-state/*/claude-allow.json`), and the host's
+  auto-deny of a permission request whose paths reach it. It works on what a request or a
+  command names, not on what the processes an agent starts open.
+- The server names in a firm's managed MCP file are taken as they are: they are not checked for
+  a double underscore (`__`), the mark an MCP rule's name uses between server and tool.
 - A cmdlet is matched by name: a PowerShell profile that defines an alias or function of the
   same name would run instead (Claude's PowerShell and Codex's `powershell.exe` load profiles
   unless `-NoProfile`).
