@@ -16,6 +16,31 @@ mod macos;
 mod name_match;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::named;
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) mod procargs;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use linux::uids as linux_uids;
+
+/// A session's sweep (`session.rs`) over this machine's processes, as Linux reads them.
+#[cfg(target_os = "linux")]
+pub(crate) async fn sweep_marked(entry: &[u8], timer: &impl crate::Timer) -> crate::SessionSwept {
+    crate::session::passes::sweep(&linux::Procfs::new(), entry, timer).await
+}
+
+/// A session's sweep (`session.rs`) over this machine's processes, as macOS reads them.
+#[cfg(target_os = "macos")]
+pub(crate) async fn sweep_marked(entry: &[u8], timer: &impl crate::Timer) -> crate::SessionSwept {
+    crate::session::passes::sweep(&macos::Marked::new(), entry, timer).await
+}
+
+/// No session sweep on this OS: on Windows the agent's Job Object takes every process it started.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn sweep_marked(
+    _entry: &[u8],
+    _timer: &impl crate::Timer,
+) -> std::future::Ready<crate::SessionSwept> {
+    std::future::ready(crate::SessionSwept::NotNeeded)
+}
 
 #[cfg(unix)]
 mod unix;

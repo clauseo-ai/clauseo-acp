@@ -445,6 +445,9 @@ mod search;
 #[path = "host/search_review.rs"]
 mod search_review;
 #[cfg(test)]
+#[path = "host/session_end.rs"]
+mod session_end;
+#[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]

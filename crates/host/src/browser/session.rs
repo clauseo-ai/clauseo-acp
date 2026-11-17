@@ -2,9 +2,10 @@
 //! the launch-prep thread and held until the agent's process tree was killed. Two processes can
 //! outlive that kill and with it the claims: an agent that ignores it (the process crate's
 //! `StopStep::Unresponsive`), and agent-browser's Unix daemon, which leaves the tree (`setsid`)
-//! and lives until its idle timeout (G17 item 6). On Windows the guard's own Job Object ends
-//! the daemon and Chrome when the guard exits. Claims hold within this host process only: two
-//! hosts on one machine can be handed the same port (stage C's `ports`).
+//! and ends with the session's sweep, which follows the kill (`agent/leftovers.rs`). On Windows
+//! the guard's own Job Object ends the daemon and Chrome when the guard exits. Claims hold
+//! within this host process only: two hosts on one machine can be handed the same port (stage
+//! C's `ports`).
 //!
 //! - [`BrowserPorts`]: Chrome's debugging port (`--cdp-port`) and, on Windows, agent-browser's
 //!   daemon port (`--daemon-port`), each a [`PortClaim`] from stage C's `ports`

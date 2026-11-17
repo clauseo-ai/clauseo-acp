@@ -3,12 +3,13 @@
 //! `Handle`. The owner waits for the agent to exit or for a stop; on a stop it drops the `exited`
 //! future, lists the agent's descendants on a `clauseo-sweep` thread (on Unix the tree kill ends
 //! those that left the agent's group) and runs the shutdown ladder, because `exited` borrows the
-//! handle and `shutdown` consumes it. Either way it then waits for the stderr pump and the event
-//! forwarder to end and then for every call that took a [`AgentLink::fence`] to post its answer,
-//! reads the exit report, and posts [`Ended`] after the agent's last event and after those
-//! answers. So a prompt the agent answered just before it exited (a Codex limit error, then the
-//! exit) reaches the actor as the prompt's answer, never as the exit, and the last chunk it wrote
-//! before it exited is posted before its `Ended`.
+//! handle and `shutdown` consumes it. Either way, once the agent is gone, its session's sweep
+//! kills what still carries the session's marker (`leftovers::end_session`), and the owner then
+//! waits for the stderr pump and the event forwarder to end and then for every call that took a
+//! [`AgentLink::fence`] to post its answer, reads the exit report, and posts [`Ended`] after the
+//! agent's last event and after those answers. So a prompt the agent answered just before it
+//! exited (a Codex limit error, then the exit) reaches the actor as the prompt's answer, never as
+//! the exit, and the last chunk it wrote before it exited is posted before its `Ended`.
 //!
 //! A helper the agent left holding a pipe would hold that wait open, so it gives up once
 //! [`PUMP_END_BOUND`] has passed with all the agent wrote to stdout before the exit posted
@@ -171,6 +172,8 @@ pub(crate) enum OwnerStep {
     Listing,
     /// Stopping: the shutdown ladder runs.
     Ladder,
+    /// The agent is gone, stopped or exited: its session's sweep ends what carries its marker.
+    Sweeping,
     /// The agent is gone: waiting for its pipes and fenced calls to end.
     Settling,
     /// `Ended` was posted.
@@ -338,6 +341,7 @@ pub(crate) fn start(
         step: Rc::clone(&step),
         clock,
         post,
+        mark: clauseo_process::SessionMark::of_env(spec.env()),
     };
     spawn(spawner, own(handle, stop_asked, ends, output, owner))?;
     Ok(AgentLink {
@@ -447,12 +451,23 @@ struct Owner {
     step: Rc<Cell<OwnerStep>>,
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
+    /// The session's marker from the launch's environment; `None` for a spec without one (some
+    /// tests'), which then has no session sweep.
+    mark: Option<clauseo_process::SessionMark>,
 }
 
 impl Owner {
     fn enter(&self, pid: u32, step: OwnerStep) {
         tracing::debug!(pid, ?step, "the agent's owner moves on");
         self.step.set(step);
+    }
+
+    /// The session's end, once the agent is gone: what still carries its marker is killed.
+    async fn sweep(&self, pid: u32) {
+        if let Some(mark) = &self.mark {
+            self.enter(pid, OwnerStep::Sweeping);
+            leftovers::end_session(mark.clone()).await;
+        }
     }
 }
 
@@ -476,6 +491,7 @@ async fn own(
     };
     let ended = if let Some(report) = exited {
         // The agent is gone: all it wrote is in its stdout or already read.
+        owner.sweep(pid).await;
         owner.enter(pid, OwnerStep::Settling);
         let mark = output.progress.mark();
         settle(ends, || output.posted_since(mark), &**clock).await;
@@ -500,6 +516,7 @@ async fn own(
                 "the agent did not exit after its kill; it is reaped later"
             );
         }
+        owner.sweep(pid).await;
         owner.enter(pid, OwnerStep::Settling);
         let mark = output.progress.mark();
         settle(ends, || output.posted_since(mark), &**clock).await;

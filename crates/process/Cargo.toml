@@ -20,12 +20,17 @@ memchr = { workspace = true }
 thiserror = { workspace = true }
 
 # killpg for the shutdown ladder and the tree kill; kill for a listed descendant; clock_gettime
-# and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`).
+# and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`); getuid for a session's
+# sweep, which ends only this user's processes (`user`).
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal", "time", "feature"] }
+nix = { workspace = true, features = ["signal", "time", "feature", "user"] }
+
+# pidfd_open and pidfd_send_signal for a session's sweep (src/os/linux/marked.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
 
 # libproc's proc_listchildpids, proc_pidinfo and proc_pidpath: the descendant listing
-# (src/os/macos.rs).
+# (src/os/macos.rs); sysctl(KERN_PROCARGS2) for a session's sweep (src/os/macos/marked.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 
