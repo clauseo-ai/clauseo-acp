@@ -452,9 +452,12 @@ not a script Claude writes that opens the file itself. Only the jail (tiers A an
 readable.
 
 Each Claude launch also writes `syncClaudeAiSkills: false` into Claude Code's user settings in
-Clauseo's own Claude home (`<data>/agents/claude-acp/home/settings.json`, G11), keeping any
-other key there, so the account's claude.ai skills are neither synced nor loaded beside the
-packs. There is no switch for it.
+Clauseo's own Claude home (`<data>/agents/claude-acp/home/settings.json`, G11), so the
+account's claude.ai skills are neither synced nor loaded beside the packs. There is no switch for
+it. The file holds exactly that, plus the three preferences Claude Code writes there itself
+(`model`, `fastMode`, `skipAutoPermissionPrompt`, each kept only with a value of its kind,
+`agent/home.rs` `CLAUDE_OWN_KEYS`); every other key goes, and a launch whose file cannot be
+written is refused.
 
 ### Windows
 
