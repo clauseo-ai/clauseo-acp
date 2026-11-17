@@ -3,9 +3,11 @@
 //! the lines from the sources, keeps what `!if`, `!ifdef`, `!ifndef` and `!else` select for a mode,
 //! and fails on any line it doesn't know, so a step that grows past it fails its test.
 
+use int_op::int_op;
 use std::collections::HashMap;
 
 mod files;
+mod int_op;
 mod str_cpy;
 
 /// The named variables `Machine::expand` reads (the others it knows are `$R0`..`$R9`, `$0`..`$9`).
@@ -254,6 +256,8 @@ pub(super) struct Machine {
     pub(super) locked: Vec<String>,
     /// How many more `File` lines can't open their file (held open by another program).
     pub(super) held: usize,
+    /// Each file's attributes for the fake `Get`/`SetFileAttributesW` (32, archive, if unlisted).
+    pub(super) attributes: HashMap<String, i64>,
     /// An `Abort` ran: nothing after it does, as the section it ends.
     pub(super) aborted: bool,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -287,6 +291,7 @@ impl Machine {
             found: Vec::new(),
             locked: Vec::new(),
             held: 0,
+            attributes: HashMap::new(),
             aborted: false,
             inline: HashMap::new(),
             after: HashMap::new(),
@@ -452,6 +457,9 @@ impl Machine {
             self.set(var, self.exit_code.to_owned());
             return;
         }
+        if files::system_line(self, line) {
+            return;
+        }
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
         if files::file_line(self, &parts) {
@@ -500,16 +508,7 @@ impl Machine {
                 };
                 self.set(var, text.to_owned());
             }
-            ["IntOp", var, a, "+", b] => {
-                let a: i64 = self.expand(a).parse().unwrap();
-                let b: i64 = self.expand(b).parse().unwrap();
-                self.set(var, (a + b).to_string());
-            }
-            ["IntOp", var, a, "-", b] => {
-                let a: i64 = self.expand(a).parse().unwrap();
-                let b: i64 = self.expand(b).parse().unwrap();
-                self.set(var, (a - b).to_string());
-            }
+            ["IntOp", var, a, op @ ("+" | "-" | "&" | "|"), b] => int_op(self, var, a, op, b),
             ["DetailPrint", text] => {
                 let text = self.expand(text);
                 self.said.push(format!("DetailPrint {text}"));

@@ -17,6 +17,7 @@ mod message_front;
 mod native_arm64;
 mod nsis_names;
 mod nsis_run;
+mod place_attributes;
 mod place_files;
 mod reinstall_default;
 mod repair;
