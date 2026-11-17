@@ -56,7 +56,8 @@ pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{
-    BUILT_IN_PLUGIN, LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads,
+    BUILT_IN_PLUGIN, LaunchDeny, claude_project_key, claude_projects, is_agent_plans, launch_deny,
+    own_reads,
 };
 pub(crate) use shell_deny::{
     own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
@@ -127,8 +128,8 @@ pub(crate) const DENIED: [&str; 32] = [
 ];
 
 /// What of `<data>` every session may read, with the reason: neither denied to Claude nor listed
-/// per launch, and an own folder of every session for the auto-deny (while it resolves to its
-/// place under `<data>`'s canonical path).
+/// per launch (Claude's file tools may not change it), and an own folder of a Claude session for
+/// the auto-deny (while it resolves to its place under `<data>`'s canonical path; not Codex's).
 pub(crate) const SHARED: [(&str, &str); 1] = [(
     "profile",
     "holds only the built-in plugin, the same for every matter; the model must Read files in \
@@ -280,21 +281,6 @@ fn escape(text: &str) -> String {
     out
 }
 
-/// Whether `plans` is a plans folder in one of Clauseo's agents' homes under `data`
-/// (`<data>/agents/<agent id>/home/plans`, `Locations::agent_home`), where Claude Code writes
-/// its plan note (`agent/plan_note.rs`) when its home is Clauseo's.
-pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
-    let Ok(place) = plans.strip_prefix(data) else {
-        return false;
-    };
-    let names: Vec<_> = place.components().collect();
-    matches!(
-        names.as_slice(),
-        [Component::Normal(agents), Component::Normal(_), Component::Normal(home), Component::Normal(folder)]
-            if *agents == "agents" && *home == "home" && *folder == "plans"
-    )
-}
-
 /// A permission request's paths to check against the data folder, on the matter thread.
 #[derive(Debug, Clone)]
 pub(crate) struct FenceCheck {
@@ -325,6 +311,10 @@ pub(crate) struct FenceCheck {
     /// The agent's launch variables that hold a path ([`launch_vars`]), for PowerShell's
     /// `$env:NAME` in a path; a variable not among them is read from the host's environment.
     pub(crate) vars: Vec<(String, String)>,
+    /// Whether what every session shares ([`SHARED`]: the built-in plugin) counts as own: for
+    /// Claude, whose Read of a built-in skill may ask; not for Codex, whose sandbox reads it
+    /// unasked, so a request of Codex's naming it is for a write, and is refused.
+    pub(crate) shared_own: bool,
 }
 
 impl FenceCheck {
@@ -443,7 +433,8 @@ impl FenceCheck {
         let home = self.home.as_deref();
         let data = key(real_data, insensitive);
         let mut own = Vec::new();
-        let shared = SHARED.iter().map(|(place, _)| self.data.join(place));
+        let shared = SHARED.iter().filter(|_| self.shared_own);
+        let shared = shared.map(|(place, _)| self.data.join(place));
         for folder in self.allowed.iter().cloned().chain(shared) {
             let Ok(place) = folder.strip_prefix(&self.data) else {
                 continue;

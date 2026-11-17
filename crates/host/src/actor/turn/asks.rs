@@ -175,7 +175,8 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
 /// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
-/// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
+/// plans folder in Clauseo's Claude home, and its working folder; and for any agent but Codex,
+/// what every session shares (`data_fence::SHARED`). None when the request names no
 /// path and no command, or the thread has no agent. Its command's search folders are read as
 /// `shell`, the shell of the request's tool, would read them.
 fn fence_check(
@@ -191,8 +192,11 @@ fn fence_check(
     if paths.is_empty() && words.is_empty() && roots.is_empty() {
         return None;
     }
-    let turn = &actor.threads.get(&thread)?.turn;
+    let entry = actor.threads.get(&thread)?;
+    let turn = &entry.turn;
     let agent = turn.agent.as_deref()?;
+    let codex = clauseo_protocol::AgentKind::of(&entry.row.agent)
+        == Some(clauseo_protocol::AgentKind::Codex);
     let data = actor.effective.locations().data_dir().to_owned();
     let mut allowed: Vec<PathBuf> = turn
         .run
@@ -217,6 +221,7 @@ fn fence_check(
         words,
         health: actor.protection.data_fence().clone(),
         vars: agent.fence_vars.clone(),
+        shared_own: !codex,
     }))
 }
 

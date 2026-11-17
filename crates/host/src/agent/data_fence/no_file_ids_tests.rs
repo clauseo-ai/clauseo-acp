@@ -53,6 +53,7 @@ fn request(health: &DataFenceHealth, data: &str, paths: &[PathBuf], search: bool
         words: Vec::new(),
         health: health.clone(),
         vars: Vec::new(),
+        shared_own: true,
     }
 }
 
