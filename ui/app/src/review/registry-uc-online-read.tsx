@@ -24,7 +24,7 @@ export const UC_ONLINE_READ: Entry[] = [
   {
     id: "UC-915",
     words: roomWords(
-      "Not on this computer, so Clauseo keeps no versions of it yet. Reading it in a conversation downloads it.",
+      "Not on this computer, so Clauseo saves no new versions of it for now. Reading it in a conversation downloads it.",
     ),
     screen: "room/wall-away",
     render: STATES.other,
