@@ -40,6 +40,11 @@ pub struct AgentsConfig {
     /// the field does not exist.
     #[cfg(feature = "test-support")]
     pub ready_for_tests: BTreeMap<AgentId, crate::state::Installed>,
+    /// Tests only: the start resumes nothing a quit cut short (`install::restart`), so a test
+    /// of a press finds Python `Missing` beside a `Ready` agent. Outside `test-support` the
+    /// field does not exist.
+    #[cfg(feature = "test-support")]
+    pub no_resume_for_tests: bool,
     /// Tests only: Smart App Control's state and Codex's layouts, used instead of the registry
     /// and the pinned layouts, on any OS (`sac`). Outside `test-support` the field does not exist.
     #[cfg(feature = "test-support")]
@@ -62,6 +67,8 @@ impl AgentsConfig {
             clock: Arc::new(SystemClock),
             #[cfg(feature = "test-support")]
             ready_for_tests: BTreeMap::new(),
+            #[cfg(feature = "test-support")]
+            no_resume_for_tests: false,
             #[cfg(feature = "test-support")]
             sac_for_tests: None,
         }

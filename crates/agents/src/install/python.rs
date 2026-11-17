@@ -66,6 +66,7 @@ pub(super) async fn step<T: Timer + Send + Sync>(job: &Job<T>) -> Option<PythonS
         }
         let err = match attempt(job, archive).await {
             Ok(()) => {
+                super::restart::clear_blocked(&config.data_dir);
                 let version = config.snapshot.python().version().to_owned();
                 return Some(PythonState::Ready { version });
             }
@@ -79,6 +80,10 @@ pub(super) async fn step<T: Timer + Send + Sync>(job: &Job<T>) -> Option<PythonS
                 log.push(crate::log::redact(&failure.to_string(), &config.data_dir));
                 if let Some(by) = blocked_by {
                     log.push(format!("blocked by: {}", by.word()));
+                }
+                if kind == PythonFailureKind::RunBlocked {
+                    // The next start's own retry skips it: the same policy would refuse it.
+                    super::restart::mark_blocked(&config.data_dir, archive, blocked_by);
                 }
                 let mut state = failed(log, kind, tries);
                 if let PythonState::Failed(failure) = &mut state {

@@ -62,6 +62,15 @@ impl Shared {
         self.lock().python.clone()
     }
 
+    /// The first agent whose install is `Ready`, if any (a managed agent never is).
+    pub(super) fn ready_agent(&self) -> Option<AgentId> {
+        let inner = self.lock();
+        let mut states = inner.states.iter();
+        states
+            .find(|(_, state)| matches!(state, InstallState::Ready { .. }))
+            .map(|(agent, _)| agent.clone())
+    }
+
     /// Records and sends the Python runtime's `state`: the worker's own events.
     pub(super) fn set_python(&self, state: PythonState) {
         Inner::set_python(&mut self.lock(), &self.events, state);

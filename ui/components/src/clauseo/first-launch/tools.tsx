@@ -17,7 +17,7 @@ export type ToolsView =
   | { kind: "missing"; mb: number }
   /** Downloading: the bytes for the bar, and the whole MB the words say (done never above total). */
   | { kind: "downloading"; received: number; total: number; doneMb: number; totalMb: number }
-  /** Unpacking and its first run: every byte is in, so the line says the full size. */
+  /** Unpacking and its first run: every byte is in, so the bar is full and the line says it is being set up. */
   | { kind: "installing"; mb: number }
   /** Waiting, retrying by itself. `online`: the window says it is online meanwhile, so the download can't be
    * reached. */
@@ -54,10 +54,8 @@ export function ToolsLine({
       bar = { received: view.received, total: view.total };
       break;
     case "installing":
-      words = w("Downloading document tools… {done} of {size}", {
-        done: size(view.mb),
-        size: size(view.mb),
-      });
+      // every byte is in: the bar full, and the words say it is being set up
+      words = w("Setting up the document tools…");
       bar = { received: 1, total: 1 };
       break;
     case "waiting":
