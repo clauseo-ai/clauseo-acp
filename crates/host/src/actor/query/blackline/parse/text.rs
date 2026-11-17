@@ -61,7 +61,7 @@ impl Text {
 
 /// The view's own lines this reader knows, by how they start: the head block's, the end of a
 /// table, a section's end, the position line and collapsed content (`{opaque …}`).
-const STRUCTURE: [&str; 9] = [
+pub(super) const STRUCTURE: [&str; 9] = [
     "{stet ",
     "{rules:",
     "{authors:",
