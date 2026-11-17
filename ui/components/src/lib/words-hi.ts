@@ -27,6 +27,7 @@ import { HI as room } from "./words-room.hi.ts";
 import { HI as scan } from "./words-scan.hi.ts";
 import { HI as settings } from "./words-settings.hi.ts";
 import { HI as signinExpired } from "./words-signin-expired.hi.ts";
+import { HI as skills } from "./words-skills.hi.ts";
 import { HI as sources } from "./words-sources.hi.ts";
 import { HI as startup } from "./words-startup.hi.ts";
 import { HI as stepsLive } from "./words-steps-live.hi.ts";
@@ -70,6 +71,7 @@ export const HINDI = {
   scan,
   settings,
   "signin-expired": signinExpired,
+  skills,
   sources,
   startup,
   "steps-live": stepsLive,

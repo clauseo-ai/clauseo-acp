@@ -452,6 +452,10 @@ export class TauriTransport
   async openSettings(section: SettingsSection | null = null): Promise<void> {
     await call(commands.openSettings(section));
   }
+  /** Settings › Skills' folder picker (`pick_skill`): the folder's path, or null when cancelled. */
+  async pickSkill(): Promise<string | null> {
+    return call(commands.pickSkill());
+  }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
     return this.#subs.add(stream, after, subscriber);
   }

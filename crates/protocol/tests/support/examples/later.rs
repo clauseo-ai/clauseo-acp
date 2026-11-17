@@ -114,6 +114,8 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             "the file changed since the list",
         ),
         failed(ErrorCode::WordNotDocx, "not a Word document"),
+        failed(ErrorCode::SkillNoSkillMd, "the path holds no SKILL.md"),
+        failed(ErrorCode::SkillInvalid, "the skill cannot be added (skill)"),
         failed(ErrorCode::WordTooLarge, "stetdoc refused: limit_exceeded"),
         failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
         failed(

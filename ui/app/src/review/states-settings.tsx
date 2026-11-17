@@ -6,6 +6,7 @@ import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { provideTools, type ToolsCommands } from "../settings/sections/tools-model.ts";
+import type { FakeSkills } from "../settings/sections/skills-fake.ts";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
@@ -46,6 +47,7 @@ export function SettingsOver({
   update,
   matters = [],
   mcpTools,
+  skills,
 }: {
   section: SectionId;
   lang: Lang;
@@ -72,6 +74,8 @@ export function SettingsOver({
   matters?: MatterInfo[];
   /** Settings › Tools' commands (tools-fake.ts); none when left out, and Tools doesn't show. */
   mcpTools?: ToolsCommands;
+  /** Settings › Skills' host (skills-fake.ts); none when left out, and Skills doesn't show. */
+  skills?: FakeSkills;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -100,6 +104,7 @@ export function SettingsOver({
       ...(protection === undefined ? {} : { protection }),
       ...(blocklist === undefined ? {} : { blocklist }),
       ...(update === undefined ? {} : { update }),
+      ...(skills === undefined ? {} : skills.host()),
       ...(setup === undefined
         ? {}
         : {

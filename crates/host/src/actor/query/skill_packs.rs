@@ -121,7 +121,12 @@ fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> PackStatus {
         listing.hook.as_ref(),
     );
     let recorded = listing.enabled.get(id.as_str());
-    let (state, reason) = match (listing.admission.refusal(id.as_str()), &read) {
+    let added_here = match &read {
+        Ok(pack) => pack.manifest().added_here,
+        Err(_) => packs::added::is_added_here(&listing.root.join(id.as_str())),
+    };
+    let admitted = listing.admission.refusal_for(id.as_str(), added_here);
+    let (state, reason) = match (admitted, &read) {
         (Some(by_policy), _) => (
             PackState::NotAdmitted,
             Some(PackReason::NotAdmitted { by_policy }),
@@ -140,7 +145,10 @@ fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> PackStatus {
         },
     };
     let pack = read.ok();
-    shown(id, pack.as_ref(), state, reason)
+    PackStatus {
+        added_here,
+        ..shown(id, pack.as_ref(), state, reason)
+    }
 }
 
 /// The status of `id` in `state`, with `pack`'s manifest when it read.
@@ -152,7 +160,10 @@ fn shown(
 ) -> PackStatus {
     let manifest = pack.map(Pack::manifest);
     let text = |pick: fn(&packs::PackManifest) -> &str, max| {
-        manifest.and_then(|manifest| packs::listed(pick(manifest), max))
+        manifest
+            .map(pick)
+            .filter(|text| !text.is_empty())
+            .and_then(|text| packs::listed(text, max))
     };
     PackStatus {
         name: text(|m| &m.name, DISPLAY_MAX),
@@ -166,5 +177,6 @@ fn shown(
         id,
         state,
         reason,
+        added_here: false,
     }
 }

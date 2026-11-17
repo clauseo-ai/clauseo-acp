@@ -121,6 +121,12 @@ golden! { HostCommand::name_of {
         id: PackId::new("nda-kit").unwrap(),
         on: true,
     };
+    AddSkill => add_skill: HostCommand::AddSkill {
+        path: "/Users/lawyer/Skills/nda-review".to_owned(),
+    };
+    RemoveSkill => remove_skill: HostCommand::RemoveSkill {
+        id: PackId::new("nda-review").unwrap(),
+    };
     SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
         patch: privacy::privacy_patch(),
     };
