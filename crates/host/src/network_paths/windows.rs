@@ -3,11 +3,12 @@
 //! tag, from its folder's listing (`FindFirstFileW`), never by opening it; and a local file's
 //! identity, opened without following a link and only once the walk has vouched for its path.
 //! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`),
-//! and its link count and identity, for the guard's record (`write::open_append_record`).
+//! and its link count and identity, for the guard's record (`write::open_append_record`), and
+//! Windows' link policy for a share (`agent/network_matter/reads.rs`), from the registry.
 #![expect(
     unsafe_code,
-    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity and an \
-              open file's attributes, reparse tag, link count and record identity"
+    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity, an \
+              open file's attributes, reparse tag, link count and record identity, and RegGetValueW"
 )]
 
 use std::os::windows::ffi::OsStrExt as _;
@@ -291,5 +292,69 @@ impl Drop for TestDrive {
         if let Err(error) = unsafe { DefineDosDeviceW(flags, &name, &raw) } {
             eprintln!("removing the test drive {}: {error}", self.letter);
         }
+    }
+}
+
+/// The registry values of Windows' link policy (`fsutil behavior set SymlinkEvaluation`, and the
+/// group policy "Selectively allow the evaluation of a symbolic link"), each a key and a value.
+/// R2R lets a link on a share lead to another server; R2L, to this computer's own disks.
+const LINK_POLICY: [(&str, &str); 4] = [
+    (
+        r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        "SymlinkRemoteToRemoteEvaluation",
+    ),
+    (
+        r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        "SymlinkRemoteToLocalEvaluation",
+    ),
+    (
+        r"SOFTWARE\Policies\Microsoft\Windows\Filesystems\NTFS",
+        "SymlinkRemoteToRemoteEvaluation",
+    ),
+    (
+        r"SOFTWARE\Policies\Microsoft\Windows\Filesystems\NTFS",
+        "SymlinkRemoteToLocalEvaluation",
+    ),
+];
+
+/// Windows' link policy values ([`LINK_POLICY`]) in HKLM's 64-bit view, each as a `REG_DWORD`:
+/// `None` when not set, `Err` when it can't be read or is of another type
+/// (`agent::network_matter::reads::links_followed`). Reads the registry only, never a path.
+pub(crate) fn link_policy() -> Vec<Result<Option<u32>, ()>> {
+    LINK_POLICY
+        .iter()
+        .map(|(key, value)| registry_dword(key, value))
+        .collect()
+}
+
+/// One `REG_DWORD` of HKLM's `key`, its `value`.
+fn registry_dword(key: &str, value: &str) -> Result<Option<u32>, ()> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{
+        HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_SUBKEY_WOW6464KEY,
+        RegGetValueW,
+    };
+    let mut data = 0u32;
+    let mut len = u32::try_from(std::mem::size_of::<u32>()).map_err(drop)?;
+    let flags = REG_ROUTINE_FLAGS(RRF_RT_REG_DWORD.0 | RRF_SUBKEY_WOW6464KEY.0);
+    // SAFETY: the key and value names are NUL-terminated wide strings that outlive the call;
+    // `data` is a writable `u32`, `len` holds its size in bytes.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            &HSTRING::from(key),
+            &HSTRING::from(value),
+            flags,
+            None,
+            Some((&raw mut data).cast()),
+            Some(&raw mut len),
+        )
+    };
+    if code == ERROR_SUCCESS {
+        Ok(Some(data))
+    } else if clauseo_settings::chromium_policy::registry_missing(code.0) {
+        Ok(None)
+    } else {
+        Err(())
     }
 }

@@ -121,6 +121,8 @@ pub(super) struct Agent {
     pub(super) forced_ask: bool,
     /// The launch's folder check answer, when it ran; read through [`Agent::unprotected`].
     pub(super) folder_check: Option<crate::agent::folder_support::Answer>,
+    /// Claude Code had an administrator policy tier at its launch (`network_matter::admin_policy`).
+    pub(super) admin_tier: agent::network_matter::admin_policy::AdminTier,
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
     /// (`session/claude_mode.rs`).
     pub(super) auto: session::Auto,

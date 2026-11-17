@@ -25,7 +25,7 @@ pub(in super::super) fn launch_now(
     // Only a Claude launch has a folder answer without a Codex preparation.
     let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
     let forced_ask = prepared.codex.is_none() && unprotected;
-    let prepared_folder = prepared.folder;
+    let (prepared_folder, admin_tier) = (prepared.folder, prepared.settings.admin_tier);
     let profile = prepared.profile;
     let shell_start = if prepared.settings.shell_carries {
         crate::sent::ShellStart::Unknown
@@ -88,6 +88,7 @@ pub(in super::super) fn launch_now(
         mcp_commands: Vec::new(),
         forced_ask,
         folder_check: prepared_folder,
+        admin_tier,
         auto: session::Auto::default(),
         claude_home,
         mcp_sent: (!unprotected).then(Vec::new),

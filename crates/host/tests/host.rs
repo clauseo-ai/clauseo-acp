@@ -478,6 +478,8 @@ mod settings;
 #[path = "host/settings_entries.rs"]
 mod settings_entries;
 #[cfg(test)]
+#[path = "host/share_reads.rs"]
+mod share_reads;
 #[cfg(test)]
 #[path = "host/sign_in_hold.rs"]
 mod sign_in_hold;

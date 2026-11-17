@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::actor::turn::launch_checks::CodexPrepared;
+use crate::agent::network_matter::admin_policy::{AdminDoc, AdminTier, admin_policy_present};
 
 #[cfg(doc)]
 use super::ReachClass;
@@ -113,7 +114,32 @@ impl Reads {
             moved: self.moved(codex, claude_home),
             // Every agent but Codex, whose exec runs each call in its own process.
             shell_carries: codex.is_none() && claude_shell_carries(&self.managed),
+            admin_tier: AdminTier::of(
+                codex.is_none()
+                    && self.claude
+                    && admin_policy_present(&self.admin_docs(claude_home)),
+            ),
         }
+    }
+
+    /// Claude Code's administrator policy documents for this launch, its Claude home
+    /// `claude_home` (`agent::network_matter::admin_policy`, which lists them); on the prep's
+    /// thread. Drop-ins that can't be listed, or more than 64, count as one unreadable document.
+    pub(crate) fn admin_docs(&self, claude_home: Option<&Path>) -> Vec<AdminDoc> {
+        let mut docs = match managed_files(&self.managed) {
+            Ok(files) => files
+                .iter()
+                .map(|file| AdminDoc::Json(read(file)))
+                .collect(),
+            Err(()) => vec![AdminDoc::Json(Err(()))],
+        };
+        if self.os_policy {
+            docs.extend(os_policy::admin_docs());
+        }
+        if let Some(home) = claude_home {
+            docs.push(AdminDoc::Json(read(&home.join("remote-settings.json"))));
+        }
+        docs
     }
 
     /// Whether the launch's agent reads a file that moves its route or host: a Codex agent
@@ -145,6 +171,10 @@ pub(crate) struct SettingsRead {
     /// Claude Code's policy settings may keep its shell's folder from one call to the next
     /// ([`claude_shell_carries`]): each shell call's starting folder is then unknown.
     pub(crate) shell_carries: bool,
+    /// Claude Code has an administrator policy tier (`agent::network_matter::admin_policy`):
+    /// the host then answers none of its network-address asks. `Absent` for any other agent;
+    /// `Present` until read (the default).
+    pub(crate) admin_tier: AdminTier,
 }
 
 /// Why the agent's settings leave its route or host unknown: the one word the log gets.

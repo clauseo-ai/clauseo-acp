@@ -873,6 +873,31 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   and waits 5 s (`PREPARE_WAIT`); a check that doesn't answer by then, or whose thread fails,
   answers `check_failed`, never an error: `agent.launch_failed` reads as a broken thread in the
   app. No log line names the folder (`actor/query/folder_support.rs`).
+- **2026-11-16 (orchestrator; a matter stored by its network address).** Claude Code 2.1.293
+  asks before every Read, Grep and Glob of a UNC path ("appears to be a UNC path that could
+  access network resources"; its `trustedNetworkDirectories` only takes a mapped drive's UNC
+  form). In a matter stored as `\\server\share\…` the host answers that ask itself,
+  `allow_once` with nothing logged, when the read stays inside the matter folder by its text
+  alone: the same server, share, folders and case the matter was registered with
+  (`agent/network_matter/reads.rs`, `actor/turn/asks/share_reads.rs`). Every change still
+  asks. Anything outside the matter, on another share or server, or by another spelling (IP,
+  FQDN, `@SSL`, `@port`, `\\?\UNC\`, a short name, `..`, a trailing dot or space, a stream)
+  is left as it was: the data fence refuses it unasked. The ask guards against a path the model
+  picked sending the lawyer's Windows sign-in to an outsider's server; the matter's own server
+  and share were picked by the lawyer, and Clauseo already opens them by that text.
+  - **Links.** The text can't show a link inside the matter. A junction is followed by the
+    server, inside its own disks. A symbolic link on a share is followed by this computer only
+    when Windows' link policy allows remote links, which it does not by default; the host
+    answers nothing while `SymlinkRemoteToRemoteEvaluation` or
+    `SymlinkRemoteToLocalEvaluation` (under `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`
+    or the group policy's `HKLM\SOFTWARE\Policies\Microsoft\Windows\Filesystems\NTFS`) is
+    anything but 0, or can't be read. The card never showed a link's target either.
+  - **Administrator policy.** The host answers nothing when Claude Code has an administrator
+    policy tier at the launch (`agent/network_matter/admin_policy.rs`, to be replaced by host's
+    `Agent::admin_tier`): a firm's `permissions.ask` rule for reads raises the same request,
+    and claude-agent-acp 0.89.1 keeps `matchedAskRule` to itself (it only drops the "always"
+    options, which the network-address ask lacks too). Claude Code re-reads managed settings
+    mid-session; a policy added during a session counts from the next launch.
 
 ### The data folder fence (tier C)
 

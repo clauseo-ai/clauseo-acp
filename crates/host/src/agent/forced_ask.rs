@@ -17,7 +17,9 @@
 //!   A forced-ask Claude launch with no guard hook to give is refused (`agent.guard_missing`).
 //!
 //! A `PermissionRequest` hook already in the lawyer's own settings or plugins can still approve
-//! here (decision record 0030 has why that is accepted).
+//! here (decision record 0030 has why that is accepted). In a matter stored by its network
+//! address the host itself allows Claude Code's own ask before a read inside the matter
+//! (`agent/network_matter/reads.rs`); no change is ever allowed that way.
 //!
 //! The decision is made per launch from that launch's own folder check, never from the row's
 //! remembered answer; `session/load` comes with a launch, so it is checked again.
