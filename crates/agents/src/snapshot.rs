@@ -347,16 +347,22 @@ impl Snapshot {
     }
 
     /// The install folder's `<hash>` for `id` on `platform`: the first 16 hex digits of the
-    /// SHA-256 over the id, the derived lock's bytes and the platform (`linux-x64-glibc`), each
-    /// prefixed by its length.
+    /// SHA-256 over the id, the derived lock's bytes and the platform (`linux-x64-glibc`), and
+    /// for an install codex-acp's patch changes (`install::codex_patch::patched_by`) its tag,
+    /// each prefixed by its length. The tag moves an install made before the patch to another
+    /// folder, so it is redone once.
     pub fn install_hash(&self, id: &AgentId, platform: Platform) -> Option<String> {
         let pins = self.pins(id)?;
         let platform = platform.to_string();
-        Some(short_hash(&[
+        let mut parts = vec![
             id.as_str().as_bytes(),
             pins.lock().as_bytes(),
             platform.as_bytes(),
-        ]))
+        ];
+        if crate::install::codex_patch::patched_by(pins) {
+            parts.push(crate::install::codex_patch::TAG.as_bytes());
+        }
+        Some(short_hash(&parts))
     }
 
     /// Bytes an install of `id` on `platform` downloads: the agent's packages (its sizes row;

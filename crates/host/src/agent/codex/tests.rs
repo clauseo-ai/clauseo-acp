@@ -6,8 +6,8 @@ use clauseo_protocol::{ErrorCode, MatterId};
 use serde_json::{Map, Value, json};
 
 use super::{
-    config, config_on, guard_trusted, home_config, launch_env, make_home, merge_add_only,
-    prepare_launch, refuse_codex_folder, write_home_config,
+    DROPPED_VARS, NETWORK_VAR, config, config_on, guard_trusted, home_config, launch_env,
+    make_home, merge_add_only, prepare_launch, refuse_codex_folder, write_home_config,
 };
 use crate::write;
 
@@ -209,6 +209,33 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
     let parsed: Value = serde_json::from_str(text.to_str().unwrap()).unwrap();
     assert_eq!(parsed, pinned());
     assert_eq!(env.len(), 4);
+}
+
+/// The shell's network (`CLAUSEO_CODEX_NETWORK=1`, which the patched codex-acp reads) only
+/// when the launch profile's `web_search` is `live`: never with it `disabled` or missing.
+#[test]
+fn codex_shell_network_is_set_only_when_web_search_is_live() {
+    assert_eq!(NETWORK_VAR, "CLAUSEO_CODEX_NETWORK");
+    let home = Path::new("/data/agents/codex-acp/home");
+    let launch = |search: Option<&str>| {
+        let mut profile = Map::new();
+        if let Some(search) = search {
+            profile.insert("web_search".to_owned(), Value::from(search));
+        }
+        launch_env(home, &BTreeMap::new(), profile, None)
+    };
+    let network =
+        |env: &BTreeMap<OsString, OsString>| env.get(&OsString::from(NETWORK_VAR)).cloned();
+    let on = launch(Some("live"));
+    assert_eq!(network(&on), Some("1".into()));
+    assert_eq!(on.len(), 5);
+    for search in [Some("disabled"), None] {
+        let off = launch(search);
+        assert_eq!(network(&off), None, "{search:?}");
+        assert_eq!(off.len(), 4, "{search:?}");
+    }
+    // A settings value cannot turn it on: it is dropped from every other source.
+    assert!(DROPPED_VARS.contains(&NETWORK_VAR));
 }
 
 #[test]

@@ -65,3 +65,7 @@ mod resume;
 #[cfg(test)]
 #[path = "install/sac.rs"]
 mod sac;
+
+#[cfg(test)]
+#[path = "install/codex_patch.rs"]
+mod codex_patch;

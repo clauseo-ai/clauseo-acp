@@ -26,6 +26,7 @@
 //! Every wait and every npm run is raced against the job's [`Cancel`], and every event goes
 //! through [`Shared::emit_job`], which drops it once the job is paused.
 
+pub(crate) mod codex_patch;
 mod files;
 mod kept;
 mod locks;

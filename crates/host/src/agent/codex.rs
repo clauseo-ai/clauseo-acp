@@ -21,11 +21,12 @@ use crate::log_file::Cause;
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 /// The mode every Codex session runs in, with no Clauseo sandbox (tier C): codex-acp's own
 /// default, "Auto review" (`dist/index.js:34293-34308, 34319`), Codex's automatic mode. Its
-/// sandbox is `workspace-write` with no network, as in [`FALLBACK_MODE`]: Codex creates,
-/// changes and deletes files inside the matter folder without asking (G8a saw it,
-/// clauseo-acp-private #255). A step that needs more (a write outside the folder, the network,
-/// an escalation) goes to Codex's reviewer model, which answers it instead of the lawyer
-/// (approvals reviewer `auto_review`; codex 0.162.1 `core/src/tools/approvals.rs:505-524`).
+/// sandbox is `workspace-write`, as in [`FALLBACK_MODE`], with the network only when the
+/// session has web search ([`NETWORK_VAR`]): Codex creates, changes and deletes files inside
+/// the matter folder without asking (G8a saw it, clauseo-acp-private #255). A step that needs
+/// more (a write outside the folder, the network without web search, an escalation) goes to
+/// Codex's reviewer model, which answers it instead of the lawyer (approvals reviewer
+/// `auto_review`; codex 0.162.1 `core/src/tools/approvals.rs:505-524`).
 /// Undo per turn is the lawyer's way back.
 pub(crate) const MODE: &str = "agent";
 /// The mode a Codex session runs in once the account's requirements refuse [`MODE`]'s reviewer
@@ -39,18 +40,27 @@ pub(crate) const CONFIG_VAR: &str = "CODEX_CONFIG";
 /// Set to `true`, codex-acp passes the session's MCP servers as they are, without dropping those
 /// it judges duplicates (`dist/index.js:35465-35467, 35820-35821`): Clauseo already chose them.
 pub(crate) const MCP_FILTER_VAR: &str = "DISABLE_MCP_CONFIG_FILTERING";
+/// Set to `1`, codex-acp's `workspace-write` and `agent` modes give Codex's sandboxed shell the
+/// network. codex-acp 2.2.2 hardcodes `networkAccess: false` there and sends it with every turn
+/// (`dist/index.js:34287, 34303`); the install patches both lines to read this variable
+/// (`clauseo-agents`' `install::codex_patch`, which names the same variable). codex-acp reads it
+/// once, as it loads, so it holds for the launch. Set only when the session's web search is on
+/// ([`launch_env`]); any other source of it is dropped ([`DROPPED_VARS`]).
+pub(crate) const NETWORK_VAR: &str = "CLAUSEO_CODEX_NETWORK";
 
 /// The variables a Codex agent never gets, from any source (inherited, the settings' agent
 /// variables or the profile hook's), whatever their case. `CODEX_PATH` swaps the app-server
 /// binary; `APP_SERVER_LOGS` makes codex-acp log the whole `CODEX_CONFIG`, hooks included, to
 /// a file (`dist/index.js:27641-27675, 45673`); `DEFAULT_AUTH_REQUEST` picks a sign-in;
 /// `MODEL_PROVIDER` picks a provider, where the home's `config.toml` defines none and sign-in
-/// is the login Codex keeps in its home (0025).
-pub(crate) const DROPPED_VARS: [&str; 4] = [
+/// is the login Codex keeps in its home (0025); [`NETWORK_VAR`] would give the shell the
+/// network when web search is off (only [`launch_env`] sets it).
+pub(crate) const DROPPED_VARS: [&str; 5] = [
     "CODEX_PATH",
     "APP_SERVER_LOGS",
     "DEFAULT_AUTH_REQUEST",
     "MODEL_PROVIDER",
+    NETWORK_VAR,
 ];
 
 /// The keys of a settings `CODEX_CONFIG` the host keeps, and only these: the model and its
@@ -59,21 +69,32 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
-/// name: [`MODE`], `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, and no MCP
-/// filtering.
+/// name: [`MODE`], `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, no MCP
+/// filtering, and [`NETWORK_VAR`] as `1` when the session has web search.
+///
+/// Web search is the launch profile's `web_search` key, `live` when `tools.web_search` is on
+/// (`agent::loads::profile::codex_keys`, from the same reading of the switch as the rest of the
+/// launch), so the shell's network and Codex's web search are always on or off together. A
+/// session reads the switch once, at its launch (`actor/settings/tools.rs`): a change reaches
+/// the next launch, like the rest of `CODEX_CONFIG`.
 pub(crate) fn launch_env(
     home: &Path,
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
     hooks: Option<Map<String, Value>>,
 ) -> BTreeMap<OsString, OsString> {
+    let web = profile.get("web_search").and_then(Value::as_str) == Some("live");
     let config = Value::Object(config(settings_env, profile, hooks)).to_string();
-    BTreeMap::from([
+    let mut env = BTreeMap::from([
         (OsString::from(MODE_VAR), OsString::from(MODE)),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
         (OsString::from(CONFIG_VAR), OsString::from(config)),
         (OsString::from(MCP_FILTER_VAR), OsString::from("true")),
-    ])
+    ]);
+    if web {
+        env.insert(OsString::from(NETWORK_VAR), OsString::from("1"));
+    }
+    env
 }
 
 /// The top-level keys `config` takes from the launch profile's side

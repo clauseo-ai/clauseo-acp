@@ -4,6 +4,8 @@
 //! the launch, and stetdoc's folder on `PATH`. A switch the lawyer changes while a session runs
 //! reaches the next session started only (`tool_switches.rs`).
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -141,6 +143,64 @@ fn web_search_on_allows_search_and_the_seeded_sites() {
     );
     assert_eq!(config["web_search"], json!("live"));
     assert_eq!(tools, [tool(ClauseoTool::WebSearch, None)]);
+}
+
+/// One Codex thread, one turn, with `env` as its settings variables and `extra` as more
+/// settings: the variables the Codex agent was launched with.
+fn codex_launch(dir: &Dir, env: Value, extra: Value) -> BTreeMap<OsString, OsString> {
+    let codex = template(dir, "codex", &codex_lines("codex", &json!({})));
+    settings(dir, agents(&[(CODEX, &codex, env)]), extra);
+    let launcher = Wired::new(dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CODEX));
+    host.shutdown();
+    let seen = launcher.seen();
+    let codex = seen
+        .iter()
+        .find(|seen| seen.codex_config().is_some())
+        .expect("a Codex launch");
+    codex.env.clone()
+}
+
+/// The variable the patched codex-acp gives its sandboxed shell the network by.
+const CODEX_NETWORK: &str = "CLAUSEO_CODEX_NETWORK";
+
+/// Web search on: Codex's sandboxed shell gets the network too (`CLAUSEO_CODEX_NETWORK=1`).
+#[test]
+fn web_search_on_gives_codex_shell_the_network() {
+    let dir = Dir::new("tools_codex_network_on", &[]);
+    let env = codex_launch(&dir, json!({}), json!({"tools": {"web_search": true}}));
+    assert_eq!(
+        env.get(&OsString::from(CODEX_NETWORK)),
+        Some(&OsString::from("1"))
+    );
+}
+
+/// Web search off, or locked off by policy: no network for the shell, even when the agent's
+/// settings variables ask for it.
+#[test]
+fn web_search_off_keeps_codex_shell_offline_whatever_the_settings_say() {
+    for (test, policy) in [
+        ("tools_codex_network_off", None),
+        (
+            "tools_codex_network_locked",
+            Some(r#"{"tools": {"web_search": false}}"#),
+        ),
+    ] {
+        let dir = Dir::new(test, &[]);
+        if let Some(policy) = policy {
+            dir.set_policy(policy);
+        }
+        let asked = json!({ CODEX_NETWORK: "1", "clauseo_codex_network": "1" });
+        // The lawyer's own switch is off; under the policy it is on, and the policy wins.
+        let switch = policy.is_some();
+        let env = codex_launch(&dir, asked, json!({"tools": {"web_search": switch}}));
+        let found = env
+            .keys()
+            .find(|name| name.eq_ignore_ascii_case(CODEX_NETWORK));
+        assert_eq!(found, None, "{test}");
+    }
 }
 
 /// A Bedrock login has no `WebSearch`: the header says so, `WebFetch` stays allowed, and the

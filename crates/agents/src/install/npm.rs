@@ -217,6 +217,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         // Codex's unsigned rg.exe moves off PATH under Smart App Control (Windows; never fails),
         // before the marker, so a kept tree's manifest is the settled tree.
         crate::sac::settle(config, &tmp, agent);
+        // codex-acp's shell takes the network from `CLAUSEO_CODEX_NETWORK` (`codex_patch`):
+        // a file that is not the pinned one stops the try, before the marker.
+        super::codex_patch::apply(config, &tmp, agent, pins)?;
         // From here the tree is finished: a failed rename keeps it for the next try (`kept`).
         kept::mark(&tmp, agent, pins.version(), &hash).map_err(io("marking the set-up done"))?;
         marked.set(true);

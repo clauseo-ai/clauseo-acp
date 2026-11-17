@@ -107,11 +107,12 @@ fn expected_names(var: &str, extra: &[&str], dropped: &[&str]) -> Vec<OsString> 
 }
 
 /// The Codex reader's own drops (`readers/env.rs`'s `CODEX_DROPPED`).
-const CODEX_DROPPED: [&str; 4] = [
+const CODEX_DROPPED: [&str; 5] = [
     "CODEX_PATH",
     "APP_SERVER_LOGS",
     "DEFAULT_AUTH_REQUEST",
     "MODEL_PROVIDER",
+    "CLAUSEO_CODEX_NETWORK",
 ];
 
 #[test]

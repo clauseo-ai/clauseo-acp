@@ -59,11 +59,12 @@ pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMO
 
 /// The names left out of the Codex reader's environment wherever they come from: the same list
 /// as `crates/host/src/agent/codex.rs`'s `DROPPED_VARS`.
-pub(crate) const CODEX_DROPPED: [&str; 4] = [
+pub(crate) const CODEX_DROPPED: [&str; 5] = [
     "CODEX_PATH",
     "APP_SERVER_LOGS",
     "DEFAULT_AUTH_REQUEST",
     "MODEL_PROVIDER",
+    "CLAUSEO_CODEX_NETWORK",
 ];
 
 /// Whether an inherited `name` stays out: a prefix in [`DROPPED_INHERITED_PREFIXES`] or a name
@@ -112,7 +113,8 @@ mod tests {
                 "CODEX_PATH",
                 "APP_SERVER_LOGS",
                 "DEFAULT_AUTH_REQUEST",
-                "MODEL_PROVIDER"
+                "MODEL_PROVIDER",
+                "CLAUSEO_CODEX_NETWORK"
             ]
         );
     }

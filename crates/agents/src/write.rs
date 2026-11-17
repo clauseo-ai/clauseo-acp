@@ -425,6 +425,34 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+/// Replaces the file at `path` with `bytes` as [`write_atomic`] does, the temp file given
+/// `path`'s permissions before the rename, so the new file keeps its mode (codex-acp's patched
+/// `dist/index.js`, 0755 in its tarball, `install::codex_patch`).
+pub(crate) fn replace_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let permissions = std::fs::metadata(path)?.permissions();
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(name);
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    let written = (|| {
+        let mut file = open_truncate(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::set_permissions(&tmp, permissions)
+    })();
+    match written.and_then(|()| std::fs::rename(&tmp, path)) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            drop(remove_file(&tmp));
+            Err(err)
+        }
+    }
+}
+
 /// Writes the `sh` script `bytes` to `path` atomically, as [`write_atomic`] does, with mode 0700
 /// set before the rename: the sign-in's `BROWSER` shim, which only its owner may run or change.
 #[cfg(unix)]

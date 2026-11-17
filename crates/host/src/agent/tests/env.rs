@@ -116,7 +116,8 @@ fn the_drop_lists_are_the_plan_readers() {
     let markers = crate::agent::spec::DROPPED_INHERITED.join(" ");
     assert_eq!(markers, "NO_BROWSER CLAUDE_CODE_REMOTE");
     let codex = crate::agent::codex::DROPPED_VARS.join(" ");
-    let expected = "CODEX_PATH APP_SERVER_LOGS DEFAULT_AUTH_REQUEST MODEL_PROVIDER";
+    let expected =
+        "CODEX_PATH APP_SERVER_LOGS DEFAULT_AUTH_REQUEST MODEL_PROVIDER CLAUSEO_CODEX_NETWORK";
     assert_eq!(codex, expected);
 }
 
