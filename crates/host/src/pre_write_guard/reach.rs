@@ -5,9 +5,8 @@
 //! fail-closed); one it does not vouch for is judged by its text alone. So is a path that lies,
 //! by its text, in a matter folder the lawyer keeps on a share: never touched.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-use super::MAX_RESOLVED;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{NetEnv, touchable};
 
@@ -42,6 +41,34 @@ impl Reach {
         }
         touchable(path, &self.matter, disk)
     }
+}
+
+/// The longest path [`existing_resolved`] resolves; a longer one (no OS opens it) is only
+/// normalised by its text, so a huge word costs time in proportion to its length.
+const MAX_RESOLVED: usize = 4096;
+
+/// Where `path` leads: the network-safe walk's resolved path ([`Reach::walked`]: every link
+/// followed, `..` taken as the OS takes it, missing names kept as written), used as it is and
+/// never canonicalised again. A path over [`MAX_RESOLVED`] bytes, or one the walk does not vouch
+/// for (a network location, or one it can't look at), is only normalised by its text
+/// ([`lexical`]), never touched.
+pub(super) fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
+    reach.walked(path).unwrap_or_else(|| lexical(path))
+}
+
+/// `path` with `.` parts dropped and each `..` taking the part before it off.
+pub(super) fn lexical(path: &Path) -> PathBuf {
+    let mut resolved = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => resolved.push(part),
+        }
+    }
+    resolved
 }
 
 #[cfg(test)]

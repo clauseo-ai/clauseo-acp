@@ -164,12 +164,13 @@ pub(super) fn target(args: &[OsString]) -> Option<(PathBuf, RecordId)> {
 }
 
 /// The record of `refusal` for the hook input `bytes`, from Claude Code's entry when `claude`;
-/// `None` for a refusal the lawyer is not told about (`stetdoc mcp`).
+/// `None` for a refusal the lawyer is not told about (`stetdoc mcp`, Codex's home).
 pub(super) fn record_of(refusal: &Refusal, bytes: &[u8], claude: bool) -> Option<Record> {
     let (reason, path) = match refusal {
         Refusal::HeldOpen(path) => (Reason::HeldOpen, Some(path.clone())),
         Refusal::CodexFolder => (Reason::CodexFolder, None),
-        Refusal::StetdocServe => return None,
+        // No notice kind names Codex's home yet: the agent is told, the lawyer reads its reply.
+        Refusal::StetdocServe | Refusal::CodexHome => return None,
     };
     let tool = serde_json::from_slice::<Value>(bytes)
         .ok()

@@ -282,7 +282,9 @@ mod view;
 mod window;
 mod write;
 
-pub use agent::loads::{GUARD_EXE, codex_guard_program, codex_hook_config};
+pub use agent::loads::{
+    GUARD_EXE, codex_guard_program, codex_hook_config, codex_hook_config_with_home,
+};
 pub use agent::login_link::{
     AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,
 };

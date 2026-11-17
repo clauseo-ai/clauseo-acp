@@ -80,6 +80,21 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
 /// [`RECORD_ID_FLAG`]: crate::pre_write_guard::RECORD_ID_FLAG
 pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Option<Value> {
+    codex_hook_config_with_home(program, record, None)
+}
+
+/// [`codex_hook_config`], with [`CODEX_HOME_FLAG`] and Codex's home `home` last on both lines,
+/// so the guard refuses a target there; the line, and so its `trusted_hash`, change with it. The
+/// Windows line quotes it as it quotes the program and the record (`ps_quoted`), so any
+/// character of a user name reaches the guard as it is. A home with no UTF-8 spelling goes out
+/// of both lines, with a warning. The launch passes its `CODEX_HOME` (`actor::turn::agents`).
+///
+/// [`CODEX_HOME_FLAG`]: crate::pre_write_guard::CODEX_HOME_FLAG
+pub fn codex_hook_config_with_home(
+    program: &Path,
+    record: Option<(&Path, &str)>,
+    home: Option<&Path>,
+) -> Option<Value> {
     let program = program.to_str()?;
     let hex = |id: &&str| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit());
     let record = record.and_then(|(file, id)| Some((file.to_str()?, Some(id).filter(hex)?)));
@@ -97,6 +112,15 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
             id_flag.to_owned(),
             ps_quoted(id),
         ]);
+    }
+    if let Some(home) = home {
+        let home_flag = crate::pre_write_guard::CODEX_HOME_FLAG;
+        if let Some(home) = home.to_str() {
+            command = format!("{command} {home_flag} {}", posix_quoted(home));
+            windows.extend([home_flag.to_owned(), ps_quoted(home)]);
+        } else {
+            tracing::warn!("Codex's home is not UTF-8: the guard's hook line lacks it");
+        }
     }
     let command_windows = ps_command(&windows);
     let effective = if cfg!(windows) {
@@ -224,7 +248,10 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{codex_hook_config, fingerprint, hook_hash, posix_quoted, ps_command, ps_quoted};
+    use super::{
+        codex_hook_config, codex_hook_config_with_home, fingerprint, hook_hash, posix_quoted,
+        ps_command, ps_quoted,
+    };
 
     /// Codex's own test, `config/src/fingerprint_tests.rs` at rust-v0.162.1: the TOML
     /// `rows = [{ z = 2, a = 1 }, { z = 4, a = 3 }]` with `[nested] z = "text"`, `a = true`.
@@ -403,6 +430,41 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    /// Codex's home goes last on both lines, quoted for each shell, so a Windows user name with
+    /// `%`, `'`, `’`, `&` and a space stays one word that expands nothing (run through PowerShell
+    /// into the guard on Windows CI: `tests/guard_windows.rs`); the trust hash covers it.
+    #[test]
+    fn codex_home_goes_last_quoted_for_each_shell() {
+        let program = Path::new("/opt/clauseo/clauseo-desktop");
+        let home =
+            "C:\\Users\\O'Brien \u{2019}Q\u{2019} 100% & Co\\AppData\\agents\\codex-acp\\home";
+        let config = codex_hook_config_with_home(program, None, Some(Path::new(home))).unwrap();
+        let hook = &config["PreToolUse"][0]["hooks"][0];
+        let windows = ps_command(&[
+            "'/opt/clauseo/clauseo-desktop'".to_owned(),
+            "--pre-write-guard".to_owned(),
+            "--codex-home".to_owned(),
+            "'C:\\Users\\O''Brien \u{2019}\u{2019}Q\u{2019}\u{2019} 100% & Co\\AppData\\agents\\\
+             codex-acp\\home'"
+                .to_owned(),
+        ]);
+        let posix = format!(
+            "'/opt/clauseo/clauseo-desktop' --pre-write-guard --codex-home {}",
+            posix_quoted(home)
+        );
+        assert_eq!(hook["commandWindows"], windows);
+        assert_eq!(hook["command"], posix);
+        let effective = if cfg!(windows) { &windows } else { &posix };
+        let state = config["state"].as_object().unwrap();
+        let [(_, entry)] = state.iter().collect::<Vec<_>>()[..] else {
+            panic!("one trust entry: {state:?}");
+        };
+        assert_eq!(
+            entry["trusted_hash"],
+            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 30)
+        );
     }
 }
 

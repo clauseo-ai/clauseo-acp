@@ -8,6 +8,7 @@
 //! from a data folder under `…\O'Brien & Sons Zoë Q\…` (a record path over 260 characters); a
 //! harmless step ends with 0; a held file under a Devanagari name, fifty times, and one in
 //! `Müller GmbH` are refused by name; a guard that isn't there ends with 2 and the shared line.
+//! Codex's home under a user name with `%`, `'`, `’` and `&` reaches the guard as it is.
 //! The program is a console program, and its GUI twin (the same bytes, Subsystem 2) run by the
 //! same line gives no answer of the guard's: the check that these tests catch a GUI target.
 //! The trust hash is the one Codex computes (`config/src/fingerprint.rs`). Prints timings.
@@ -270,6 +271,51 @@ fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folde
         assert_eq!(line["reason"], "codex_folder", "{line}");
         assert_eq!(line["agent"], "codex", "{line}");
         assert_eq!(line["tool"], "Bash", "{line}");
+    }
+}
+
+/// Codex's home under a Windows user named with `%`, `'`, `’`, `&` and spaces: the line
+/// (trusted by its hash) hands the guard that folder exactly, so a patch into it by its full
+/// path is refused as one into Codex's home, and the same patch into the matter goes on.
+#[test]
+fn codex_home_under_a_user_name_with_percent_and_quotes_reaches_the_guard_exactly() {
+    let root = tempfile::Builder::new()
+        .prefix("guard-home-")
+        .tempdir()
+        .unwrap();
+    let user = folder(
+        root.path(),
+        "O'Brien \u{2019}Q\u{2019} 100% & %USERNAME% Co",
+    );
+    let matter = folder(user.path(), "matter");
+    let home = folder(user.path(), "home");
+    let guard = guard_for_app();
+    let config =
+        clauseo_host::codex_hook_config_with_home(&guard, None, Some(home.path())).unwrap();
+    let command = config["PreToolUse"][0]["hooks"][0]["commandWindows"]
+        .as_str()
+        .unwrap();
+    let state = &config["state"][r"C:\<session-flags>\config.toml:pre_tool_use:0:0"];
+    assert_eq!(
+        state["trusted_hash"],
+        codex_hash(command),
+        "the trust check"
+    );
+    let patch_into = |folder: &Path| {
+        let target = folder.join("AGENTS.md");
+        let patch = format!(
+            "*** Begin Patch\n*** Add File: {}\n+x\n*** End Patch\n",
+            target.display()
+        );
+        codex_input(matter.path(), "apply_patch", &patch)
+    };
+    for shell in &shells() {
+        let (output, _) = as_codex_runs_it(shell, command, &patch_into(home.path()), user.path());
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
+        assert!(errors.contains("(CODEX_HOME)"), "{shell}: {errors}");
+        let (output, _) = as_codex_runs_it(shell, command, &patch_into(matter.path()), user.path());
+        assert_eq!(output.status.code(), Some(0), "{shell}: {output:?}");
     }
 }
 

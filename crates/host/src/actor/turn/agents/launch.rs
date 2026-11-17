@@ -84,7 +84,7 @@ pub(super) fn launch(
         let record = record
             .as_ref()
             .map(|(file, id)| (file.as_path(), id.as_str()));
-        let hooks = codex_hooks(actor, record);
+        let hooks = codex_hooks(actor, record, &prepared.home);
         let guard = hooks.is_some();
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
@@ -178,7 +178,8 @@ pub(super) fn launch(
 /// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
 /// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
 /// group, the guard's, which records its refusals in the session's `record` file, with that
-/// file's identity, for the lawyer (`updates/guard_blocks.rs`); none when the launch prep made
+/// file's identity, for the lawyer (`updates/guard_blocks.rs`), and Codex's `home`, whose files
+/// the guard refuses (`pre_write_guard::CODEX_HOME_FLAG`); none when the launch prep made
 /// no record (a Claude session). `None` with no guard program, or (with a warning) one that
 /// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
 /// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
@@ -186,13 +187,14 @@ pub(super) fn launch(
 fn codex_hooks(
     actor: &Actor,
     record: Option<(&std::path::Path, &str)>,
+    home: &std::path::Path,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Some(hooks) = &actor.codex_hooks {
         return Some(hooks.clone());
     }
     // On Windows the console program beside the app, which PowerShell waits for.
     let program = agent::loads::codex_guard_program(actor.pre_write_guard.as_deref()?);
-    let config = agent::loads::codex_hook_config(&program, record);
+    let config = agent::loads::codex_hook_config_with_home(&program, record, Some(home));
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::warn!(
             "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \

@@ -78,17 +78,24 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     // Windows the hook names the console program beside the app (`codex_guard_program`).
     let program = clauseo_host::codex_guard_program(Path::new(PROGRAM));
     let program = program.display();
+    // Codex's home goes last, for the guard to refuse a target there.
+    let home = dir.data_dir().join("agents").join("codex-acp").join("home");
     let (record, id) = windows
         .strip_prefix(&format!(
             "$global:LASTEXITCODE = -1; & '{program}' --pre-write-guard --record '"
         ))
         .and_then(|rest| rest.split_once("' --record-id '"))
-        .and_then(|(record, rest)| Some((record, rest.split_once("';")?.0)))
+        .and_then(|(record, rest)| {
+            let (id, rest) = rest.split_once("' --codex-home '")?;
+            let quoted_home = rest.split_once("';")?.0;
+            (quoted_home == home.display().to_string()).then_some((record, id))
+        })
         .unwrap_or_else(|| panic!("{windows}"));
     let record = PathBuf::from(record);
     let posix = format!(
-        "'{program}' --pre-write-guard --record '{}' --record-id {id}",
-        record.display()
+        "'{program}' --pre-write-guard --record '{}' --record-id {id} --codex-home '{}'",
+        record.display(),
+        home.display()
     );
     assert_eq!(hook["command"], posix);
     assert!(dir.data_dir().to_str().unwrap().contains("Zoë Q"));
@@ -128,7 +135,8 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
         );
     }
     let guard = clauseo_host::codex_guard_program(Path::new(PROGRAM));
-    let expected = clauseo_host::codex_hook_config(&guard, Some((&record, id)));
+    let expected =
+        clauseo_host::codex_hook_config_with_home(&guard, Some((&record, id)), Some(&home));
     assert_eq!(config["hooks"], expected.unwrap());
     host.shutdown();
     assert!(!folder.exists(), "the guard folder goes with the session");
