@@ -53,8 +53,8 @@ fn answer(thread: ThreadId, events: &Events, n: usize, option: &str) -> HostComm
     }
 }
 
-/// The file change and the command offer allow once and cancel only; the session option, the
-/// prefix rule's and the unknown one are refused when named.
+/// The file change offers allow once, its session option ("For this conversation") and cancel;
+/// the command loses the prefix rule and the unknown one, each refused when named.
 #[test]
 fn a_codex_command_card_never_offers_the_prefix_rule() {
     let (_dir, host, thread, mut events) =
@@ -62,13 +62,9 @@ fn a_codex_command_card_never_offers_the_prefix_rule() {
     let (turn, _) = host.prompt(thread, "Mark it done.");
     assert_eq!(
         offered(&mut events, 0),
-        ["allow_once", "cancel"],
+        ["allow_once", "allow_for_session", "cancel"],
         "{}",
         events.dump()
-    );
-    host.refused(
-        answer(thread, &events, 0, "allow_for_session"),
-        ErrorCode::PermissionUnknownOption,
     );
     assert_eq!(
         host.ok(answer(thread, &events, 0, "allow_once")),
@@ -110,23 +106,22 @@ fn a_codex_network_amendment_never_reaches_the_card_or_the_agent() {
     host.shutdown();
 }
 
-/// The MCP card loses `allow_session` and `allow_always`, each refused when named.
+/// The MCP card keeps `allow_session` ("For this conversation") and loses `allow_always`,
+/// refused when named.
 #[test]
 fn a_codex_mcp_card_never_offers_always_allow() {
     let (_dir, host, thread, mut events) = codex_turn("codex_no_mcp_always", "codex-no-mcp-always");
     let (turn, _) = host.prompt(thread, "Search the docs.");
     assert_eq!(
         offered(&mut events, 0),
-        ["allow_once", "cancel"],
+        ["allow_once", "allow_session", "cancel"],
         "{}",
         events.dump()
     );
-    for option in ["allow_session", "allow_always"] {
-        host.refused(
-            answer(thread, &events, 0, option),
-            ErrorCode::PermissionUnknownOption,
-        );
-    }
+    host.refused(
+        answer(thread, &events, 0, "allow_always"),
+        ErrorCode::PermissionUnknownOption,
+    );
     assert_eq!(
         host.ok(answer(thread, &events, 0, "allow_once")),
         CommandOutcome::Done

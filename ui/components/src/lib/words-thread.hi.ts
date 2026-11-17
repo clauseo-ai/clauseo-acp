@@ -101,6 +101,10 @@ export const HI = {
     "इस मामले के लिए अनुमति दी गई। Clauseo ने {paper} का नया संस्करण सहेजा।",
   "Not allowed. Clauseo left {paper} as it was.":
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
+  // ChatGPT's allow-always answers last the conversation only (UC-920 to UC-922; provisional; hi: later)
+  "For this conversation": null,
+  "Allowed for this conversation.": null,
+  "Allowed for this conversation. Clauseo saved a new version of {paper}.": null,
   // the prompt's line for Claude's own plan note, in place of the call's title: a provisional draft (stage C #418)
   "Claude wants to save its plan as a note in its own folder, not in this matter.":
     "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",

@@ -564,3 +564,18 @@ test("a refused prompt folds to its line behind a cross, an allowed one behind t
   await again({ state: "once" });
   expect(iconIn($(".perm-done"), IconAccept, 14, "perm-done-icon")).not.toBeNull();
 });
+
+// ChatGPT's allow-always answers last the conversation only: the button and the folded lines say so, never the matter
+test("scope conversation: the allow-always answer and its folded lines name the conversation", async () => {
+  await show({ offered: ["once", "always", "deny"], testIds, scope: "conversation" });
+  expect($('[data-testid="perm-always"]').querySelector(".deva-nudge")?.textContent).toBe(
+    "For this conversation",
+  );
+  await again({ state: "always", scope: "conversation", done: true });
+  expect(host?.textContent).toContain(
+    "Allowed for this conversation. Clauseo saved a new version of Notice to the bank.",
+  );
+  await again({ state: "always", scope: "conversation", done: false });
+  expect(host?.textContent).toContain("Allowed for this conversation.");
+  expect(host?.textContent).not.toContain("this matter");
+});
