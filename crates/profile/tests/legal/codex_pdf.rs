@@ -2,9 +2,9 @@
 
 /// Codex has no PDF input, so where Clauseo's `pdftoppm` is on its `PATH` the desktop tells it
 /// to render pages into its work folder and view them, and that `pdftotext` prints a PDF's text
-/// with OCR for scans, and to read every PDF only with them and `pdfinfo` (`setup/hook.rs`). The profile's own instructions never say so, for either
-/// agent: the tools are not everywhere. `budgets.rs`'s `CODEX_MAX` counts these lines all the same,
-/// as every line that can ship.
+/// with OCR for scans, and to read every PDF only with them and `pdfinfo` (`setup/hook.rs`). The
+/// profile's own instructions never say so, for either agent: the tools are not everywhere.
+/// `budgets.rs`'s `CODEX_MAX` counts these lines all the same, as every line that can ship.
 #[test]
 fn the_pdf_lines_are_three_short_sentences_the_profile_never_adds_itself() {
     use clauseo_profile::instructions::{codex_pdf, word_count};
