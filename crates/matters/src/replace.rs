@@ -9,9 +9,10 @@
 //! 1. The ids are checked.
 //! 2. One walk of the folder against the stat cache, as any checkpoint's.
 //! 3. The checks: the file is not held open (`matter.file_locked`), is one the walk read (not
-//!    over the size cap, not cloud-only: `word.edit_failed`, as a retry would meet the same),
-//!    may be written, and its content as walked is exactly the bytes the new content was made
-//!    from (`word.revisions_stale` otherwise).
+//!    over the size cap, not cloud-only, even one carried forward with its blob still held:
+//!    `word.edit_failed`, as a retry would meet the same), may be written, and its content as
+//!    walked is exactly the bytes the new content was made from (`word.revisions_stale`
+//!    otherwise).
 //! 4. The walk is committed as the `outside-edits` checkpoint if the folder changed.
 //! 5. The new content is stored as a blob, then `writeback::apply` stages it beside the file,
 //!    checks the file's stat against that checkpoint's cache again and renames. A file changed
@@ -36,7 +37,8 @@ use crate::history::{HistoryStore, Oid};
 use crate::no_download::NoDownload;
 use crate::stat::{EntryState, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, ReplaceFile, Replaced, Settings, TimelineEntry};
-use crate::writeback::{self, Failed, Op, writable};
+use crate::undo::now_skipped;
+use crate::writeback::{self, Failed, Names, Op, writable};
 use crate::{Error, locks};
 
 /// See [`crate::Matter::replace_file`]. The steps are the module's.
@@ -71,7 +73,11 @@ pub(crate) fn replace(
     }
     let found = find_by_path(walked.entries(), path.as_str(), |entry| entry.path.as_str())
         .map(|entry| entry.state);
-    if matches!(found, Some(EntryState::Skipped | EntryState::Unread(_))) {
+    // Cloud-only now with an entry read: carried forward by the walk (its stat as when read, so
+    // its blob still held), or evicted since. Not one the walk read either way.
+    if matches!(found, Some(EntryState::Skipped | EntryState::Unread(_)))
+        || now_skipped(&mut Names::default(), folder, settings, path)?
+    {
         return Err(Error::NotVersioned { path: path.clone() });
     }
     let expected = hash_of(core, settings, request.expected)?;

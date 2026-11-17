@@ -4,6 +4,7 @@
 //! trailer); read changed it is listed, but undo keeps it (`Undone::unversioned`).
 
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use clauseo_matters::{Error, Limits};
 use clauseo_protocol::{SkippedFile, SkippedFileReason};
@@ -38,6 +39,35 @@ fn first_read_lines(fx: &Fixture) -> Vec<String> {
 fn cloud_only(fx: &Fixture, rel: &str, bytes: &[u8]) {
     fx.write(rel, bytes);
     fx.probe.mark(fx.file(rel));
+}
+
+/// The download the agent's read makes shows a modification time 40 ns off the placeholder's
+/// (iCloud Drive rounds it on the first download, seen on the Mac mini): `notes.txt` is still
+/// read unchanged, a baseline, and not a change with no earlier copy.
+#[test]
+fn a_first_download_40_ns_off_the_placeholder_s_time_is_a_baseline() {
+    let fx = Fixture::new("first-read-40ns");
+    fx.write("brief.txt", "draft");
+    cloud_only(&fx, "notes.txt", b"the lawyer's notes");
+    let past = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    crate::support::set_mtime(fx.file("notes.txt"), past);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+
+    fx.probe.unmark(fx.file("notes.txt"));
+    crate::support::set_mtime(fx.file("notes.txt"), past + Duration::from_nanos(40));
+    fx.write("brief.txt", "final");
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["notes.txt", "brief.txt"]))
+        .unwrap();
+    assert_eq!(
+        created(checkpoint, 3),
+        [modified("brief.txt", b"draft", b"final")]
+    );
+    assert_eq!(
+        first_read_lines(&fx),
+        ["Clauseo-Baseline: cloud-only notes.txt"]
+    );
 }
 
 /// The `OneDrive` case: `notes.txt` is a placeholder Clauseo never read; the agent reads it, so

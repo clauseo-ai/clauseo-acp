@@ -11,14 +11,14 @@
 //! Why a tolerance: iCloud Drive hands a file's modification time back rounded once, on its
 //! first download (seen on the Mac mini, 2026-11-17, three runs: +40 ns, -111 ns and +95 ns,
 //! e.g. 1794905650.790433128 local and after eviction, 1794905650.790433168 after the first
-//! download, stable after that). Evicting keeps the time and the size exactly. `OneDrive` has no
-//! row yet.
+//! download, stable after that). Evicting keeps the time and the size exactly. `OneDrive` is
+//! expected to behave alike and is not yet measured.
 
 use crate::stat::{FileTime, Stat};
 
-/// The first-read rule's tolerance (`first_read.rs`, `gone.rs`, through
-/// `skip_record::same_stat`): a file skipped as cloud-only, read after the agent's read
-/// downloaded it, is unchanged (a baseline, not changed with no earlier copy) within this. 1 us.
+/// The first-read rule's tolerance (`first_read.rs`, through `skip_record::same_stat`): a file
+/// skipped as cloud-only, read after the agent's read downloaded it, is unchanged (a baseline,
+/// not a change) within this. 1 us.
 pub(crate) const FIRST_READ_NS: u64 = 1_000;
 
 /// Carrying a held file forward (`checkpoint/walk_folder.rs` `carried`): a file found cloud-only
