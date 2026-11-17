@@ -11,6 +11,7 @@ import { PROGRAM_BLOCKED, PROGRAM_MAC, PROGRAM_MISSING } from "./words-errors-pr
 import { MATTER_WORDS } from "./words-errors-matter.ts";
 import { refusedKey, type RefusedDetail } from "./words-errors-refused.ts";
 import { writtenKey } from "./words-errors-written.ts";
+import { START_UNREACHABLE } from "./words-errors-start.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -252,6 +253,8 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart where agent.launch_failed has it. App-track English; copy review pending, Hindi later
   "agent.home_failed":
     "Claude didn't start, because Clauseo couldn't set up the folder it keeps for Claude on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
+  // provisional (U3-err-agent.start_unreachable): online, Clauseo couldn't reach the agent at its start
+  "agent.start_unreachable": START_UNREACHABLE.claude,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -317,6 +320,7 @@ const PLANNED: Partial<
     named: PROGRAM_MISSING.named,
     nameless: PROGRAM_MISSING.nameless,
   },
+  "agent.start_unreachable": START_UNREACHABLE,
   // provisional (before-launch item 3), as ERROR_WORDS' sentence
   "agent.start_offline": {
     chatgpt:

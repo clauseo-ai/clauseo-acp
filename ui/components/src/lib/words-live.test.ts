@@ -449,3 +449,23 @@ test("agent.program_missing and agent.program_blocked: each names the thread's a
     );
   }
 });
+
+// agent.start_unreachable names the thread's agent, the same on every computer; no Hindi yet, so the English stands.
+test("agent.start_unreachable names the thread's agent on every computer", () => {
+  const code = "agent.start_unreachable";
+  const claude =
+    "Claude didn't start, because Clauseo couldn't reach Claude from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.";
+  expect(errorWords("en", code)).toBe(claude);
+  expect(errorWords("en", code, undefined, { platform: "mac", parent: null })).toBe(claude);
+  expect(errorWords("hi", code)).toBe(claude);
+  expect(errorWords("en", code, CODEX)).toBe(
+    "ChatGPT didn't start, because Clauseo couldn't reach ChatGPT from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
+  );
+  expect(errorWords("en", code, named("gemini"))).toMatch(
+    /^gemini didn't start, because Clauseo couldn't reach gemini /,
+  );
+  for (const none of [null, "", "  "])
+    expect(errorWords("en", code, named(none))).toBe(
+      "The AI didn't start, because Clauseo couldn't reach it from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
+    );
+});

@@ -201,6 +201,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentKeyDenied,
             "a stored API key could not be read: the key store refused the read",
         ),
+        failed(
+            ErrorCode::AgentStartUnreachable,
+            "a start request failed on its connection; online, the probe did not get through",
+        ),
     ]
 }
 

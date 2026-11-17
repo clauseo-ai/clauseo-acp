@@ -1568,7 +1568,8 @@ expression: counts_schema()
         "agent.home_failed",
         "matter.file_refused",
         "matter.file_write_failed",
-        "agent.key_denied"
+        "agent.key_denied",
+        "agent.start_unreachable"
       ],
       "type": "string"
     },

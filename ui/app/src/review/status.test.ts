@@ -130,14 +130,15 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
           ? ["only.put_back", "others.put_back", "damaged"].map((c) => `U3-err-${code}.${c}`)
           : [`U3-err-${code}`],
     );
-  // agent.program_missing's and agent.program_blocked's agent and Mac lines are U3-err-<code>.<variant>
-  // (registry-program.tsx), after the codes' own; agent.home_failed's lines per plan take its own id with the plan's
-  // suffix (registry-home-failed.tsx)
+  // agent.program_missing's, agent.program_blocked's and agent.start_unreachable's agent and Mac lines are
+  // U3-err-<code>.<variant> (registry-program.tsx), after the codes' own; agent.home_failed's lines per plan take its
+  // own id with the plan's suffix (registry-home-failed.tsx)
   const variant = (id: string) =>
-    /^U3-err-agent\.program_(missing|blocked)\.(chatgpt|named|nameless|mac)/.test(id) ||
-    /^U3-err-agent\.home_failed\.(chatgpt|named|nameless)$/.test(id);
+    /^U3-err-agent\.(program_(missing|blocked)|start_unreachable)\.(chatgpt|named|nameless|mac)/.test(
+      id,
+    ) || /^U3-err-agent\.home_failed\.(chatgpt|named|nameless)$/.test(id);
   expect(ids.filter((id) => id.startsWith("U3-err-") && !variant(id))).toEqual(codes);
-  expect(ids.filter(variant)).toHaveLength(13);
+  expect(ids.filter(variant)).toHaveLength(16);
   expect(ids.filter((id) => id.startsWith("U3-err-agent.home_failed."))).toEqual([
     "U3-err-agent.home_failed.chatgpt",
     "U3-err-agent.home_failed.named",
