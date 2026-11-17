@@ -568,6 +568,7 @@ impl Actor {
                 let _gone = ready.send(Ok(()));
                 scratch::serving(self);
                 update::serving(self);
+                browser_install::serving(self);
                 counting::app_opened(self);
                 turn::queued_at_start(self);
                 None

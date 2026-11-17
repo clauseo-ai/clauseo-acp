@@ -12,7 +12,8 @@
 //!   cancelled one is still ending, it answers `Done` and a new download starts once that one's
 //!   `Failed` is out. Neither command stores a receipt. The lawyer's download waits out a
 //!   dropped connection (`Offline`, then a new try every [`install::OFFLINE_RETRY`]).
-//! - The daily check: a timer thread ticks at start and then once a day while the host runs;
+//! - The daily check: a timer thread ticks at start (its check waits until the host serves, since
+//!   start-up waits for no download to run) and then once a day while the host runs;
 //!   each tick with a downloaded copy on disk runs the same thread, quietly: it updates the
 //!   record of Stables seen, downloads when Stable is newer, and removes old copies no session
 //!   runs. Quiet means it publishes nothing until it starts downloading (a check that finds the
@@ -89,6 +90,9 @@ pub(crate) struct BrowserInstall {
     restart: bool,
     /// Dropped to stop the daily timer.
     timer: Option<std::sync::mpsc::Sender<()>>,
+    /// A tick came during start-up: its check runs once the host serves, so a download never
+    /// holds start-up back (start-up waits for no download to run).
+    check_after_start: bool,
 }
 
 /// A running download.
@@ -111,6 +115,7 @@ impl BrowserInstall {
             latest: None,
             restart: false,
             timer: None,
+            check_after_start: false,
         }
     }
 
@@ -206,10 +211,18 @@ pub(super) fn install(actor: &mut Actor, ctx: &CommandCtx) {
     actor.finish_command(ctx.id, result);
 }
 
-/// The daily tick: a quiet check, unless one runs or the firm forbids downloads.
+/// The daily tick: a quiet check, unless one runs or the firm forbids downloads. During
+/// start-up it waits for [`serving`].
 fn check(actor: &mut Actor) {
-    let stopping = matches!(actor.phase, super::state::HostPhase::Stopping(_));
-    if stopping || actor.browser_install.running.is_some() {
+    match actor.phase {
+        super::state::HostPhase::Starting(_) => {
+            actor.browser_install.check_after_start = true;
+            return;
+        }
+        super::state::HostPhase::Stopping(_) => return,
+        super::state::HostPhase::Serving => {}
+    }
+    if actor.browser_install.running.is_some() {
         return;
     }
     if !actor.effective.settings().browser.allow_download {
@@ -397,6 +410,13 @@ impl Drop for LastState {
             };
             let _gone = post.try_send(Input::BrowserInstall(Step::State(state)));
         }
+    }
+}
+
+/// The host now serves: a tick that came during start-up gets its check.
+pub(super) fn serving(actor: &mut Actor) {
+    if std::mem::take(&mut actor.browser_install.check_after_start) {
+        check(actor);
     }
 }
 
