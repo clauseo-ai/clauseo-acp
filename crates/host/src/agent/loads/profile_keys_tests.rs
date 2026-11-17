@@ -165,9 +165,10 @@ fn each_bare_webfetch_form_is_dropped_alone() {
     }
 }
 
-/// Hook `allowedTools` and `disallowedTools` entries must be plain one-rule strings of tool-name
-/// characters: an entry that is no string, or holds any other character outside its
-/// parentheses, is dropped alone, and a plain rule beside it stays.
+/// Hook `allowedTools` entries must be plain one-rule strings of tool-name characters: an entry
+/// that is no string, or holds any other character outside its parentheses, is dropped alone,
+/// and a plain rule beside it stays. In `disallowedTools` only a non-string is dropped; a string
+/// stays as it is.
 #[test]
 fn hook_entries_that_are_not_plain_rule_strings_are_dropped_alone() {
     let odd = [
@@ -195,7 +196,11 @@ fn hook_entries_that_are_not_plain_rule_strings_are_dropped_alone() {
             let allowed = options["allowedTools"].as_array().unwrap();
             let disallowed = options["disallowedTools"].as_array().unwrap();
             assert!(!allowed.contains(&entry), "{entry}: {allowed:?}");
-            assert!(!disallowed.contains(&entry), "{entry}: {disallowed:?}");
+            assert_eq!(
+                disallowed.contains(&entry),
+                entry.is_string(),
+                "{entry}: {disallowed:?}"
+            );
             assert!(allowed.iter().all(Value::is_string), "{entry}: {allowed:?}");
             assert!(
                 disallowed.iter().all(Value::is_string),
@@ -205,8 +210,30 @@ fn hook_entries_that_are_not_plain_rule_strings_are_dropped_alone() {
                 allowed.contains(&json!("Bash(git status)")),
                 "{entry}: {allowed:?}"
             );
-            assert_eq!(disallowed[0], "Task", "{entry}: {disallowed:?}");
+            assert!(
+                disallowed.contains(&json!("Task")),
+                "{entry}: {disallowed:?}"
+            );
         }
+    }
+}
+
+/// A hook deny written as two rules in one string survives whole (the CLI splits it into two
+/// denies); a non-string beside it is dropped.
+#[test]
+fn a_hooks_comma_deny_survives_and_a_non_string_deny_is_dropped() {
+    let hook = json!({"disallowedTools": ["Read,Write", ["Bash"], 3, "Task"]});
+    for search in [ON, LOCKED_OFF] {
+        let options = options(&hook, &keys(search, Login::FirstParty));
+        let disallowed = strings(&options["disallowedTools"]);
+        assert_eq!(disallowed[..2], ["Read,Write", "Task"]);
+        assert!(
+            options["disallowedTools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(Value::is_string)
+        );
     }
 }
 
