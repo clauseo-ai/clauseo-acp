@@ -28,7 +28,9 @@ const CLAUDE_MAX: usize = 2250;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
 /// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
-const CODEX_MAX: usize = 2000;
+/// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
+/// 2016.
+const CODEX_MAX: usize = 2040;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
