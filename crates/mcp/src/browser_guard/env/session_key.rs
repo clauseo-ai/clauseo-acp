@@ -11,8 +11,8 @@ use super::set_cdp;
 /// pipe only to a process that proves it, and its CLI talks only to a daemon that proves it, so
 /// an unsandboxed process of the user (Claude's shell on Windows has no OS sandbox) can no
 /// longer send the daemon raw commands past [`crate`]'s filter. Only the agent-browser that
-/// [`agent_env`] is for gets it, created hardened in the guard's job (`job.rs`); it passes it
-/// to its hardened children only. Never in a file, on a command line, in Chrome's environment
+/// [`agent_env`] is for gets it, created in the guard's job (`job.rs`); it passes it to its
+/// own children only. Never in a file, on a command line, in Chrome's environment
 /// ([`super::chrome_env`]) or the one-shot's, and taken out of agent-browser's output
 /// (`relay/redact.rs`).
 pub(crate) const SESSION_KEY: &str = "AGENT_BROWSER_SESSION_KEY";

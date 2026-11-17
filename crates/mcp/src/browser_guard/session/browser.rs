@@ -7,7 +7,7 @@
 //! the failure carries the reason the agent is told ([`browsers::Unavailable`]); when each one
 //! tried failed, it is the plain "could not start".
 //!
-//! Each browser is launched (`chrome/pipe.rs`; on Windows hardened and in the job), its record
+//! Each browser is launched (`chrome/pipe.rs`; on Windows in the job), its record
 //! written, on Unix its pid told to the reaper before the wait, and then given the start wait to
 //! answer `Browser.getVersion` on the pipe.
 

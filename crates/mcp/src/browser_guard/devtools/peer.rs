@@ -15,9 +15,11 @@
 //!   `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`, read through `proc_info.rs`'s mirror of the header).
 //! - Windows: the socket's owning pid from `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)`, then
 //!   its parent chain (a Toolhelp snapshot) up to agent-browser, each parent created no later
-//!   than its child, so a parent pid Windows reused is never taken for agent-browser. A process
-//!   cannot claim agent-browser as its parent (`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` needs
-//!   `PROCESS_CREATE_PROCESS` on it, which its hardened DACL denies, `harden.rs`).
+//!   than its child, so a parent pid Windows reused is never taken for agent-browser. With no
+//!   protected DACL on agent-browser, a same-user process can claim it as its parent
+//!   (`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` needs only `PROCESS_CREATE_PROCESS` on it, which
+//!   the user's default DACL grants) and pass this check; the relay's secret path and the
+//!   session key (`env.rs` `SESSION_KEY`) are what remain against such a process.
 //!
 //! On macOS and Linux the walk goes down from agent-browser, so a process another one reparented
 //! is never found: an orphan's parent becomes init or launchd, not agent-browser. The browser

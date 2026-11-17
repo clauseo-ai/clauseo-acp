@@ -185,6 +185,14 @@ on stderr and starts no browser (fail closed).
   read another's arguments and environment unless its own Seatbelt profile denies `process-info`,
   which is why the peer check exists.
 
+**Revision, 2026-11-17:** the Windows part is removed. The protected DACL denied the guard's own
+process `PROCESS_DUP_HANDLE`, which `WSADuplicateSocketW` needs to duplicate a socket into the
+current process. That broke std's `TcpStream::try_clone` in the relay (`devtools.rs`) and
+agent-browser's clone of its CDP socket, both failing with "os error 10022" (`WSAEINVAL`), so the
+relay dropped agent-browser. The guard no longer starts a hardened copy of itself, and its
+children get the user's default DACL; Clauseo doesn't try to be safer than the agents' own mode.
+Linux's `PR_SET_DUMPABLE` stays.
+
 ### Which browser
 
 - **Windows** (`browsers.rs`, host `browser/chrome.rs`): the host's choice comes first, but only
