@@ -18,6 +18,6 @@ mod open_probe;
 mod open_unloaded;
 mod open_upstream;
 mod private;
-mod test_net;
+pub(super) mod test_net;
 mod unreachable;
 mod upstream;

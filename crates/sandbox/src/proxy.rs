@@ -384,10 +384,16 @@ pub(crate) fn start_with(
         Some(local) => local,
         None => local_nets(open_browser)?,
     };
-    // Only open mode's browser listener has the name-only path, read when it comes on.
+    // Only open mode's browser listener has the name-only path, read on each probe.
     let firm = open_browser.then(|| {
         options.firm.unwrap_or_else(|| {
-            Arc::new(|| upstream::firm_suffixes(Env::from_process().no_proxy.as_deref()))
+            let last = std::sync::Mutex::new(None::<upstream::Counts>);
+            Arc::new(move || {
+                let mut last = last
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                upstream::firm_suffixes(Env::from_process().no_proxy.as_deref(), &mut last)
+            })
         })
     });
     if config.block.first_unloaded_notice() {

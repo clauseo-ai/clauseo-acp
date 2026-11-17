@@ -12,7 +12,7 @@ use clauseo_blocklist::Current;
 
 use super::test_net::TestNet;
 use crate::proxy::local_net::{LocalNets, OnLink};
-use crate::proxy::name_only::{FirmRead, PROBE_NAMES};
+use crate::proxy::name_only::{FirmRead, probe_names};
 use crate::proxy::net::Network;
 use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Reach, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, ProxyMode, start_with};
@@ -89,6 +89,8 @@ pub(crate) struct Setup {
     pub(crate) read_firm: Option<Arc<FirmRead>>,
     /// Whether local DNS answers the name-only path's probe (not by default).
     pub(crate) dns_works: bool,
+    /// The test network (a new one by default), for a hold set before the proxy starts.
+    pub(crate) net: Arc<TestNet>,
 }
 
 impl Default for Setup {
@@ -111,6 +113,7 @@ impl Default for Setup {
             firm: Vec::new(),
             read_firm: None,
             dns_works: false,
+            net: Arc::default(),
         }
     }
 }
@@ -144,7 +147,7 @@ fn list(entries: &[&str]) -> Allowlist {
 }
 
 pub(crate) fn rig(setup: Setup) -> Rig {
-    let net = Arc::new(TestNet::default());
+    let net = Arc::clone(&setup.net);
     let sink = Arc::new(Sink::default());
     let clock = Arc::new(TestClock::default());
     let records = Arc::new(Records::default());
@@ -204,7 +207,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
         })),
     };
     if setup.dns_works {
-        for probe in PROBE_NAMES {
+        for probe in probe_names() {
             net.name(probe, &["192.0.2.80"]);
         }
     }

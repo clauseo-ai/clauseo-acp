@@ -1,13 +1,14 @@
 //! The address check before an upstream proxy, which gets the name unresolved, and open mode's
 //! name-only path behind it (`proxy::name_only`).
 
+use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use crate::proxy::Exchange;
 use crate::proxy::allowlist::Name;
 use crate::proxy::head::within;
-use crate::proxy::name_only::{FirmNames, LOCAL_DNS_WAIT, Outcome};
+use crate::proxy::name_only::{FirmNames, LOCAL_DNS_WAIT, Outcome, Run};
 use crate::proxy::target::{Kind, Target};
 use crate::{Clock as _, HostRefusal};
 
@@ -46,22 +47,31 @@ pub(super) async fn screen(
 
 /// Open mode's browser listener: local DNS first, its answers checked as on any route. No
 /// answer is `DnsUnavailable` unless the launch's probe (`name_only::Gate`), run again first
-/// when the last is a minute old, finds local DNS unable to answer public names: then the
+/// when `Gate::after_failure` finds it due, finds local DNS unable to answer public names: then the
 /// name-only path ([`by_name`]). While the last probe found it so, local DNS is waited for
-/// [`LOCAL_DNS_WAIT`] at most, else the connect limit, as on any route.
+/// [`LOCAL_DNS_WAIT`] at most, else the connect limit, as on any route; while the first probe
+/// runs, see [`while_first_probe`]. A lookup whose every answer may be reached tells the probe
+/// local DNS may be back (`Gate::answered`).
 async fn screen_open(ctx: &Ctx, target: &Target, domain: &str, proxy: &str) -> Option<HostRefusal> {
     let Some(gate) = &ctx.gate else {
         let found = local_dns(ctx, target, domain, ctx.limits.connect).await;
         return Some(private(ctx, &found).unwrap_or(HostRefusal::DnsUnavailable));
     };
-    let wait = if gate.borrow().name_only() {
-        ctx.limits.connect.min(LOCAL_DNS_WAIT)
+    let first = gate.borrow().first_running();
+    let found = if let Some(first) = first {
+        while_first_probe(ctx, target, domain, first).await
+    } else if gate.borrow().name_only() {
+        let wait = ctx.limits.connect.min(LOCAL_DNS_WAIT);
+        local_dns(ctx, target, domain, wait).await
     } else {
-        ctx.limits.connect
+        local_dns(ctx, target, domain, ctx.limits.connect).await
     };
-    let found = local_dns(ctx, target, domain, wait).await;
     if !found.is_empty() {
-        return private(ctx, &found);
+        let refusal = private(ctx, &found);
+        if refusal.is_none() {
+            gate.borrow_mut().answered();
+        }
+        return refusal;
     }
     let run = gate.borrow_mut().after_failure(ctx.dns_clock.now());
     match run.await {
@@ -96,8 +106,36 @@ fn private(ctx: &Ctx, found: &[SocketAddr]) -> Option<HostRefusal> {
 
 /// Local DNS's answers for `domain`, under `wait`; none when it fails or times out.
 async fn local_dns(ctx: &Ctx, target: &Target, domain: &str, wait: Duration) -> Vec<SocketAddr> {
+    let found = within(wait, ctx.net.resolve(domain, target.port)).await;
+    answers(target, found)
+}
+
+/// Local DNS's answers for `domain` while the first probe (`first`) runs: waited for
+/// [`LOCAL_DNS_WAIT`], then, if it has not answered, for the probe. If the probe finds local DNS
+/// unable to answer, none; else the lookup is waited for up to the connect limit in all. So the
+/// first request on a name-only network waits for the longer of the two, not the connect limit.
+async fn while_first_probe(
+    ctx: &Ctx,
+    target: &Target,
+    domain: &str,
+    first: Run,
+) -> Vec<SocketAddr> {
+    let mut asked = ctx.net.resolve(domain, target.port);
+    let short = ctx.limits.connect.min(LOCAL_DNS_WAIT);
+    if let Some(found) = within(short, &mut asked).await {
+        return answers(target, Some(found));
+    }
+    if matches!(first.await, Outcome::NameOnly(_)) {
+        return answers(target, None);
+    }
+    let rest = ctx.limits.connect.saturating_sub(short);
+    answers(target, within(rest, asked).await)
+}
+
+/// A lookup's answers; none when it failed (`Some(Err)`) or timed out (`None`).
+fn answers(target: &Target, found: Option<io::Result<Vec<SocketAddr>>>) -> Vec<SocketAddr> {
     let host = &target.name;
-    match within(wait, ctx.net.resolve(domain, target.port)).await {
+    match found {
         Some(Ok(found)) => found,
         Some(Err(error)) => {
             tracing::debug!(%host, %error, "egress: local DNS failed");

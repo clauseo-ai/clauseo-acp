@@ -26,6 +26,8 @@ pub(crate) struct TestNet {
     /// Holds the next resolve, or the next connect, until released.
     hold_resolve: Mutex<Option<Hold>>,
     hold_connect: Mutex<Option<Hold>>,
+    /// Holds the next probe lookup until released.
+    hold_probe: Mutex<Option<Hold>>,
 }
 
 /// One held call: it tells the test it arrived, then waits for the release.
@@ -119,6 +121,11 @@ impl TestNet {
         hold(&self.hold_resolve)
     }
 
+    /// The next probe lookup waits until the test releases it.
+    pub(crate) fn hold_next_probe(&self) -> Held {
+        hold(&self.hold_probe)
+    }
+
     /// The next connect waits until the test releases it.
     pub(crate) fn hold_next_connect(&self) -> Held {
         hold(&self.hold_connect)
@@ -136,7 +143,8 @@ impl Network for TestNet {
         })
     }
 
-    /// Never held, and kept apart, so a probe at the proxy's start leaves `resolved` alone.
+    /// Kept apart, so a probe at the proxy's start leaves `resolved` alone; held only by
+    /// [`TestNet::hold_next_probe`].
     fn resolve_alone(
         &self,
         host: &str,
@@ -144,7 +152,11 @@ impl Network for TestNet {
     ) -> BoxFuture<'static, io::Result<Vec<SocketAddr>>> {
         self.probed.lock().unwrap().push(host.to_owned());
         let result = self.answer(host, port);
-        Box::pin(async move { result })
+        let held = self.hold_probe.lock().unwrap().take();
+        Box::pin(async move {
+            wait_for(held).await;
+            result
+        })
     }
 
     fn connect(&self, addr: SocketAddr) -> BoxFuture<'static, io::Result<Async<TcpStream>>> {

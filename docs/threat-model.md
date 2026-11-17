@@ -247,21 +247,24 @@ lawyer's documents somewhere.
 - `built`: Open mode's browser listener lets in names no list vouched for. Behind a firm's
   proxy, local DNS is asked first and a non-public answer is refused. When it gives no answer,
   the name is refused (`DnsUnavailable`) unless a probe that Clauseo runs, not the page, finds
-  that local DNS answers neither of two fixed public names (`github.com`, `registry.npmjs.org`;
-  at the proxy's start, then at most once a minute after a failed lookup; no answer within 3 s
-  counts as none). Only then does the name go on unresolved, and only as a CONNECT to port 443;
+  that local DNS answers none of a few fixed public names (`github.com`, `registry.npmjs.org`,
+  and the OS's own connectivity check: `dns.msftncsi.com` on Windows, `captive.apple.com` on
+  macOS; at the proxy's start, then after a failed lookup: at most once a minute while the path
+  is off, after 10 s while it is on, at once when a lookup has answered since; no answer within
+  3 s counts as none). Only then does the name go on unresolved, and only as a CONNECT to port 443;
   never a single label, a name under `localhost`, `.local`, `.internal`, `.lan`, `.corp`,
   `.home`, `.home.arpa`, `.localdomain` or `.intranet`, a name under a name-to-address service
   (`nip.io`, `sslip.io`, `xip.io`, `localtest.me`, `lvh.me`, `traefik.me`, `local.gd`,
-  `vcap.me`), the firm proxy's own host, or a name under the firm's own suffixes (the domains of
-  `NO_PROXY`, the OS proxy exceptions, the DNS search domains and the VPN domains the OS lists,
-  read when the path comes on and again when the probe's answer changes; if any of them cannot
-  be read, the path stays off). Gap, accepted on networks that really are name-only: the firm's
-  proxy, not Clauseo, resolves the name, so a public name that points at a private address (or
-  rebinds to one) reaches whatever the firm's proxy lets it reach on port 443, and so does an
-  intranet host whose name is under no suffix listed above (PAC rules cannot be listed). What
-  limits it: port 443 only, the firm's own proxy rules, and the refusals above. An agent can
-  still proceed past Chrome's certificate warning; a separate change closes that before launch
+  `vcap.me`, `rbndr.us`, `1u.ms`, `localhost.direct`), the firm proxy's own host, or a name
+  under the firm's own suffixes (the domains of `NO_PROXY`, the OS proxy exceptions, the DNS
+  search domains and the VPN domains the OS lists, read again on every probe that finds the path
+  on; one that is not there counts as none, and if any that is there cannot be read, the path
+  stays off). Gap, accepted on networks that really are name-only: the firm's proxy, not
+  Clauseo, resolves the name, so a public name that points at a private address (or rebinds to
+  one) reaches whatever the firm's proxy lets it reach on port 443, and so does an intranet host
+  whose name is under no suffix listed above (PAC rules cannot be listed). What limits it: port
+  443 only, the firm's own proxy rules, and the refusals above. An agent can still proceed past
+  Chrome's certificate warning; a separate change closes that before launch
 - `built`: It decides by host name and never intercepts TLS: it holds no CA. Gap: a CONNECT to
   an allowed host can carry TLS whose SNI or `Host` names another site on the same address
   (domain fronting)
