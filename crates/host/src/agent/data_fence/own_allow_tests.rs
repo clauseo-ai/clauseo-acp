@@ -543,3 +543,58 @@ fn the_history_reads_are_allowed_for_this_matter_alone() {
         }
     }
 }
+
+/// The denies that hold the history's allow rules to the history (`history_deny_rules`): for
+/// this matter's prefix alone, each of `--no-index`, `--output`, `--exec` and `--remote` after
+/// it is denied (a deny beats the allow); the reads the instructions write are not, and another
+/// matter's commands are in none of these rules.
+#[test]
+fn the_history_denies_hold_the_reads_to_the_history() {
+    use super::super::tests::matches;
+    let own = "01a1d5b4-a291-7649-9fa4-5e91c306e4a0";
+    let other = "01a1d5b4-a291-7649-9fa4-5e91c306e4a1";
+    let deny = |data: &str| LaunchDeny {
+        spellings: vec![PathBuf::from(data)],
+        own_reads: vec![format!("agent-state/{own}/notes")],
+        ..LaunchDeny::default()
+    };
+    let forbidden = [
+        "diff --no-index Notes.txt other.txt",
+        "log --output=x.txt refs/clauseo/timeline",
+        "archive -o v.tar --remote=. --exec=x HEAD",
+        "archive --remote=. HEAD",
+    ];
+    let reads = [
+        "log refs/clauseo/timeline -- Notice.docx",
+        "show 1a2b:Notice.docx",
+        "diff 1a2b 3c4d",
+    ];
+    let hit = |rules: &[String], command: &str| rules.iter().any(|rule| matches(rule, command));
+    // unix-paths-ok: a spelling of `<data>` made into rule text, never opened
+    let mac = "/Users/Ann Mary/Library/Application Support/ai.clauseo.desktop";
+    for (data, sep, windows, quotes) in [
+        (mac, "/", false, &["\""][..]),
+        (DATA, "\\", true, &["\"", ""][..]),
+    ] {
+        let rules = super::history_deny_rules(&deny(data), windows);
+        let tool = if windows { "PowerShell(" } else { "Bash(" };
+        assert!(
+            rules.iter().all(|rule| rule.starts_with(tool)),
+            "{rules:#?}"
+        );
+        for quote in quotes {
+            let git = |matter: &str, rest: &str| {
+                format!(
+                    "git --git-dir={quote}{data}{sep}matters{sep}{matter}{sep}history.git{quote} {rest}"
+                )
+            };
+            for rest in forbidden {
+                assert!(hit(&rules, &git(own, rest)), "{quote}{rest}");
+                assert!(!hit(&rules, &git(other, rest)), "{quote}{rest}");
+            }
+            for rest in reads {
+                assert!(!hit(&rules, &git(own, rest)), "{quote}{rest}");
+            }
+        }
+    }
+}

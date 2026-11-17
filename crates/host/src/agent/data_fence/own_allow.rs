@@ -229,6 +229,12 @@ pub(crate) fn own_shell_glob_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec
 /// The read-only `git` commands of the instructions (`legal.md`, "Version history").
 const HISTORY_READS: [&str; 3] = ["log", "show", "diff"];
 
+/// The options that would take an allowed history read past the history: another file read
+/// (`diff --no-index`), a file written anywhere (`--output`), and a command run (`archive
+/// --remote … --exec …`). git takes no abbreviation of any of them here: `--no-ind…` and
+/// `--outp…` are ambiguous, and `archive` looks for `--remote` and `--exec` whole.
+const HISTORY_DENIED: [&str; 4] = ["--no-index", "--output", "--exec", "--remote"];
+
 /// The allow rules for reading this matter's version history (`agent::history`, found from the
 /// notes in [`LaunchDeny::own_reads`]) with `git`, as the instructions write each command:
 /// `git --git-dir="<history>" log *`, `show *` and `diff *`, so `auto` runs them with no
@@ -236,6 +242,40 @@ const HISTORY_READS: [&str; 3] = ["log", "show", "diff"];
 /// `$VAR` form did not). Bash's off Windows; PowerShell's on Windows, which matches a command
 /// with its quotes dropped, so its rules come with and without them. No other matter's.
 pub(crate) fn history_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    history_rules(deny, windows, |head| {
+        HISTORY_READS
+            .iter()
+            .map(|read| join(&[head, &text(&format!(" {read} ")), &[Piece::Any]]))
+            .collect()
+    })
+}
+
+/// The deny rules that keep [`history_allow_rules`] from letting more through than Claude
+/// Code's classifier would: the same prefix with any of [`HISTORY_DENIED`] after it
+/// (`git --git-dir="<history>" *--output*`). A deny beats an allow; no other command is touched.
+pub(crate) fn history_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    history_rules(deny, windows, |head| {
+        HISTORY_DENIED
+            .iter()
+            .map(|option| {
+                join(&[
+                    head,
+                    &text(" "),
+                    &[Piece::Any],
+                    &text(option),
+                    &[Piece::Any],
+                ])
+            })
+            .collect()
+    })
+}
+
+/// The rules `tails` makes from each spelling of the prefix `git --git-dir="<history>"`.
+fn history_rules(
+    deny: &LaunchDeny,
+    windows: bool,
+    tails: impl Fn(&[Piece]) -> Vec<Vec<Piece>>,
+) -> Vec<String> {
     let places: Vec<String> = deny
         .own_reads
         .iter()
@@ -249,13 +289,12 @@ pub(crate) fn history_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Strin
             (true, false) => continue,
         };
         for quote in quotes {
-            for read in HISTORY_READS {
-                let pieces = join(&[
-                    &text(&format!("git --git-dir={quote}")),
-                    &path,
-                    &text(&format!("{quote} {read} ")),
-                    &[Piece::Any],
-                ]);
+            let head = join(&[
+                &text(&format!("git --git-dir={quote}")),
+                &path,
+                &text(quote),
+            ]);
+            for pieces in tails(&head) {
                 let rule = format!("{tool}({})", render(&pieces, false));
                 if !rules.contains(&rule) {
                     rules.push(rule);
