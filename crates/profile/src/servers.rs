@@ -1,5 +1,5 @@
 //! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard
-//! (Codex and Claude off Windows, [`browser_mcp`]), then `case-law`, the paid case-law
+//! (Codex on every OS, Claude off Windows, [`browser_mcp`]), then `case-law`, the paid case-law
 //! connector through the host's relay (R24).
 
 use std::collections::BTreeMap;
@@ -17,8 +17,8 @@ use crate::placeholders::{
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
 
-/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex and Claude,
-/// on macOS and Linux.
+/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex on every
+/// OS, Claude on macOS and Linux.
 ///
 /// In a Codex turn the shell `agent-browser` cannot work: an approved command still runs under
 /// Seatbelt, because Clauseo's permission profile has deny entries, with no network, and
@@ -32,26 +32,32 @@ pub const BROWSER: &str = "browser";
 /// host's `agent::loads::sandbox`), and a Claude session whose sandbox falls back off gets no
 /// entry (the host's `profile_loads::claude`).
 ///
-/// Not on Windows ([`no_browser`]).
+/// Codex's on every OS, Windows included; Claude's on macOS and Linux, not yet on Windows
+/// ([`no_browser`]).
 pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
     browser_mcp_on(kind, cfg!(windows))
 }
 
 /// [`browser_mcp`] as it is on Windows when `windows` is true, and elsewhere when it is false.
 pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
-    matches!(kind, Some(AgentKind::Codex | AgentKind::Claude)) && !windows
+    match kind {
+        Some(AgentKind::Codex) => true,
+        Some(AgentKind::Claude) => !windows,
+        None => false,
+    }
 }
 
 /// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command,
 /// for launch (decision record 0030):
 ///
-/// - Codex on Windows. Clauseo gives Codex's shell the unelevated restricted-token sandbox there
-///   (`windows.sandbox = "unelevated"`), whose only network block is proxy variables that leave
-///   loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`, applied at
-///   `spawn_prep.rs:141-143`; the firewall rules exist only in the elevated setup).
-///   agent-browser's daemon port and Chrome's debugging port are unauthenticated, so with the
-///   entry a shell command Codex runs without a prompt could drive the unfenced guard's browser
-///   past its filter. The way back is the elevated sandbox or an authenticated daemon.
+/// - Not Codex, on any OS. On Windows Codex was off because its shell's unelevated
+///   restricted-token sandbox (`windows.sandbox = "unelevated"`) leaves loopback open (codex
+///   0.162.1 `windows-sandbox-rs/src/env.rs:126-170`), and agent-browser's daemon was
+///   unauthenticated, so a shell command Codex ran without a prompt could drive the guard's
+///   browser past its filter. It is on now: the guard draws a per-session key (#1091,
+///   `clauseo_mcp` `browser_guard/env/session_key.rs`) that only its own agent-browser gets,
+///   the patched daemon serves no client without it, and Chrome speaks CDP over a pipe, not a
+///   port, on Windows.
 /// - Claude on Windows, for now (Claude's guarded entry there is a later change). Claude Code
 ///   has no sandbox there; the shell command ran on deny rules alone,
 ///   and no deny list is complete: brace expansion (`{upload,}`), globs (`upl?ad`), a variable
@@ -59,18 +65,16 @@ pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
 ///   each spell a refused command no rule sees (security review round 4 of #1014).
 ///   The way back is Clauseo's own `agent-browser` shim, after launch.
 ///
-/// So no agent has a browser on Windows, and both have it, through the guarded entry only, on
-/// macOS and Linux. No agent gets the shell command anywhere ([`shell_browser`]).
+/// So Codex has a browser, through its guarded entry, on every OS, and Claude, through the same
+/// guarded entry, on macOS and Linux; Claude has none on Windows yet. No agent gets the shell
+/// command anywhere ([`shell_browser`]).
 pub fn no_browser(kind: Option<AgentKind>) -> bool {
     no_browser_on(kind, cfg!(windows))
 }
 
 /// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
 pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
-    match kind {
-        Some(AgentKind::Codex | AgentKind::Claude) => windows,
-        None => false,
-    }
+    kind == Some(AgentKind::Claude) && windows
 }
 
 /// Whether any agent gets the `agent-browser` shell command on this OS: none, on any OS, for

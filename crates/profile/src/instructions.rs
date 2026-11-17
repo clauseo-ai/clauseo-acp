@@ -190,8 +190,8 @@ pub enum BrowserPart {
     /// The session has the browser: the `browser` MCP entry's tools ([`BROWSER_CODEX`],
     /// [`BROWSER_CLAUDE_MCP`]), or the dormant `agent-browser` command ([`BROWSER`]).
     On,
-    /// Turned off, left out by policy, or no browser for this agent here (either agent on
-    /// Windows, `servers::no_browser`; Claude with its sandbox off): [`BROWSER_OFF`].
+    /// Turned off, left out by policy, or no browser for this agent here (Claude on Windows,
+    /// `servers::no_browser`; Claude with its sandbox off): [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,

@@ -1,5 +1,5 @@
 //! Codex's browser is the `browser` MCP entry, on one host wired with the shell tool too: the
-//! Codex session (macOS and Linux) opens one egress proxy, since its entry asks for one
+//! Codex session (every OS) opens one egress proxy, since its entry asks for one
 //! (`{proxy_port}`, ADR 0053), and gets the entry filled with the proxy's address and its browser
 //! listener's password (in a variable, in no argument), no `AGENT_BROWSER_*` variable of its own,
 //! no tools folder on its `PATH` and the entry's line in its instructions; a Claude session the
@@ -54,14 +54,9 @@ fn path_parts(env: &std::collections::BTreeMap<OsString, OsString>) -> Vec<PathB
 }
 
 /// The guard's file for Codex's session, read while the session runs: the password and a line
-/// end, private to the user (no guard runs here to read and delete it). Codex on Windows has no
-/// browser, so no proxy and no file.
+/// end, private to the user (no guard runs here to read and delete it).
 fn proxy_secret_file_holds_the_password(codex_seen: &Seen) {
     let file = codex_seen.run.as_ref().unwrap().join("proxy-secret");
-    if cfg!(windows) {
-        assert!(!file.exists());
-        return;
-    }
     let text = std::fs::read_to_string(&file).unwrap();
     assert_eq!(text, format!("{}\n", TestProxy::PASSWORD));
     #[cfg(unix)]
@@ -92,28 +87,23 @@ fn codex_env_has_no_shell_browser_and_no_password(codex_seen: &Seen, tools: &Pat
             .all(|value| !value.to_string_lossy().contains(TestProxy::PASSWORD)),
         "the proxy password is in Codex's environment"
     );
-    assert_eq!(
+    assert!(
         codex_seen
             .redacted
             .iter()
-            .any(|secret| secret == TestProxy::PASSWORD),
-        !cfg!(windows)
+            .any(|secret| secret == TestProxy::PASSWORD)
     );
 }
 
 #[test]
-fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_shell_tool() {
+fn codex_gets_the_entry_with_its_proxy_and_claude_no_shell_tool() {
     let dir = Dir::new("browser_codex", &[]);
     // Exactly these arguments and variables (the password in none of them), with
     // `AGENT_BROWSER_PROXY=http://127.0.0.1:8123` (the recording's port) and
     // `CLAUSEO_PROXY_SECRET_FILE` the run folder's `proxy-secret`, holding `TestProxy::PASSWORD`.
     let entry = filled_browser();
-    // Codex on Windows has no browser at all, whatever the hook offers: no entry goes.
-    let servers = if cfg!(windows) {
-        json!([])
-    } else {
-        json!([entry])
-    };
+    // Codex has the entry on every OS, Windows included (the guard's session key, #1091).
+    let servers = json!([entry]);
     let codex = template(
         &dir,
         "bc-codex",
@@ -157,20 +147,11 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_shell_tool() {
     let browser = header
         .iter()
         .find(|state| state.tool == ClauseoTool::Browser);
-    if cfg!(windows) {
-        // No browser state at all: the app offers no browser action (no install, no switch).
-        assert_eq!(browser, None);
-    } else {
-        let browser = browser.expect("the header shows the browser");
-        assert_eq!(browser.availability, ToolAvailability::Available);
-    }
+    let browser = browser.expect("the header shows the browser");
+    assert_eq!(browser.availability, ToolAvailability::Available);
     // Codex's entry asks for the session's proxy: exactly one opened, and it is open while its
-    // agent runs. On Windows, no browser, so none.
-    let opened: Vec<String> = if cfg!(windows) {
-        Vec::new()
-    } else {
-        vec!["open 1".to_owned()]
-    };
+    // agent runs.
+    let opened = vec!["open 1".to_owned()];
     assert_eq!(calls(&log), opened);
     proxy_secret_file_holds_the_password(&launcher.seen()[0]);
 
@@ -182,11 +163,7 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_shell_tool() {
     host.shutdown();
     // Codex's proxy closed once, after its agent; nothing else (the recording logs each open
     // and close).
-    let closed: Vec<String> = if cfg!(windows) {
-        Vec::new()
-    } else {
-        vec!["open 1".to_owned(), "close 1".to_owned()]
-    };
+    let closed = vec!["open 1".to_owned(), "close 1".to_owned()];
     assert_eq!(calls(&log), closed);
 
     let seen = launcher.seen();
@@ -195,11 +172,7 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_shell_tool() {
     codex_env_has_no_shell_browser_and_no_password(codex_seen, &tools);
     let config = codex_seen.codex_config().expect("a CODEX_CONFIG");
     let instructions = config["developer_instructions"].as_str().unwrap();
-    let line = if cfg!(windows) {
-        "You have no browser in this session."
-    } else {
-        "use the `browser` MCP server's tools"
-    };
+    let line = "use the `browser` MCP server's tools";
     assert!(instructions.contains(line), "{instructions}");
     assert!(!instructions.contains("agent-browser"), "{instructions}");
     assert!(

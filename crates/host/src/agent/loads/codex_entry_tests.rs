@@ -147,12 +147,11 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
     }
 }
 
-/// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the
-/// session sends none and its header holds no browser state at all, which the app shows as
-/// nothing to act on (no install advice, no switch). Claude has no browser on Windows either and
-/// the entry elsewhere, as Codex does. Runs on every OS: the OS is a parameter.
+/// Codex has the browser on every OS, Windows included (`no_browser`, the guard's session key
+/// from #1091): its entry goes out and its header holds the browser's state. Claude has no
+/// browser on Windows yet and the entry elsewhere. Runs on every OS: the OS is a parameter.
 #[test]
-fn codex_on_windows_gets_no_entry_and_no_browser_state() {
+fn codex_gets_the_entry_and_its_browser_state_on_every_os() {
     use clauseo_protocol::AgentKind;
     let dir = PathBuf::from("/data/browser/run/t-1");
     let chrome = PathBuf::from("/chrome");
@@ -161,20 +160,15 @@ fn codex_on_windows_gets_no_entry_and_no_browser_state() {
         assert_eq!(no_browser(Some(AgentKind::Claude), windows), windows);
         assert!(!no_browser(None, windows));
         let none_here = no_browser(Some(AgentKind::Codex), windows);
-        assert_eq!(none_here, windows);
+        assert!(!none_here, "windows {windows}");
         let servers = offered(vec![codex_server(false)], none_here);
         let (sent, state) = hook_servers(servers, &ready);
-        if windows {
-            assert_eq!(sent, Vec::<McpServer>::new());
-            assert_eq!(state, None);
-        } else {
-            assert_eq!(sent.len(), 1);
-            let state = state.expect("a browser state");
-            assert_eq!(
-                state.availability,
-                clauseo_protocol::ToolAvailability::Available
-            );
-        }
+        assert_eq!(sent.len(), 1, "windows {windows}");
+        let state = state.expect("a browser state");
+        assert_eq!(
+            state.availability,
+            clauseo_protocol::ToolAvailability::Available
+        );
     }
 }
 

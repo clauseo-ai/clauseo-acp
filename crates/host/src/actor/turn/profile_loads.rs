@@ -435,8 +435,8 @@ fn socket_dir(run: &RunFolders) -> Option<&Path> {
     }
 }
 
-/// Whether the profile hook offers `agent` the `browser` MCP entry (Codex and Claude off
-/// Windows: `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
+/// Whether the profile hook offers `agent` the `browser` MCP entry (Codex on every OS, Claude
+/// off Windows: `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
     actor
         .profile
@@ -498,7 +498,7 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
 }
 
 /// Which browser part `run`'s session gets: `none_here`'s for an agent with no browser here
-/// (`browser::no_browser`: either agent on Windows; Claude with its sandbox off,
+/// (`browser::no_browser`: Claude on Windows; Claude with its sandbox off,
 /// `profile_loads/claude.rs`): the no-browser sentence; else the shell tool's (no agent's for
 /// launch), else the one the `browser` entry's state gives (`browser::entry_part`), else none.
 fn session_part(
