@@ -34,12 +34,13 @@
 //!   with no prompt the agent stops at the idle limit, as any idle agent does, so work it goes
 //!   on with after its turn keeps its full idle limit, as before the change. Its next prompt
 //!   relaunches it on the new profile, unless background work of its last turn may still run
-//!   ([`background_may_run`], [`holds_relaunch`]); then that prompt goes to it as it is. Only
-//!   the idle stop spares background work for sure. A prompt after the change still cuts, for
-//!   now, a command or helper the agent put in the background on its own (no steer from the
-//!   lawyer), and steered work still running `cap_min_idle` (60 s) after its turn's end: the
-//!   host sees neither until it reports. The tracking of background work, once it lands, closes
-//!   both in [`background_may_run`].
+//!   ([`background_may_run`], [`holds_relaunch`]); then that prompt goes to it as it is. With
+//!   no prompt, background work is cut no sooner than any idle agent's stop, 300 s after its
+//!   last event. A prompt after the change still cuts, for now, a command or helper the agent
+//!   put in the background on its own (no steer from the lawyer), and steered work still
+//!   running `cap_min_idle` (60 s) after its turn's end: the host sees neither until it
+//!   reports. The tracking of background work, once it lands, closes both in
+//!   [`background_may_run`].
 
 use std::collections::BTreeSet;
 use std::time::Duration;
