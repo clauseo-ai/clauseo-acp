@@ -56,6 +56,10 @@ export const HI = {
   "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  // a helper asked for a task, done and tried: its task is the helper's description (helper-words.ts; UC-906, UC-907;
+  // provisional; hi: later)
+  "Asked a helper: {task}.": null,
+  "Tried to ask a helper: {task}.": null,
   // UC-167; provisional
   "Tried to let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने देने की कोशिश की गई।",
   // a step named only by the agent's own words (its title or a task's description), tried and not done: those words
