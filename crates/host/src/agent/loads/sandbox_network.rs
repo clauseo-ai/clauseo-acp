@@ -3,7 +3,7 @@
 //!
 //! - `allowedDomains` ([`allowed_domains`]): the seeded legal sites Claude may also fetch unasked
 //!   ([`WEB_FETCH_SITES`]) plus [`SHELL_NEEDED_HOSTS`], sorted, each once. It was `["*"]`.
-//!   With `tools.web_search` off it is empty ([`launch_network`]).
+//!   With `tools.web_search` off it is empty and strict, in every mode ([`launch_network`]).
 //!   The launch may add extra hosts ([`plain_hosts`]); today it adds none.
 //! - `deniedDomains`: loopback and the any-address ([`DENIED_DOMAINS`]), unchanged; a deny wins
 //!   over an allow in Claude Code's proxy.
@@ -129,14 +129,19 @@ pub(crate) fn network(strict: Strict, extra_hosts: &[&str]) -> Value {
 /// Puts the launch's `network` object in the flag settings' `sandbox`, when there is one (a
 /// session with Claude's sandbox): strict unless in forced ask ([`Strict::at_launch`]), with
 /// the plain ones of `extra_hosts` ([`plain_hosts`]). With `tools.web_search` off (`web_on`
-/// false) `allowedDomains` is empty, so a strict launch's shell reaches no host at all.
+/// false) `allowedDomains` is empty and strict is on in every mode, forced ask included, so the
+/// shell reaches no host and no card can grant one; forced ask still asks for every other tool.
 pub(crate) fn launch_network(
     settings: &mut Map<String, Value>,
     forced_ask: bool,
     web_on: bool,
     extra_hosts: &[String],
 ) {
-    let strict = Strict::at_launch(forced_ask);
+    let strict = if web_on {
+        Strict::at_launch(forced_ask)
+    } else {
+        Strict::On
+    };
     let extra = plain_hosts(extra_hosts);
     let mut object = network(strict, &extra);
     if !web_on && let Some(fields) = object.as_object_mut() {

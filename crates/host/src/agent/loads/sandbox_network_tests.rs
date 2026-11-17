@@ -166,8 +166,8 @@ fn strict_in_auto_accept_edits_and_the_default_but_not_forced_ask() {
     assert_eq!(claude_mode(false), CLAUDE_MODE);
 }
 
-/// With `tools.web_search` off the shell's list is empty in every mode: strict and empty
-/// reaches no host; forced ask still asks per site.
+/// With `tools.web_search` off the shell's list is empty and strict in every mode, forced ask
+/// included: no host, and no card that could grant one.
 #[test]
 fn web_off_empties_the_shells_list() {
     for forced_ask in [false, true] {
@@ -180,11 +180,7 @@ fn web_off_empties_the_shells_list() {
             json!(DENIED_DOMAINS),
             "{forced_ask}"
         );
-        assert_eq!(
-            network.get("strictAllowlist").is_some(),
-            !forced_ask,
-            "{forced_ask}"
-        );
+        assert_eq!(network["strictAllowlist"], json!(true), "{forced_ask}");
     }
 }
 
@@ -245,4 +241,14 @@ fn no_sandbox_gets_no_network_object() {
     let mut settings = Map::new();
     launch_network(&mut settings, false, true, &extra(&["example.org"]));
     assert!(settings.is_empty());
+}
+
+/// Web off in forced ask: `allowedDomains: []` with `strictAllowlist: true`, not cards.
+#[test]
+fn web_off_in_forced_ask_is_empty_and_strict() {
+    let mut settings = with_sandbox();
+    launch_network(&mut settings, true, false, &[]);
+    let network = &settings["sandbox"]["network"];
+    assert_eq!(network["allowedDomains"], json!([]));
+    assert_eq!(network["strictAllowlist"], json!(true));
 }

@@ -54,6 +54,8 @@ What Claude Code 2.1.293 does, read from its binary and `sdk.d.ts`:
   launch that falls back to no sandbox has no network list at all, and a command the lawyer
   approves there reaches every host. This change depends on #1153 for that case.
 - With web search off, `allowedDomains` is empty: under strict the shell reaches no host.
+- With web search off, strict is on in every mode, forced ask included, so no card can grant a
+  host; forced ask still asks for every other tool.
 - Claude Code also adds `WebFetch(domain:…)` allow rules from the settings it loads (the
   launch's `--settings`, and the managed and user settings files) to the list, so a wildcard
   rule there would bring every host back. The user settings file is the gap the threat model
