@@ -442,7 +442,7 @@ fn attach_commit(
             },
         )?;
     }
-    if let Some(notice) = claude_mode::notice(actor, thread) {
+    if let Some(notice) = claude_mode::notice(actor, thread, &start.config_options) {
         out.push(actor, notice)?;
     }
     if let Some(notice) = super::profile_loads::claude::notice(actor, thread) {

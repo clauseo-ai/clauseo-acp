@@ -38,6 +38,8 @@ use serde::{Deserialize, Serialize};
 use super::Actor;
 use crate::log_file::Cause;
 
+pub(crate) mod efforts;
+
 /// The file's name in the data folder.
 pub(crate) const FILE: &str = "agent-options.json";
 /// The most of the file read, 4 MiB: an agent's options are a few kilobytes (Codex's eight
@@ -132,11 +134,13 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
     if options.is_empty() {
         return;
     }
-    let options = match actor.agent_options.starting.remove(&thread) {
+    let reported = options;
+    let mut options = match actor.agent_options.starting.remove(&thread) {
         Some(start) if !start.is_empty() => start,
         Some(_) => options.to_vec(),
         None => merged(actor.agent_options.stored(agent.as_str()), options),
     };
+    efforts::carry(&mut options, reported);
     let changed = match actor.agent_options.keep(agent.as_str(), &options) {
         Ok(changed) => changed,
         Err(error) => {

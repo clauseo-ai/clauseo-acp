@@ -26,6 +26,7 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
                 name: short("Opus"),
                 description: Some("Largest".to_owned()),
                 group: None,
+                takes_effort: true,
             }],
         },
     };

@@ -13,6 +13,23 @@ use crate::fixtures::{decode_both, decodes_in_both, entry, envelope, packed_raw,
 use crate::json_copies::ID_KEY;
 use crate::unknown_variants::unit_enum;
 
+/// The model's auto notice is a new kind, a one-key map (a variant never changes shape): the
+/// account's stays the plain string an older host wrote, and an older reader, which knows no
+/// `auto_mode_unavailable_for_model` key, reads the new one as `Unknown` like any later kind.
+#[test]
+fn the_model_auto_notice_is_a_new_kind_beside_the_account_one() {
+    decodes_in_both(
+        r#""auto_mode_unavailable""#,
+        &NoticeKind::AutoModeUnavailable,
+    );
+    decodes_in_both(
+        r#"{"auto_mode_unavailable_for_model":{"model":"Haiku 4.5"}}"#,
+        &NoticeKind::AutoModeUnavailableForModel {
+            model: "Haiku 4.5".to_owned(),
+        },
+    );
+}
+
 #[test]
 fn principal_keeps_its_wire_form() {
     let json = r#""local_desktop""#;

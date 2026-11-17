@@ -1032,6 +1032,14 @@ export type ConfigChoice = {
 	description?: string,
 	/**  The name of the ACP group it came from, if the agent grouped its values. */
 	group?: string,
+	/**
+	 *  For a model choice: whether the model offers an effort (`thought_level`) option, so the
+	 *  app can hide its effort picker for one that does not. The host learns it from the
+	 *  sessions that ran the model: claude-agent-acp 0.89.1 sends a `thought_level` option only
+	 *  while the current model takes an effort, and sends no per-model flag. True when unknown,
+	 *  for every other choice, and in an entry written before the field.
+	 */
+	takes_effort?: boolean,
 };
 
 /**  A session config option the agent offers (ACP's `session/set_config_option`). */
@@ -4478,7 +4486,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { download_outside_matter?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4488,13 +4496,26 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
- *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
- *  running commands.
+ *  the settings or the agent ruled it out, or the model did and the host knows no name
+ *  for it), so Claude runs in `acceptEdits` and asks before running commands.
  */
 "auto_mode_unavailable" | 
+/**
+ *  As `auto_mode_unavailable`, because the session's model offers no `auto` (Claude
+ *  Code moved the session to `acceptEdits` itself). A host before this kind sent
+ *  `auto_mode_unavailable` for it; an older reader decodes this one to `Unknown` and
+ *  shows the notice's `text`.
+ */
+({ auto_mode_unavailable_for_model: {
+	/**
+	 *  The model's display name, as the agent names it in its model choices, such as
+	 *  "Haiku 4.5".
+	 */
+	model: string,
+} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's data fence refused a request of the agent's without asking the lawyer: it
  *  reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
@@ -4520,7 +4541,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4538,7 +4559,7 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { download_outside_matter?: never; files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  The browser saved a file outside the matter folder, in Clauseo's own folder for this
  *  matter (`<data>/agent-state/<matter id>/downloads`): the matter's drive cannot keep
@@ -4548,7 +4569,7 @@ export type NoticeKind =
 ({ download_outside_matter: {
 	/**  The file's name in that folder: one component, no separator. */
 	name: string,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Claude's sandbox could not be set up for this session on macOS or Linux (a `*` or `?`
  *  in a path, a path that is not UTF-8, no short temp folder), so Claude runs in

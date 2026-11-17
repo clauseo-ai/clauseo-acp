@@ -159,6 +159,7 @@ open_data_enum! {
                 name: CompactString::const_new("Fast"),
                 description: Some("Quicker answers".to_owned()),
                 group: None,
+                takes_effort: false,
             }],
         },
         ConfigOptionKind::Boolean {
@@ -183,6 +184,18 @@ pub struct ConfigChoice {
     /// The name of the ACP group it came from, if the agent grouped its values.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub group: Option<String>,
+    /// For a model choice: whether the model offers an effort (`thought_level`) option, so the
+    /// app can hide its effort picker for one that does not. The host learns it from the
+    /// sessions that ran the model: claude-agent-acp 0.89.1 sends a `thought_level` option only
+    /// while the current model takes an effort, and sends no per-model flag. True when unknown,
+    /// for every other choice, and in an entry written before the field.
+    #[serde(default = "takes_effort_unknown")]
+    pub takes_effort: bool,
+}
+
+/// What `ConfigChoice::takes_effort` reads as when an entry lacks it: true.
+const fn takes_effort_unknown() -> bool {
+    true
 }
 
 /// A slash command the agent offers.
@@ -309,9 +322,18 @@ open_data_enum! {
             reason: PackSkipReason,
         },
         /// Claude Code's `auto` permission mode is not available for this session (the account,
-        /// the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
-        /// running commands.
+        /// the settings or the agent ruled it out, or the model did and the host knows no name
+        /// for it), so Claude runs in `acceptEdits` and asks before running commands.
         AutoModeUnavailable = "auto_mode_unavailable",
+        /// As `auto_mode_unavailable`, because the session's model offers no `auto` (Claude
+        /// Code moved the session to `acceptEdits` itself). A host before this kind sent
+        /// `auto_mode_unavailable` for it; an older reader decodes this one to `Unknown` and
+        /// shows the notice's `text`.
+        AutoModeUnavailableForModel = "auto_mode_unavailable_for_model" {
+            /// The model's display name, as the agent names it in its model choices, such as
+            /// "Haiku 4.5".
+            model: String,
+        },
         /// Clauseo's data fence refused a request of the agent's without asking the lawyer: it
         /// reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
         OutsideMatterBlocked = "outside_matter_blocked",
@@ -381,6 +403,9 @@ open_data_enum! {
         NoticeKind::AutoModeUnavailable,
         NoticeKind::DownloadOutsideMatter {
             name: "judgment.pdf".to_owned(),
+        },
+        NoticeKind::AutoModeUnavailableForModel {
+            model: "Haiku 4.5".to_owned(),
         },
     ];
 }

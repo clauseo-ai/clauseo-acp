@@ -136,6 +136,8 @@ fn choices(options: acp::SessionConfigSelectOptions) -> Result<Vec<ConfigChoice>
             name: option.name.into(),
             description: option.description,
             group,
+            // The host marks the model choices it learns take no effort (`actor/turn/efforts.rs`).
+            takes_effort: true,
         })
     };
     match options {

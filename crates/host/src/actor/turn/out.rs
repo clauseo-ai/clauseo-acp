@@ -47,10 +47,19 @@ impl Out {
         event: impl Into<DomainEvent>,
     ) -> Result<Seq, Error> {
         let stream = StreamId::Thread(self.thread);
+        let mut event = event.into();
+        // Every options report the thread logs says which models take an effort.
+        if let DomainEvent::ConfigOptionsReplaced(replaced) = &mut event {
+            super::super::agent_options::efforts::mark_for(
+                actor,
+                self.thread,
+                &mut replaced.options,
+            );
+        }
         actor.pipeline.push(
             &mut self.draft,
             stream,
-            event.into(),
+            event,
             self.command,
             self.ts,
             &mut actor.ids,

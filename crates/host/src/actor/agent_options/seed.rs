@@ -96,6 +96,7 @@ fn option(id: &str, name: &str, category: ConfigCategory) -> ConfigOption {
                 name: "Default".into(),
                 description: None,
                 group: None,
+                takes_effort: true,
             }],
         },
     }
