@@ -29,7 +29,7 @@ const CLAUDE_MAX: usize = 2250;
 /// Codex's whole `developer_instructions`, the worst case on each OS: the tools part with the
 /// stetdoc line, the legal part, the offline line, the refusal line, the shell line (macOS), the
 /// built-in skills index and the PDF line the desktop adds with Clauseo's PDF tools on its `PATH`.
-/// 0058's amendment for the PDF and web lines: 2083 words on macOS, rounded up.
+/// 0058's amendment for the PDF and web lines: 2,086 words on macOS and 2,030 on Windows.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 const CODEX_MAX: usize = 2100;
 /// The paper reader's prompt, its folder filled.
@@ -147,7 +147,6 @@ fn codex_standing_text_budget() {
         assert_eq!(text.contains(shell), macos);
         assert!(text.ends_with(codex_pdf().rsplit('}').next().unwrap()));
         let count = word_count(&text);
-        eprintln!("MEASURE codex macos={macos}: {count}");
         assert!(
             count <= CODEX_MAX,
             "Codex's standing text has {count} words (macOS: {macos})"

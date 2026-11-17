@@ -115,13 +115,14 @@ words in `legal.md`) fit `legal.md` (1,360), the shared text (about 1,752) and C
 Amended 2026-11-16 (PDF and web steering, branch `codex-pdf-tools-line`): Codex's cap now counts
 every line that can ship, in the worst case on each OS, including the PDF line the desktop adds
 when Clauseo's PDF tools are on Codex's `PATH`. The cap had never counted that line. As shipped
-on main, Codex's text was 1,996 + 40 (the old PDF line) = 2,036 words on macOS and 1,980 on
-Windows (no 56-word macOS line). The steering adds 47 words: the PDF line goes 40 to 56, so that
-every PDF read goes to Clauseo's `pdfinfo`, `pdftoppm` and the runtime's pypdf, and never to
-`mdls` or `swift`, which stage C's census saw raise "run outside the sandbox" cards that can
-never be always-approved. The offline line goes 24 to 56, so that all web work goes to the browser
-tools and never to `curl`, the commonest repeated card in stage E's census. The result is
-2,036 + 47 = 2,083 on macOS and 2,027 on Windows. The cap goes from 2,000 to 2,100.
+on main, filled for the long macOS data folder, Codex's text was 1,996 + 42 (the old PDF line,
+its `{work_folder}` filled) = 2,038 words on macOS and 1,982 on Windows (no 56-word macOS line).
+The steering adds 48 words: the PDF line goes 40 to 56, so that every PDF read goes to Clauseo's
+`pdfinfo`, `pdftoppm` and the runtime's pypdf, never to `mdls` or `swift`, which stage C's census
+saw raise "run outside the sandbox" cards that can never be always-approved; and the offline line
+goes 24 to 56, so that all web work goes to the browser tools, never to `curl`, the commonest
+repeated card in stage E's census. Measured: 2,038 + 48 = 2,086 on macOS and 2,030 on Windows.
+The cap goes from 2,000 to 2,100.
 
 ## Status
 
