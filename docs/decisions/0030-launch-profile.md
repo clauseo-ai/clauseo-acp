@@ -233,9 +233,9 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
     `WebFetch(domain:<host>)` per host of `WEB_FETCH_SITES` in `host/src/browser/seed_sites.rs`:
     `SEED_SITES` (R21's copy of the hosts S27 names; S27 adds the High Courts), then
     `FETCH_ONLY_SITES`. There is no bare `WebFetch` allow. A hook's `WebFetch` rule stays only
-    as `WebFetch(domain:<host>)` with a plain lower-case host, and a hook entry with a comma or
-    whitespace outside parentheses, or unbalanced parentheses, is dropped ("Claude's web
-    fetches" below).
+    as `WebFetch(domain:<host>)` with a plain lower-case host, and hook `allowedTools` and
+    `disallowedTools` entries must be plain one-rule strings of tool-name characters; any other
+    entry is dropped ("Claude's web fetches" below).
   - `additionalDirectories` gains the work folder and the matter's notes folder, after the
     hook's entries.
   - `settings` gains `disableSkillShellExecution: true`, and `skipWebFetchPreflight: true` when
@@ -1360,9 +1360,11 @@ this record and firm-it §8.
   - **The hook's rules.** Claude Code splits `--allowedTools` on commas and whitespace outside
     parentheses and trims each piece, and reads `WebFetch()` and `WebFetch(*)` as the bare
     tool. So a hook `WebFetch…` rule stays only if it is `WebFetch(domain:<host>)` with the
-    host in `[a-z0-9.-]`, and any hook entry (any tool) with a comma or whitespace outside
-    parentheses, or unbalanced parentheses, is dropped (`is_one_rule` and `is_open_fetch_rule`
-    in `host/src/agent/loads/profile.rs`). This covers the hook's rules only, not other
+    host in `[a-z0-9.-]`. Hook `allowedTools` and `disallowedTools` entries must be plain
+    one-rule strings of tool-name characters: a string holding a name in `[A-Za-z0-9_-]`,
+    optionally followed by one `(…)` that ends it and holds no other parenthesis. Any other
+    entry is dropped (`is_one_rule` and `is_open_fetch_rule` in
+    `host/src/agent/loads/profile.rs`). Tool names in rules match case-sensitively. This covers the hook's rules only, not other
     settings sources: managed settings can allow anything by design.
   - **What is true now.** A fetch from a seeded host (`WEB_FETCH_SITES`) runs unasked in every
     mode but forced ask. A fetch from any other host goes to the session's permission mode: in

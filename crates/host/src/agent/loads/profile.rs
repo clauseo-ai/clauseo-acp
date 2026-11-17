@@ -205,7 +205,11 @@ pub(crate) struct ClaudeKeys<'a> {
 pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys<'_>) {
     let mut disallowed = take_array(options, "disallowedTools");
     let mut allowed = take_array(options, "allowedTools");
-    allowed.retain(|rule| rule.as_str().is_none_or(is_one_rule));
+    // The SDK passes each list to the CLI as `join(",")`, which would flatten a nested array, so
+    // only string entries that are one plain rule stay.
+    let one_rule = |rule: &Value| rule.as_str().is_some_and(is_one_rule);
+    allowed.retain(one_rule);
+    disallowed.retain(one_rule);
     if keys.web_search.on {
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
@@ -407,25 +411,26 @@ fn forced_ask_settings(settings: &mut Map<String, Value>) {
     settings.insert("sandbox".to_owned(), Value::Object(sandbox));
 }
 
-/// Whether a hook's `allowedTools` entry is one rule as Claude Code reads it. The CLI splits
-/// `--allowedTools` on commas and whitespace outside parentheses and trims each piece, so
-/// `"Read,WebFetch"`, `"Read WebFetch"` or `" WebFetch"` would smuggle in a bare tool; an entry
-/// like that, or one with unbalanced parentheses, is dropped.
+/// Whether a hook's tool-rule entry is one plain rule: a tool name, optionally followed by one
+/// `(…)` that ends the entry and holds no other parenthesis. The name may hold only the
+/// characters Claude Code leaves in a tool or MCP server name (`[A-Za-z0-9_-]`, its MCP
+/// name normaliser's set; `mcp__<server>__<tool>` fits). Claude Code 2.1.293 splits
+/// `--allowedTools` on commas and spaces outside parentheses, with no nesting (the first `)`
+/// closes), and trims each piece with JavaScript's `trim`, so an entry with any other character
+/// outside the parentheses is dropped. Tool names in rules match case-sensitively (no folding;
+/// only exact legacy aliases such as `Task` for `Agent`), so `webfetch` is not `WebFetch`.
 fn is_one_rule(rule: &str) -> bool {
-    let mut depth = 0_usize;
-    for c in rule.chars() {
-        match c {
-            '(' => depth = depth.saturating_add(1),
-            ')' => match depth.checked_sub(1) {
-                Some(d) => depth = d,
-                None => return false,
-            },
-            ',' if depth == 0 => return false,
-            c if depth == 0 && c.is_whitespace() => return false,
-            _ => {}
-        }
-    }
-    depth == 0
+    let (name, content) = match rule.split_once('(') {
+        Some((name, rest)) => (name, rest.strip_suffix(')').map(Some)),
+        None => (rule, Some(None)),
+    };
+    let plain_content =
+        |content: Option<&str>| content.is_none_or(|text| !text.contains(['(', ')']));
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && content.is_some_and(plain_content)
 }
 
 /// A `WebFetch` allow rule that is not one named host: anything starting `WebFetch` but
