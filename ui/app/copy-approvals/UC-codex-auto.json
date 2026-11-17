@@ -25,5 +25,14 @@
     "at": "2026-11-17",
     "by": "stage B automode (provisional; orchestrator to approve)",
     "note": "The same, on a card about saving a new version of one paper; Claude's says U4-13. Words are provisional"
+  },
+  "UC-923": {
+    "en": "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before approving steps.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "stage B automode (provisional; the app thread finalises the words)",
+    "note": "Host notice auto_mode_unavailable from a ChatGPT thread: the account refuses Codex's reviewer, so the session runs in workspace-write, where ChatGPT asks the lawyer before steps outside the matter. Once per conversation. Claude's thread keeps TN-10. Words are provisional"
   }
 }
