@@ -221,6 +221,42 @@ pub(crate) fn remove_entry(path: &Path) -> Result<(), ProfileError> {
     }
 }
 
+/// `fs::rename` of `from` to `to`, which must not exist: the entry itself, never what a link
+/// at `from` leads to.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Removes the entry at `path` with all it holds: a real folder by `fs::remove_dir_all`, which
+/// never follows a link inside, anything else by [`remove_entry`]. A missing one is no error.
+pub(crate) fn remove_any(path: &Path) -> Result<(), ProfileError> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(ProfileError::io("read", path, err)),
+    };
+    if meta.is_dir() && !crate::packs::read::is_reparse(&meta) {
+        return match std::fs::remove_dir_all(path) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => {
+                Err(ProfileError::io("remove", path, err))
+            }
+            _ => Ok(()),
+        };
+    }
+    #[cfg(windows)]
+    if meta.is_file() && meta.permissions().readonly() {
+        // A plain file Windows will not remove while it is read-only; never a link's target.
+        let mut permissions = meta.permissions();
+        #[expect(
+            clippy::permissions_set_readonly_false,
+            reason = "Windows: clears the read-only attribute alone, no Unix mode bits"
+        )]
+        permissions.set_readonly(false);
+        let _cleared = std::fs::set_permissions(path, permissions);
+    }
+    remove_entry(path)
+}
+
 /// `fs::remove_dir` of a folder that must be empty; a missing one is no error.
 pub(crate) fn remove_dir(path: &Path) -> Result<(), ProfileError> {
     match std::fs::remove_dir(path) {

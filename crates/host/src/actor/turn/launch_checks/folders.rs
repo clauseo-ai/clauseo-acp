@@ -73,13 +73,14 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
 }
 
 /// Writes `writes` in order, on the launch-prep thread, and returns the first write's token
-/// when it succeeded: the one the launch's Codex keys may take the index from. A write that fails
-/// is a warning; the agent starts with the skills the folder holds. After each write with a
-/// plugin (Claude's, which Codex's index names too), written or not, the plugin folder is made to
-/// hold only what Clauseo ships (`clauseo_profile::match_plugin`); what went is logged as a
-/// count. When that fails, the launch is refused with
-/// `agent.launch_failed`: the folder may hold what Claude Code would load in every matter. No
-/// run folder is made yet. File system calls: off the actor.
+/// when it succeeded: the one the launch's Codex keys may take the index from. A write without
+/// a plugin (Codex's own folder) that fails is a warning; the agent starts with the skills the
+/// folder holds. After each write with a plugin (Claude's, which Codex's index names too),
+/// written or not, the plugin folder is made to hold only what Clauseo ships, byte for byte
+/// (`clauseo_profile::match_plugin`); what went is logged as a count. When that write had
+/// failed, it is made once more. When the match or that second write fails, the launch is
+/// refused with `agent.launch_failed`: the folder may hold what Claude Code would load in every
+/// matter. No run folder is made yet. File system calls: off the actor.
 pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten>, Error> {
     let unmatched = || {
         tracing::warn!("the built-in plugin folder could not be made to hold only Clauseo's files");
@@ -91,24 +92,34 @@ pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten
     };
     let mut first = None;
     for (at, write) in writes.iter().enumerate() {
-        match clauseo_profile::write_skills(write) {
+        let written = clauseo_profile::write_skills(write);
+        let plugin = write.plugin().is_some();
+        if plugin {
+            let removed = match clauseo_profile::match_plugin(write) {
+                Ok(removed) => removed,
+                // The error names a path in the folder, which may be a planted file's: not
+                // logged.
+                Err(_unlogged) => return Err(unmatched()),
+            };
+            if removed > 0 {
+                tracing::warn!(
+                    removed,
+                    "entries Clauseo did not ship left the built-in plugin folder"
+                );
+            }
+        }
+        let written = match written {
+            Err(_first_try) if plugin => clauseo_profile::write_skills(write),
+            other => other,
+        };
+        match written {
             Ok(written) if at == 0 => first = Some(written),
             Ok(_) => {}
+            Err(_unlogged) if plugin => return Err(unmatched()),
             Err(error) => tracing::warn!(
                 error = %Cause(&error),
                 "the profile's skills were not written; the agent starts with what the folder holds"
             ),
-        }
-        let removed = match clauseo_profile::match_plugin(write) {
-            Ok(removed) => removed,
-            // The error names a path in the folder, which may be a planted file's: not logged.
-            Err(_unlogged) => return Err(unmatched()),
-        };
-        if removed > 0 {
-            tracing::warn!(
-                removed,
-                "files Clauseo did not ship left the built-in plugin folder"
-            );
         }
     }
     Ok(first)

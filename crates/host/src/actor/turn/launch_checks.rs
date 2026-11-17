@@ -569,4 +569,6 @@ mod skill_wait;
 #[cfg(test)]
 mod guard_tests;
 #[cfg(test)]
+mod plugin_tests;
+#[cfg(test)]
 mod tests;
