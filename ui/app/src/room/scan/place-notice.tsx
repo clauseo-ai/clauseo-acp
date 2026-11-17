@@ -7,8 +7,18 @@ import { IconAbout } from "@clauseo/components/icons/icons.tsx";
 import { sc } from "@clauseo/components/lib/words-scan.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import type { RefObject } from "react";
 
-export function PlaceNotice({ service, onGotIt }: { service: string; onGotIt: () => void }) {
+export function PlaceNotice({
+  service,
+  gotItRef,
+  onGotIt,
+}: {
+  service: string;
+  /** Where Create's press moves focus: the Got it button (focusGotIt). */
+  gotItRef?: RefObject<HTMLButtonElement | null> | undefined;
+  onGotIt: () => void;
+}) {
   const { lang } = useWords();
   return (
     <div className="scan-place" role="status" data-testid="place-notice" data-place="synced">
@@ -24,7 +34,13 @@ export function PlaceNotice({ service, onGotIt }: { service: string; onGotIt: ()
           )}
         </Say>
       </p>
-      <Button kind="quiet" size="small" data-testid="synced-got-it" onClick={onGotIt}>
+      <Button
+        ref={gotItRef}
+        kind="quiet"
+        size="small"
+        data-testid="synced-got-it"
+        onClick={onGotIt}
+      >
         <span className="deva-nudge">{sc(lang, "Got it")}</span>
       </Button>
     </div>
