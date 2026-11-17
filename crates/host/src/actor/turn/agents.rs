@@ -20,7 +20,6 @@ use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
 use super::{
     AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, offline, session, state,
-    steps,
 };
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
@@ -32,11 +31,14 @@ mod ended;
 mod launch;
 mod path;
 mod start_failure;
+mod waiting;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
 pub(super) use start_failure::launch_failed;
+use waiting::fail_waiting;
+pub(super) use waiting::{fail_all, run_waiting};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -519,83 +521,6 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
                 agent.replay = None;
             }
             session::new_session(actor, thread);
-        }
-    }
-}
-
-pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
-        fail_waiting(actor, thread, &waiting, &lost("the agent"));
-        return;
-    };
-    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
-    let Some(session) = agent.session.clone() else {
-        fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
-        return;
-    };
-    match waiting {
-        Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
-        Waiting::Config(ctx, option, value)
-            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
-        {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "config option {option} sets the mode, and this matter's folder is \
-                     unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
-        Waiting::Config(ctx, option, value) => {
-            super::idle::call_started(actor, thread);
-            call(actor, thread, id, async move {
-                let result = client.set_config_option(&session, option.clone(), value.clone());
-                let (pick, result) = ((option, value), result.await);
-                AgentReply::Config { ctx, pick, result }
-            });
-        }
-        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "mode {mode} would approve changes without asking, and this matter's folder \
-                     is unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
-        Waiting::Mode(ctx, mode) => {
-            super::idle::call_started(actor, thread);
-            call(actor, thread, id, async move {
-                let result = client.set_mode(&session, mode.clone()).await;
-                AgentReply::Mode { ctx, mode, result }
-            });
-        }
-    }
-}
-
-/// The choice id `value` names, for a select option; `None` for a boolean.
-fn select(value: &ConfigValue) -> Option<&str> {
-    match value {
-        ConfigValue::Select(choice) => Some(choice.as_str()),
-        ConfigValue::Boolean(_) => None,
-    }
-}
-
-/// Fails each of `waiting` with `error`.
-pub(super) fn fail_all(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, error: &Error) {
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
-    }
-}
-
-fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &Error) {
-    match waiting {
-        Waiting::Turn(turn) => steps::on_launch_failed(actor, thread, *turn, error),
-        Waiting::Config(ctx, ..) | Waiting::Mode(ctx, ..) => {
-            let error = Error::refused(error.code(), error.to_string());
-            actor.finish_command(ctx.id, Err(error));
         }
     }
 }
