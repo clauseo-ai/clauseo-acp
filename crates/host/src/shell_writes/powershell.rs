@@ -1,4 +1,4 @@
-//! A PowerShell command split into simple commands, for [`super::add_script`]: the plain forms
+//! A PowerShell command split into simple commands, for [`super::add_input`]: the plain forms
 //! an agent writes (`cd "C:\Matter"; stetdoc edit 'Main Agreement.docx' --ops ops.json`).
 //!
 //! Read by the reader every PowerShell reader in the host shares (`pre_write_guard`'s
@@ -9,7 +9,8 @@
 //! Anything PowerShell could expand or read another way leaves its word unclear, so it writes
 //! nothing: an expansion (`$name`, `$(…)`, bare or in double quotes), an unquoted glob (`*`,
 //! `?`, `[`), brace or `@` (a splat or an array), a leading unquoted `~`, an array's `,`, or a
-//! quote that never closes.
+//! quote that never closes. An array of plain text elements (`a.docx, 'b c.docx'`) is a list
+//! word ([`super::Word::list`]): a delete's or a move's paths are its elements.
 
 use crate::pre_write_guard::{ARRAY_COMMA, Escape, Joint, Role, Segments, shell_segments};
 
@@ -40,6 +41,7 @@ pub(super) fn segments(script: &str) -> Vec<Segment> {
                 let word = Word {
                     text: text.clone(),
                     clear: clear(text, *quoted, *unknown),
+                    list: list(text, *unknown),
                 };
                 match role {
                     Role::Arg => out.words.push(word),
@@ -81,4 +83,16 @@ fn clear(text: &str, quoted: bool, unknown: bool) -> bool {
     let bare_special =
         !quoted && (text.contains(['*', '?', '[', '{', '}', '@']) || text.starts_with('~'));
     !(unknown || bare_special || text.contains(ARRAY_COMMA))
+}
+
+/// Whether the word `text` (holding an expansion when `unknown`) is an array of plain text
+/// elements: its `,`s are [`ARRAY_COMMA`], and no element is empty, holds a glob, brace or `@`
+/// character, or starts with `~`, quoted or not.
+fn list(text: &str, unknown: bool) -> bool {
+    !unknown
+        && text.contains(ARRAY_COMMA)
+        && !text.contains(['*', '?', '[', '{', '}', '@'])
+        && text
+            .split(ARRAY_COMMA)
+            .all(|element| !element.is_empty() && !element.starts_with('~'))
 }

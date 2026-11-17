@@ -37,6 +37,7 @@ use std::path::Path;
 
 use crate::stetdoc_args;
 
+mod changes;
 pub(crate) mod deletes;
 mod folder;
 mod posix;
@@ -86,11 +87,16 @@ pub(crate) fn add_input(
     dialect: Dialect,
     start: Option<&str>,
 ) {
-    add_input_as(targets, raw_input, dialect, start, Kind::Writes);
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Writes);
 }
 
 /// [`add_input`] with every path a delete or a move names, sources and destinations alike
-/// ([`deletes`]): what a turn's shell changed in any way.
+/// ([`deletes`]): what a turn's shell changed in any way. A deleted or moved path may be a
+/// folder, with what is under it; `exact` gets those of the paths a caller matches only whole,
+/// never as a folder: a write's target, and a move's destination named without a separator at
+/// its end, which may be the new name or a folder the source goes in (`mv a.docx Archive` adds
+/// `Archive`, matched whole, and `Archive/a.docx`).
 #[cfg_attr(
     not(test),
     expect(
@@ -100,15 +106,21 @@ pub(crate) fn add_input(
 )]
 pub(crate) fn add_changed_input(
     targets: &mut BTreeSet<String>,
+    exact: &mut BTreeSet<String>,
     raw_input: &str,
     dialect: Dialect,
     start: Option<&str>,
 ) {
-    add_input_as(targets, raw_input, dialect, start, Kind::Changes);
+    let mut out = Out::new(targets, Some(exact));
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Changes);
 }
 
 /// [`add_input`] for the paths a delete program names alone ([`deletes::taken`]: `rm`,
-/// `Remove-Item`, ...; no move), for the pre-write guard's folder rule.
+/// `Remove-Item`, ...; no move), for the pre-write guard's folder rule. Returns whether a delete
+/// in it names a target that is no path here: a word with an expansion, a glob, `~` or a
+/// PowerShell array element of those, a parameter with no value, a target whose path the start
+/// leaves unknown, the matter's folder itself or above it (`rm -rf .`, `rm -rf ..` run in the
+/// matter's folder), or, on a pipeline's input, no path at all (`Get-ChildItem | Remove-Item`).
 #[cfg_attr(
     not(test),
     expect(
@@ -121,12 +133,16 @@ pub(crate) fn add_deleted_input(
     raw_input: &str,
     dialect: Dialect,
     start: Option<&str>,
-) {
-    add_input_as(targets, raw_input, dialect, start, Kind::Deletes);
+) -> bool {
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::Deletes);
+    out.unclear
 }
 
 /// [`add_input`] for the paths a move takes away alone: the sources of `mv`, `git mv`,
-/// `Move-Item`, `Rename-Item`, `cmd /c move` and `ren` ([`deletes::taken`]), not where they go.
+/// `Move-Item`, `Rename-Item`, `cmd /c` `move` and `ren` ([`deletes::taken`]), not where they
+/// go. Returns whether a move in it names a source that is no path here, as
+/// [`add_deleted_input`] says for a delete.
 #[cfg_attr(
     not(test),
     expect(
@@ -139,8 +155,45 @@ pub(crate) fn add_moved_input(
     raw_input: &str,
     dialect: Dialect,
     start: Option<&str>,
-) {
-    add_input_as(targets, raw_input, dialect, start, Kind::MovedFrom);
+) -> bool {
+    let mut out = Out::new(targets, None);
+    add_input_as(&mut out, raw_input, dialect, start, Kind::MovedFrom);
+    out.unclear
+}
+
+/// Where a reading puts what it reads.
+struct Out<'a> {
+    /// Every path read.
+    targets: &'a mut BTreeSet<String>,
+    /// The paths matched only whole ([`add_changed_input`]), when the reading keeps them.
+    exact: Option<&'a mut BTreeSet<String>>,
+    /// A delete or a move names a target that is no path here ([`add_deleted_input`]).
+    unclear: bool,
+}
+
+impl<'a> Out<'a> {
+    fn new(targets: &'a mut BTreeSet<String>, exact: Option<&'a mut BTreeSet<String>>) -> Self {
+        Self {
+            targets,
+            exact,
+            unclear: false,
+        }
+    }
+
+    /// Adds `target`, run in `cwd`; whether it is a path here ([`add`]).
+    fn path(&mut self, cwd: Option<&str>, target: &str) -> bool {
+        add(self.targets, cwd, target)
+    }
+
+    /// Adds `target`, run in `cwd`, as a path matched only whole.
+    fn whole(&mut self, cwd: Option<&str>, target: &str) {
+        if self.path(cwd, target)
+            && let Some(exact) = self.exact.as_deref_mut()
+            && let Some(path) = place(cwd, target)
+        {
+            exact.insert(path);
+        }
+    }
 }
 
 /// Which targets a reading adds.
@@ -164,7 +217,7 @@ enum Kind {
 }
 
 fn add_input_as(
-    targets: &mut BTreeSet<String>,
+    out: &mut Out<'_>,
     raw_input: &str,
     dialect: Dialect,
     start: Option<&str>,
@@ -179,7 +232,7 @@ fn add_input_as(
         .or(start);
     match input.get("command") {
         Some(serde_json::Value::String(script)) => {
-            add_script_as(targets, cwd, script, dialect, kind);
+            add_script_as(out, cwd, script, dialect, kind);
         }
         Some(serde_json::Value::Array(items)) => {
             let Some(argv) = items
@@ -194,11 +247,16 @@ fn add_input_as(
                     if ["-c", "-lc", "-ic"].contains(&flag.as_str())
                         && ["sh", "bash", "zsh", "dash"].contains(&base(shell)) =>
                 {
-                    add_script_as(targets, cwd, script, Dialect::Posix, kind);
+                    add_script_as(out, cwd, script, Dialect::Posix, kind);
                 }
                 _ => {
                     let words: Vec<Word> = argv.into_iter().map(Word::plain).collect();
-                    add_segment(targets, cwd, &words, &[], (kind, Dialect::Posix));
+                    let how = How {
+                        kind,
+                        dialect: Dialect::Posix,
+                        piped: false,
+                    };
+                    add_segment(out, cwd, &words, &[], how);
                 }
             }
         }
@@ -210,32 +268,42 @@ fn add_input_as(
 /// the matter's folder, `None` unknown).
 #[cfg(test)]
 fn add_script(targets: &mut BTreeSet<String>, cwd: Option<&str>, script: &str, dialect: Dialect) {
-    add_script_as(targets, cwd, script, dialect, Kind::Writes);
+    add_script_as(
+        &mut Out::new(targets, None),
+        cwd,
+        script,
+        dialect,
+        Kind::Writes,
+    );
 }
 
-fn add_script_as(
-    targets: &mut BTreeSet<String>,
-    cwd: Option<&str>,
-    script: &str,
-    dialect: Dialect,
-    kind: Kind,
-) {
+fn add_script_as(out: &mut Out<'_>, cwd: Option<&str>, script: &str, dialect: Dialect, kind: Kind) {
     let segments = match dialect {
         Dialect::Posix => segments(script),
         Dialect::PowerShell => powershell::segments(script),
     };
     let mut folder = folder::Folder::new(cwd);
+    let mut piped = false;
     for segment in &segments {
         if let Some((cwd, words)) = folder.read(segment, dialect) {
-            add_segment(
-                targets,
-                cwd.as_deref(),
-                words,
-                &segment.redirects,
-                (kind, dialect),
-            );
+            let how = How {
+                kind,
+                dialect,
+                piped,
+            };
+            add_segment(out, cwd.as_deref(), words, &segment.redirects, how);
         }
+        piped = segment.ender == Sep::Pipe;
     }
+}
+
+/// How a simple command is read: for which targets, in which shell, and whether it runs on a
+/// pipeline's input.
+#[derive(Debug, Clone, Copy)]
+struct How {
+    kind: Kind,
+    dialect: Dialect,
+    piped: bool,
 }
 
 /// The path in the matter `folder` of `target` (relative to the folder, or absolute), or `None`
@@ -249,16 +317,23 @@ pub(crate) fn in_matter(folder: &Path, target: &str) -> Option<String> {
     (!rest.is_empty()).then(|| rest.to_owned())
 }
 
-/// One word of a command, and whether it is plain text: no expansion, glob or `~`.
+/// One word of a command, whether it is plain text (no expansion, glob or `~`), and whether it
+/// is a PowerShell array of plain text elements (`a.docx, 'b c.docx'`, split at
+/// `ARRAY_COMMA`).
 #[derive(Debug)]
 struct Word {
     text: String,
     clear: bool,
+    list: bool,
 }
 
 impl Word {
     fn plain(text: String) -> Self {
-        Self { text, clear: true }
+        Self {
+            text,
+            clear: true,
+            list: false,
+        }
     }
 }
 
@@ -300,20 +375,9 @@ struct Segment {
     nested: bool,
 }
 
-/// Adds one simple command's targets of `kind`, read in `dialect`, run in `cwd` (`None`:
-/// unknown, so only absolute targets count).
-fn add_segment(
-    targets: &mut BTreeSet<String>,
-    cwd: Option<&str>,
-    words: &[Word],
-    redirects: &[Word],
-    (kind, dialect): (Kind, Dialect),
-) {
-    let mut found: Vec<&Word> = if matches!(kind, Kind::Writes | Kind::Changes) {
-        redirects.iter().collect()
-    } else {
-        Vec::new()
-    };
+/// Adds one simple command's targets, read as `how` says, run in `cwd` (`None`: unknown, so only
+/// absolute targets count).
+fn add_segment(out: &mut Out<'_>, cwd: Option<&str>, words: &[Word], redirects: &[Word], how: How) {
     // Leading assignments and wrappers that run the rest as the command.
     let start = words
         .iter()
@@ -323,30 +387,21 @@ fn add_segment(
         })
         .unwrap_or(words.len());
     let argv = words.get(start..).unwrap_or_default();
-    if matches!(kind, Kind::Deletes | Kind::MovedFrom) {
-        if let Some((program, args)) = argv.split_first() {
-            let taken = deletes::taken(&program.text, args, dialect);
-            let picked = if kind == Kind::Deletes {
-                taken.deleted
-            } else {
-                taken.sources
-            };
-            // A folder deleted or moved with a trailing separator (`rm -r Exhibits/`) is that
-            // folder.
-            for word in picked
-                .into_iter()
-                .filter_map(|i| args.get(i))
-                .filter(|word| word.clear)
-            {
-                let trimmed = word.text.trim_end_matches(['/', '\\']);
-                add(
-                    targets,
-                    cwd,
-                    if trimmed.is_empty() { "/." } else { trimmed },
-                );
-            }
-        }
-    } else if let Some((program, args)) = argv.split_first()
+    if matches!(how.kind, Kind::Writes | Kind::Changes) {
+        add_writes(out, cwd, argv, redirects);
+    }
+    if how.kind != Kind::Writes
+        && let Some((program, args)) = argv.split_first()
+    {
+        let taken = deletes::taken(&program.text, args, how.dialect);
+        changes::add_taken(out, cwd, args, &taken, how);
+    }
+}
+
+/// Adds the files one simple command's words `argv` and `redirects` write, run in `cwd`.
+fn add_writes(out: &mut Out<'_>, cwd: Option<&str>, argv: &[Word], redirects: &[Word]) {
+    let mut found: Vec<&Word> = redirects.iter().collect();
+    if let Some((program, args)) = argv.split_first()
         && is_stetdoc(&program.text)
     {
         // stetdoc's own forms (`crate::stetdoc_args`): its default output and `--in-place`
@@ -355,7 +410,7 @@ fn add_segment(
         if program.clear && args.iter().all(|arg| arg.clear) {
             let words: Vec<String> = args.iter().map(|arg| arg.text.clone()).collect();
             for target in stetdoc_args::written(&words) {
-                add(targets, cwd, &target);
+                out.whole(cwd, &target);
             }
         }
     } else if let Some((program, args)) = argv.split_first() {
@@ -381,104 +436,79 @@ fn add_segment(
             }
             _ => {}
         }
-        if kind == Kind::Changes {
-            let taken = deletes::taken(program, args, dialect);
-            found.extend(
-                taken
-                    .deleted
-                    .iter()
-                    .chain(&taken.sources)
-                    .filter_map(|i| args.get(*i)),
-            );
-            for target in destinations(&taken, args) {
-                add(targets, cwd, &target);
-            }
-        }
         // `--output=Reply.docx`
         for arg in args {
             if let Some(value) = arg.text.strip_prefix("--output=")
                 && arg.clear
                 && !value.is_empty()
             {
-                add(targets, cwd, value);
+                out.whole(cwd, value);
             }
         }
     }
     for word in found {
         if word.clear {
-            add(targets, cwd, &word.text);
+            out.whole(cwd, &word.text);
         }
     }
 }
 
-/// Where a move ([`deletes::Taken`]) puts its plain sources among `args`: its destination path,
-/// each source's name in its destination folder, or a rename's new name beside each source.
-/// Nothing when a word it needs is unclear.
-fn destinations(taken: &deletes::Taken, args: &[Word]) -> Vec<String> {
-    let clear = |at: usize| {
-        args.get(at)
-            .filter(|word| word.clear)
-            .map(|w| w.text.as_str())
-    };
-    let sources = || taken.sources.iter().filter_map(|at| clear(*at));
-    let name = |path: &str| {
-        let trimmed = path.trim_end_matches(['/', '\\']);
-        trimmed
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(trimmed)
-            .to_owned()
-    };
-    match taken.to {
-        None => Vec::new(),
-        Some(deletes::To::Path(at)) => clear(at).map(str::to_owned).into_iter().collect(),
-        Some(deletes::To::Folder(at)) => clear(at).map_or_else(Vec::new, |folder| {
-            let folder = folder.trim_end_matches(['/', '\\']);
-            sources()
-                .map(|source| format!("{folder}/{}", name(source)))
-                .collect()
-        }),
-        Some(deletes::To::Beside(at)) => clear(at).map_or_else(Vec::new, |new| {
-            if new.contains(['/', '\\']) {
-                return vec![new.to_owned()];
-            }
-            sources()
-                .map(|source| {
-                    let trimmed = source.trim_end_matches(['/', '\\']);
-                    match trimmed.rfind(['/', '\\']) {
-                        Some(cut) => format!("{}/{new}", trimmed.get(..cut).unwrap_or_default()),
-                        None => new.to_owned(),
-                    }
-                })
-                .collect()
-        }),
+/// Adds `target`, run in `cwd` (`None`: unknown), to `targets`; whether it is a path here: not
+/// past [`MAX_TARGETS`], no separator at its end, and a place [`place`] gives.
+fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) -> bool {
+    if targets.len() >= MAX_TARGETS || target.ends_with(['/', '\\']) {
+        return false;
+    }
+    match place(cwd, target) {
+        Some(path) => {
+            targets.insert(path);
+            true
+        }
+        None => false,
     }
 }
 
-fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) {
-    if targets.len() >= MAX_TARGETS || target.ends_with(['/', '\\']) {
-        return;
-    }
-    let Some(cwd) = cwd.or_else(|| is_absolute(target).then_some("")) else {
-        return;
-    };
-    if let Some(path) = join(cwd, target)
-        && !path.is_empty()
-    {
-        targets.insert(path);
-    }
+/// `target`'s path, run in `cwd` (`None`: unknown, so an absolute target alone has one), joined
+/// ([`join`]); `None` for the matter's folder itself (an empty path) or one above it.
+fn place(cwd: Option<&str>, target: &str) -> Option<String> {
+    let cwd = cwd.or_else(|| is_absolute(target).then_some(""))?;
+    join(cwd, target).filter(|path| !path.is_empty())
 }
 
 /// `target` joined to `cwd` and normalised: separators as `/`, no `.` or empty part, each `..`
 /// taking off the part before it. An absolute result keeps its root (`/`, `C:/`, `//`); a
-/// relative one that climbs out of the matter's folder is `None`.
+/// relative one that climbs out of the matter's folder is `None`. A drive-relative target
+/// (`C:a.docx`, `C:..\b.docx`) is joined to `cwd` when `cwd` is on that drive, else `None`.
+/// A Win32 path's `\\?\` or `\\.\` prefix is read before a drive (`\\?\C:\x` is `C:/x`) or
+/// `UNC\` (`\\?\UNC\server\share\x` is `//server/share/x`); any other such path is `None`.
 fn join(cwd: &str, target: &str) -> Option<String> {
+    if let Some((drive, rest)) = drive_of(target).filter(|(_, rest)| !rest.starts_with(['/', '\\']))
+    {
+        return match drive_of(cwd) {
+            Some((on, path))
+                if on.eq_ignore_ascii_case(&drive) && path.starts_with(['/', '\\']) =>
+            {
+                join(cwd, rest)
+            }
+            _ => None,
+        };
+    }
     let whole = if is_absolute(target) || cwd.is_empty() {
         target.to_owned()
     } else {
         format!("{cwd}/{target}")
     };
-    let unified = whole.replace('\\', "/");
+    let mut unified = whole.replace('\\', "/");
+    if let Some(rest) = ["//?/", "//./"]
+        .iter()
+        .find_map(|prefix| unified.strip_prefix(prefix))
+    {
+        unified = match rest.get(..4) {
+            Some(unc) if unc.eq_ignore_ascii_case("UNC/") => format!("//{}", rest.get(4..)?),
+            _ if drive_of(rest).is_some_and(|(_, path)| path.starts_with('/')) => rest.to_owned(),
+            _ => return None,
+        };
+    }
     let (root, rest) = if let Some(rest) = unified.strip_prefix("//") {
         ("//".to_owned(), rest)
     } else if let Some(rest) = unified.strip_prefix('/') {
