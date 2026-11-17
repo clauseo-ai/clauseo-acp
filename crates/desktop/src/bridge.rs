@@ -64,6 +64,16 @@ const MODE_OPTIONS: [&str; 4] = [
     "exit-plan-clear-auto",
 ];
 
+/// codex-acp 2.2.2's session answers (`dist/index.js:32023-32041, 32228-32250`): Codex keeps
+/// them in memory for the rest of the conversation only, never past it
+/// (`clauseo-host`'s `agent::codex_options`), so the card says "For this conversation" and
+/// answering one asks no "Always allow?" confirm, though its kind is `allow_always`.
+const CONVERSATION_OPTIONS: [&str; 3] = [
+    "allow_for_session",
+    "allow_session",
+    "allow_permissions_session",
+];
+
 /// A window's stream, with the number of the `open_stream` call that made it.
 type Numbered = (u64, Arc<Mutex<Window>>);
 
