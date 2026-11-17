@@ -344,8 +344,9 @@ pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
 /// `{}`, so the lawyer's `~/.agent-browser/config.json` is never read), the session's own
 /// downloads folder and Chrome profile (`AGENT_BROWSER_DOWNLOAD_PATH`, `AGENT_BROWSER_PROFILE`,
 /// so never the lawyer's own profile), all three in its run folder's `agent-browser` folder,
-/// the one place the data fences open to this session's agent-browser and to no other session's
-/// (`agent::codex_fence`, `agent::data_fence`), and the Chrome the launch prep
+/// the one place Claude's data fence opens to this session's agent-browser and to no other
+/// session's (`agent::data_fence`), and a writable root of Codex's (`agent::codex_fence`), and
+/// the Chrome the launch prep
 /// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy or
 /// socket folder: the shell tool has none of the guard's claims.
 pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {

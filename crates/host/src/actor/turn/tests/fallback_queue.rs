@@ -53,10 +53,10 @@ fn download_notices(rig: &mut Rig, thread: ThreadId) -> Vec<String> {
         .collect()
 }
 
-/// The launch makes the fallback folder before the fences list the matter's state, so both deny
-/// it from the first session on (a folder the guard made mid-session would be in neither).
+/// The launch makes the fallback folder before Claude's fence lists the matter's state, so it
+/// denies it from the first session on (a folder the guard made mid-session would be in none).
 #[test]
-fn the_launch_makes_the_fallback_folder_and_the_fences_deny_it() {
+fn the_launch_makes_the_fallback_folder_and_claudes_fence_denies_it() {
     let mut rig = Rig::start("turn-fallback-folder-fenced", EXIT_AFTER_ANSWER);
     let thread = rig.thread();
     let data = rig.actor.effective.data_dir().to_owned();
@@ -68,8 +68,6 @@ fn the_launch_makes_the_fallback_folder_and_the_fences_deny_it() {
     });
     assert!(crate::write::is_real_dir(&folder));
     let run = rig.actor.threads[&thread].turn.run.as_ref().unwrap();
-    let codex = run.codex_listed.agent_state.clone().unwrap_or_default();
-    assert!(codex.contains(&folder), "{codex:?}");
     let pattern = format!("agent-state/{}/downloads/**", rig.matter());
     let claude = &run.data_deny.targets;
     assert!(claude.contains(&pattern), "{claude:?}");

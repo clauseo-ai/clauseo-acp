@@ -79,9 +79,9 @@ pub(crate) fn launch_env(
 /// The top-level keys `config` takes from the launch profile's side
 /// (`agent::loads::profile::codex_keys`): the profile's own [`PROFILE_KEYS`], and the host's
 /// `web_search` and `sandbox_workspace_write` (only its `writable_roots`, the session's work
-/// and notes folders), and the data-folder fence's `default_permissions` and `permissions`
-/// (`agent::codex_fence`; `codex_keys` drops both from the profile hook, so only the host's
-/// reach here). Any other key is refused with a warning: `hooks`, `mcp_servers`,
+/// and notes folders), and Codex's permission profile's `default_permissions` and
+/// `permissions` (`agent::codex_fence`; `codex_keys` drops both from the profile hook, so only
+/// the host's reach here). Any other key is refused with a warning: `hooks`, `mcp_servers`,
 /// `sandbox_mode`, `approval_policy`, `skills`, `features`, `projects`, `model_providers`,
 /// `profiles`, `notify` and the rest.
 const LAUNCH_KEYS: [&str; 5] = [

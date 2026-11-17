@@ -56,7 +56,6 @@ use super::agents::{self, Waiting};
 use super::offline::probe::settings::{Reads, SettingsRead};
 use super::{TurnInput, host_stopping, state};
 
-use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::loads::lawyer::Reads as McpReads;
@@ -167,10 +166,6 @@ pub(crate) struct RunFolders {
     /// entry that is not this session's own enumerated by the launch prep. Run folders and
     /// matters' notes made after the launch are in no rule (the accepted residual).
     pub(crate) data_deny: LaunchDeny,
-    /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
-    /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
-    /// and its runtime folder the shell needs not. Each folder is denied whole until then.
-    pub(crate) codex_listed: Listed,
     /// `<root>/relay-token`: the case-law relay's token file (R24), written only when the relay
     /// opened, gone with the run folder; R17 passes it to `PolicyBuilder::read_only_in_state`.
     pub(crate) relay_token: PathBuf,
@@ -238,7 +233,6 @@ impl RunFolders {
             browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
-            codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
             egress: None,
             lease: Arc::default(),
@@ -379,7 +373,6 @@ pub(super) fn prepare(
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
-                run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
                 let skills_written = skill_wait::write_skills(&skills.writes);
