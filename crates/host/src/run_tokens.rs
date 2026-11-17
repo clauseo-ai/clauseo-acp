@@ -5,8 +5,9 @@
 //! the transcript.
 //!
 //! Every deny list names each of them: Claude's data-folder rules (`agent::data_fence::DENIED`,
-//! from which the Read and Edit rules and the Windows shell rules are derived) and the test
-//! folders that stand in for a data folder. `tests.rs` fails when any of those lists names a
+//! from which the Read and Edit rules and the Windows shell rules are derived), Codex's fence
+//! (`agent::codex_fence`: the own run folder's by path, every session's by `token_globs`) and
+//! the test folders that stand in for a data folder. `tests.rs` fails when any of those lists names a
 //! token file this list does not hold, or leaves out one it does.
 
 /// The case-law relay's token file.

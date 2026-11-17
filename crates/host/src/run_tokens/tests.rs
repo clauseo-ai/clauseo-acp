@@ -1,6 +1,7 @@
-//! Token-file parity: every deny list names exactly the token files [`RUN_TOKEN_FILES`] holds. A
-//! list that names one and not another fails here, and so does a token file added to a list
-//! but not to [`RUN_TOKEN_FILES`] (or the other way round), whatever its name.
+//! Token-file parity: every deny list, Claude's and Codex's, names exactly the token files
+//! [`RUN_TOKEN_FILES`] holds. A list that names one and not another fails here, and so does a
+//! token file added to a list but not to [`RUN_TOKEN_FILES`] (or the other way round), whatever
+//! its name.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -102,6 +103,33 @@ fn every_deny_list_names_every_token_file_and_no_other() {
             expected(),
             "the Windows shell rules"
         );
+    }
+}
+
+/// Codex's fence (none on Windows, `codex_fence.rs`) denies every token file in every kind of
+/// turn, escalated included: the own run folder's by its path, and a later session's, in a run
+/// folder no listing named, by a glob per name. Its rules name exactly the token files.
+#[test]
+fn codex_denies_every_token_file_the_own_and_a_later_sessions() {
+    use crate::agent::codex_fence::PROFILE;
+    use crate::agent::codex_fence::tests::{
+        access, data, escalated_access, fence_with, listed, run_root,
+    };
+    let keys = fence_with(&listed());
+    let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
+        .as_object()
+        .unwrap();
+    assert_eq!(
+        token_names(scoped.keys().map(String::as_str)),
+        expected(),
+        "Codex's rules"
+    );
+    let later = data().join("run").join("s9");
+    for name in RUN_TOKEN_FILES {
+        for file in [run_root().join(name), later.join(name)] {
+            assert_eq!(access(&keys, &file), "deny", "{}", file.display());
+            assert_eq!(escalated_access(&keys, &file), "deny", "{}", file.display());
+        }
     }
 }
 
