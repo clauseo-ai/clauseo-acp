@@ -383,8 +383,8 @@ pub(super) fn reason(path: &MatterPath, why: SkippedFileReason, act: Act) -> Str
              themselves."
         ),
         Act::Overwrite => format!(
-            "{path} can't be brought back if it is overwritten: Clauseo keeps no copy of it, \
-             because {because}. Write to a new file instead, and tell the lawyer."
+            "Clauseo does not let you overwrite, edit or move {path} now: Clauseo keeps no copy of \
+             it, because {because}. Write to a new file instead, and tell the lawyer."
         ),
     }
 }

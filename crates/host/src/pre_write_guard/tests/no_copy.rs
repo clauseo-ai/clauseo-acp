@@ -221,8 +221,9 @@ fn a_file_over_the_cap_now_is_refused_to_an_overwrite() {
 }
 
 /// R4: the agent's words are true for each case and promise nothing for asking: a delete says
-/// the lawyer can delete it themselves; an overwrite says to write to a new file; neither says a
-/// listed file being deleted is "not downloaded".
+/// the lawyer can delete it themselves; an overwrite, edit or move says what is not allowed (a
+/// move is not called an overwrite) and to write to a new file; neither says a listed file being
+/// deleted is "not downloaded".
 #[test]
 fn the_refusal_words_say_what_is_true_and_promise_nothing() {
     let path = MatterPath::new("Contract.docx").unwrap();
@@ -236,8 +237,8 @@ fn the_refusal_words_say_what_is_true_and_promise_nothing() {
     let overwrite = reason(&path, LARGE, Act::Overwrite);
     assert_eq!(
         overwrite,
-        "Contract.docx can't be brought back if it is overwritten: Clauseo keeps no copy of it, \
-         because it is larger than 512 MB. Write to a new file instead, and tell the lawyer."
+        "Clauseo does not let you overwrite, edit or move Contract.docx now: Clauseo keeps no copy \
+         of it, because it is larger than 512 MB. Write to a new file instead, and tell the lawyer."
     );
     // A listed file over the cap at this answer's start may have shrunk since.
     assert_eq!(
