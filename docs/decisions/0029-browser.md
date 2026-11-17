@@ -1557,16 +1557,21 @@ the release fetches the pinned asset, checks its hash and writes it into the des
 
 - **The pin**, `crates/desktop/agent-browser.toml`: `version = "0.41.1"`, then one table per Rust
   target triple with `url` and `sha256` (lowercase hex) of the release's raw binary (no archive).
+  Since 2026-11-15 the macOS and Windows tables point at our build (below, "Our build"), and three
+  more keys before the tables pin its source: `patched_tag`, `upstream_commit` and
+  `upstream_tarball_sha256`.
   A triple with no build may hold `none = true` and be left out explicitly; none does today, and the Rust
   and node pin tests refuse it, so a future `none` is a deliberate change to those tests. The
   file's header states the format. Each hash was taken from a download of the asset and matches
   the digest GitHub lists for it. `crates/desktop/src/agent_browser_pin.rs` (the
-  `agent_browser_pin` test) checks the file: semver version, the six triples, each url under the
-  pinned release with its asset name, each sha256 in shape.
+  `agent_browser_pin` test) checks the file: semver version, the source keys, the six triples,
+  each url under its pinned release (ours for macOS and Windows, upstream's for Linux) with its
+  asset name, each sha256 in shape.
 - **The fetch**, `crates/desktop/sidecars/agent-browser.mjs`: `fetchAgentBrowser(triple,
   destPath)`, Node built-ins only. It reads the pin, throws on a triple the pin does not name,
   accepts only an https URL on `github.com/vercel-labs/agent-browser/releases/download/v<version>/`
-  whose asset name is one plain segment (no `/`, no `%`), and downloads it with a 120 s timeout.
+  or our `github.com/clauseo-ai/clauseo-acp/releases/download/<patched_tag>/` (refusing the
+  all-zero placeholder sha256 before any request) whose asset name is one plain segment (no `/`, no `%`), and downloads it with a 120 s timeout.
   The response must be HTTP 200 and at most 64 MB (a larger Content-Length is refused up front; a
   larger body is refused while reading). Redirects are followed; the SHA-256 of the bytes decides
   trust. A mismatch throws and writes nothing. Otherwise it writes `<destPath>.partial`, sets mode
@@ -1586,8 +1591,13 @@ the release fetches the pinned asset, checks its hash and writes it into the des
   Apple's folder for nested helper code, not `Contents/MacOS`, which the agent's sandbox can reach
   (0035, "Sidecars"). The desktop looks there first and, transitionally, beside the exe; the
   fallback goes in the same change as stage C's J3 deny on `Contents/Helpers`.
-- **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
-  Windows on ARM runs under x64 emulation; the pin says so in a comment.
+- **Our build** (2026-11-15): macOS and Windows take upstream's source at the pinned commit plus
+  our patches (`crates/desktop/agent-browser/README.md`: a cross-platform switch that keeps the
+  stream server off, offered upstream, and the Windows named pipe and hardening), built per
+  triple, Windows ARM64 natively, by the workflow `agent-browser-build.yml` (from PR #1089) and
+  published as a pre-release of this repository under `patched_tag`. It replaces upstream's x64 asset, which
+  Windows on ARM used to run under x64 emulation. Linux keeps upstream's binary for now
+  (development and CI only; the stream server is still on there).
 - **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream
   has no NOTICE file), listed in `LICENSES/README.md`.
 - **Machine memory**: the desktop reads the machine's total physical memory once at start-up
@@ -1796,17 +1806,18 @@ Record 0030 has the entry; this is the browser's side of it.
   - **`read`** (H1). agent-browser marks `agent_browser_read` read-only, so Codex runs it with
     no prompt; the guard refuses its `url`, `llms` and `requireMd` keys, so it reads only the
     page already open, through Chrome (agent-browser v0.41.1 `native/actions.rs:5964-5994`).
-- **No browser for Codex on Windows.** Clauseo gives Codex's shell the unelevated
-  restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only network block is
-  proxy variables that leave loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`,
-  applied at `spawn_prep.rs:141-143`); the firewall rules exist only in the elevated setup. Its
-  reads are not restricted, so the guard's port file and Chrome's command line are readable.
-  agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
-  command Codex runs without a prompt could drive the unfenced browser past the filter and write
-  outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
-  (`servers::no_browser`), no browser in its header (the app offers no browser action), and the
-  no-browser sentence. The way back is the elevated sandbox (its firewall) or an authenticated
-  daemon. Claude has no browser on Windows either (below), so no agent has one there.
+- **Codex's browser on Windows, back on** (2026-11-17). It was off: Clauseo gives Codex's shell
+  the unelevated restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only
+  network block is proxy variables that leave loopback out (codex 0.162.1
+  `windows-sandbox-rs/src/env.rs:126-170`, applied at `spawn_prep.rs:141-143`), and
+  agent-browser's daemon took no password, so a shell command Codex ran without a prompt could
+  have driven the guard's browser past the filter. That way back, an authenticated daemon, is
+  #1091: the guard draws a per-session key that only its own agent-browser gets (never in a file,
+  on a command line or in Chrome's environment), the patched daemon serves no client without it,
+  and Chrome speaks CDP over a pipe, not a port (record 0060). So Codex gets its guarded entry on
+  Windows as on macOS and Linux (`servers::browser_mcp`, `servers::no_browser` false for Codex
+  on every OS), with the session's egress proxy and downloads to the matter. Claude still has no
+  browser on Windows (below).
 - **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
   #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
   (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it

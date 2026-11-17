@@ -1,0 +1,188 @@
+stream: AGENT_BROWSER_STREAM_DISABLED=1 keeps every loopback server off
+
+Clauseo's patch to vercel-labs/agent-browser v0.41.1 (5868f7c05020e047c00e68e4abf9253cce864f41),
+every OS. Upstream always starts the stream server with the daemon (port 0 only picks a random
+port), and its HTTP API can drive the session. With AGENT_BROWSER_STREAM_DISABLED=1 (or true) the
+daemon starts no stream server and writes no .stream file, `stream enable` fails, `inspect` and
+`dashboard start` refuse to start their servers, and a daemon started with streaming on is not
+reused by a CLI that has it off (the option joins the daemon's config fingerprint). This is the
+part offered upstream; if upstream takes it, macOS can go back to upstream's binary. (Linux takes
+upstream's binary already, for dev and CI only.)
+
+diff --git a/cli/src/connection.rs b/cli/src/connection.rs
+index 2fe4b8a..887dae5 100644
+--- a/cli/src/connection.rs
++++ b/cli/src/connection.rs
+@@ -642,6 +642,8 @@ fn daemon_config_fingerprint(opts: &DaemonOptions) -> String {
+     opts.idle_timeout.hash(&mut hasher);
+     opts.default_timeout.hash(&mut hasher);
+     opts.no_auto_dialog.hash(&mut hasher);
++    // A daemon started with streaming on is not reused by a CLI that has it off.
++    crate::native::stream::stream_disabled().hash(&mut hasher);
+     format!("{:016x}", hasher.finish())
+ }
+ 
+diff --git a/cli/src/main.rs b/cli/src/main.rs
+index a009151..67d6a1a 100644
+--- a/cli/src/main.rs
++++ b/cli/src/main.rs
+@@ -1567,6 +1567,15 @@ fn main() {
+                 run_dashboard_stop(flags.json);
+                 return;
+             }
++            DashboardCommand::Start { .. } if native::stream::stream_disabled() => {
++                let error = native::stream::stream_disabled_error("The dashboard");
++                if flags.json {
++                    print_json_error(error);
++                } else {
++                    eprintln!("{} {}", color::error_indicator(), error);
++                }
++                exit(1);
++            }
+             DashboardCommand::Start {
+                 port,
+                 allowed_origins,
+diff --git a/cli/src/native/daemon.rs b/cli/src/native/daemon.rs
+index 987348b..4fb9666 100644
+--- a/cli/src/native/daemon.rs
++++ b/cli/src/native/daemon.rs
+@@ -17,7 +17,7 @@ use super::actions::{
+ };
+ use super::cdp::client::CdpClient;
+ use super::state;
+-use super::stream::{IdleActivity, StreamServer};
++use super::stream::{stream_disabled, IdleActivity, StreamServer};
+ use crate::connection::INTERNAL_DAEMON_SHUTDOWN_ACTION;
+ use crate::session_files::{owns_session, remove_daemon_files, SessionFile};
+ use crate::validation::{is_valid_session_name, session_name_error};
+@@ -111,23 +111,25 @@ pub async fn run_daemon(session: &str) {
+         .ok()
+         .and_then(|s| s.parse::<u16>().ok())
+         .unwrap_or(0);
+-    match StreamServer::start_without_client(
+-        preferred_port,
+-        session.to_string(),
+-        true,
+-        idle_activity.clone(),
+-    )
+-    .await
+-    {
+-        Ok((stream_server, client_slot)) => {
+-            stream_client = Some(client_slot.clone());
+-            if let Err(e) = fs::write(&stream_path, stream_server.port().to_string()) {
+-                let _ = writeln!(std::io::stderr(), "Failed to write .stream file: {}", e);
++    if !stream_disabled() {
++        match StreamServer::start_without_client(
++            preferred_port,
++            session.to_string(),
++            true,
++            idle_activity.clone(),
++        )
++        .await
++        {
++            Ok((stream_server, client_slot)) => {
++                stream_client = Some(client_slot.clone());
++                if let Err(e) = fs::write(&stream_path, stream_server.port().to_string()) {
++                    let _ = writeln!(std::io::stderr(), "Failed to write .stream file: {}", e);
++                }
++                stream_server_instance = Some(Arc::new(stream_server));
++            }
++            Err(e) => {
++                let _ = writeln!(std::io::stderr(), "Stream server failed to start: {}", e);
+             }
+-            stream_server_instance = Some(Arc::new(stream_server));
+-        }
+-        Err(e) => {
+-            let _ = writeln!(std::io::stderr(), "Stream server failed to start: {}", e);
+         }
+     }
+ 
+diff --git a/cli/src/native/inspect_server.rs b/cli/src/native/inspect_server.rs
+index 2910ade..ad90043 100644
+--- a/cli/src/native/inspect_server.rs
++++ b/cli/src/native/inspect_server.rs
+@@ -38,6 +38,9 @@ impl InspectServer {
+         target_id: String,
+         chrome_host_port: String,
+     ) -> Result<Self, String> {
++        if super::stream::stream_disabled() {
++            return Err(super::stream::stream_disabled_error("The inspect server"));
++        }
+         let listener = TcpListener::bind("127.0.0.1:0")
+             .await
+             .map_err(|e| format!("Failed to bind inspect server: {}", e))?;
+diff --git a/cli/src/native/stream/dashboard.rs b/cli/src/native/stream/dashboard.rs
+index bf64ca1..d1019d5 100644
+--- a/cli/src/native/stream/dashboard.rs
++++ b/cli/src/native/stream/dashboard.rs
+@@ -624,6 +624,10 @@ async fn proxy_session_stream(mut stream: tokio::net::TcpStream, port: u16) {
+ }
+ 
+ pub async fn run_dashboard_server(port: u16) {
++    if super::stream_disabled() {
++        eprintln!("{}", super::stream_disabled_error("The dashboard"));
++        return;
++    }
+     let ipv4_addr = (Ipv4Addr::LOCALHOST, port);
+     let ipv4_listener = match TcpListener::bind(ipv4_addr).await {
+         Ok(l) => l,
+diff --git a/cli/src/native/stream/mod.rs b/cli/src/native/stream/mod.rs
+index dea9606..52dc255 100644
+--- a/cli/src/native/stream/mod.rs
++++ b/cli/src/native/stream/mod.rs
+@@ -19,6 +19,27 @@ use tokio::sync::{broadcast, watch, Mutex, Notify, RwLock};
+ 
+ use super::cdp::client::CdpClient;
+ 
++/// Whether streaming is switched off with `AGENT_BROWSER_STREAM_DISABLED=1` (or
++/// `true`). Then nothing listens on a loopback port: the daemon starts no
++/// stream server and writes no `.stream` file, `stream enable` fails, and
++/// `inspect` and `dashboard start` refuse to start their servers.
++pub fn stream_disabled() -> bool {
++    stream_disabled_value(
++        std::env::var("AGENT_BROWSER_STREAM_DISABLED")
++            .ok()
++            .as_deref(),
++    )
++}
++
++/// The error for a loopback server that `stream_disabled` keeps off.
++pub fn stream_disabled_error(what: &str) -> String {
++    format!("{} is disabled (AGENT_BROWSER_STREAM_DISABLED=1)", what)
++}
++
++fn stream_disabled_value(value: Option<&str>) -> bool {
++    value.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true"))
++}
++
+ /// Screencast encoding for the live stream, from `AGENT_BROWSER_STREAM_*`.
+ ///
+ /// Invariant: `max_width` and `max_height` are overrides, so `None` keeps the
+@@ -312,6 +333,9 @@ impl StreamServer {
+         allow_port_fallback: bool,
+         idle_activity: Arc<IdleActivity>,
+     ) -> Result<(Self, Arc<RwLock<Option<Arc<CdpClient>>>>), String> {
++        if stream_disabled() {
++            return Err(stream_disabled_error("Streaming"));
++        }
+         let addr = format!("127.0.0.1:{}", preferred_port);
+         let listener = match TcpListener::bind(&addr).await {
+             Ok(l) => l,
+@@ -642,6 +666,17 @@ pub fn is_allowed_origin(origin: Option<&str>) -> bool {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn test_stream_disabled_values() {
++        for on in ["1", "true", " TRUE ", "1\n"] {
++            assert!(stream_disabled_value(Some(on)), "{on:?}");
++        }
++        for off in ["", "0", "false", "yes", "2"] {
++            assert!(!stream_disabled_value(Some(off)), "{off:?}");
++        }
++        assert!(!stream_disabled_value(None));
++    }
++
+     #[test]
+     fn test_screencast_config_defaults_when_unset() {
+         let c = ScreencastConfig::parse(None, None, None);

@@ -137,8 +137,12 @@ pub(crate) struct Launcher {
     /// agent-browser's file and arguments.
     pub(crate) program: PathBuf,
     pub(crate) args: Vec<OsString>,
-    /// agent-browser's environment without [`env::CDP`], which each start adds.
+    /// agent-browser's environment without [`env::CDP`] and [`env::SESSION_KEY`], which each
+    /// start adds ([`env::agent_env`]); the one-shot gets it as it is.
     pub(crate) env: BTreeMap<String, OsString>,
+    /// Windows: the session key ([`env::SESSION_KEY`]), drawn once per guard run; none
+    /// elsewhere.
+    pub(crate) session_key: Option<String>,
     /// Checked after every line agent-browser writes.
     pub(crate) port_checks: Vec<Expected>,
     /// The daemon's socket folder and session name, for `reaper::kill_daemon`.
@@ -198,6 +202,7 @@ impl Launcher {
             program: dir.join("agent-browser"),
             args: Vec::new(),
             env: BTreeMap::new(),
+            session_key: None,
             port_checks,
             socket_dir: dir.to_owned(),
             session: "s".to_owned(),
@@ -405,8 +410,7 @@ fn start_both(
 ) -> Result<(), StartFailure> {
     let launcher = &shared.launcher;
     let (mut chrome, endpoint) = browser::start_browser(shared, parent)?;
-    let mut env = launcher.env.clone();
-    env::set_cdp(&mut env, &endpoint);
+    let env = env::agent_env(&launcher.env, &endpoint, launcher.session_key.as_deref());
     let cannot_run =
         |error: io::Error| format!("cannot run {}: {error}", launcher.program.display());
     let mut agent = pumps::spawn_child(

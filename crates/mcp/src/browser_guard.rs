@@ -37,7 +37,9 @@
 //! no debugging port. The guard starts it over a `DevTools` pipe (`chrome/pipe.rs`) and relays the
 //! pipe to agent-browser on a 127.0.0.1 websocket with a 256-bit secret path, letting in only
 //! agent-browser's own processes (`devtools.rs`, `devtools/peer.rs`); `--cdp-port` is unused,
-//! and agent-browser is told to start no stream server (`env.rs`, `port_file.rs`). The guard
+//! and agent-browser is told to start no stream server (`env.rs`, `port_file.rs`). On Windows the
+//! guard also draws a session key per run and gives it only to the agent-browser connected to
+//! the browser, whose daemon then serves no process without it (`env.rs` `SESSION_KEY`). The guard
 //! first hides itself from other processes of the user (`harden.rs`; exit 1 if it cannot): on
 //! Windows a protected DACL from its creation, by running as a copy of itself that its first
 //! process starts hardened (passing on its exit code), which every child it starts gets too; on
@@ -344,6 +346,7 @@ fn serve(
         args: command.child_args.clone(),
         port_checks: port_checks(&env, command, session),
         env,
+        session_key: session_key()?,
         #[cfg(unix)]
         socket_dir,
         #[cfg(unix)]
@@ -372,6 +375,17 @@ fn serve(
     #[cfg(unix)]
     reaper.done();
     outcome_code(outcome, &command.agent_browser)
+}
+
+/// Windows: this run's agent-browser's session key (`env::SESSION_KEY`), or no browser; else None.
+fn session_key() -> Result<Option<String>, Failure> {
+    if cfg!(windows) {
+        env::new_session_key()
+            .map(Some)
+            .map_err(|error| failed(&format!("cannot draw the session key: {error}")))
+    } else {
+        Ok(None)
+    }
 }
 
 /// agent-browser's exit code, or the failure for a relay the guard ended.

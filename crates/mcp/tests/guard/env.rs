@@ -38,6 +38,11 @@ const HOSTILE: &[(&str, &str)] = &[
     ("TMPDIR", "/tmp/elsewhere"),
 ];
 
+/// The session key's name (Windows), and what [`child_env`] puts for its value once the
+/// guard's redaction mark is checked in its place.
+const SESSION_KEY: &str = "AGENT_BROWSER_SESSION_KEY";
+const SESSION_KEY_SEEN: &str = "<session key>";
+
 /// The map the child must see, built from the brief's list for this OS.
 fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let cwd = scratch.cwd();
@@ -74,6 +79,9 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
         under("screenshots"),
     );
     if cfg!(windows) {
+        // The session key (`src/browser_guard/env/session_key.rs`): only the agent-browser given
+        // the relay gets it, never the one-shot; `child_env` checks its form and puts this in.
+        map.insert(SESSION_KEY.to_owned(), SESSION_KEY_SEEN.to_owned());
         map.insert("TEMP".to_owned(), under("tmp"));
         map.insert("TMP".to_owned(), under("tmp"));
         map.insert("AGENT_BROWSER_SOCKET_DIR".to_owned(), under("run"));
@@ -156,6 +164,7 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
     let oneshot = guard.read();
     let mut without_cdp = expected(&scratch);
     without_cdp.remove("AGENT_BROWSER_CDP");
+    without_cdp.remove(SESSION_KEY);
     assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
     // The first call starts Chrome, then agent-browser with the guard's relay. The stub exits
     // without answering, so the guard answers the call with an error and exits with its 0.
@@ -227,6 +236,7 @@ fn without_a_proxy_the_guard_starts_and_the_child_gets_no_proxy_variable() {
     let oneshot = guard.read();
     let mut without_cdp = wanted.clone();
     without_cdp.remove("AGENT_BROWSER_CDP");
+    without_cdp.remove(SESSION_KEY);
     assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
     guard.send_call("open");
     let report = guard.read();
@@ -261,6 +271,7 @@ fn the_proxy_secret_file_is_read_deleted_and_never_passed_on() {
     assert!(!file.exists(), "the guard deletes the file at its start");
     let mut without_cdp = expected(&scratch);
     without_cdp.remove("AGENT_BROWSER_CDP");
+    without_cdp.remove(SESSION_KEY);
     assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
     guard.send_call("open");
     let report = guard.read();
@@ -298,6 +309,16 @@ fn child_env(report: &Value, host_session: &str) -> BTreeMap<String, String> {
                     "{name} came through from the guard's env"
                 );
             }
+        }
+        if let Some(key) = env.get_mut(SESSION_KEY) {
+            // The stub's report comes back through the guard's redaction (`relay/redact.rs`),
+            // which puts its mark for the key's value.
+            assert_eq!(
+                key.as_str(),
+                "[secret redacted]",
+                "the session key was not redacted"
+            );
+            SESSION_KEY_SEEN.clone_into(key);
         }
         // PATH starts with the system directory Windows reports (`GetSystemDirectoryW`), which
         // can differ in case from `<SystemRoot>\System32` (e.g. `system32`): Windows paths

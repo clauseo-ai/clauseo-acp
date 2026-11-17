@@ -306,8 +306,8 @@ pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
     }
 }
 
-/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows,
-/// and Claude on every OS (`clauseo_profile::servers::no_browser_on`, decision record 0030).
+/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Claude on every
+/// OS (`clauseo_profile::servers::no_browser_on`, decision record 0030).
 /// Such a session gets no entry, no shell tool (no `agent-browser` on `PATH`, no
 /// `AGENT_BROWSER_*` variables, no browser rules), no browser in its header (the app then offers
 /// no browser action: no install advice, no switch) and the no-browser sentence
