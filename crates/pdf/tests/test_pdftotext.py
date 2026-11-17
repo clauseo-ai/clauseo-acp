@@ -5,6 +5,9 @@
 #   <python> -m unittest discover -s crates/pdf/tests -p 'test_*.py'
 # The test that OCRs a real scan needs Clauseo's tesseract: CLAUSEO_TEST_TESSERACT=<its folder>,
 # which holds tesseract and tessdata/ (eng); without it, that test is skipped.
+# On Windows the fake engine is the Rust one (src/bin/fake_tesseract.rs, never shipped), built by
+# `cargo build -p clauseo-pdf --bins`: CLAUSEO_TEST_FAKE_TESSERACT=<its .exe>, and for the Job
+# Object test CLAUSEO_TEST_PDFTOTEXT=<the pdftotext.exe launcher> too.
 import ast
 import ntpath
 import importlib.util
@@ -38,11 +41,24 @@ for name in ("BUDGET", "MAX_OCR", "STALE"):
         setattr(m, name, type(getattr(m, name))(os.environ["TEST_" + name]))
 if "TEST_WORKERS" in os.environ:
     m.workers = lambda: int(os.environ["TEST_WORKERS"])
-sys.exit(m.main(sys.argv[1:]))
+if "TEST_RENDER_FAIL" in os.environ:
+    render = m.pgm
+
+    def pgm(doc, pg):
+        if pg == int(os.environ["TEST_RENDER_FAIL"]):
+            raise m.pdfium_error("Failed to fill bitmap rectangle")
+        return render(doc, pg)
+    import pypdfium2
+    m.pdfium_error, m.pgm = pypdfium2.PdfiumError, pgm
+code = m.main(sys.argv[1:])
+if os.environ.get("TEST_NICE"):
+    sys.stderr.write("nice %d\n" % os.getpriority(os.PRIO_PROCESS, 0))
+sys.exit(code)
 """
 
 # A fake tesseract: it checks the O2 rules (stdin, stdout, --tessdata-dir, no TESSDATA_PREFIX, a
-# PGM on stdin), sleeps FAKE_SLEEP, logs "<langs> <width>" and prints words naming the width.
+# PGM on stdin), writes leptonica's chatter on stderr as the real one does, sleeps FAKE_SLEEP, logs
+# "<langs> <width>" and prints words naming the width. src/bin/fake_tesseract.rs is the same.
 FAKE = r"""
 import os, sys, time
 args = sys.argv[1:]
@@ -57,10 +73,15 @@ width = data.split()[1].decode()
 if os.environ.get("FAKE_PIDS"):
     with open(os.environ["FAKE_PIDS"], "a") as pids:
         pids.write("%d\n" % os.getpid())
+sys.stderr.write("Error in pixReadMemTiff: function not present\n"
+                 "Error in pixReadMem: tiff: no pix returned\nEstimating resolution as 300\n")
 if width == os.environ.get("FAKE_FAIL_WIDTH"):
-    sys.stderr.write("pixReadMemTiff: function not present\nError: page broke\n")
+    sys.stderr.write("Error: page broke\nError in pixaGenerateFont: pixa not made\n")
     sys.exit(1)
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+if os.environ.get("FAKE_NICE"):
+    with open(os.environ["FAKE_NICE"], "w") as nice:
+        nice.write("%d" % os.getpriority(os.PRIO_PROCESS, 0))
 hindi = os.environ.get("FAKE_HINDI") == "1" and "hin" in args[3]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write("%s %s\n" % (args[3], width))
@@ -70,8 +91,15 @@ sys.stdout.write("%sw%s\n" % (text, width))
 
 # The fake engine is a "#!python" script, and Windows runs only an .exe; there the real-engine
 # test (CLAUSEO_TEST_TESSERACT) covers the engine instead.
-fake_engine = unittest.skipIf(os.name == "nt", "the fake engine is a Python script; Windows runs "
-                              "only .exe; the real-engine test covers Windows")
+FAKE_EXE = os.environ.get("CLAUSEO_TEST_FAKE_TESSERACT", "")
+fake_engine = unittest.skipIf(os.name == "nt" and not FAKE_EXE, "the fake engine is a Python "
+                              "script; Windows runs only .exe: set CLAUSEO_TEST_FAKE_TESSERACT")
+
+
+def ocr(pg, width, langs="eng+hin"):
+    """A page OCR'd by the fake engine, as the output prints it."""
+    return (f"[page {pg}: no text layer; recognised by OCR (tesseract, {langs}), errors are "
+            f"possible]\nrecognised words w{width}\n")
 
 
 def pdf_bytes(pages):
@@ -93,6 +121,18 @@ def pdf_bytes(pages):
             ops = b"BT /F1 12 Tf 14 TL 72 720 Td " + b"".join(
                 b"(" + line.encode("latin-1") + b") Tj T* " for line in page[1]) + b"ET"
             res = b"/Font << /F1 %d 0 R >>" % font
+        elif kind == "tounicode":
+            # Helvetica whose ToUnicode map sends A, B and C to ESC, BEL and C1's NEL.
+            cmap = (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName "
+                    b"/T def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange "
+                    b"3 beginbfchar <41> <001B> <42> <0007> <43> <0085> endbfchar 1 beginbfrange "
+                    b"<61> <7A> <0061> endbfrange endcmap CMapName currentdict /CMap "
+                    b"defineresource pop end end")
+            uni = add(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(cmap), cmap))
+            tfont = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode %d 0 R >>"
+                        % uni)
+            ops = b"BT /F1 12 Tf 72 720 Td (" + page[1].encode() + b") Tj ET"
+            res = b"/Font << /F1 %d 0 R >>" % tfont
         elif kind == "columns":
             ops = b"".join(b"BT /F1 12 Tf %d %d Td (%s) Tj ET " % (x, y, t.encode())
                            for x, y, t in page[1])
@@ -107,7 +147,7 @@ def pdf_bytes(pages):
             ops = b"q %d 0 0 %d 0 0 cm /Im0 Do Q" % size
             res = b"/XObject << /Im0 %d 0 R >>" % img
         else:
-            size, ops = (page[1], 300), b""
+            size, ops = (page[1], page[2] if len(page) > 2 else 300), b""
         content = add(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(ops), ops))
         kids.append(add(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %d %d] /Contents %d 0 R "
                         b"/Resources << %s >> >>" % (parent, size[0], size[1], content, res)))
@@ -123,6 +163,23 @@ def pdf_bytes(pages):
     out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
     out += b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
         len(objs) + 1, catalog, xref)
+    return bytes(out)
+
+
+def many_pages(count):
+    """A PDF of `count` empty pages that share one page tree entry's size: small to write."""
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /MediaBox [0 0 200 300] /Count %d /Kids [%s] >>" % (
+                count, b" ".join(b"%d 0 R" % (3 + i) for i in range(count)))]
+    objs += [b"<< /Type /Page /Parent 2 0 R >>"] * count
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (i, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
     return bytes(out)
 
 
@@ -156,6 +213,8 @@ class PdfToText(unittest.TestCase):
         with open(self.fake, "w") as file:
             file.write(f"#!{sys.executable}\n{FAKE}")
         os.chmod(self.fake, 0o755)
+        if os.name == "nt" and FAKE_EXE:
+            self.fake = FAKE_EXE
         self.tessdata = os.path.join(self.dir, "tessdata")
         os.makedirs(self.tessdata)
 
@@ -215,7 +274,7 @@ class PdfToText(unittest.TestCase):
         code, out, err = self.run_tool("doc.pdf", "-")
         self.assertEqual(code, 0, err)
         pages = out.split("\f")
-        self.assertEqual(pages[1], "recognised words w834\n")
+        self.assertEqual(pages[1], ocr(2, 834))
         self.assertIn("typed first", pages[0])
         self.assertIn("typed third", pages[2])
         self.assertEqual(self.calls(), ["eng+hin 834"])
@@ -267,6 +326,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(code, 0, err)
         first = self.calls()
         self.assertTrue(1 <= len(first) < 5, first)
+        self.assertTrue(out.startswith("[Bundle.pdf: 0 of 5 pages read from the text layer, "), out)
         marker = out.split("\f")[-1]
         self.assertRegex(marker, r"^\[pages? [0-9, -]+ of Bundle\.pdf: not yet recognised; OCR "
                          r"stops after 1 seconds per run\. Run the same command again to "
@@ -296,7 +356,7 @@ class PdfToText(unittest.TestCase):
     def test_without_a_cache_folder_it_still_ocrs_and_keeps_nothing(self):
         self.pdf([("blank", 200)])
         code, out, _ = self.run_tool("doc.pdf", "-", CLAUSEO_OCR_DIR=None)
-        self.assertEqual((code, out), (0, "recognised words w834\n\f"))
+        self.assertEqual((code, out), (0, ocr(1, 834) + "\f"))
         self.assertFalse(os.path.exists(self.ocr))
 
     @fake_engine
@@ -339,7 +399,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(len(self.calls()), 1)
         os.utime(lock, (time.time() - 60, time.time() - 60))
         code, out, _ = self.run_tool("doc.pdf", "-")
-        self.assertEqual((code, out), (0, "recognised words w834\n\frecognised words w876\n\f"))
+        self.assertEqual((code, out), (0, ocr(1, 834) + "\f" + ocr(2, 876, "eng") + "\f"))
         self.assertFalse(os.path.exists(lock))
 
     @fake_engine
@@ -404,7 +464,7 @@ class PdfToText(unittest.TestCase):
         self.pdf([("blank", 200)], name=name)
         code, out, err = self.run_tool(name, "-", PYTHONIOENCODING="ascii")
         self.assertEqual(code, 0, err)
-        self.assertEqual(out, "recognised words w834\n\f")
+        self.assertEqual(out, ocr(1, 834) + "\f")
         self.assertIn("pages recognised 1 of 1", self.mirror(name))
 
     def test_windows_paths_mirror_under_the_matter_and_nothing_outside_it(self):
@@ -518,7 +578,7 @@ class PdfToText(unittest.TestCase):
                                "doc.pdf", "-"], cwd=self.matter, env=self.env(),
                               capture_output=True, timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.decode(), "recognised words w834\n\f")
+        self.assertEqual(done.stdout.decode(), ocr(1, 834) + "\f")
         self.assertEqual(self.calls(), ["eng+hin 834"])
         [folder] = os.listdir(os.path.join(self.ocr, ".by-hash"))
         self.assertTrue(folder.endswith("-" + __import__("hashlib").sha256(
@@ -536,6 +596,112 @@ class PdfToText(unittest.TestCase):
         self.assertLessEqual(width * height, module.MAX_PIXELS)
         self.assertEqual(len(image), len(b"P5\n%d %d\n255\n" % (width, height)) + width * height)
 
+    def test_a_page_too_long_renders_under_the_side_cap(self):
+        module = script()
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(self.pdf([("blank", 100_000)]))
+        image = module.pgm(doc, 1)
+        doc.close()
+        width, height = (int(v) for v in bytes(image[:40]).split()[1:3])
+        self.assertLessEqual(max(width, height), 20_000)
+
+    @fake_engine
+    def test_a_page_pdfium_cannot_render_is_named_and_the_others_are_kept(self):
+        self.pdf([("text", ["A typed first page with enough characters in it."]),
+                  ("blank", 200), ("blank", 210)])
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_RENDER_FAIL=2, TEST_WORKERS=1)
+        self.assertEqual(code, 0, err)
+        self.assertIn("typed first", out)
+        self.assertIn(ocr(3, 876), out)
+        self.assertIn("[page 2 of doc.pdf: OCR failed (PDFium could not render it: PdfiumError: "
+                      "Failed to fill bitmap rectangle); run the same command again", out)
+
+    def test_pages_past_the_budget_are_named_in_time_however_many(self):
+        # 150,000 pages, none read (no budget): the output once took time in the square of that.
+        with open(os.path.join(self.matter, "big.pdf"), "wb") as file:
+            file.write(many_pages(150_000))
+        began = time.monotonic()
+        code, out, err = self.run_tool("big.pdf", "-", TEST_BUDGET=0)
+        self.assertLess(time.monotonic() - began, 30)
+        self.assertEqual(code, 0, err)
+        self.assertIn("[pages 1-150000 of big.pdf: not read;", out)
+
+    def test_control_characters_never_reach_the_output(self):
+        self.pdf([("tounicode", "abcdefghijklmnopqrstuvwxyzABCabc")])
+        code, out, err = self.run_tool("doc.pdf", "-")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "abcdefghijklmnopqrstuvwxyzabc\f")
+        out = self.run_tool("-layout", "doc.pdf", "-")[1]
+        self.assertEqual(out.strip(" "), "abcdefghijklmnopqrstuvwxyzabc\n\f")
+
+    @fake_engine
+    def test_ocr_text_carries_its_marker_in_the_output_file_even_with_q(self):
+        self.pdf([("blank", 200)])
+        self.assertEqual(self.run_tool("-q", "doc.pdf")[:3], (0, "", ""))
+        with open(os.path.join(self.matter, "doc.txt"), encoding="utf-8") as file:
+            self.assertEqual(file.read(), ocr(1, 834) + "\f")
+        self.assertTrue(self.mirror("doc.pdf").split("\n", 1)[1].startswith(ocr(1, 834)))
+
+    @fake_engine
+    def test_without_a_cache_folder_a_short_budget_says_a_rerun_starts_over(self):
+        self.pdf([("blank", 200 + 10 * n) for n in range(5)])
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_BUDGET=1, FAKE_SLEEP=0.4,
+                                       TEST_WORKERS=1, CLAUSEO_OCR_DIR=None)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("again to continue", out)
+        self.assertRegex(out, r"not yet recognised; OCR stops after 1 seconds per run\. A rerun "
+                         r"starts over \(this run keeps no OCR cache\); use -f/-l for the pages "
+                         r"you need\.\]\n$")
+
+    @fake_engine
+    def test_cached_languages_other_than_eng_or_eng_hin_are_not_used(self):
+        data = pdf_bytes([("blank", 200), ("blank", 210)])
+        self.pdf([("blank", 200), ("blank", 210)])
+        folder = os.path.join(self.ocr, ".by-hash", "%s-%s" % (
+            __import__("hashlib").sha256(data).hexdigest(),
+            __import__("hashlib").sha256(b"test-build|tesseract|300|1").hexdigest()[:8]))
+        os.makedirs(folder)
+        with open(os.path.join(folder, "meta.json"), "w") as file:
+            json.dump({"langs": "fra"}, file)
+        with open(os.path.join(folder, "p0002.json"), "w") as file:
+            json.dump({"kind": "ocr", "langs": "eng --psm 0", "text": "planted\n"}, file)
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_WORKERS=1)
+        self.assertEqual(code, 0, err)
+        # The probe asks for eng+hin and finds no Hindi, so eng.
+        self.assertEqual(self.calls(), ["eng+hin 834", "eng 876"])
+        self.assertNotIn("planted", out)
+
+    @unittest.skipIf(not hasattr(os, "getpriority") or os.getpriority(os.PRIO_PROCESS, 0) >= 10,
+                     "Unix, from a priority above 10")
+    def test_the_whole_run_and_its_tesseract_run_at_low_priority(self):
+        nice = os.path.join(self.dir, "nice")
+        self.pdf([("text", ["A typed first page with enough characters in it."]), ("blank", 200)])
+        code, _, err = self.run_tool("doc.pdf", "-", TEST_NICE=1, FAKE_NICE=nice)
+        self.assertEqual(code, 0, err)
+        self.assertIn("nice 10\n", err)
+        with open(nice) as file:
+            self.assertEqual(file.read(), "10")
+
+    @fake_engine
+    def test_tesseract_chatter_stays_out_of_stderr(self):
+        self.pdf([("blank", 200)])
+        code, _, err = self.run_tool("doc.pdf", "-")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("Error in pix", err)
+        self.assertNotIn("Estimating", err)
+
+    def test_partial_output_says_so_on_its_first_line(self):
+        self.pdf([("text", [f"This is page number {n} of the typed bundle."]) for n in (1, 2)]
+                 + [("blank", 200)])
+        code, out, err = self.run_tool("doc.pdf", "-", TEST_ENGINE=os.path.join(self.dir, "x"))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith(
+            "[doc.pdf: 2 of 3 pages read from the text layer, 0 by OCR; 1 not read, 0 failed. "
+            "The notes at the end name them.]\nThis is page number 1"), out)
+        self.assertTrue(self.run_tool("doc.pdf", "-", TEST_MAX_OCR=0)[1].startswith(
+            "[doc.pdf: 2 of 3 pages read from the text layer, 0 by OCR; 1 not read"))
+
     @unittest.skipUnless(os.environ.get("CLAUSEO_TEST_TESSERACT"), "CLAUSEO_TEST_TESSERACT unset")
     def test_a_scanned_page_yields_its_words_with_the_real_engine(self):
         folder = os.environ["CLAUSEO_TEST_TESSERACT"]
@@ -548,6 +714,80 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(code, 0, err)
         for word in ("HIGH", "COURT", "DELHI", "petition", "allowed", "costs"):
             self.assertIn(word, out)
+
+
+def wait_for_pids(path, want, seconds=30):
+    started = time.monotonic()
+    while time.monotonic() - started < seconds:
+        if os.path.exists(path):
+            with open(path) as file:
+                pids = [int(p) for p in file.read().split()]
+            if len(pids) >= want:
+                return pids
+        time.sleep(0.05)
+    raise AssertionError(f"no {want} tesseract started")
+
+
+@unittest.skipUnless(os.name == "nt" and FAKE_EXE, "Windows, with CLAUSEO_TEST_FAKE_TESSERACT")
+class WindowsEngine(unittest.TestCase):
+    """Windows only, with the Rust fake: what the Unix signal tests check there, the Windows way."""
+
+    setUp, tearDown, pdf, env, start = (PdfToText.setUp, PdfToText.tearDown, PdfToText.pdf,
+                                        PdfToText.env, PdfToText.start)
+
+    def kernel32(self):
+        import ctypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.GetPriorityClass.argtypes = k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        return k32
+
+    def test_tesseract_runs_below_normal_priority(self):
+        k32, pids = self.kernel32(), os.path.join(self.dir, "pids")
+        self.pdf([("blank", 200)])
+        proc = self.start("doc.pdf", "-", FAKE_SLEEP=3, FAKE_PIDS=pids)
+        [pid] = wait_for_pids(pids, 1)
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        self.assertTrue(handle)
+        try:
+            self.assertEqual(k32.GetPriorityClass(handle), 0x4000)  # BELOW_NORMAL
+        finally:
+            k32.CloseHandle(handle)
+        self.assertEqual(proc.communicate(timeout=60)[0].decode().count("recognised words"), 1)
+
+    @unittest.skipUnless(os.environ.get("CLAUSEO_TEST_PDFTOTEXT"), "CLAUSEO_TEST_PDFTOTEXT unset")
+    def test_killing_the_launcher_takes_python_and_tesseract_down(self):
+        # A runtime-shaped folder: a venv of this interpreter (which has pypdfium2 in its own
+        # site-packages, not --user: the launcher runs Python -I) with the receipt and the fake
+        # engine as clauseo-bin\tesseract.exe, on PATH alone; then the launcher as an agent runs it.
+        import shutil
+
+        k32, pids = self.kernel32(), os.path.join(self.dir, "pids")
+        venv = os.path.join(self.dir, "rt")
+        subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", "--without-pip",
+                        venv], check=True, timeout=120)
+        scripts = os.path.join(venv, "Scripts")
+        with open(os.path.join(scripts, "clauseo-python.json"), "w") as file:
+            json.dump({"schema": 1, "archive": "rt-test"}, file)
+        os.makedirs(os.path.join(scripts, "clauseo-bin", "tessdata"))
+        shutil.copy(FAKE_EXE, os.path.join(scripts, "clauseo-bin", "tesseract.exe"))
+        self.pdf([("blank", 200)])
+        env = self.env(FAKE_SLEEP=60, FAKE_PIDS=pids, PATH=scripts)
+        proc = subprocess.Popen([os.environ["CLAUSEO_TEST_PDFTOTEXT"], "doc.pdf", "-"],
+                                cwd=self.matter, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        [pid] = wait_for_pids(pids, 1, 60)
+        handle = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        proc.kill()
+        proc.communicate(timeout=30)
+        if handle:
+            try:
+                self.assertEqual(k32.WaitForSingleObject(handle, 10_000), 0,
+                                 f"tesseract {pid} outlived pdftotext.exe")
+            finally:
+                k32.CloseHandle(handle)
 
 
 if __name__ == "__main__":

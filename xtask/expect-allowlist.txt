@@ -699,9 +699,11 @@ crates/host/src/network_paths/windows.rs - unsafe_code
 # Vendored from clauseo_sandbox (stage C, #735) with its exported names; stage E's #764 calls it.
 crates/host/src/network_paths/ascii_fold.rs refused_in_other_matter dead_code
 # clauseo-pdf's launchers (scanned PDFs): the one PATH walk that finds the Python runtime, and
-# the one start of the interpreter (exec on Unix, a wait on Windows).
+# the one start of the interpreter (exec on Unix, a wait on Windows); and the test-only fake
+# tesseract's appends to its test's files and its sleep.
 crates/pdf/src/lib.rs find_python_with clippy::disallowed_methods
 crates/pdf/src/job.rs - unsafe_code
+crates/pdf/src/bin/fake_tesseract.rs - clippy::disallowed_methods
 crates/pdf/src/lib.rs start clippy::disallowed_methods
 crates/pdf/src/lib.rs start clippy::disallowed_methods
 # S22's launch cut (decision record 0060): the native crash handler's sigaction and unhandled-

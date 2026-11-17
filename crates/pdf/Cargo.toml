@@ -24,6 +24,14 @@ path = "src/bin/pdfinfo.rs"
 name = "pdftotext"
 path = "src/bin/pdftotext.rs"
 
+# Test only, never bundled (PDF_TOOLS names the three above): the fake tesseract.exe that
+# tests/test_pdftotext.py runs on Windows, where a #!python fake cannot run.
+[[bin]]
+name = "clauseo-fake-tesseract"
+path = "src/bin/fake_tesseract.rs"
+test = false
+doc = false
+
 # No dependencies but `windows` on Windows. The rendering is the Python script's
 # (src/clauseo_pdf.py, src/pdftotext.py), on the runtime's pypdfium2, Pillow and tesseract.
 [dependencies]

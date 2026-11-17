@@ -7,7 +7,7 @@
 # and OCRs until BUDGET seconds after it started (at most MAX_TEXT and MAX_OCR pages) and writes
 # its notes until END, inside Claude Code's 120 s Bash kill; the rest are named in a marker line.
 # With CLAUSEO_OCR_DIR (the matter's notes/ocr) the pages are kept in .by-hash/<sha256>-<settings>/
-# there, so a rerun continues, a renamed file is found by its bytes, and a changed byte misses;
+# there, so a rerun continues (without it a rerun starts over), a renamed file is found by its bytes, and a changed byte misses;
 # a lock there makes one process do the OCR while another waits for its pages. A document under
 # the current folder also gets <rel path>.txt there: the text of every page known so far.
 import hashlib
@@ -24,6 +24,11 @@ MAX_TEXT = 10_000
 MAX_OCR = 1000
 DPI = 300
 MAX_PIXELS = 20_000_000
+MAX_SIDE = 20_000  # px a side, under tesseract's 32,767: a 1e9 x 1e-4 pt page passes the area cap
+LANGS = ("eng", "eng+hin")
+# C0 and C1 controls but \t, \n and \f: a ToUnicode map can name ESC or BEL.
+CONTROLS = dict.fromkeys(c for c in range(160) if c < 32 and c not in (9, 10, 12) or c > 126)
+NOISE = ("Error in pix", "Estimating resolution", "Detected ", "Warning: Invalid resolution")
 STALE = 30.0
 FORMAT = 1
 OPEN_ERROR, OUTPUT_ERROR, OTHER_ERROR = 1, 2, 99
@@ -71,6 +76,18 @@ def parse(args):
                 raise Fail(OTHER_ERROR, f"{version()}\n{USAGE}") from None
         i += 1
     return opts, files
+
+
+def clean(text):
+    return text.translate(CONTROLS)
+
+
+def marked(pg, found):
+    """A page's text; an OCR'd one after a line that says so (in the output, not only -q's)."""
+    if found.get("kind") != "ocr":
+        return found["text"]
+    return (f"[page {pg}: no text layer; recognised by OCR (tesseract, {found['langs']}), errors "
+            "are possible]\n" + found["text"])
 
 
 def spans(pages, word=True):
@@ -281,9 +298,8 @@ def pgm(doc, pg):
     page = doc[pg - 1]
     try:
         w, h = page.get_size()
-        scale = DPI / 72
-        if w * h * scale * scale > MAX_PIXELS:
-            scale = (MAX_PIXELS / max(w * h, 1)) ** 0.5 * 0.99
+        scale = min(DPI / 72, (MAX_PIXELS / max(w * h, 1)) ** 0.5 * 0.99,
+                    MAX_SIDE * 0.99 / max(w, h, 1))
         bitmap = page.render(scale=scale, grayscale=True)
         try:
             width, height, stride = bitmap.width, bitmap.height, bitmap.stride
@@ -316,23 +332,21 @@ class Ocr:
         with self.render_lock:
             if self.stopped or time.monotonic() >= self.deadline:
                 return None
-            image = pgm(self.doc, pg)
+            try:
+                image = pgm(self.doc, pg)
+            except Exception as err:  # noqa: BLE001 - one page PDFium cannot render is named
+                return self.fail(pg, f"PDFium could not render it: {type(err).__name__}: {err}")
         if not image.startswith(b"P5") or self.stopped or time.monotonic() >= self.deadline:
             return None
         kwargs = {}
         if os.name == "nt":
             kwargs["creationflags"] = 0x4000 | 0x08000000  # BELOW_NORMAL_PRIORITY, NO_WINDOW
-        import subprocess
+        import subprocess  # the process's priority, lowered at start, is tesseract's on Unix
         proc = subprocess.Popen(
             engine_command(self.program, self.tessdata, langs), stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=engine_env(), **kwargs)
         self.procs.add(proc)
         try:
-            if os.name != "nt":
-                try:
-                    os.setpriority(os.PRIO_PROCESS, proc.pid, 10)
-                except OSError:
-                    pass
             out, err = proc.communicate(image, timeout=max(self.deadline - time.monotonic(), 0))
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -348,17 +362,20 @@ class Ocr:
         if proc.returncode != 0:
             if self.stopped:
                 return None
-            lines = [ln for ln in err.decode("utf-8", "replace").splitlines()
-                     if ln.strip() and "pixReadMemTiff" not in ln]
-            reason = lines[-1] if lines else f"exit {proc.returncode}"
-            self.failed[pg] = reason[:200]
-            self.say(f"OCR: page {pg} failed: {reason[:200]}")
-            return ""
+            # Its stderr is kept only for a failure: the last line not leptonica's chatter.
+            lines = [ln for ln in err.decode("utf-8", "replace").splitlines()[-40:]
+                     if ln.strip() and not ln.startswith(NOISE)]
+            return self.fail(pg, "tesseract: " + (lines[-1] if lines else f"exit {proc.returncode}"))
         text = out.decode("utf-8", "replace")
         self.cache.put(pg, "ocr", text, langs)
         self.done[pg] = {"kind": "ocr", "langs": langs, "text": text}
         self.say(f"OCR: page {pg} recognised ({len(self.done)}/{self.total})")
         return text
+
+    def fail(self, pg, reason):
+        self.failed[pg] = reason[:200]
+        self.say(f"OCR: page {pg} failed: {reason[:200]}")
+        return ""
 
     def run(self, pages):
         """The pages recognised, by number; a page tesseract failed on is in self.failed. Every
@@ -371,6 +388,7 @@ class Ocr:
     def recognise(self, pages):
         self.total, queue = len(pages), list(pages)
         probe = self.cache.meta().get("langs")
+        probe = probe if probe in LANGS else None
         while queue and probe is None and time.monotonic() < self.deadline:
             text = self.one(queue[0], "eng+hin")
             if text is None:
@@ -455,10 +473,17 @@ def pdftotext(args):
     if opts.get("-enc", "UTF-8").upper().replace("-", "") != "UTF8":
         raise Fail(OTHER_ERROR, "Command Line Error: this pdftotext writes UTF-8 only")
     quiet = opts.get("-q", False)
+    if hasattr(os, "getpriority"):
+        # Below the app and the agent, rendering included (Windows lowers tesseract only).
+        try:
+            if os.getpriority(os.PRIO_PROCESS, 0) < 10:
+                os.setpriority(os.PRIO_PROCESS, 0, 10)
+        except OSError:
+            pass
 
     def say(text):
         if not quiet:
-            print(text, file=sys.stderr, flush=True)
+            print(clean(text), file=sys.stderr, flush=True)
     src = files[0]
     if len(files) == 2:
         out = files[1]
@@ -495,12 +520,12 @@ def pdftotext(args):
     texts, plains, scanned, unread = {}, {}, [], []
     for pg in pages:
         if pg >= first + MAX_TEXT or time.monotonic() >= deadline:
-            unread = list(range(pg, last + 1))
+            unread = range(pg, last + 1)  # a range: `in` below is O(1)
             break
         page = doc[pg - 1]
         textpage = page.get_textpage()
         try:
-            plain = textpage.get_text_range().replace("\r\n", "\n").replace("\r", "\n")
+            plain = clean(textpage.get_text_range().replace("\r\n", "\n").replace("\r", "\n"))
             if len(plain.strip()) >= MIN_CHARS:
                 texts[pg] = layout(textpage, plain) if opts.get("-layout") else plain
                 plains[pg] = plain
@@ -518,7 +543,7 @@ def pdftotext(args):
     known = {}
     for pg in allowed:
         found = cache.page(pg) if cache else None
-        if found and found.get("kind") == "ocr":
+        if ocred(found):
             known[pg] = found
     missing = [pg for pg in allowed if pg not in known]
     failed = {}
@@ -543,24 +568,26 @@ def pdftotext(args):
             time.sleep(0.25)
             for pg in missing:
                 found = cache.page(pg)
-                if found and found.get("kind") == "ocr":
+                if ocred(found):
                     known[pg] = found
             missing = [pg for pg in missing if pg not in known]
         missing = [pg for pg in allowed if pg not in known and pg not in failed]
     doc.close()
+    typed = len(texts)
     for pg, found in known.items():
-        texts[pg] = found["text"]
+        texts[pg] = marked(pg, found)
     name = os.path.basename(src)
     notes = []
     if missing and unavailable:
         notes.append(f"[{spans(missing)} of {name}: no text layer, and OCR is not "
                      "available: Clauseo's Python runtime has no tesseract.]")
     elif missing:
+        again = ("Run the same command again to continue, or use" if cache else
+                 "A rerun starts over (this run keeps no OCR cache); use")
         notes.append(f"[{spans(missing)} of {name}: not yet recognised; OCR stops after "
-                     f"{BUDGET:.0f} seconds per run. Run the same command again to continue, or "
-                     "use -f/-l for the pages you need.]")
+                     f"{BUDGET:.0f} seconds per run. {again} -f/-l for the pages you need.]")
     for pg, reason in sorted(failed.items()):
-        notes.append(f"[page {pg} of {name}: OCR failed (tesseract: {reason}); run the same "
+        notes.append(f"[page {pg} of {name}: OCR failed ({reason}); run the same "
                      "command again to retry, or check the page image.]")
     if unread:
         notes.append(f"[{spans(unread)} of {name}: not read; one run reads at most "
@@ -573,6 +600,12 @@ def pdftotext(args):
     brk = "" if opts.get("-nopgbrk") else "\f"
     body = "".join(texts.get(pg, "") + brk for pg in pages if pg not in unread)
     body += "".join(note + "\n" for note in notes)
+    if notes:
+        # First too: output cut short still says it is partial.
+        left = len(missing) + len(unread) + len(capped)
+        body = (f"[{name}: {typed} of {len(pages)} pages read from the text layer, {len(known)} "
+                f"by OCR; {left} not read, {len(failed)} failed. The notes at the end name "
+                "them.]\n" + body)
     if known:
         langs = "+".join(sorted({lang for f in known.values() for lang in f["langs"].split("+")},
                                 key=lambda lang: lang != "eng"))
@@ -585,6 +618,10 @@ def pdftotext(args):
         mirror(cache, src, count, name)
     emit(body, out)
     return 0
+
+
+def ocred(found):
+    return bool(found) and found.get("kind") == "ocr" and found.get("langs") in LANGS
 
 
 class Memory:
@@ -614,21 +651,22 @@ def mirror(cache, src, count, name):
     ocr = [pg for pg, f in found.items() if f and f.get("kind") == "ocr"]
     if not ocr:
         return
-    langs = cache.meta().get("langs") or "eng+hin"
+    langs = cache.meta().get("langs")
+    langs = langs if langs in LANGS else "eng+hin"
     todo = [pg for pg, f in found.items() if not f]
     head = (f"# OCR of {rel}, sha256 {cache.digest}, pages recognised {spans(ocr, False)} of "
             f"{count}, tesseract {langs}" + (f"; {spans(todo)} not yet read" if todo else "")
             + "\n")
-    pages = "".join((f["text"] if f else f"[page {pg}: not yet read]\n") + "\f"
+    pages = "".join((marked(pg, f) if f else f"[page {pg}: not yet read]\n") + "\f"
                     for pg, f in found.items())
     try:
-        write_atomic(path, (head + pages).encode("utf-8"))
+        write_atomic(path, clean(head + pages).encode("utf-8"))
     except OSError:
         pass
 
 
 def emit(body, out):
-    data = body.encode("utf-8")
+    data = clean(body).encode("utf-8")
     if out == "-":
         sys.stdout.flush()
         sys.stdout.buffer.write(data)

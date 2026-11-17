@@ -99,9 +99,10 @@ fn the_script_fits_a_windows_command_line() {
 #[test]
 fn the_pdftotext_script_fits_a_windows_command_line() {
     // pdftotext's own arguments are a few flags and at most two paths, so its script may take
-    // more of the line than pdftoppm's, whose arguments are as many.
+    // more of the line than pdftoppm's, whose arguments are as many: 30,000 leaves 2,767 for the
+    // interpreter's path, the flags and two file paths.
     assert!(
-        escaped(PDFTOTEXT) < 28_000,
+        escaped(PDFTOTEXT) < 30_000,
         "{} characters",
         escaped(PDFTOTEXT)
     );
