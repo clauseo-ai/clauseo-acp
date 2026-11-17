@@ -36,6 +36,20 @@ pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     std::fs::hard_link(original, link)
 }
 
+/// Tests: a socket file at `path`, a special file on every Unix, its listener closed again. It is
+/// bound at a short name in the temp folder and renamed into place, as a socket's path has a
+/// short limit (104 bytes on macOS); `path` must be on the temp folder's drive.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn socket_file(path: &Path) -> io::Result<()> {
+    let short = std::env::temp_dir().join(format!("cs-{}", std::process::id()));
+    match remove_file(&short) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
+        Ok(()) | Err(_) => {}
+    }
+    drop(std::os::unix::net::UnixListener::bind(&short)?);
+    rename(&short, path)
+}
+
 /// Takes the file at `path` out of the folder with `remove`: a move to a trash
 /// ([`crate::Trash`]), or [`delete_file`]. In tests a file can come back after it
 /// (`no_download::resurrect` in unit tests, `test_support::bring_back_after_delete` with the
