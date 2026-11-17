@@ -7,9 +7,9 @@
 
 use clauseo_process::Cutoff;
 use clauseo_protocol::{
-    CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallId, ToolCallPatch,
-    ToolCallStatus, ToolCallUpdated, TurnId,
+    CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, ErrorCode,
+    PermissionChoice, PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallId,
+    ToolCallPatch, ToolCallStatus, ToolCallUpdated, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -389,7 +389,12 @@ pub(super) fn sweep_leftovers(actor: &mut Actor, thread: ThreadId, stop: StopRea
     );
 }
 
-/// Shutdown's part: running turns are cancelled (their agents stop when they end), turns that
+/// The failure a turn the host stopped while closing ends with: the neutral `thread.interrupted`
+/// a crash's start-up repair writes, not the lawyer's `Cancelled`.
+const SHUTDOWN_DETAIL: &str = "the host stopped";
+
+/// Shutdown's part: running turns are cancelled (their agents stop when they end) and end
+/// `thread.interrupted`, a turn the lawyer had already stopped stays `Cancelled`, turns that
 /// have not started stay queued for the next start, and every other agent stops now.
 pub(super) fn shutdown(actor: &mut Actor) {
     let threads: Vec<ThreadId> = actor
@@ -402,9 +407,11 @@ pub(super) fn shutdown(actor: &mut Actor) {
         let found = current(actor, thread).map(|current| (current.phase, current.cancelled));
         match found {
             Some((TurnPhase::Prompting, false)) => {
+                interrupted(actor, thread);
                 cancel_running(actor, thread, None, why::SHUTDOWN);
             }
             Some((TurnPhase::Checkpointing | TurnPhase::Starting, false)) => {
+                interrupted(actor, thread);
                 if let Some(current) = current(actor, thread) {
                     current.cancelled = true;
                 }
@@ -425,5 +432,16 @@ pub(super) fn shutdown(actor: &mut Actor) {
             ) => {}
             None => agents::stop(actor, thread),
         }
+    }
+}
+
+/// Marks `thread`'s turn as stopped by the host closing: it ends `Failed` with
+/// `thread.interrupted` (`end_turn`), unless a failure of its own came first.
+fn interrupted(actor: &mut Actor, thread: ThreadId) {
+    if let Some(current) = current(actor, thread) {
+        current.failure.get_or_insert((
+            ErrorCode::ThreadInterrupted,
+            Some(SHUTDOWN_DETAIL.to_owned()),
+        ));
     }
 }

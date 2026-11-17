@@ -1,16 +1,17 @@
 //! Cancel: pending permissions and unfinished tool calls are closed first, late updates are
-//! dropped, an agent that never answers is stopped after 5 s, and shutdown cancels too.
+//! dropped, an agent that never answers is stopped after 5 s, and shutdown cancels too: a turn
+//! it cuts ends `thread.interrupted`, one the lawyer had stopped stays `Cancelled`.
 
 use std::time::Duration;
 
 use clauseo_protocol::{
     CommandOutcome, DetachReason, DomainEvent, ErrorCode, HostCommand, PermissionChoice,
-    StopReason, StreamId, ToolCallStatus,
+    StopReason, StreamId, ToolCallStatus, TurnId,
 };
 
-use crate::observe::ended_with;
+use crate::observe::{Events, ended_with};
 use crate::permissions::until_first_request;
-use crate::support::{Dir, FAKE, Scenario, matter_with_thread, wait};
+use crate::support::{Dir, FAKE, Scenario, matter_with_thread, shutdown_past_cancel, wait};
 
 /// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
 /// agent's first chunk reached the host. (The display shows that chunk at once, so no display
@@ -212,8 +213,11 @@ fn shutdown_ends_turns_and_stops_agents() {
     assert!(
         events
             .turn_ended(turn)
-            .is_some_and(|e| e.stop == StopReason::Cancelled)
+            .is_some_and(|e| e.stop == StopReason::Failed),
+        "{}",
+        events.dump()
     );
+    assert_eq!(interrupted(&events, turn), 1, "{}", events.dump());
     assert_eq!(events.count(is_closed), 1, "{}", events.dump());
     join.join().unwrap_or_else(|e| panic!("join: {e}"));
 
@@ -224,4 +228,78 @@ fn shutdown_ends_turns_and_stops_agents() {
         .query(clauseo_protocol::HostQuery::ListMatters)
         .unwrap_err();
     assert_eq!(later.code(), ErrorCode::Internal);
+}
+
+/// `TurnFailed { thread.interrupted }` events of `turn`.
+fn interrupted(events: &Events, turn: TurnId) -> usize {
+    events.count(|event| {
+        matches!(event, DomainEvent::TurnFailed(failed)
+            if failed.turn == turn && failed.code == ErrorCode::ThreadInterrupted)
+    })
+}
+
+/// A shutdown that cuts an answer mid-way ends the turn `TurnFailed { thread.interrupted }` then
+/// `TurnEnded { Failed }`, not the lawyer's `Cancelled`, and keeps the answer so far.
+#[test]
+fn shutdown_mid_answer_ends_interrupted_and_keeps_the_text() {
+    let dir = Dir::new(
+        "shutdown_mid_answer_ends_interrupted_and_keeps_the_text",
+        &[(FAKE, Scenario::Bundled("cancel-late-updates"))],
+    );
+    let mut host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the cap.");
+    host.wait_armed(DURABLE);
+
+    let join = host.take_join();
+    wait("shutdown", host.handle.shutdown()).unwrap_or_else(|e| panic!("shutdown: {e}"));
+    events.until_end();
+    events.assert_no_mismatch();
+    join.join().unwrap_or_else(|e| panic!("join: {e}"));
+    let failed = events.position(|e| matches!(e, DomainEvent::TurnFailed(f) if f.turn == turn));
+    let ended = events.position(|e| ended_with(e, turn, StopReason::Failed));
+    let (Some(failed), Some(ended)) = (failed, ended) else {
+        panic!(
+            "want TurnFailed {{ thread.interrupted }} then TurnEnded {{ Failed }}: {}",
+            events.dump()
+        );
+    };
+    assert!(failed < ended, "{}", events.dump());
+    assert_eq!(interrupted(&events, turn), 1, "{}", events.dump());
+    assert_eq!(events.turn_text(turn), "The clause ", "{}", events.dump());
+}
+
+/// A Stop the lawyer pressed before the shutdown, its end landing during it, stays
+/// `Cancelled`: the shutdown leaves a turn already cancelled alone.
+#[test]
+fn a_stop_before_shutdown_stays_cancelled() {
+    let dir = Dir::new(
+        "a_stop_before_shutdown_stays_cancelled",
+        &[(FAKE, Scenario::Bundled("cancel-unanswered"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the cap.");
+    host.wait_armed(DURABLE);
+    assert_eq!(
+        host.ok(HostCommand::Cancel { thread }),
+        CommandOutcome::Done
+    );
+    // The agent never answers its cancel: the turn ends on the 5 s fallback, which the shutdown
+    // moves the clock past.
+    shutdown_past_cancel(host);
+    events.until_end();
+    events.assert_no_mismatch();
+    assert!(
+        events
+            .turn_ended(turn)
+            .is_some_and(|e| e.stop == StopReason::Cancelled),
+        "{}",
+        events.dump()
+    );
+    let failed = events.count(|e| matches!(e, DomainEvent::TurnFailed(f) if f.turn == turn));
+    assert_eq!(failed, 0, "{}", events.dump());
+    assert_eq!(events.turn_text(turn), "The clause ", "{}", events.dump());
 }

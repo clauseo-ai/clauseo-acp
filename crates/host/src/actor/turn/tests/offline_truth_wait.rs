@@ -1,5 +1,6 @@
-//! A failed prompt's end waiting for the host's probe (`offline/hold.rs`): a Stop or shutdown
-//! during the wait ends the turn cancelled at once and keeps the agent; the window going offline
+//! A failed prompt's end waiting for the host's probe (`offline/hold.rs`): a Stop during the
+//! wait ends the turn cancelled at once and keeps the agent, a shutdown ends it
+//! `thread.interrupted` at once; the window going offline
 //! or online during the wait decides the verdict as it stands at the end; an unreachable end
 //! carries the probe's fixed fields on the prompt path too; and a cloud provider's login (nothing
 //! to probe) under a window that says offline is offline, not a protocol error. The probe is a
@@ -72,10 +73,10 @@ fn a_stop_during_the_wait_ends_cancelled_at_once_and_keeps_the_agent() {
     rig.finish();
 }
 
-/// Shutdown while the end waits for a probe that never answers: the turn ends cancelled with
-/// no clock moved.
+/// Shutdown while the end waits for a probe that never answers: the turn ends
+/// `thread.interrupted` (not the lawyer's `Cancelled`) with no clock moved.
 #[test]
-fn a_shutdown_during_the_wait_ends_cancelled_at_once() {
+fn a_shutdown_during_the_wait_ends_interrupted_at_once() {
     let (probe, gate) = ReachProbe::gated(false);
     let lines = failing(CONNECTION);
     let (mut rig, thread, _) = start(
@@ -88,7 +89,10 @@ fn a_shutdown_during_the_wait_ends_cancelled_at_once() {
     until_held(&mut rig, thread);
     rig.shut_down();
     let log = rig.log(thread);
-    assert_eq!(ended(&log, turn), (Some(StopReason::Cancelled), None));
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Failed), Some(ErrorCode::ThreadInterrupted))
+    );
     assert_eq!(answer(&log, turn), "Clause five says");
     drop(gate);
     rig.finish();
