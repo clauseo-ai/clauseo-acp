@@ -101,6 +101,7 @@ bundled! {
         "pickers-busy",
         "pickers-codex-early",
         "pickers-codex-late",
+        "pickers-default-moved",
         "pickers-early",
         "pickers-first",
         "pickers-load",

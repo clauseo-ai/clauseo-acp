@@ -13,12 +13,20 @@
 //! another version counts as none (logged): the worst a damaged file does is hide the pickers
 //! until the agent's next session starts. A write that fails is logged and the options hold in
 //! memory for the host's run.
+//!
+//! Each option's current value is the one the session started with: the options the agent
+//! reported in its `session/new`, `session/load` or `session/resume` answer ([`started`],
+//! taken before Clauseo sets any pick), else its first options report. Every later report (a
+//! pick's answer, the agent's own update) refreshes the options and their values but keeps each
+//! kept current that it still offers ([`merged`]), so a pick in one conversation never becomes
+//! another's draft default. An option the report drops goes; one with no kept current takes the
+//! report's.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{ConfigOption, HostEvent, ThreadId};
+use clauseo_protocol::{ConfigOption, ConfigOptionKind, HostEvent, ThreadId};
 use serde::{Deserialize, Serialize};
 
 use super::Actor;
@@ -44,6 +52,9 @@ struct OnDisk {
 pub(crate) struct AgentOptions {
     path: PathBuf,
     kept: Option<BTreeMap<String, Vec<ConfigOption>>>,
+    /// The options each thread's session started with, until its next durable options report
+    /// ([`note`]); empty when the start reported none, so that report is the start's.
+    starting: BTreeMap<ThreadId, Vec<ConfigOption>>,
 }
 
 impl AgentOptions {
@@ -52,7 +63,14 @@ impl AgentOptions {
         Self {
             path: data_dir.join(FILE),
             kept: None,
+            starting: BTreeMap::new(),
         }
+    }
+
+    /// `thread`'s session started with `options`, as the agent reported them before any pick
+    /// is set: its next durable options report keeps these instead.
+    pub(crate) fn started(&mut self, thread: ThreadId, options: &[ConfigOption]) {
+        self.starting.insert(thread, options.to_vec());
     }
 
     /// `agent`'s options as its latest session reported them; empty before any.
@@ -86,8 +104,9 @@ impl AgentOptions {
     }
 }
 
-/// `thread` logged `options` durably: they become its agent's, and every app subscriber gets
-/// `SettingsChanged` when that changed them.
+/// `thread` logged `options` durably: they become its agent's, each current value the session
+/// started with (module doc), and every app subscriber gets `SettingsChanged` when that changed
+/// them.
 pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) {
     let Some(agent) = actor
         .threads
@@ -99,7 +118,12 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
     if options.is_empty() {
         return;
     }
-    let changed = match actor.agent_options.keep(agent.as_str(), options) {
+    let options = match actor.agent_options.starting.remove(&thread) {
+        Some(start) if !start.is_empty() => start,
+        Some(_) => options.to_vec(),
+        None => merged(actor.agent_options.of(agent.as_str()), options),
+    };
+    let changed = match actor.agent_options.keep(agent.as_str(), &options) {
         Ok(changed) => changed,
         Err(error) => {
             tracing::warn!(error = %Cause(&error), "agent-options.json was not written");
@@ -110,6 +134,41 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
         let view = super::settings::view(actor);
         super::app::publish(actor, &HostEvent::SettingsChanged(view));
     }
+}
+
+/// `reported`, a session's later options, with each current value from `kept` that `reported`
+/// still offers; an option whose kept current it no longer offers (the efforts of a picked
+/// model) stays as kept, and one with none kept, or of another kind, is as reported.
+fn merged(kept: &[ConfigOption], reported: &[ConfigOption]) -> Vec<ConfigOption> {
+    reported
+        .iter()
+        .map(|option| {
+            let Some(old) = kept.iter().find(|old| old.id == option.id) else {
+                return option.clone();
+            };
+            let mut option = option.clone();
+            match (&old.kind, &mut option.kind) {
+                (
+                    ConfigOptionKind::Select { current_value, .. },
+                    ConfigOptionKind::Select {
+                        current_value: now,
+                        options,
+                    },
+                ) => {
+                    if !options.iter().any(|choice| choice.value == *current_value) {
+                        return old.clone();
+                    }
+                    now.clone_from(current_value);
+                }
+                (
+                    ConfigOptionKind::Boolean { current_value },
+                    ConfigOptionKind::Boolean { current_value: now },
+                ) => *now = *current_value,
+                _ => {}
+            }
+            option
+        })
+        .collect()
 }
 
 /// The kept options on disk; none when the file is missing or unusable.
