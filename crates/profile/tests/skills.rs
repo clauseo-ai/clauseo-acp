@@ -12,6 +12,9 @@ mod builtin;
 #[path = "skills/tools.rs"]
 mod tools;
 
+#[path = "skills/plugin_match.rs"]
+mod plugin_match;
+
 #[path = "skills/stetdoc.rs"]
 mod stetdoc_cli;
 

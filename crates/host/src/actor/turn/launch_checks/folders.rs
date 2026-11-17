@@ -1,15 +1,18 @@
 //! The data-fence and folder helpers of a launch: the deny rules Claude's data folder gets
 //! (`agent/data_fence.rs`), the paths a session's folders sit at under the data folder, their
-//! making ([`make`], [`make_guard`]) and the removal of a launch's run
-//! folder. The callers in `launch_checks` call them off the actor.
+//! making ([`make`], [`make_guard`]), the skills write with the built-in plugin's match
+//! ([`write_skills`]) and the removal of a launch's run folder. The callers in `launch_checks`
+//! call them off the actor.
 
 use std::path::{Path, PathBuf};
 
+use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{ErrorCode, MatterId};
 
 use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
 /// that, the host's first launch sets aside the `run` folder an earlier run left ([`RunSweep`]).
@@ -67,6 +70,45 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
             ))
         }
     }
+}
+
+/// Writes `writes` in order, on the launch-prep thread, and returns the first write's token
+/// when it succeeded: the one the launch's Codex keys may take the index from. A write that fails
+/// is a warning; the agent starts with the skills the folder holds. After each write with a
+/// plugin (Claude's, which Codex's index names too), written or not, the plugin folder is made to
+/// hold only what Clauseo ships (`clauseo_profile::match_plugin`); what went is logged as a
+/// count. When that fails, the launch is refused with
+/// `agent.launch_failed`: the folder may hold what Claude Code would load in every matter. No
+/// run folder is made yet. File system calls: off the actor.
+pub(super) fn write_skills(writes: &[SkillWrite]) -> Result<Option<SkillsWritten>, Error> {
+    // The error names a path in the folder, which may be a planted file's: not logged.
+    let unmatched = |_: clauseo_profile::ProfileError| {
+        tracing::warn!("the built-in plugin folder could not be made to hold only Clauseo's files");
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            "Clauseo's built-in skills folder holds files Clauseo did not put there, and they \
+             could not be removed",
+        )
+    };
+    let mut first = None;
+    for (at, write) in writes.iter().enumerate() {
+        match clauseo_profile::write_skills(write) {
+            Ok(written) if at == 0 => first = Some(written),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                error = %Cause(&error),
+                "the profile's skills were not written; the agent starts with what the folder holds"
+            ),
+        }
+        let removed = clauseo_profile::match_plugin(write).map_err(unmatched)?;
+        if removed > 0 {
+            tracing::warn!(
+                removed,
+                "files Clauseo did not ship left the built-in plugin folder"
+            );
+        }
+    }
+    Ok(first)
 }
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone

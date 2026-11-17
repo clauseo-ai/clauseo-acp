@@ -94,6 +94,13 @@ impl Manifest {
         self.skills.insert(skill.to_owned(), entry.to_value());
     }
 
+    /// Keeps only the entries whose skill `keep` says; whether any went.
+    pub fn retain_skills(&mut self, keep: impl Fn(&str) -> bool) -> bool {
+        let before = self.skills.len();
+        self.skills.retain(|skill, _| keep(skill));
+        self.skills.len() != before
+    }
+
     /// Removes the entry of `skill`, if it has one.
     pub fn remove(&mut self, skill: &str) {
         self.skills.remove(skill);
