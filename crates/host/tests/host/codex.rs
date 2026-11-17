@@ -82,7 +82,11 @@ pub(crate) fn one_turn(dir: &Dir, host: &Running, agent: &str) -> (ThreadId, Eve
 }
 
 /// Asserts `turn` failed with `code` before any prompt went: no text, no mismatch.
-fn assert_failed_before_prompt(events: &Events, turn: TurnId, code: ErrorCode) -> TurnFailed {
+pub(crate) fn assert_failed_before_prompt(
+    events: &Events,
+    turn: TurnId,
+    code: ErrorCode,
+) -> TurnFailed {
     events.assert_no_mismatch();
     let failed = turn_failed(events, turn)
         .unwrap_or_else(|| panic!("no TurnFailed of {turn}: {}", events.dump()));
@@ -491,7 +495,7 @@ fn codex_not_signed_in_fails_the_turn_with_auth_required() {
 }
 
 /// A small hooks object, as the codex hooks seam would give.
-fn hooks() -> Map<String, Value> {
+pub(crate) fn hooks() -> Map<String, Value> {
     json!({"PreToolUse": [{"hooks": [{"type": "command", "command": "/bin/guard"}]}]})
         .as_object()
         .cloned()
@@ -546,19 +550,27 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
     let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 1, "{groups:?}");
-    assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
+    assert_eq!(groups[0]["matcher"], "*");
     // The guard records its refusals in a folder of the session's own,
     // `<data>/browser/guard/<session>`, which no agent's shell may write, and writes only the
-    // file whose identity follows `--record-id` (`guard_record.rs`).
+    // file whose identity follows `--record-id` (`guard_record.rs`), answering from the ids
+    // file named by `--sessions` (`guard_sessions.rs`).
     let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
     // On Windows the hook names the console program beside the app (`codex_guard_program`).
     let program = clauseo_host::codex_guard_program(std::path::Path::new(PROGRAM));
     let shown = program.display();
-    let (record, id) = command
+    let (record, rest) = command
         .strip_prefix(&format!("'{shown}' --pre-write-guard --record '"))
         .and_then(|rest| rest.split_once("' --record-id "))
         .unwrap_or_else(|| panic!("{command}"));
+    let (id, sessions) = rest.split_once(' ').unwrap_or_else(|| panic!("{command}"));
     let record = std::path::PathBuf::from(record);
+    let ids = record.parent().unwrap().join("sessions.json");
+    assert_eq!(
+        sessions,
+        format!("--sessions '{}'", ids.display()),
+        "{command}"
+    );
     let below = crate::guard_record::below_data(&dir, &record);
     let [browser, guard, session, file] = below.as_slice() else {
         panic!("{below:?}");
@@ -572,15 +584,6 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     assert_eq!(id.len(), 48, "{command}");
     let expected = clauseo_host::codex_hook_config(&program, Some((&record, id))).unwrap();
     assert_eq!(config["hooks"], expected);
-}
-
-#[test]
-fn codex_guard_untrusted_fails_before_any_prompt() {
-    let dir = codex_dir("codex_hook_untrusted", "codex-hook-untrusted");
-    let host = dir.start_with(0, |config| config.with_codex_hooks(hooks()));
-    let (_, events, turn) = one_turn(&dir, &host, CODEX);
-    assert_failed_before_prompt(&events, turn, ErrorCode::AgentLaunchFailed);
-    host.shutdown();
 }
 
 /// Without a hooks object the trust check is skipped: `codex-handshake` never expects

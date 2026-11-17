@@ -22,7 +22,7 @@ const ALLOWED: [(&str, &str); 2] = [
 
 const ROOT: &str = "/home/lawyer";
 
-fn locations() -> Locations {
+pub(crate) fn locations() -> Locations {
     Locations::under_root(Path::new(ROOT))
 }
 

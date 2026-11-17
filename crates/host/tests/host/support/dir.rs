@@ -155,6 +155,9 @@ impl Dir {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
         crate::idle_stop::off(HostConfig::new(effective, launcher))
+            // The guard programs the tests name are never run: no self-test of Codex's guard
+            // hook, but in the tests of it (`guard_sessions.rs`).
+            .with_guard_self_test(false)
             // A silent turn is never probed: no host test touches the network (D-050).
             .with_quiet_watch(false)
             .with_limits_reader(Arc::new(NoReader))

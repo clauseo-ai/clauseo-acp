@@ -65,6 +65,7 @@ pub struct HostConfig {
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     folder_check: crate::agent::folder_support::CheckSource,
     pre_write_guard: Option<PathBuf>,
+    guard_self_test: bool,
     limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
@@ -103,6 +104,7 @@ impl HostConfig {
             codex_hooks: None,
             folder_check: crate::agent::folder_support::CheckSource::default(),
             pre_write_guard: None,
+            guard_self_test: true,
             limits_reader: None,
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
@@ -389,14 +391,6 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn with_app_subscription_capacity(mut self, capacity: usize) -> Self {
         self.app_capacity = capacity.max(1);
-        self
-    }
-
-    /// The `hooks` object a Codex agent's `CODEX_CONFIG` carries, as the codex hooks seam
-    /// (`actor/turn/agents.rs`) would give it, for tests of the guard's trust check.
-    #[cfg(feature = "test-support")]
-    pub fn with_codex_hooks(mut self, hooks: serde_json::Map<String, serde_json::Value>) -> Self {
-        self.codex_hooks = Some(hooks);
         self
     }
 

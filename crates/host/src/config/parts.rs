@@ -34,6 +34,7 @@ pub(crate) struct ConfigParts {
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     pub(crate) pre_write_guard: Option<PathBuf>,
+    pub(crate) guard_self_test: bool,
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
@@ -116,6 +117,7 @@ impl From<HostConfig> for ConfigParts {
             codex_hooks: config.codex_hooks,
             folder_check: config.folder_check,
             pre_write_guard: config.pre_write_guard,
+            guard_self_test: config.guard_self_test,
             limits_reader: config.limits_reader,
             wiring: config.wiring,
             scan_walk: config.scan_walk,
@@ -157,6 +159,23 @@ impl HostConfig {
     #[must_use]
     pub fn with_last_run_unclean(mut self, unclean: bool) -> Self {
         self.update.last_run_unclean = unclean;
+        self
+    }
+
+    /// Whether a Codex launch runs the self-test of its guard hook before the session's first
+    /// prompt (`pre_write_guard/self_test.rs`; on by default), off for tests whose guard program
+    /// is only a name.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_guard_self_test(mut self, on: bool) -> Self {
+        self.guard_self_test = on;
+        self
+    }
+
+    /// The `hooks` object a Codex agent's `CODEX_CONFIG` carries, as the codex hooks seam
+    /// (`actor/turn/agents.rs`) would give it, for tests of the guard's trust check.
+    #[cfg(feature = "test-support")]
+    pub fn with_codex_hooks(mut self, hooks: serde_json::Map<String, serde_json::Value>) -> Self {
+        self.codex_hooks = Some(hooks);
         self
     }
 }

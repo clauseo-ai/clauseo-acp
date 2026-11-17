@@ -78,6 +78,7 @@ export type ErrorCode =
   | "signin.failed"
   | "signin.policy_unreadable"
   | "agent.guard_missing"
+  | "agent.guard_selftest_failed"
   | "update.failed"
   | "signin.agents_still_running"
   | "agent.keys_loading"
@@ -251,6 +252,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "signin.policy_unreadable":
     "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
   "agent.guard_missing": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
+  // provisional (U3-err-agent.guard_selftest_failed, Hindi later): the file check failed at launch
+  "agent.guard_selftest_failed":
+    "Clauseo couldn't start its file check, so Claude didn't start. Quit and reopen Clauseo, then try again.",
   "update.failed": "The update didn't install. Try again.",
   "signin.agents_still_running": "Clauseo is still finishing. Try again in a moment.",
   "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
@@ -417,6 +421,15 @@ const PLANNED: Partial<
     chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
     named: "Clauseo can't start {name} safely here. Reinstall Clauseo.",
     nameless: "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+  },
+  // provisional (U3-err-agent.guard_selftest_failed, Hindi later)
+  "agent.guard_selftest_failed": {
+    chatgpt:
+      "Clauseo couldn't start its file check, so ChatGPT didn't start. Quit and reopen Clauseo, then try again.",
+    named:
+      "Clauseo couldn't start its file check, so {name} didn't start. Quit and reopen Clauseo, then try again.",
+    nameless:
+      "Clauseo couldn't start its file check, so the AI didn't start. Quit and reopen Clauseo, then try again.",
   },
   // ChatGPT's approved (orchestrator, 2026-11-12); {name}'s and the AI's derived from it (provisional)
   "agent.service_error": {

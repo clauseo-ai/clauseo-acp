@@ -1857,6 +1857,8 @@ export type ErrorCode =
 "signin.policy_unreadable" | 
 /** A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. */
 "agent.guard_missing" | 
+/** The check Clauseo runs on its file guard before a launch failed (the guard did not answer as it should), so the agent was not started; quitting and reopening Clauseo may fix it. */
+"agent.guard_selftest_failed" | 
 /** The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. */
 "update.failed" | 
 /** The change breaks a settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped variable or an address that is not https; the message names the key, never the value, and nothing was changed. */

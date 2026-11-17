@@ -192,6 +192,9 @@ error_codes! {
     AgentGuardMissing = "agent.guard_missing", retryable: false, meaning: "A Claude launch that \
         must ask before every change could not set up the guard that makes it ask, so it was \
         not started.";
+    AgentGuardSelftestFailed = "agent.guard_selftest_failed", retryable: true, meaning: "The \
+        check Clauseo runs on its file guard before a launch failed (the guard did not answer as \
+        it should), so the agent was not started; quitting and reopening Clauseo may fix it.";
     UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
         signature check or install failed; the version running keeps running, and a later check \
         tries again.";

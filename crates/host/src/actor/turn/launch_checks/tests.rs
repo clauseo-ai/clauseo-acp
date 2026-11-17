@@ -16,6 +16,7 @@ use crate::pipeline::tests::support::id;
 use crate::write;
 
 mod claude_sandbox;
+mod temp_folder;
 
 /// A fresh data folder under the temp folder for `test`.
 fn scratch(test: &str) -> PathBuf {
@@ -367,7 +368,8 @@ fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
                     matter: Some(id::<MatterId>(7)),
                     source: crate::agent::folder_support::CheckSource::Windows,
                 };
-                crate::agent::codex::prepare_launch(&check, &gone, &data, &home)
+                let locations = clauseo_settings::Locations::under_root(&data);
+                crate::agent::codex::prepare_launch(&check, &gone, &data, &home, &locations)
             },
             drop,
         )
@@ -578,23 +580,5 @@ fn the_shell_profile_saves_a_pdf_link_instead_of_opening_it() {
     super::browser::shell_folders(&mut run, &data);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), on);
     run.remove();
-    write::remove_dir_all(&data).unwrap();
-}
-
-/// The session's temp folder (D-023) is made with its run folder and goes with it.
-#[test]
-fn the_temp_folder_is_made_in_the_run_folder_and_goes_with_it() {
-    let data = scratch("temp-folder");
-    let launch = folders(&data, 1);
-    launch.make(&data, &RunSweep::default()).unwrap();
-    let tmp = crate::agent::temp::temp_dir(&launch.root);
-    assert_eq!(tmp, data.join("run").join(launch.key.id()).join("tmp"));
-    assert!(tmp.is_dir());
-    write::write_file(&tmp.join("module.pcm"), b"cache").unwrap();
-    launch.remove();
-    assert!(
-        !launch.root.exists(),
-        "the temp folder went with the run folder"
-    );
     write::remove_dir_all(&data).unwrap();
 }

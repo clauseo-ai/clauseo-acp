@@ -16,7 +16,6 @@ use clauseo_process::TreeWatch;
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
-use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
 use super::{
     AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, offline, session, state,
@@ -28,11 +27,13 @@ use crate::log_file::{Cause, LIFECYCLE};
 use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
+mod codex_agent;
 mod ended;
 mod launch;
 mod path;
 mod start_failure;
 
+pub(super) use codex_agent::CodexAgent;
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
@@ -159,19 +160,6 @@ impl Agent {
     pub(super) fn unprotected(&self) -> bool {
         self.folder_check.is_some_and(agent::forced_ask::applies)
     }
-}
-
-/// What a Codex agent's launch recorded.
-#[derive(Debug)]
-pub(super) struct CodexAgent {
-    /// The matter folder as resolved through links at the launch: `_codex/hooks/list` names
-    /// it. Each prompt and session call checks the stored folder for `.codex` first, resolved
-    /// again.
-    pub(super) folder: PathBuf,
-    /// Its `CODEX_CONFIG` got a hooks object: its session start checks Codex trusts the guard.
-    pub(super) guard: bool,
-    /// Its one `authenticate` with its key (`key_retry.rs`).
-    pub(super) key_retry: KeyRetry,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.

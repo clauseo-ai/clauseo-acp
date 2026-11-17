@@ -159,6 +159,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
         ),
+        failed(
+            ErrorCode::AgentGuardSelftestFailed,
+            "the guard's self-test answered allow for a write it must refuse",
+        ),
     ]
 }
 

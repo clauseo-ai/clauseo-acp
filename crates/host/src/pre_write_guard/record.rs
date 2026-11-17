@@ -185,7 +185,7 @@ pub(super) fn record_of(refusal: &Refusal, bytes: &[u8], claude: bool) -> Option
 }
 
 /// `tool`, cut to at most [`MAX_TOOL`] bytes at a character boundary.
-fn cut(tool: &str) -> String {
+pub(super) fn cut(tool: &str) -> String {
     let mut end = tool.len().min(MAX_TOOL);
     while !tool.is_char_boundary(end) {
         end = end.saturating_sub(1);

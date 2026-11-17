@@ -1,0 +1,11 @@
+{
+  "U3-err-agent.guard_selftest_failed": {
+    "en": "Clauseo couldn't start its file check, so Claude didn't start. Quit and reopen Clauseo, then try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host (agents-fix PR; provisional; orchestrator to approve)",
+    "note": "A launch's self-test of the agent's guard hook failed (agent.guard_selftest_failed, host actor/turn/session.rs and actor/turn/agents/launch.rs). Claude's sentence is ERROR_WORDS'; ChatGPT's, {name}'s and the AI's are PLANNED's, as agent.guard_missing's."
+  }
+}

@@ -295,6 +295,14 @@ pub(in crate::actor::turn) fn read_new(
         None => return (offset, Vec::new()),
     };
     let next = offset.saturating_add(u64::try_from(whole).unwrap_or(MAX_READ));
+    let lines = || {
+        bytes
+            .get(..whole)
+            .unwrap_or_default()
+            .split(|byte| *byte == b'\n')
+    };
+    // The guard's decision lines (`pre_write_guard::sessions::Decision`) go to the log.
+    crate::pre_write_guard::sessions::log_decisions(lines());
     let kinds = bytes
         .get(..whole)
         .unwrap_or_default()

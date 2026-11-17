@@ -31,6 +31,11 @@ fn any_check() -> crate::agent::folder_support::FolderCheck {
     }
 }
 
+/// The locations a launch under `data` reads its side profile's rules from.
+fn locations(data: &Path) -> clauseo_settings::Locations {
+    clauseo_settings::Locations::under_root(data)
+}
+
 /// A data folder, a matter folder and the agent's home made, under a fresh scratch root.
 fn launch_root(test: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     let root = scratch(test);
@@ -57,12 +62,12 @@ fn the_launch_removes_planted_rules() {
     .unwrap();
     write::write_file(&rules.join("sub/other.rules"), b"x\n").unwrap();
     write::write_file(&home.join("auth.json"), b"{}").unwrap();
-    prepare_launch(&any_check(), &matter, &data, &home).unwrap();
+    prepare_launch(&any_check(), &matter, &data, &home, &locations(&data)).unwrap();
     assert!(std::fs::symlink_metadata(&rules).is_err());
     assert!(home.join("auth.json").is_file());
     assert!(home.join("config.toml").is_file());
     // Again, with nothing there: fine.
-    prepare_launch(&any_check(), &matter, &data, &home).unwrap();
+    prepare_launch(&any_check(), &matter, &data, &home, &locations(&data)).unwrap();
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -76,7 +81,7 @@ fn the_launch_removes_a_linked_rules_or_a_file_without_following() {
     write::write_file(&elsewhere.join("default.rules"), b"x\n").unwrap();
     let rules = home.join("rules");
     write::symlink(&elsewhere, &rules).unwrap();
-    prepare_launch(&any_check(), &matter, &data, &home).unwrap();
+    prepare_launch(&any_check(), &matter, &data, &home, &locations(&data)).unwrap();
     assert!(std::fs::symlink_metadata(&rules).is_err());
     assert!(elsewhere.join("default.rules").is_file());
 
@@ -107,7 +112,7 @@ fn the_launch_refuses_when_rules_cannot_be_removed() {
         write::remove_dir_all(&root).unwrap();
         return;
     }
-    let error = prepare_launch(&any_check(), &matter, &data, &home).unwrap_err();
+    let error = prepare_launch(&any_check(), &matter, &data, &home, &locations(&data)).unwrap_err();
     write::set_mode(&locked, 0o700).unwrap();
     assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
     assert!(

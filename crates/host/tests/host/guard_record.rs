@@ -34,7 +34,7 @@ pub(crate) fn below_data(dir: &Dir, record: &Path) -> Vec<String> {
 }
 
 /// Every file under `dir`, through its folders; none when it is not there.
-fn files_under(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn files_under(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -78,17 +78,26 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     // Windows the hook names the console program beside the app (`codex_guard_program`).
     let program = clauseo_host::codex_guard_program(Path::new(PROGRAM));
     let program = program.display();
-    let (record, id) = windows
+    let (record, rest) = windows
         .strip_prefix(&format!(
             "$global:LASTEXITCODE = -1; & '{program}' --pre-write-guard --record '"
         ))
         .and_then(|rest| rest.split_once("' --record-id '"))
-        .and_then(|(record, rest)| Some((record, rest.split_once("';")?.0)))
+        .and_then(|(record, rest)| Some((record, rest.split_once(';')?.0)))
         .unwrap_or_else(|| panic!("{windows}"));
+    let (id, sessions) = rest.split_once("' ").unwrap_or_else(|| panic!("{windows}"));
     let record = PathBuf::from(record);
+    // The ids file sits beside the record, in the session's guard folder.
+    let ids = record.parent().unwrap().join("sessions.json");
+    assert_eq!(
+        sessions,
+        format!("--sessions '{}'", ids.display()),
+        "{windows}"
+    );
     let posix = format!(
-        "'{program}' --pre-write-guard --record '{}' --record-id {id}",
-        record.display()
+        "'{program}' --pre-write-guard --record '{}' --record-id {id} --sessions '{}'",
+        record.display(),
+        ids.display()
     );
     assert_eq!(hook["command"], posix);
     assert!(dir.data_dir().to_str().unwrap().contains("Zoë Q"));

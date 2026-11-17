@@ -1494,6 +1494,7 @@ expression: counts_schema()
         "signin.failed",
         "signin.policy_unreadable",
         "agent.guard_missing",
+        "agent.guard_selftest_failed",
         "update.failed",
         "settings.refused",
         "settings.key_stored",

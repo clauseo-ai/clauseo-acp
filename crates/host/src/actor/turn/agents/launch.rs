@@ -18,6 +18,7 @@ use super::super::offline::probe::Target;
 use super::{CodexAgent, path, start_failure};
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
+use crate::pre_write_guard::self_test::SelfTest;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
 /// Claude launch's plans folder, the matter folder's spellings for its stderr summary, a Claude
@@ -80,17 +81,21 @@ pub(super) fn launch(
         .guard
         .as_ref()
         .map(|(file, id)| (file.clone(), id.hex()));
+    let mut test_hooks = None;
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let record = record
             .as_ref()
             .map(|(file, id)| (file.as_path(), id.as_str()));
-        let hooks = codex_hooks(actor, record);
+        let hooks = codex_hooks(actor, record)?;
         let guard = hooks.is_some();
+        // The hook's command, for the self-test before the first prompt (`session.rs`).
+        test_hooks = hooks.clone().filter(|_| actor.guard_self_test);
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
             folder: prepared.folder,
             guard,
             key_retry: KeyRetry::default(),
+            self_test: None,
         };
         (forced, Some((codex, prepared.login)))
     } else {
@@ -131,6 +136,13 @@ pub(super) fn launch(
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
+    // The guard's hook as Codex will run it: the agent's environment, in the session folder.
+    let self_test = test_hooks.map(|entry| SelfTest {
+        entry,
+        env: spec.env().clone(),
+        cwd: spec.cwd().to_path_buf(),
+    });
+    let codex = codex.map(|codex| CodexAgent { self_test, ..codex });
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
@@ -175,26 +187,38 @@ pub(super) fn launch(
 /// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
 /// group, the guard's, which records its refusals in the session's `record` file, with that
 /// file's identity, for the lawyer (`updates/guard_blocks.rs`); none when the launch prep made
-/// no record (a Claude session). `None` with no guard program, or (with a warning) one that
-/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
+/// no record (a Claude session). `None` with no guard program; a program `codex_hook_config`
+/// cannot quote refuses the launch (an error in the log), since Codex would run every call
+/// unchecked. It is read once per launch, which records on the agent
 /// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check.
+/// check and its self-test.
 fn codex_hooks(
     actor: &Actor,
     record: Option<(&std::path::Path, &str)>,
-) -> Option<serde_json::Map<String, serde_json::Value>> {
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, Error> {
     if let Some(hooks) = &actor.codex_hooks {
-        return Some(hooks.clone());
+        return Ok(Some(hooks.clone()));
     }
+    let Some(app) = actor.pre_write_guard.as_deref() else {
+        return Ok(None);
+    };
     // On Windows the console program beside the app, which PowerShell waits for.
-    let program = agent::loads::codex_guard_program(actor.pre_write_guard.as_deref()?);
+    let program = agent::loads::codex_guard_program(app);
     let config = agent::loads::codex_hook_config(&program, record);
     let Some(serde_json::Value::Object(hooks)) = config else {
-        tracing::warn!(
-            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
-             the guard"
+        tracing::error!(
+            "the pre-write guard's path cannot go in Codex's hook command, so Codex is not started"
         );
-        return None;
+        return Err(guard_off());
     };
-    Some(hooks)
+    Ok(Some(hooks))
+}
+
+/// The failure of a Codex launch whose guard hook can't be set up as Codex will run it.
+fn guard_off() -> Error {
+    Error::refused(
+        ErrorCode::AgentGuardSelftestFailed,
+        "Clauseo couldn't start its file check, so ChatGPT didn't start. Quit and reopen Clauseo, \
+         then try again.",
+    )
 }

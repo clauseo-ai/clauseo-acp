@@ -135,6 +135,8 @@ pub struct AppStages;
 
 impl Stages for AppStages {
     fn guard(&mut self, args: &[OsString]) -> i32 {
+        // First: Codex's hook refuses on a panic or past its deadline, never lets a call run.
+        clauseo_host::pre_write_guard::sessions::arm(args);
         clauseo_host::pre_write_guard::run(args, io::stdin().lock(), io::stdout(), io::stderr())
     }
 

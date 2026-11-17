@@ -213,7 +213,8 @@ anything the agent starts.
   beside `Clauseo.exe` (`codex_guard_program`); the guard's 0 and 2 end the hook, and any other
   ending, input the guard can't read, or a missing program ends with 2 and "Clauseo could not
   check this step, so it did not run." Scope: when Codex's own 30 s limit for the hook passes,
-  Codex stops it and runs the tool; where PowerShell is blocked or absent, Codex can't start the
+  Codex stops it and runs the tool (with `--sessions` the guard refuses on its own after 15 s,
+  `pre_write_guard::sessions::DEADLINE`); where PowerShell is blocked or absent, Codex can't start the
   guard; under `cmd`, the session's fallback shell, the line does not run as one
   command; a firm rule that allows only `Clauseo.exe` by path refuses every Codex step. The
   program's folder is the app's: no Clauseo fence names it, and Codex's own sandbox, which asks

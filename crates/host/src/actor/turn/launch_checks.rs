@@ -326,6 +326,7 @@ pub(super) fn prepare(
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
+    let locations = actor.effective.locations().clone();
     actor.spawn_post(async move {
         let skills = skill_wait::after_keys(keys_wait, skills).await;
         // Before anything is made for the launch: a folder that is gone, or does not answer,
@@ -351,7 +352,7 @@ pub(super) fn prepare(
                 let codex = match codex_home {
                     Some(home) => {
                         let (folder, support) =
-                            codex::prepare_launch(&check, &stored, &data, &home)?;
+                            codex::prepare_launch(&check, &stored, &data, &home, &locations)?;
                         answer = Some(support);
                         Some(CodexPrepared {
                             folder,

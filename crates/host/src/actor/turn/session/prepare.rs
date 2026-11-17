@@ -2,8 +2,6 @@
 //! switch, Codex's guard check and the model and effort picks, held updates meanwhile; then, for
 //! picks made while it ran, another round (`picks::late`), else the attach.
 
-use std::path::PathBuf;
-
 use clauseo_acp::{AcpClient, SessionStart};
 use clauseo_protocol::{AgentChoiceId, CompactString, ThreadId};
 
@@ -11,6 +9,7 @@ use super::super::super::Actor;
 use super::super::agents::call;
 use super::super::picks::{Pick, Picked};
 use super::super::{AgentReply, state};
+use super::guard::{self, GuardCheck};
 use super::{attach, claude_mode};
 use crate::agent::codex;
 use crate::error::Error;
@@ -21,7 +20,7 @@ pub(super) fn before_attach(
     actor: &mut Actor,
     thread: ThreadId,
     (start, loaded): (SessionStart, bool),
-    (mode, guard, picks): (Option<Switch>, Option<PathBuf>, Vec<Pick>),
+    (mode, guard, picks): (Option<Switch>, Option<GuardCheck>, Vec<Pick>),
 ) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
@@ -51,7 +50,7 @@ pub(super) fn before_attach(
 async fn prepare(
     client: &AcpClient,
     mut start: SessionStart,
-    (mode, guard): (Option<Switch>, Option<PathBuf>),
+    (mode, guard): (Option<Switch>, Option<GuardCheck>),
     picks: Vec<Pick>,
 ) -> (Result<SessionStart, Error>, Picked, bool) {
     let fell_back = match checks(client, &mut start, (mode, guard)).await {
@@ -74,7 +73,7 @@ pub(super) struct Switch {
 async fn checks(
     client: &AcpClient,
     start: &mut SessionStart,
-    (mode, guard): (Option<Switch>, Option<PathBuf>),
+    (mode, guard): (Option<Switch>, Option<GuardCheck>),
 ) -> Result<bool, Error> {
     let mut fell_back = false;
     if let Some(Switch { mode, fallback }) = mode {
@@ -100,11 +99,12 @@ async fn checks(
             modes.current = CompactString::from(mode.as_str());
         }
     }
-    if let Some(cwd) = guard {
-        let answer = client.codex_hooks_list(&cwd).await?;
+    if let Some(guard) = guard {
+        let answer = client.codex_hooks_list(&guard.folder).await?;
         if !codex::guard_trusted(&answer) {
             return Err(codex::guard_untrusted(&answer));
         }
+        guard::self_test(guard).await?;
     }
     Ok(fell_back)
 }

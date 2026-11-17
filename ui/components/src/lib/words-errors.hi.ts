@@ -56,6 +56,16 @@ export const HI = {
     "Clauseo यहाँ {name} को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
   "Clauseo can't start the AI safely here. Reinstall Clauseo.":
     "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+  // Clauseo's file check failed its self-test at a launch, for Claude, ChatGPT, {name} and the AI (provisional,
+  // U3-err-agent.guard_selftest_failed; Hindi later)
+  "Clauseo couldn't start its file check, so Claude didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so ChatGPT didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so {name} didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so the AI didn't start. Quit and reopen Clauseo, then try again.":
+    null,
   "The computer's disk is full. Free some space, then try again.":
     "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर दोबारा प्रयास करें।",
   "Clauseo couldn't read back its saved data.": "Clauseo अपना सहेजा गया डेटा वापस नहीं पढ़ सका।",

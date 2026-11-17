@@ -82,6 +82,11 @@ use serde_json::{Map, Value};
 pub(crate) const PROFILE: &str = "clauseo";
 /// The built-in profile it extends: Codex's workspace-write.
 pub(crate) const EXTENDS: &str = ":workspace";
+/// The profile the Codex home's `config.toml` names for threads Codex starts on its own, which
+/// take no session's `CODEX_CONFIG` ([`side_rules`]).
+pub(crate) const SIDE_PROFILE: &str = "clauseo-side";
+/// The built-in profile it extends: Codex's read-only.
+pub(crate) const SIDE_EXTENDS: &str = ":read-only";
 
 /// A SQLite database's own file and its companions.
 const SQLITE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
@@ -308,14 +313,7 @@ pub(crate) struct Session<'a> {
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
     let agents = data.join("agents");
-    let mut denied: Vec<PathBuf> = vec![
-        locations.log_dir(),
-        locations.updates_dir(),
-        locations.update_marker(),
-        locations.settings_file().to_path_buf(),
-        data.join(clauseo_counts::FIRST_ACT),
-        data.join(clauseo_store::LOCK_FILE),
-    ];
+    let mut denied = fixed_rules(locations);
     for database in [clauseo_store::DB_FILE, clauseo_search::FILE_NAME] {
         for suffix in SQLITE_SUFFIXES {
             denied.push(data.join(format!("{database}{suffix}")));
@@ -389,6 +387,48 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
     denied
 }
 
+/// The first of [`rules`]: the denied paths `Locations` names, and the counts' and the store's
+/// marker files, the same for every session.
+pub(crate) fn fixed_rules(locations: &Locations) -> Vec<PathBuf> {
+    let data = locations.data_dir();
+    vec![
+        locations.log_dir(),
+        locations.updates_dir(),
+        locations.update_marker(),
+        locations.settings_file().to_path_buf(),
+        data.join(clauseo_counts::FIRST_ACT),
+        data.join(clauseo_store::LOCK_FILE),
+    ]
+}
+
+/// The denied paths of [`SIDE_PROFILE`], for threads Codex starts on its own (they take their
+/// profile from the Codex home's `config.toml`, shared by every session): the data folder
+/// whole, then each of [`fixed_rules`] outside it, deduplicated. Nothing session-specific.
+/// Empty on Windows (`windows`), as [`keys`]; empty, with a warning, when the data folder is
+/// not UTF-8; a rule that is not UTF-8 is left out with a warning.
+pub(crate) fn side_rules(locations: &Locations, windows: bool) -> Vec<String> {
+    if windows {
+        return Vec::new();
+    }
+    let data = locations.data_dir();
+    let Some(base) = data.to_str() else {
+        tracing::warn!("the data folder is not UTF-8: Codex's side threads get no deny");
+        return Vec::new();
+    };
+    let mut out = vec![base.to_owned()];
+    for path in fixed_rules(locations) {
+        if path.starts_with(data) {
+            continue;
+        }
+        match path.to_str() {
+            Some(text) if !out.iter().any(|seen| seen == text) => out.push(text.to_owned()),
+            Some(_) => {}
+            None => tracing::warn!("a side-thread deny is not UTF-8 and is left out"),
+        }
+    }
+    out
+}
+
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
 /// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the
 /// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
@@ -454,6 +494,9 @@ pub(crate) fn keys(
 #[cfg(test)]
 #[path = "codex_fence/listed_tests.rs"]
 mod listed_tests;
+#[cfg(test)]
+#[path = "codex_fence/side_tests.rs"]
+mod side_tests;
 #[cfg(test)]
 #[path = "codex_fence/tests.rs"]
 pub(crate) mod tests;

@@ -153,7 +153,7 @@ fn as_codex_runs_it(shell: &str, command: &str, input: &[u8], cwd: &Path) -> (Ou
 fn codex_hash(command: &str) -> String {
     let identity = format!(
         "{{\"event_name\":\"pre_tool_use\",\"hooks\":[{{\"async\":false,\"command\":{},\
-         \"timeout\":30,\"type\":\"command\"}}],\"matcher\":\"apply_patch|Write|Edit|Bash\"}}",
+         \"timeout\":30,\"type\":\"command\"}}],\"matcher\":\"*\"}}",
         serde_json::to_string(command).unwrap()
     );
     let digest = Sha256::digest(identity.as_bytes());
@@ -165,10 +165,26 @@ fn codex_hash(command: &str) -> String {
     hash
 }
 
-/// A Codex hook input from `cwd` for `tool` with `command`.
+/// The session the hook input comes from: the conversation's own, listed in the ids file when
+/// the line names one.
+#[cfg(test)]
+const SESSION: &str = "sess-win-1";
+
+/// Lists [`SESSION`] in the ids file `ids` beside the record, with the host's own write.
+#[cfg(test)]
+fn list_session(ids: &Path) {
+    clauseo_host::pre_write_guard::sessions::add(ids.parent().unwrap(), SESSION).unwrap();
+    assert_eq!(
+        clauseo_host::pre_write_guard::sessions::read(ids).as_deref(),
+        Some([SESSION.to_owned()].as_slice())
+    );
+}
+
+/// A Codex hook input from `cwd` in [`SESSION`] for `tool` with `command`.
 #[cfg(test)]
 fn codex_input(cwd: &Path, tool: &str, command: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
+        "session_id": SESSION,
         "cwd": cwd,
         "tool_name": tool,
         "tool_input": { "command": command },
@@ -220,14 +236,20 @@ fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folde
     let hook = &config["PreToolUse"][0]["hooks"][0];
     let command = hook["commandWindows"].as_str().unwrap();
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));
+    let ids = record.parent().unwrap().join("sessions.json");
     assert!(
         command.starts_with(&format!(
-            "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id '{id}'; $c",
+            "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id '{id}' \
+             --sessions {}; $c",
             quoted(GUARD),
             quoted(&record.display().to_string()),
+            quoted(&ids.display().to_string()),
         )),
         "{command}"
     );
+    // The guard answers only the conversation's own sessions: list the input's, as the host
+    // does once its session call returns.
+    list_session(&ids);
     assert!(
         !command.contains('"'),
         "no double quote to escape: {command}"

@@ -137,6 +137,9 @@ pub(crate) struct Actor {
     pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
+    /// Whether a Codex launch runs its guard hook's self-test (`pre_write_guard/self_test.rs`);
+    /// on but in tests that turn it off (`HostConfig::with_guard_self_test`).
+    pub(crate) guard_self_test: bool,
     /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.

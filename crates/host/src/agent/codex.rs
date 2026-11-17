@@ -270,17 +270,49 @@ pub(crate) fn home_config() -> String {
     text
 }
 
-/// Writes [`home_config`] to `<home>/config.toml`, atomically and 0600 on Unix, over whatever is
-/// there. codex-acp 2.2.2 gives `CODEX_CONFIG` only to the session (as each thread's `config`)
-/// and starts the app-server with `-c` for hooks alone (`dist/index.js:45590-45601`), so
-/// app-server starts from this file: without it plugins are on, and every start syncs a plugin
-/// cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57 skills;
-/// `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
-/// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing
-/// else in the home is read or touched: `auth.json` and the rest are Codex's. Nor does the
-/// session's shell keys go here (`allow_login_shell` and `features.shell_snapshot`,
-/// [`without_login_shell`]): they come with the session's `PATH`, which differs between
-/// sessions of the agent, so they ride in each session's own `CODEX_CONFIG`.
+/// The text appended to [`home_config`] for threads Codex's app-server starts on its own, which
+/// take their profile from the home's `config.toml`, not a session's `CODEX_CONFIG` (whose own
+/// `default_permissions` wins for the session's thread): `default_permissions` naming
+/// [`codex_fence::SIDE_PROFILE`], then its table, extending [`codex_fence::SIDE_EXTENDS`]
+/// (read-only) with each of [`codex_fence::side_rules`] as `deny`. Side threads run read-only,
+/// with Clauseo's data folder denied. Last in the file, after every top-level key. Empty when
+/// there is no rule (Windows, a data folder that is not UTF-8).
+///
+/// [`codex_fence::SIDE_PROFILE`]: crate::agent::codex_fence::SIDE_PROFILE
+/// [`codex_fence::SIDE_EXTENDS`]: crate::agent::codex_fence::SIDE_EXTENDS
+/// [`codex_fence::side_rules`]: crate::agent::codex_fence::side_rules
+pub(crate) fn side_profile_toml(locations: &clauseo_settings::Locations, windows: bool) -> String {
+    use crate::agent::codex_fence::{SIDE_EXTENDS, SIDE_PROFILE, side_rules};
+    let rules = side_rules(locations, windows);
+    if rules.is_empty() {
+        return String::new();
+    }
+    // A JSON string is a TOML basic string.
+    let quote = |text: &str| Value::from(text).to_string();
+    let mut text = format!(
+        "default_permissions = {profile}\n[permissions.{SIDE_PROFILE}]\nextends = {extends}\n\
+         [permissions.{SIDE_PROFILE}.filesystem]\n",
+        profile = quote(SIDE_PROFILE),
+        extends = quote(SIDE_EXTENDS),
+    );
+    for rule in rules {
+        text.push_str(&quote(&rule));
+        text.push_str(" = \"deny\"\n");
+    }
+    text
+}
+
+/// Writes [`home_config`], then `side` ([`side_profile_toml`]), to `<home>/config.toml`, atomically
+/// and 0600 on Unix, over whatever is there. codex-acp 2.2.2 gives `CODEX_CONFIG` only to the
+/// session (as each thread's `config`) and starts the app-server with `-c` for hooks alone
+/// (`dist/index.js:45590-45601`), so app-server starts from this file: without it plugins are on,
+/// and every start syncs a plugin cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57
+/// skills; `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
+/// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing else
+/// in the home is read or touched: `auth.json` and the rest are Codex's. Nor does the session's
+/// shell keys go here (`allow_login_shell` and `features.shell_snapshot`, [`without_login_shell`]):
+/// they come with the session's `PATH`, which differs between sessions of the agent, so they ride
+/// in each session's own `CODEX_CONFIG`.
 ///
 /// The hooks table never goes in this file, only through `CODEX_CONFIG`: the guard's trust entry
 /// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a
@@ -290,9 +322,10 @@ pub(crate) fn home_config() -> String {
 /// A `config.toml` that already holds exactly these bytes (a plain file, 0600 on Unix) is left
 /// as it is: no write, so no rename over a file another program holds open on Windows. Before a
 /// write, temp files a crashed write left beside it (`config.toml.clauseo-*.new`) are removed.
-pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
+pub(crate) fn write_home_config(home: &Path, side: &str) -> Result<(), Error> {
     let path = home.join("config.toml");
-    let text = home_config();
+    let mut text = home_config();
+    text.push_str(side);
     if holds(&path, text.as_bytes()) {
         return Ok(());
     }
@@ -483,20 +516,22 @@ pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(),
 /// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
 /// the `.codex` refusal, the matter's folder check `check` (`agent/folder_support.rs`: Codex is
 /// refused on a network drive or a drive without permissions), the home made under `data`,
-/// its `rules` removed ([`rules::remove_rules`]), then `config.toml`. The resolved folder
-/// comes back, with the folder check's answer.
+/// its `rules` removed ([`rules::remove_rules`]), then `config.toml` (with the side threads'
+/// profile of `locations`, [`side_profile_toml`]). The resolved folder comes back, with the
+/// folder check's answer.
 pub(crate) fn prepare_launch(
     check: &FolderCheck,
     stored: &Path,
     data: &Path,
     home: &Path,
+    locations: &clauseo_settings::Locations,
 ) -> Result<(PathBuf, Answer), Error> {
     let folder = crate::agent::session_folder(stored);
     refuse_codex_folder(&folder)?;
     let support = check.refuse_unsupported(&folder)?;
     make_home(data, home)?;
     rules::remove_rules(home)?;
-    write_home_config(home)?;
+    write_home_config(home, &side_profile_toml(locations, cfg!(windows)))?;
     Ok((folder, support))
 }
 
@@ -505,5 +540,9 @@ pub(crate) mod rules;
 
 #[cfg(test)]
 mod code_mode_tests;
+#[cfg(test)]
+mod schema_tests;
+#[cfg(test)]
+mod side_profile_tests;
 #[cfg(test)]
 mod tests;

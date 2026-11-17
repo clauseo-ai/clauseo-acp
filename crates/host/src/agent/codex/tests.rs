@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     config, config_on, guard_trusted, home_config, launch_env, make_home, merge_add_only,
-    prepare_launch, refuse_codex_folder, write_home_config,
+    prepare_launch, refuse_codex_folder, side_profile_toml, write_home_config,
 };
 use crate::write;
 
@@ -409,15 +409,19 @@ fn prepare_launch_checks_then_makes_the_home() {
         matter: Some(id),
         source: crate::agent::folder_support::CheckSource::Windows,
     };
-    let error = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap_err();
+    let locations = clauseo_settings::Locations::under_root(&data);
+    let error = prepare_launch(&check, &matter, &data, &home_in(&data), &locations).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
     assert!(!data.join("agents").exists());
     write::remove_dir_all(&matter.join(".codex")).unwrap();
-    let (folder, support) = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap();
+    let (folder, support) =
+        prepare_launch(&check, &matter, &data, &home_in(&data), &locations).unwrap();
     assert_eq!(folder, dunce::canonicalize(&matter).unwrap());
     // A folder the test made is fine on Windows, and off Windows nothing is checked.
     assert_eq!(support, crate::agent::folder_support::Answer::Known(None));
-    assert!(home_in(&data).join("config.toml").is_file());
+    let written = std::fs::read_to_string(home_in(&data).join("config.toml")).unwrap();
+    let side = side_profile_toml(&locations, cfg!(windows));
+    assert_eq!(written, format!("{}{side}", home_config()));
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -448,6 +452,14 @@ fn home_config_holds_only_the_switches() {
     assert!(!text.contains("hooks"), "{text}");
 }
 
+/// A side profile as `write_home_config` takes it.
+const SIDE: &str = "default_permissions = \"clauseo-side\"\n";
+
+/// The text `write_home_config(home, SIDE)` writes.
+fn whole() -> String {
+    format!("{}{SIDE}", home_config())
+}
+
 /// Written at 0600, written again over an edit, and `auth.json` beside it untouched.
 #[test]
 fn home_config_is_rewritten_and_auth_json_is_left_alone() {
@@ -456,9 +468,9 @@ fn home_config_is_rewritten_and_auth_json_is_left_alone() {
     make_home(&root, &home).unwrap();
     let auth = br#"{"tokens": "not-a-real-token"}"#;
     write::write_file(&home.join("auth.json"), auth).unwrap();
-    write_home_config(&home).unwrap();
+    write_home_config(&home, SIDE).unwrap();
     let path = home.join("config.toml");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), home_config());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), whole());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -466,8 +478,8 @@ fn home_config_is_rewritten_and_auth_json_is_left_alone() {
         assert_eq!(mode, 0o600);
     }
     write::write_file(&path, b"features.plugins = true\n").unwrap();
-    write_home_config(&home).unwrap();
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), home_config());
+    write_home_config(&home, SIDE).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), whole());
     assert_eq!(std::fs::read(home.join("auth.json")).unwrap(), auth);
     // No temp file is left beside it.
     let mut names: Vec<String> = std::fs::read_dir(&home)
@@ -488,19 +500,19 @@ fn an_identical_home_config_is_not_written_again() {
     let root = scratch("home-config-same");
     let home = home_in(&root);
     make_home(&root, &home).unwrap();
-    write_home_config(&home).unwrap();
+    write_home_config(&home, SIDE).unwrap();
     let path = home.join("config.toml");
     let first = std::fs::symlink_metadata(&path).unwrap().ino();
-    write_home_config(&home).unwrap();
+    write_home_config(&home, SIDE).unwrap();
     assert_eq!(std::fs::symlink_metadata(&path).unwrap().ino(), first);
     // A link to a file holding the same bytes is replaced by a file, never followed.
     let elsewhere = root.join("elsewhere.toml");
-    write::write_file(&elsewhere, home_config().as_bytes()).unwrap();
+    write::write_file(&elsewhere, whole().as_bytes()).unwrap();
     write::remove_file(&path).unwrap();
     write::symlink(&elsewhere, &path).unwrap();
-    write_home_config(&home).unwrap();
+    write_home_config(&home, SIDE).unwrap();
     assert!(std::fs::symlink_metadata(&path).unwrap().is_file());
-    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), home_config());
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), whole());
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -519,7 +531,7 @@ fn stale_temp_files_are_swept_before_a_write() {
     }
     write::write_file(&home.join("auth.json"), b"{}").unwrap();
     write::write_file(&home.join("other.clauseo-1-0.new"), b"x").unwrap();
-    write_home_config(&home).unwrap();
+    write_home_config(&home, SIDE).unwrap();
     let mut names: Vec<String> = std::fs::read_dir(&home)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())

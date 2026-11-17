@@ -39,15 +39,18 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-/// The tools Codex's guard hook runs before: `apply_patch` (and its aliases `Write` and `Edit`)
-/// and `Bash`. Names joined by `|` are an exact list in Codex.
-pub(crate) const CODEX_GUARD_MATCHER: &str = "apply_patch|Write|Edit|Bash";
+/// The tools Codex's guard hook runs before: every tool (`*` matches all in Codex,
+/// `hooks/src/engine/matcher.rs:13`), so the session check (`pre_write_guard/sessions.rs`)
+/// sees each call; the guard's own checks still look only at `apply_patch` (and its aliases
+/// `Write` and `Edit`), `Bash` and `view_image`.
+pub(crate) const CODEX_GUARD_MATCHER: &str = "*";
 
 /// The seconds Codex waits for the guard (its default is 600), room for a cold PowerShell start
-/// and a first scan of a new program. Scope: when they pass, Codex stops the hook and runs the
-/// tool (codex-rs at rust-v0.162.1, `hooks/src/engine/command_runner.rs:276-318`); every other
-/// ending of the line is a refusal.
-const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 30;
+/// and a first scan of a new program. Codex refuses a tool on the guard's exit 2 with a reason on
+/// stderr (codex-rs at rust-v0.162.1, `hooks/src/events/pre_tool_use.rs`). This stays at twice
+/// or more the guard's own deadline (`pre_write_guard::sessions::DEADLINE`), past which the
+/// guard refuses on its own.
+pub(crate) const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 30;
 
 /// The key of the first handler of the first `PreToolUse` group from session flags.
 #[cfg(not(windows))]
@@ -58,23 +61,27 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// The `hooks` value for Codex's config that runs the pre-write guard, `program` with
 /// [`FLAG`](crate::pre_write_guard::FLAG) and, with `record`, [`RECORD_FLAG`] and that file
 /// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`) then
-/// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), before each
-/// `apply_patch` and `Bash`, trusted by its own `state` entry:
+/// [`RECORD_ID_FLAG`] and its identity (hex digits, `pre_write_guard::make_record`), then
+/// `--sessions` and the ids file beside the record (`pre_write_guard::sessions::file`), before
+/// every tool, trusted by its own `state` entry:
 ///
 /// ```json
-/// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
-///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
+/// {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
+///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>
+///     --sessions '<ids>'",
 ///   "commandWindows": "$global:LASTEXITCODE = -1; & '<program>' --pre-write-guard --record
-///     '<record>' --record-id '<hex>'; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
-///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
+///     '<record>' --record-id '<hex>' --sessions '<ids>'; $c = $LASTEXITCODE; if ($c -eq 0 -or
+///     $c -eq 2) { exit $c }; [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
 /// The hash is for the OS this runs on, as Codex computes it on the same machine, so it changes
 /// with the record file, one per session. `None` when `program` is no UTF-8 string: no hook
 /// rather than one that runs something else. A record file with no UTF-8 spelling, or an
-/// identity of anything but hex digits, goes out of the command alone: the guard still runs, and
-/// the lawyer is not told of its refusals. The codex hooks seam (`actor::turn::agents`,
+/// identity of anything but hex digits, goes out of the command alone, the ids file with it: the
+/// guard still runs, the lawyer is not told of its refusals, and the launch's self-test
+/// (`pre_write_guard/self_test.rs`), which needs the session check, refuses the launch. The codex
+/// hooks seam (`actor::turn::agents`,
 /// `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
 ///
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
@@ -89,6 +96,14 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
     );
     let mut command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
     let mut windows = vec![ps_quoted(program), crate::pre_write_guard::FLAG.to_owned()];
+    // The ids file sits beside the record, in the session's guard folder.
+    let sessions = record.and_then(|(file, _)| {
+        let folder = Path::new(file).parent()?;
+        crate::pre_write_guard::sessions::file(folder)
+            .to_str()
+            .map(str::to_owned)
+    });
+    let sessions_flag = crate::pre_write_guard::sessions::FLAG;
     if let Some((file, id)) = record {
         command = format!("{command} {flag} {} {id_flag} {id}", posix_quoted(file));
         windows.extend([
@@ -97,6 +112,10 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
             id_flag.to_owned(),
             ps_quoted(id),
         ]);
+        if let Some(sessions) = &sessions {
+            command = format!("{command} {sessions_flag} {}", posix_quoted(sessions));
+            windows.extend([sessions_flag.to_owned(), ps_quoted(sessions)]);
+        }
     }
     let command_windows = ps_command(&windows);
     let effective = if cfg!(windows) {
@@ -275,26 +294,24 @@ mod tests {
             "'/opt/clauseo/clauseo-desktop'".to_owned(),
             "--pre-write-guard".to_owned(),
         ]);
-        let (key, hash) = if cfg!(windows) {
+        let posix = "'/opt/clauseo/clauseo-desktop' --pre-write-guard";
+        let (key, effective) = if cfg!(windows) {
             (
                 r"C:\<session-flags>\config.toml:pre_tool_use:0:0",
-                hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", &windows, 30),
+                windows.as_str(),
             )
         } else {
-            (
-                "/<session-flags>/config.toml:pre_tool_use:0:0",
-                "sha256:1674028cddd3b0a1ede5c83351d6fa14f67d1c995b607b04ad58aab21ffb4624"
-                    .to_owned(),
-            )
+            ("/<session-flags>/config.toml:pre_tool_use:0:0", posix)
         };
+        let hash = hook_hash("pre_tool_use", "*", effective, 30);
         assert_eq!(
             config,
             json!({
                 "PreToolUse": [{
-                    "matcher": "apply_patch|Write|Edit|Bash",
+                    "matcher": "*",
                     "hooks": [{
                         "type": "command",
-                        "command": "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
+                        "command": posix,
                         "commandWindows": windows,
                         "timeout": 30,
                     }],
@@ -344,8 +361,8 @@ mod tests {
     }
 
     /// The session's record file goes after the flag, quoted for each shell, then its identity,
-    /// and the trust hash is the one Codex computes for that whole command; an identity of
-    /// anything but hex digits leaves both commands without them.
+    /// then the ids file beside it, and the trust hash is the one Codex computes for that whole
+    /// command; an identity of anything but hex digits leaves both commands without them.
     #[test]
     fn the_record_file_and_its_identity_go_in_the_command_and_its_hash() {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
@@ -355,7 +372,8 @@ mod tests {
         let hook = &config["PreToolUse"][0]["hooks"][0];
         let posix = format!(
             "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
-             '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id}"
+             '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id} \
+             --sessions '/data/browser/guard/s 1/sessions.json'"
         );
         let windows = ps_command(&[
             "'/opt/clauseo/clauseo-desktop'".to_owned(),
@@ -364,6 +382,8 @@ mod tests {
             "'/data/browser/guard/s 1/guard-blocks.jsonl'".to_owned(),
             "--record-id".to_owned(),
             ps_quoted(id),
+            "--sessions".to_owned(),
+            "'/data/browser/guard/s 1/sessions.json'".to_owned(),
         ]);
         assert_eq!(hook["command"], posix);
         assert_eq!(hook["commandWindows"], windows);
@@ -373,16 +393,7 @@ mod tests {
             panic!("one trust entry: {state:?}");
         };
         let trusted = &entry["trusted_hash"];
-        assert_eq!(
-            *trusted,
-            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 30)
-        );
-        if !cfg!(windows) {
-            assert_eq!(
-                *trusted,
-                "sha256:a7cad9406971426d55a138ac2b7994ff2291be229fdba66206fc9b69e34ba1b1"
-            );
-        }
+        assert_eq!(*trusted, hook_hash("pre_tool_use", "*", effective, 30));
         let odd = Path::new("/data/100%/guard-blocks.jsonl");
         let odd = codex_hook_config(program, Some((odd, id))).unwrap();
         let odd = &odd["PreToolUse"][0]["hooks"][0];
@@ -393,7 +404,8 @@ mod tests {
                 .contains("--record '/data/100%/guard-blocks.jsonl' --record-id")
         );
         assert!(odd["command"].as_str().unwrap().ends_with(&format!(
-            "--record '/data/100%/guard-blocks.jsonl' --record-id {id}"
+            "--record '/data/100%/guard-blocks.jsonl' --record-id {id} \
+             --sessions '/data/100%/sessions.json'"
         )));
         for bad in ["", "12 && calc", "'x'", "00g1"] {
             let config = codex_hook_config(program, Some((record, bad))).unwrap();
@@ -403,6 +415,35 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    /// Every tool reaches the guard: the matcher Codex gets is `*`, whatever the record.
+    #[test]
+    fn the_matcher_codex_gets_is_every_tool() {
+        let program = Path::new("/opt/clauseo/clauseo-desktop");
+        let record = Path::new("/data/browser/guard/s1/guard-blocks.jsonl");
+        for record in [None, Some((record, "00ff"))] {
+            let config = codex_hook_config(program, record).unwrap();
+            assert_eq!(config["PreToolUse"][0]["matcher"], "*");
+            assert_eq!(super::CODEX_GUARD_MATCHER, "*");
+        }
+    }
+
+    /// Codex lets a call run when its hook times out, so the timeout it gets is never under the
+    /// guard's own deadline (with room for a slow start), past which the guard refuses itself.
+    #[test]
+    fn codexs_timeout_is_not_under_the_guards_deadline() {
+        let deadline = crate::pre_write_guard::sessions::DEADLINE;
+        assert!(
+            super::CODEX_GUARD_TIMEOUT_SECONDS >= deadline.as_secs().saturating_mul(2),
+            "timeout {}s, deadline {deadline:?}",
+            super::CODEX_GUARD_TIMEOUT_SECONDS
+        );
+        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
+        assert_eq!(
+            config["PreToolUse"][0]["hooks"][0]["timeout"],
+            super::CODEX_GUARD_TIMEOUT_SECONDS
+        );
     }
 }
 

@@ -164,6 +164,8 @@ mod codex;
 mod names;
 mod reach;
 pub(crate) mod record;
+pub(crate) mod self_test;
+pub mod sessions;
 mod shell;
 mod timings;
 mod words;
@@ -245,17 +247,28 @@ fn run_timed(
     on: bool,
 ) -> i32 {
     timings::start(on);
+    let started = sessions::now();
     let mut bytes = Vec::new();
-    let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
-        Ok(_) => {
+    let read = input.take(MAX_INPUT).read_to_end(&mut bytes);
+    // Codex's hook: a call from a session that is not the conversation's is refused first.
+    let outsider = sessions::wanted(args)
+        .then(|| {
+            let read = read.as_ref().ok().map(|_| bytes.as_slice());
+            sessions::refusal(read, sessions::file_arg(args).as_deref())
+        })
+        .flatten();
+    let found = match (outsider, read) {
+        (Some(_), _) => Ok(None),
+        (None, Ok(_)) => {
             timings::mark("read");
             refusal(&bytes, matter_arg(args).as_deref())
         }
-        Err(_) => Err(Ignored::Unreadable),
+        (None, Err(_)) => Err(Ignored::Unreadable),
     };
     timings::mark("decide");
-    let refused = matches!(found, Ok(Some(_)));
+    let refused = outsider.is_some() || matches!(found, Ok(Some(_)));
     let (line, code) = match found {
+        Ok(None) if outsider.is_some() => (outsider.map(str::to_owned), DENY),
         Ok(None) => (None, 0),
         Ok(Some(refusal)) => {
             let claude = matter_arg(args).is_some();
@@ -279,6 +292,9 @@ fn run_timed(
                 .and_then(|()| output.write_all(b"\n"))
                 .and_then(|()| output.flush()),
         );
+    }
+    if sessions::wanted(args) {
+        sessions::record_decision(args, &bytes, code == DENY, started);
     }
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
     for line in line.into_iter().chain(timings::finish()) {

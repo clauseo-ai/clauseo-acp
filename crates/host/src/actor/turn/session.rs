@@ -1,12 +1,12 @@
-//! A launched agent's session: `session/load` with the stored session id when the agent offers
-//! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
-//! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
-//! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
-//! Clauseo's mode, for any agent the model and effort picks (`picks.rs`); then the attach
-//! commit, the held replay and the work that waited. When `initialize` gave the agent a title,
-//! its name is logged first (`AgentNamed`, `session/named.rs`), so a failed `session/new`
-//! leaves it in the thread. A Codex agent with a key that answers a session call with
-//! auth-required gets its one `authenticate` first (`key_retry.rs`).
+//! A launched agent's session: `session/load` with the stored session id when the agent offers it
+//! (after reading the thread's whole log for replay dedupe), else `session/resume` when it offers
+//! that (nothing is replayed), else `session/new`; for a Codex agent the checks before its first
+//! prompt (the ask mode, the guard's trust and self-test, `session/guard.rs`), for a Claude agent
+//! the switch to Clauseo's mode, for any agent the model and effort picks (`picks.rs`); then the
+//! attach commit, the held replay and the work that waited. When `initialize` gave the agent a
+//! title, its name is logged first (`AgentNamed`, `session/named.rs`), so a failed `session/new`
+//! leaves it in the thread. A Codex agent with a key that answers a session call with auth-required
+//! gets its one `authenticate` first (`key_retry.rs`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,11 +29,13 @@ use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
 
 mod claude_mode;
+mod guard;
 mod named;
 mod prepare;
 
 use claude_mode::claude_start;
 pub(super) use claude_mode::{Auto, hold_auto_back};
+use guard::ids_target;
 pub(super) use prepare::on_prepared;
 use prepare::{Switch, before_attach};
 
@@ -107,6 +109,7 @@ pub(super) fn on_replay_log(
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let ids = ids_target(actor, thread, matter);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -143,10 +146,7 @@ pub(super) fn on_replay_log(
             .run(&client, || client.load_session(request.clone()))
             .await;
         fence.await;
-        AgentReply::Session {
-            loaded: true,
-            result,
-        }
+        guard::reply(ids, true, result).await
     });
 }
 
@@ -167,6 +167,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let ids = ids_target(actor, thread, matter);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -194,10 +195,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
             .run(&client, || client.resume_session(request.clone()))
             .await;
         fence.await;
-        AgentReply::Session {
-            loaded: true,
-            result,
-        }
+        guard::reply(ids, true, result).await
     });
 }
 
@@ -214,6 +212,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let ids = ids_target(actor, thread, matter);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -240,10 +239,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             .run(&client, || client.new_session(request.clone()))
             .await;
         fence.await;
-        AgentReply::Session {
-            loaded: false,
-            result,
-        }
+        guard::reply(ids, false, result).await
     });
 }
 
@@ -347,11 +343,7 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         }
     };
     // Whether a hooks object went in was recorded at launch, with the folder resolved then.
-    let guard = state(actor, thread)
-        .and_then(|state| state.agent.as_deref())
-        .and_then(|agent| agent.codex.as_ref())
-        .filter(|codex| codex.guard)
-        .map(|codex| codex.folder.clone());
+    let guard = guard::check(actor, thread, matter_of(actor, thread));
     if !switch && guard.is_none() && picks.is_empty() {
         attach(actor, thread, start, loaded);
         return;

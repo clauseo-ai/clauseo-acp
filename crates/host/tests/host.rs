@@ -215,6 +215,9 @@ mod guard_hook;
 #[path = "host/guard_record.rs"]
 mod guard_record;
 #[cfg(test)]
+#[path = "host/guard_sessions.rs"]
+mod guard_sessions;
+#[cfg(test)]
 #[path = "host/hindi.rs"]
 mod hindi;
 #[cfg(test)]
