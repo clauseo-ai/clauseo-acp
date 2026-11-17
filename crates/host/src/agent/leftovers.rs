@@ -60,7 +60,7 @@ thread_local! {
 
 /// A slow listing, for tests: the next one started from this thread, once taken, sends on
 /// `taken` and answers only when `release` drops.
-#[cfg(all(unix, test))]
+#[cfg(test)]
 pub(crate) struct HeldListing {
     pub(crate) taken: async_channel::Receiver<()>,
     /// Dropped (with the whole hold) to let the listing answer.
@@ -68,7 +68,7 @@ pub(crate) struct HeldListing {
 }
 
 /// Holds the next listing started from this thread ([`HeldListing`]).
-#[cfg(all(unix, test))]
+#[cfg(test)]
 pub(crate) fn hold_next_listing() -> HeldListing {
     let (said, taken) = async_channel::bounded(1);
     let (release, held) = async_channel::bounded(1);

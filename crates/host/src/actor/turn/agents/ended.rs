@@ -2,12 +2,14 @@
 //! agent whose connection is gone, the shutdown ladder's stop, and `Ended`: the detach it logs
 //! and the turn the exit cut short.
 
-use clauseo_protocol::{AgentSessionDetached, DetachReason, ErrorCode, StreamId, ThreadId};
+use clauseo_protocol::{
+    AgentSessionDetached, DetachReason, ErrorCode, StopReason, StreamId, ThreadId,
+};
 
 use super::super::super::Actor;
 use super::super::launch_checks;
 use super::super::out::Out;
-use super::super::{End, Then, TurnPhase, current, end, state, updates};
+use super::super::{End, Holder, Then, TurnPhase, current, end, state, updates};
 use super::{Agent, Stage, Waiting, fail_waiting, start};
 use crate::agent::{Ended, StopStep, leftovers};
 use crate::error::Error;
@@ -177,7 +179,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);
     }
-    let detach = session.is_some().then_some(reason);
+    let detach = end_own_unstarted(actor, thread, session.is_some().then_some(reason));
     let phase = current(actor, thread).map(|current| (current.phase, current.cancelled));
     match (phase, detach) {
         (Some((TurnPhase::Prompting, cancelled)), detach) => {
@@ -223,6 +225,54 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     }
     super::super::sign_in::agent_ended(actor, thread, unresponsive);
     actor.release(StreamId::Thread(thread));
+}
+
+/// An agent-started turn of `thread` that had not started when its agent ended was opened for
+/// that agent's output, which went with it (`refused::agent_ended`): it never starts on another
+/// agent with nothing to show, where only its quiet timer would end it, a minute later, as an
+/// empty exchange with an Undo step, Stop showing and the lawyer's prompts queued behind it. With
+/// its `TurnQueued` logged and waiting (for the writer, or with it for an agent the matter's move
+/// stopped, `restart_if_moved`) it ends now, `Cancelled` with no `TurnStarted`, carrying
+/// `detach`, which it takes; checkpointing, starting, or not yet logged, it is marked cancelled
+/// and ends, still with no `TurnStarted` but for a start already in flight, when that step
+/// answers. Not while the host stops: start-up ends such a turn (`own_turn/restart.rs`). A
+/// prompt of the lawyer's is left alone. Returns the detach still to log.
+fn end_own_unstarted(
+    actor: &mut Actor,
+    thread: ThreadId,
+    detach: Option<DetachReason>,
+) -> Option<DetachReason> {
+    if super::super::host_stopping(actor) {
+        return detach;
+    }
+    let writer = actor
+        .check_thread(thread)
+        .map(|entry| entry.row.matter)
+        .ok()
+        .and_then(|matter| actor.matters.get(&matter))
+        .is_some_and(|entry| entry.turns.holder == Some(Holder::Thread(thread)));
+    let Some(current) = current(actor, thread)
+        .filter(|current| current.own.is_some() && !current.cancelled && !current.live())
+    else {
+        return detach;
+    };
+    let turn = current.turn;
+    let now = match current.phase {
+        TurnPhase::Queued => true,
+        TurnPhase::Launching => writer,
+        TurnPhase::Accepting | TurnPhase::Checkpointing | TurnPhase::Starting => false,
+        TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending => return detach,
+    };
+    tracing::info!(target: LIFECYCLE, %thread, %turn, now, "the agent ended before its agent-started turn started; the turn ends");
+    if !now {
+        current.cancelled = true;
+        return detach;
+    }
+    if detach.is_some() {
+        current.detach = detach;
+    }
+    super::super::steps::end_unstarted(actor, thread, turn, None, StopReason::Cancelled, None);
+    None
 }
 
 /// A detach reason as the log file may show it: its kind and exit code, never `stderr_tail`,

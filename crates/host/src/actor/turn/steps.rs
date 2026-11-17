@@ -374,7 +374,7 @@ pub(super) fn on_before_turn(
             // stops nothing: dropping the held output already ends the loop, and the stop would
             // kill the lawyer's background commands for nothing.
             if own {
-                agents::stop(actor, thread);
+                super::own_turn::refused::stop_agent(actor, thread);
             }
             return;
         }

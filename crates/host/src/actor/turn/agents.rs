@@ -232,8 +232,10 @@ pub(super) fn next_agent_id() -> u64 {
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
 /// (the matter was relocated since): stops that agent and starts a new one in the new folder for
-/// the turn, which goes back to step 2 and keeps the writer. `false` when the agent's folder is
-/// the matter's, or there is no running agent.
+/// the turn, which goes back to step 2 and keeps the writer. An agent-started turn is not started
+/// again: it was opened for the old agent's output, which goes with it, so the turn ends with
+/// that agent (`agents/ended.rs`, `end_own_unstarted`). `false` when the agent's folder is the
+/// matter's, or there is no running agent.
 pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
     let Ok(row) = actor.check_thread(thread).map(|entry| entry.row.matter) else {
         return false;
@@ -249,6 +251,20 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     };
     if agent.folder == folder || agent.stage == Stage::Stopping {
         return false;
+    }
+    if super::own_turn::is_own(actor, thread) {
+        tracing::info!(%thread, "the matter moved; its agent stops, and its agent-started turn with it");
+        if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
+            agent.link.stop();
+            agent.stage = Stage::Stopping;
+            agent.stop_cause = StopCause::Asked;
+            let waiting = std::mem::take(&mut agent.waiting);
+            agent.after_stop.extend(waiting);
+        }
+        if let Some(current) = current(actor, thread) {
+            current.phase = TurnPhase::Launching;
+        }
+        return true;
     }
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
     restart_for(actor, thread, turn);
@@ -382,6 +398,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
+        AgentReply::HeldAnswered => super::own_turn::refused::answered(actor, thread, same),
         AgentReply::ModeReset(mode, result) => {
             super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }

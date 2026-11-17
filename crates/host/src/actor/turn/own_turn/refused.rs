@@ -8,7 +8,9 @@
 //! cards (permission requests, elicitations) are answered at once: the permission's reject-once
 //! option (else `cancelled`), an elicitation `decline`. ACP's answer carries no reason, so the
 //! reason goes to host.log. A refused agent-started turn's agent is stopped next
-//! (`steps::on_before_turn`); a refused prompt of the lawyer's stops nothing.
+//! (`steps::on_before_turn`), once those answers are on its connection ([`stop_agent`]): the
+//! stop closes the agent's stdin at once, and an answer still on its way would never be read. A
+//! refused prompt of the lawyer's stops nothing.
 //!
 //! The belt ([`CAP`]): however a thread's agent-started turns come to fail, no more than `CAP`
 //! of them in a row fail with the same code and no turn starting between: the `CAP`th stops the
@@ -18,8 +20,9 @@ use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_protocol::{AgentChoiceId, ElicitationResponse, ErrorCode, ThreadId};
 
 use super::super::super::Actor;
+use super::super::inputs::AgentReply;
 use super::super::shell_network::reject_option;
-use super::super::{agents, spawn, state, updates};
+use super::super::{agents, state, updates};
 use super::is_own;
 
 /// The most agent-started turns of a thread that fail in a row with the same code, no turn
@@ -61,6 +64,33 @@ pub(in crate::actor::turn) fn unstarted_failed(
     }
     if run >= CAP {
         tracing::warn!(%thread, %code, run, "agent-started turns keep failing; the agent is stopped");
+        stop_agent(actor, thread);
+    }
+}
+
+/// Stops `thread`'s agent once the held cards answered just now have been handed to its
+/// connection: the stop closes the agent's stdin at once, which would beat an answer still
+/// on its way, so the agent would never read it.
+pub(in crate::actor::turn) fn stop_agent(actor: &mut Actor, thread: ThreadId) {
+    let Some(state) = state(actor, thread) else {
+        return;
+    };
+    if state.own_held.answering > 0 {
+        state.own_held.stop_after = true;
+        return;
+    }
+    agents::stop(actor, thread);
+}
+
+/// The answers to held cards that went to `thread`'s agent (`same`: the agent the thread still
+/// has) were handed to its connection: a stop that waited for them goes now.
+pub(in crate::actor::turn) fn answered(actor: &mut Actor, thread: ThreadId, same: bool) {
+    let Some(state) = state(actor, thread).filter(|_| same) else {
+        return;
+    };
+    let held = &mut state.own_held;
+    held.answering = held.answering.saturating_sub(1);
+    if held.answering == 0 && std::mem::take(&mut held.stop_after) {
         agents::stop(actor, thread);
     }
 }
@@ -73,10 +103,18 @@ pub(in crate::actor::turn) fn agent_ended(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     state.own_held.failed = None;
+    state.own_held.answering = 0;
+    state.own_held.stop_after = false;
     let held = std::mem::take(&mut state.own_held.updates);
     if !held.is_empty() {
         tracing::info!(%thread, dropped = held.len(), "the agent ended; what it held went with it");
     }
+}
+
+/// How many held cards of `thread` were answered on an agent so far (tests).
+#[cfg(test)]
+pub(in crate::actor::turn) fn sent(actor: &mut Actor, thread: ThreadId) -> usize {
+    state(actor, thread).map_or(0, |state| state.own_held.sent)
 }
 
 /// A turn of `thread` started: the run of failed agent-started turns ends.
@@ -113,7 +151,8 @@ fn answer_of(card: &AcpEvent) -> Option<Answer> {
     None
 }
 
-/// Answers the cards among `held` off the actor ([`answer_of`]).
+/// Answers the cards among `held` off the actor ([`answer_of`]); once they are handed to the
+/// connection, [`answered`] runs.
 fn answer(actor: &mut Actor, thread: ThreadId, held: &[AcpEvent]) {
     let answers: Vec<Answer> = held.iter().filter_map(answer_of).collect();
     if answers.is_empty() {
@@ -123,7 +162,15 @@ fn answer(actor: &mut Actor, thread: ThreadId, held: &[AcpEvent]) {
         return;
     };
     let client = agent.link.client.clone();
-    spawn(actor, async move {
+    let id = agent.id;
+    if let Some(state) = state(actor, thread) {
+        state.own_held.answering = state.own_held.answering.saturating_add(1);
+        #[cfg(test)]
+        {
+            state.own_held.sent += answers.len();
+        }
+    }
+    agents::call(actor, thread, id, async move {
         for answer in answers {
             let answered = match answer {
                 Answer::Option(key, option) => client.answer_permission(key, option).await,
@@ -138,5 +185,6 @@ fn answer(actor: &mut Actor, thread: ThreadId, held: &[AcpEvent]) {
                 tracing::debug!(%error, "a held card of a refused agent-started turn was not answered");
             }
         }
+        AgentReply::HeldAnswered
     });
 }

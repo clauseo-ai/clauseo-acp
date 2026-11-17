@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use clauseo_acp::{AcpEvent, AgentUpdate, Origin, PendingKey};
 use clauseo_protocol::{
-    AgentSessionId, DomainEvent, ErrorCode, PermissionKind, PermissionOption, ThreadId,
+    AgentSessionId, DomainEvent, ErrorCode, PermissionKind, PermissionOption, StopReason, ThreadId,
 };
 
 use super::agents::send_prompt;
@@ -28,6 +28,7 @@ use crate::agent::AgentInput;
 use crate::agent::OwnerStep;
 #[cfg(unix)]
 use crate::agent::leftovers::{self, STOP_LIST_WAIT};
+use crate::pipeline::tests::support::TempDir;
 
 fn session() -> AgentSessionId {
     AgentSessionId::new("sess-1").unwrap()
@@ -143,7 +144,7 @@ fn refused_once_by(name: &str, held: fn() -> AcpEvent, refuse: Refuse, code: Err
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
-    let _holding = refuse(&folder_of(&rig));
+    let holding = refuse(&folder_of(&rig));
     // Only a live agent sends: once the refusal has stopped it, nothing more comes.
     for _ in 0..10 {
         if !live(&rig.actor, thread) {
@@ -158,6 +159,8 @@ fn refused_once_by(name: &str, held: fn() -> AcpEvent, refuse: Refuse, code: Err
     let events = rig.log(thread).len();
     rig.run_until("the agent stopped", |actor| !live(actor, thread));
     assert_eq!(rig.log(thread).len(), events, "the log stopped growing");
+    // Before the rig's data folder goes: on Windows a file held with no sharing keeps it.
+    drop(holding);
     rig.finish();
 }
 
@@ -202,13 +205,19 @@ fn a_held_permission_request_is_answered_reject_once_on_its_agent() {
     until_idle(&mut rig, thread);
     let (refuse, code) = refusal();
     let folder = folder_of(&rig);
-    let _holding = refuse(&folder);
+    let holding = refuse(&folder);
     rig.release_held();
     until_settled(&mut rig, thread);
     let answered = agent_folder(&folder).join("answered.pid");
-    poll_until(&mut rig, "the agent's answer", |_| answered.exists());
+    poll_until(&mut rig, "answer from the agent", |_| answered.exists());
     assert_eq!(failures(&mut rig, thread), vec![code]);
+    assert_eq!(
+        refused::sent(&mut rig.actor, thread),
+        1,
+        "one card answered"
+    );
     rig.run_until("the agent stopped", |actor| !live(actor, thread));
+    drop(holding);
     rig.finish();
 }
 
@@ -220,16 +229,19 @@ fn a_refused_prompt_of_the_lawyers_leaves_the_agent_running() {
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
     let (refuse, code) = refusal();
-    let _holding = refuse(&folder_of(&rig));
+    let holding = refuse(&folder_of(&rig));
     send_prompt(&mut rig, 11, thread);
     until_settled(&mut rig, thread);
     assert_eq!(failures(&mut rig, thread), vec![code]);
     assert!(live(&rig.actor, thread), "the agent was stopped");
+    drop(holding);
     rig.finish();
 }
 
 /// What the agent sent between turns goes with it when it ends: no card of it waits to be
-/// answered on the next agent, whose request keys start again at 1.
+/// answered on the next agent, whose request keys start again at 1. The next agent's turn shows
+/// none of the earlier agent's cards (so the lawyer can't answer one onto it), and the host
+/// answers none of them on it.
 #[test]
 fn held_output_goes_when_its_agent_ends() {
     let mut rig = rig("refused-held-ended", TWO_ANSWERS, "exit");
@@ -237,13 +249,111 @@ fn held_output_goes_when_its_agent_ends() {
     send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
     own_turn::hold_for_test(&mut rig.actor, thread, helper_card());
-    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 1);
+    // A request under the key the next agent's first request will have.
+    let mut first_key = helper_card();
+    if let AcpEvent::PermissionRequested { key, .. } = &mut first_key {
+        *key = PendingKey(1);
+    }
+    own_turn::hold_for_test(&mut rig.actor, thread, first_key);
+    own_turn::hold_for_test(&mut rig.actor, thread, background_update());
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 3);
     crate::actor::turn::agents::stop(&mut rig.actor, thread);
     rig.run_until("the agent ended", |actor| {
         actor.threads[&thread].turn.agent.is_none()
     });
     assert_eq!(own_turn::waiting(&mut rig.actor, thread), 0, "nothing held");
+    let before = rig.log(thread).len();
+    // A later agent: the lawyer's next prompt starts one, and its turn ends as the agent says.
+    let next = send_prompt(&mut rig, 11, thread);
+    until_settled(&mut rig, thread);
+    assert!(live(&rig.actor, thread), "no later agent");
+    let log = rig.log(thread);
+    let later = &log[before..];
+    assert!(
+        !later
+            .iter()
+            .any(|event| matches!(event, DomainEvent::PermissionRequested(_))),
+        "an earlier agent's card was shown on the later agent's turn"
+    );
+    assert!(later.iter().any(|event| matches!(event,
+        DomainEvent::TurnEnded(ended) if ended.turn == next && ended.stop == StopReason::EndTurn)));
+    assert_eq!(
+        refused::sent(&mut rig.actor, thread),
+        0,
+        "a card answered on the later agent"
+    );
+    let asks = rig.actor.threads[&thread]
+        .turn
+        .agent
+        .as_deref()
+        .map(|agent| agent.permissions.len());
+    assert_eq!(asks, Some(0), "the later agent has a card open");
     rig.finish();
+}
+
+/// The matter moved (its row names another folder, as a relocate leaves it) and held output opens
+/// an agent-started turn: its agent, in the old folder, is stopped, and the turn ends with it at
+/// once, `Cancelled` with no `TurnStarted` and no checkpoint, on a clock that never moves (no
+/// quiet timer ends it). No new agent starts for it, and the lawyer's next prompt goes straight
+/// through on a new agent in the new folder.
+#[test]
+fn an_agent_started_turn_ends_with_its_agent_when_the_matter_moved() {
+    let mut rig = rig("refused-moved-own", TWO_ANSWERS, "exit");
+    let thread = rig.thread();
+    let matter = rig.matter();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    let old = folder_of(&rig);
+    let copies = TempDir::new("refused-moved-own-copy");
+    let moved = copies.path().join("Scratch moved");
+    crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
+    let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
+    crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();
+    rig.actor.matters.get_mut(&matter).unwrap().row.folder_path =
+        moved.to_string_lossy().into_owned();
+    let (events, matter_events) = (rig.log(thread).len(), rig.matter_log().len());
+    own_turn::hold_for_test(&mut rig.actor, thread, background_update());
+    own_turn::open_if_idle(&mut rig.actor, thread);
+    let own = rig.actor.threads[&thread]
+        .turn
+        .current
+        .as_ref()
+        .map(|current| current.turn)
+        .expect("no agent-started turn opened");
+    until_settled(&mut rig, thread);
+    assert!(
+        rig.actor.threads[&thread].turn.agent.is_none(),
+        "an agent started for the ended turn"
+    );
+    let log = rig.log(thread);
+    let kinds: Vec<_> = log[events..].iter().map(super::rig::kind).collect();
+    let ended = log[events..].iter().find_map(|event| {
+        if let DomainEvent::TurnEnded(ended) = event
+            && ended.turn == own
+        {
+            return Some(ended.stop);
+        }
+        None
+    });
+    assert_eq!(ended, Some(StopReason::Cancelled), "{kinds:?}");
+    assert!(
+        !log[events..].iter().any(|event| matches!(event,
+            DomainEvent::TurnStarted(started) if started.turn == own)),
+        "the turn started: {kinds:?}"
+    );
+    assert_eq!(
+        rig.matter_log().len(),
+        matter_events,
+        "a checkpoint for the turn"
+    );
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 0, "nothing held");
+    let next = send_prompt(&mut rig, 11, thread);
+    until_settled(&mut rig, thread);
+    let log = rig.log(thread);
+    assert!(log.iter().any(|event| matches!(event,
+        DomainEvent::TurnEnded(ended) if ended.turn == next && ended.stop == StopReason::EndTurn)));
+    rig.finish();
+    drop(copies);
 }
 
 /// A new file in the matter that another program holds open with no sharing at all (share mode
@@ -306,17 +416,25 @@ const OWN_SESSION_COMMAND: &str = r#"{"expect":{"method":"session/prompt","as":"
 /// even when the agent ignores its stdin closing (`on_stdin_close: hang`): the host lists the
 /// agent's descendants by parent before the ladder (`agent.rs`, `agent/leftovers.rs`), and the
 /// tree kill ends the listed ones after the group.
-/// Handles what the tasks post until `done` holds, looking every 5 ms for up to 10 s: for a
-/// step that posts no input (a listing thread's answer, the owner task's step).
+/// Handles what the tasks post until `done` holds, looking every 5 ms for up to 10 s of wall
+/// time: for a step that posts no input (a listing thread's answer, the owner task's step). The
+/// bound is one 10 s timer, not a count of 5 ms sleeps: Windows rounds each sleep up to its
+/// timer tick (about 15.6 ms), so 2,000 of them took 31 s, past nextest's 30 s.
 pub(super) fn poll_until(rig: &mut Rig, what: &str, mut done: impl FnMut(&mut Actor) -> bool) {
-    for _ in 0..2000 {
+    let mut deadline = async_io::Timer::after(Duration::from_secs(10));
+    loop {
         rig.drain();
         if done(&mut rig.actor) {
             return;
         }
-        futures::executor::block_on(async_io::Timer::after(Duration::from_millis(5)));
+        let tick = async_io::Timer::after(Duration::from_millis(5));
+        let waited = futures::executor::block_on(futures::future::select(&mut deadline, tick));
+        if matches!(waited, futures::future::Either::Left(_)) {
+            rig.drain();
+            assert!(done(&mut rig.actor), "no {what} within 10 s");
+            return;
+        }
     }
-    panic!("no {what} within 10 s");
 }
 
 /// Kills the test's own command on drop, so a failed assert leaves no process behind.
@@ -413,6 +531,50 @@ fn own_session_command_dies_with_the_stop(name: &str, late: bool) {
     assert!(
         gone,
         "the command in a session of its own outlived the stop"
+    );
+    rig.finish();
+}
+
+/// While the host stops (a quit), an agent's stop waits only [`leftovers::SNAPSHOT_WAIT`] (1 s)
+/// for its listing, not [`STOP_LIST_WAIT`]: with the listing held, the ladder runs once 1 s
+/// has passed on the host's clock. Unix: Windows lists nothing before its ladder.
+#[cfg(unix)]
+#[test]
+fn a_stop_while_the_host_quits_waits_one_second_for_its_listing() {
+    let mut rig = rig("refused-quit-listing", TWO_ANSWERS, "exit");
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    let held = leftovers::hold_next_listing();
+    let serving = std::mem::replace(
+        &mut rig.actor.phase,
+        crate::actor::HostPhase::Stopping(Vec::new()),
+    );
+    crate::actor::turn::agents::stop(&mut rig.actor, thread);
+    rig.actor.phase = serving;
+    let step = |actor: &mut Actor| {
+        actor.threads[&thread]
+            .turn
+            .agent
+            .as_deref()
+            .map(|agent| agent.link.owner_step())
+    };
+    poll_until(&mut rig, "the listing taken", |_| !held.taken.is_empty());
+    assert_eq!(step(&mut rig.actor), Some(OwnerStep::Listing));
+    advance(&mut rig, leftovers::SNAPSHOT_WAIT);
+    poll_until(&mut rig, "the ladder after 1 s", |actor| {
+        !matches!(step(actor), Some(OwnerStep::Running | OwnerStep::Listing))
+    });
+    drop(held);
+    for _ in 0..20 {
+        if rig.actor.threads[&thread].turn.agent.is_none() {
+            break;
+        }
+        advance(&mut rig, Duration::from_secs(3));
+    }
+    assert!(
+        rig.actor.threads[&thread].turn.agent.is_none(),
+        "the agent ended"
     );
     rig.finish();
 }
