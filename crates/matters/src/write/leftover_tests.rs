@@ -334,12 +334,14 @@ fn protect(path: &Path) {
         use std::os::unix::fs::PermissionsExt as _;
         super::set_permissions(path, std::fs::Permissions::from_mode(0o640)).unwrap();
         // A file system without user attributes leaves the mode alone to check.
-        let _ = rustix::fs::setxattr(
+        if let Err(err) = rustix::fs::setxattr(
             path,
             "user.clauseo.test",
             b"kept",
             rustix::fs::XattrFlags::empty(),
-        );
+        ) {
+            eprintln!("no user attribute ({err}): the mode alone is checked");
+        }
     }
     #[cfg(windows)]
     {
