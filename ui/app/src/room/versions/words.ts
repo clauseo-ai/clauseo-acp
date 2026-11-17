@@ -431,14 +431,26 @@ export function doneLine(
             date: cal.words(lang, to.day, "date"),
           });
     }
-    case "undidRestore":
+    case "undidRestore": {
       if (done.file !== null) {
         // what the undo did, as its marker says: never what the dialog's preview expected
         return undidFileLine(lang, fileName(done.file), markOf(s, done, done.file), platform);
       }
+      // the files the undo kept, changed after the restore: the matter doesn't stand as it did
+      const kept = (done.kept ?? []).map(fileName);
+      const [paper] = kept;
+      if (paper !== undefined && kept.length === 1)
+        return vt(lang, "Undid the restore. {paper} changed after it, so it stays as it is.", {
+          paper,
+        });
+      if (kept.length > 1)
+        return vt(lang, "Undid the restore. {papers} changed after it, so they stay as they are.", {
+          papers: listOf(lang, kept),
+        });
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),
       });
+    }
     case "undidChange":
       return vt(
         lang,

@@ -81,6 +81,8 @@ export type Done =
       file: string | null;
       /** The version the undo answered with, whose marker says what it did to that file. */
       checkpoint?: string;
+      /** For the matter: the files its preview kept, changed after the restore (or unwritable). */
+      kept?: readonly string[];
     }
   | {
       kind: "undidChange";
@@ -105,7 +107,10 @@ export function restoreDone(
 ): Done {
   const { file, preview } = ask;
   if (ask.undoes !== null) {
-    if (file === null) return { kind: "undidRestore", at, file };
+    if (file === null) {
+      const kept = preview.kept.length > 0 ? { kept: preview.kept } : {};
+      return { kind: "undidRestore", at, file, ...kept };
+    }
     const checkpoint = outcome.kind === "wrote" ? { checkpoint: outcome.checkpoint } : {};
     return { kind: "undidRestore", at, file, ...checkpoint };
   }

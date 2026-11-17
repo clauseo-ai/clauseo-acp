@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Restoring one document's copy review cells (UC-316 to UC-325, UC-341, UC-392 to UC-399, and UC-428), rendered as the review
-// renders them (in StrictMode): each shows its string, its slots filled, in the state it names, after the presses that
+// Restoring one document's copy review cells (UC-316 to UC-325, UC-341, UC-392 to UC-399, UC-428, UC-983, UC-984),
+// rendered as the review renders them (in StrictMode): each shows its string, its slots filled, in the state it names, after the presses that
 // bring it. A Windows line (UC-394) shows with the review's platform set to Windows, as its cell is reviewed.
 import { DEFAULT_DISPLAY, showDisplay } from "@clauseo/components/lib/display.ts";
 import { act, StrictMode } from "react";

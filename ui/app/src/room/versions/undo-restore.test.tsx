@@ -116,6 +116,36 @@ test("Undo this change on a restore version asks through the restore dialog, wit
   expect(document.body.textContent).toMatch(/Undid the restore\. The matter stands as it did at/);
 });
 
+// the undo keeps a document changed after the restore (its preview's kept): the matter doesn't stand as it did
+test.each([
+  { kept: [], line: /Undid the restore\. The matter stands as it did at/ },
+  {
+    kept: ["memo.docx"],
+    line: "Undid the restore. \u2068memo.docx\u2069 changed after it, so it stays as it is.",
+  },
+  {
+    kept: ["memo.docx", "notes.docx"],
+    line: "Undid the restore. \u2068memo.docx\u2069 and \u2068notes.docx\u2069 changed after it, so they stay as they are.",
+  },
+])("undoing a restore of the matter that keeps $kept says so", async ({ kept, line }) => {
+  h = await mountVersions(
+    [...VERSIONS, version(4, "restore"), restoredMarker(40, "cp2", "cp4")],
+    STEPS,
+    {
+      query: answering({ preview_restore: { restore_preview: { ...PREVIEW, kept } } }),
+      dispatch: () => ({ version_restored: { checkpoint: "cp5" } }),
+    },
+  );
+  await h.openVersions();
+  await h.click(h.host.querySelector(".room-pair .room-undo"));
+  await h.click(h.one("dialog-confirm"));
+  expect(dialog()).toBeNull();
+  const said = document.body.textContent ?? "";
+  if (typeof line === "string") expect(said).toContain(line);
+  else expect(said).toMatch(line);
+  if (kept.length > 0) expect(said).not.toMatch(/The matter stands/);
+});
+
 test("the restored line goes once the matter's stream moves past the restore", async () => {
   h = await mountVersions(VERSIONS, STEPS, {
     query: answering({ preview_restore: { restore_preview: PREVIEW } }),

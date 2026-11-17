@@ -253,6 +253,9 @@ const OWN = {
     "आज {time} बजे पर पुनर्स्थापित किया गया। 1 दस्तावेज़ बदला।",
   "Undid the restore. The matter stands as it did at {time}.":
     "पुनर्स्थापन पूर्ववत किया गया। मामला वैसा है जैसा {time} बजे था।",
+  // a whole-matter undo that kept documents changed after the restore (UC-983, UC-984), Hindi later
+  "Undid the restore. {paper} changed after it, so it stays as it is.": null,
+  "Undid the restore. {papers} changed after it, so they stay as they are.": null,
   // undoing one change
   "Undo the change Clauseo made at {time}?": "{time} बजे Clauseo का किया बदलाव पूर्ववत करें?",
   "Undo the change you made outside Clauseo at {time}?":
