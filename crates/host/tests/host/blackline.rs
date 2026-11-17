@@ -359,8 +359,31 @@ fn a_view_past_8_mib_fails() {
     let stetdoc = fake_stetdoc(&dir);
     write::write(&stetdoc.parent().unwrap().join("view-mode.txt"), b"big");
     let (host, matter, old, _) = lease_matter(&dir, Some(&stetdoc));
+    let handle = host.handle.clone();
+    let asked = query(matter, DOC, old, None);
+    let (send, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _gone = send.send(wait(
+            "the blackline",
+            handle.query(Principal::LocalDesktop, asked),
+        ));
+    });
+    // Past 8 MiB the view is stopped, and its shutdown waits its graces on the host clock: once
+    // the view runs (it notes its arguments first), the clock moves a second at a time until
+    // the answer comes, so a loaded machine's slow write never meets the test's own time limit.
+    let started = stetdoc.parent().unwrap().join("args-view.txt");
+    let mut answered = None;
+    for _ in 0..600 {
+        if started.exists() {
+            host.clock.advance(Duration::from_secs(1));
+        }
+        if let Ok(got) = answer.recv_timeout(Duration::from_millis(100)) {
+            answered = Some(got);
+            break;
+        }
+    }
     refused(
-        host.query(query(matter, DOC, old, None)),
+        answered.expect("the blackline never answered"),
         ErrorCode::BlacklineFailed,
     );
     assert_eq!(temp_entries(&dir), Vec::<PathBuf>::new());
