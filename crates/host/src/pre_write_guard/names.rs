@@ -420,12 +420,20 @@ fn names_word<'a>(word: &str, held: &'a [Held], hits: &[String]) -> Option<Named
 /// joined and, under [`Escape::Backslash`], `$'…'` decoded (comments are not dropped); or in one
 /// of its first [`MAX_READ_WORDS`] words as the shell reads them, quotes and escapes off
 /// (`Con""tract.docx`, `Con\tract.docx`, `My\ Deal.docx`), and the words of each script it
-/// hands to `sh -c`, `eval` and the like (one level).
-pub(super) fn named_in<'a>(command: &str, escape: Escape, held: &'a [Held]) -> Option<&'a Held> {
+/// hands to `sh -c`, `eval` and the like (one level). [`Refusal::Unread`] when a reading of its
+/// words is cut short (`Segments::cut`).
+pub(super) fn named_in<'a>(
+    command: &str,
+    escape: Escape,
+    held: &'a [Held],
+) -> Result<Option<&'a Held>, Refusal> {
     if held.is_empty() {
-        return None;
+        return Ok(None);
     }
-    named(&raw_text(command, escape), held).or_else(|| named_in_words(command, escape, held, 1))
+    match named(&raw_text(command, escape), held) {
+        Some(file) => Ok(Some(file)),
+        None => named_in_words(command, escape, held, 1),
+    }
 }
 
 /// The first of `held` one of `command`'s words names, and those of its scripts to `depth`.
@@ -434,28 +442,32 @@ fn named_in_words<'a>(
     escape: Escape,
     held: &'a [Held],
     depth: usize,
-) -> Option<&'a Held> {
+) -> Result<Option<&'a Held>, Refusal> {
     let mut segments = Segments::new(MAX_READ_WORDS);
     shell_segments(command, escape, &mut segments);
+    if segments.cut() {
+        return Err(Refusal::Unread);
+    }
     let searching = patterns::only_searches(&segments.iter().collect::<Vec<_>>());
-    segments.iter().find_map(|segment| {
-        segment
-            .words
-            .iter()
-            .enumerate()
-            .find_map(|(at, word)| {
-                named(word, held).or_else(|| {
-                    globbed(word, held).filter(|_| {
-                        segment.command && !(searching && patterns::quoted_pattern(segment, at))
-                    })
+    for segment in segments.iter() {
+        let file = segment.words.iter().enumerate().find_map(|(at, word)| {
+            named(word, held).or_else(|| {
+                globbed(word, held).filter(|_| {
+                    segment.command && !(searching && patterns::quoted_pattern(segment, at))
                 })
             })
-            .or_else(|| {
-                let (inner, inner_escape) =
-                    script(&segment.words, escape).filter(|_| segment.command && depth > 0)?;
-                named_in_words(&inner, inner_escape, held, depth - 1)
-            })
-    })
+        });
+        if file.is_some() {
+            return Ok(file);
+        }
+        if let Some((inner, inner_escape)) =
+            script(&segment.words, escape).filter(|_| segment.command && depth > 0)
+            && let Some(file) = named_in_words(&inner, inner_escape, held, depth - 1)?
+        {
+            return Ok(Some(file));
+        }
+    }
+    Ok(None)
 }
 
 /// `command` with escaped newlines joined and (POSIX) `$'…'` replaced by its decoded text.
@@ -503,6 +515,9 @@ pub(super) fn shell_refusal(
     super::timings::mark("walk");
     let mut segments = Segments::new(MAX_WORDS);
     shell_segments(text, escape, &mut segments);
+    if segments.cut() {
+        return Some(Refusal::Unread);
+    }
     for segment in segments.iter().filter(|segment| segment.command) {
         match stetdoc(&segment.words, &held, hits) {
             Stetdoc::Serve => return Some(Refusal::StetdocServe),
@@ -515,7 +530,13 @@ pub(super) fn shell_refusal(
             return Some(Refusal::HeldOpen(file.path.clone()));
         }
     }
-    let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
+    let path = match found {
+        Some(path) => path,
+        None => match named_in(text, escape, &held) {
+            Ok(file) => file?.path.clone(),
+            Err(refusal) => return Some(refusal),
+        },
+    };
     let shown = as_listed(path.clone(), &held);
     let mut names_held = held;
     // The file as found and as listed both count as held: the list read-only checks against

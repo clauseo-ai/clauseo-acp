@@ -554,6 +554,7 @@ mod codex_home;
 mod devanagari;
 mod fixtures;
 mod gaps;
+mod nesting;
 mod powershell;
 mod record;
 mod timings;

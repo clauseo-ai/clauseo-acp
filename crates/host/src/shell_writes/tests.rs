@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::{Dialect, add_input, add_script, in_matter};
+use crate::clock::{Clock, SystemClock};
 
 fn targets(script: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
@@ -403,4 +404,35 @@ fn an_unknown_start_counts_only_what_an_absolute_folder_places() {
         None,
     );
     assert_eq!(out.into_iter().collect::<Vec<_>>(), ["/m/b.md"]);
+}
+
+/// A PowerShell command the shared reader cannot finish within its depth and size caps
+/// (`pre_write_guard::words::MAX_NESTING`, `MAX_NESTED_BYTES`) is credited nothing, read quickly
+/// on a 1 MiB stack; one within them as before.
+#[test]
+fn a_powershell_command_nested_past_the_cap_is_credited_nothing() {
+    let nested = |open: &str, depth: usize| format!("{}x{}", open.repeat(depth), ")".repeat(depth));
+    let long = format!("$($({}))", "x".repeat(1 << 20));
+    for past in [nested("$(", 20_000), nested("<<$(", 20_000), long] {
+        let script = format!("pandoc a.md -o Reply.docx; {past}");
+        let (got, took) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn_scoped(scope, || {
+                    let started = SystemClock.now().mono;
+                    let got = targets_ps(&script);
+                    (got, SystemClock.now().mono.saturating_sub(started))
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        });
+        assert_eq!(got, none());
+        let bound = if cfg!(debug_assertions) { 10 } else { 1 };
+        assert!(took < std::time::Duration::from_secs(bound), "{took:?}");
+    }
+    for open in ["$(", "<<$("] {
+        let within = format!("pandoc a.md -o Reply.docx; {}", nested(open, 30));
+        assert_eq!(targets_ps(&within), ["Reply.docx"], "{open}");
+    }
 }

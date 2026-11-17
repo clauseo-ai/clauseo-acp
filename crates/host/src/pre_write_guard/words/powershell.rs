@@ -50,7 +50,7 @@ pub(super) fn spelled_as_5_1(word: &str, alt: Vec<(usize, char, String)>) -> Opt
 pub(crate) fn powershell_words(command: &str) -> Vec<Vec<String>> {
     let mut segments = Segments::new(usize::MAX);
     shell_segments(command, Escape::Backtick, &mut segments);
-    segments
+    let mut words: Vec<Vec<String>> = segments
         .iter()
         .map(|segment| {
             segment
@@ -67,7 +67,19 @@ pub(crate) fn powershell_words(command: &str) -> Vec<Vec<String>> {
                 .collect::<Vec<_>>()
         })
         .filter(|words| !words.is_empty())
-        .collect()
+        .collect();
+    // A reading cut short ([`Segments::cut`]) also gives the whole text split at blanks, quotes
+    // trimmed, so a name past the cut is still a word.
+    if segments.cut() {
+        words.push(
+            word_and_parts(command, true)
+                .skip(1)
+                .filter(|word| !word.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        );
+    }
+    words
 }
 
 /// `word`, then, when `split`, its parts between blanks, quotes trimmed ([`powershell_words`]).

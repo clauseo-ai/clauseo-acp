@@ -20,7 +20,8 @@ pub(super) fn segments(script: &str) -> Vec<Segment> {
     let mut read = Segments::new(usize::MAX);
     shell_segments(script, Escape::Backtick, &mut read);
     // A quote, here-string or `$(…)` that never closes, or a redirection with no target: a
-    // parse error, so PowerShell runs none of it.
+    // parse error, so PowerShell runs none of it. A reading cut short (`Segments::cut`): what
+    // it writes is not known, so it is credited nothing either.
     if read.unsure() {
         return Vec::new();
     }

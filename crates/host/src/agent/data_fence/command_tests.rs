@@ -281,3 +281,34 @@ fn a_folder_named_with_a_closing_brace_is_still_walked() {
     }
     assert!(!judge(ShellKind::Posix, "grep -r token sub"));
 }
+
+/// A command the shared reader cannot finish within its depth and size caps
+/// (`pre_write_guard::words::MAX_NESTING`, `MAX_NESTED_BYTES`) still gives every path in its
+/// text, read as PowerShell, and is denied when one is the data folder.
+#[test]
+fn a_path_in_a_command_nested_past_the_cap_is_still_found() {
+    let dir = layout("nested-cap");
+    let root = dir.path();
+    let data = text(
+        &root
+            .join("data")
+            .join("agent-state")
+            .join("m2")
+            .join("x.md"),
+    );
+    for open in ["$(", "<<$("] {
+        let inner = format!("Get-Content {data} ");
+        let line = format!("{}{inner}{}", open.repeat(40), ")".repeat(40));
+        assert!(
+            command::command_paths(&line, true).contains(&PathBuf::from(&data)),
+            "{open}"
+        );
+        assert!(
+            command::command_words(&line, true).contains(&data),
+            "{open}"
+        );
+        let input = json!({ "command": line });
+        let check = check_as(root, &[], Some(&input), ShellKind::PowerShell);
+        assert!(check.touches_data(), "{open}");
+    }
+}

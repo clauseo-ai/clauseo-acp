@@ -55,10 +55,13 @@ fn the_walk_looks_up_only_what_an_owner_file_may_point_at() {
         let held = held_files_with(&folder.0, share_modes);
         assert_eq!(
             named_in("echo hi > new.txt", Escape::Backslash, &held),
-            None
+            Ok(None)
         );
         let found = named_in("cat Contract.docx", Escape::Backslash, &held);
-        assert_eq!(found.map(|file| file.path.as_str()), Some("Contract.docx"));
+        assert_eq!(
+            found.map(|file| file.map(|file| file.path.as_str())),
+            Ok(Some("Contract.docx"))
+        );
         let line = timings::finish().unwrap();
         assert_eq!(counts(&line), (202, 1), "share modes {share_modes}: {line}");
         // Only the held file is known held; the rest are kept, unknown, only with share modes.
@@ -76,7 +79,7 @@ fn with_share_modes_a_named_file_is_looked_up_once_when_named() {
     for command in ["cat Free.docx", "cat Free.docx", "rm Doc\\ 7.txt"] {
         assert_eq!(
             named_in(command, Escape::Backslash, &held),
-            None,
+            Ok(None),
             "{command}"
         );
     }
@@ -84,7 +87,7 @@ fn with_share_modes_a_named_file_is_looked_up_once_when_named() {
     assert_eq!(probed, 3, "Contract.docx, Free.docx once, Doc 7.txt");
     timings::start(true);
     // A wildcard opens what it matches until a held file: none of the 200 is held.
-    assert_eq!(named_in("rm Doc*.txt", Escape::Backslash, &held), None);
+    assert_eq!(named_in("rm Doc*.txt", Escape::Backslash, &held), Ok(None));
     let (_, probed) = counts(&timings::finish().unwrap());
     assert_eq!(probed, 199, "every Doc file but Doc 7.txt, known already");
 }

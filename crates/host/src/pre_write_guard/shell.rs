@@ -97,6 +97,9 @@ pub(super) fn shell_targets(
             (inner, escape)
         })
         .collect();
+    if segments.cut() || scripts.iter().any(|(inner, _)| inner.cut()) {
+        return Ok(Targets::Unread);
+    }
     let parts: Vec<Part<'_>> = segments
         .iter()
         .map(|segment| (segment, escape))
