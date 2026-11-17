@@ -37,6 +37,12 @@ staging-connector = ["clauseo-connectors/staging"]
 # "Clauseo/<version> (local)". Chosen here alone, at compile time; a fixed address, so a build
 # can be scanned for it.
 local-connector = ["clauseo-connectors/local"]
+# The slow-stetdoc test build (src/profile/stetdoc/slow.rs), never on by default and never in a
+# release (release.yml fails a v* release with any feature, and scans every binary it ships for
+# this build's marker and variable): stetdoc's background tries start a sleep in stetdoc's place
+# for their first CLAUSEO_TEST_STETDOC_SLOW_TRIES launches, so the real app shows an agent that
+# started without the skill relaunching with it.
+stetdoc-slow-test = []
 
 [build-dependencies]
 tauri-build.workspace = true

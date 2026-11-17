@@ -83,6 +83,12 @@ Developer ID.
   binary, whatever its own strings. Checked locally (2026-11-06): the `e2e` app and unit-test
   binaries hold the marker and the plain ones do not; the scan passes a clean binary and fails one
   with each string, in ASCII or UTF-16LE.
+  The next step, in every run (test runs too), fails on the `stetdoc-slow-test` build's
+  variable, `CLAUSEO_TEST_STETDOC_SLOW_TRIES`, and its marker,
+  `CLAUSEO-STETDOC-SLOW-TEST-MARKER` (a `#[used]` static in `src/profile/stetdoc/slow.rs`):
+  that test-only build holds a first-run stetdoc's background tries, so a real app shows an
+  agent relaunching with the skill (#1181), and no run of the workflow builds it. The check
+  job's list of features no default may reach names it too.
 - **Artefacts by tier.** Tier 1, which must build: `Clauseo_<v>_aarch64.dmg` and
   `Clauseo_<v>_aarch64.app.tar.gz` (`macos-15`), `Clauseo_<v>_x64-setup.exe` and
   `Clauseo_<v>_x64-machine-setup.exe` (`windows-2025`). Tier 2, `continue-on-error`, named in the

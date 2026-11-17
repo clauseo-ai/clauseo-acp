@@ -188,7 +188,7 @@ check_mode() {
     die "version $VERSION is not plain X.Y.Z"
   local on
   on=$(jq -r '.features as $f | [($f.default // []) | recurse(.[] | $f[.] // []) | .[]?]
-    | unique | map(select(IN("e2e","marks","crash_test","staging-connector","local-connector")))
+    | unique | map(select(IN("e2e","marks","crash_test","staging-connector","local-connector","stetdoc-slow-test")))
     | join(" ")' <<< "$crate")
   [ -z "$on" ] || die "the desktop crate's default features turn on $on"
   echo "mode=dry version=$VERSION features= release_date= version_suffix=$SUFFIX"
