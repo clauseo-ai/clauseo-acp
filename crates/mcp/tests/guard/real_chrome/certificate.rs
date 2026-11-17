@@ -46,6 +46,8 @@ const MARKER: &str = "CLAUSEO-CERT-PAGE-MARKER-5e1d";
 const WARNING: &str = "Your connection is not private";
 /// How many times, a second apart, a row looks for the warning.
 const LOOKS: usize = 10;
+/// How many more looks, a second apart, a row that acts on the warning watches it stay.
+const HOLD: usize = 3;
 /// The origin of Chrome's error page, the certificate warning's.
 const ERROR_PAGE: &str = "chrome-error://chromewebdata/";
 /// The pages: host, and the name its certificate gives.
@@ -255,6 +257,27 @@ impl Agent {
         }
         panic!("{row}: no certificate warning: {seen}");
     }
+
+    /// [`Self::assert_warning`], then the warning stays for [`HOLD`] more looks, a second apart,
+    /// each with the same checks: for the rows that act on a warning already showing (Advanced,
+    /// Proceed, the typed phrase), where a slow click-through would land after the first look.
+    fn assert_warning_holds(&mut self, row: &str) -> String {
+        let mut seen = self.assert_warning(row);
+        for _ in 0..HOLD {
+            self.call("agent_browser_wait_ms", &json!({"ms": 1000}));
+            seen = self.seen();
+            assert!(
+                !seen.contains(MARKER),
+                "{row}: the page's content showed: {seen}"
+            );
+            assert!(!seen.contains("Proceed to"), "{row}: a way past: {seen}");
+            assert!(
+                seen.contains(WARNING) || seen.contains(ERROR_PAGE),
+                "{row}: the tab left the certificate warning: {seen}"
+            );
+        }
+        seen
+    }
 }
 
 fn start(
@@ -290,21 +313,21 @@ fn rows(host: &str, redirect: bool) {
         "agent_browser_click",
         &json!({"selector": "#details-button"}),
     );
-    let advanced = agent.assert_warning("Advanced");
+    let advanced = agent.assert_warning_holds("Advanced");
     eprintln!("AFTER ADVANCED ({host}): {advanced}");
     agent.call("agent_browser_click", &json!({"selector": "#proceed-link"}));
-    agent.assert_warning("Proceed");
+    agent.assert_warning_holds("Proceed");
 
     // `thisisunsafe`, key by key and as typed text.
     for key in "thisisunsafe".chars() {
         agent.call("agent_browser_press", &json!({"key": key.to_string()}));
     }
-    agent.assert_warning("thisisunsafe pressed");
+    agent.assert_warning_holds("thisisunsafe pressed");
     agent.call(
         "agent_browser_type",
         &json!({"selector": "body", "text": "thisisunsafe"}),
     );
-    agent.assert_warning("thisisunsafe typed");
+    agent.assert_warning_holds("thisisunsafe typed");
 
     agent.call("agent_browser_reload", &json!({}));
     agent.assert_warning("reload");
