@@ -1,0 +1,11 @@
+{"scenario":"codex-auto-review-refused-twice","description":"Codex whose account refuses Codex's reviewer, and whose resend in workspace-write is refused the same way: the client must switch once, resend once, and send nothing after the second refusal.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"note":"codex 0.162.1 refuses the turn's approvalsReviewer before it starts (config/src/config_requirements.rs:1863-1871, app-server turn_processor.rs:884-904); codex-acp's SDK answers a thrown error as -32603 with its message under data.details (dist/index.js:25697-25708).","respond":{"to":"p1","error":{"code":-32603,"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `approvals_reviewer`: `AutoReview` is not in the allowed set [User] (set by MDM managed_config.toml)"}}}}
+{"expect":{"method":"session/set_mode","as":"to-ww","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"to-ww","result":{}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"note":"codex 0.162.1 refuses the turn's approvalsReviewer before it starts (config/src/config_requirements.rs:1863-1871, app-server turn_processor.rs:884-904); codex-acp's SDK answers a thrown error as -32603 with its message under data.details (dist/index.js:25697-25708).","respond":{"to":"p2","error":{"code":-32603,"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `approvals_reviewer`: `AutoReview` is not in the allowed set [User] (set by MDM managed_config.toml)"}}}}

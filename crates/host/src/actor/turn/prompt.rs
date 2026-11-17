@@ -86,6 +86,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     };
     let stopped = std::rc::Rc::clone(&current.stopped);
+    let resend = super::codex_reviewer::Resend::for_prompt(check.is_some(), &stopped);
     super::state::prompt_sent(actor, thread);
     // The prompt goes out: the case-law relay's turn caps start again (R24), and while the
     // window says the computer is offline, the turn is watched (`offline.rs`).
@@ -117,11 +118,15 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                 return AgentReply::PromptRefused { turn, error };
             }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
-            let result = retry
-                .run(&client, || client.prompt(&session, turn, content.clone()))
-                .await;
+            let send = || client.prompt(&session, turn, content.clone());
+            let result = retry.run(&client, send).await;
+            let (result, fell_back) = resend.run(&client, &session, result, send).await;
             fence.await;
-            AgentReply::Prompt { turn, result }
+            AgentReply::Prompt {
+                turn,
+                result,
+                fell_back,
+            }
         },
         registration,
     );
