@@ -291,7 +291,8 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
 /// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
 /// and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
-/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. The own
+/// and reading (`data_fence::claude_allow_rules`) and the `git` reads of this matter's history
+/// (`data_fence::history_allow_rules`), each after any the hook put there. The own
 /// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
 /// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
 /// another type is replaced. With no spelling (a unit test's keys) nothing changes.
@@ -309,7 +310,11 @@ fn deny_data_folder(
         push_new(&mut deny, &rule);
     }
     let mut allow = take_array(&mut permissions, "allow");
-    for rule in crate::agent::data_fence::claude_allow_rules(data) {
+    let history = crate::agent::data_fence::history_allow_rules(data, cfg!(windows));
+    for rule in crate::agent::data_fence::claude_allow_rules(data)
+        .into_iter()
+        .chain(history)
+    {
         push_new(&mut allow, &rule);
     }
     if cfg!(windows) {
@@ -532,18 +537,14 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
 /// notes, `agent::history`), `{connectors}` and `{browser}` filled, in one pass. An unfillable
 /// token is a host bug: `agent.launch_failed`, naming it in the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
-    let history = crate::agent::history::matter_history(Path::new(folders.notes));
-    let history = history
-        .as_deref()
-        .and_then(Path::to_str)
-        .unwrap_or_default();
+    let history = crate::agent::history::history_text(folders.notes);
     placeholders::fill(
         text,
         &IN_INSTRUCTIONS,
         &[
             (WORK_FOLDER, folders.work),
             (MATTER_NOTES, folders.notes),
-            (MATTER_HISTORY, history),
+            (MATTER_HISTORY, &history),
             (CONNECTORS, folders.connectors),
             (BROWSER, folders.browser),
         ],

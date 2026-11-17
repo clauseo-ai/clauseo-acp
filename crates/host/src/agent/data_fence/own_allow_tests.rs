@@ -480,3 +480,66 @@ mod binary;
 
 #[path = "own_allow_glob_tests.rs"]
 mod glob;
+
+/// This matter's history (`history_allow_rules`): `git --git-dir="<history>" log|show|diff …`
+/// is allowed for its own path alone, through the port of Claude Code's matcher: Bash's off
+/// Windows, a path with spaces quoted as the instructions write it; PowerShell's on Windows,
+/// with and without the quotes. Another matter's history, and a write, are in no rule.
+#[test]
+fn the_history_reads_are_allowed_for_this_matter_alone() {
+    use super::super::tests::matches;
+    let own = "01a1d5b4-a291-7649-9fa4-5e91c306e4a0";
+    let other = "01a1d5b4-a291-7649-9fa4-5e91c306e4a1";
+    let deny = |data: &str| LaunchDeny {
+        spellings: vec![PathBuf::from(data)],
+        own_reads: vec![
+            format!("agent-state/{own}/work/t-1"),
+            format!("agent-state/{own}/notes"),
+        ],
+        ..LaunchDeny::default()
+    };
+    let reads = [
+        "log refs/clauseo/timeline -- Notice.docx",
+        "show 1a2b:Notice.docx",
+        "diff 1a2b 3c4d",
+    ];
+    // unix-paths-ok: a spelling of `<data>` made into rule text, never opened
+    let mac = "/Users/Ann Mary/Library/Application Support/ai.clauseo.desktop";
+    let rules = super::history_allow_rules(&deny(mac), false);
+    assert_eq!(rules.len(), 3, "{rules:#?}");
+    let git = |data: &str, sep: &str, matter: &str, quote: &str, read: &str| {
+        format!(
+            "git --git-dir={quote}{data}{sep}matters{sep}{matter}{sep}history.git{quote} {read}"
+        )
+    };
+    let allowed = |rules: &[String], command: &str| rules.iter().any(|rule| matches(rule, command));
+    for read in reads.into_iter().chain(["commit -m x"]) {
+        let writes = read.starts_with("commit");
+        assert_eq!(
+            allowed(&rules, &git(mac, "/", own, "\"", read)),
+            !writes,
+            "{read}"
+        );
+        assert!(
+            !allowed(&rules, &git(mac, "/", other, "\"", read)),
+            "{read}"
+        );
+    }
+    let rules = super::history_allow_rules(&deny(DATA), true);
+    assert!(
+        rules.iter().all(|rule| rule.starts_with("PowerShell(")),
+        "{rules:#?}"
+    );
+    for quote in ["\"", ""] {
+        for read in reads {
+            assert!(
+                allowed(&rules, &git(DATA, "\\", own, quote, read)),
+                "{quote}{read}"
+            );
+            assert!(
+                !allowed(&rules, &git(DATA, "\\", other, quote, read)),
+                "{quote}{read}"
+            );
+        }
+    }
+}
