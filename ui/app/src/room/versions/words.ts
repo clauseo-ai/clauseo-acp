@@ -355,6 +355,28 @@ function undidFileLine(lang: Lang, paper: string, mark: OneFile | undefined, pla
   );
 }
 
+/** The version a one-document line's act answered with, whose marker says what it did. */
+const answeredOf = (done: Done): string | undefined => {
+  if (done.kind === "restoredFile")
+    return done.outcome.kind === "wrote" ? done.outcome.checkpoint : undefined;
+  return done.kind === "undidRestore" && done.file !== null ? done.checkpoint : undefined;
+};
+
+/** A one-document line's marker: only one about the line's file; any other is no marker. */
+function markOf(s: Snapshot, done: Done, file: string): OneFile | undefined {
+  const id = answeredOf(done);
+  const mark = id === undefined ? undefined : s.oneFile.get(id);
+  return mark?.file === file ? mark : undefined;
+}
+
+/** Whether a one-document line waits for the matter's stream: the host answers before the update
+ * with the version and its marker lands (a frame later), so until then it has neither. A restore
+ * that wrote nothing answers with a version already in the timeline, and says so at once. */
+export function awaitsRecord(s: Snapshot, done: Done): boolean {
+  const id = answeredOf(done);
+  return id !== undefined && !s.oneFile.has(id) && !s.timeline.meta.has(id);
+}
+
 /** The line under the band for what the room last did; without its Undo, which the band adds. platform: the
  * computer's, whose bin a removed paper went to. */
 export function doneLine(
@@ -386,8 +408,7 @@ export function doneLine(
       const time = to === undefined ? "" : timeOf(lang, to);
       const paper = fileName(done.file);
       // what the restore did, as its marker says: no marker, or one that didn't write it, wrote nothing
-      const mark =
-        done.outcome.kind === "wrote" ? s.oneFile.get(done.outcome.checkpoint) : undefined;
+      const mark = markOf(s, done, done.file);
       if (mark?.wrote !== true)
         return vt(
           lang,
@@ -413,8 +434,7 @@ export function doneLine(
     case "undidRestore":
       if (done.file !== null) {
         // what the undo did, as its marker says: never what the dialog's preview expected
-        const mark = done.checkpoint === undefined ? undefined : s.oneFile.get(done.checkpoint);
-        return undidFileLine(lang, fileName(done.file), mark, platform);
+        return undidFileLine(lang, fileName(done.file), markOf(s, done, done.file), platform);
       }
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),
@@ -439,6 +459,8 @@ export function doneLines(
   place: FolderPlace | undefined,
   platform: Platform,
 ): { text: string; kept: boolean }[] {
+  // a one-document line says nothing until the stream brings what the act did
+  if (awaitsRecord(s, done)) return [];
   const kept = done.kind === "undidChange" ? (done.kept ?? []) : [];
   const own =
     done.kind === "undidChange" && done.papers.length === 0 && kept.length > 0
