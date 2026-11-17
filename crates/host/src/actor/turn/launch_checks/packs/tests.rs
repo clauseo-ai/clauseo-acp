@@ -49,7 +49,7 @@ const THREE: [(&str, char); 3] = [("nda-kit", '1'), ("lease-kit", '2'), ("tax-ki
 
 #[test]
 fn a_missing_matter_list_uses_skills_enabled() {
-    let request = PackRequest::new(&skills(SkillsExtra::Any, &[], &THREE), None);
+    let request = PackRequest::new(&skills(SkillsExtra::Any, &[], &THREE), None, false);
     // `skills.enabled` order, which is the map's (sorted by id).
     assert_eq!(ids(&request), ["lease-kit", "nda-kit", "tax-kit"]);
     assert_eq!(
@@ -57,6 +57,7 @@ fn a_missing_matter_list_uses_skills_enabled() {
         PackEntry {
             id: "nda-kit".to_owned(),
             hash: PackHash::parse(&hash('1')).unwrap(),
+            added_only: false,
         }
     );
     assert!(request.skipped.is_empty(), "{:?}", request.skipped);
@@ -65,10 +66,10 @@ fn a_missing_matter_list_uses_skills_enabled() {
 #[test]
 fn a_matter_list_narrows_the_global_list_and_empty_means_none() {
     let settings = skills(SkillsExtra::Any, &[], &THREE);
-    let narrowed = PackRequest::new(&settings, Some(&list(&["tax-kit", "nda-kit"])));
+    let narrowed = PackRequest::new(&settings, Some(&list(&["tax-kit", "nda-kit"])), false);
     assert_eq!(ids(&narrowed), ["nda-kit", "tax-kit"]);
     assert!(narrowed.skipped.is_empty(), "{:?}", narrowed.skipped);
-    let none = PackRequest::new(&settings, Some(&list(&[])));
+    let none = PackRequest::new(&settings, Some(&list(&[])), false);
     assert_eq!(none.entries(), []);
     assert!(none.skipped.is_empty(), "{:?}", none.skipped);
 }
@@ -76,7 +77,7 @@ fn a_matter_list_narrows_the_global_list_and_empty_means_none() {
 #[test]
 fn an_id_not_turned_on_is_skipped() {
     let settings = skills(SkillsExtra::Any, &[], &THREE[..1]);
-    let request = PackRequest::new(&settings, Some(&list(&["nda-kit", "wills-kit"])));
+    let request = PackRequest::new(&settings, Some(&list(&["nda-kit", "wills-kit"])), false);
     assert_eq!(ids(&request), ["nda-kit"]);
     assert_eq!(
         request.skipped,
@@ -86,7 +87,7 @@ fn an_id_not_turned_on_is_skipped() {
 
 #[test]
 fn policy_off_loads_no_pack_and_curated_admits_only_listed_ids() {
-    let off = PackRequest::new(&skills(SkillsExtra::Off, &["nda-kit"], &THREE), None);
+    let off = PackRequest::new(&skills(SkillsExtra::Off, &["nda-kit"], &THREE), None, false);
     assert_eq!(off.entries(), []);
     assert_eq!(off.skipped.len(), 3);
     assert!(
@@ -95,7 +96,7 @@ fn policy_off_loads_no_pack_and_curated_admits_only_listed_ids() {
             .all(|(_, skip)| *skip == PackSkip::NotAdmitted)
     );
     let curated = skills(SkillsExtra::Curated, &["nda-kit", "wills-kit"], &THREE);
-    let request = PackRequest::new(&curated, None);
+    let request = PackRequest::new(&curated, None, false);
     assert_eq!(ids(&request), ["nda-kit"]);
     assert_eq!(
         request.skipped,
@@ -105,7 +106,7 @@ fn policy_off_loads_no_pack_and_curated_admits_only_listed_ids() {
         ]
     );
     // A curated id that is not turned on stays off: curated admits, it never turns on.
-    let narrowed = PackRequest::new(&curated, Some(&list(&["wills-kit"])));
+    let narrowed = PackRequest::new(&curated, Some(&list(&["wills-kit"])), false);
     assert_eq!(narrowed.entries(), []);
     assert_eq!(
         narrowed.skipped,
@@ -116,9 +117,9 @@ fn policy_off_loads_no_pack_and_curated_admits_only_listed_ids() {
 #[test]
 fn allow_scripts_rides_on_the_request() {
     let mut settings = skills(SkillsExtra::Any, &[], &THREE);
-    assert!(!PackRequest::new(&settings, None).allow_scripts());
+    assert!(!PackRequest::new(&settings, None, false).allow_scripts());
     settings.allow_scripts = true;
-    assert!(PackRequest::new(&settings, None).allow_scripts());
+    assert!(PackRequest::new(&settings, None, false).allow_scripts());
 }
 
 #[test]
@@ -292,6 +293,7 @@ fn prep(root: &Path) -> PackPrep {
     let entries = vec![PackEntry {
         id: "nda-kit".to_owned(),
         hash: pack.hash().clone(),
+        added_only: false,
     }];
     PackPrep {
         write: profile(root).pack_write(Some(AgentKind::Claude), entries, false),

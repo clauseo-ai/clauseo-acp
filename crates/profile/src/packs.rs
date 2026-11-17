@@ -17,6 +17,7 @@
 //! Nothing here starts a process (tested). A pack's files are copied, never run, and never get
 //! the exec bit.
 
+pub mod added;
 pub mod folders;
 pub mod hash;
 pub mod index;
@@ -191,6 +192,8 @@ pub enum Skip {
     Changed,
     /// Past [`PACKS_PER_LAUNCH`].
     TooMany,
+    /// Asked for only as a pack added on this computer, and it was not.
+    NotAdmitted,
 }
 
 impl Skip {
@@ -200,6 +203,7 @@ impl Skip {
             Self::Refused(refusal) => refusal.code(),
             Self::Changed => "changed",
             Self::TooMany => "too_many",
+            Self::NotAdmitted => "not_admitted",
         }
     }
 }
@@ -250,6 +254,9 @@ pub struct PackEntry {
     pub id: String,
     /// The hash `skills.enabled` holds for it.
     pub hash: PackHash,
+    /// Whether it loads only as a pack added on this computer (`added_here`): the lawyer's own
+    /// `skills.extra` does not admit it otherwise.
+    pub added_only: bool,
 }
 
 /// What a launch's packs came to: those loaded, in the order asked, and those skipped.
@@ -340,6 +347,9 @@ fn load_one(packs_root: &Path, entry: &PackEntry, allow_scripts: bool) -> Result
     let pack = inspect(packs_root, &entry.id, allow_scripts).map_err(Skip::Refused)?;
     if *pack.hash() != entry.hash {
         return Err(Skip::Changed);
+    }
+    if entry.added_only && !pack.manifest().added_here {
+        return Err(Skip::NotAdmitted);
     }
     Ok(pack)
 }

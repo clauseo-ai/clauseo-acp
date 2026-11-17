@@ -11,6 +11,7 @@
 //! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`;
 //! `SetSkillPack` in `packs.rs`.
 
+pub(in crate::actor) mod add_skill;
 mod entries;
 mod lock_causes;
 pub(in crate::actor) mod packs;

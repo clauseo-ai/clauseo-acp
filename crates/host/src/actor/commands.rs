@@ -275,6 +275,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),
+        HostCommand::AddSkill { path } => super::settings::add_skill::add_skill(actor, ctx, path),
+        HostCommand::RemoveSkill { id } => {
+            super::settings::add_skill::remove_skill(actor, ctx, id);
+        }
         HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
         HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
         HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),

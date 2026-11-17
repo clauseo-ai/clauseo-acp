@@ -40,6 +40,7 @@ fn hashed(scripts: bool) -> Hashed {
     Hashed {
         hash: format!("sha256:{}", "a".repeat(64)),
         scripts,
+        added_here: false,
     }
 }
 

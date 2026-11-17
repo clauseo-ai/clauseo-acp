@@ -10,6 +10,9 @@
 //! `cargo nextest run --workspace -E 'package(clauseo-host)'`.
 
 #[cfg(test)]
+#[path = "host/add_skill.rs"]
+mod add_skill;
+#[cfg(test)]
 #[path = "host/observe.rs"]
 mod observe;
 #[cfg(test)]

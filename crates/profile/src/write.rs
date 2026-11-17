@@ -6,7 +6,9 @@
 //! `<data>/profile/claude-plugin`, Codex's `<agent home>/skills`), and in them only the folders
 //! of the skills a render is given, their manifest and the plugin's `plugin.json`; and for the
 //! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`;
-//! and the agents' shell commands in `<data>/tools` ([`crate::tools`]).
+//! and the agents' shell commands in `<data>/tools` ([`crate::tools`]); and a skill added on this
+//! computer, written under `<data>/skill-packs.adding` then renamed into `<data>/skill-packs`
+//! ([`crate::packs::added`]).
 
 #![expect(
     clippy::disallowed_methods,
@@ -183,6 +185,11 @@ pub(crate) fn sweep_old(dir: &Path) {
             let _still_running = std::fs::remove_file(entry.path());
         }
     }
+}
+
+/// `fs::rename`.
+pub(crate) fn rename(from: &Path, to: &Path) -> Result<(), ProfileError> {
+    std::fs::rename(from, to).map_err(|err| ProfileError::io("rename", to, err))
 }
 
 /// `fs::create_dir`: a new folder, an error when `path` already exists.
