@@ -166,7 +166,9 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
 pub(crate) enum ExitWait {
     /// The host had already stopped: nothing to do.
     AlreadyStopped,
-    /// Nothing ran (no process handle held, no setup job): no stop, no wait.
+    /// Nothing ran (no process handle held, no setup job), and the host's stop still ran and
+    /// ended within the bound: a commit, snapshot, matter job or import has no process behind
+    /// it, and the host's shutdown waits for it.
     Idle,
     /// The stop ended within the bound (this call's stopper, or one already running).
     Stopped,
@@ -178,10 +180,12 @@ pub(crate) enum ExitWait {
 
 /// [`stop_on_exit`]'s order, apart from the app: `hide` hides every window first (the
 /// window-state plugin has already saved, before this callback: tauri 2.12.4 `app.rs:2815`),
-/// then [`Exit::exiting_on_main`] is set, then the first caller asks `idle` and, when something
-/// runs, `start` starts the stopper (false: no thread for it); a later caller only waits. The
-/// wait is at most `bound`. `flush` runs when no stopper will flush the log (idle, no thread,
-/// timed out).
+/// then [`Exit::exiting_on_main`] is set, then the first caller asks `idle` and `start`s the
+/// stopper either way (false: no thread for it): an idle app has no process to wait for, but the
+/// host may still be in a commit, a snapshot, a matter job or an import, which its stop waits
+/// for. A later caller only waits. The wait is at most `bound`. `flush` runs when no stopper
+/// will flush the log (no thread, timed out). `closed` runs only when the stop ended within the
+/// bound: a stop cut short leaves the run unclosed, so the next start knows (`last_run.rs`).
 pub(crate) fn stop_on_exit_with(
     exit: &Arc<Exit>,
     bound: Duration,
@@ -189,6 +193,7 @@ pub(crate) fn stop_on_exit_with(
     idle: impl FnOnce() -> bool,
     start: impl FnOnce(Arc<Exit>) -> bool,
     flush: impl FnOnce(),
+    closed: impl FnOnce(),
 ) -> ExitWait {
     if exit.stopped.load(Ordering::Acquire) {
         return ExitWait::AlreadyStopped;
@@ -199,11 +204,9 @@ pub(crate) fn stop_on_exit_with(
         .stopping
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_ok();
+    let mut nothing_ran = false;
     if first {
-        if idle() {
-            flush();
-            return ExitWait::Idle;
-        }
+        nothing_ran = idle();
         if !start(Arc::clone(exit)) {
             // No thread for it: the host's next start repairs what it left open.
             flush();
@@ -211,7 +214,12 @@ pub(crate) fn stop_on_exit_with(
         }
     }
     if exit.wait_stopped(bound) {
-        ExitWait::Stopped
+        closed();
+        if nothing_ran {
+            ExitWait::Idle
+        } else {
+            ExitWait::Stopped
+        }
     } else {
         tracing::warn!(
             "the stop at exit did not end in time: what it had not stopped is left running"
@@ -255,9 +263,11 @@ fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
 /// `LoopDestroyed`, which tauri-runtime-wry turns into `RunEvent::Exit` and never into
 /// `ExitRequested`. A Windows logoff or shutdown reaches it as well (tao 0.37.1's
 /// `WM_ENDSESSION`, `event_loop.rs:2332-2342`, which then calls `process::exit`). The process
-/// ends when this returns. The windows hide first; then, when nothing runs ([`nothing_runs`]),
-/// it returns at once (the counts saved and the log flushed), so an idle app never holds a
-/// logoff. Else the stop sequence runs on its own thread, waited for at most [`exit_bound`]
+/// ends when this returns. The windows hide first; then the stop sequence runs on its own
+/// thread, also when nothing runs ([`nothing_runs`]: the counts are saved first), since the
+/// host's commits, snapshots, matter jobs and imports have no process behind them. With nothing
+/// running it ends in milliseconds, so an idle app never holds a logoff. It is waited for at
+/// most [`exit_bound`]
 /// ([`EXIT_STOP_WAIT`]; on Windows [`SESSION_END_WAIT`], under its end-session limit), with no
 /// install after it
 /// ([`Exit::exiting_on_main`]: the plugin saved before this callback, and the OS is ending the
@@ -291,11 +301,10 @@ pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) -> 
                 })
                 .is_ok()
         },
-        // The OS ends the app now, a quit all the same (`last_run.rs`).
-        || {
-            host_log::flush_app(app);
-            crate::last_run::closed(app);
-        },
+        || host_log::flush_app(app),
+        // The stop ended within the bound: a quit all the same (`last_run.rs`). The stopper
+        // marked it already; a stop that ran out leaves the run unclosed.
+        || crate::last_run::closed(app),
     )
 }
 

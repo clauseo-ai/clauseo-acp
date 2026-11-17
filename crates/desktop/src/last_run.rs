@@ -14,9 +14,9 @@
 //! - [`closed`], from every quit once the host has stopped and the log is flushed: a closed
 //!   window, the Quit menu, a quit signal, the updater's relaunch or install (both run after the
 //!   stop's flush), macOS's quit, logout and shutdown, and Windows ending the session (all
-//!   through `RunEvent::Exit`, also when its wait runs out or nothing runs), and a second quit
-//!   signal. It writes `closed`, trying again briefly when Windows refuses the rename, then lets
-//!   go of the lock.
+//!   through `RunEvent::Exit`, also when nothing runs, but not when its wait for the host's stop
+//!   runs out), and a second quit signal. It writes `closed`, trying again briefly when Windows
+//!   refuses the rename, then lets go of the lock.
 //!   The file is overwritten rather than removed: one write path, and a file that is always
 //!   there says which way the last run went.
 //!
