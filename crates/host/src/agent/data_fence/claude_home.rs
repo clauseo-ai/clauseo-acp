@@ -20,7 +20,7 @@
 //! (`super::DENIED`): its tool results are large outputs the model must Read back.
 
 /// The names under Claude's config folder, as rule patterns under it (a folder as `name/**`).
-pub(crate) const CLAUDE_HOME: [&str; 73] = [
+pub(crate) const CLAUDE_HOME: [&str; 74] = [
     ".claude.json*",
     ".config.json",
     ".credentials.json",
@@ -79,6 +79,7 @@ pub(crate) const CLAUDE_HOME: [&str; 73] = [
     "session-env/**",
     "sessions/**",
     "settings.json",
+    "settings.local.json",
     "shares/**",
     "shell-snapshots/**",
     "skills/**",

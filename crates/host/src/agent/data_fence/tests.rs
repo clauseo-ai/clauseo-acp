@@ -109,8 +109,10 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         // The relay token files (R24), the proxy's password files (ADR 0053) and the shell
         // browser's config files are the only things under `run` denied; the run folders
         // themselves never are.
+        // The built-in plugin is denied for `Edit` alone; a Read of it stays.
         let named = |r: &&String| {
             r.contains(kept)
+                && r.as_str() != "Edit(//d/ata/profile/claude-plugin/**)"
                 && !r.ends_with("/run/*/relay-token)")
                 && !r.ends_with("/run/*/proxy-secret)")
                 && !r.ends_with("/run/*/agent-browser/config.json)")
@@ -122,6 +124,35 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         false,
     );
     assert_eq!(both.len(), rules.len() * 2);
+}
+
+/// What Claude Code loads from the data folder is denied for `Edit` (which covers `Write`,
+/// `MultiEdit` and `NotebookEdit`): the whole built-in plugin, whose skills stay readable, and
+/// Claude's local settings file in its home, for Read too.
+#[test]
+fn the_built_in_plugin_and_claudes_local_settings_are_denied_for_edit() {
+    let deny = LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]);
+    let rules = claude_deny_rules(&deny, false);
+    for rule in [
+        "Edit(//d/ata/profile/claude-plugin/**)",
+        "Read(//d/ata/agents/claude-acp/home/settings.local.json)",
+        "Edit(//d/ata/agents/claude-acp/home/settings.local.json)",
+        "Edit(//d/ata/agents/claude-acp/home/settings.json)",
+        "Edit(//d/ata/agents/claude-acp/home/CLAUDE.md)",
+        "Edit(//d/ata/agents/claude-acp/home/skills/**)",
+        "Edit(//d/ata/agents/claude-acp/home/plugins/**)",
+    ] {
+        assert!(rules.iter().any(|r| r == rule), "{rule} in {rules:?}");
+    }
+    assert!(
+        !rules.iter().any(|r| r.starts_with("Read(//d/ata/profile")),
+        "{rules:?}"
+    );
+    let allow = super::claude_allow_rules(&deny);
+    assert!(
+        allow.contains(&"Read(//d/ata/profile/claude-plugin/skills/**)".to_owned()),
+        "{allow:?}"
+    );
 }
 
 /// On Windows a path's separators become `/` and its drive `/c`; glob characters are escaped.

@@ -82,7 +82,8 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and
-/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`).
+/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`);
+/// and the run's packs plugin, denied for `Edit` alone (`LaunchDeny::edit_denied`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
@@ -96,6 +97,13 @@ pub(super) fn launch_deny(
     });
     let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    // The own run folder is left out above; its packs plugin, which Claude Code loads, is
+    // still denied for `Edit`.
+    for place in data_fence::own_reads(data, &[&run.skill_packs]) {
+        if !deny.edit_denied.contains(&place) {
+            deny.edit_denied.push(place);
+        }
+    }
     deny
 }
 
