@@ -42,6 +42,7 @@ mod rig;
 mod setting_refused;
 mod skipped;
 mod start_offline;
+mod start_races;
 mod start_timeout;
 mod sweep;
 mod title_window;
