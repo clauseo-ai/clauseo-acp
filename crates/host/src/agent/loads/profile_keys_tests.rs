@@ -165,6 +165,51 @@ fn each_bare_webfetch_form_is_dropped_alone() {
     }
 }
 
+/// Hook `allowedTools` and `disallowedTools` entries must be plain one-rule strings of tool-name
+/// characters: an entry that is no string, or holds any other character outside its
+/// parentheses, is dropped alone, and a plain rule beside it stays.
+#[test]
+fn hook_entries_that_are_not_plain_rule_strings_are_dropped_alone() {
+    let odd = [
+        json!(["WebFetch"]),
+        json!(["Read", ["WebFetch"]]),
+        json!(7),
+        json!(null),
+        json!({"tool": "WebFetch"}),
+        json!("\u{FEFF}WebFetch"),
+        json!("WebFetch\u{FEFF}"),
+        json!("\u{A0}WebFetch"),
+        json!("Read\u{2028}WebFetch"),
+        json!("\tWebFetch"),
+        json!("Read\tWebFetch"),
+        json!("Bash(a (b) WebFetch)"),
+        json!("Read(x)WebFetch"),
+    ];
+    for entry in odd {
+        let hook = json!({
+            "allowedTools": [entry.clone(), "Bash(git status)"],
+            "disallowedTools": [entry.clone(), "Task"],
+        });
+        for (search, login) in [(ON, Login::FirstParty), (LOCKED_OFF, Login::OtherCloud)] {
+            let options = options(&hook, &keys(search, login));
+            let allowed = options["allowedTools"].as_array().unwrap();
+            let disallowed = options["disallowedTools"].as_array().unwrap();
+            assert!(!allowed.contains(&entry), "{entry}: {allowed:?}");
+            assert!(!disallowed.contains(&entry), "{entry}: {disallowed:?}");
+            assert!(allowed.iter().all(Value::is_string), "{entry}: {allowed:?}");
+            assert!(
+                disallowed.iter().all(Value::is_string),
+                "{entry}: {disallowed:?}"
+            );
+            assert!(
+                allowed.contains(&json!("Bash(git status)")),
+                "{entry}: {allowed:?}"
+            );
+            assert_eq!(disallowed[0], "Task", "{entry}: {disallowed:?}");
+        }
+    }
+}
+
 #[test]
 fn web_search_off_disallows_both_tools_whatever_the_hook_sent() {
     let hook = json!({
