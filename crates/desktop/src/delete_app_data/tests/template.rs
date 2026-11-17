@@ -12,7 +12,8 @@
 //! `un-gui-end`) are tested in `uninstall_in_place.rs`. `webview2-no-elevation` keeps a per-user
 //! install from asking for an administrator over an old `WebView2` (`webview2_floor.rs`);
 //! `unable-to-uninstall-front` and `silent-downgrades-front` bring Tauri's own boxes to the front
-//! (`message_front.rs`).
+//! (`message_front.rs`). `reinstall-default` and `reinstall-focus` make install-over the reinstall
+//! page's pick for an older version, with focus on the pick (`reinstall_default.rs`).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -41,7 +42,7 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 13] = [
+const BLOCKS: [Block; 15] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
@@ -58,6 +59,16 @@ const BLOCKS: [Block; 13] = [
             "VIAddVersionKey \"FileVersion\" \"${VERSION}\"",
             "VIAddVersionKey \"ProductVersion\" \"${VERSION}\"",
         ],
+    },
+    Block {
+        name: "reinstall-default",
+        after: "    ; selected the last time we were on this page",
+        replaces: &[],
+    },
+    Block {
+        name: "reinstall-focus",
+        after: "",
+        replaces: &["    ${NSD_SetFocus} $R2"],
     },
     Block {
         name: "unable-to-uninstall-front",

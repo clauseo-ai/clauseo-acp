@@ -313,13 +313,27 @@ Function PageReinstall
     ; Check the first radio button if this the first time
     ; we enter this page or if the second button wasn't
     ; selected the last time we were on this page
+    ; >>> clauseo: reinstall-default
+    ; Clauseo's change to tauri-cli 2.12.2's template (item 43): an older or unknown version found
+    ; ($R0 1), first visit ($ReinstallPageCheck still empty): the second radio, install over it
+    ; (dontUninstall), is the pick, as the updater does; a later visit keeps the lawyer's own.
+    ${IfThen} "$R0$ReinstallPageCheck" == "1" ${|} StrCpy $ReinstallPageCheck 2 ${|}
+    ; <<< clauseo: reinstall-default
     ${If} $ReinstallPageCheck <> 2
       SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
     ${Else}
       SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
     ${EndIf}
 
-    ${NSD_SetFocus} $R2
+    ; >>> clauseo: reinstall-focus
+    ; Keyboard focus on the checked radio, not always the first: Space or an arrow key on an
+    ; unchecked radio would change the pick.
+    ${If} $ReinstallPageCheck = 2
+      ${NSD_SetFocus} $R3
+    ${Else}
+      ${NSD_SetFocus} $R2
+    ${EndIf}
+    ; <<< clauseo: reinstall-focus
     nsDialogs::Show
   ${EndIf}
 FunctionEnd
