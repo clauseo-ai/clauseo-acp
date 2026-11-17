@@ -710,6 +710,7 @@ class PdfToText(unittest.TestCase):
         self.pdf([("blank", 200), ("blank", 210)])
         code, out, err = self.run_tool("doc.pdf", "-", FAKE_FAIL_WIDTH=876, TEST_WORKERS=1)
         self.assertEqual(code, 0, err)
+        err = err.replace("\r\n", "\n")  # Windows ends stderr's lines with \r\n
         self.assertIn("OCR: page 2 failed: tesseract: Error: page broke\n", err)
         for text in (out, err):
             self.assertNotIn("Error in pix", text)
