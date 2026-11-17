@@ -379,6 +379,44 @@ fn a_seen_stetdoc_slow_at_the_start_stays_on_and_gets_its_skill_from_the_retry()
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
 }
 
+/// A stetdoc slow at the start, with its skill cached by an earlier start's launch: the agents
+/// start with the cached skill, and the background retry, which answers with the same skill
+/// (same name, version and bytes), puts nothing in place: the generation stays 0, so no agent
+/// is marked to relaunch.
+#[test]
+fn an_unchanged_cached_skill_leaves_the_generation_at_0() {
+    let scratch = Scratch::new("profile-release-cached-same", &[]);
+    let earlier = macos_bundle(&scratch, Some((STUB, REAL_0_9_3)));
+    let cached = written_skill(&earlier).expect("the earlier start's launch caches the skill");
+    drop(earlier);
+    let script = slow_runs(1, "ok", true);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let hook = macos_bundle(&scratch, Some((script.as_slice(), REAL_0_9_3)));
+        let _sent = tx.send((hook, scratch));
+    });
+    let (hook, scratch) = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the build returns within 10 s");
+    assert!(
+        hook.launch_wait(&agent(CLAUDE)).is_some(),
+        "the background retry is in flight"
+    );
+    assert!(
+        eventually(&hook, |hook| hook.launch_wait(&agent(CLAUDE)).is_none()),
+        "the background retry ends"
+    );
+    let folder = folder_of(&helpers_stetdoc(&scratch)).unwrap();
+    let runs = std::fs::read_to_string(folder.join("runs")).unwrap();
+    let runs: u32 = runs.trim().parse().unwrap();
+    assert!(
+        runs >= 2,
+        "the retry ran stetdoc after the start's try ({runs} runs)"
+    );
+    assert_eq!(hook.generation(), 0);
+    assert_eq!(written_skill(&hook), Some(cached));
+}
+
 /// A stetdoc slow at the start whose background retry fails for real: on at once, then the
 /// agents are no longer told about it. Its `PATH` entry and the blackline's program were given
 /// to the host at its start and stay until the app restarts.

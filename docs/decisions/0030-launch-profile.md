@@ -379,10 +379,16 @@ two dependencies, `profile` and `tracing`.
   Tools change marks one (`Relaunch::ProfileChanged`, `ProfileHook::generation` and
   `changed`, `turn/idle.rs`, 2026-11-15 to 2026-11-17). Its next question relaunches it on
   the new profile and resumes its session. The mark has no grace of its own: with no question,
-  the agent stops at the idle limit (300 s) as any idle agent does, never mid-turn, so a
-  background command or helper of its last turn is not cut by a change the lawyer did not
-  make; and while such a command may still run (its last turn closed after a steer during a
-  tool call, within `cap_min_idle`), the next question goes to the agent as it is. Only a real
+  the agent stops at the idle limit (300 s) as any idle agent does, never mid-turn, so the
+  idle stop does not cut a background command or helper of its last turn. The next question
+  can: it relaunches the agent unless background work of its last turn may still run
+  (`background_may_run`, `turn/idle.rs`), and then it goes to the agent as it is. Today the
+  host knows of that work only when the last turn closed after a steer during a tool call,
+  within `cap_min_idle` (60 s). So, as scope for now, a question after a profile change still
+  cuts (a) a command or helper the agent put in the background on its own, without the lawyer
+  steering, and (b) steered background work still running 60 s after its turn's end. Closing
+  both depends on the tracking of background work (the item that keeps it alive and tells when
+  it ends): it plugs into `background_may_run` in one line. Only a real
   change makes a new profile: the background try puts its answer in place only when it
   differs from the state the start had. stetdoc found broken (`State::Off`) is such a change,
   and every agent launched before it relaunches once without stetdoc. That is intended: those
