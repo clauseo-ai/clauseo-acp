@@ -86,13 +86,12 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked, agent.home_failed, agent.start_unreachable and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_blocked, agent.home_failed, agent.start_unreachable and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
     "agent.home_failed",
     "agent.launch_failed",
     "agent.program_blocked",
-    "agent.program_missing",
     "agent.start_offline",
     "agent.start_unreachable",
     "thread.interrupted",
@@ -165,8 +164,15 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.answer_failed"), true, null)).toBeNull();
   expect(refillOf(brk("agent.mode_missing"), true, null)).toBeNull();
   // A program missing or blocked keeps the question: it comes back to the field, as for a failed launch.
-  expect(refillOf(brk("agent.program_missing"), true, null)).toEqual({ key: "step:x", text: "Q" });
+  // A blocked program: the lawyer allows it outside Clauseo, then Restart is the try-again; the question comes back.
   expect(refillOf(brk("agent.program_blocked"), true, null)).toEqual({ key: "step:x", text: "Q" });
+  expect(RESTARTS.has("agent.program_blocked")).toBe(true);
+  // A missing program: its line says to quit and install, so Restart would fail; no Restart, no refill.
+  expect(RESTARTS.has("agent.program_missing")).toBe(false);
+  expect(refillOf(brk("agent.program_missing"), true, null)).toBeNull();
+  expect(
+    stoppedLine("en", brk("agent.program_missing"), 0, { onRestart: () => {}, refused: null }),
+  ).toBeNull();
   expect(refillOf(brk("agent.start_unreachable"), true, null)).toEqual({
     key: "step:x",
     text: "Q",
