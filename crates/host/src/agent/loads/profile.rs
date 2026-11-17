@@ -207,10 +207,10 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     let mut disallowed = take_array(options, "disallowedTools");
     let mut allowed = take_array(options, "allowedTools");
     // The SDK passes each list to the CLI as `join(",")`, which would flatten a nested array, so
-    // only string entries that are one plain rule stay.
-    let one_rule = |rule: &Value| rule.as_str().is_some_and(is_one_rule);
-    allowed.retain(one_rule);
-    disallowed.retain(one_rule);
+    // only string entries stay, and in `allowedTools` only those that are one plain rule.
+    // A deny string stays whole: the CLI's split of it only adds denies; dropping it loosens.
+    allowed.retain(|rule| rule.as_str().is_some_and(is_one_rule));
+    disallowed.retain(Value::is_string);
     if keys.web_search.on {
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
