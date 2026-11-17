@@ -16,7 +16,8 @@ expression: "event(\"config_options_replaced\")"
               {
                 "value": "opus",
                 "name": "Opus",
-                "description": "Largest"
+                "description": "Largest",
+                "takes_effort": true
               }
             ]
           }

@@ -11,14 +11,25 @@
 //! - the agent reports a `current_mode_update` away from `auto` among the updates held between
 //!   that switch and the attach ([`prepared`]): claude-agent-acp 0.89.1 itself moves a session
 //!   whose model cannot run auto to `acceptEdits` and says so (`session-mode.js:98-102`,
-//!   `:161-162`).
+//!   `:161-162`). The notice then names the model (`NoticeKind::AutoModeUnavailableForModel`),
+//!   as the session's model choices name its current one; a refused switch, a session that
+//!   lists no `auto`, or a model the options do not name gets the account's
+//!   (`NoticeKind::AutoModeUnavailable`).
+//!
+//! Mid-conversation, a model pick that cannot run auto moves the session to `acceptEdits`
+//! (claude-agent-acp 0.89.1 `acp-agent.js:6788`, `:6892`); the host keeps that mode
+//! (`forced_mode.rs`) and gives no notice there. The adapter never moves it back to `auto`
+//! when a later pick can run it; the host asks for `auto` again at the next session start.
 //!
 //! claude-agent-acp 0.89.1 lists `auto` whatever the account (`session-mode.js:233-258`), and a
 //! CLI that drops to `default` on its own (its remote kill switch) is never relayed, so the host
 //! cannot see that case.
 
 use clauseo_acp::{AcpEvent, AgentUpdate, SessionStart};
-use clauseo_protocol::{AgentChoiceId, ErrorCode, Notice, NoticeKind, NoticeLevel, ThreadId};
+use clauseo_protocol::{
+    AgentChoiceId, ConfigCategory, ConfigOption, ConfigOptionKind, ErrorCode, Notice, NoticeKind,
+    NoticeLevel, ThreadId,
+};
 
 use super::super::super::Actor;
 use super::super::agents::launch_failed;
@@ -34,6 +45,14 @@ use crate::log_file::Cause;
 pub(crate) const AUTO_UNAVAILABLE: &str = "Claude's automatic mode isn't available for this \
      account, so Claude asks before running commands.";
 
+/// The host English of the notice when the session's model rules `auto` out
+/// (`NoticeKind::AutoModeUnavailableForModel`), `{model}` its display name.
+pub(crate) fn auto_unavailable_for(model: &str) -> String {
+    format!(
+        "Claude's automatic mode isn't available for {model}, so Claude asks before running commands."
+    )
+}
+
 /// Where a Claude agent stands with `auto`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Auto {
@@ -43,8 +62,9 @@ pub(crate) enum Auto {
     /// `session/set_mode auto` went out before the attach; the agent's held updates from index
     /// `held` on are its answer.
     Set { held: usize },
-    /// Not available: the session runs in `acceptEdits` and goes back to it.
-    Unavailable,
+    /// Not available: the session runs in `acceptEdits` and goes back to it. `model`: the
+    /// agent moved the session off `auto` itself, as for a model without it ([`prepared`]).
+    Unavailable { model: bool },
     /// Held back by the host: Claude's sandbox is off before the launch on macOS or Linux (a
     /// `*` or `?` in a path, a path to deny that is not UTF-8, or no short temp folder:
     /// `agent::loads::sandbox::Off::holds_auto_back`), so the session runs in `acceptEdits` and
@@ -57,7 +77,7 @@ pub(crate) enum Auto {
 impl Auto {
     /// Whether the session runs in `acceptEdits` instead of `auto`.
     pub(crate) fn off(self) -> bool {
-        matches!(self, Self::Unavailable | Self::NoSandbox)
+        matches!(self, Self::Unavailable { .. } | Self::NoSandbox)
     }
 }
 
@@ -96,11 +116,11 @@ pub(super) fn claude_start(
     let offered = |id: &str| modes.available.iter().any(|mode| mode.id == id);
     let target = if !forced_ask && agent.auto == Auto::NoSandbox {
         CLAUDE_FALLBACK_MODE
-    } else if !forced_ask && (agent.auto == Auto::Unavailable || !offered(wanted)) {
-        if agent.auto != Auto::Unavailable {
+    } else if !forced_ask && (matches!(agent.auto, Auto::Unavailable { .. }) || !offered(wanted)) {
+        if !matches!(agent.auto, Auto::Unavailable { .. }) {
             tracing::info!(%thread, "Claude offered no auto mode; it runs in acceptEdits");
+            agent.auto = Auto::Unavailable { model: false };
         }
-        agent.auto = Auto::Unavailable;
         CLAUDE_FALLBACK_MODE
     } else {
         wanted
@@ -145,9 +165,10 @@ fn no_mode(actor: &mut Actor, thread: ThreadId, mode: &str, why: &str) {
 }
 
 /// `prepare` ended well. A switch to `auto` that fell back (`fell_back`), or whose held updates
-/// since it went out move the session to another mode, leaves auto unavailable; one that held
-/// keeps `auto` wanted. A held move to `acceptEdits` is then kept as it is logged; a move to
-/// any other mode is switched back to `acceptEdits` (`forced_mode.rs`).
+/// since it went out move the session to another mode, leaves auto unavailable (the model's
+/// doing when it did not fall back, since the host's own fallback is such a move too); one
+/// that held keeps `auto` wanted. A held move to `acceptEdits` is then kept as it is logged; a
+/// move to any other mode is switched back to `acceptEdits` (`forced_mode.rs`).
 pub(super) fn prepared(actor: &mut Actor, thread: ThreadId, fell_back: bool) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
@@ -171,27 +192,68 @@ pub(super) fn prepared(actor: &mut Actor, thread: ThreadId, fell_back: bool) {
         });
     agent.auto = if fell_back || moved {
         tracing::info!(%thread, fell_back, moved, "Claude's auto mode is not available; it runs in acceptEdits");
-        Auto::Unavailable
+        Auto::Unavailable {
+            model: moved && !fell_back,
+        }
     } else {
         Auto::Wanted
     };
 }
 
 /// The notice that auto is not available, for the attach commit: once per thread for the host's
-/// run, and only while the agent runs without auto.
-pub(super) fn notice(actor: &mut Actor, thread: ThreadId) -> Option<Notice> {
+/// run, and only while the agent runs without auto. When the model ruled it out, the notice
+/// names the current model of `options`, the session's at its attach ([`model_name`]).
+pub(super) fn notice(
+    actor: &mut Actor,
+    thread: ThreadId,
+    options: &[ConfigOption],
+) -> Option<Notice> {
     let state = state(actor, thread)?;
-    let unavailable = state
-        .agent
-        .as_deref()
-        .is_some_and(|agent| agent.auto == Auto::Unavailable);
-    if !unavailable || state.auto_told {
+    let Some(Auto::Unavailable { model }) = state.agent.as_deref().map(|agent| agent.auto) else {
+        return None;
+    };
+    if state.auto_told {
         return None;
     }
     state.auto_told = true;
-    Some(Notice {
-        level: NoticeLevel::Info,
-        text: AUTO_UNAVAILABLE.to_owned(),
-        kind: Some(NoticeKind::AutoModeUnavailable),
+    let named = model.then(|| model_name(options)).flatten();
+    Some(match named {
+        Some(model) => Notice {
+            level: NoticeLevel::Info,
+            text: auto_unavailable_for(&model),
+            kind: Some(NoticeKind::AutoModeUnavailableForModel { model }),
+        },
+        None => Notice {
+            level: NoticeLevel::Info,
+            text: AUTO_UNAVAILABLE.to_owned(),
+            kind: Some(NoticeKind::AutoModeUnavailable),
+        },
     })
+}
+
+/// The display name of the current model among `options`: the name of the current value's
+/// choice in the first select option of the `Model` category, or `None` when there is no such
+/// option, its current value is no choice of it, or the name is blank.
+pub(super) fn model_name(options: &[ConfigOption]) -> Option<String> {
+    options
+        .iter()
+        .filter(|option| option.category == ConfigCategory::Model)
+        .find_map(|option| {
+            let ConfigOptionKind::Select {
+                current_value,
+                options,
+            } = &option.kind
+            else {
+                return None;
+            };
+            Some(
+                options
+                    .iter()
+                    .find(|choice| choice.value == *current_value)
+                    .map(|choice| choice.name.trim())
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
+            )
+        })
+        .flatten()
 }

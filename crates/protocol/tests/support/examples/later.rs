@@ -310,6 +310,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::AutoModeUnavailable),
         },
+        auto_model_notice(),
         Notice {
             level: NoticeLevel::Warning,
             text: "Clauseo blocked a request: it reaches outside this matter.".to_owned(),
@@ -402,6 +403,19 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         .map(|(reason, words)| skill_pack_notice(reason, words)),
     );
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// The host notice that the session's model, Haiku 4.5, has no auto mode.
+fn auto_model_notice() -> Notice {
+    Notice {
+        level: NoticeLevel::Info,
+        text: "Claude's automatic mode isn't available for Haiku 4.5, so Claude asks before \
+               running commands."
+            .to_owned(),
+        kind: Some(NoticeKind::AutoModeUnavailableForModel {
+            model: "Haiku 4.5".to_owned(),
+        }),
+    }
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.

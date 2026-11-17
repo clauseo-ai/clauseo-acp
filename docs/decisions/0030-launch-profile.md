@@ -492,7 +492,8 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   answers an error (the CLI refuses auto for the plan, the settings or fast mode, and
   claude-agent-acp 0.89.1 passes the error back); or the agent moves off `auto` among the
   updates held before the attach (0.89.1 moves a model without auto to `acceptEdits` and
-  says so). A CLI that drops to `default` on its own (its remote kill switch) is not relayed
+  says so; that notice is `NoticeKind::AutoModeUnavailableForModel` with the model's display
+  name, when the session's model choices name it). A CLI that drops to `default` on its own (its remote kill switch) is not relayed
   by 0.89.1, so the host can't see it. `auto`, `acceptEdits` and `plan` are kept when
   Claude moves there; any other mode goes back to `auto` (or `acceptEdits` in the fallback).
   The plan exit's "use auto mode" lands in `auto` and stays. Forced ask is unchanged. The

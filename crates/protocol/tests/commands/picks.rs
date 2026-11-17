@@ -110,6 +110,7 @@ fn an_agent_summary_carries_its_cached_options() {
                 name: short("Default"),
                 description: None,
                 group: None,
+                takes_effort: true,
             }],
         },
     };

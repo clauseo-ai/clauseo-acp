@@ -14,6 +14,7 @@ fn model(current: &str) -> ConfigOption {
         name: value.into(),
         description: None,
         group: None,
+        takes_effort: true,
     };
     ConfigOption {
         id: "model".into(),

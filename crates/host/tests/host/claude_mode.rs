@@ -10,8 +10,8 @@
 //! Forced ask starts in `default` instead (`forced_ask.rs`).
 
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, NoticeKind, StopReason,
-    StreamId, ThreadId,
+    AgentChoiceId, CommandOutcome, ConfigOptionKind, DomainEvent, ErrorCode, HostCommand,
+    NoticeKind, StopReason, StreamId, ThreadId,
 };
 
 use crate::observe::Events;
@@ -31,15 +31,22 @@ fn modes(events: &Events) -> Vec<String> {
         .collect()
 }
 
-/// How many `AutoModeUnavailable` notices the thread has.
-fn auto_notices(events: &Events) -> usize {
+/// The kinds of the thread's notices that auto is not available, `AutoModeUnavailable` or
+/// `AutoModeUnavailableForModel`, in order.
+fn auto_notices(events: &Events) -> Vec<NoticeKind> {
     events
         .events()
-        .filter(|event| {
-            matches!(event, DomainEvent::Notice(notice)
-                if notice.kind == Some(NoticeKind::AutoModeUnavailable))
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => notice.kind.clone().filter(|kind| {
+                matches!(
+                    kind,
+                    NoticeKind::AutoModeUnavailable
+                        | NoticeKind::AutoModeUnavailableForModel { .. }
+                )
+            }),
+            _ => None,
         })
-        .count()
+        .collect()
 }
 
 /// Runs one prompt on `thread` to its end and returns the thread's events so far.
@@ -96,13 +103,18 @@ fn a_claude_session_switches_to_auto_before_its_first_prompt_on_load_and_on_resu
         "{}",
         events.dump()
     );
-    assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    assert!(auto_notices(&events).is_empty(), "{}", events.dump());
     host.shutdown();
 }
 
 /// Plays `scenario`, whose agent cannot run `auto`, through two turns: the session runs in
-/// `acceptEdits` with exactly one notice, and the modes logged are `expected`.
-fn falls_back(test: &str, scenario: &'static str, expected: &[&str]) {
+/// `acceptEdits` with exactly one notice, of kind `notice`, and the modes logged are `expected`.
+fn falls_back(
+    test: &str,
+    scenario: &'static str,
+    expected: &[&str],
+    notice: &NoticeKind,
+) -> Events {
     let dir = Dir::new(test, &[(CLAUDE, Scenario::Local(scenario))]);
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
@@ -114,8 +126,14 @@ fn falls_back(test: &str, scenario: &'static str, expected: &[&str]) {
         modes(&events).last().map(String::as_str),
         Some("acceptEdits")
     );
-    assert_eq!(auto_notices(&events), 1, "{}", events.dump());
+    assert_eq!(
+        auto_notices(&events),
+        std::slice::from_ref(notice),
+        "{}",
+        events.dump()
+    );
     host.shutdown();
+    events
 }
 
 #[test]
@@ -124,6 +142,7 @@ fn a_session_offering_no_auto_runs_in_accept_edits_with_one_notice() {
         "claude_mode_no_auto",
         "claude-mode-no-auto",
         &["acceptEdits", "default", "acceptEdits"],
+        &NoticeKind::AutoModeUnavailable,
     );
 }
 
@@ -133,16 +152,39 @@ fn a_refused_switch_to_auto_falls_back_to_accept_edits_with_one_notice() {
         "claude_mode_auto_refused",
         "claude-mode-auto-refused",
         &["acceptEdits"],
+        &NoticeKind::AutoModeUnavailable,
     );
 }
 
+/// The agent moving off `auto` itself is the model's doing: the notice names the session's
+/// current model as its model choices do. That model came with no effort option, so its choice
+/// takes no effort; the other model, unknown, does.
 #[test]
 fn an_agent_that_moves_off_auto_at_once_runs_in_accept_edits_with_one_notice() {
-    falls_back(
+    let events = falls_back(
         "claude_mode_auto_moved",
         "claude-mode-auto-moved",
         &["auto", "acceptEdits"],
+        &NoticeKind::AutoModeUnavailableForModel {
+            model: "Haiku 4.5".to_owned(),
+        },
     );
+    let marks: Vec<(String, bool)> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::ConfigOptionsReplaced(replaced) => replaced.options.first().cloned(),
+            _ => None,
+        })
+        .flat_map(|option| {
+            let ConfigOptionKind::Select { options, .. } = option.kind else {
+                return Vec::new();
+            };
+            options
+        })
+        .map(|choice| (choice.value.to_string(), choice.takes_effort))
+        .collect();
+    let expected = [("haiku".to_owned(), false), ("opus".to_owned(), true)];
+    assert_eq!(marks, expected, "{}", events.dump());
 }
 
 /// Plays `scenario` to a turn that must fail before any prompt with `code`, with no mode
@@ -226,7 +268,7 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_auto() {
     let mut events = turn(&host, thread, "And clause 6?");
     events.until("ModeChanged acceptEdits", |e| modes(e).len() == 6);
     assert_eq!(modes(&events)[5..], ["acceptEdits"], "{}", events.dump());
-    assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    assert!(auto_notices(&events).is_empty(), "{}", events.dump());
     host.shutdown();
 }
 
@@ -251,7 +293,7 @@ fn a_matter_the_sandbox_could_not_name_runs_in_auto() {
         "{}",
         events.dump()
     );
-    assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    assert!(auto_notices(&events).is_empty(), "{}", events.dump());
     let sandbox_off = events
         .events()
         .filter(|event| {

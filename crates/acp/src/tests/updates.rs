@@ -145,12 +145,14 @@ fn grouped_config_values_keep_their_group() {
                 name: "Fast".into(),
                 description: None,
                 group: Some("Quick".to_owned()),
+                takes_effort: true,
             },
             ConfigChoice {
                 value: "careful".into(),
                 name: "Careful".into(),
                 description: Some("Slower".to_owned()),
                 group: Some("Deep".to_owned()),
+                takes_effort: true,
             },
         ]
     );

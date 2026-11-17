@@ -25,6 +25,7 @@ fn select(id: &str, category: ConfigCategory, values: &[&str]) -> ConfigOption {
                     name: CompactString::from(*value),
                     description: None,
                     group: None,
+                    takes_effort: true,
                 })
                 .collect(),
         },
