@@ -320,15 +320,13 @@
     "note": "D-033 review: the undo-a-restore dialog whose body is the removals alone; the closing sentence of U8's restore bodies"
   },
   "U8-37": {
-    "en": "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.",
-    "hi": "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल {service} में था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति {service} के पुराने संस्करणों में है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-11",
-    "hi_by": "stage D undo (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-11",
-    "by": "orchestrator",
-    "note": "orchestrator, 2026-11-11, stage D undo keeps skipped files"
+    "en": "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service} may still have an earlier version.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "icloud fixes (provisional; Rohan batch review)",
+    "note": "Now says \"may\", matching #1180's lines: iCloud Drive keeps no version history for Word files, so \"{service}'s version history has the earlier one\" was false. Was approved 2026-11-11 (stage D undo keeps skipped files); the old Hindi said the copy is in {service}'s older versions, so it no longer matches."
   },
   "U8-38": {
     "en": "Clauseo can't undo the change to {file}. It was only online before, so there's no earlier copy here. Your cloud service's version history may have the earlier one.",

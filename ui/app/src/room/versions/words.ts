@@ -329,7 +329,7 @@ export function cantUndoWords(
       )
     : vt(
         lang,
-        "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.",
+        "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service} may still have an earlier version.",
         { file, service },
       );
 }
