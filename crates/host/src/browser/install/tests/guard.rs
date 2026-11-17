@@ -66,7 +66,7 @@ fn the_run_never_downgrades_and_skips_a_current_copy() {
     let tools = Fake::working();
     let (result, states) = outcome(dir.path(), &tools);
     assert_eq!(result.unwrap(), Outcome::Current);
-    assert!(states.is_empty());
+    assert_eq!(states, Vec::<BrowserInstallState>::new());
     assert_eq!(tools.calls(), ["fetch_versions"]);
     let record = fresh::read_record(&dir.path().join("app").join("browsers")).unwrap();
     assert_eq!(record.stable, VERSION);

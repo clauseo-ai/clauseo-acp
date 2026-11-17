@@ -98,7 +98,7 @@ fn a_lagged_subscriber_hears_how_the_download_ended() {
     );
     // A second download (the copy gone, so Stable is new again): the subscriber, caught up,
     // hears it start and end.
-    std::fs::remove_dir_all(
+    crate::write::remove_dir_all(
         dir.data()
             .join("app")
             .join("browsers")

@@ -358,7 +358,7 @@ fn a_failed_signature_fails_only_when_required() {
     assert!(!super::signature_checked(Platform::MacArm64));
     assert!(!super::signature_checked(Platform::MacX64));
     assert!(super::signature_checked(Platform::WindowsX64));
-    assert!(!super::SIGNATURE_REQUIRED_WINDOWS);
+    const { assert!(!super::SIGNATURE_REQUIRED_WINDOWS) };
     let unsigned = Fake {
         signed: Err("not signed".to_owned()),
         ..Fake::working()
