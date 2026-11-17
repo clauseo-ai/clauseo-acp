@@ -111,15 +111,21 @@ fn a_firmlinked_own_matter_is_in_no_rule_and_the_other_is_denied() {
             &disk,
             Some((&root, &data)),
         );
-        // The model's firmlink is a real link, which `forms::canonical` follows (a real firmlink
-        // it doesn't), so the other matter may also be spelled the other way: what counts is
-        // that it is denied and that no fence path is or holds the own matter.
+        // Exactly the spelling it has, and where the model's link leads when that differs
+        // (`forms::canonical`; a real firmlink it doesn't follow); never the data-volume twin
+        // (`forms::twin`, for comparisons only). Registered on the data volume, the other matter
+        // is in the rules by that spelling alone, not by its `Users` twin.
+        let registered = parent.join("Other");
+        let mut expected = vec![registered.clone()];
+        let led = dunce::canonicalize(&registered).unwrap();
+        if led != registered {
+            expected.push(led);
+        }
         let paths = &fence.others[0].paths;
-        assert!(paths.contains(&parent.join("Other")), "{own:?}: {paths:?}");
-        assert!(
-            paths.iter().all(|path| path.ends_with("Other")),
-            "{own:?}: {paths:?}"
-        );
+        assert_eq!(paths, &expected, "{own:?}");
+        if parent == &long {
+            assert_eq!(paths, std::slice::from_ref(&registered), "{own:?}: no twin");
+        }
         let rules = claude_deny_rules(
             &LaunchDeny {
                 matters: fence,
@@ -127,6 +133,14 @@ fn a_firmlinked_own_matter_is_in_no_rule_and_the_other_is_denied() {
             },
             false,
         );
+        if parent == &long {
+            let twin = short.join("Other");
+            let twin = twin.to_string_lossy();
+            assert!(
+                rules.iter().all(|rule| !rule.contains(twin.as_ref())),
+                "{own:?}: the twin {twin} in a rule: {rules:#?}"
+            );
+        }
         for base in [&short, &long] {
             for path in [base.join("Own"), base.join("Own/a.txt")] {
                 for tool in ["Read", "Edit"] {
