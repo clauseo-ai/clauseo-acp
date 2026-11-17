@@ -35,6 +35,7 @@ When a thread runs out of its block, it asks the app track, which hands out a su
 | online words (UC-online-only-read.json, within the app track's 900 to 919)  | UC-913 to UC-915 | 2026-11-17 |
 | app track (blackline PR 2 uses UC-949 to UC-956 and UC-968)                 | UC-947 to UC-989 | 2026-11-17 |
 | Settings › Skills, Add a skill (UC-skills.json)                             | UC-970 to UC-978 | 2026-11-17 |
+| stage B automode (UC-codex-auto.json; asked of the app track in its PR)     | UC-920 to UC-923 | 2026-11-17 |
 
 ## Other prefixes: closed to new ids
 

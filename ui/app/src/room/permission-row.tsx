@@ -120,6 +120,7 @@ function Permission({
         {...(command === null ? {} : { details: <CommandFold command={command} lang={lang} /> })}
         {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
+        scope={plan?.kind === "codex" ? "conversation" : "matter"}
         done={m.done}
         busy={pending && asked !== null}
         confirming={pending && asked?.answer === "always" && !asked.sent}
