@@ -8,9 +8,10 @@
 // BASELINE=1 leaves the two feature keys out, to see the rows fail. KEYS_IN=config or
 // KEYS_IN=home puts them in only CODEX_CONFIG or only the home's config.toml.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -179,6 +180,8 @@ const child = spawn(process.execPath, [acp], {
 });
 let stderr = "";
 child.stderr.on("data", (d) => (stderr += d));
+// A reply written as the child exits must not crash the probe while cleanup waits for it.
+child.stdin.on("error", () => {});
 let nextId = 1;
 const pending = new Map();
 const updates = [];
@@ -208,9 +211,86 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   }
 });
 
-const timeout = setTimeout(() => {
+// Stops the child and removes the scratch folder. The normal end, a thrown error and the timeout
+// all come here, and it runs once; later calls get the same promise. It waits for the child to
+// exit, then for the Codex processes the child started (codex-acp starts Codex, which can outlive
+// codex-acp by a moment), and only then removes the folder, so nothing writes into it while it
+// shuts down. Each wait is capped: SIGTERM and 10 s to exit, then SIGKILL and 5 s more.
+let cleaning = null;
+const gone = () => child.exitCode !== null || child.signalCode !== null || child.pid === undefined;
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+function exitWithin(ms) {
+  if (gone()) return Promise.resolve(true);
+  return new Promise((ok) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      ok(false);
+    }, ms);
+    const onExit = () => {
+      clearTimeout(timer);
+      ok(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+// The pids below `parent` in the process table, read before anything is signalled.
+function descendants(parent) {
+  if (parent === undefined) return [];
+  let rows;
+  try {
+    rows = execFileSync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8" });
+  } catch {
+    return [];
+  }
+  const kids = new Map();
+  for (const [pid, ppid] of rows.trim().split("\n").map((row) => row.trim().split(/\s+/).map(Number))) {
+    kids.set(ppid, [...(kids.get(ppid) || []), pid]);
+  }
+  const found = [];
+  for (let level = [parent]; level.length; ) {
+    level = level.flatMap((pid) => kids.get(pid) || []);
+    found.push(...level);
+  }
+  return found;
+}
+async function allGone(pids, ms) {
+  const until = Date.now() + ms;
+  while (pids.some(alive)) {
+    if (Date.now() >= until) return false;
+    await new Promise((ok) => setTimeout(ok, 100));
+  }
+  return true;
+}
+function cleanup() {
+  cleaning ??= (async () => {
+    clearTimeout(timeout);
+    const started = descendants(child.pid);
+    if (!gone()) child.kill("SIGTERM");
+    if (!(await exitWithin(10000))) {
+      child.kill("SIGKILL");
+      await exitWithin(5000);
+    }
+    if (!(await allGone(started, 10000))) {
+      for (const pid of started.filter(alive)) process.kill(pid, "SIGKILL");
+      await allGone(started, 5000);
+    }
+    server.close();
+    if (keep) console.log(`kept ${root}`);
+    else await rm(root, { recursive: true, force: true });
+  })();
+  return cleaning;
+}
+
+const timeout = setTimeout(async () => {
   console.error("timed out\n" + stderr.slice(-4000));
-  child.kill("SIGTERM");
+  await cleanup();
   process.exit(3);
 }, 120000);
 
@@ -249,11 +329,7 @@ try {
   failed++;
   console.log(`FAIL run: ${error.message}\n${stderr.slice(-4000)}`);
 } finally {
-  clearTimeout(timeout);
-  child.kill("SIGTERM");
-  server.close();
-  if (keep) console.log(`kept ${root}`);
-  else rmSync(root, { recursive: true, force: true });
+  await cleanup();
 }
 console.log(failed ? `${failed} failed` : "all rows passed");
 process.exit(failed ? 1 : 0);

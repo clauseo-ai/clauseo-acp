@@ -10,8 +10,10 @@ nothing in CI runs it. It exists to check the two `[features]` keys the host set
 node scripts/codex-launch-probe/probe.mjs <node_modules>
 ```
 
-The probe makes a scratch folder under the temp folder with a Codex home and a work folder. It
-removes the folder at the end unless `KEEP=1` is set. The home has no `auth.json`, and `HOME`
+The probe makes a scratch folder under the temp folder with a Codex home and a work folder. At the
+end it stops codex-acp and the Codex processes it started, and removes the folder only after they
+have exited (SIGTERM, then SIGKILL after 10 s). The same happens on the timeout and on an error.
+`KEEP=1` keeps the folder. The home has no `auth.json`, and `HOME`
 points into the scratch folder too. The home's `config.toml` holds the host's keys as dotted
 keys (`clauseo_limits::CODEX_OVERRIDES`, then `LAUNCH_FEATURES`), plus a `mock` model provider on
 127.0.0.1 with `requires_openai_auth = false`. `CODEX_CONFIG` holds the same keys as nested
