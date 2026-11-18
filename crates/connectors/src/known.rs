@@ -29,10 +29,64 @@ pub(crate) const PRODUCTION_ORIGIN: &str = "https://data.clauseo.chat";
 #[cfg(feature = "staging")]
 pub(crate) const STAGING_ORIGIN: &str = "https://data-staging.clauseo.chat";
 
-/// The connector's local test server on the Mac mini (feature `local` only): plain http, the
-/// same paths as production. A fixed address, so a build can be scanned for it.
+/// The connector's local test server (feature `local` only): plain http, the same paths as
+/// production. `http://127.0.0.1:8793` (the Mac mini's), unless the build sets
+/// `CLAUSEO_LOCAL_CONNECTOR_ORIGIN` to another origin, such as a test machine's address on a
+/// private network. Either way it is fixed at compile time, so a build can be scanned for it.
 #[cfg(feature = "local")]
-pub const LOCAL_ORIGIN: &str = "http://127.0.0.1:8793";
+pub const LOCAL_ORIGIN: &str = match option_env!("CLAUSEO_LOCAL_CONNECTOR_ORIGIN") {
+    Some(origin) => origin,
+    None => "http://127.0.0.1:8793",
+};
+
+// A set origin must be written as `url` writes it, since the app compares links with it as
+// strings: `http://` or `https://`, a lowercase host, an optional port that is not the default,
+// and nothing after.
+#[cfg(feature = "local")]
+const _: () = assert!(
+    origin_shape_ok(LOCAL_ORIGIN),
+    "CLAUSEO_LOCAL_CONNECTOR_ORIGIN must be http://host[:port] or https://host[:port]: lowercase, \
+     no default port, no path and no trailing /"
+);
+
+/// Whether `origin` is `http://` or `https://`, then a non-empty lowercase host of letters,
+/// digits, `.` and `-`, an optional port that is not the scheme's default, and nothing after.
+#[cfg(feature = "local")]
+pub(crate) const fn origin_shape_ok(origin: &str) -> bool {
+    let (mut rest, default_port): (&[u8], &[u8]) = match origin.as_bytes() {
+        [b'h', b't', b't', b'p', b':', b'/', b'/', rest @ ..] => (rest, b":80"),
+        [b'h', b't', b't', b'p', b's', b':', b'/', b'/', rest @ ..] => (rest, b":443"),
+        _ => return false,
+    };
+    if matches!(rest, [] | [b':', ..]) || ends_with(rest, default_port) {
+        return false;
+    }
+    while let [byte, tail @ ..] = rest {
+        if !(byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || matches!(byte, b'.' | b'-' | b':'))
+        {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
+/// `bytes.ends_with(suffix)`, in a `const fn`.
+#[cfg(feature = "local")]
+const fn ends_with(mut bytes: &[u8], mut suffix: &[u8]) -> bool {
+    loop {
+        match (bytes, suffix) {
+            (_, []) => return true,
+            ([bytes_rest @ .., last], [suffix_rest @ .., wanted]) if *last == *wanted => {
+                bytes = bytes_rest;
+                suffix = suffix_rest;
+            }
+            _ => return false,
+        }
+    }
+}
 
 /// Indian Kanoon case law, the one connector at launch.
 pub const CASE_LAW: KnownConnector = KnownConnector {

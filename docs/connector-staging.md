@@ -79,6 +79,14 @@ cargo run -p clauseo-desktop --features local-connector        # a dev run
 pnpm -C ui tauri build --features local-connector               # or the bundle
 ```
 
+To reach a test server on another computer with no port forward, set
+`CLAUSEO_LOCAL_CONNECTOR_ORIGIN` when building, for example
+`CLAUSEO_LOCAL_CONNECTOR_ORIGIN=http://<test-machine>:<port>` with the test machine's address on
+a private network. Everything below then holds for that origin in place of
+`http://127.0.0.1:8793`. It is read at compile time only (`crates/connectors/src/known.rs`): the
+value must be `http://` or `https://`, a lowercase host and an optional port, with no path or
+trailing `/`, or the build fails. The app's tests assume the default, so run them without it.
+
 What changes in a local build:
 
 - every connector request goes to `http://127.0.0.1:8793`, on the production paths, with no

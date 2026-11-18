@@ -48,12 +48,53 @@ fn staging_maps_every_url_onto_its_host() {
     assert_eq!(urls.pay_prefix, "https://data-staging.clauseo.chat/pay/");
 }
 
-/// The local test server: every path of production on `http://127.0.0.1:8793`, the paths the
-/// connector's owner listed.
+/// Without `CLAUSEO_LOCAL_CONNECTOR_ORIGIN` at build time, the local origin is exactly
+/// `http://127.0.0.1:8793`, as before the variable.
+#[cfg(feature = "local")]
+#[test]
+fn the_local_origin_defaults_to_the_mini_on_loopback() {
+    if option_env!("CLAUSEO_LOCAL_CONNECTOR_ORIGIN").is_none() {
+        assert_eq!(crate::LOCAL_ORIGIN, "http://127.0.0.1:8793");
+    }
+}
+
+/// The shape a set local origin must have; a build with another fails to compile.
+#[cfg(feature = "local")]
+#[test]
+fn a_local_origin_must_be_written_as_url_writes_it() {
+    use crate::known::origin_shape_ok;
+    for good in [
+        "http://127.0.0.1:8793",
+        "http://test-box.example.ts.net:8795",
+        "https://test-box.example",
+        "http://localhost",
+    ] {
+        assert!(origin_shape_ok(good), "{good}");
+    }
+    for bad in [
+        "http://127.0.0.1:8793/",
+        "http://Test-Box.example:8795",
+        "http://test-box.example:8795/path",
+        "http://user@test-box.example",
+        "http://test-box.example?x=1",
+        "http://test-box.example:80",
+        "https://test-box.example:443",
+        "http://",
+        "http://:8793",
+        "ftp://test-box.example",
+        "test-box.example:8795",
+        "",
+    ] {
+        assert!(!origin_shape_ok(bad), "{bad}");
+    }
+}
+
+/// The local test server: every path of production on its origin (`http://127.0.0.1:8793`
+/// unless the build set another), the paths the connector's owner listed.
 #[cfg(feature = "local")]
 #[test]
 fn local_maps_every_url_onto_the_local_server() {
-    let base = "http://127.0.0.1:8793";
+    let base = crate::LOCAL_ORIGIN;
     assert!(Origin::Local.allowed());
     let urls = Origin::Local.urls(&CASE_LAW);
     assert_eq!(urls.issuer, base);
