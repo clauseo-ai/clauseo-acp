@@ -211,6 +211,11 @@ fn the_codex_fragment_is_the_instructions_alone() {
             .to_owned();
         keys.insert("developer_instructions".to_owned(), Value::String(alone));
     }
+    // And Windows' online shell line (browser.rs checks it) stands as the other systems' one.
+    let net = clauseo_profile::instructions::codex_shell_net_on;
+    let text = keys["developer_instructions"].as_str().unwrap();
+    let same = text.replace(net(true, true), net(true, false));
+    keys.insert("developer_instructions".to_owned(), Value::String(same));
     insta::assert_snapshot!(pretty(&Value::Object(keys)));
 }
 
