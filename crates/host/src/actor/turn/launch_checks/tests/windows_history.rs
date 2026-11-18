@@ -1,9 +1,8 @@
-//! On Windows a launch leaves this matter's `history.git` under the shell rules' `matters/**`,
+//! On Windows a launch leaves this matter's `history.git` under the `matters/**` rules,
 //! as before the history's rules, and Claude gets no history rules (`folders::own_folders`,
 //! `data_fence::history_rules`): the Windows fallback for the release candidate's PowerShell
 //! calls refused with no classifier verdict. Off Windows the history is kept and gets its rules.
 
-use std::ffi::OsString;
 use std::path::PathBuf;
 
 use super::{folders, scratch};
@@ -15,11 +14,6 @@ const DATA: &str = r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop";
 
 /// Another matter's id.
 const OTHER: &str = "01a1d5b4-a291-7649-9fa4-000000000001";
-
-/// The lawyer's variables.
-fn env(name: &str) -> Option<OsString> {
-    (name == "LOCALAPPDATA").then(|| r"C:\Users\clauseo-lawyer\AppData\Local".into())
-}
 
 /// The history options the history's deny rules name.
 const OPTIONS: [&str; 4] = ["--no-index", "--output", "--exec", "--remote"];
@@ -59,8 +53,8 @@ fn on_windows_the_history_stays_denied_and_gets_no_rules() {
     assert_eq!(windows.targets, before.targets);
     assert_eq!(windows.kept, before.kept);
     assert!(windows.targets.iter().any(|target| target == "matters/**"));
-    let shell = data_fence::windows_shell_deny_rules(&windows, &env);
-    assert_eq!(shell, data_fence::windows_shell_deny_rules(&before, &env));
+    let shell = data_fence::windows_fixed_shell_deny_rules(&windows);
+    assert_eq!(shell, data_fence::windows_fixed_shell_deny_rules(&before));
     let (allow, deny) = data_fence::history_rules(&windows, true);
     assert!(allow.is_empty() && deny.is_empty(), "{allow:?} {deny:?}");
     let mut rules = data_fence::claude_allow_rules_on(&windows, true);

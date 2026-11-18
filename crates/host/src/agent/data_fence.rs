@@ -14,12 +14,12 @@
 //!   plans folder are left out by naming their siblings instead, and so are the tool results
 //!   Claude saves in its own project folder. Run folders, matters' notes and other matters'
 //!   Claude projects made after the launch are the accepted residual of these rules.
-//!   On Windows, where Claude has no sandbox, `Bash(…)` and `PowerShell(…)` rules name the same
-//!   targets in every spelling of `<data>` a command may use (`shell_deny.rs`): the own run
-//!   and work folders, this matter's notes, Claude's plans folder, its tool results and the
-//!   read-only tools stay reachable by a command, and all else under `<data>`, the folder too,
-//!   is denied when a command names it. The rules go to Claude Code in a settings file
-//!   (`agent::launch_settings`), since a busy data folder's rules outgrow a command line.
+//!   On Windows, where Claude has no sandbox, a fixed list of `Bash(…)` and `PowerShell(…)`
+//!   rules denies a command that names one of Clauseo's secret places under `<data>`
+//!   (`fixed_shell_deny.rs`: the logins, credentials, relay token, proxy secret, launch
+//!   settings, settings file and stores); a command naming anything else there is Claude Code's
+//!   classifier's, under the `Read` and `Edit` rules. The rules go to Claude Code in a settings
+//!   file (`agent::launch_settings`), since a busy data folder's rules outgrow a command line.
 //! - The host's auto-deny ([`FenceCheck`]): a permission request whose paths ([`candidates`]:
 //!   the request's locations and diffs, `rawInput`'s path keys and every string in it shaped
 //!   like a path, the path words of a shell command and the targets of its `ln`, and any path
@@ -56,9 +56,10 @@ pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+#[cfg(test)]
+pub(crate) use shell_deny::windows_shell_deny_rules;
 pub(crate) use shell_deny::{
-    history_rules, own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
-    windows_shell_deny_rules_without_variables,
+    history_rules, own_shell_allow_rules, own_shell_glob_deny_rules, windows_fixed_shell_deny_rules,
 };
 pub(crate) use variables::launch_vars;
 
@@ -158,6 +159,7 @@ pub(crate) const READ_ONLY: [&str; 2] = ["tools", "agents/runtime/clauseo-python
 /// an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny being
 /// matched on the whole command too. A spelling that is not UTF-8 gets none (no rule could
 /// name it).
+#[cfg(test)]
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
     claude_deny_rules_on(deny, cfg!(windows), sandboxed)
 }
@@ -207,6 +209,7 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 /// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
 /// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
 /// A spelling that is not UTF-8 gets none.
+#[cfg(test)]
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
     claude_allow_rules_on(deny, cfg!(windows))
 }

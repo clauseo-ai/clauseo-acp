@@ -87,9 +87,9 @@ pub(crate) struct LaunchDeny {
     pub(crate) targets: Vec<String>,
     /// What the launch left out of [`Self::targets`], as patterns in the same form (a `*` is
     /// any name, or any rest of one): the session's own folders, [`SHARED`], [`READ_ONLY`]
-    /// and the own project's `tool-results` folders. The shell rules
-    /// (`super::windows_shell_deny_rules`) end a target's name at a name boundary when one of
-    /// these could start with it.
+    /// and the own project's `tool-results` folders. The walked shell rules, built in tests
+    /// only (`super::windows_shell_deny_rules`), end a target's name at a name boundary when
+    /// one of these could start with it.
     pub(crate) kept: Vec<String>,
     /// The session's own work and notes folders, as patterns in the same form
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode

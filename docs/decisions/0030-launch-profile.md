@@ -723,6 +723,21 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   Code also reads settings sources of its own (its user settings in Clauseo's Claude home,
   managed settings and the `HKLM`/`HKCU` `Policies\ClaudeCode` keys, and a folder's project and
   local settings for this variable); what they may set is the launch check's (#1167).
+- **2026-11-18: the Windows shell deny rules are a fixed list (orchestrator).** The walked list
+  of the 2026-11-11 and 2026-11-13 entries multiplied each target by each spelling of
+  `<data>`, separator, shell and walked folder: 9,472 rules and 656 KB on a test laptop, and
+  at 12,116 rules and 843 KB Claude Code's classifier stopped giving a verdict, so every command
+  that needed it was refused. A Windows launch now sends a short fixed list instead
+  (`agent/data_fence/fixed_shell_deny.rs`): Clauseo's secret places under `<data>` (Codex's
+  home, the sign-in state, Claude's login source, credentials and account file, the relay
+  token, the proxy secret, `launch-settings`, `settings.json`, the store and the search
+  index), for at most two ways of writing `<data>` (the folder's own name alone for the
+  default folder), `\` and `/`, in both shells. It does not grow with matters,
+  conversations, run folders or walked folders. The `Read` and `Edit` denies, the own
+  folders' allow and glob rules and the host's auto-deny are unchanged. **Residual risk:**
+  other matters' notes, other conversations' work folders and other projects' tool results are
+  in no shell rule; a command naming them is the classifier's, under the `Read` and `Edit`
+  denies.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
@@ -1521,8 +1536,8 @@ stayed without a browser until "Claude on Windows too" (below).
   Sending nothing also keeps the session's behaviour the same if that gate opens. A `sandbox`
   object the profile hook sends passes through on Windows untouched. That is accepted:
   auto-allow is forced off there, whatever it says. A Windows session still runs in `auto`,
-  so its commands go to the classifier, behind the shell deny rules for the data folder
-  ("2026-11-11: Windows stays in `auto`, with shell deny rules" above).
+  so its commands go to the classifier, behind the fixed shell deny rules for the data
+  folder's secret places ("2026-11-18: the Windows shell deny rules are a fixed list" above).
 - The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
   where it can't start, and with `failIfUnavailable: true` Claude would fail at start-up.
