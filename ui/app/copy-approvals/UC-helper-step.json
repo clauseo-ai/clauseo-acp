@@ -3,18 +3,18 @@
     "en": "Asked a helper: {task}.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Done: a helper step (Claude's Agent, or Task; ChatGPT's spawn_agent), the helper's description as {task}, cut at 80 characters. Was \"Thought it through.\" (counted as \"Planned the work.\"); with no description, that stays. Words are provisional"
   },
   "UC-907": {
     "en": "Tried to ask a helper: {task}.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Failed or stopped: a helper step, the helper's description as {task}, cut at 80 characters. Was \"Tried to think it through.\"; with no description, that stays. Words are provisional"
   }
 }

@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "browser1 (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "browser1 (provisional; Rohan to approve on the copy page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Reworded 2026-11-15 from \"ChatGPT uses it. Runs on this computer.\": Claude gets the same guarded browser on macOS (and Linux) in browser PR-1. The row stays hidden on Windows"
   }
 }

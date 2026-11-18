@@ -221,9 +221,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.launch_failed now also covers an error the agent answered a start request with, and an exit before its session was ready; \"Try again.\" added (was approved by Rohan on 2026-11-02 without \"Try again.\"). Rohan, on the review page (built from U3 53b4ca5d, approved as U3-31)"
   },
   "U3-err-agent.protocol_error": {
@@ -1094,9 +1094,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.answer_failed: an error the agent answered the question with (was \"Claude sent something Clauseo can't read.\"); Try again under the answer, never Restart"
   },
   "U3-err-agent.mode_missing": {
@@ -1105,9 +1105,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.mode_missing: the session offered no mode Clauseo runs it in (was \"Claude sent something Clauseo can't read.\"); the same words as U3-err-agent.unsupported_version, approved there"
   },
   "U3-err-agent.setting_refused": {
@@ -1116,9 +1116,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.setting_refused: the agent answered the lawyer's mode or setting change with an error (was \"Claude sent something Clauseo can't read.\")"
   },
   "U3-err-agent.start_offline": {
@@ -1127,9 +1127,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through"
   }
 }

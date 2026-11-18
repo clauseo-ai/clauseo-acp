@@ -247,9 +247,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "macchromium (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "macchromium (provisional; Rohan approved the earlier words, 'Install Google Chrome, then start a new conversation.', on the review page 2026-11-16; these reworded words to approve on the screenshots page, UET room/status)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Under Install Chrome on a Mac: names the browsers Clauseo looks for (Chrome, then Edge, Brave, Chromium); the browser's skill loads as each conversation starts (#899), so a new conversation finds one installed later. On Linux (development builds only) the host looks only for google-chrome and chromium, so the line's Edge and Brave are Mac-only; no lawyer sees Linux"
   },
   "UET-50": {

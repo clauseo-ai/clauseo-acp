@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "crash-reports-app (provisional; final English for Rohan's approval)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Settings, Privacy: the anonymous counts' switch, after UEP-26's line; crash reports follow the counts (decision 0060)"
   },
   "UC-750": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "crash-reports-app (provisional; final English for Rohan's approval)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "First run, the welcome's counts line: UD1-08's approved words with crash reports added, so a lawyer who never opens Settings is told (security review of #1099); UD1-08 retired. Settings keeps UEP-26 and UC-261"
   }
 }

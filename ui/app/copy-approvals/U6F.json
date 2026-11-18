@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.launch_failed now also covers an error the agent answered a start request with, and an exit before its session was ready; \"Try again.\" added (was approved by Rohan on 2026-11-02 without \"Try again.\"). Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-02": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.launch_failed now also covers an error the agent answered a start request with, and an exit before its session was ready; \"Try again.\" added (was approved by Rohan on 2026-11-02 without \"Try again.\"). Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-03": {
@@ -78,9 +78,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.launch_failed now also covers an error the agent answered a start request with, and an exit before its session was ready; \"Try again.\" added (was approved by Rohan on 2026-11-02 without \"Try again.\"). Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-10": {

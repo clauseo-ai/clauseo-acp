@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::HeldOpenBlocked: Clauseo's pre-write guard refused a step of the agent's that would change a paper open in Word (actor/turn/updates/guard_blocks.rs), once a paper a turn. Codex only: codex-acp sends no step for a call its hook blocked; Claude shows its own failed step, so it gets no notice. {name} is the agent as TN-11 names it; {file} the paper's name alone, the last part of its path, cut to 60 characters with its middle elided, and only when the matter holds it (else UC-704); shown as Versions names it (namesOf)"
   },
   "UC-701": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "UC-700 where the room knows no agent name (notice-words.ts), as TN-12; rendered alone. The host's own notice text is this English with the paper's name alone (never its path), for a view that does not know the kind"
   },
   "UC-702": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::CodexFolderBlocked: Clauseo's pre-write guard refused a step of ChatGPT's that would change the matter's .codex folder (Codex's own settings there), once a turn. Brief's draft was \"…tried to change Clauseo's settings for this matter\"; the folder holds the agent's settings, not Clauseo's"
   },
   "UC-703": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "UC-702 where the room knows no agent name, as TN-12; rendered alone. The host's own notice text is this English"
   },
   "UC-704": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::GuardStepBlocked: the guard refused a step on a paper open in Word, but the paper its record names is not one the matter holds, so the line names none (the record is the agent's to forge); once a turn. Also the host's English fallback"
   },
   "UC-705": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::GuardStepsMore with more = 1: once at a turn's end, the steps the guard stopped past the eight lines a turn names (UC-700 to UC-704). Also the host's English fallback"
   },
   "UC-706": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "guard-block-step (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "guard-block-step (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "UC-705 with more ≥ 2; {n} the count. Also the host's English fallback"
   }
 }
