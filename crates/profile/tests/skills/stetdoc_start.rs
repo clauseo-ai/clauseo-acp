@@ -29,8 +29,8 @@ use futures::executor::block_on;
 
 use super::{Scratch, profile_paths, stub, write};
 
-/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.3 (macOS arm64).
-const REAL_0_9_3: &[u8] = include_bytes!("../fixtures/stetdoc-0.9.3-skills-get-core.md");
+/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.4 (Linux `x86_64`).
+const REAL_0_9_4: &[u8] = include_bytes!("../fixtures/stetdoc-0.9.4-skills-get-core.md");
 
 /// A timer whose waits end at once: every limit has passed. With the stub held ([`slow`]), as
 /// for a stetdoc that the OS holds while it scans the program; a stub free to answer could
@@ -105,7 +105,7 @@ impl Timer for AtTheSkillRun {
 pub(crate) fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
     let bin = root.join("bin");
     write::fresh_dir(&bin).unwrap();
-    let real = std::str::from_utf8(REAL_0_9_3).unwrap();
+    let real = std::str::from_utf8(REAL_0_9_4).unwrap();
     (
         stub(&bin, version, real),
         profile_paths(root).claude_skills(),
@@ -127,7 +127,7 @@ fn answers(root: &Scratch) {
 /// 0.9.3's skill as it loads.
 #[cfg(test)]
 pub(crate) fn skill_0_9_3() -> SkillSource {
-    skill_source("stetdoc 0.9.3", REAL_0_9_3).unwrap()
+    skill_source("stetdoc 0.9.3", REAL_0_9_4).unwrap()
 }
 
 /// The marker of the stetdoc seen to answer, of the profile under `<root>` for the stub in
@@ -246,7 +246,7 @@ fn a_timeout_then_a_background_success_brings_the_skill() {
     assert_eq!(next, Some(State::On(Some(skill_0_9_3()))));
     let (line, skill) = told(&root, &next.unwrap());
     assert!(line);
-    let real = std::str::from_utf8(REAL_0_9_3).unwrap();
+    let real = std::str::from_utf8(REAL_0_9_4).unwrap();
     assert!(skill.unwrap().ends_with(real));
 }
 

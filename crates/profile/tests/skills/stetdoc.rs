@@ -1,6 +1,6 @@
 //! stetdoc as the agents get it: the command, told in the instructions' stetdoc line, with its
 //! skill optional. stetdoc 0.9.3 prints its skill's body alone, no frontmatter
-//! (`fixtures/stetdoc-0.9.3-skills-get-core.md`, captured from the macOS release binary; the
+//! (`fixtures/stetdoc-0.9.4-skills-get-core.md`, captured from the Linux release binary; the
 //! Windows one prints it with mostly CRLF line ends), so Clauseo writes the frontmatter: the
 //! description is its first `# ` heading, the body its text, byte for byte.
 
@@ -17,8 +17,8 @@ use futures::executor::block_on;
 
 use super::{Scratch, profile_paths, stub, write};
 
-/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.3 (macOS arm64).
-const REAL_0_9_3: &[u8] = include_bytes!("../fixtures/stetdoc-0.9.3-skills-get-core.md");
+/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.4 (Linux `x86_64`).
+const REAL_0_9_4: &[u8] = include_bytes!("../fixtures/stetdoc-0.9.4-skills-get-core.md");
 
 /// stetdoc 0.9.3's first line, which becomes the skill's description.
 const HEADING: &str = "stetdoc: editing Word documents with tracked changes";
@@ -39,7 +39,7 @@ fn own_front(description: &str) -> String {
 /// lines 216-235 and 279-293 (1-based), which end in a bare LF; the last line ends in CRLF.
 #[cfg(test)]
 fn windows_0_9_3() -> Vec<u8> {
-    let text = std::str::from_utf8(REAL_0_9_3).unwrap();
+    let text = std::str::from_utf8(REAL_0_9_4).unwrap();
     let mut out = String::new();
     for (at, line) in text.split_inclusive('\n').enumerate() {
         let number = at + 1;
@@ -58,15 +58,15 @@ fn windows_0_9_3() -> Vec<u8> {
 #[test]
 fn stetdoc_0_9_3s_body_only_text_loads_under_its_first_heading() {
     assert!(
-        REAL_0_9_3.starts_with(b"# stetdoc"),
+        REAL_0_9_4.starts_with(b"# stetdoc"),
         "the fixture has no frontmatter"
     );
-    let text = std::str::from_utf8(REAL_0_9_3).unwrap();
+    let text = std::str::from_utf8(REAL_0_9_4).unwrap();
     assert!(
         text.lines().skip(1).any(|line| line == "---"),
         "a rule mid-body"
     );
-    let loaded = skill_source("stetdoc 0.9.3", REAL_0_9_3).unwrap();
+    let loaded = skill_source("stetdoc 0.9.3", REAL_0_9_4).unwrap();
     assert_eq!(skill_text(&loaded), format!("{}{text}", own_front(HEADING)));
     assert_eq!(loaded.version, "stetdoc 0.9.3");
     assert!(render(&[loaded]).is_ok());
@@ -78,10 +78,10 @@ fn stetdoc_0_9_3s_body_only_text_loads_under_its_first_heading() {
 #[test]
 fn stetdoc_0_9_3s_windows_text_loads_the_same_and_stays_cached() {
     let windows = windows_0_9_3();
-    assert_eq!(windows.split(|&byte| byte == b'\n').count(), 300);
+    assert_eq!(windows.split(|&byte| byte == b'\n').count(), 310);
     assert_eq!(
         windows.windows(2).filter(|pair| pair == b"\r\n").count(),
-        264
+        274
     );
     assert!(windows.ends_with(b"\r\n"));
     let front = own_front(HEADING).into_bytes();
@@ -169,7 +169,7 @@ fn stetdoc_0_9_3s_version_works_and_its_skill_loads() {
     let bin = root.join("bin");
     write::fresh_dir(&bin).unwrap();
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    let real = std::str::from_utf8(REAL_0_9_3).unwrap();
+    let real = std::str::from_utf8(REAL_0_9_4).unwrap();
     let program = stub(&bin, "stetdoc 0.9.3\n", real);
     let version = block_on(stetdoc::version(&launcher, &AsyncIoTimer, &program)).unwrap();
     assert_eq!(version, "stetdoc 0.9.3");

@@ -19,30 +19,30 @@
 #
 # Each asset is an archive (.tar.gz, or .zip on Windows) holding one folder with the program
 # (`stetdoc`, `stetdoc.exe` on Windows) and its licence files; only the program is bundled. The
-# hashes match the digests GitHub lists for the release assets (`gh release view v0.9.3 -R
+# hashes match the digests GitHub lists for the release assets (`gh release view v0.9.4 -R
 # clauseo-ai/stetdoc --json assets`) and were checked against a download of each.
 #
-# v0.9.3 is built with `-C target-feature=+crt-static`, so the Windows program imports no
+# v0.9.4 is built with `-C target-feature=+crt-static`, so the Windows program imports no
 # VCRUNTIME, and it has a Windows arm64 (aarch64-pc-windows-msvc) asset.
 
-version = "0.9.3"
+version = "0.9.4"
 
 [aarch64-apple-darwin]
-url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-aarch64-apple-darwin.tar.gz"
-sha256 = "6be5d4edb66fe23316f102a98a948b3e5f50e485cfb7a95afa15bb99b842ff5a"
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.4/stetdoc-aarch64-apple-darwin.tar.gz"
+sha256 = "4ef120543aeadc4b806b1b6b308e0b618bb49f66d7a960099f209d5764ee4428"
 
 [x86_64-apple-darwin]
-url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-apple-darwin.tar.gz"
-sha256 = "159b664120ec537df224f5ad716dcd63d11b84759ad307f4331b28937b38dc5c"
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.4/stetdoc-x86_64-apple-darwin.tar.gz"
+sha256 = "78e0646986ef2359d698248bb64c7134be0502c4a67cd2b3f8c417d5abb2ca6d"
 
 [x86_64-unknown-linux-gnu]
-url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-unknown-linux-gnu.tar.gz"
-sha256 = "76ec891e2028b842191220a1175af0a6f672277467c01fb4b9712018a562dfe2"
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.4/stetdoc-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "b708f65893172f464a8689dba3a9bdf256d9cd47914d85eb063b48d9aa732fb5"
 
 [x86_64-pc-windows-msvc]
-url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-pc-windows-msvc.zip"
-sha256 = "2885fa3da7b7539f1d9d62a6e13f75e774dfbda7e3fc78f145b640cf8f924fe9"
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.4/stetdoc-x86_64-pc-windows-msvc.zip"
+sha256 = "85aede60e532c8d965ec7503d71351e60235f27044c8858ec628a793013e7f7e"
 
 [aarch64-pc-windows-msvc]
-url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-aarch64-pc-windows-msvc.zip"
-sha256 = "1a916baa7708e0712c916dbd556de727b40c2a8a35d03d53225aa76f85fce1cb"
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.4/stetdoc-aarch64-pc-windows-msvc.zip"
+sha256 = "7676a1a63007ec9cb6ee4023df72c9c37cff433829e0a528c58f4b751b58b365"
