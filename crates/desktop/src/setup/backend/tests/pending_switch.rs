@@ -15,7 +15,9 @@ use serde_json::json;
 
 use super::fakes::{command, rig, setup_events};
 use super::pending::{not_installed, pending, pump, ready, sign_ins as shown};
-use super::switch_account::{asked, device, different, sign_ins, signed_in, start, switch};
+use super::switch_account::{
+    asked, device, different, own_expired, sign_ins, signed_in, start, switch,
+};
 use super::{MAIN, codex};
 use crate::bridge::lock;
 use crate::test_support::block_on;
@@ -63,7 +65,7 @@ fn a_kept_press_keeps_the_yes_given_when_pressed() {
     ] {
         let rig = rig(true);
         not_installed(&rig, &codex());
-        rig.s18_was(&codex(), signed_in(Source::Own));
+        own_expired(&rig);
         let answer = block_on(rig.setup().run(MAIN, command));
         assert_eq!(answer, Ok(CommandOutcome::Done), "{call}");
         assert_eq!(sign_ins(&rig), 0, "{call}: kept, not started");
@@ -83,7 +85,7 @@ fn a_yes_does_not_outlive_its_cancelled_press() {
     for second_yes in [true, false] {
         let rig = rig(true);
         not_installed(&rig, &codex());
-        rig.s18_was(&codex(), signed_in(Source::Own));
+        own_expired(&rig);
         let done = Ok(CommandOutcome::Done);
         assert_eq!(block_on(rig.setup().run(MAIN, start(&codex()))), done);
         assert!(pending(&rig, &codex()).is_some(), "kept with the yes");
@@ -119,7 +121,7 @@ fn a_yes_does_not_outlive_its_cancelled_press() {
 /// read for the yes.
 fn kept_with_yes(rig: &super::fakes::Rig) {
     not_installed(rig, &codex());
-    rig.s18_was(&codex(), signed_in(Source::Own));
+    own_expired(rig);
     let answer = block_on(rig.setup().run(MAIN, start(&codex())));
     assert_eq!(answer, Ok(CommandOutcome::Done));
     assert!(pending(rig, &codex()).is_some(), "kept with the yes");
@@ -159,7 +161,7 @@ fn a_restart_drops_the_kept_press_and_its_yes() {
     drop(before);
     let rig = rig(true);
     not_installed(&rig, &codex());
-    rig.s18_was(&codex(), signed_in(Source::Own));
+    own_expired(&rig);
     assert_eq!(
         pending(&rig, &codex()),
         None,
@@ -188,7 +190,7 @@ fn a_login_changed_before_ready_drops_the_yes_and_the_next_press_asks() {
     assert_eq!(*lock(&rig.confirm.asked), [switch()], "no ask from Ready");
     let states = shown(setup_events(&mut feed), &codex());
     assert!(
-        matches!(states.last(), Some(SignIn::SignedIn { .. })),
+        matches!(states.last(), Some(SignIn::SignedOut { .. })),
         "S18's state again, not Queued: {states:?}"
     );
     let answer = block_on(rig.setup().run(MAIN, start(&codex())));
