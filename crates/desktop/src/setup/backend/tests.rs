@@ -24,6 +24,7 @@ mod pending_switch;
 mod python;
 mod quit;
 mod races;
+mod ready_order;
 mod refusals;
 mod reinstall;
 mod retry;

@@ -7,7 +7,7 @@
 //! given for: another one there by `Ready` drops the press, and the next press asks.
 
 use clauseo_agents::testing::failed;
-use clauseo_agents::{FailureKind, InstallState, Source};
+use clauseo_agents::{AgentsEvent, FailureKind, InstallState, SigninState, Source};
 use std::sync::atomic::Ordering;
 
 use clauseo_protocol::{CommandOutcome, SignIn};
@@ -21,6 +21,17 @@ use super::switch_account::{
 use super::{MAIN, codex};
 use crate::bridge::lock;
 use crate::test_support::block_on;
+
+/// S18 answers the status check `Ready` asked: signed out (the own login there has lapsed).
+/// Until it does, a start is dropped unasked (`ready_checks`).
+fn check_says_signed_out(rig: &super::fakes::Rig) {
+    let state = SigninState::SignedOut { found: None };
+    let event = AgentsEvent::Signin {
+        agent: codex(),
+        state,
+    };
+    block_on(rig.backend.pump(futures::stream::iter([event])));
+}
 
 /// Pressed with nothing to replace, kept while Codex installs; Clauseo's own login is there by
 /// `Ready` (a login of an earlier install's, read from the files): no login starts, no confirm
@@ -98,6 +109,7 @@ fn a_yes_does_not_outlive_its_cancelled_press() {
         );
         pump(&rig, &codex(), vec![ready()]);
         assert_eq!(sign_ins(&rig), 0, "nothing at Ready: {:?}", rig.calls());
+        check_says_signed_out(&rig);
 
         rig.confirm.answer.store(second_yes, Ordering::SeqCst);
         assert_eq!(block_on(rig.setup().run(MAIN, start(&codex()))), done);
@@ -169,6 +181,7 @@ fn a_restart_drops_the_kept_press_and_its_yes() {
     );
     pump(&rig, &codex(), vec![ready()]);
     assert_eq!(sign_ins(&rig), 0, "nothing at Ready: {:?}", rig.calls());
+    check_says_signed_out(&rig);
     let answer = block_on(rig.setup().run(MAIN, start(&codex())));
     assert_eq!(answer, Ok(CommandOutcome::Done));
     assert_eq!(*lock(&rig.confirm.asked), [switch()], "asked again");
@@ -193,6 +206,7 @@ fn a_login_changed_before_ready_drops_the_yes_and_the_next_press_asks() {
         matches!(states.last(), Some(SignIn::SignedOut { .. })),
         "S18's state again, not Queued: {states:?}"
     );
+    check_says_signed_out(&rig);
     let answer = block_on(rig.setup().run(MAIN, start(&codex())));
     assert_eq!(answer, Ok(CommandOutcome::Done));
     assert_eq!(

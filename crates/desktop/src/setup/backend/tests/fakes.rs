@@ -486,6 +486,7 @@ pub(super) fn rig_with(
         known,
         signin_gate: Mutex::default(),
         rechecks: Mutex::default(),
+        ready_checks: Mutex::default(),
         pending: Mutex::default(),
         wiring: Wiring::new(
             Arc::clone(&readers) as Arc<dyn LeaveReaders>,
