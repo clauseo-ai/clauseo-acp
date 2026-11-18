@@ -313,10 +313,10 @@ fn the_1098_pinned_read_is_not_denied() {
 
 /// The launch with the glob denies still fits: 60 seeded matters, the default folder and a
 /// configured one spelled two ways, Read and Edit with the glob denies, the allow rules and the
-/// Windows shell rules with their variable forms, under `SHED_AT`.
+/// fixed Windows shell rules, under 150 KB.
 #[test]
 fn the_launch_with_the_glob_denies_fits_its_budget() {
-    use crate::agent::loads::profile::SHED_AT;
+    const BUDGET: usize = 150 * 1024;
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let dir = TempDir::new("own-glob-size");
     for spellings in [vec![DATA], CONFIGURED.to_vec()] {
@@ -325,18 +325,15 @@ fn the_launch_with_the_glob_denies_fits_its_budget() {
         let glob = own_shell_glob_deny_rules(&deny, true);
         let read_edit = claude_deny_rules_on(&deny, true, false);
         let allow = claude_allow_rules_on(&deny, true);
-        let shell = super::super::super::windows_shell_deny_rules(
-            &deny,
-            &super::super::super::cross_tests::env,
-        );
+        let shell = super::super::super::windows_fixed_shell_deny_rules(&deny);
         let total = size(&read_edit) + size(&allow) + size(&shell);
         eprintln!(
-            "{spellings:?}: {} glob denies ({} B); deny, allow and shell {total} B of {SHED_AT}",
+            "{spellings:?}: {} glob denies ({} B); deny, allow and shell {total} B of {BUDGET}",
             glob.len(),
             size(&glob)
         );
         assert!(glob.iter().all(|rule| read_edit.contains(rule)));
-        assert!(total < SHED_AT, "{total}");
+        assert!(total < BUDGET, "{total}");
     }
 }
 

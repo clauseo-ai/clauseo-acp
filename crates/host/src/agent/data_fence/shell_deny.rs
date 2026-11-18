@@ -1,7 +1,14 @@
-//! Windows: Claude's `Bash(…)` and `PowerShell(…)` deny rules for a command that names what of
+//! Windows: Claude's shell rules. A launch sends the fixed list of `fixed_shell_deny.rs`
+//! ([`windows_fixed_shell_deny_rules`]), which does not grow with the data folder, and the own
+//! folders' allow and glob rules (`own_allow.rs`). The walked list below
+//! (`windows_shell_deny_rules`) is no longer sent: it grew with every spelling, separator and
+//! walked folder (9,472 rules, 656 KB on a test laptop) until Claude Code's classifier stopped
+//! answering. It is built in tests only, beside the rule matcher they share.
+//!
+//! The walked list: `Bash(…)` and `PowerShell(…)` deny rules for a command that names what of
 //! the data folder is not the session's own (decision record 0030, "Claude's permission mode").
 //! Claude runs in `auto` on Windows too, with no sandbox there, so a command in no rule goes to
-//! the classifier alone; these rules refuse the plain spellings first, beside the `Read` and
+//! the classifier alone; these rules refused the plain spellings first, beside the `Read` and
 //! `Edit` rules of [`super::claude_deny_rules`], and name the same targets (`LaunchDeny`,
 //! `launch.rs`): [`super::DENIED`] and every entry of `<data>` the launch found that is not the
 //! session's own. So the session's run and work folders, this matter's notes, Claude's plans
@@ -80,23 +87,33 @@
 //! `agent-state` alone (`npm ls claude-acp`), and in PowerShell, which ignores case, a path such
 //! as `…\Projects\Deal\` after `claude-acp` and `home` in the same command.
 
+#[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
 use std::ffi::OsString;
 
+#[cfg(test)]
 use super::LaunchDeny;
+pub(crate) use fixed_shell_deny::windows_fixed_shell_deny_rules;
+#[cfg(test)]
 use forms::{Shells, forms};
 pub(crate) use own_allow::{history_rules, own_shell_allow_rules, own_shell_glob_deny_rules};
 
+#[path = "fixed_shell_deny.rs"]
+mod fixed_shell_deny;
+#[cfg(test)]
 #[path = "shell_deny_forms.rs"]
 mod forms;
 #[path = "own_allow.rs"]
 mod own_allow;
 
 /// The matters' histories under `<data>` (`data_fence::DENIED`'s `matters/**`).
+#[cfg(test)]
 const HISTORIES: &str = "matters/**";
 
 /// The separators a command may write between two names: `\`, `/`, and `\\` (Git Bash's escaped
 /// form, or a doubled `\`).
+#[cfg(test)]
 const JUNCTIONS: [&str; 3] = ["\\", "/", "\\\\"];
 
 /// What may follow a name at a boundary, besides a separator or the end: a quote, a space or
@@ -104,6 +121,7 @@ const JUNCTIONS: [&str; 3] = ["\\", "/", "\\\\"];
 /// substitution, a glob character (`run\<sibling>*`), a dot (Win32 drops a name's trailing dots
 /// and spaces: `ai.clauseo.desktop.\tools` is the data folder's) and a colon (a stream,
 /// `settings.json::$DATA`).
+#[cfg(test)]
 const AFTER: [&str; 19] = [
     "\"", "'", " ", "\t", "\n", ";", "|", "&", ">", "<", "(", ")", ",", "`", "*", "?", "[", ".",
     ":",
@@ -116,6 +134,7 @@ const AFTER: [&str; 19] = [
 /// after `\`: `\\` is the escaped form's separator, which the rules name in its own right.
 /// A `strict` folder is one no own path is written past in the escaped form with a single `\`
 /// after it (a configured folder's path, `D:\FirmData\Clauseo\\x`): there `\` after `\` is a run.
+#[cfg(test)]
 fn after_sep(end: &str, strict: bool) -> &'static [&'static str] {
     match end {
         "\\" if strict => &["\"", "'", " ", "/", ".", "$", "{", "`", "\\"],
@@ -126,6 +145,7 @@ fn after_sep(end: &str, strict: bool) -> &'static [&'static str] {
 }
 
 /// The separators a `..` may follow anywhere after the data folder's name (`\\..` holds `\..`).
+#[cfg(test)]
 const DOTS: [&str; 2] = ["\\", "/"];
 
 /// The glob characters that reach every entry of a folder.
@@ -140,6 +160,7 @@ enum Piece {
 
 /// The rules (see the module doc) for `deny`'s spellings of `<data>` and targets, with `var`
 /// reading the variables of `forms::VARS`.
+#[cfg(test)]
 pub(crate) fn windows_shell_deny_rules(
     deny: &LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
@@ -151,6 +172,7 @@ pub(crate) fn windows_shell_deny_rules(
 /// variable (`%APPDATA%`, `$env:USERPROFILE`, `~`, …): what a launch sheds when its settings would
 /// outgrow the file Claude Code reads (`agent::loads::profile`). The default folder loses
 /// nothing: its name alone stands for all of those.
+#[cfg(test)]
 pub(crate) fn windows_shell_deny_rules_without_variables(
     deny: &LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
@@ -159,6 +181,7 @@ pub(crate) fn windows_shell_deny_rules_without_variables(
 }
 
 /// [`windows_shell_deny_rules`], with the variable forms when `variables`.
+#[cfg(test)]
 fn rules(
     deny: &LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
@@ -301,6 +324,7 @@ fn rules(
 
 /// The rules for a name (`path`) a target ends in: followed by anything, or when `bounded` at
 /// a name boundary only (a separator, one of [`AFTER`], the end).
+#[cfg(test)]
 fn named(
     path: &[Piece],
     bounded: bool,
@@ -319,6 +343,7 @@ fn named(
 
 /// The rules for a folder (`path`) named alone: followed by one of [`AFTER`] or at the end, and
 /// by a separator at the end, or before one of [`after_sep`] or a glob character.
+#[cfg(test)]
 fn alone(path: &[Piece], strict: bool, contents: &mut Vec<Vec<Piece>>, ends: &mut Vec<Vec<Piece>>) {
     for junction in JUNCTIONS {
         let with = join(&[path, &text(junction)]);
@@ -369,10 +394,12 @@ fn push_text(pieces: &mut Vec<Piece>, c: char) {
 
 /// The names of Clauseo's own that no folder of the lawyer's holds: a target or folder under
 /// one is named from it on ([`tail`]).
+#[cfg(test)]
 const OWN_WORDS: [&str; 3] = ["agent-state", "claude-acp", "codex-acp"];
 
 /// How long a run folder's name, or its group's start (`launch.rs`), must be to name it by its
 /// tail: an id's first twelve characters are no lawyer's folder name.
+#[cfg(test)]
 const DISTINCT: usize = 12;
 
 /// The tail a target or a folder is named by alone (the module doc), whatever spelling of
@@ -382,6 +409,7 @@ const DISTINCT: usize = 12;
 /// id, whose `history.git` a launch keeps (`agent::history`), so the launch walks into
 /// `matters` and that matter's folder. Written after each spelling of `<data>`, those rules
 /// grew the canary's launch (a long data folder, two spellings) past Claude Code's 2 MiB.
+#[cfg(test)]
 fn tail(names: &[Vec<Piece>]) -> Option<&[Vec<Piece>]> {
     fn is(name: &[Piece], word: &str) -> bool {
         matches!(name, [Piece::Text(text)] if text == word)
@@ -406,6 +434,7 @@ fn tail(names: &[Vec<Piece>]) -> Option<&[Vec<Piece>]> {
 /// Whether a kept place could have a name at `names`' last that starts with it and is longer:
 /// then its rules end at a name boundary. A target whose last name holds a pattern `*` never
 /// does. Names compare in any case, as Windows does; a pattern is taken as meeting anything.
+#[cfg(test)]
 fn needs_boundary(names: &[Vec<Piece>], kept: &[Vec<Vec<Piece>>]) -> bool {
     let Some((last, above)) = names.split_last() else {
         return false;
@@ -431,6 +460,7 @@ fn needs_boundary(names: &[Vec<Piece>], kept: &[Vec<Vec<Piece>>]) -> bool {
 }
 
 /// The text a name starts with, folded to lower case: the whole name when it has no pattern.
+#[cfg(test)]
 fn lead_text(name: &[Piece]) -> Option<String> {
     match name.first() {
         Some(Piece::Text(text)) => Some(text.to_lowercase()),
@@ -444,6 +474,7 @@ fn lead_text(name: &[Piece]) -> Option<String> {
 /// separator of [`JUNCTIONS`] when the folder above it is `walked` (its own rules catch a
 /// doubled separator or a dot after it), so a group's start (`run\x*`) can't match inside an
 /// own name; otherwise after `*` and `\` or `/`, so a separator run before it matches too.
+#[cfg(test)]
 fn spread(names: &[Vec<Piece>], walked: bool) -> Vec<Vec<Piece>> {
     let Some((last, above)) = names.split_last() else {
         return Vec::new();

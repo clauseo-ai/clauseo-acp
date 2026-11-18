@@ -234,8 +234,8 @@ fn a_sixty_matter_launch_carries_only_the_path() {
     assert!(windows_text.len() > 32_767, "the case this file is for");
 }
 
-/// [`claude_deny_rules`] and the shell rules for the same targets with the data folder at
-/// Windows' default place.
+/// [`claude_deny_rules`] and the fixed shell rules with the data folder at Windows' default
+/// place.
 fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
     let windows = LaunchDeny {
         spellings: vec![PathBuf::from(
@@ -243,12 +243,9 @@ fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
         )],
         ..deny.clone()
     };
-    let var = |name: &str| -> Option<std::ffi::OsString> {
-        (name == "LOCALAPPDATA").then(|| r"C:\Users\clauseo-lawyer\AppData\Local".into())
-    };
     let mut rules = claude_deny_rules_on(&windows, true, false);
-    rules.extend(crate::agent::data_fence::windows_shell_deny_rules(
-        &windows, &var,
+    rules.extend(crate::agent::data_fence::windows_fixed_shell_deny_rules(
+        &windows,
     ));
     rules
 }

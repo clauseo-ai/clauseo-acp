@@ -282,6 +282,7 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
         every.extend(super::super::claude_allow_rules_on(&deny, false));
         every.extend(windows_shell_deny_rules(&deny, var));
         every.extend(windows_shell_deny_rules_without_variables(&deny, var));
+        every.extend(super::windows_fixed_shell_deny_rules(&deny));
         assert!(every.len() > 1000, "{}", every.len());
         for rule in &every {
             let read = parse(rule);
@@ -295,129 +296,20 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
 
 /// The worst realistic launch: a long profile, a configured data folder under it spelled two
 /// ways (one in lower case), 1,000 seeded matters with random ids and realistic project keys.
-/// Its rules (Read and Edit with the shell rules and the allow rules, as JSON) stay under the size
-/// past which a launch sheds its variable forms (`agent::loads::profile::SHED_AT`, about 1.8 MiB).
+/// Its rules (Read and Edit with the fixed shell rules and the allow rules, as JSON) stay under
+/// the 2 MiB settings file Claude Code reads (`agent::launch_settings`).
 #[test]
 fn the_worst_realistic_launch_fits_the_settings_file() {
     let deny = worst();
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let allow = size(&super::super::claude_allow_rules_on(&deny, true));
     let read_edit = size(&claude_deny_rules_on(&deny, true, false)) + allow;
-    let full = size(&windows_shell_deny_rules(&deny, &long_env));
-    let shed = size(&windows_shell_deny_rules_without_variables(
-        &deny, &long_env,
-    ));
+    let shell = size(&super::windows_fixed_shell_deny_rules(&deny));
     eprintln!(
-        "worst launch: {} targets; Read/Edit and allow {read_edit} B (allow {allow} B); shell \
-         {full} B with the variable forms, {shed} B without; total {} B, or {} B shed",
+        "worst launch: {} targets; Read/Edit and allow {read_edit} B (allow {allow} B); fixed \
+         shell {shell} B; total {} B",
         deny.targets.len(),
-        read_edit + full,
-        read_edit + shed,
+        read_edit + shell,
     );
-    assert!(read_edit + full < crate::agent::loads::profile::SHED_AT);
-    assert!(shed < full);
-}
-
-/// The shed decision (`loads::profile::shell_rules_within`), driven off Windows on stage C's
-/// case: 1,000 matters and a configured folder under both `Local` and `Roaming` (two spellings).
-/// The bytes already spent are set from the budget, so no change to the other deny rules can move
-/// the case across it: at exactly the budget a launch keeps the variable forms; one byte past it,
-/// the launch logs the shed (fields only) and gets the rules without them, which still deny
-/// Claude's credentials in every spelling.
-#[test]
-fn a_launch_past_its_budget_sheds_the_variable_forms() {
-    use crate::agent::loads::profile::{SHED_AT, shell_rules_within};
-    let dir = TempDir::new("shell-deny-shed");
-    let (deny, _, _) = laptop(dir.path(), 11, 1000, "alexandra.montgomery-smith");
-    let home = r"C:\Users\alexandra.montgomery-smith\AppData";
-    let spellings = [
-        format!(r"{home}\Local\Clauseo Data"),
-        format!(r"{home}\Roaming\Clauseo Data"),
-    ];
-    let deny = LaunchDeny {
-        spellings: spellings.iter().map(PathBuf::from).collect(),
-        ..deny
-    };
-    let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
-    let full = windows_shell_deny_rules(&deny, &long_env);
-    let shed = windows_shell_deny_rules_without_variables(&deny, &long_env);
-    eprintln!(
-        "two spellings, 1,000 matters: shell rules {} B with the variable forms, {} B without \
-         (budget {SHED_AT})",
-        size(&full),
-        size(&shed),
-    );
-    assert!(size(&shed) < size(&full) && size(&full) < SHED_AT);
-    let fits = SHED_AT - size(&full);
-    let (kept, quiet) = logged(|| shell_rules_within(&deny, &long_env, fits, SHED_AT));
-    assert_eq!(kept, full);
-    assert!(!quiet.contains("shed="), "{quiet}");
-    let (got, text) = logged(|| shell_rules_within(&deny, &long_env, fits + 1, SHED_AT));
-    assert_eq!(got, shed);
-    assert!(fits + 1 + size(&got) <= SHED_AT);
-    assert!(
-        text.contains("shed=\"vars\"") || text.contains("shed=vars"),
-        "{text}"
-    );
-    assert!(
-        text.contains("budget=") && !text.contains("Clauseo Data"),
-        "{text}"
-    );
-    let rules = Rules::new(&got);
-    for spelling in &spellings {
-        let file = format!(r"{spelling}\agents\claude-acp\home\.credentials.json");
-        for tool in ["Bash", "PowerShell"] {
-            assert!(
-                rules.denies(tool, &format!(r#"type "{file}""#)),
-                "{tool}: {file}"
-            );
-        }
-    }
-    // Within its budget a launch keeps them.
-    let roomy = shell_rules_within(&deny, &long_env, 0, usize::MAX);
-    assert_eq!(roomy, full);
-}
-
-/// `run` under a log of its own, and what it logged. The cached interest of every callsite is
-/// rebuilt inside that scope first: with one dispatcher alive, tracing-core takes a callsite's
-/// interest from whatever default is in force where it is first hit (`Rebuilder::JustOne`), so
-/// a first hit with no subscriber, in this test or another in the process, silences it for good.
-fn logged<T>(run: impl FnOnce() -> T) -> (T, String) {
-    let log = Log::default();
-    let dispatch = log.dispatch();
-    let value = tracing::dispatcher::with_default(&dispatch, || {
-        tracing::callsite::rebuild_interest_cache();
-        run()
-    });
-    (value, log.text())
-}
-
-/// A log sink for one test's `tracing` output.
-#[derive(Clone, Default)]
-struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl Log {
-    fn dispatch(&self) -> tracing::Dispatch {
-        let sink = self.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_writer(move || sink.clone())
-            .finish();
-        tracing::Dispatch::new(subscriber)
-    }
-
-    fn text(&self) -> String {
-        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
-    }
-}
-
-impl std::io::Write for Log {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
+    assert!(read_edit + shell < 2 * 1024 * 1024);
 }

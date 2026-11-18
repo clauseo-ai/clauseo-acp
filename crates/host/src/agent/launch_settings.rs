@@ -39,8 +39,7 @@ use clauseo_protocol::{ErrorCode, MatterId};
 pub(crate) const FOLDER: &str = "launch-settings";
 
 /// The largest settings file Claude Code 2.1.293 reads (`Zf`, 2 MiB); a larger one makes it exit
-/// at its start, so a launch whose settings would be larger fails before it (the shell rules
-/// shed their variable forms first, `agent::loads::profile::SHED_AT`).
+/// at its start, so a launch whose settings would be larger fails before it.
 const MAX_FILE: usize = 2 * 1024 * 1024;
 
 /// The most names a run tries before its session call fails.

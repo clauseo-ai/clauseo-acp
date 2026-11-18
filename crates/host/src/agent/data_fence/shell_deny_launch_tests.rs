@@ -547,14 +547,14 @@ fn only_this_matters_history_opens_to_a_command() {
 
 /// The desktop canary's launch on Windows (`crates/desktop/tests/canary.rs`): a data folder
 /// whose path is long, with spaces and Devanagari, in two spellings (the 8.3 one too), this
-/// matter's `history.git` kept. Its Read and Edit denies, allow rules, history rules and shell
-/// rules with their variable forms stay under `SHED_AT`: with the folders under `matters`
-/// named after each spelling of `<data>`, they came to 3.7 MB, and the launch failed with
-/// "Clauseo could not write the agent's settings file".
+/// matter's `history.git` kept. Its Read and Edit denies, allow rules, history rules and fixed
+/// shell rules stay under 256 KB (two spellings of a long path; about 210 KB). With the walked
+/// shell rules and the folders under `matters` named after each spelling of `<data>`, they came
+/// to 3.7 MB, and the launch failed with "Clauseo could not write the agent's settings file".
 #[test]
 fn the_canary_launch_with_its_history_fits_its_budget() {
     use crate::agent::data_fence::{claude_allow_rules_on, history_rules, own_reads};
-    use crate::agent::loads::profile::SHED_AT;
+    const BUDGET: usize = 256 * 1024;
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let dir = TempDir::new("shell-deny-canary");
     let data = dir.path().join("data");
@@ -584,16 +584,11 @@ fn the_canary_launch_with_its_history_fits_its_budget() {
         spellings: vec![canary("runneradmin"), canary("RUNNER~1")],
         ..deny
     };
-    let env = |var: &str| match var {
-        "LOCALAPPDATA" => Some(r"C:\Users\runneradmin\AppData\Local".into()),
-        "TEMP" | "TMP" => Some(r"C:\Users\RUNNER~1\AppData\Local\Temp".into()),
-        _ => None,
-    };
     let (allow, history_deny) = history_rules(&deny, true);
     let total = size(&claude_deny_rules_on(&deny, true, false))
         + size(&claude_allow_rules_on(&deny, true))
         + size(&allow)
         + size(&history_deny)
-        + size(&windows_shell_deny_rules(&deny, &env));
-    assert!(total < SHED_AT, "{total} B of {SHED_AT}");
+        + size(&super::windows_fixed_shell_deny_rules(&deny));
+    assert!(total < BUDGET, "{total} B of {BUDGET}");
 }
