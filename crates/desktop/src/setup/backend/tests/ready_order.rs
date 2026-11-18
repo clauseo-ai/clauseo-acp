@@ -50,24 +50,35 @@ impl std::io::Write for Lines {
     }
 }
 
-/// The `Ready` publish comes after the status check is asked, by host.log's own lines.
-#[test]
-fn the_ready_publish_comes_after_the_check_is_asked() {
+/// The lines this thread logs while `work` runs. A second dispatcher stays alive meanwhile: with
+/// just one, tracing caches a log line's interest from whichever thread reaches it first, so a
+/// sibling test running the same code with no subscriber would mute it here.
+fn captured(work: impl FnOnce()) -> String {
     let lines = Lines::default();
     let writer = lines.clone();
     let subscriber = tracing_subscriber::fmt()
         .with_writer(move || writer.clone())
         .with_ansi(false)
         .finish();
+    let dispatch = tracing::Dispatch::new(subscriber);
+    let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+    tracing::dispatcher::with_default(&dispatch, work);
+    String::from_utf8(lock(&lines.0).clone()).unwrap()
+}
+
+/// The `Ready` publish comes after the status check is asked, by the log: the fake's line for
+/// the call, as the product's own "asked" line stops after a run's first 50 lines
+/// (`status_timing`), which sibling tests in the same process use up.
+#[test]
+fn the_ready_publish_comes_after_the_check_is_asked() {
     let rig = rig(true);
-    tracing::subscriber::with_default(subscriber, || ready_over_own_login(&rig));
-    let text = String::from_utf8(lock(&lines.0).clone()).unwrap();
+    let text = captured(|| ready_over_own_login(&rig));
     let at = |needle: &str| {
         text.lines()
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("no {needle:?} in {text}"))
     };
-    let asked_at = at("sign-in status check asked");
+    let asked_at = at("fake agents call check_status");
     let ready_at = at(r#"install state published to the windows agent=codex-acp state="ready""#);
     assert!(asked_at < ready_at, "{text}");
 }

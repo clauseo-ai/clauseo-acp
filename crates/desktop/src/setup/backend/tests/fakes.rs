@@ -85,6 +85,8 @@ pub(super) struct FakeAgents {
 
 impl FakeAgents {
     fn call(&self, name: &'static str, agent: &AgentId) {
+        // a line in order with the backend's own, for a test that reads the log (`ready_order`)
+        tracing::info!(%agent, "fake agents call {name}");
         lock(&self.calls).push((name, agent.clone()));
         lock(&self.journal).push(format!("agents.{name}"));
         let answer = lock(&self.answers).get(name).cloned();
