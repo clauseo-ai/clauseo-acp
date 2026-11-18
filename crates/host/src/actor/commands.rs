@@ -6,6 +6,7 @@
 //! A refused command stores no receipt. A failed commit answers with the stream's first
 //! failure.
 
+mod lookup;
 mod to_turn;
 
 use clauseo_protocol::{
@@ -26,6 +27,9 @@ use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
 use crate::principal::{Access, authorize};
+
+pub(super) use lookup::listed_thread;
+pub(crate) use lookup::{check_matter, check_thread};
 
 /// A command between its receipt lookup and its answer.
 pub(crate) struct PendingCommand {
@@ -385,40 +389,6 @@ pub(super) fn command_committed(
         .map(|()| answer)
         .map_err(|failure| Error::Store(failure.error.clone()));
     actor.finish_command(id, result);
-}
-
-/// The thread `thread`, or `command.unknown_thread`.
-pub(crate) fn check_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEntry, Error> {
-    actor.threads.get(&thread).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::CommandUnknownThread,
-            format!("no thread {thread}"),
-        )
-    })
-}
-
-/// The thread `thread` of a matter on the list, for a command that names it:
-/// `command.unknown_thread` for an unknown thread or one of a forgotten matter.
-pub(super) fn listed_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEntry, Error> {
-    let entry = actor.check_thread(thread)?;
-    if actor.matters.contains_key(&entry.row.matter) {
-        Ok(entry)
-    } else {
-        Err(Error::refused(
-            ErrorCode::CommandUnknownThread,
-            format!("thread {thread} is in a forgotten matter"),
-        ))
-    }
-}
-
-/// The matter `matter`, or `command.unknown_matter`.
-pub(crate) fn check_matter(actor: &Actor, matter: MatterId) -> Result<&MatterEntry, Error> {
-    actor.matters.get(&matter).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::CommandUnknownMatter,
-            format!("no matter {matter}"),
-        )
-    })
 }
 
 /// `CreateThread`: the agent must be in the settings; `ThreadCreated` and the row. No
