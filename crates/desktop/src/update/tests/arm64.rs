@@ -23,7 +23,7 @@ use crate::test_support::{Scratch, block_on};
 
 /// The release's host: never resolved, the proxy answers every `CONNECT`.
 const HOST: &str = "updates.clauseo.test";
-/// The version of the real signatures, newer than the app's own (`tauri.conf.json`'s 0.0.0).
+/// The version of the real signatures, newer than the test app's own (`plugin::app`'s 0.0.0).
 const VERSION: &str = "0.0.3";
 /// The bytes of the entry for this machine's own keys (the x64 installer's, on Windows x64).
 const NATIVE_BYTES: &[u8] = b"the native installer's bytes";
