@@ -31,7 +31,13 @@ import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { rememberPlan } from "./plan-default.ts";
 import type { Drafts } from "./thread/session.ts";
-import { applyChange, freshState, keepKept, type MatterState } from "./conversations-state.ts";
+import {
+  applyChange,
+  freshState,
+  keepHeard,
+  keepKept,
+  type MatterState,
+} from "./conversations-state.ts";
 import { resting, type ConversationsView, type Known } from "./conversations-view.ts";
 import type { AppEvent, NextHost } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
@@ -210,8 +216,9 @@ export class Conversations {
     if (typeof made === "string" || made.thread_created === undefined)
       throw internalError("create_thread answered without a thread");
     const thread = made.thread_created.thread;
-    // idle until its question is accepted and its header says otherwise
-    m.threads.set(thread, { thread, matter: m.matter, agent, status: "idle", queue_held: false });
+    // idle until its question is accepted and its header says otherwise; a threads_changed heard first is newer
+    if (!m.threads.has(thread))
+      m.threads.set(thread, { thread, matter: m.matter, agent, status: "idle", queue_held: false });
     m.made.add(thread);
     m.unsent.add(thread);
     m.keys.set(thread, key);
@@ -328,9 +335,11 @@ export class Conversations {
     this.#emit();
   }
 
-  /** Reads the matter's list; an answer older than a later read is dropped. */
+  /** Reads the matter's list; an answer older than a later read is dropped, and a thread a threads_changed told of
+   * after the read was asked keeps what the change said. */
   #list(m: MatterState): Promise<void> {
     const ticket = (m.ticket += 1);
+    const since = m.heardN;
     const rows = this.#next.matters;
     const read = (async () => {
       try {
@@ -345,6 +354,7 @@ export class Conversations {
           const known = m.threads.get(made);
           if (!listed.has(made) && known !== undefined) listed.set(made, known);
         }
+        keepHeard(m, listed, since);
         keepKept(m, listed);
         m.threads = listed;
         m.phase = "ready";

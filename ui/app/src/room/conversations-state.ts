@@ -25,6 +25,11 @@ export type MatterState = {
   /** The list read in flight, for a first send while it loads. */
   listing: Promise<void> | null;
   ticket: number;
+  /** Each thread a threads_changed told of (upserted or removed), by the count of changes heard when it did: a list
+   * answer travels apart from the app feed, so one asked before that change may land after it, and the change stands. */
+  heard: Map<ThreadId, number>;
+  /** How many partial threads_changed this matter has heard. */
+  heardN: number;
   /** Threads given a rename by this room: one each. */
   renamed: Set<ThreadId>;
   /** H13: threads this room retried, with the thread and the time of the question they came from. */
@@ -52,12 +57,26 @@ export const freshState = (matter: MatterId): MatterState => ({
   refusal: null,
   listing: null,
   ticket: 0,
+  heard: new Map(),
+  heardN: 0,
   renamed: new Set(),
   retried: new Map(),
   made: new Set(),
   unsent: new Set(),
   kept: null,
 });
+
+/** A list read (`listed`) that was asked when `since` changes had been heard: each thread a later threads_changed told
+ * of keeps what it said (or stays gone), as that change is newer than the answer. */
+export function keepHeard(m: MatterState, listed: Map<ThreadId, Known>, since: number): void {
+  for (const [thread, n] of m.heard) {
+    if (n <= since) continue;
+    const now = m.threads.get(thread);
+    if (now === undefined) listed.delete(thread);
+    else listed.set(thread, now);
+  }
+  m.heard.clear();
+}
 
 /** A list just read or heard (`threads`) keeps the thread opened with its summary, while it is still the one open; once
  * another opens it is let go. */
@@ -90,7 +109,13 @@ export function applyChange(
     m.unsent.delete(gone);
   }
   m.threads = threads;
-  if (change.all) {
+  if (!change.all) {
+    m.heardN += 1;
+    for (const t of change.threads) m.heard.set(t.thread, m.heardN);
+    for (const gone of change.removed) m.heard.set(gone, m.heardN);
+  } else {
+    // every read in flight is older and is dropped, so none needs what was heard
+    m.heard.clear();
     m.ticket += 1;
     m.phase = "ready";
     m.refused = null;
