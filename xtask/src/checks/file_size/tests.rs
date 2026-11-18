@@ -11,7 +11,7 @@ use repos::{exceptions, git_repo, lines};
 
 #[test]
 fn a_file_of_exactly_the_limit_passes() {
-    let found = run(git_repo("exactly-600", &[("src/lib.rs", lines(LINE_LIMIT))]).ctx());
+    let found = run(git_repo("exactly-700", &[("src/lib.rs", lines(LINE_LIMIT))]).ctx());
     assert_eq!((found.inspected, found.violations), (1, Vec::new()));
 }
 
@@ -36,7 +36,7 @@ fn a_listed_file_over_the_limit_still_has_its_comments_checked() {
     let found = run(git_repo(
         "listed-comment",
         &[
-            ("src/parser.rs", format!("{long_comment}{}", lines(650))),
+            ("src/parser.rs", format!("{long_comment}{}", lines(750))),
             exceptions("src/parser.rs generated\n"),
         ],
     )
@@ -77,20 +77,20 @@ fn lines_end_at_lf_crlf_or_a_lone_cr() {
 }
 
 #[test]
-fn near_limit_notes_name_changed_files_of_501_to_600_lines() {
+fn near_limit_notes_name_changed_files_of_501_to_700_lines() {
     let sizes = [
         ("a.rs".to_owned(), 500),
         ("b.rs".to_owned(), 501),
-        ("c.ts".to_owned(), 600),
-        ("d.rs".to_owned(), 601),
+        ("c.ts".to_owned(), 700),
+        ("d.rs".to_owned(), 701),
         ("e.rs".to_owned(), 550),
     ];
     let changed = ["a.rs", "b.rs", "c.ts", "d.rs", "gone.rs"].map(str::to_owned);
     assert_eq!(
         near_limit_notes(&changed, &sizes),
         [
-            "b.rs has 501 of 600 lines; split it now",
-            "c.ts has 600 of 600 lines; split it now",
+            "b.rs has 501 of 700 lines; split it now",
+            "c.ts has 700 of 700 lines; split it now",
         ]
     );
 }

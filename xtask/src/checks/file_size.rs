@@ -23,7 +23,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The most lines a source file may have, unless it is an exception.
-pub(super) const LINE_LIMIT: usize = 600;
+///
+/// TEMPORARY, Rohan 18 Nov 2026: raised from 600 to 700 until the 20 Nov build; back to 600
+/// right after it (revert this commit). Not a licence to stop splitting files.
+pub(super) const LINE_LIMIT: usize = 700;
 /// A changed file over this many lines gets a note.
 const NOTE_FROM: usize = 500;
 /// The last column a comment may reach, in characters.

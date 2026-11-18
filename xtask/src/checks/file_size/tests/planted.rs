@@ -6,34 +6,34 @@ use crate::checks::file_size::Fix;
 use crate::checks::planted::{fails, failure};
 
 crate::checks::planted::cases! {
-    /// A `.rs` file of 601 lines fails at line 1 and names the limit and the two fixes.
+    /// A `.rs` file of 701 lines fails at line 1 and names the limit and the two fixes.
     rs_601_lines: Fails[fails(
         "src/big.rs:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::rs_601_lines,
-    /// A `.ts` file of 601 lines fails the same way.
+    /// A `.ts` file of 701 lines fails the same way.
     ts_601_lines: Fails[fails(
         "ui/big.ts:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::ts_601_lines,
-    /// A `.tsx` file of 601 lines fails the same way.
+    /// A `.tsx` file of 701 lines fails the same way.
     tsx_601_lines: Fails[fails(
         "ui/Big.tsx:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::tsx_601_lines,
-    /// A `.mts` file of 601 lines fails the same way, and so does an upper-case `.RS` file.
+    /// A `.mts` file of 701 lines fails the same way, and so does an upper-case `.RS` file.
     mts_and_upper_case_rs_601_lines: Fails[
         fails(
             "src/LIB.RS:1",
-            "this file has 601 lines; the limit is 600",
+            "this file has 701 lines; the limit is 700",
             Fix::SplitOrExempt,
         ),
         fails(
             "ui/big.mts:1",
-            "this file has 601 lines; the limit is 600",
+            "this file has 701 lines; the limit is 700",
             Fix::SplitOrExempt,
         ),
     ], inspects 2 => super::repos::mts_and_upper_case_rs_601_lines,
@@ -47,7 +47,7 @@ crate::checks::planted::cases! {
     /// An exception for a file of 450 lines fails: it needs no exception.
     stale_exception_short: Fails[fails(
         "xtask/file-size-exceptions.txt:2",
-        "`src/short.rs` is listed as an exception, but it has 450 lines, within the 600-line limit",
+        "`src/short.rs` is listed as an exception, but it has 450 lines, within the 700-line limit",
         Fix::DeleteException,
     )], inspects 1 => super::repos::stale_exception_short,
     /// A line comment that reaches column 101 fails, and the message names the column.
@@ -105,29 +105,29 @@ crate::checks::planted::cases! {
         crate::checks::Fix::NotUtf8,
     )], inspects 0 => super::repos::only_file_unreadable,
     /// A file of 650 lines listed in the exception file, with a reason, passes.
-    listed_600_plus_file_passes: Passes, inspects 1 => super::repos::listed_600_plus_file_passes,
-    /// A `.cts` file of 601 lines fails the same way.
+    listed_700_plus_file_passes: Passes, inspects 1 => super::repos::listed_700_plus_file_passes,
+    /// A `.cts` file of 701 lines fails the same way.
     cts_601_lines: Fails[fails(
         "ui/big.cts:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::cts_601_lines,
     /// CRLF line endings count one line each.
     crlf_601_lines: Fails[fails(
         "src/big.rs:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::crlf_601_lines,
     /// Lone `\\r` line endings count one line each too.
     lone_cr_601_lines: Fails[fails(
         "ui/big.ts:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::lone_cr_601_lines,
     /// A `.rs` symlink to a long file of another kind is read through the link.
     symlinked_file_601_lines: Fails[fails(
         "src/link.rs:1",
-        "this file has 601 lines; the limit is 600",
+        "this file has 701 lines; the limit is 700",
         Fix::SplitOrExempt,
     )], inspects 1 => super::repos::symlinked_file_601_lines,
     /// An outer doc comment (`///`) that reaches column 101 fails.

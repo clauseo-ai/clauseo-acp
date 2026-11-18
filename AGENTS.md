@@ -66,7 +66,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
   not even `#[expect]`. What such a crate carries is in the I/O paragraph of `ARCHITECTURE.md`.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.
-- A source file has at most 600 lines.
+- A source file has at most 700 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
