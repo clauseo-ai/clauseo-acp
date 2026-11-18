@@ -1,0 +1,1 @@
+Your shell has the internet, so a download or another command that needs it just runs.

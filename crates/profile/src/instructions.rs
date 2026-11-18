@@ -83,28 +83,28 @@ pub const BROWSER_CLAUDE_MCP: &str = include_str!("../assets/instructions/browse
 /// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
 pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
 
-/// The line every Codex session gets after the instructions, whatever its browser: its shell starts
-/// offline, and a command that needs the internet asks for escalated permissions, which Codex's own
-/// reviewer answers. Claude never gets it.
+/// The shell line a Codex session with web search gets after the instructions: with web search on,
+/// Codex's sandboxed shell has the network (`network_access`, #1252), so a download just runs.
+/// Claude never gets it.
+pub const CODEX_SHELL_ONLINE: &str = include_str!("../assets/instructions/codex-shell-online.txt");
+
+/// The shell line a Codex session without web search gets after the instructions: its shell is
+/// offline, and a command that fails for want of the internet is rerun on its own with escalated
+/// permissions, which Codex's reviewer answers. Claude never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
-/// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
-/// without web search ([`codex_shell_offline`]).
-pub const CODEX_SHELL_SEARCH: &str = "Otherwise prefer web search, web fetch or the browser.";
-
-/// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
-/// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.
-pub fn codex_shell_offline(web_search: bool) -> &'static str {
-    let line = CODEX_SHELL_OFFLINE.trim();
+/// The shell line a Codex session gets, by its web search switch (`web_search`):
+/// [`CODEX_SHELL_ONLINE`] when on, else [`CODEX_SHELL_OFFLINE`], both trimmed.
+pub fn codex_shell_net(web_search: bool) -> &'static str {
     if web_search {
-        return line;
+        CODEX_SHELL_ONLINE.trim()
+    } else {
+        CODEX_SHELL_OFFLINE.trim()
     }
-    line.strip_suffix(CODEX_SHELL_SEARCH)
-        .map_or(line, str::trim_end)
 }
 
-/// The line every Codex session gets after [`CODEX_SHELL_OFFLINE`]: Codex's refusals reach the
+/// The line every Codex session gets after [`codex_shell_net`]: Codex's refusals reach the
 /// lawyer only through its answer. A command its sandbox refuses at once, or a write the
 /// pre-write guard blocks, sends Clauseo no step at all (codex 0.162.1 and codex-acp 2.2.2), so
 /// unless the answer says so, the lawyer never learns it. Copy id UC-710. Claude never gets it:

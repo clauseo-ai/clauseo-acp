@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, BrowserRoute, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
-    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part,
+    BrowserPart, BrowserRoute, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, LEGAL, SCALE_CLAUDE, STETDOC_CLI,
+    TOOLS, browser_part, browser_part_for, codex_shell, codex_shell_net, connectors_part,
     word_count,
 };
 use clauseo_profile::placeholders::{
@@ -28,7 +28,8 @@ const SHARED_MAX: usize = 1800;
 /// history line.
 const CLAUDE_MAX: usize = 2300;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
-/// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
+/// legal part, the shell-net line (online with web search), the refusal line, the shell line and
+/// the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 /// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
 /// 2016; 2100 for the version history line.
@@ -133,7 +134,7 @@ fn codex_standing_text_budget() {
         browser_part_for(BrowserPart::On, BrowserRoute::CodexEntry),
     );
     for line in [
-        CODEX_SHELL_OFFLINE,
+        codex_shell_net(true),
         CODEX_REFUSAL,
         codex_shell(true).unwrap(),
     ] {
