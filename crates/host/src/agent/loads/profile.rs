@@ -493,9 +493,9 @@ pub(crate) fn codex_keys(
     if let Some(Value::String(text)) = keys.get_mut("developer_instructions") {
         *text = fill_instructions(text, folders)?;
         if !web_search.on {
-            // The offline-shell line offers no web search to a session without it.
-            let offline = clauseo_profile::instructions::codex_shell_offline;
-            *text = text.replace(offline(true), offline(false));
+            // The shell line says the shell is offline when the session has no web search.
+            let net = clauseo_profile::instructions::codex_shell_net;
+            *text = text.replace(net(true), net(false));
         }
     }
     let search = if web_search.on { "live" } else { "disabled" };

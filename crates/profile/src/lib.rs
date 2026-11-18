@@ -252,14 +252,15 @@ impl ClauseoProfile {
     }
 
     /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line and
-    /// [`instructions::CODEX_SHELL_OFFLINE`], a blank line and [`instructions::CODEX_REFUSAL`],
+    /// [`instructions::codex_shell_net`]`(true)` (the online shell line, as the host swaps in the
+    /// offline one when web search is off), a blank line and [`instructions::CODEX_REFUSAL`],
     /// then on macOS (`macos`) a blank line and [`instructions::codex_shell`]'s line; Claude
     /// gets none of them.
     pub fn codex_instructions_for(&self, macos: bool) -> String {
         let text = format!(
             "{}\n\n{}\n\n{}",
             self.instructions_for(AgentKind::Codex),
-            instructions::CODEX_SHELL_OFFLINE.trim(),
+            instructions::codex_shell_net(true),
             instructions::CODEX_REFUSAL.trim()
         );
         match instructions::codex_shell(macos) {
