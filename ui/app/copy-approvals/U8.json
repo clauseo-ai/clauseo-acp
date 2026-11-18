@@ -323,9 +323,9 @@
     "en": "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service} may still have an earlier version.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "icloud fixes (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Now says \"may\", matching #1180's lines: iCloud Drive keeps no version history for Word files, so \"{service}'s version history has the earlier one\" was false. Was approved 2026-11-11 (stage D undo keeps skipped files); the old Hindi said the copy is in {service}'s older versions, so it no longer matches."
   },
   "U8-38": {

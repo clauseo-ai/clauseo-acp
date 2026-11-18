@@ -104,9 +104,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "blackline-notes-tables (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "over the blackline sheet when stetdoc lists or counts more tracked changes than the sheet shows in the body and the parts: in practice a footnote, endnote, header or footer whose view failed or whose opening line couldn't be read, or a summary count above what is shown; compare marks no tracked change in comments, so they aren't the example (BlacklineNotice changes_outside_text). Reworded by blackline PR 2: first from '…such as in headers or footnotes. They aren't shown here.' (the sheet now shows changed notes, headers and footers), then, after review round 2, from '…such as in comments.', the one case that doesn't happen; then, on the app track's review, from 'Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown.'"
   },
   "UC-369": {

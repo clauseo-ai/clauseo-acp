@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Tool line reason (row and \"Browser: off, {reason}.\"): the browser's egress proxy couldn't be opened for the session (no_proxy), so the browser is left out. No \"proxy\" in lawyer-facing words"
   },
   "UC-614": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Tool line popover, under the browser's reason in full (no_proxy). No \"proxy\" in lawyer-facing words"
   },
   "UC-615": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Tool line reason (row and \"Browser: off, {reason}.\"): Clauseo's block list didn't load as the session started (block_list_not_loaded), so the browser is left out rather than let every site through; checked again at the next session launch. \"Unsafe-site list\" as in words-blocklist.ts"
   },
   "UC-616": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Tool line popover, under the browser's reason in full (block_list_not_loaded)"
   }
 }

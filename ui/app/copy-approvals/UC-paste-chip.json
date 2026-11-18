@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "the name on a long paste's chip on the composer's well: a paste of 20,000 characters or more goes into a chip, not the field"
   },
   "UC-257": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "under Pasted text on the chip: the pasted text's size in words, Indian grouping and Western digits (money.ts's count), e.g. 8,400 words"
   },
   "UC-258": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "the chip's remove button's name, for a screen reader and its tooltip-less icon; the chip's size describes it"
   },
   "UC-259": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "spare id: under Pasted text when the paste is one word, such as a long run of digits; the one form of {count} words (UC-257), as 1 paper and {n} papers are"
   }
 }

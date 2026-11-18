@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "The first screen's Open the folder for a matter, a folder picked on a network drive or a drive without file permissions: the step's other button, which makes the folder a matter anyway. The step's title and words are New matter's warning's (FR-07, FR-08, FR-13, FR-14), Choose another folder as FR-09. The same words as #1060's FR-30 (its backslash step), so one entry can go when both are in"
   },
   "UC-284": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "The first screen's step for a folder picked on a network drive: New matter's warning's words reused (FR-07's title, FR-08's body and why, FR-09's button), the why said in the step since it has no info icon; Open anyway as UC-283"
   },
   "UC-285": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "The first screen's step for a folder picked on a drive without file permissions: New matter's warning's words reused (FR-13's title, FR-14's body and why, FR-09's button); Open anyway as UC-283"
   }
 }

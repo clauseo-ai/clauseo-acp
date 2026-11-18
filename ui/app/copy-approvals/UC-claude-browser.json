@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "browser1 (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "browser1 (provisional; Rohan to approve on the copy page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::SandboxOff: Claude's sandbox fell back off on macOS or Linux (a * or ? in a path, a path that is not UTF-8, no short temp folder; agent::loads::sandbox::Off::holds_auto_back), so Claude runs in acceptEdits and asks before running commands, and the session gets no browser entry (actor/turn/profile_loads/claude.rs); once a thread for the host's run. One notice for both, per the orchestrator 2026-11-15. The host's own notice text is this English"
   }
 }

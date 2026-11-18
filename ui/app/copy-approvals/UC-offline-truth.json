@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.unreachable (offline truth): the agent couldn't get through to its service while the computer seemed online, so the turn failed; Try again under the answer, never Restart; Claude's, as U3-err-agent.quiet names Claude; ChatGPT's is UC-531"
   },
   "UC-531": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.unreachable (offline truth): the agent couldn't get through to its service while the computer seemed online; Try again under the answer, never Restart"
   },
   "UC-532": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.unreachable (offline truth): an agent of no kind by its name, as U6F-23 (agent.quiet's); Try again under the answer, never Restart"
   },
   "UC-533": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "agent.unreachable (offline truth): no name at all, as U6F-24 (agent.quiet's); Try again under the answer, never Restart"
   },
   "UC-534": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)"
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)"
   },
   "UC-535": {
     "en": "Your browser opens when setting up can continue.",
@@ -59,8 +59,8 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "orchestrator (design approved; Rohan to OK on the screenshots page)"
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)"
   }
 }

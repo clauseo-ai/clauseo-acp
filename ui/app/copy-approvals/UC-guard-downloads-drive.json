@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "guarddl notice (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "guarddl notice (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice NoticeKind::DownloadOutsideMatter (crates/host/src/sources/browser/fallback.rs): the browser saved a download in Clauseo's own folder for the matter (<app data>/agent-state/<matter>/downloads) because the matter's drive cannot keep the downloaded-from-the-internet mark. {file} is the file's plain name, isolated. The row ends with the existing Show in Finder / Show in File Explorer / Show in folder button, which reveals the file selected (reveal's download target)"
   }
 }
