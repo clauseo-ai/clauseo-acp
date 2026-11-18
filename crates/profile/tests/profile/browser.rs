@@ -207,6 +207,30 @@ fn only_the_browser_part_names_agent_browser() {
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
 }
 
+/// `codex_shell_net_on` gives the exact line for each combination: web search off is the offline
+/// line on every OS; web search on is the online line, or on Windows the Python-download line.
+#[test]
+fn codex_shell_net_gives_the_line_for_web_search_and_os() {
+    use clauseo_profile::instructions::codex_shell_net_on;
+    let offline = "Your shell is offline: when a command fails for want of the internet, rerun it \
+        at once with `sandbox_permissions: \"require_escalated\"` and a one-line `justification`, \
+        without asking the lawyer first; Codex's reviewer checks it and the command gets network.";
+    assert_eq!(codex_shell_net_on(false, false), offline);
+    assert_eq!(codex_shell_net_on(false, true), offline);
+    assert_eq!(
+        codex_shell_net_on(true, false),
+        "Your shell has the internet, so a download or another command that needs it just runs."
+    );
+    assert_eq!(
+        codex_shell_net_on(true, true),
+        "Your shell has the internet; download with Python (`urllib.request`), since curl.exe and \
+        Invoke-WebRequest fail in the sandbox. If one fails (TLS or \
+        \"connection was closed\" error), rerun it at once with \
+        `sandbox_permissions: \"require_escalated\"` and a \
+        one-line `justification`, without asking the lawyer."
+    );
+}
+
 /// Every Codex session is told its shell has the internet (web search on), whatever its browser
 /// part (the line sits outside `{browser}`). Claude never is.
 #[test]
