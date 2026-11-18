@@ -146,7 +146,7 @@ jobs:
             workflow_dispatch:*)
               [ "$DRY_RUN" = true ] ||
                 fail "a release starts only from a pushed tag; a dispatched run is a dry run (dry_run: true)"
-              mode=dry version=$conf_version ;;
+              mode=dry version=$conf_version features=local-connector ;;
             push:refs/tags/v*)
               mode=release tag=${REF#refs/tags/} version=${REF#refs/tags/v} environment=release ;;
             push:refs/tags/test-v*)
@@ -789,6 +789,7 @@ jobs:
       CLAUSEO_RELEASE_MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
       FEATURES: ${{ needs.check.outputs.features }}
+      CLAUSEO_LOCAL_CONNECTOR_ORIGIN: ${{ secrets.IK_DEV_ORIGIN }}
       RELEASE_DATE: ${{ needs.check.outputs.release_date }}
       RUSTFLAGS: ${{ matrix.rustflags }}
       RELEASE_DIR: target/${{ matrix.target }}/release
@@ -987,7 +988,7 @@ jobs:
           set -euo pipefail
           exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
           [ -f "$exe" ] || { echo "::error::no app binary at $exe"; exit 1; }
-          for pair in "staging-connector data-staging.clauseo.chat" "local-connector 127.0.0.1:8793"; do
+          for pair in "staging-connector data-staging.clauseo.chat" "local-connector ${CLAUSEO_LOCAL_CONNECTOR_ORIGIN#http://}"; do
             feature=${pair%% *} host=${pair#* }
             case " ${FEATURES//,/ } " in *" $feature "*) echo "built with $feature: $host expected"; continue;; esac
             found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$host") || [ $? -eq 1 ]
@@ -1552,6 +1553,7 @@ jobs:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
       FEATURES: ${{ needs.check.outputs.features }}
+      CLAUSEO_LOCAL_CONNECTOR_ORIGIN: ${{ secrets.IK_DEV_ORIGIN }}
       RELEASE_DIR: target/${{ matrix.target }}/release
       OUT: ${{ github.workspace }}/release-out
       # As in build: blocklist.conf.json with the block-list switch on, else empty.
