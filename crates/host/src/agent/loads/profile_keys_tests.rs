@@ -476,9 +476,16 @@ fn claudes_shell_is_kept_in_the_matters_folder() {
 /// offline one.
 #[test]
 fn codex_shell_line_follows_web_search() {
-    use clauseo_profile::instructions::{CODEX_SHELL_OFFLINE, CODEX_SHELL_ONLINE, codex_shell_net};
+    use clauseo_profile::instructions::{
+        CODEX_SHELL_OFFLINE, CODEX_SHELL_ONLINE, CODEX_SHELL_ONLINE_WINDOWS, codex_shell_net,
+    };
     let online = codex_shell_net(true);
-    assert_eq!(online, CODEX_SHELL_ONLINE.trim());
+    let want = if cfg!(windows) {
+        CODEX_SHELL_ONLINE_WINDOWS
+    } else {
+        CODEX_SHELL_ONLINE
+    };
+    assert_eq!(online, want.trim());
     let hook = json!({"developer_instructions": format!("Rules.\n\n{online}")});
     let instructions = |switch| {
         let map = hook.as_object().cloned().unwrap();
