@@ -51,6 +51,7 @@ import {
   type Done,
   type Look,
   type Outcome,
+  type Refusal,
   type Snapshot,
   type Unsaved,
 } from "./state.ts";
@@ -60,9 +61,6 @@ import { lookAt, newestUndo, timelineOf, undoable, type VersionMeta } from "./ti
 export type { Ask, Done, Look, Snapshot, Unsaved };
 
 type UndoAsk = Extract<Ask, { act: "undo" }>;
-/** A refusal: the host's error (its code, the files it names, its refusal or write failure), and whether the dialog is
- * still open. */
-type Refusal = HostError & { kind: "refused"; current: boolean };
 type RestoreAsk = Extract<Ask, { act: "restore" }>;
 
 export class VersionsController {
