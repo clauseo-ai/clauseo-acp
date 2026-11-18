@@ -988,6 +988,7 @@ jobs:
           set -euo pipefail
           exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
           [ -f "$exe" ] || { echo "::error::no app binary at $exe"; exit 1; }
+          [ -n "${CLAUSEO_LOCAL_CONNECTOR_ORIGIN:-}" ] && echo "::add-mask::${CLAUSEO_LOCAL_CONNECTOR_ORIGIN#http://}"
           for pair in "staging-connector data-staging.clauseo.chat" "local-connector ${CLAUSEO_LOCAL_CONNECTOR_ORIGIN#http://}"; do
             feature=${pair%% *} host=${pair#* }
             case " ${FEATURES//,/ } " in *" $feature "*) echo "built with $feature: $host expected"; continue;; esac
