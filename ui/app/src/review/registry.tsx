@@ -93,6 +93,7 @@ import { UC_ONE_FILE } from "./registry-uc-one-file.tsx";
 import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 import { UC_SKILLS } from "./registry-uc-skills.tsx";
 import { UC_AGENTS } from "./registry-uc-agents.tsx";
+import { UC_STARTING } from "./registry-uc-starting.tsx";
 import { RELEASE_NOTES } from "./registry-release-notes.tsx";
 import { UC_PANELS } from "./registry-uc-panels.tsx";
 
@@ -585,6 +586,7 @@ export const REGISTRY: readonly Entry[] = [
   ...MCP_TOOLS,
   ...UC_SKILLS,
   ...UC_AGENTS,
+  ...UC_STARTING,
   ...RELEASE_NOTES,
   ...UC_PANELS,
 ];

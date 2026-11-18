@@ -67,7 +67,7 @@ import { LimitWarning } from "../limits/limit-warning.tsx";
 import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
-import { pausedLine, type Paused } from "./limit-words.ts";
+import { pausedLine, planNameOf, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
 import { useNotSentRestore } from "./steer-restore.ts";
 import { tooLong } from "./prompt-cost.ts";
@@ -75,6 +75,7 @@ import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { holdLine, useHold } from "../first-run/hold.ts";
 import { useStopKey } from "./stop-key.ts";
+import { useStartingHint } from "./starting-hint.ts";
 import type { AskHow, Drafts } from "./session.ts";
 import { ProtectionContext } from "../protection/context.ts";
 
@@ -90,6 +91,7 @@ export function WorkComposer({
   mentions,
   disabled,
   busy,
+  starting = false,
   doing = null,
   asks = null,
   refused,
@@ -129,6 +131,8 @@ export function WorkComposer({
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
+  /** The open thread's header says Starting: after STARTING_HINT_MS the working line adds UC-873's line (starting-hint.ts). */
+  starting?: boolean;
   /** What the running step is doing ("Reading Lease.pdf."), said in place of "Answering."; null for none. */
   doing?: string | null;
   /** A permission prompt or a question waiting on the lawyer: said in place of what the step in hand is doing, led by
@@ -177,6 +181,8 @@ export function WorkComposer({
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
+  // UC-873: after STARTING_HINT_MS in Starting, the working line adds its line under the words; Stop is the same button
+  const hinted = useStartingHint(starting);
   // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
   const hold = useHold(transport);
   // UC: the room's protection line, and the firm's hold on send while the open matter has no protection
@@ -366,10 +372,20 @@ export function WorkComposer({
   // while the turn runs the pen writes after the words (working-line.tsx); the line is gone, and the pen with it,
   // once the turn ends. A single read stays a wait in its own words: check and series say "Checking" and "judgments",
   // which a plain read isn't
-  const answering: WorkingState =
+  const answered: WorkingState =
     asks === null
       ? { kind: "wait", words: doing ?? frame(w.lang, "Answering."), pill: null, working: true }
       : { kind: "wait", words: asksWords(w.lang, asks), pill: null, asks };
+  // UC-873: the agent's name, as the errors name it (Claude, ChatGPT); the pen still writes after the words
+  const answering: WorkingState =
+    hinted && answered.kind === "wait"
+      ? {
+          ...answered,
+          note: frame(w.lang, "{agent} is taking longer than usual to start.", {
+            agent: planNameOf(agentPlan),
+          }),
+        }
+      : answered;
   const line: BreakLine | null =
     failed ??
     (refused !== null

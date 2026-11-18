@@ -10,6 +10,9 @@ export const HI = {
   // when an answer will end
   "Answering.": "उत्तर दिया जा रहा है।",
   "Answering. Expected by {time}": "उत्तर तैयार हो रहा है। {time} बजे तक अपेक्षित",
+  // UC-873: the working line's one more line, once the thread has sat in Starting for 8 s (the agent's name); provisional,
+  // hi: later
+  "{agent} is taking longer than usual to start.": null,
   "A question for you": "आपसे एक प्रश्न",
   "Needs your permission": "आपकी अनुमति चाहिए",
   "Answer ready": "उत्तर तैयार है",
