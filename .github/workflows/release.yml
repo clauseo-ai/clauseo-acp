@@ -991,7 +991,11 @@ jobs:
           [ -n "${CLAUSEO_LOCAL_CONNECTOR_ORIGIN:-}" ] && echo "::add-mask::${CLAUSEO_LOCAL_CONNECTOR_ORIGIN#http://}"
           for pair in "staging-connector data-staging.clauseo.chat" "local-connector ${CLAUSEO_LOCAL_CONNECTOR_ORIGIN#http://}"; do
             feature=${pair%% *} host=${pair#* }
-            case " ${FEATURES//,/ } " in *" $feature "*) echo "built with $feature: $host expected"; continue;; esac
+            case " ${FEATURES//,/ } " in *" $feature "*)
+              n=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$host") || [ $? -eq 1 ]
+              [ "$n" != 0 ] || { echo "::error::$exe was built with $feature but holds no $host"; exit 1; }
+              echo "built with $feature: $host found in the binary"; continue;;
+            esac
             found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$host") || [ $? -eq 1 ]
             if [ "$found" != 0 ]; then
               echo "::error::$exe holds $host, which only a $feature build may"
