@@ -168,31 +168,11 @@ fn an_unreadable_saved_copy_stops_the_write_before_any_byte() {
 fn a_deny_delete_file_is_written_in_place_keeping_its_acl_on_macos() {
     let mut matter = matter("in-place-deny-delete");
     let file = saved(&mut matter, "a4.docx", "a4 now");
-    let chmod = |args: &[&str]| {
-        let done = std::process::Command::new("chmod")
-            .args(args)
-            .arg(&file)
-            .status()
-            .unwrap();
-        assert!(done.success(), "chmod {args:?}");
-    };
-    chmod(&["+a", "everyone deny delete"]);
+    write::deny_everyone_delete(&file).unwrap();
     record_stat(&mut matter, 0, "a4.docx");
-    let acl = |file: &std::path::Path| {
-        let listed = std::process::Command::new("ls")
-            .arg("-le")
-            .arg(file)
-            .output()
-            .unwrap();
-        String::from_utf8(listed.stdout)
-            .unwrap()
-            .lines()
-            .skip(1)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let acl = |file: &std::path::Path| write::acl_text(&std::fs::File::open(file).unwrap());
     let before = acl(&file);
-    assert!(before.contains("deny delete"), "{before}");
+    assert!(before.contains(":deny:delete"), "{before}");
     let inode = std::fs::metadata(&file).unwrap().ino();
     let ops = [Op::Write(path("a4.docx"), blob(&mut matter, "a4 then"))];
     let done = write_back(&matter, &ops).unwrap();
@@ -200,5 +180,5 @@ fn a_deny_delete_file_is_written_in_place_keeping_its_acl_on_macos() {
     assert_eq!(read(&file), "a4 then");
     assert_eq!(std::fs::metadata(&file).unwrap().ino(), inode);
     assert_eq!(acl(&file), before);
-    chmod(&["-N"]);
+    write::clear_acl(&file).unwrap();
 }

@@ -159,6 +159,13 @@ pub(super) fn deny_delete_and_read(path: &Path) -> io::Result<()> {
     )
 }
 
+/// Tests: the ACL of `path` set to `everyone` (gid 12) denied `delete`, what
+/// `chmod +a "everyone deny delete"` makes of a file with none: a rename over it is refused.
+#[cfg(test)]
+pub(crate) fn deny_everyone_delete(path: &Path) -> io::Result<()> {
+    set_entries(path, &[(ACL_EXTENDED_DENY, group(12)?, ACL_DELETE)])
+}
+
 /// Tests: the UUID of the group `gid`.
 #[cfg(test)]
 fn group(gid: libc::gid_t) -> io::Result<[u8; 16]> {
@@ -187,7 +194,7 @@ pub(super) fn allow_me_deny_everyone(path: &Path) -> io::Result<()> {
 
 /// Tests: the ACL of the file `file` as `acl_to_text` writes it; empty for none.
 #[cfg(test)]
-pub(super) fn acl_text(file: &File) -> String {
+pub(crate) fn acl_text(file: &File) -> String {
     // SAFETY: the descriptor is open for the whole call.
     let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
     if acl.is_null() {
@@ -221,7 +228,7 @@ fn me() -> io::Result<[u8; 16]> {
 
 /// Tests: no ACL entries on `path`.
 #[cfg(test)]
-pub(super) fn clear_acl(path: &Path) -> io::Result<()> {
+pub(crate) fn clear_acl(path: &Path) -> io::Result<()> {
     // SAFETY: no pointers in; the result is owned by `Acl`.
     let acl = Acl(unsafe { acl_init(0) });
     set_link(path, &acl)
