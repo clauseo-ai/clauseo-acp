@@ -15,9 +15,9 @@ test-support = []
 # `staging-connector` build (docs/connector-staging.md) and the tests. Off, a build holds no
 # staging host at all, which release.yml's binary scan relies on.
 staging = []
-# `Origin::Local` and the connector's local test server (http://127.0.0.1:8793, the Mac mini's),
-# for desktop's `local-connector` build and the tests. The one origin plain http may reach. Off,
-# a build holds no such address.
+# `Origin::Local` and the connector's local test server (http://127.0.0.1:8793, the Mac mini's,
+# or the origin in CLAUSEO_LOCAL_CONNECTOR_ORIGIN at build time), for desktop's `local-connector`
+# build and the tests. The one origin plain http may reach. Off, a build holds no such address.
 local = []
 
 [dependencies]
