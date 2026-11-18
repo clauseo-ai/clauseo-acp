@@ -180,6 +180,6 @@ fn both_agents_read_a_mentioned_paper_in_the_reviewed_words() {
         std::fs::read_to_string(ui.join("copy-approvals/UC-agents-mention-read.json")).unwrap();
     let approvals: serde_json::Value = serde_json::from_str(&approvals).unwrap();
     assert_eq!(approvals["UC-711"]["en"], LINE);
-    assert_eq!(approvals["UC-711"]["status"], "provisional");
+    assert_eq!(approvals["UC-711"]["status"], "approved");
     assert!(approvals["UC-711"]["hi"].is_null());
 }

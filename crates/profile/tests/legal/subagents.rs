@@ -190,7 +190,7 @@ fn codex_is_told_to_report_every_refusal_in_the_reviewed_words() {
         std::fs::read_to_string(ui.join("copy-approvals/UC-agents-subagents-scale.json")).unwrap();
     let approvals: Value = serde_json::from_str(&approvals).unwrap();
     assert_eq!(approvals["UC-710"]["en"], line);
-    assert_eq!(approvals["UC-710"]["status"], "provisional");
+    assert_eq!(approvals["UC-710"]["status"], "approved");
 }
 
 /// The settings the measurements decided, each pinned to one value, so a snapshot re-accepted
