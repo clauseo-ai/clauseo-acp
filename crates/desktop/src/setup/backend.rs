@@ -101,6 +101,10 @@ pub(crate) struct AgentsBackend {
     /// job has not ended yet (no sign-in state and no `SigninUnchanged` since): a second hold
     /// meanwhile asks for none.
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
+    /// The agents whose status check the install's `Ready` asked for and that have sent no
+    /// sign-in state and no `SigninUnchanged` since: S18 is about to check them, though it
+    /// shows no `Checking` yet (`switch::stale_start`).
+    pub(crate) ready_checks: Mutex<BTreeSet<AgentId>>,
     /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
     /// memory only, so none outlives a quit.
     pub(crate) pending: Mutex<BTreeMap<AgentId, Kept>>,
@@ -421,6 +425,7 @@ impl AgentsBackend {
                 }
                 AgentsEvent::Signin { agent, state } => {
                     lock(&self.rechecks).remove(&agent);
+                    lock(&self.ready_checks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
                     pending::run_next(self);
@@ -436,6 +441,7 @@ impl AgentsBackend {
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {
                     lock(&self.rechecks).remove(&agent);
+                    lock(&self.ready_checks).remove(&agent);
                     pending::run_next(self);
                 }
                 _ => {}
@@ -445,7 +451,8 @@ impl AgentsBackend {
 
     /// One install state: sent to the windows; on `Ready` the entry written, then a pending
     /// sign-in run (`pending.rs`) or else the status checked (once per agent; not over a press
-    /// still waiting for another sign-in); an agent with no sign-in state yet shown signed out.
+    /// still waiting for another sign-in), marked in `ready_checks`, and only then sent; an agent
+    /// with no sign-in state yet shown signed out.
     async fn install_event(
         &self,
         agent: &AgentId,
@@ -456,26 +463,36 @@ impl AgentsBackend {
             return;
         };
         let before = lock(&self.wiring.applied).installed.contains(agent);
-        if let Some(progress) = progress(state, &info.hosts, before) {
-            self.events.publish(SetupEvent::AgentInstallProgress {
-                agent: agent.clone(),
-                state: progress,
-            });
-            log_published(agent, state);
-        }
+        let publish = || {
+            if let Some(progress) = progress(state, &info.hosts, before) {
+                self.events.publish(SetupEvent::AgentInstallProgress {
+                    agent: agent.clone(),
+                    state: progress,
+                });
+                log_published(agent, state);
+            }
+        };
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
             let ran = pending::run_press(self, agent);
             let fresh = ran != pending::Ran::Waits && checked.insert(agent.clone());
             if fresh && ran == pending::Ran::Nothing {
                 super::status_timing::asked(agent, "installed");
+                lock(&self.ready_checks).insert(agent.clone());
                 if let Err(error) = self.agents.check_status(agent) {
+                    lock(&self.ready_checks).remove(agent);
                     tracing::warn!(%agent, %error, "no status check");
                 }
             }
-        } else if self.compose.s18(agent).is_none() && self.agents.signin_state(agent).is_none() {
-            self.compose
-                .signin(agent, SigninState::SignedOut { found: None });
+            // `Ready` reaches the windows last: the sign-in "Add ChatGPT" sends on it then
+            // meets the press run or the check asked (`switch::stale_start`).
+            publish();
+        } else {
+            publish();
+            if self.compose.s18(agent).is_none() && self.agents.signin_state(agent).is_none() {
+                self.compose
+                    .signin(agent, SigninState::SignedOut { found: None });
+            }
         }
     }
 

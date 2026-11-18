@@ -8,6 +8,7 @@ use clauseo_protocol::{AgentId, AgentKind};
 
 use super::AgentsBackend;
 use super::seam::SetupAgents;
+use crate::bridge::lock;
 use crate::setup::confirm::Ask;
 
 /// Whether a sign-in may start for `agent` (named `name`), and with what: `Some(None)` when it
@@ -38,7 +39,8 @@ pub(super) async fn switch_first(
 }
 
 /// Whether a `StartSignIn` or `UseDeviceCode` for `agent` is stale, and dropped unasked: Clauseo's
-/// own Codex login is there and S18 is `Checking` it or `SignedIn`. A signed-in card offers
+/// own Codex login is there and S18 is `Checking` it or `SignedIn`, or the install's `Ready`
+/// asked its status check and no answer has come (`ready_checks`). A signed-in card offers
 /// "Sign out", not "Sign in", so such a press is no request to sign out: it is "Add `ChatGPT`"'s
 /// sign-in at the install's `Ready`, whichever of the window and the check is first, or a
 /// second press. It answers `Done` as a decline does, its starting mark removed.
@@ -47,7 +49,7 @@ pub(super) fn stale_start(backend: &AgentsBackend, agent: &AgentId) -> bool {
     let signed = matches!(
         backend.agents.signin_state(agent),
         Some(SigninState::Checking | SigninState::SignedIn { .. })
-    );
+    ) || lock(&backend.ready_checks).contains(agent);
     if !signed || backend.agents.own_login(agent).is_none() {
         return false;
     }

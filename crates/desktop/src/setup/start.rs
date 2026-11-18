@@ -423,6 +423,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             known: read.known,
             signin_gate: Mutex::new(()),
             rechecks: Mutex::default(),
+            ready_checks: Mutex::default(),
             pending: Mutex::default(),
             wiring,
             counts: parts.counts,
