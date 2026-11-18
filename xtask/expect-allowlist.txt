@@ -494,6 +494,12 @@ crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
 crates/mcp/src/browser_guard/devtools/peer_tests.rs a_child_of_agent_browser_is_let_in_and_another_process_is_not clippy::disallowed_methods
 crates/mcp/src/browser_guard/session/browser.rs candidates clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
+# The launch mode's one start of the lawyer's local MCP server: exec on Unix, a child in the
+# mode's own job on Windows (no exec there).
+crates/mcp/src/launch/unix.rs exec clippy::disallowed_methods
+crates/mcp/src/launch/windows.rs run clippy::disallowed_methods
+crates/mcp/tests/launch.rs write clippy::disallowed_methods
+crates/mcp/tests/launch.rs run clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
 crates/mcp/src/write/windows.rs - unsafe_code
 crates/mcp/src/write/mac.rs - unsafe_code

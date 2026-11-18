@@ -25,6 +25,7 @@ use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 
 pub(super) mod claude;
+pub(super) mod mcp_launch;
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -277,7 +278,7 @@ pub(super) fn session_loads(
         // What the app heard from a "Try again" follows this newer read.
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
-    let mut servers = lawyer_sent;
+    let mut servers = mcp_launch::entries(actor, &run, lawyer_sent);
     super::super::mcp::left_out(actor, left_out);
     note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);

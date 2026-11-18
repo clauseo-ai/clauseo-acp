@@ -107,6 +107,7 @@ pub(super) fn on_replay_log(
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let mut staged = super::profile_loads::mcp_launch::staged(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -119,13 +120,14 @@ pub(super) fn on_replay_log(
         Ok(log) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
         Err(error) => tracing::warn!(%thread, error = %Cause(&error), "no log for replay dedupe"),
     }
-    agent.mcp_commands = commands(&mcp_servers);
+    agent.mcp_commands = staged.sent(&mcp_servers, commands(&mcp_servers));
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let check = staged.written(check, Arc::clone(&clock), matter);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -167,16 +169,18 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let mut staged = super::profile_loads::mcp_launch::staged(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    agent.mcp_commands = commands(&mcp_servers);
+    agent.mcp_commands = staged.sent(&mcp_servers, commands(&mcp_servers));
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let check = staged.written(check, Arc::clone(&clock), matter);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -214,16 +218,18 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let mut staged = super::profile_loads::mcp_launch::staged(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    agent.mcp_commands = commands(&mcp_servers);
+    agent.mcp_commands = staged.sent(&mcp_servers, commands(&mcp_servers));
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let check = staged.written(check, Arc::clone(&clock), matter);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {

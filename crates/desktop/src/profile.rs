@@ -513,6 +513,10 @@ impl ProfileHook for DesktopProfile {
     fn browser_tool(&self) -> Option<PathBuf> {
         self.browser_tool.clone()
     }
+
+    fn mcp_launcher(&self) -> Option<PathBuf> {
+        Some(self.profile().paths().browser().clauseo_mcp.clone())
+    }
 }
 
 /// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch

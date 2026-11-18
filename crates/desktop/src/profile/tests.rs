@@ -385,6 +385,21 @@ fn a_relative_path_folder_is_never_prepended() {
     assert_eq!(super::absolute_folder(PathBuf::from("bin/stetdoc")), None);
 }
 
+/// The lawyer's local MCP servers start through the bundled `clauseo-mcp launch`, with or
+/// without setup's hook over the profile: with none, their values would go on argv.
+#[test]
+fn the_host_gets_the_bundled_clauseo_mcp_as_the_mcp_launcher() {
+    let scratch = Scratch::new("profile-mcp-launcher", &[]);
+    let clauseo_mcp = scratch
+        .path()
+        .join("app")
+        .join(format!("clauseo-mcp{}", std::env::consts::EXE_SUFFIX));
+    let hook = DesktopProfile::new(profile(&scratch), true);
+    assert_eq!(hook.mcp_launcher(), Some(clauseo_mcp.clone()));
+    let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
+    assert_eq!(config.profile_hook().mcp_launcher(), Some(clauseo_mcp));
+}
+
 /// Setup's hook with no key and no plan.
 fn setup_hook() -> crate::setup::SetupHook {
     crate::setup::SetupHook::new(

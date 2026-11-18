@@ -11,9 +11,9 @@ use crate::support::{CDP_PORT, GUARD, Guard, Scratch, example, guard_command, po
 use crate::write;
 
 const MODE_USAGE: &str = if cfg!(unix) {
-    "usage: clauseo-mcp <mode> ... (modes: browser-guard, browser-reaper, connector)\n"
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, browser-reaper, connector, launch)\n"
 } else {
-    "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n"
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector, launch)\n"
 };
 const GUARD_USAGE: &str = if cfg!(windows) {
     "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> \

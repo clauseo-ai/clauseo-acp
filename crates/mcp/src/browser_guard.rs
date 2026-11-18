@@ -56,7 +56,7 @@ mod env;
 mod filter;
 mod harden;
 #[cfg(windows)]
-mod job;
+pub(crate) mod job;
 mod logon;
 mod parent;
 mod port_file;

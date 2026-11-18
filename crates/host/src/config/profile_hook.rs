@@ -153,6 +153,13 @@ pub trait ProfileHook: Send {
     fn browser_tool(&self) -> Option<PathBuf> {
         None
     }
+    /// The `clauseo-mcp` binary (default: none), whose `launch` mode starts each of the lawyer's
+    /// local MCP servers from a private file in the run folder, so its arguments and variables
+    /// stay off the agent's command line (`actor/turn/mcp_launch.rs`). With none, the servers
+    /// go as the lawyer saved them, with a warning. No I/O: a path the adapter already holds.
+    fn mcp_launcher(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// No profile: no `_meta`, no extra variables.
