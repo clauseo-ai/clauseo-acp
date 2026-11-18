@@ -93,6 +93,10 @@ fn a_late_prompt_listing_still_lets_the_cancel_end_the_turns_command() {
     });
     let pid = pid.unwrap();
     let _reap = super::refused_requeue::Reap(pid);
+    // A sweep spares what started in its cutoff's clock unit (10 ms ticks on Linux).
+    super::refused_requeue::poll_until(&mut rig, "a cutoff to cover the command", |_| {
+        clauseo_process::started_before_now(pid)
+    });
     rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
     until_idle(&mut rig, thread);
     assert!(
