@@ -239,6 +239,8 @@ mod keep;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) use macos::{acl_text, clear_acl, deny_everyone_delete};
 
 #[cfg(any(windows, test))]
 mod replace_keeping;
