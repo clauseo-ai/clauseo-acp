@@ -18,6 +18,7 @@ use crate::write;
 mod claude_sandbox;
 mod codex_roots;
 mod own_folders;
+mod windows_history;
 
 /// A fresh data folder under the temp folder for `test`.
 fn scratch(test: &str) -> PathBuf {

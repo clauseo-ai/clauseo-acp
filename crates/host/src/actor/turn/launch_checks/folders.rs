@@ -82,13 +82,15 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and
 /// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`).
+/// `windows`: the launch is on Windows ([`own_folders`]).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
     data: &Path,
     claude_home: Option<&Path>,
+    windows: bool,
 ) -> data_fence::LaunchDeny {
-    let own = own_folders(run, stored, claude_home);
+    let own = own_folders(run, stored, claude_home, windows);
     let cwd = crate::agent::session_folder(stored);
     let projects = claude_home.map_or_else(Vec::new, |home| {
         data_fence::claude_projects(home, &[&cwd, stored])
@@ -100,13 +102,20 @@ pub(super) fn launch_deny(
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, its work
 /// folder, this matter's notes, the matter folder (`agent::session_folder` of `stored`) and,
-/// for Claude, the plans folder in its home; and this matter's `history.git`
-/// (`agent::history`), which the Windows shell rules then leave a command to name for reading
-/// with `git`, while `matters/**` still denies it to Claude's Read and Edit
-/// (`data_fence::DENIED`).
-fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> Vec<PathBuf> {
+/// for Claude, the plans folder in its home; and, off Windows, this matter's `history.git`
+/// (`agent::history`), while `matters/**` still denies it to Claude's Read and Edit
+/// (`data_fence::DENIED`). On Windows the history stays under the shell rules' `matters/**`,
+/// as before the history's rules, and Claude gets no history rules
+/// (`data_fence::history_rules`): the release candidate's PowerShell calls were refused with
+/// no classifier verdict on a Windows laptop (2026-11-18), with those rules the suspect.
+fn own_folders(
+    run: &RunFolders,
+    stored: &Path,
+    claude_home: Option<&Path>,
+    windows: bool,
+) -> Vec<PathBuf> {
     let plans = claude_home.map(|home| home.join("plans"));
-    let history = crate::agent::history::matter_history(&run.notes);
+    let history = crate::agent::history::matter_history(&run.notes).filter(|_| !windows);
     [
         run.root.clone(),
         run.work.clone(),
