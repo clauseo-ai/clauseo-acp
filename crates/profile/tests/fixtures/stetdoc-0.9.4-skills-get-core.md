@@ -1,6 +1,6 @@
 # stetdoc: editing Word documents with tracked changes
 
-stetdoc 0.9.3 turns a .docx into a **working copy** of plain text files, and turns your edits back into the same
+stetdoc 0.9.4 turns a .docx into a **working copy** of plain text files, and turns your edits back into the same
 .docx with **real Word tracked changes**. Everything you do not touch stays byte-identical. Every change is a revision
 with an author and a date, so a reviewer sees exactly what you did.
 
@@ -156,8 +156,12 @@ can open the file`. Tell the user that the input did not open in Word and the ou
 After you insert, delete or re-level a list item, read any `ref_retargeted`, `ref_unresolved` or `definition_removed`
 warning and fix the typed references (such as `Clause 16.2(b)`) in the same batch, or confirm the move with the user.
 
+A `delete` of a paragraph that Word needs, such as the only paragraph of a cell or one between two tables, deletes its
+text and keeps the empty paragraph under the same ref. The receipt says `p2 emptied and kept` and gives a
+`kept_required_paragraph` warning with the reason.
+
 When the document holds tracked changes you did not make, receipts and views say so in a line such as
-`4 tracked changes by others (Jane Doe 2, Eric White 2) you did not make: #0 insert p1 "shall pay ", ...`, followed by
+`4 tracked changes by others (Jane Doe 2, Eric White 2) you did not make: #101 insert p1 "shall pay ", ...`, followed by
 `Tell the user about them.` Do it: name who made them and what they change. `stetdoc view FILE --revisions --context 1`
 shows each of them in its paragraph. Without a saved author, a view says the changes are `already in the document`:
 tell the user about them if you did not make them.
@@ -165,7 +169,11 @@ tell the user about them if you did not make them.
 ## Way 1: edit the readable files
 
 `document.md` holds the body, `notes.md` the footnotes and endnotes, `headers.md` the headers and footers. Each paragraph is
-one line that starts with its **ref** (`p42`); tables show `t` and `r` lines.
+one line that starts with its **ref** (`p42`); tables show `t` and `r` lines. A row that is an item of a repeating section
+says so, `r4 {row item=2}`: a `row` insert next to it adds a new item, and deleting the item's only row removes the item.
+A tracked insert before the first item (`item=1`) goes above the section as a plain row, with a
+`row_outside_repeating_section` warning; insert untracked if it must be the first item. A tracked delete of that item's
+first row warns `repeating_section_unwrapped_by_word`: Word's Accept All drops the section control around the rest.
 
 - Change the text after a ref with your own edit tool. stetdoc diffs it word by word into insertions and deletions.
 - Delete a paragraph by deleting its whole line. Add paragraphs as new lines **without** a ref after the line they follow.
@@ -204,7 +212,9 @@ EOF
 - **Refs** name blocks: `p` paragraphs, `t` tables, `r` rows, `c3` comments, `fn3` and `en2` notes. A batch cannot name a
   paragraph that it creates itself. The receipt gives the refs of new paragraphs and the new base for the next batch.
 - **Ranges.** Prefer `find`, which must match once in the paragraph (or add `occurrence: 2`). Use `start` and `end` offsets
-  only when `find` cannot say it. They count characters of the paragraph's text as `view --mode final` shows it.
+  only when `find` cannot say it. They count characters of the paragraph's text as `view --mode final` shows it. A field
+  counts as the characters of its quoted result, except one that ends in `label`, such as
+  `{field MACROBUTTON "Click here" label}`: that text is a label shown from the field code and counts as nothing.
 - **Scope.** When the task names a region, pass `--scope p40..p60`: a change outside it fails the whole batch
   (`scope_violation`) instead of landing.
 - **Quotes.** Type straight quotes. stetdoc follows the paragraph's own convention (curly or straight) and says so in the

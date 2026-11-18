@@ -22,9 +22,9 @@ use super::super::{DesktopProfile, Layout, paths_for};
 use super::{CLAUDE, CODEX, agent, developer_instructions};
 use crate::test_support::Scratch;
 
-/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.3 (macOS arm64).
-const REAL_0_9_3: &[u8] =
-    include_bytes!("../../../../profile/tests/fixtures/stetdoc-0.9.3-skills-get-core.md");
+/// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.4 (Linux `x86_64`).
+const REAL_0_9_4: &[u8] =
+    include_bytes!("../../../../profile/tests/fixtures/stetdoc-0.9.4-skills-get-core.md");
 
 /// The start's limits in these builds: 3 s for each try, seen before or not, so the stand-ins'
 /// 5 s runs and hangs pass them; the background check's 30 s as in the app.
@@ -183,7 +183,7 @@ fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
 #[test]
 fn a_resource_folder_release_layout_keeps_stetdoc_as_a_command() {
     let scratch = Scratch::new("profile-release-resources", &["app"]);
-    let program = stetdoc_at(&scratch, "resources/stetdoc", STUB, REAL_0_9_3);
+    let program = stetdoc_at(&scratch, "resources/stetdoc", STUB, REAL_0_9_4);
     let resources = scratch.path().join("resources");
     let exe = scratch.path().join("app").join("clauseo");
     seen_before(&scratch, &exe, &program);
@@ -199,7 +199,7 @@ fn a_resource_folder_release_layout_keeps_stetdoc_as_a_command() {
     let skill = written_skill(&hook).expect("0.9.3's skill is written");
     let front = b"---\nname: stetdoc\ndescription: \"stetdoc: editing Word documents with tracked \
                   changes\"\n---\n";
-    assert_eq!(skill, [front.as_slice(), REAL_0_9_3].concat());
+    assert_eq!(skill, [front.as_slice(), REAL_0_9_4].concat());
     assert_eq!(hook.stetdoc(), Some(program.as_path()));
     assert_eq!(hook.path_prepend(), folder_of(&program));
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
@@ -232,7 +232,7 @@ fn a_missing_stetdoc_or_one_whose_version_fails_is_absent_for_the_agents() {
     ];
     for (at, script) in broken.into_iter().enumerate() {
         let scratch = Scratch::new(&format!("profile-release-broken-{at}"), &[]);
-        let hook = macos_bundle(&scratch, script.map(|script| (script, REAL_0_9_3)));
+        let hook = macos_bundle(&scratch, script.map(|script| (script, REAL_0_9_4)));
         assert_eq!(written_skill(&hook), None, "case {at}");
         assert_eq!(hook.path_prepend(), None, "case {at}");
         assert_eq!(both_have_the_stetdoc_line(&hook), [false; 2], "case {at}");
@@ -316,7 +316,7 @@ fn an_unseen_stetdoc_holds_nothing_at_the_start_and_gets_its_skill_in_the_backgr
     let scratch = Scratch::new("profile-release-unseen", &[]);
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let hook = bundle(&scratch, Some((GATED, REAL_0_9_3)), false, long);
+        let hook = bundle(&scratch, Some((GATED, REAL_0_9_4)), false, long);
         let _sent = tx.send((hook, scratch));
     });
     let (hook, scratch) = rx
@@ -364,7 +364,7 @@ fn an_unseen_stetdoc_holds_nothing_at_the_start_and_gets_its_skill_in_the_backgr
 fn a_seen_stetdoc_slow_at_the_start_stays_on_and_gets_its_skill_from_the_retry() {
     let (hook, scratch) = bundle_within_10_s(
         slow_runs(1, "ok", true),
-        REAL_0_9_3,
+        REAL_0_9_4,
         "profile-release-slow-once",
     );
     let program = helpers_stetdoc(&scratch);
@@ -386,13 +386,13 @@ fn a_seen_stetdoc_slow_at_the_start_stays_on_and_gets_its_skill_from_the_retry()
 #[test]
 fn an_unchanged_cached_skill_leaves_the_generation_at_0() {
     let scratch = Scratch::new("profile-release-cached-same", &[]);
-    let earlier = macos_bundle(&scratch, Some((STUB, REAL_0_9_3)));
+    let earlier = macos_bundle(&scratch, Some((STUB, REAL_0_9_4)));
     let cached = written_skill(&earlier).expect("the earlier start's launch caches the skill");
     drop(earlier);
     let script = slow_runs(1, "ok", true);
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let hook = macos_bundle(&scratch, Some((script.as_slice(), REAL_0_9_3)));
+        let hook = macos_bundle(&scratch, Some((script.as_slice(), REAL_0_9_4)));
         let _sent = tx.send((hook, scratch));
     });
     let (hook, scratch) = rx
@@ -442,7 +442,7 @@ fn a_stetdoc_slow_then_broken_is_no_longer_told_to_the_agents() {
 #[test]
 fn a_stetdoc_that_hangs_on_its_version_stays_on_for_now() {
     let script = b"#!/bin/sh\nsleep 60\n".to_vec();
-    let (hook, scratch) = bundle_within_10_s(script, REAL_0_9_3, "profile-release-hangs");
+    let (hook, scratch) = bundle_within_10_s(script, REAL_0_9_4, "profile-release-hangs");
     let program = helpers_stetdoc(&scratch);
     assert_eq!(written_skill(&hook), None);
     assert_eq!(hook.path_prepend(), folder_of(&program));
