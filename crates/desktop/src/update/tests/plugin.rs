@@ -39,11 +39,16 @@ fn fixture_key() -> String {
 /// An endpoint no test requests.
 const ENDPOINT: &str = "https://example.invalid/latest.json";
 
-/// An app on the mock runtime with the app's checked context and the updater plugin.
+/// An app on the mock runtime with the app's checked context and the updater plugin, at version
+/// 0.0.0 whatever `tauri.conf.json` says: older than every release the tests serve (the real
+/// test-v0.0.3 signatures in `arm64.rs`, 0.4.1 here), so the plugin's check (offered version
+/// newer than the app's own) still offers them once a release bumps the app's version.
 pub(super) fn app() -> App<MockRuntime> {
+    let mut context = crate::context::<MockRuntime>();
+    context.package_info_mut().version = "0.0.0".parse().unwrap();
     mock_builder()
         .plugin_rust_only(tauri_plugin_updater::Builder::new().build())
-        .build(crate::context::<MockRuntime>())
+        .build(context)
         .unwrap()
 }
 
