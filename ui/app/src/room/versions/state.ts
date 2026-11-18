@@ -49,6 +49,10 @@ export type Ask = (UndoAsk | RestoreAsk) &
 /** What an act wrote: the version it made, or nothing (a bare done). */
 export type Outcome = { kind: "wrote"; checkpoint: string } | { kind: "nothing" };
 
+/** A refusal: the host's error (its code, the files it names, its refusal or write failure), and whether the dialog is
+ * still open. */
+export type Refusal = HostError & { kind: "refused"; current: boolean };
+
 /** What the host's answer to an act says it wrote. */
 export function outcomeOf(r: CommandOutcome): Outcome {
   if (typeof r === "object" && "step_undone" in r)
