@@ -4,6 +4,7 @@
 //! confirmed. `UseDifferentAccount` asks the same.
 //! Signed out, a reused login (refused as before) and Claude ask nothing.
 
+use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
 use clauseo_agents::{SigninState, Source};
@@ -23,6 +24,13 @@ pub(super) fn signed_in(source: Source) -> SigninState {
         source,
         at: UNIX_EPOCH,
     }
+}
+
+/// Clauseo's own Codex login is on disk and S18 says it is signed out (an expired login): a
+/// start or a device code over it asks, as `UseDifferentAccount` does in any state.
+pub(super) fn own_expired(rig: &Rig) {
+    rig.agents.own_file.store(true, Ordering::SeqCst);
+    rig.s18_was(&codex(), SigninState::SignedOut { found: None });
 }
 
 /// How many times the fake `Agents` was asked `name`.
@@ -59,14 +67,14 @@ pub(super) fn different(agent: &AgentId) -> SetupCommand {
 
 pub(super) fn switch() -> Ask {
     Ask::SwitchAccount {
-        name: "Codex".to_owned(),
+        name: "ChatGPT".to_owned(),
     }
 }
 
 #[test]
 fn a_declined_switch_starts_no_codex_login_and_leaves_no_mark() {
     let rig = rig(false);
-    rig.s18_was(&codex(), signed_in(Source::Own));
+    own_expired(&rig);
     let done = Ok(CommandOutcome::Done);
     assert_eq!(block_on(rig.setup().run(MAIN, start(&codex()))), done);
     assert_eq!(block_on(rig.setup().run(MAIN, device(&codex()))), done);
@@ -91,11 +99,58 @@ fn an_accepted_switch_starts_the_sign_in_as_confirmed() {
         (different(&codex()), "use_different_account_switching"),
     ] {
         let rig = rig(true);
-        rig.s18_was(&codex(), signed_in(Source::Own));
+        own_expired(&rig);
         assert_eq!(block_on(rig.setup().run(MAIN, command)), done, "{call}");
         assert_eq!(asked(&rig, call), 1, "{call}");
         assert_eq!(sign_ins(&rig), 1, "{call}");
         assert_eq!(*lock(&rig.confirm.asked), [switch()], "{call}");
+    }
+}
+
+/// "Add `ChatGPT`" (C2's first run): Codex comes up `Ready` with Clauseo's own login on disk and
+/// S18 checks it; the window's sign-in, sent at `Ready`, meets that check. It asks nothing,
+/// starts nothing and leaves no mark.
+#[test]
+fn a_press_over_the_check_of_the_own_login_asks_nothing() {
+    stale_presses_ask_nothing(&SigninState::Checking);
+}
+
+/// The window hears of `Ready` after the check came up signed in with Clauseo's own login:
+/// the Add's sign-in is as stale, and asks and starts nothing either.
+#[test]
+fn a_press_over_the_signed_in_own_login_asks_nothing() {
+    stale_presses_ask_nothing(&signed_in(Source::Own));
+}
+
+fn stale_presses_ask_nothing(state: &SigninState) {
+    for command in [start(&codex()), device(&codex())] {
+        let name = format!("{command:?}");
+        let rig = rig(true);
+        rig.agents.own_file.store(true, Ordering::SeqCst);
+        rig.s18_was(&codex(), state.clone());
+        let answer = block_on(rig.setup().run(MAIN, command));
+        assert_eq!(answer, Ok(CommandOutcome::Done), "{name}");
+        assert_eq!(*lock(&rig.confirm.asked), [], "{name}: no confirm");
+        assert_eq!(sign_ins(&rig), 0, "{name}: no codex login");
+        assert!(rig.events.begin_start(&codex()), "{name}: a mark left");
+    }
+}
+
+/// "Sign in with a different account" on the signed-in card, or over a check, still asks.
+#[test]
+fn a_different_account_over_the_own_login_asks() {
+    for state in [signed_in(Source::Own), SigninState::Checking] {
+        let rig = rig(true);
+        rig.agents.own_file.store(true, Ordering::SeqCst);
+        rig.s18_was(&codex(), state.clone());
+        let answer = block_on(rig.setup().run(MAIN, different(&codex())));
+        assert_eq!(answer, Ok(CommandOutcome::Done), "{state:?}");
+        assert_eq!(*lock(&rig.confirm.asked), [switch()], "{state:?}");
+        assert_eq!(
+            asked(&rig, "use_different_account_switching"),
+            1,
+            "{state:?}"
+        );
     }
 }
 
@@ -121,7 +176,7 @@ fn the_switch_words_name_the_agent() {
     assert_eq!(words.title, "Sign in with a different account?");
     assert_eq!(
         words.message,
-        "This signs you out of Codex first, in every matter. Then you can sign in with the account \
+        "This signs you out of ChatGPT first, in every matter. Then you can sign in with the account \
          you want."
     );
     assert_eq!(words.ok, "Sign out and continue");
@@ -134,7 +189,7 @@ fn the_setup_confirms_follow_the_language() {
     let hi = words(&switch(), Language::Hi);
     assert_eq!(hi.title, "किसी दूसरे खाते से साइन इन करें?");
     assert!(
-        hi.message.starts_with("इससे पहले हर मामले में Codex से"),
+        hi.message.starts_with("इससे पहले हर मामले में ChatGPT से"),
         "{}",
         hi.message
     );

@@ -165,6 +165,9 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
+                if switch::stale_start(self, &agent) {
+                    return Ok(());
+                }
                 let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
                 };
@@ -196,6 +199,9 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
+                if switch::stale_start(self, &agent) {
+                    return Ok(());
+                }
                 let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
                 };

@@ -79,6 +79,8 @@ pub(super) struct FakeAgents {
     /// Each `set_network`, in order.
     pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
     pub(super) own_login: std::sync::atomic::AtomicU64,
+    /// Clauseo's own Codex login is on disk whatever S18's state says (a stat sees the file).
+    pub(super) own_file: std::sync::atomic::AtomicBool,
 }
 
 impl FakeAgents {
@@ -160,6 +162,7 @@ impl SetupAgents for FakeAgents {
                 ..
             })
         );
+        let own = own || self.own_file.load(std::sync::atomic::Ordering::SeqCst);
         let n = self.own_login.load(std::sync::atomic::Ordering::SeqCst);
         (agent.as_str() == "codex-acp" && own).then(|| OwnLogin::for_tests(n))
     }
