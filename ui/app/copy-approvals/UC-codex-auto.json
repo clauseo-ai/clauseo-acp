@@ -3,36 +3,36 @@
     "en": "For this conversation",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "stage B automode (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "ChatGPT's permission card: the allow answer Codex keeps for the rest of the conversation (codex-acp's allow_for_session, allow_session, allow_permissions_session), in place of \"Always for this matter\", which it is not. Claude's card keeps U4-10. Words are provisional"
   },
   "UC-980": {
     "en": "Allowed for this conversation.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "stage B automode (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "ChatGPT's permission card folded after the lawyer chose \"For this conversation\" (UC-979); Claude's says U4's \"Allowed for this matter.\". Words are provisional"
   },
   "UC-981": {
     "en": "Allowed for this conversation. Clauseo saved a new version of {paper}.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "stage B automode (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "The same, on a card about saving a new version of one paper; Claude's says U4-13. Words are provisional"
   },
   "UC-982": {
     "en": "ChatGPT's automatic mode isn't available for this account, so ChatGPT asks before running commands.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "stage B automode (provisional; the app thread finalises the words)",
+    "status": "approved",
+    "at": "2026-11-18",
+    "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Host notice auto_mode_unavailable from a ChatGPT thread: the account refuses Codex's reviewer, so the session runs in workspace-write, where ChatGPT asks the lawyer before steps outside the matter. Once per conversation. Claude's thread keeps TN-10. Words are provisional"
   }
 }
