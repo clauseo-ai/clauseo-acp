@@ -544,3 +544,56 @@ fn only_this_matters_history_opens_to_a_command() {
         assert!(read_edit.contains(&rule), "{rule}");
     }
 }
+
+/// The desktop canary's launch on Windows (`crates/desktop/tests/canary.rs`): a data folder
+/// whose path is long, with spaces and Devanagari, in two spellings (the 8.3 one too), this
+/// matter's `history.git` kept. Its Read and Edit denies, allow rules, history rules and shell
+/// rules with their variable forms stay under `SHED_AT`: with the folders under `matters`
+/// named after each spelling of `<data>`, they came to 3.7 MB, and the launch failed with
+/// "Clauseo could not write the agent's settings file".
+#[test]
+fn the_canary_launch_with_its_history_fits_its_budget() {
+    use crate::agent::data_fence::{claude_allow_rules_on, history_rules, own_reads};
+    use crate::agent::loads::profile::SHED_AT;
+    let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
+    let dir = TempDir::new("shell-deny-canary");
+    let data = dir.path().join("data");
+    let matter = matter_id(0);
+    for file in [
+        format!("matters/{matter}/history.git/HEAD"),
+        format!("matters/{}/history.git/HEAD", matter_id(1)),
+        format!("agent-state/{matter}/notes/n.md"),
+        "settings.json".to_owned(),
+    ] {
+        let path = data.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, b"x").unwrap();
+    }
+    let notes = data.join("agent-state").join(&matter).join("notes");
+    let history = crate::agent::history::matter_history(&notes).unwrap();
+    let mut deny = launch_deny(vec![data.clone()], &data, &[notes.clone(), history], &[]);
+    deny.own_reads = own_reads(&data, &[&notes]);
+    let (token, name) = ("cnry0123456789abcdef", "म\u{947}हरा तलाक\u{93c}");
+    let canary = |user: &str| {
+        let temp = format!(r"C:\Users\{user}\AppData\Local\Temp");
+        PathBuf::from(format!(
+            r"{temp}\clauseo-canary-4242-{token} {name}\data {name} {token}"
+        ))
+    };
+    let deny = LaunchDeny {
+        spellings: vec![canary("runneradmin"), canary("RUNNER~1")],
+        ..deny
+    };
+    let env = |var: &str| match var {
+        "LOCALAPPDATA" => Some(r"C:\Users\runneradmin\AppData\Local".into()),
+        "TEMP" | "TMP" => Some(r"C:\Users\RUNNER~1\AppData\Local\Temp".into()),
+        _ => None,
+    };
+    let (allow, history_deny) = history_rules(&deny, true);
+    let total = size(&claude_deny_rules_on(&deny, true, false))
+        + size(&claude_allow_rules_on(&deny, true))
+        + size(&allow)
+        + size(&history_deny)
+        + size(&windows_shell_deny_rules(&deny, &env));
+    assert!(total < SHED_AT, "{total} B of {SHED_AT}");
+}

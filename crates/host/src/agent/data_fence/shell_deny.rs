@@ -58,13 +58,13 @@
 //! `run/<start>*`) stays Claude's `*`, which takes separators too (`run\<own>\work\relay-token.md`
 //! is denied with the token; the accepted cost). A target's name is matched as a start, so a
 //! trailing dot or space and a stream (`settings.json::$DATA`) are denied with it. What lies
-//! under Clauseo's own names ([`OWN_WORDS`]: `agent-state`, `claude-acp`, `codex-acp`), and a
-//! run folder whose name (or group's start) is an id's, is named by its tail alone
-//! (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`), whatever spelling of
-//! `<data>` is before it: no folder of the lawyer's holds those names, and with `launch.rs`
-//! naming the siblings of a busy folder in groups, a launch's rules hardly grow with the matters
-//! (the settings file Claude Code reads is at most 2 MiB, `agent::launch_settings`). The
-//! default data folder is written as Clauseo's own folder name alone
+//! under Clauseo's own names ([`OWN_WORDS`]: `agent-state`, `claude-acp`, `codex-acp`), and a run
+//! or matter folder whose name (or group's start) is an id's, is named by its tail alone
+//! (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`, `matters\<id>\…`), whatever
+//! spelling of `<data>` is before it: no folder of the lawyer's holds those names, and with
+//! `launch.rs` naming the siblings of a busy folder in groups, a launch's rules hardly grow with
+//! the matters (the settings file Claude Code reads is at most 2 MiB, `agent::launch_settings`).
+//! The default data folder is written as Clauseo's own folder name alone
 //! (`clauseo_settings::IDENTIFIER`), which every other way of writing it (a drive, a share or
 //! device path, `%LOCALAPPDATA%` in any case, `~`, `$HOME`, …) ends in.
 //!
@@ -377,8 +377,11 @@ const DISTINCT: usize = 12;
 
 /// The tail a target or a folder is named by alone (the module doc), whatever spelling of
 /// `<data>` is before it: from the first of [`OWN_WORDS`] on (`agent-state\<id>`,
-/// `claude-acp\home\projects\<key>`), or `run\<name>` when the name (or its group's start)
-/// has at least [`DISTINCT`] characters.
+/// `claude-acp\home\projects\<key>`), or `run\<name>`, or `matters\<name>` and what is under
+/// it, when the name (or its group's start) has at least [`DISTINCT`] characters: a matter's
+/// id, whose `history.git` a launch keeps (`agent::history`), so the launch walks into
+/// `matters` and that matter's folder. Written after each spelling of `<data>`, those rules
+/// grew the canary's launch (a long data folder, two spellings) past Claude Code's 2 MiB.
 fn tail(names: &[Vec<Piece>]) -> Option<&[Vec<Piece>]> {
     fn is(name: &[Piece], word: &str) -> bool {
         matches!(name, [Piece::Text(text)] if text == word)
@@ -389,15 +392,15 @@ fn tail(names: &[Vec<Piece>]) -> Option<&[Vec<Piece>]> {
     {
         return names.get(at..);
     }
-    match names {
-        [run, name] if is(run, "run") => {
-            let ([Piece::Text(start)] | [Piece::Text(start), Piece::Any]) = name.as_slice() else {
-                return None;
-            };
-            (start.chars().count() >= DISTINCT).then_some(names)
-        }
-        _ => None,
-    }
+    let name = match names {
+        [run, name] if is(run, "run") => name,
+        [matters, name, ..] if is(matters, "matters") => name,
+        _ => return None,
+    };
+    let ([Piece::Text(start)] | [Piece::Text(start), Piece::Any]) = name.as_slice() else {
+        return None;
+    };
+    (start.chars().count() >= DISTINCT).then_some(names)
 }
 
 /// Whether a kept place could have a name at `names`' last that starts with it and is longer:
