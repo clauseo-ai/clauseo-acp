@@ -7,7 +7,8 @@
 //!   [`LimitsInput::Read`], which becomes exactly one `Input::ReadDone`. The loop never waits
 //!   on a reader; dropping the actor drops the reads in flight.
 //! - [`Action::Changed`] is stored (`Store::put_account_limits`, off the loop; a failure is
-//!   only logged) and published as `AccountLimitsChanged`. The actions of one input publish
+//!   only logged) and published as `AccountLimitsChanged`; [`Action::Forget`] deletes the same
+//!   way (`Store::forget_account_limits`) and publishes nothing. The actions of one input publish
 //!   each `AccountLimitsChanged`, then one `LimitsViewChanged` when any action changed the view.
 //! - The timer waits for [`Limits::next_deadline`] on the host clock. It is replaced only when
 //!   that time moves. Taking it (a fire, a re-arm, a cancel) moves the generation on, and a fire
@@ -45,8 +46,8 @@ use clauseo_limits::{
     ReadFailure, ReadLimits, ReadOutcome,
 };
 use clauseo_protocol::{
-    AccountLimits, AgentId, AgentKind, HostEvent, LimitsView, Principal, RefreshWhy, ThreadId,
-    Timestamp, TurnId,
+    AccountLimits, AccountRef, AgentId, AgentKind, HostEvent, LimitsView, Principal, RefreshWhy,
+    ThreadId, Timestamp, TurnId,
 };
 use clauseo_settings::Effective;
 use futures::future::AbortHandle;
@@ -391,6 +392,10 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
                 publish(actor, &HostEvent::AccountLimitsChanged(limits));
                 view_changed = true;
             }
+            Action::Forget { agent, keep } => {
+                forget(actor, agent, keep);
+                view_changed = true;
+            }
             Action::ViewChanged => view_changed = true,
         }
     }
@@ -442,9 +447,29 @@ fn start_read(actor: &mut Actor, agent: AgentKind) {
 /// Keeps `limits` as the last value for its account, off the loop.
 fn store(actor: &Actor, limits: AccountLimits) {
     let store = actor.store.clone();
+    off_loop(actor, "account limits were not stored", async move {
+        store.put_account_limits(limits).await
+    });
+}
+
+/// Deletes `agent`'s stored limits for every account but `keep`, off the loop. A `Changed` and
+/// the `Forget` that keeps its account leave the same rows in either order.
+fn forget(actor: &Actor, agent: AgentKind, keep: Option<AccountRef>) {
+    let store = actor.store.clone();
+    off_loop(actor, "account limits were not forgotten", async move {
+        store.forget_account_limits(agent, keep).await
+    });
+}
+
+/// Runs a store write on the actor's pool; a failure is only logged, with `failed`.
+fn off_loop(
+    actor: &Actor,
+    failed: &'static str,
+    write: impl Future<Output = Result<(), clauseo_store::Error>> + 'static,
+) {
     let spawned = futures::task::LocalSpawnExt::spawn_local(&actor.spawner, async move {
-        if let Err(error) = store.put_account_limits(limits).await {
-            tracing::warn!(error = %Cause(&error), "account limits were not stored");
+        if let Err(error) = write.await {
+            tracing::warn!(error = %Cause(&error), "{failed}");
         }
     });
     if let Err(error) = spawned {

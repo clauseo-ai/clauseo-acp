@@ -165,3 +165,14 @@ pub(crate) fn changed(actions: &[Action]) -> &AccountLimits {
         other => panic!("expected one Changed, got {other:?}"),
     }
 }
+
+/// The limits a `Changed` carries and the `keep` of the `Forget` after it; fails on any other
+/// action list.
+pub(crate) fn changed_then_forget(actions: &[Action]) -> (&AccountLimits, Option<&AccountRef>) {
+    match actions {
+        [Action::Changed(limits), Action::Forget { agent, keep }] if *agent == limits.agent => {
+            (limits, keep.as_ref())
+        }
+        other => panic!("expected Changed then its agent's Forget, got {other:?}"),
+    }
+}

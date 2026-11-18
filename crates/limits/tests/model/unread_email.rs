@@ -1,10 +1,13 @@
 //! A Codex read whose `account/read` did not come (`AccountRead::NotRead`, the plan ref): the
-//! merge keeps the last email for the same identity, and blanks it otherwise.
+//! merge keeps the last email for the same identity, and blanks it otherwise, forgetting the
+//! email's stored entry.
 
 use clauseo_limits::{AccountRead, Action, Input, Limits, ReadOutcome};
 use clauseo_protocol::{AccountLimits, AccountRef, AgentKind, PlanLabel, Timestamp};
 
-use crate::support::{account, at, changed, done, five_hour, read_once, usage};
+use crate::support::{
+    account, at, changed, changed_then_forget, done, five_hour, read_once, usage,
+};
 
 const CODEX: AgentKind = AgentKind::Codex;
 /// The email the last good read gave.
@@ -30,20 +33,26 @@ fn unread(limits: AccountLimits) -> ReadOutcome {
     }
 }
 
-/// Asks for another read of Codex at `now`, then ends it with `outcome`; the account ref the
-/// `Changed` carries.
-fn read_again(model: &mut Limits, outcome: ReadOutcome, now: Timestamp) -> AccountRef {
+/// Asks for another read of Codex at `now`, then ends it with `outcome`; the actions it gives.
+fn read_again(model: &mut Limits, outcome: ReadOutcome, now: Timestamp) -> Vec<Action> {
     let actions = model.input(Input::TryAgain { agent: Some(CODEX) }, now);
     assert_eq!(actions, vec![Action::Read(CODEX)]);
-    let actions = model.input(done(CODEX, outcome), now);
-    changed(&actions).account.clone()
+    model.input(done(CODEX, outcome), now)
+}
+
+/// Asserts that `actions` store the plan ref and forget every other entry, the email's too.
+fn plan_ref_replaces_the_email(actions: &[Action]) {
+    let plan = AccountRef(REF_PLAN.to_owned());
+    let (stored, keep) = changed_then_forget(actions);
+    assert_eq!(stored.account, plan);
+    assert_eq!(keep, Some(&plan));
 }
 
 #[test]
 fn a_late_account_read_keeps_the_last_email_for_the_same_plan() {
     let mut model = read_once(codex(EMAIL, "ChatGPT Plus"));
-    let got = read_again(&mut model, unread(codex(REF_PLAN, "ChatGPT Plus")), at(1));
-    assert_eq!(got, AccountRef(EMAIL.to_owned()));
+    let actions = read_again(&mut model, unread(codex(REF_PLAN, "ChatGPT Plus")), at(1));
+    assert_eq!(changed(&actions).account, AccountRef(EMAIL.to_owned()));
 }
 
 #[test]
@@ -57,13 +66,19 @@ fn a_late_account_read_with_no_email_known_is_the_plan_ref() {
 #[test]
 fn a_late_account_read_on_another_plan_drops_the_email() {
     let mut model = read_once(codex(EMAIL, "ChatGPT Plus"));
-    let got = read_again(&mut model, unread(codex(REF_PLAN, "ChatGPT Pro")), at(1));
-    assert_eq!(got, AccountRef(REF_PLAN.to_owned()));
+    plan_ref_replaces_the_email(&read_again(
+        &mut model,
+        unread(codex(REF_PLAN, "ChatGPT Pro")),
+        at(1),
+    ));
 }
 
 #[test]
 fn an_account_read_that_says_no_email_is_not_kept_from_before() {
     let mut model = read_once(codex(EMAIL, "ChatGPT Go"));
-    let got = read_again(&mut model, usage(codex(REF_PLAN, "ChatGPT Go")), at(1));
-    assert_eq!(got, AccountRef(REF_PLAN.to_owned()));
+    plan_ref_replaces_the_email(&read_again(
+        &mut model,
+        usage(codex(REF_PLAN, "ChatGPT Go")),
+        at(1),
+    ));
 }
