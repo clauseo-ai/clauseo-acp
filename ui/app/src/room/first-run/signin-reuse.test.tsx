@@ -60,3 +60,22 @@ test.each<[string, { found?: FoundLogin }]>([
   expect(text()).not.toContain(UNUSABLE);
   expect(text()).not.toContain("may have expired");
 });
+
+// A Mac where Claude Code is signed in and Clauseo isn't yet: the start window drew no Claude row (login_found had no
+// line there); it shows the found line with Use it, which sends use_found_login as the room gate's does
+test("the start window with Claude Code's login found: Claude's row says so, and Use it uses it", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [
+      info(true),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { login_found: { from: "claude_code" } }),
+    ],
+  });
+  const row = document.querySelector(`[data-testid="plan-row"][data-agent="${CLAUDE}"]`);
+  expect(row?.textContent).toContain(
+    "Clauseo found your Claude account from Claude Code and will use it here.",
+  );
+  await press(byId("signin-foot-use"));
+  expect(setups(t)).toEqual([{ use_found_login: { agent: CLAUDE } }]);
+});
