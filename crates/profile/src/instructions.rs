@@ -94,13 +94,27 @@ pub const CODEX_SHELL_ONLINE: &str = include_str!("../assets/instructions/codex-
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
-/// The shell line a Codex session gets, by its web search switch (`web_search`):
-/// [`CODEX_SHELL_ONLINE`] when on, else [`CODEX_SHELL_OFFLINE`], both trimmed.
+/// The shell line a Codex session on Windows with web search gets instead of
+/// [`CODEX_SHELL_ONLINE`]: the sandboxed shell has the network there too. Python's own TLS works
+/// unescalated, but Windows' schannel gets no credentials under Codex's unelevated sandbox token,
+/// so `curl.exe` and `Invoke-WebRequest` need the escalated rerun, which Codex's reviewer allows.
+/// Claude never gets it.
+pub const CODEX_SHELL_ONLINE_WINDOWS: &str =
+    include_str!("../assets/instructions/codex-shell-online-windows.txt");
+
+/// The shell line a Codex session gets, by its web search switch (`web_search`): on Windows
+/// [`CODEX_SHELL_ONLINE_WINDOWS`] (see there), elsewhere [`CODEX_SHELL_ONLINE`]; off, on every
+/// OS, [`CODEX_SHELL_OFFLINE`].
 pub fn codex_shell_net(web_search: bool) -> &'static str {
-    if web_search {
-        CODEX_SHELL_ONLINE.trim()
-    } else {
-        CODEX_SHELL_OFFLINE.trim()
+    codex_shell_net_on(web_search, cfg!(windows))
+}
+
+/// [`codex_shell_net`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn codex_shell_net_on(web_search: bool, windows: bool) -> &'static str {
+    match (web_search, windows) {
+        (false, _) => CODEX_SHELL_OFFLINE.trim(),
+        (true, true) => CODEX_SHELL_ONLINE_WINDOWS.trim(),
+        (true, false) => CODEX_SHELL_ONLINE.trim(),
     }
 }
 

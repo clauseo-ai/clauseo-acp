@@ -8,8 +8,8 @@ use std::path::Path;
 
 use clauseo_profile::instructions::{
     BrowserPart, BrowserRoute, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, LEGAL, SCALE_CLAUDE, STETDOC_CLI,
-    TOOLS, browser_part, browser_part_for, codex_shell, codex_shell_net, connectors_part,
-    word_count,
+    TOOLS, browser_part, browser_part_for, codex_shell, codex_shell_net, codex_shell_net_on,
+    connectors_part, word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
@@ -123,29 +123,31 @@ fn claude_standing_text_budget() {
     );
 }
 
-/// Codex's standing text: everything in `developer_instructions` with the built-in index.
+/// Codex's standing text: everything in `developer_instructions` with the built-in index. Web
+/// search on, its shell line is the Windows form on Windows and the other form elsewhere; both
+/// forms are counted, and each must fit `CODEX_MAX`.
 #[test]
 fn codex_standing_text_budget() {
     let profile = profile();
     let index = profile.skills_index();
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
-    let text = filled(
-        &format!("{}\n\n{index}", profile.codex_instructions_for(true)),
-        browser_part_for(BrowserPart::On, BrowserRoute::CodexEntry),
-    );
-    for line in [
-        codex_shell_net(true),
-        CODEX_REFUSAL,
-        codex_shell(true).unwrap(),
-    ] {
-        assert!(text.contains(line.trim()), "{line}");
+    let base = profile.codex_instructions_for(true);
+    for windows in [false, true] {
+        let line = codex_shell_net_on(true, windows);
+        let text = filled(
+            &format!("{}\n\n{index}", base.replace(codex_shell_net(true), line)),
+            browser_part_for(BrowserPart::On, BrowserRoute::CodexEntry),
+        );
+        for shell in [line, CODEX_REFUSAL, codex_shell(true).unwrap()] {
+            assert!(text.contains(shell.trim()), "{shell}");
+        }
+        assert!(text.ends_with(index.trim_end()));
+        let count = word_count(&text);
+        assert!(
+            count <= CODEX_MAX,
+            "Codex's standing text has {count} words (windows: {windows})"
+        );
     }
-    assert!(text.ends_with(index.trim_end()));
-    let count = word_count(&text);
-    assert!(
-        count <= CODEX_MAX,
-        "Codex's standing text has {count} words"
-    );
 }
 
 /// Each helper's prompt is all the standing text it gets (a helper never gets
