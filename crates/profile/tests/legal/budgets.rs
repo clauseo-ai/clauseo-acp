@@ -18,22 +18,23 @@ use clauseo_profile::subagents::{PAPER_READER, ResearcherArm, researcher_prompt,
 use clauseo_profile::{ClauseoProfile, Instructions};
 use clauseo_protocol::AgentKind;
 
-/// The legal part (`legal.md`): 0058's cap, raised to the next 50 for the version history line.
-const LEGAL_MAX: usize = 1400;
+/// The legal part (`legal.md`): 0058's cap, raised to the next 50 for the version history line,
+/// and again for the permission-settings line.
+const LEGAL_MAX: usize = 1450;
 /// The text both agents share (the tools part with the stetdoc line, and the legal part), filled:
-/// 0058's cap, kept.
-const SHARED_MAX: usize = 1800;
+/// 0058's cap, raised to the next 50 for the permission-settings line.
+const SHARED_MAX: usize = 1850;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
 /// legal part, the shell line and "Working at scale"; raised to the next 50 for the version
-/// history line.
-const CLAUDE_MAX: usize = 2300;
+/// history line, and again for the permission-settings line.
+const CLAUDE_MAX: usize = 2350;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
 /// legal part, the shell-net line (online with web search), the refusal line, the shell line and
 /// the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 /// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
-/// 2016; 2100 for the version history line.
-const CODEX_MAX: usize = 2100;
+/// 2016; 2100 for the version history line; 2150 for the permission-settings line.
+const CODEX_MAX: usize = 2150;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
