@@ -106,10 +106,9 @@ pub(super) fn launch_deny(
 /// folder, this matter's notes, the matter folder (`agent::session_folder` of `stored`) and,
 /// for Claude, the plans folder in its home; and, off Windows, this matter's `history.git`
 /// (`agent::history`), while `matters/**` still denies it to Claude's Read and Edit
-/// (`data_fence::DENIED`). On Windows the history stays under the shell rules' `matters/**`,
-/// as before the history's rules, and Claude gets no history rules
-/// (`data_fence::history_rules`): the release candidate's PowerShell calls were refused with
-/// no classifier verdict on a Windows laptop (2026-11-18), with those rules the suspect.
+/// (`data_fence::DENIED`). On Windows the history is not among them, so `matters/**` stays
+/// whole in the Read and Edit denies, and its PowerShell reads get the history's allow and deny
+/// rules (`data_fence::history_rules`), which do not grow with matters.
 fn own_folders(
     run: &RunFolders,
     stored: &Path,

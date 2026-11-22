@@ -1,6 +1,6 @@
 //! The fixed Windows shell rules (`fixed_shell_deny.rs`): the same short list whatever the data
 //! folder holds or how long its path is, each target denied in every form, the own folders left
-//! to the classifier, the settings file small, and no history rules on Windows.
+//! to the classifier, the settings file small, and the history's rules for this matter alone.
 
 use std::path::{Path, PathBuf};
 
@@ -117,8 +117,9 @@ fn shell_count(settings: &Map<String, Value>) -> usize {
 
 /// The most `PowerShell(…)` and `Bash(…)` deny rules a Windows launch may carry for each
 /// spelling of `<data>`: the fixed list, the own folders' glob denies
-/// (`own_shell_glob_deny_rules`, which guard their allow rules) and the `Bash` tool's deny.
-const MOST_PER_SPELLING: usize = 250;
+/// (`own_shell_glob_deny_rules`, which guard their allow rules), the `Bash` tool's deny and
+/// this matter's history denies (16, `history_rules`).
+const MOST_PER_SPELLING: usize = 275;
 
 /// The launch's shell deny counts for `spellings`, `matters` matters, `conversations`
 /// conversations and `runs` run folders: the fixed list's, and all the settings carry, with
@@ -289,19 +290,37 @@ fn what_is_not_a_secret_is_left_to_the_classifier() {
     }
 }
 
-/// A Windows launch gets no history rules, and none of its rules names a history.
+/// A Windows launch's rules name this matter's history alone, in its fixed PowerShell rules:
+/// 12 allow and 16 deny for one spelling, the same for 3 matters or 30.
 #[test]
-fn a_windows_launch_has_no_history_rules() {
+fn a_windows_launch_has_this_matters_history_rules_alone() {
     let dir = TempDir::new("fixed-shell-history");
-    let deny = launch(dir.path(), &[LONG], 3, 2, 1);
-    let settings = windows_settings(&deny);
-    for rule in rules(&settings, "deny")
-        .iter()
-        .chain(&rules(&settings, "allow"))
-    {
-        assert!(!rule.contains("history.git"), "{rule}");
-        for option in ["--no-index", "--output", "--exec", "--remote"] {
-            assert!(!rule.contains(option), "{rule}");
+    let history = |rules: Vec<String>| -> Vec<String> {
+        rules
+            .into_iter()
+            .filter(|rule| rule.contains("history.git"))
+            .collect()
+    };
+    let mut seen = Vec::new();
+    for matters in [3, 30] {
+        let deny = launch(
+            &dir.path().join(matters.to_string()),
+            &[LONG],
+            matters,
+            2,
+            1,
+        );
+        let settings = windows_settings(&deny);
+        let (allow, deny) = (
+            history(rules(&settings, "allow")),
+            history(rules(&settings, "deny")),
+        );
+        assert_eq!((allow.len(), deny.len()), (12, 16), "{allow:#?} {deny:#?}");
+        for rule in allow.iter().chain(&deny) {
+            assert!(rule.starts_with("PowerShell(git --git-dir="), "{rule}");
+            assert!(rule.contains(OWN_MATTER), "{rule}");
         }
+        seen.push((allow, deny));
     }
+    assert_eq!(seen[0], seen[1]);
 }
