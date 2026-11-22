@@ -341,9 +341,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "Shamil's track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "Shamil's track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "A per-model 5-hour window, such as a ChatGPT plan's Spark bucket; U12-44's form with U12-12's length"
   }
 }
