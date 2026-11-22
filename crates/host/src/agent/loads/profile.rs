@@ -287,11 +287,11 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
 /// fixed `Bash` and `PowerShell` rules for Clauseo's secret places,
 /// `data_fence::windows_fixed_shell_deny_rules`, which do not grow with the data folder), and
 /// `permissions.allow` the Read of the built-in skills' folder and the own folders' listing and
-/// reading (`data_fence::claude_allow_rules`) and this matter's history (`history_rules`, none on
-/// Windows), each after any the hook put there. The own folders' glob denies go in only without
-/// Claude's shell sandbox (`sandboxed`, `keys.sandbox`: on Windows, or with the sandbox `Off`).
-/// A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
-/// spelling (a unit test's keys) nothing changes.
+/// reading (`data_fence::claude_allow_rules`) and this matter's history (`history_rules`, its
+/// denies in `permissions.deny`), each after any the hook put there. The own folders' glob
+/// denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`: on Windows,
+/// or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of another
+/// type is replaced. With no spelling (a unit test's keys) nothing changes.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,

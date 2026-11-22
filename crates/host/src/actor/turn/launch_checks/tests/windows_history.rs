@@ -1,7 +1,8 @@
-//! On Windows a launch leaves this matter's `history.git` under the `matters/**` rules,
-//! as before the history's rules, and Claude gets no history rules (`folders::own_folders`,
-//! `data_fence::history_rules`): the Windows fallback for the release candidate's PowerShell
-//! calls refused with no classifier verdict. Off Windows the history is kept and gets its rules.
+//! On Windows a launch leaves this matter's `history.git` under the `matters/**` rules
+//! (`folders::own_folders`), so its Read and Edit denies and shell rules are those of the launch
+//! without the history, and Claude gets the history's fixed PowerShell rules
+//! (`data_fence::history_rules`): this matter's alone, so they do not grow with matters. Off
+//! Windows the history is kept and gets its rules.
 
 use std::path::PathBuf;
 
@@ -19,7 +20,7 @@ const OTHER: &str = "01a1d5b4-a291-7649-9fa4-000000000001";
 const OPTIONS: [&str; 4] = ["--no-index", "--output", "--exec", "--remote"];
 
 #[test]
-fn on_windows_the_history_stays_denied_and_gets_no_rules() {
+fn on_windows_the_history_stays_denied_and_gets_its_fixed_rules() {
     let data = scratch("windows-history");
     let stored = scratch("windows-history-matter");
     let run = folders(&data, 1);
@@ -55,8 +56,24 @@ fn on_windows_the_history_stays_denied_and_gets_no_rules() {
     assert!(windows.targets.iter().any(|target| target == "matters/**"));
     let shell = data_fence::windows_fixed_shell_deny_rules(&windows);
     assert_eq!(shell, data_fence::windows_fixed_shell_deny_rules(&before));
+    // This matter's history alone: `log`, `show` and `diff`, with and without quotes, under
+    // `\` and `/` (12), and the four options held off them (16); none for another matter.
+    let matter = history.parent().and_then(|dir| dir.file_name()).unwrap();
+    let matter = matter.to_str().unwrap();
     let (allow, deny) = data_fence::history_rules(&windows, true);
-    assert!(allow.is_empty() && deny.is_empty(), "{allow:?} {deny:?}");
+    assert_eq!((allow.len(), deny.len()), (12, 16), "{allow:#?} {deny:#?}");
+    for rule in allow.iter().chain(&deny) {
+        assert!(rule.starts_with("PowerShell(git --git-dir="), "{rule}");
+        assert!(
+            rule.contains(matter) && rule.contains("history.git"),
+            "{rule}"
+        );
+        assert!(!rule.contains(OTHER), "{rule}");
+    }
+    let holds = |rule: &String| OPTIONS.iter().any(|option| rule.contains(option));
+    assert!(deny.iter().all(holds), "{deny:#?}");
+    assert!(!allow.iter().any(holds), "{allow:#?}");
+    // No other rule names the history.
     let mut rules = data_fence::claude_allow_rules_on(&windows, true);
     rules.extend(data_fence::claude_deny_rules_on(&windows, true, false));
     rules.extend(shell);

@@ -270,13 +270,10 @@ pub(crate) fn history_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec<String
     })
 }
 
-/// [`history_allow_rules`] and [`history_deny_rules`] for one launch's settings; none on
-/// Windows (`windows`), where the history stays under the shell rules' `matters/**`
-/// (`launch_checks::folders::own_folders`).
+/// [`history_allow_rules`] and [`history_deny_rules`] for one launch's settings, Bash's off
+/// Windows and PowerShell's on Windows (`windows`): this matter's history alone, so they do not
+/// grow with matters.
 pub(crate) fn history_rules(deny: &LaunchDeny, windows: bool) -> (Vec<String>, Vec<String>) {
-    if windows {
-        return (Vec::new(), Vec::new());
-    }
     (
         history_allow_rules(deny, windows),
         history_deny_rules(deny, windows),
