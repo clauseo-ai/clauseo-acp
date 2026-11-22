@@ -210,36 +210,36 @@
     "en": "Claude didn't start, because Clauseo couldn't reach Claude from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "Refusal of a turn whose agent didn't start: its start failed on its connection, the window says online and the host's probe couldn't reach the service (agent.start_unreachable); Claude's line, also for an agent not known"
   },
   "U3-err-agent.start_unreachable.chatgpt": {
     "en": "ChatGPT didn't start, because Clauseo couldn't reach ChatGPT from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.start_unreachable for ChatGPT"
   },
   "U3-err-agent.start_unreachable.named": {
     "en": "{name} didn't start, because Clauseo couldn't reach {name} from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.start_unreachable for an agent of no kind by its name"
   },
   "U3-err-agent.start_unreachable.nameless": {
     "en": "The AI didn't start, because Clauseo couldn't reach it from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "orchestrator (provisional; the app's words; Rohan to OK on the screenshots page)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.start_unreachable with no name at all"
   }
 }

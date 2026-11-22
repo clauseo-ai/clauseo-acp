@@ -3,36 +3,36 @@
     "en": "Claude didn't start, because Clauseo couldn't set up the folder it keeps for Claude on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (final English; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.home_failed: Clauseo couldn't prepare the agent's own folder (its home) before starting it; Try again under the turn, Restart where agent.launch_failed has it; the same words on every platform; Claude's; ChatGPT's is U3-err-agent.home_failed.chatgpt"
   },
   "U3-err-agent.home_failed.chatgpt": {
     "en": "ChatGPT didn't start, because Clauseo couldn't set up the folder it keeps for ChatGPT on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (final English; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.home_failed: Clauseo couldn't prepare the agent's own folder (its home) before starting it; Try again under the turn, Restart where agent.launch_failed has it; the same words on every platform; ChatGPT's"
   },
   "U3-err-agent.home_failed.named": {
     "en": "{name} didn't start, because Clauseo couldn't set up the folder it keeps for {name} on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (final English; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.home_failed: Clauseo couldn't prepare the agent's own folder (its home) before starting it; Try again under the turn, Restart where agent.launch_failed has it; the same words on every platform; an agent of no kind by its name"
   },
   "U3-err-agent.home_failed.nameless": {
     "en": "The AI didn't start, because Clauseo couldn't set up the folder it keeps for the AI on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-17",
-    "by": "app track (final English; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-22",
+    "by": "Rohan (standing approval of all copy, 2026-11-22)",
     "note": "agent.home_failed: Clauseo couldn't prepare the agent's own folder (its home) before starting it; Try again under the turn, Restart where agent.launch_failed has it; the same words on every platform; no name at all"
   }
 }
