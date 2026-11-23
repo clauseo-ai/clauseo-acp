@@ -317,10 +317,11 @@ fn the_rendered_frontmatter_is_name_and_description_alone() {
         assert!(!text.contains("metadata:"));
         // R24 gave the research skill's case-law line conditional wording (version 2), then
         // the brief's "and citations" (version 3), then no browser in its tools (version 4).
-        // The matter brief's check before its read (D-044) is its version 2.
+        // The matter brief's check before its read (D-044) is its version 2. The drafting skill's
+        // clean edit when the lawyer asks for no tracked changes (23 Nov) is its version 2.
         let version = match skill.name() {
             "legal-research" => "4",
-            "matter-brief" => "2",
+            "matter-brief" | "legal-drafting" => "2",
             _ => "1",
         };
         assert_eq!(skill.entry().version, version, "{}", skill.name());
@@ -534,7 +535,7 @@ fn versions_lock() {
             .unwrap_err()
             .contains("not listed")
     );
-    let bumped_text = [(name, "2", hash)];
+    let bumped_text = [(name, "99", hash)];
     assert!(
         check_lock(&lock, &bumped_text)
             .unwrap_err()

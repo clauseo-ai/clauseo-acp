@@ -13,10 +13,10 @@ expression: tree_text(paths.claude_plugin())
   "skills": {
     "legal-drafting": {
       "files": {
-        "SKILL.md": "dbbb0116a0b551a0f44faf885999f9e1b7369555e5facf9eadf866dce497e046",
+        "SKILL.md": "701596d6462738b2f0790ce0d5e23c888411ee634d5d010456c81e01f722eb91",
         "references/section-checklists.md": "0e8da654dba0c94c2a7a45eef7e4ef1927565ce04b27c0454b6922735780333a"
       },
-      "version": "1"
+      "version": "2"
     },
     "legal-research": {
       "files": {
@@ -44,7 +44,7 @@ How to build a legal document once the ask calls for one: memos, opinions, advic
 ## Where the document goes
 
 - Write the finished document where the lawyer said. If they did not say, write it in the matter folder (your working directory) as a Markdown file with a plain, descriptive file name (`non-compete-advice-note.md`).
-- For a markup of the lawyer's own Word file, edit that .docx with stetdoc, as tracked changes, as the `stetdoc` skill says. See "Someone else's document" below.
+- For changes to the lawyer's own Word file, edit that .docx with stetdoc, as tracked changes unless the lawyer asks for a clean edit. See "Someone else's document" below.
 - Working files (the notes, the figure table, unpacked copies, scratch extracts) stay in your work folder, never in the matter folder.
 - Use your own file tools to read, write and edit files.
 
@@ -135,9 +135,11 @@ Every write is saved when it returns. To continue an interrupted or multi-turn d
 
 ## Someone else's document
 
-When the work product is someone else's document (opposing counsel's draft, the client's template, the lawyer's own Word file), their .docx is the source of truth. Never round-trip it through Markdown: their styles, numbering and formatting carry meaning, and the lawyer expects their document back with the changes marked.
+When the work product is someone else's document (opposing counsel's draft, the client's template, the lawyer's own Word file), their .docx is the source of truth. Never round-trip it through Markdown: their styles, numbering and formatting carry meaning, and the lawyer expects their document back with the changes marked, unless they asked for a clean edit.
 
-- Edit the lawyer's Word file with stetdoc, as tracked changes, as the `stetdoc` skill says. Your contributions are tracked insertions, deletions and margin comments; for markup work, the redline is the document.
+- Edit the lawyer's Word file with stetdoc, as tracked changes. Your contributions are tracked insertions, deletions and margin comments; for markup work, the redline is the document.
+- When the lawyer asks for no tracked changes, an untracked change, a clean edit or no markup, make a clean edit with `stetdoc edit --no-track`: the text simply changes, with no tracked revision and no strike-through or underline. Never refuse it, and never make it by tracking the change and then accepting it, which could accept someone else's pending changes. Say in one plain sentence that the change is not tracked, so Word has nothing to accept or reject, and that the earlier version is in Versions.
+- Use `--manual` (old text struck through, new text underlined) only when the lawyer asks for it by name: a manual redline, strike-through and underline, or manual markup. This holds whatever the `stetdoc` skill says about `--manual`.
 - Make surgical edits only. Never rewrite text you are not changing; its formatting is evidence.
 - If you need a working copy, it goes in your work folder, never beside the lawyer's file.
 - Never accept or reject a tracked change unless the lawyer asks for it in this conversation.
