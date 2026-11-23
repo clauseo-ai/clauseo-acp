@@ -122,19 +122,14 @@ fn each_agent_puts_a_draft_in_word_and_answers_in_the_chat() {
     }
 }
 
-/// The new-document rule (decision record 0058): with a working stetdoc, both agents read that
-/// tracked changes only change a paper that already exists, and that a new document is made
-/// clean with pandoc from a Markdown file. The saved-file rule then names it.
+/// The new-document rule (decision record 0058): with a working stetdoc, both agents read that a
+/// new document is made clean with pandoc from a Markdown file. The saved-file rule then names it.
 #[test]
 fn each_agent_makes_a_new_document_clean_with_pandoc() {
     let profile =
         launch_profile(&std::env::temp_dir().join("new-document-rule")).with_stetdoc_cli(true);
     let claude = profile.claude_options().system_prompt_append().to_owned();
     for text in [claude, profile.codex_instructions_for(false)] {
-        assert!(
-            text.contains("Tracked changes are only for changing a paper that already exists."),
-            "{text}"
-        );
         assert!(text.contains("Make a new document clean"), "{text}");
         assert!(
             text.contains("`pandoc \"{work_folder}/<file>.md\" -o \"<Name>.docx\"`"),
@@ -182,4 +177,38 @@ fn both_agents_read_a_mentioned_paper_in_the_reviewed_words() {
     assert_eq!(approvals["UC-711"]["en"], LINE);
     assert_eq!(approvals["UC-711"]["status"], "approved");
     assert!(approvals["UC-711"]["hi"].is_null());
+}
+
+/// The clean-edit sentence (UC-985, Rohan 23 Nov): both agents edit as tracked changes unless the
+/// lawyer asks for no tracked changes, then make a clean edit with `stetdoc edit --no-track`, and
+/// use `--manual` only when asked for it by name. Once in each agent's text on every OS, with or
+/// without a working stetdoc, verbatim in `registry-uc-agents.tsx` and in its approvals file.
+#[test]
+fn both_agents_make_a_clean_edit_when_asked_for_no_tracked_changes() {
+    use clauseo_profile::instructions::TOOLS;
+    const LINE: &str = "When the lawyer asks for no tracked changes, a clean edit or no markup, use \
+                        `stetdoc edit --no-track` and say it is not tracked, so Word has nothing \
+                        to accept or reject, and the earlier version is in Versions. Use \
+                        `--manual` only when the lawyer asks for manual markup by name.";
+    assert_eq!(TOOLS.matches(LINE).count(), 1);
+    assert!(!TOOLS.contains("only with the `stetdoc` command in your shell, as tracked changes"));
+    let root = std::env::temp_dir().join("rules-clean-edit");
+    for stetdoc in [false, true] {
+        let profile = launch_profile(&root).with_stetdoc_cli(stetdoc);
+        for macos in [false, true] {
+            let claude = profile.claude_instructions_for(macos);
+            let codex = profile.codex_instructions_for(macos);
+            assert_eq!(claude.matches(LINE).count(), 1, "{claude}");
+            assert_eq!(codex.matches(LINE).count(), 1, "{codex}");
+        }
+    }
+    let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/app");
+    let registry = std::fs::read_to_string(ui.join("src/review/registry-uc-agents.tsx")).unwrap();
+    assert!(registry.contains("\"UC-985\""));
+    assert!(registry.contains(&serde_json::to_string(LINE).unwrap()));
+    let approvals =
+        std::fs::read_to_string(ui.join("copy-approvals/UC-agents-clean-edit.json")).unwrap();
+    let approvals: serde_json::Value = serde_json::from_str(&approvals).unwrap();
+    assert_eq!(approvals["UC-985"]["en"], LINE);
+    assert!(approvals["UC-985"]["hi"].is_null());
 }

@@ -1,6 +1,7 @@
 // UC's entries for words Clauseo gives the agent rather than the window: the line every ChatGPT (Codex) session is told
 // about a command or a save the sandbox or Clauseo refuses, so the lawyer reads in the answer what never shows as a
-// step; and the sentence both agents are told about a paper the lawyer mentions with "@". Rust sends them
+// step; the sentence both agents are told about a paper the lawyer mentions with "@"; and their clean-edit sentence
+// (no tracked changes when the lawyer asks). Rust sends them
 // (crates/profile/assets/instructions/codex-refusal.txt and tools.txt), and Rust tests there (tests/legal/subagents.rs
 // and tests/legal/rules.rs) fail unless the lines below are those files' words, verbatim. The mock shows each as the
 // agent reads it.
@@ -23,6 +24,11 @@ const REFUSAL = instructionWords(
 const MENTION = instructionWords(
   "tools.txt",
   "When the lawyer mentions a paper with @, read it before you answer; for a Word document, use stetdoc.",
+);
+
+const CLEAN_EDIT = instructionWords(
+  "tools.txt",
+  "When the lawyer asks for no tracked changes, a clean edit or no markup, use `stetdoc edit --no-track` and say it is not tracked, so Word has nothing to accept or reject, and the earlier version is in Versions. Use `--manual` only when the lawyer asks for manual markup by name.",
 );
 
 /** The line as the agent's instructions hold it, on a card of its own. */
@@ -51,5 +57,13 @@ export const UC_AGENTS: Entry[] = [
     width: 520,
     height: 200,
     render: instructions(MENTION),
+  },
+  {
+    id: "UC-985",
+    words: CLEAN_EDIT,
+    screen: "agent/instructions",
+    width: 520,
+    height: 220,
+    render: instructions(CLEAN_EDIT),
   },
 ];

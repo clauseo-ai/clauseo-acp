@@ -70,7 +70,7 @@ const USES: [(&str, &str); 5] = [
         "matter-brief",
         "reading and updating the matter brief when work starts and before a turn ends",
     ),
-    (STETDOC, "reading and editing Word files as tracked changes"),
+    (STETDOC, "reading and editing Word files"),
     (
         AGENT_BROWSER,
         "reading or using a web page that needs a real browser",

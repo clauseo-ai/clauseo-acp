@@ -6,7 +6,7 @@ expression: "index.replace('\\\\', \"/\")"
 
 Your skills are files on this computer. When a task fits one, read the file before you start, and the references it names, and follow it.
 
-- stetdoc (reading and editing Word files as tracked changes): `/data/profile/claude-plugin/skills/stetdoc/SKILL.md`
+- stetdoc (reading and editing Word files): `/data/profile/claude-plugin/skills/stetdoc/SKILL.md`
 - legal-drafting (drafting or revising a legal document, or marking up a draft): `/data/profile/claude-plugin/skills/legal-drafting/SKILL.md`
 - legal-research (Indian legal research that needs more than one search): `/data/profile/claude-plugin/skills/legal-research/SKILL.md`
 - matter-brief (reading and updating the matter brief when work starts and before a turn ends): `/data/profile/claude-plugin/skills/matter-brief/SKILL.md`
