@@ -1,0 +1,10 @@
+{
+  "UC-985": {
+    "en": "When the lawyer asks for no tracked changes, a clean edit or no markup, use `stetdoc edit --no-track` and say it is not tracked, so Word has nothing to accept or reject, and the earlier version is in Versions. Use `--manual` only when the lawyer asks for manual markup by name.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-23",
+    "by": "app track (provisional; Rohan's 23 Nov ruling on clean edits, via the orchestrator)",
+    "note": "Model-facing: both agents' instructions on every OS (crates/profile/assets/instructions/tools.txt). English alone: the agent answers in the lawyer's language."
+  }
+}
