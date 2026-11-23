@@ -71,6 +71,13 @@ fn options(sub: &str) -> Option<(&'static [&'static str], &'static [&'static str
     })
 }
 
+/// Whether the long option `name` of the writing subcommand `sub` takes a value stetdoc only
+/// reads (every valued option but `output`: `--ops`, `--author`, …), so what that value holds
+/// never changes which file the command writes.
+pub(crate) fn reads_value(sub: &str, name: &str) -> bool {
+    name != "output" && options(sub).is_some_and(|(valued, _)| valued.contains(&name))
+}
+
 /// `args` read against `valued` and `flags` ([`options`]): `--name value`, `--name=value`,
 /// `-o value`, `-ovalue`, `-o=value`; `--` ends the options; `-` is a positional (stdin).
 pub(crate) fn parse<'w>(args: &[&'w str], valued: &[&str], flags: &[&str]) -> Parsed<'w> {

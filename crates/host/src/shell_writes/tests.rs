@@ -259,6 +259,43 @@ fn stetdoc_in_powershell() {
     }
 }
 
+/// A value stetdoc only reads may hold an expansion (`--ops $f`), and the document still counts,
+/// in PowerShell and in Bash: Claude's call on a Windows laptop (2026-11-23, verbatim below)
+/// wrote its operations to the file `$f` names and edited the paper in place, and with the
+/// whole command counted for nothing, Undo called that change possibly the lawyer's. The
+/// document word and an output's value stay strict.
+#[test]
+fn an_expansion_in_a_value_stetdoc_only_reads_leaves_the_document_counted() {
+    let laptop = r#"$b = "base: 91a429a192511f6b:0:91a429a192511f6b`n---`n@replace`nref: p9`nfind: within 30 days of delivery`nwith: within 45 days of delivery`n"; $f = "C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop\agent-state\01a206e4-f96b-7082-8aaa-ad5710a95404\work\01a206e5-7fb7-7046-8caf-9c7e89c6f9c1\ops.txt"; [IO.File]::WriteAllText($f, $b); stetdoc edit "Supply Agreement.docx" --ops $f --no-track --in-place --author "Clauseo"; Remove-Item $f"#;
+    let paper = ["Supply Agreement.docx"];
+    assert_eq!(targets_ps(laptop), paper);
+    let mut out = BTreeSet::new();
+    let input = serde_json::json!({ "command": laptop, "description": "x" }).to_string();
+    add_input(&mut out, &input, Dialect::PowerShell, Some(""));
+    assert_eq!(out.into_iter().collect::<Vec<_>>(), paper);
+    for script in [
+        r#"stetdoc edit "Supply Agreement.docx" --ops "$f" --no-track --in-place"#,
+        r#"stetdoc edit "Supply Agreement.docx" --ops=$f --no-track --in-place"#,
+    ] {
+        assert_eq!(targets_ps(script), paper, "{script}");
+    }
+    for script in [
+        r#"stetdoc edit "Supply Agreement.docx" --ops "$f" --no-track --in-place"#,
+        r#"stetdoc edit "Supply Agreement.docx" --ops $f --no-track --in-place"#,
+    ] {
+        assert_eq!(targets(script), paper, "{script}");
+    }
+    // An expansion in the document word or an output's value leaves the write unknown.
+    for script in [
+        r#"stetdoc edit "$doc" --ops ops.txt --in-place"#,
+        r#"stetdoc edit "Supply Agreement.docx" --ops ops.txt -o "$out""#,
+        r#"stetdoc edit "Supply Agreement.docx" --ops $f --output "$out""#,
+    ] {
+        assert_eq!(targets(script), none(), "{script}");
+        assert_eq!(targets_ps(script), none(), "{script}");
+    }
+}
+
 /// A PowerShell call's input is read as PowerShell; any other tool's as POSIX.
 #[test]
 fn a_powershell_input_is_read_as_powershell() {
