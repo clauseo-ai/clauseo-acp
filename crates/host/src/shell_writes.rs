@@ -25,7 +25,9 @@
 //! `workdir` or the turn's folder, so nothing is tracked across calls. When Claude Code's policy
 //! settings may turn that variable off, the start is unknown instead (`sent::ShellStart`): only
 //! absolute targets, and those after an absolute `cd`, count. A target that is unclear (an
-//! expansion, a glob, one ending in `/`) writes nothing, and leaves the others as they are.
+//! expansion, a glob, one ending in `/`) writes nothing, and leaves the others as they are; so
+//! does a `stetdoc` command with any word unclear, except a value stetdoc only reads
+//! (`--ops $f`), which never changes the file it writes.
 //! Kept in memory for the turn only, never logged.
 
 use std::collections::BTreeSet;
@@ -211,9 +213,11 @@ fn add_segment(
     {
         // stetdoc's own forms (`crate::stetdoc_args`): its default output and `--in-place`
         // write files no option names, and `--dry-run` writes none. A word that is not plain
-        // text leaves what it writes unknown.
-        if program.clear && args.iter().all(|arg| arg.clear) {
-            let words: Vec<String> = args.iter().map(|arg| arg.text.clone()).collect();
+        // text leaves what it writes unknown, unless it is a value stetdoc only reads
+        // (`--ops $f`, `--ops="$f"`: `stetdoc_args::reads_value`).
+        if program.clear
+            && let Some(words) = stetdoc_words(args)
+        {
             for target in stetdoc_args::written(&words) {
                 add(targets, cwd, &target);
             }
@@ -256,6 +260,40 @@ fn add_segment(
             add(targets, cwd, &word.text);
         }
     }
+}
+
+/// The words of a `stetdoc` command after the program, each value stetdoc only reads that is
+/// not plain text (`--ops $f`) put as a plain stand-in; `None` when any other word is not
+/// plain text.
+fn stetdoc_words(args: &[Word]) -> Option<Vec<String>> {
+    let sub = args
+        .iter()
+        .map(|arg| arg.text.as_str())
+        .find(|arg| *arg != "--json")
+        .unwrap_or_default();
+    let mut words = Vec::with_capacity(args.len());
+    for arg in args {
+        let text = if arg.clear {
+            arg.text.clone()
+        } else if let Some((name, _)) = arg
+            .text
+            .strip_prefix("--")
+            .and_then(|long| long.split_once('='))
+            .filter(|(name, _)| stetdoc_args::reads_value(sub, name))
+        {
+            format!("--{name}=x")
+        } else if words
+            .last()
+            .and_then(|last: &String| last.strip_prefix("--"))
+            .is_some_and(|name| stetdoc_args::reads_value(sub, name))
+        {
+            "x".to_owned()
+        } else {
+            return None;
+        };
+        words.push(text);
+    }
+    Some(words)
 }
 
 fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) {
