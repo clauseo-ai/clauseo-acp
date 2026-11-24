@@ -23,6 +23,7 @@ export function Permissions({
   heading = "Before your first matter",
   opens = (listed) => listed.some((r) => r.state !== "granted"),
   wrap = (step) => step,
+  leavesWhenAllowed = false,
 }: {
   host: PermissionsHost;
   platform: Platform;
@@ -32,6 +33,8 @@ export function Permissions({
   heading?: StepHeading | null;
   /** Whether the first read's rows make it stand: a row not allowed yet, unless the caller says otherwise. */
   opens?: (listed: readonly PermissionRow[]) => boolean;
+  /** The band's: it leaves once every row is allowed, none waiting and none refused. */
+  leavesWhenAllowed?: boolean;
   /** What the step stands in, drawn only while it shows (Settings' group). */
   wrap?: (step: ReactNode) => ReactNode;
   /** System Settings' Files and Folders pane (the Mac's). */
@@ -97,6 +100,7 @@ export function Permissions({
   };
   const shown = stepRows(rows, waiting, failed);
   if (shown.length === 0) return null;
+  if (leavesWhenAllowed && shown.every((r) => r.shows === "granted")) return null;
   const mac = platform === "mac";
   return wrap(
     <PermissionsStep

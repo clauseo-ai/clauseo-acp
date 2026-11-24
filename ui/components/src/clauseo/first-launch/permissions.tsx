@@ -222,7 +222,7 @@ function Refused({ row, onSettings, onCheck }: { row: PermissionStepRow } & Perm
       <p className="fl-perm-said" role="status" data-testid="permission-denied">
         <Say>{w("Not allowed.")}</Say>{" "}
         {row.id === "keychain" ? (
-          <Say>{w("You can allow it here at any time.")}</Say>
+          <Say>{w("You can allow it in Settings, under Privacy, at any time.")}</Say>
         ) : (
           row.path !== undefined && (
             <Say>{w("You can allow it in {path}.", { path: row.path })}</Say>
@@ -239,23 +239,38 @@ function Refused({ row, onSettings, onCheck }: { row: PermissionStepRow } & Perm
 /** Windows Security's path without its own first step, which the words before it name. */
 const underSecurity = (path: string) => path.replace(/^Windows Security\s*›\s*/, "");
 
-/** What the keychain's refused items are for, from the desktop's note ("service (account), …"): connectors' items
- * have "connectors" in their service; the rest are Claude's and ChatGPT's sign-ins. The note itself never shows. */
+/** What the keychain's refused items hold, by the services in the desktop's note ("service (account), …"):
+ * "ai.clauseo.desktop.mcp" holds the keys of the lawyer's own connectors, a service with "connectors" in it Clauseo's
+ * connectors' sign-ins, the rest Claude's and ChatGPT's sign-ins. */
+const ITEMS: Record<string, FirstLaunchKey> = {
+  plans: "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT.",
+  connectors: "Without it, Clauseo can't read your saved sign-ins for connectors.",
+  own: "Without it, Clauseo can't read the saved keys for your own connectors.",
+  "plans connectors":
+    "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.",
+  "plans own":
+    "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or the saved keys for your own connectors.",
+  "connectors own":
+    "Without it, Clauseo can't read your saved sign-ins for connectors, or the saved keys for your own connectors.",
+  "plans connectors own":
+    "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.",
+};
+
+/** The kind of item a keychain service holds. */
+const kindOf = (service: string) =>
+  service.endsWith(".mcp") ? "own" : service.includes("connectors") ? "connectors" : "plans";
+
+/** What the refused items hold, in plain words; the note itself never shows. */
 function KeychainItems({ note }: { note: string | undefined }) {
   const w = useFirstLaunchWords();
   if (note === undefined) return null;
-  const services = note.split(/,\s*/).map((item) => item.replace(/\s*\(.*\)\s*$/, ""));
-  const connectors = services.some((s) => s.includes("connectors"));
-  const plans = services.some((s) => s !== "" && !s.includes("connectors"));
-  const key: FirstLaunchKey | null =
-    connectors && plans
-      ? "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors."
-      : connectors
-        ? "Without it, Clauseo can't read your saved sign-ins for connectors."
-        : plans
-          ? "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT."
-          : null;
-  if (key === null) return null;
+  const services = note
+    .split(/,\s*/)
+    .map((item) => item.replace(/\s*\(.*\)\s*$/, "").trim())
+    .filter((service) => service !== "");
+  const kinds = new Set(services.map(kindOf));
+  const key = ITEMS[["plans", "connectors", "own"].filter((k) => kinds.has(k)).join(" ")];
+  if (key === undefined) return null;
   return (
     <p className="fl-perm-note" data-testid="permission-note">
       <Say>{w(key)}</Say>

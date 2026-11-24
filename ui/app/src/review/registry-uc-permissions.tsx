@@ -208,7 +208,7 @@ export const UC_PERMISSIONS: Entry[] = [
   { id: "UC-1159", words: w("Open System Settings"), screen: SCREEN, render: DENIED },
   {
     id: "UC-1160",
-    words: w("You can allow it here at any time."),
+    words: w("You can allow it in Settings, under Privacy, at any time."),
     screen: SCREEN,
     render: KEY_DENIED,
   },
@@ -270,6 +270,41 @@ export const UC_PERMISSIONS: Entry[] = [
     render: KEY_DENIED,
   },
   { id: "UC-1279", words: w("In Windows Security: {path}"), screen: SCREEN, render: WIN_BLOCKING },
+  // the lawyer's own connectors' keys (ai.clauseo.desktop.mcp) among the refused items
+  {
+    id: "UC-1287",
+    words: w("Without it, Clauseo can't read the saved keys for your own connectors."),
+    screen: SCREEN,
+    render: keyDenied("ai.clauseo.desktop.mcp (court-filings)"),
+  },
+  {
+    id: "UC-1288",
+    words: w(
+      "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or the saved keys for your own connectors.",
+    ),
+    screen: SCREEN,
+    render: keyDenied("ai.clauseo.desktop (claude-acp), ai.clauseo.desktop.mcp (court-filings)"),
+  },
+  {
+    id: "UC-1289",
+    words: w(
+      "Without it, Clauseo can't read your saved sign-ins for connectors, or the saved keys for your own connectors.",
+    ),
+    screen: SCREEN,
+    render: keyDenied(
+      "ai.clauseo.desktop.connectors (westlaw), ai.clauseo.desktop.mcp (court-filings)",
+    ),
+  },
+  {
+    id: "UC-1290",
+    words: w(
+      "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.",
+    ),
+    screen: SCREEN,
+    render: keyDenied(
+      "ai.clauseo.desktop (claude-acp), ai.clauseo.desktop.connectors (westlaw), ai.clauseo.desktop.mcp (court-filings)",
+    ),
+  },
   // Settings › Privacy's Permissions group (#1303): the same rows, for a lawyer who already has matters
   {
     id: "UC-1260",

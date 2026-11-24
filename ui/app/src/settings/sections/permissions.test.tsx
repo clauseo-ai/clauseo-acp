@@ -100,8 +100,10 @@ test("one row: the group headed Permissions, first in Privacy, with that row; Al
   const ask = vi.fn(async () => ({ ...KEYS, state: "granted" as const }));
   const el = await mount({ list: async () => [KEYS], ask });
   const found = group(el);
-  expect(found?.querySelector("h3")?.textContent).toBe("Permissions");
-  // the first-start step's own heading is the group's here
+  // its one heading is the group's: the first-start step's own is left out
+  expect([...(found?.querySelectorAll("h2, h3") ?? [])].map((h) => h.textContent)).toEqual([
+    "Permissions",
+  ]);
   expect(found?.textContent).not.toContain("Before your first matter");
   const rows = [...(found?.querySelectorAll('[data-testid="permission-row"]') ?? [])];
   expect(rows.map((r) => r.getAttribute("data-id"))).toEqual(["keychain"]);
@@ -118,4 +120,16 @@ test("one row: the group headed Permissions, first in Privacy, with that row; Al
   expect(group(el)?.querySelector('[data-testid="permission-granted"]')?.textContent).toBe(
     "Allowed",
   );
+});
+
+test("every row allowed: the group still lists them, each Allowed (Settings shows the rows at any time)", async () => {
+  const ask = vi.fn(async () => KEYS);
+  const el = await mount({ list: async () => [{ ...KEYS, state: "granted" }], ask });
+  const found = group(el);
+  expect([...(found?.querySelectorAll("h2, h3") ?? [])].map((h) => h.textContent)).toEqual([
+    "Permissions",
+  ]);
+  expect(found?.querySelector('[data-testid="permission-granted"]')?.textContent).toBe("Allowed");
+  expect(found?.querySelector('[data-testid="permission-allow"]')).toBeNull();
+  expect(ask).not.toHaveBeenCalled();
 });

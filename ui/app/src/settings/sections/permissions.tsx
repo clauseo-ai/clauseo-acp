@@ -19,7 +19,8 @@ export function PermissionsGroup({ ctx }: { ctx: SectionContext }) {
     <Permissions
       host={host}
       platform={ctx.display.platform}
-      titled={false}
+      heading={null}
+      opens={(listed) => listed.length > 0}
       onSettings={() => void transport.openPrivacySettings().catch(() => {})}
       wrap={(step) => (
         <div data-testid="settings-permissions">
