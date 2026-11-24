@@ -11,12 +11,22 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { pointsToKeychain, useKeychain, type Keychain } from "./keychain-state.ts";
 
-export function KeychainAllow({ k, small = true }: { k: Keychain; small?: boolean }) {
+/** The row's Allow; `className` from a caller whose page ships that class's sheet (the library's lib-feature-add). */
+export function KeychainAllow({
+  k,
+  small = true,
+  className,
+}: {
+  k: Keychain;
+  small?: boolean;
+  className?: string;
+}) {
   const { lang } = useDisplay();
   return (
     <Button
       kind="tone"
       {...(small ? { size: "small" as const } : {})}
+      {...(className === undefined ? {} : { className })}
       disabled={k.asking}
       onClick={k.allow}
       data-testid="keychain-allow"
