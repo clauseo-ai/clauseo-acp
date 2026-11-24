@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    LimitStopReason, MatterPath, NoticeLevel, RawFrom, SteeringCapability, TextOrBlob,
-    ToolCallContent, ToolLocation,
+    ConfigOption, ConfigOptionKind, LimitStopReason, MatterPath, NoticeLevel, RawFrom,
+    SteeringCapability, TextOrBlob, ToolCallContent, ToolLocation,
 };
 use serde_json::json;
 
@@ -468,6 +468,48 @@ fn config_option_with_unnameable_id_is_refused() {
         &events[..],
         [AcpEvent::Warning { session: Some(_), warning: ProtocolWarning::InvalidUpdate { name: Some(name), .. } }] if name == "config_option_update"
     ));
+}
+
+/// A model row's description goes into the menu without the usage cost or the repeated name.
+#[test]
+fn config_choice_description_is_cleaned_with_its_name() {
+    let update = json!({"sessionUpdate": "config_option_update", "configOptions": [{
+        "id": "model", "name": "Model", "category": "model", "type": "select",
+        "currentValue": "opus",
+        "options": [
+            {"value": "opus", "name": "Opus 5.5",
+             "description": "Opus 5.5 · Best for everyday, complex tasks · ~2× usage vs Sonnet"},
+            {"value": "fable", "name": "Fable 5.1",
+             "description": "Fable 5.1 · Requires usage credits"},
+        ],
+    }]});
+    let [
+        AcpEvent::Update {
+            update: AgentUpdate::ConfigOptions(options),
+            ..
+        },
+    ] = <[AcpEvent; 1]>::try_from(map_update(update, None)).unwrap()
+    else {
+        panic!("expected config options");
+    };
+    let [option] = <[ConfigOption; 1]>::try_from(options).unwrap();
+    let ConfigOptionKind::Select { options, .. } = option.kind else {
+        panic!("expected a select option");
+    };
+    let descriptions: Vec<_> = options
+        .into_iter()
+        .map(|choice| (choice.name.to_string(), choice.description))
+        .collect();
+    assert_eq!(
+        descriptions,
+        [
+            (
+                "Opus 5.5".to_owned(),
+                Some("Best for everyday, complex tasks".to_owned())
+            ),
+            ("Fable 5.1".to_owned(), None),
+        ]
+    );
 }
 
 /// `initialize`'s answer as the agent sent it, with `agent_info` (a JSON value) when given.

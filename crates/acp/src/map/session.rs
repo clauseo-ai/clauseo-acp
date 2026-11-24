@@ -10,6 +10,7 @@ use clauseo_protocol::{
     PromptCapabilities, SessionCapabilities, StopReason,
 };
 
+use super::model_line;
 use crate::event::AgentUpdate;
 use crate::types::{AgentInfo, AuthKind, AuthMethod, SessionMode, SessionModes};
 
@@ -133,8 +134,8 @@ fn choices(options: acp::SessionConfigSelectOptions) -> Result<Vec<ConfigChoice>
     let choice = |option: acp::SessionConfigSelectOption, group: Option<String>| {
         Ok(ConfigChoice {
             value: choice_id(&option.value.0, "config value")?,
+            description: model_line(&option.name, option.description),
             name: option.name.into(),
-            description: option.description,
             group,
             // The host marks the model choices it learns take no effort (`actor/turn/efforts.rs`).
             takes_effort: true,
