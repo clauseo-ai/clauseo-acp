@@ -28,6 +28,7 @@ pub(super) fn started(
         return;
     }
     state.index.helpers.insert(event.helper, seq);
+    state.index.open_helpers += 1;
     let entry = HelperEntry {
         order: seq,
         helper: event.helper,
@@ -92,6 +93,7 @@ pub(super) fn ended(
         return;
     }
     entry.outcome = Some(event.outcome);
+    state.index.open_helpers = state.index.open_helpers.saturating_sub(1);
     entry.summary.clone_from(&event.summary);
     entry.finished_at = Some(ts);
     out.changes

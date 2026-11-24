@@ -63,6 +63,11 @@ fn step(turn: TurnId, call: ToolCallId, helper: HelperId) -> DomainEvent {
     DomainEvent::ToolCallStarted(started)
 }
 
+/// How many helpers the state counts open.
+fn open(state: &StreamState) -> u32 {
+    state.as_thread().unwrap().open_helpers()
+}
+
 fn helper_entry(state: &StreamState, helper: HelperId) -> Option<HelperEntry> {
     state.entries().values().find_map(|entry| match entry {
         ViewEntry::Helper(found) if found.helper == helper => Some(found.as_ref().clone()),
@@ -132,9 +137,12 @@ fn a_running_helper_has_no_outcome_and_its_end_upserts_it_once() {
     log.push(started(turn, helper, None)).unwrap();
     let mut state = fold(log.events());
     assert_eq!(helper_entry(&state, helper).unwrap().outcome, None);
+    assert_eq!(open(&state), 1);
+    assert_eq!(open(&round_trip(&state)), 1, "a snapshot counts it again");
     let end = log.push(ended(helper, HelperOutcome::Failed)).unwrap();
     let applied = apply(&mut state, &end).unwrap();
     assert!(applied.anomalies.is_empty());
+    assert_eq!(open(&state), 0);
     let [ViewChange::Upsert(entry)] = applied.changes.as_slice() else {
         panic!("{:?}", applied.changes);
     };
@@ -165,6 +173,7 @@ fn a_second_end_changes_nothing() {
         helper_entry(&state, helper).unwrap().outcome,
         Some(HelperOutcome::Done)
     );
+    assert_eq!(open(&state), 0, "a second end counts nothing");
 }
 
 #[test]
