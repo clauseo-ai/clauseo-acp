@@ -1,0 +1,99 @@
+# Engine watch: when npm publishes a newer Claude or Codex adapter than G16's pins
+# (crates/limits/tests/live/package.json and its lock), pushes a branch with the complete bump and
+# opens a draft pull request for it. The logic is in .github/scripts/engine-watch.mjs, so it runs
+# locally too; engine-watch.test.mjs tests it and lints this file.
+#
+# - Runs every 6 hours and by hand (workflow_dispatch), on main. Never on a pull request.
+# - The bump: claude-agent-acp, codex-acp and the @openai/codex override to npm's latest (codex-acp's
+#   own codex range wins over a latest it excludes), the lock regenerated with
+#   `npm install --package-lock-only --ignore-scripts`, the snapshot's SIZES and SIZES_STAMP
+#   re-measured from the registry, and engines.seq moved one past the published engines.json.
+# - Nothing is built or tested here (ci.yml is dormant on purpose): the suite and a real-agent
+#   smoke run on the CI thread's own lanes before anyone merges. The job is about one minute.
+# - The branch is engines/claude-acp-<v>_codex-acp-<v>_codex-<v>, committed with a DCO sign-off as
+#   github-actions and force-pushed, but never when the branch already holds the same tree.
+# - The pull request: `gh pr create --draft`, the script's summary as its body. When the
+#   repository refuses Actions creating pull requests, the job still passes and prints the branch,
+#   so a person opens it. A pull request made with GITHUB_TOKEN starts no other workflow.
+# - Permissions: contents: write (the push) and pull-requests: write (the draft); no secret but
+#   the job's own token. Every action is pinned by its full commit SHA.
+
+name: Engine watch
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: engine-watch
+  cancel-in-progress: false
+
+jobs:
+  engine-watch:
+    name: engine-watch
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Look for newer engines and make the bump
+        id: bump
+        run: node .github/scripts/engine-watch.mjs --summary "$RUNNER_TEMP/engine-summary.md"
+
+      - name: Commit and push the branch, unless it already holds this tree
+        id: push
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git add crates/limits/tests/live crates/agents/src/snapshot/embedded.rs
+          { echo "agents: engines ${BRANCH#engines/}"; echo; cat "$RUNNER_TEMP/engine-summary.md"; } \
+            > "$RUNNER_TEMP/engine-commit.txt"
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -s -q -F "$RUNNER_TEMP/engine-commit.txt"
+          remote=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if [ -n "$remote" ]; then
+            git fetch -q --depth=1 origin "$remote"
+            if [ "$(git rev-parse "$remote^{tree}")" = "$(git rev-parse 'HEAD^{tree}')" ]; then
+              echo "$BRANCH already holds this tree; nothing pushed."
+              echo "pushed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open a draft pull request (a refusal leaves the branch for a person)
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          set -uo pipefail
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "A pull request for $BRANCH is open; the push updated it."
+            exit 0
+          fi
+          if gh pr create --draft --base main --head "$BRANCH" \
+              --title "agents: engines ${BRANCH#engines/}" \
+              --body-file "$RUNNER_TEMP/engine-summary.md"; then
+            exit 0
+          fi
+          echo "::notice::Could not open the pull request (the repository may refuse Actions creating them). Open one from branch $BRANCH."
+          echo "Branch pushed: $BRANCH"
