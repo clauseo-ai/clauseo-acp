@@ -41,7 +41,7 @@ use crate::error::Error;
 pub(crate) const MAX_LISTED: usize = 256;
 
 /// What the list needs from the actor, taken so it can leave it.
-struct Listing {
+pub(super) struct Listing {
     root: PathBuf,
     admission: Admission,
     allow_scripts: bool,
@@ -49,16 +49,23 @@ struct Listing {
     hook: Option<PackReadHook>,
 }
 
+impl Listing {
+    /// What the list needs from the actor now.
+    pub(super) fn of(actor: &Actor) -> Self {
+        let skills = &actor.effective.settings().skills;
+        Self {
+            root: actor.effective.data_dir().join(packs::PACKS_DIR),
+            admission: Admission::of(&actor.effective),
+            allow_scripts: skills.allow_scripts,
+            enabled: skills.enabled.clone(),
+            hook: actor.wiring.pack_read_hook.clone(),
+        }
+    }
+}
+
 /// Answers `ListSkillPacks` from a task of its own, the reads off the actor.
 pub(super) fn list(actor: &Actor, reply: Reply<QueryResult>) {
-    let skills = &actor.effective.settings().skills;
-    let listing = Listing {
-        root: actor.effective.data_dir().join(packs::PACKS_DIR),
-        admission: Admission::of(&actor.effective),
-        allow_scripts: skills.allow_scripts,
-        enabled: skills.enabled.clone(),
-        hook: actor.wiring.pack_read_hook.clone(),
-    };
+    let listing = Listing::of(actor);
     let clock = Arc::clone(&actor.clock);
     let spawned = actor.spawner.spawn_local(async move {
         let answer = off_actor(clock, READ_JOB, move || Ok(statuses(&listing))).await;
@@ -74,6 +81,15 @@ pub(super) fn list(actor: &Actor, reply: Reply<QueryResult>) {
 
 /// Every pack's status, sorted by id, at most [`MAX_LISTED`] of them. Off the actor.
 fn statuses(listing: &Listing) -> Vec<PackStatus> {
+    read_all(listing)
+        .into_iter()
+        .map(|(status, _pack)| status)
+        .collect()
+}
+
+/// [`statuses`], each with its pack when it read and checked (`ListAddons` takes the skills'
+/// descriptions and the scripts from it). Off the actor.
+pub(super) fn read_all(listing: &Listing) -> Vec<(PackStatus, Option<Pack>)> {
     let folders = PackFolders::list(&listing.root);
     let mut ids = folder_ids(&folders);
     ids.extend(listing.enabled.keys().filter_map(|id| PackId::new(id).ok()));
@@ -112,8 +128,8 @@ fn folder_ids(folders: &PackFolders) -> BTreeSet<PackId> {
     ids
 }
 
-/// The pack `id`'s status. Off the actor.
-fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> PackStatus {
+/// The pack `id`'s status, and the pack when it read. Off the actor.
+fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> (PackStatus, Option<Pack>) {
     let read = read_listed_pack(
         folders,
         id.as_str(),
@@ -145,10 +161,11 @@ fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> PackStatus {
         },
     };
     let pack = read.ok();
-    PackStatus {
+    let status = PackStatus {
         added_here,
         ..shown(id, pack.as_ref(), state, reason)
-    }
+    };
+    (status, pack)
 }
 
 /// The status of `id` in `state`, with `pack`'s manifest when it read.

@@ -38,6 +38,8 @@ pub(crate) struct Finished {
     pub(in crate::actor::connectors) slot: bool,
     /// Whether the job was the read after a relay's paid `recharge` result (`Job::Recharged`).
     pub(in crate::actor::connectors) recharged: bool,
+    /// Whether the job was the skills and tools list's re-check (`Job::Recheck`).
+    pub(in crate::actor::connectors) recheck: bool,
     pub(in crate::actor::connectors) change: Change,
     /// The credential generation the job started under.
     pub(in crate::actor::connectors) generation: u64,
@@ -60,6 +62,7 @@ impl Finished {
             out_of_credit: None,
             slot: false,
             recharged: false,
+            recheck: false,
             change: Change::Nothing,
             generation: 0,
             started: 0,

@@ -144,7 +144,10 @@ fn turning_a_pack_on_records_its_hash_off_the_actor() {
     assert_eq!(enabled(&dir)[KIT], hash_now(&dir, KIT));
     let events = crate::settings::ready(&mut sub);
     assert!(
-        matches!(events.as_slice(), [HostEvent::SettingsChanged(_)]),
+        matches!(
+            events.as_slice(),
+            [HostEvent::SettingsChanged(_), HostEvent::AddonsChanged {}]
+        ),
         "{events:?}"
     );
     assert_eq!(status(&list(&host), KIT).state, PackState::On);

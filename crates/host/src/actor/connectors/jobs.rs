@@ -70,6 +70,9 @@ pub(super) enum Job {
     Remove,
     /// The account, holding the read slot.
     Read,
+    /// A fresh liveness check, a cached failure fetched again: the skills and tools list's
+    /// re-check of case law (`recheck.rs`).
+    Recheck,
     /// The account after a relay's paid `recharge` result, at once, without the slot and from
     /// the connector.
     Recharged,
@@ -84,7 +87,7 @@ impl Job {
                 error: Some(JOB_FAILED),
             },
             // The case-law hint's matters waiting on liveness stop waiting (`hint.rs`).
-            Job::Check { .. } => Change::NoLiveness,
+            Job::Check { .. } | Job::Recheck => Change::NoLiveness,
             Job::Status
             | Job::ApiKey(_)
             | Job::Credits { .. }
@@ -107,6 +110,7 @@ impl Job {
             Job::Watch { number, .. } => Some(*number),
             Job::Status
             | Job::Check { .. }
+            | Job::Recheck
             | Job::SignIn { .. }
             | Job::ApiKey(_)
             | Job::SignOut
@@ -246,6 +250,12 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
                 Finished::new(command)
             };
             finished.liveness = Some(liveness);
+            finished
+        }
+        Job::Recheck => {
+            let mut finished = Finished::new(command);
+            finished.liveness = Some(reach.connectors.recheck_liveness());
+            finished.recheck = true;
             finished
         }
         Job::SignIn { generation, opener } => sign_in(reach, command, generation, opener.as_ref()),

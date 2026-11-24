@@ -139,6 +139,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod addons;
 mod allowed_sites;
 mod approval;
 mod blackline;
@@ -295,6 +296,10 @@ wire_types! {
         SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
     },
     skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
+    addons::{
+        Addon, AddonFrom, AddonFromKind, AddonKind, AddonList, AddonScope, AddonSource,
+        AddonStatus,
+    },
     setup::{
         FoundLogin, InstallLog, InstallProgress, LoginFrom, PythonBlockedBy, PythonFailureCause,
         PythonProgress,

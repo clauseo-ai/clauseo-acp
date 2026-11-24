@@ -340,6 +340,8 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     let papers_changed = r#"{"papers_changed":{}}"#;
     // Settings › Tools reads the lawyer's MCP servers.
     let mcp_tools_changed = r#"{"mcp_tools_changed":{}}"#;
+    // The skills and tools list re-reads on it, in both windows.
+    let addons_changed = r#"{"addons_changed":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
@@ -353,6 +355,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
         (Feed::App, site_blocked),
         (Feed::App, papers_changed),
         (Feed::App, mcp_tools_changed),
+        (Feed::App, addons_changed),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
@@ -367,6 +370,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     assert!(carries(SETTINGS, Feed::App, protection_changed));
     assert!(carries(SETTINGS, Feed::App, protection_view_changed));
     assert!(carries(SETTINGS, Feed::App, mcp_tools_changed));
+    assert!(carries(SETTINGS, Feed::App, addons_changed));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
     assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));

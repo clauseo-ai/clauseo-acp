@@ -46,6 +46,10 @@ fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &ToolsPatch) -> Result<(), 
     if patch.connectors.is_some() {
         super::super::connectors::switch_changed(actor);
     }
+    // Both switches show in the skills and tools list.
+    if patch.browser.is_some() || patch.connectors.is_some() {
+        super::super::query::addons::changed(actor);
+    }
     super::receipt(actor, ctx)
 }
 

@@ -372,6 +372,12 @@ mod too_long_log;
 // Every test here waits for a live folder watch, which Windows does not have (decision record
 // 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
 #[cfg(test)]
+#[path = "host/addons.rs"]
+mod addons;
+#[cfg(test)]
+#[path = "host/addons_tools.rs"]
+mod addons_tools;
+#[cfg(test)]
 #[path = "host/own_turn.rs"]
 mod own_turn;
 #[cfg(test)]

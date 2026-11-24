@@ -29,6 +29,7 @@ mod jobs;
 mod limits;
 mod pay_link;
 mod recharged;
+pub(super) mod recheck;
 mod watch;
 
 use std::sync::Arc;
@@ -119,6 +120,8 @@ pub(crate) struct ConnectorsOnActor {
     credentials: Arc<AtomicU64>,
     /// The case-law hint's marks and the matters waiting on liveness.
     hint: hint::HintState,
+    /// The skills and tools list's re-check of case law.
+    recheck: recheck::Recheck,
 }
 
 struct Wired {
@@ -154,6 +157,7 @@ impl ConnectorsOnActor {
             used: UsedIds::default(),
             credentials: Arc::new(AtomicU64::new(0)),
             hint: hint::HintState::default(),
+            recheck: recheck::Recheck::default(),
         }
     }
 }
@@ -422,6 +426,9 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
             tracing::warn!(error = %crate::log_file::Cause(&error), "the connector's state was not read");
         }
     }
+    if finished.recheck || matches!(finished.change, Change::NoLiveness) {
+        recheck::ended(actor);
+    }
     let connectors = &mut actor.connectors;
     if finished.slot {
         connectors.reads.in_flight = false;
@@ -559,16 +566,16 @@ fn view(actor: &Actor) -> Option<ConnectorsState> {
     Some(actor.connectors.state.view(&CASE_LAW, available, locked))
 }
 
-/// Sends the state to every app subscriber when it changed since the last one sent.
+/// Sends the state to every app subscriber when it changed since the last one sent, and
+/// `AddonsChanged` when case law's status in the skills and tools list moved.
 fn publish(actor: &mut Actor) {
-    let Some(state) = view(actor) else {
-        return;
-    };
-    if actor.connectors.published.as_ref() == Some(&state) {
-        return;
+    if let Some(state) = view(actor)
+        && actor.connectors.published.as_ref() != Some(&state)
+    {
+        actor.connectors.published = Some(state.clone());
+        super::app::publish(actor, &HostEvent::ConnectorsChanged(state));
     }
-    actor.connectors.published = Some(state.clone());
-    super::app::publish(actor, &HostEvent::ConnectorsChanged(state));
+    recheck::changed(actor);
 }
 
 /// `tools.connectors` changed: off ends the credential for the work in flight (a key being

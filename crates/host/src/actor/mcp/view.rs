@@ -97,8 +97,14 @@ pub(crate) fn publish(actor: &mut Actor) {
     if actor.mcp.sent.as_ref() == Some(&view) {
         return;
     }
+    // The skills and tools list shows who decides and the servers, not what would import.
+    let listed = |view: &McpToolsView| (view.control, view.servers.clone());
+    let list_changed = actor.mcp.sent.as_ref().map(listed) != Some(listed(&view));
     actor.mcp.sent = Some(view.clone());
     super::super::app::publish(actor, &HostEvent::McpToolsChanged(view));
+    if list_changed {
+        super::super::query::addons::changed(actor);
+    }
 }
 
 /// The app catch-up's part: the whole view, always (a lagged window may hold a list since

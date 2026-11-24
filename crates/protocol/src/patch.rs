@@ -183,6 +183,9 @@ pub enum HostEvent {
     /// only, and every app catch-up carries the latest one, as for `SettingsChanged`. It names
     /// variables and headers, never a value.
     McpToolsChanged(McpToolsView),
+    /// A skill or tool came, went or changed (`HostQuery::ListAddons`): the app reads the list
+    /// again. App-wide and never logged; a catch-up carries none. JSON: `{"addons_changed": {}}`.
+    AddonsChanged {},
     /// A turn's web searches looked like Indian case law and the case-law connector is live but
     /// not added (R24): the app offers it under the answer. Once per matter, never after the
     /// lawyer dismissed it. App-wide and never logged: an offer, not part of the record, so a

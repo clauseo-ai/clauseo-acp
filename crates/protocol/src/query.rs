@@ -8,12 +8,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
-    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit, LastStop,
-    MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
-    ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest,
-    Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId,
-    UpdateView, ViewEntry, WordBlackline,
+    AddonList, AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName,
+    CompactString, ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit,
+    LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus,
+    Protection, ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer,
+    SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
+    TurnId, UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -195,6 +195,15 @@ pub enum HostQuery {
     /// names, each with its state (decision record 0040), sorted by id; read off the host
     /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
     ListSkillPacks,
+    /// Every skill and tool, built in and added, in one list (`addons.rs`); read off the host
+    /// thread. Answered `QueryResult::Addons`. `matter` is accepted and changes nothing yet:
+    /// every row's scope is `all` and `on` the all-matters default until per-matter switches
+    /// land (D2). JSON: `{"list_addons": {"matter": "..."}}`, `matter` optional.
+    ListAddons {
+        /// The matter whose switches `on` follows (D2); `None` for the all-matters default.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        matter: Option<MatterId>,
+    },
     /// This computer's sandbox and the firm's protection settings (decision record 0051).
     /// Answered `QueryResult::Protection`, from the host's cache, at once.
     /// JSON: `"protection"`.
@@ -293,6 +302,8 @@ pub enum QueryResult {
     FolderSupport(PickedFolderSupport),
     /// For `ListSkillPacks`.
     SkillPacks(Vec<PackStatus>),
+    /// For `ListAddons`.
+    Addons(AddonList),
     /// For `Protection`.
     Protection(ProtectionView),
     /// For `AllowedSites`.
