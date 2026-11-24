@@ -186,6 +186,10 @@ pub struct Checkpoint {
     /// The papers an after-turn checkpoint with an `Overlap` left out of `changes` as other
     /// answers' (both paths of a rename), sorted; empty for any other checkpoint.
     pub beside: Vec<MatterPath>,
+    /// The changes left out that `beside` names, each with `also_changed_by` naming the answers
+    /// it was left out for: the host logs those an answer that ends with no card made as
+    /// outside edits.
+    pub left_out: Vec<FileChange>,
 }
 
 /// The answer's card an undo is limited to ([`UndoRequest::only`]).

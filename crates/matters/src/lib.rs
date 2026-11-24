@@ -164,7 +164,7 @@ mod walk;
 mod write;
 mod writeback;
 
-pub use checkpoint::Overlap;
+pub use checkpoint::{Overlap, beside_of, left_out};
 pub use diff::names_a_write;
 pub use error::{Error, MissingReason, Refusal, RefusedBecause};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};

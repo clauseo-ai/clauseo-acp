@@ -17,8 +17,8 @@ use crate::skip_record::{self, SkipRecord, SkipsRef};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
 use crate::{Error, rules, trailers};
-pub use since::Overlap;
 use since::{Now, Report};
+pub use since::{Overlap, beside_of, left_out};
 pub(crate) use timeline::Timeline;
 pub(crate) use walk_folder::OnHeld;
 #[cfg(test)]

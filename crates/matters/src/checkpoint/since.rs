@@ -22,9 +22,18 @@ use crate::{Checkpoint, CheckpointOutcome, CommitId, Error, rules};
 pub struct Overlap<'a> {
     /// The turn's own before-turn checkpoint.
     pub since: CheckpointId,
-    /// Each paper the other overlapping turns' tool calls or credited shell commands named, with
-    /// those turns' threads.
+    /// Each paper the other overlapping turns changed, with those turns' threads: what their
+    /// completed tool calls wrote and their completed shell commands wrote, or their cards
+    /// credit. Only these earn a kept change `also_changed_by`.
     pub others: &'a BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    /// Each paper the tool calls of other answers that still run name and have not completed,
+    /// with their threads: they may be writing it now. A change to one is left out as
+    /// `others`' are, but a kept one does not name them: they have not changed it yet.
+    pub busy: &'a BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    /// The papers checkpoints after `since` logged as outside edits (the start-up repair's),
+    /// each with the content logged (`None`: deleted). A change to one still holding it is
+    /// left out whoever made it: it is logged already, and is not put on this card again.
+    pub logged: &'a BTreeMap<MatterPath, Option<ContentId>>,
     /// The papers of `others` that only answers which have ended named, each with the content
     /// the card of the last of them left it with (`None`: deleted). Such a paper is left out
     /// only while it still holds that content: changed since, the lawyer may have edited it, and
@@ -71,23 +80,24 @@ impl Report<'_> {
         from_last: Vec<FileChange>,
         skipped: Vec<SkippedFile>,
     ) -> Checkpoint {
-        let (changes, beside) = Self::changes(report, from_last);
+        let (changes, left_out) = Self::changes(report, from_last);
         Checkpoint {
             outcome,
             commit,
             changes,
             skipped,
-            beside,
+            beside: beside_of(&left_out),
+            left_out,
         }
     }
 
     /// The changes a checkpoint reports, `from_last` being its flagged diff from the last
-    /// checkpoint, and the papers left out as other answers' (sorted): those and none, without an
-    /// overlap.
+    /// checkpoint, and the changes left out as other answers' (see [`left_out`]): those and
+    /// none, without an overlap.
     pub(super) fn changes(
         report: Option<Self>,
         from_last: Vec<FileChange>,
-    ) -> (Vec<FileChange>, Vec<MatterPath>) {
+    ) -> (Vec<FileChange>, Vec<FileChange>) {
         match report {
             Some(report) => left_out(report.since.unwrap_or(from_last), &report.overlap),
             None => (from_last, Vec::new()),
@@ -215,41 +225,69 @@ fn changes_since(
         .collect())
 }
 
-/// `changes` (flagged) without the ones another overlapping answer made, and the papers left
-/// out (both paths of a rename), sorted. A change to a paper (for a rename: either path) another
-/// answer named (`others`, `failed`) is kept with those threads in `also_changed_by` when this
-/// turn wrote it. When it did not (it is flagged), it is left out, unless this turn's tool calls
-/// named it after all (`own`), an answer with no card named it (`failed`), or a paper only
-/// answers that have ended named (`left`) no longer holds what their card left it with: then it
-/// is kept, flagged, as well.
-pub(super) fn left_out(
+/// The papers `left_out` names (both paths of a rename), sorted: `Checkpoint::beside`.
+pub fn beside_of(left_out: &[FileChange]) -> Vec<MatterPath> {
+    let mut beside = BTreeSet::new();
+    for change in left_out {
+        beside.insert(change.path().clone());
+        if let ChangeKind::Renamed { from } = change.change() {
+            beside.insert(from.clone());
+        }
+    }
+    beside.into_iter().collect()
+}
+
+/// `changes` (flagged) without the ones another overlapping answer made, and those left out,
+/// each with `also_changed_by` naming the answers it was left out for (none for one logged).
+///
+/// - A change whose every path (both, for a rename) `logged` holds with the content it still
+///   has is left out: it is logged as an outside edit already.
+/// - A change to a paper another answer changed (`others`, `failed`) is kept with those
+///   threads in `also_changed_by` when this turn wrote it.
+/// - When it did not (it is flagged), it is left out, and so is one to a paper only the
+///   unfinished calls of an answer still running name (`busy`), unless this turn's tool calls
+///   named it after all (`own`), an answer with no card wrote it (`failed`), or a paper only
+///   answers that have ended changed (`left`) no longer holds what their card left it with:
+///   then it is kept, flagged, as well.
+pub fn left_out(
     changes: Vec<FileChange>,
     overlap: &Overlap<'_>,
-) -> (Vec<FileChange>, Vec<MatterPath>) {
-    let mut dropped = BTreeSet::new();
+) -> (Vec<FileChange>, Vec<FileChange>) {
+    let mut dropped = Vec::new();
     let kept = changes
         .into_iter()
         .filter_map(|change| {
             let from = match change.change() {
-                ChangeKind::Renamed { from } => Some(from),
+                ChangeKind::Renamed { from } => Some(from.clone()),
                 ChangeKind::Added
                 | ChangeKind::Modified
                 | ChangeKind::Deleted
                 | ChangeKind::Unknown { .. } => None,
             };
             // Each path with what the folder holds there now: a rename's old path holds nothing.
-            let now: Vec<(&MatterPath, Option<&ContentId>)> = [(change.path(), change.after())]
+            let after = change.after().cloned();
+            let now: Vec<(&MatterPath, Option<&ContentId>)> = [(change.path(), after.as_ref())]
                 .into_iter()
-                .chain(from.map(|from| (from, None)))
+                .chain(from.as_ref().map(|from| (from, None)))
                 .collect();
-            let threads: BTreeSet<ThreadId> = now
-                .iter()
-                .flat_map(|(path, _)| [overlap.others.get(*path), overlap.failed.get(*path)])
-                .flatten()
-                .flatten()
-                .copied()
-                .collect();
-            if threads.is_empty() {
+            let logged = now.iter().all(|(path, now)| {
+                let was = overlap.logged.get(*path);
+                was.is_some_and(|was| was.as_ref() == *now)
+            });
+            if logged {
+                dropped.push(change);
+                return None;
+            }
+            let of = |maps: &[&BTreeMap<MatterPath, BTreeSet<ThreadId>>]| -> BTreeSet<ThreadId> {
+                now.iter()
+                    .flat_map(|(path, _)| maps.iter().filter_map(|map| map.get(*path)))
+                    .flatten()
+                    .copied()
+                    .collect()
+            };
+            let threads = of(&[overlap.others, overlap.failed]);
+            let busy = of(&[overlap.busy]);
+            if threads.is_empty() && busy.is_empty() {
                 return Some(change);
             }
             let kept = now
@@ -263,14 +301,17 @@ pub(super) fn left_out(
                     left.is_none_or(|was| was.as_ref() == *now)
                 });
             if change.may_include_lawyer_edits() && !kept && unchanged {
-                dropped.insert(change.path().clone());
-                dropped.extend(from.cloned());
+                let all = threads.union(&busy).copied().collect();
+                dropped.push(change.with_also_changed_by(all));
                 return None;
+            }
+            if threads.is_empty() {
+                return Some(change);
             }
             Some(change.with_also_changed_by(threads.into_iter().collect()))
         })
         .collect();
-    (kept, dropped.into_iter().collect())
+    (kept, dropped)
 }
 
 /// `files` (sorted by path bytes) with `path` as `file`, or without it for `None`.
