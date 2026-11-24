@@ -109,6 +109,10 @@ and the sha256, then the pins, apps and whole file. `publish`, the only job with
 refuses anything but that file's sha256, installs only the Tauri CLI (`--ignore-scripts`), checks
 the key signs for the lane's public key, signs with the CLI's own JS entry under `node` (no pnpm
 while the key is in the environment), verifies and uploads, each upload tried 3 times.
+`plan`'s self-check mirrors `clauseo-engines`' rules, whose lock rules are an allowlist of entry
+fields. So a field a newer npm writes fails `plan` here, never the apps' check, and the allowlist
+is widened (in the crate and the mirror) in an app release before the publisher's npm moves to a
+version that writes it.
 
 Before approving `publish`, the approver reads the run's ref and commit from GitHub itself, in the
 "Review deployments" dialog or the run page's header: the ref must be `refs/heads/main` and the
