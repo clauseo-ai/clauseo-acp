@@ -125,7 +125,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # SetFileInformationByHandle). Other crates already build the feature. Also GetLongPathNameW, a
 # picked folder's 8.3 short names spelt out (src/picked/long_name.rs).
 # The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
-# to see the per-machine installer's uninstall key.
+# to see the per-machine installer's uninstall key. The permissions step (src/permissions/windows.rs):
+# Defender's Controlled folder access setting, read from its registry places in this process.
 # The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's
 # entries, WindowsProgramming for GetDriveTypeW's DRIVE_* values, Shell for the known folders,
 # NetworkManagement_WNet for WNetGetConnectionW, a network drive's server.

@@ -107,9 +107,7 @@ const winRow = (state: "blocking" | "unknown"): PermissionRow => ({
 });
 const windows = (state: "blocking" | "unknown") =>
   permissionsScene(
-    fakePermissions([winRow(state)], {
-      controlled_folder_access: { ...winRow(state), settings_path: WIN_PATH, note: WIN_NOTE },
-    }),
+    fakePermissions([{ ...winRow(state), settings_path: WIN_PATH, note: WIN_NOTE }]),
     { platform: "windows" },
   );
 export const WIN_BLOCKING = windows("blocking");

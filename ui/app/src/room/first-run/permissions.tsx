@@ -61,16 +61,8 @@ export function Permissions({
       (listed) => {
         if (!live.current) return;
         setRows(listed);
+        // the read only: nothing is asked without the lawyer's press (Windows' row comes with its detail)
         setFirst((had) => had ?? listed);
-        // Windows' row: its ask brings back where to allow Clauseo, and opens nothing
-        for (const row of listed)
-          if (row.id === "controlled_folder_access" && row.state !== "granted")
-            host.ask(row.id).then(
-              (after) => {
-                if (live.current) settle(after);
-              },
-              () => {},
-            );
       },
       () => {},
     );

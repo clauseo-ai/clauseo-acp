@@ -1,5 +1,6 @@
-//! The OS behind [`Probe`]: the settings' matters folder, a child process run to its end, and
-//! the macOS and Windows reads (`mac.rs`, `windows.rs`), with nothing to read elsewhere.
+//! The OS behind [`Probe`]: the settings' matters folder, a child process run to its end (macOS'
+//! Documents ask), and the macOS and Windows reads (`mac.rs`, `windows.rs`, the latter in this
+//! process), with nothing to read elsewhere.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -7,11 +8,7 @@ use std::time::Duration;
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Locations, PlatformDirs as _, SystemDirs, SystemEnv};
 
-use super::{Cfa, KeychainCheck, KeychainItem, Platform, Probe, parse_preference};
-
-/// The longest the child a probe starts may take to answer, when it has a limit.
-#[cfg(windows)]
-pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+use super::{Cfa, KeychainCheck, KeychainItem, Platform, Probe, cfa_from_layers};
 
 /// A child's exit code and stdout; `None` when it outlasted its limit.
 type Ran = Option<(Option<i32>, Vec<u8>)>;
@@ -104,12 +101,12 @@ fn read(_service: &str, _account: &str) -> bool {
 }
 
 #[cfg(windows)]
-use super::windows::{preference_text, protected_defaults};
+use super::windows::{cfa_layers, protected_defaults};
 
-/// No Defender outside Windows.
+/// No Defender outside Windows: no place to read, so it cannot be told.
 #[cfg(not(windows))]
-fn preference_text() -> Option<String> {
-    None
+fn cfa_layers() -> (Vec<super::CfaLayer>, Vec<PathBuf>) {
+    (Vec::new(), Vec::new())
 }
 
 /// No Defender outside Windows.
@@ -165,7 +162,8 @@ impl Probe for SystemProbe {
     }
 
     fn controlled_folder_access(&self) -> Option<Cfa> {
-        parse_preference(&preference_text()?)
+        let (layers, protected) = cfa_layers();
+        cfa_from_layers(&layers, protected)
     }
 
     fn protected_defaults(&self) -> Vec<PathBuf> {
