@@ -131,11 +131,12 @@ mod macos {
     }
 
     /// The stale owner-file rule on macOS (this binary never calls `test_support`'s pretend
-    /// Word, so it reads the real process list; no Word runs on CI): with no Word running, an
-    /// owner file whose document no process locks, in a local APFS temp folder, is stale and
-    /// shows nothing held. While another process holds a shared `F_SETLK` lock on the document,
-    /// as Word does, the same owner file is held. (`F_GETLK` does not report this process's own
-    /// locks, so the lock is taken by a child: this test binary again, running
+    /// Word, so it reads the real process list): with no Word running, an owner file whose
+    /// document no process locks, in a local APFS temp folder, is stale and shows nothing held;
+    /// while a Word runs on the machine (someone's own Word on a shared Mac), it is held, as the
+    /// rule holds every owner file then. While another process holds a shared `F_SETLK` lock on
+    /// the document, as Word does, the same owner file is held. (`F_GETLK` does not report this
+    /// process's own locks, so the lock is taken by a child: this test binary again, running
     /// [`hold_lock_for_parent`].)
     #[test]
     fn an_owner_file_is_stale_with_no_word_and_no_lock_and_held_while_another_process_locks_it() {
@@ -152,11 +153,22 @@ mod macos {
         )
         .unwrap();
         let invoice = clauseo_protocol::MatterPath::new("Invoice.docx").unwrap();
-        assert_eq!(
-            clauseo_matters::held_open(root, &invoice),
-            None,
-            "stale: no lock, no Word, a local volume"
-        );
+        // A listing that fails reads as a Word running, as the rule reads it.
+        let word_runs = || {
+            clauseo_process::processes_named("Microsoft Word")
+                .is_none_or(|starts| !starts.is_empty())
+        };
+        let before = word_runs();
+        let first = clauseo_matters::held_open(root, &invoice);
+        // A Word started or quit during the check leaves its answer open either way.
+        if before == word_runs() {
+            let expected =
+                before.then(|| clauseo_matters::HeldOpen::OwnerFile("~$nvoice.docx".to_owned()));
+            assert_eq!(
+                first, expected,
+                "stale with no lock, no Word and a local volume; held while a Word runs"
+            );
+        }
 
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
