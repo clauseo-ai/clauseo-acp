@@ -3,10 +3,10 @@
 //! ended. Empty unless `ConnectOptions::helper_sessions` is on, since only then is a
 //! `subagent_spawned` read.
 //!
-//! Only a session this connection started is a root, a helper is announced once, and a root has
-//! at most [`MAX_PER_ROOT`] helpers, so the agent cannot grow the map with sessions nobody
-//! forgets, nor move a helper's requests to another root's cancel. An entry stays after the
-//! helper ends, so its late frames still find the root. It is forgotten with its root's entry in
+//! Only a session this connection started is a root, a helper is announced once, and a root
+//! takes at most [`MAX_PER_ROOT`] announcements between two starts, so the agent cannot grow
+//! the map with sessions nobody forgets, nor move a helper's requests to another root's cancel.
+//! An entry stays after the helper ends, so its late frames still find the root. It is forgotten with its root's entry in
 //! `State::sessions`: when the root is started again (`session/new`, `session/load`,
 //! `session/resume`; a load's replay announces its helpers again) or dropped (a failed load or
 //! resume), and with the connection. A session started under an id once announced as a helper
@@ -16,8 +16,10 @@ use std::collections::BTreeMap;
 
 use clauseo_protocol::{AgentSessionId, CompactString, TurnId};
 
-/// The most helpers one root session may have announced at once; a `subagent_spawned` past it
-/// is refused. The recordings have at most four per root (T1.jsonl).
+/// The most helpers one root session may announce between two starts of it. Ended helpers count
+/// too, since their entries stay until the root is started again or dropped: this bounds the
+/// map's memory. A `subagent_spawned` past it is refused. The recordings have at most four per
+/// root (T1.jsonl).
 pub(crate) const MAX_PER_ROOT: usize = 1024;
 
 /// Helper session id → its root session and its end.
@@ -52,7 +54,8 @@ impl HelperSessions {
         self.0.get(id).and_then(|helper| helper.end)
     }
 
-    /// Whether `root` has [`MAX_PER_ROOT`] helpers already.
+    /// Whether `root` has had [`MAX_PER_ROOT`] helpers announced (running or ended) since it
+    /// was last started.
     pub(crate) fn full(&self, root: &str) -> bool {
         let under = self
             .0
