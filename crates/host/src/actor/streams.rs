@@ -206,6 +206,10 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     for waiter in loading.waiters {
         waiter(actor, Ok(()));
     }
+    // Helpers a past run left open end now that the log is here (`turn/helpers.rs`).
+    if let StreamId::Thread(thread) = stream {
+        turn::settle_loaded(actor, thread);
+    }
     if let Some(StreamSlot::Loaded(loaded)) = actor.streams.get_mut(&stream)
         && loaded.since_snapshot >= SNAPSHOT_EVERY_EVENTS
     {

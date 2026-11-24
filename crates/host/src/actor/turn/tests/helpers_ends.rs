@@ -1,0 +1,215 @@
+//! Helpers across a run's end and a reopen (`turn/helpers.rs`): the same view after a reopen;
+//! a helper a crash left open in an open turn, or past its turn, ends `Stopped` at the next
+//! start, once; a helper whose engine dies mid-turn ends `Stopped` with the turn.
+
+use futures::channel::oneshot;
+
+use clauseo_acp::Origin;
+use clauseo_protocol::{
+    HelperOutcome, HostQuery, PageLimit, Principal, QueryResult, StreamId, ThreadId, ViewEntry,
+};
+
+use super::agents::send_prompt;
+use super::failures::until_ended;
+use super::helpers::{
+    COMPLETED, DELIVERED, LAUNCH_INPUT, PROMPT, call, in_background, lead, live_turn, one_turn,
+    patch, stamped, story, words,
+};
+use super::rig::Rig;
+use crate::actor::input::Request;
+use crate::actor::turn::helpers as turn_helpers;
+
+/// The helper's view after a reopen is the view before it: the same `Helper` and `HelperText`
+/// entries, and its steps still name it.
+#[test]
+fn a_reopened_conversation_shows_the_same_helper() {
+    let mut rig = Rig::start("helpers-reopen", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    stamped(
+        &mut rig,
+        thread,
+        at,
+        "toolu_A",
+        call("toolu_R1", "Read", None),
+    );
+    stamped(&mut rig, thread, at, "toolu_A", words("Read it."));
+    let handback = call(
+        "toolu_H",
+        "SubagentHandback",
+        Some(r#"{"message":"Digest."}"#),
+    );
+    stamped(&mut rig, thread, at, "toolu_A", handback);
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H", None, COMPLETED, Some(DELIVERED)),
+    );
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let before = helper_entries(&mut rig, thread);
+    assert_eq!(before.len(), 3, "{before:?}");
+    let mut rig = rig.restart(2);
+    let after = helper_entries(&mut rig, thread);
+    assert_eq!(after, before);
+    rig.finish();
+}
+
+/// A helper still open when the host stopped mid-turn (a crash or a quit: nothing ended the turn
+/// and the memory of its helpers went with the run) ends `Stopped` in start-up's repair of
+/// that turn, so its card does not spin after the reopen.
+#[test]
+fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
+    let mut rig = Rig::start("helpers-crash", "");
+    let thread = rig.thread();
+    let turn = rig.running_turn(thread);
+    let start = turn_helpers::Start {
+        id: None,
+        acp_id: "toolu_A".into(),
+        parent: None,
+        call: None,
+        name: "paper-reader".into(),
+        label: None,
+        task: Some("Read.".to_owned()),
+        model: None,
+        background: true,
+    };
+    turn_helpers::start(&mut rig.actor, thread, turn, start).unwrap();
+    rig.settle_commits();
+    let state = &mut rig.actor.threads.get_mut(&thread).unwrap().turn;
+    state.current = None;
+    state.helpers = None;
+    let mut rig = rig.restart(1);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "start paper-reader call= model=- label=- task=true",
+            "end paper-reader Stopped -",
+            "turn_ended Failed",
+        ]
+    );
+    let entries = helper_entries(&mut rig, thread);
+    let [ViewEntry::Helper(entry)] = entries.as_slice() else {
+        panic!("{entries:?}");
+    };
+    assert_eq!(entry.outcome, Some(HelperOutcome::Stopped));
+    rig.finish();
+}
+
+/// The engine dies mid-turn (the agent exits while its helper works): the helper ends
+/// `Stopped` in the write that ends the turn, not `Failed` as when a turn ends by itself.
+#[test]
+fn a_helper_whose_engine_dies_mid_turn_is_stopped() {
+    let launch = r#"{"update":{"update":{"_meta":{"claudeCode":{"toolName":"Agent"}},"toolCallId":"toolu_A","sessionUpdate":"tool_call","name":"Agent","status":"pending","title":"Task","kind":"think","rawInput":{"subagent_type":"paper-reader","prompt":"Read."},"content":[]}}}"#;
+    let steps = format!("{PROMPT}\n{launch}\n{{\"exit\":{{\"code\":1}}}}\n");
+    let mut rig = Rig::start("helpers-engine-dies", &steps);
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=- task=true",
+            "end paper-reader Stopped -",
+            "turn_ended Failed",
+        ]
+    );
+    rig.finish();
+}
+
+/// A helper the log leaves open after its turn ended (a send-now kept it), when the run that
+/// started it crashes: the next run ends it `Stopped` once the conversation loads, and a run
+/// after that adds nothing.
+#[test]
+fn a_helper_left_open_past_its_turn_is_stopped_once_at_the_next_load() {
+    let mut rig = Rig::start("helpers-open-past-turn", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    let start = turn_helpers::Start {
+        id: None,
+        acp_id: "toolu_A".into(),
+        parent: None,
+        call: None,
+        name: "paper-reader".into(),
+        label: None,
+        task: Some("Read.".to_owned()),
+        model: None,
+        background: true,
+    };
+    turn_helpers::start(&mut rig.actor, thread, turn, start).unwrap();
+    rig.settle_commits();
+    // The crash takes the run's memory of its helpers with it.
+    rig.actor.threads.get_mut(&thread).unwrap().turn.helpers = None;
+    let want = [
+        "turn_ended EndTurn",
+        "start paper-reader call= model=- label=- task=true",
+        "end paper-reader Stopped -",
+    ];
+    let mut rig = rig.restart(1);
+    // The load the page asks for ends the helper; the page after it shows it ended.
+    helper_entries(&mut rig, thread);
+    rig.settle_commits();
+    let entries = helper_entries(&mut rig, thread);
+    let [ViewEntry::Helper(entry)] = entries.as_slice() else {
+        panic!("{entries:?}");
+    };
+    assert_eq!(entry.outcome, Some(HelperOutcome::Stopped));
+    assert_eq!(story(&rig.log(thread))[1..], want);
+    let mut rig = rig.restart(2);
+    helper_entries(&mut rig, thread);
+    rig.settle_commits();
+    assert_eq!(
+        story(&rig.log(thread))[1..],
+        want,
+        "a second start adds nothing"
+    );
+    rig.finish();
+}
+
+/// The thread's view entries that belong to a helper (its card, its words, its steps), as a
+/// `PageEntries` query answers them: the view a reopened conversation shows.
+fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
+    let (reply, mut answer) = oneshot::channel();
+    let query = HostQuery::PageEntries {
+        stream: StreamId::Thread(thread),
+        before_order: None,
+        limit: PageLimit::new(200).unwrap(),
+    };
+    let principal = Principal::LocalDesktop;
+    rig.actor.on_request(Request::Query {
+        principal,
+        query,
+        reply,
+    });
+    let mut got = None;
+    rig.run_until("the page", |_| {
+        if got.is_none()
+            && let Ok(Some(result)) = answer.try_recv()
+        {
+            got = Some(result);
+        }
+        got.is_some()
+    });
+    let Some(Ok(QueryResult::Entries(entries))) = got else {
+        panic!("{got:?}");
+    };
+    entries
+        .into_iter()
+        .filter(|entry| match entry {
+            ViewEntry::Helper(_) | ViewEntry::HelperText(_) => true,
+            ViewEntry::ToolCall(call) => call.helper.is_some(),
+            _ => false,
+        })
+        .collect()
+}
