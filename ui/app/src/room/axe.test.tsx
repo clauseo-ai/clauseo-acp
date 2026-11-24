@@ -6,7 +6,7 @@
 // pressed and held while the OS asks, its answers waiting; and with the agent's questions as forms: Claude's
 // AskUserQuestion with one question and with two (radios, checkboxes, each with its Other). happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts). And U7's wait over the composer while
-// another conversation of the matter runs, with Stop the other and Queue.
+// an undo, a restore or a move holds the matter and the host has queued the open conversation's message.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,9 +79,7 @@ type Scene = {
   thread?: ViewEntry[];
   /** Always for this matter, pressed and held: the OS's confirm line up, the answers waiting. */
   confirming?: boolean;
-  /** The open thread idle while another conversation of its matter runs: Ask raises the wait over the composer (U7). */
-  wait?: boolean;
-  /** The open thread's message sent and queued behind another conversation's: the panel without its heading (U7). */
+  /** The open thread's message queued for the matter (an undo, a restore or a move holds it): the card (U7). */
   queued?: boolean;
   /** The rail's Recent, chosen on its switch (U16a). */
   recent?: boolean;
@@ -140,15 +138,8 @@ const SCENES: Record<string, Scene> = {
     thread: [ASKED, editCall(3, 1, "pending"), permission(4, 1)],
     confirming: true,
   },
-  // another conversation of the matter runs: the wait over the composer, with Stop the other and Queue
-  "another conversation holding the matter": {
-    matters: true,
-    papers: undefined,
-    thread: [ASKED],
-    wait: true,
-  },
-  // its message queued behind the other's: Stop the other alone, the working line saying the wait
-  "a message queued behind another conversation": {
+  // its message queued for the matter: the card, nothing to press, the working line saying the wait
+  "a message waiting for the matter": {
     matters: true,
     papers: undefined,
     thread: [ASKED],
@@ -162,10 +153,10 @@ const SCENES: Record<string, Scene> = {
   },
 };
 
-/** The open thread's header: queued behind OTHER, idle beside it, or waiting on the lawyer. */
+/** The open thread's header: queued for the matter, or waiting on the lawyer. */
 function headerFor(scene: Scene): ViewEntry {
-  const head = header(scene.wait === true ? "idle" : "needs_you");
-  if (scene.queued === true) head.header!.status = { queued: { behind: OTHER } };
+  const head = header("needs_you");
+  if (scene.queued === true) head.header!.status = { queued: { behind: THREAD } };
   return head;
 }
 
@@ -206,19 +197,19 @@ function transportFor(scene: Scene): FakeTransport {
           threads:
             thread === undefined
               ? []
-              : scene.wait === true || scene.queued === true
+              : scene.queued === true
                 ? [
                     {
                       thread: THREAD,
                       matter: MATTER,
                       agent: "claude-acp",
-                      status: scene.queued === true ? { queued: { behind: OTHER } } : "idle",
+                      status: { queued: { behind: THREAD } },
                     },
                     {
                       thread: OTHER,
                       matter: MATTER,
                       agent: "claude-acp",
-                      status: "running",
+                      status: { queued: { behind: THREAD } },
                       title: "Draft petition",
                     },
                   ]
@@ -303,39 +294,9 @@ for (const theme of THEMES) {
             if (scene.queued === true) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-              const wait = host.querySelector('[data-testid="other-wait"]');
-              expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
-              expect(wait?.querySelector('[data-testid="queue"]'), name).toBeNull();
-              expect(wait?.querySelector(".queue-wait-head"), name).toBeNull();
-            } else if (scene.wait === true) {
-              await act(async () => void (await loadThread()));
-              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-              // words in the field, then Ask: with the other running, Ask raises the wait
-              const field = host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
-              await act(async () => {
-                if (field === null) return;
-                Reflect.set(
-                  HTMLTextAreaElement.prototype,
-                  "value",
-                  "Does the lease allow it?",
-                  field,
-                );
-                field.dispatchEvent(new Event("input", { bubbles: true }));
-              });
-              await act(async () => {
-                field?.dispatchEvent(
-                  new KeyboardEvent("keydown", {
-                    key: "Enter",
-                    keyCode: 13,
-                    bubbles: true,
-                    cancelable: true,
-                  }),
-                );
-              });
-              const wait = host.querySelector('[data-testid="other-wait"]');
+              const wait = host.querySelector('[data-testid="matter-hold"]');
               expect(wait, name).not.toBeNull();
-              expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
-              expect(wait?.querySelector('[data-testid="queue"]'), name).not.toBeNull();
+              expect(wait?.querySelector("button"), name).toBeNull();
             } else if (scene.thread?.some((e) => e.elicitation !== undefined) === true) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));

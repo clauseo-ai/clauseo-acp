@@ -8,12 +8,13 @@
     "note": "Rohan, 2026-11-02, round 2 wording"
   },
   "U8-02": {
-    "en": "Restore and Undo wait until the answer in {conversation} is done.",
-    "hi": "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+    "en": "Restore and Undo wait until the answers in this matter are done.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Versions, under the band while any conversation of the matter answers. Several may answer at once now (issue 15), so it names no conversation; the {conversation} slot is gone. Was \"Restore and Undo wait until the answer in {conversation} is done.\" (approved 2026-11-02, Rohan)."
   },
   "U8-03": {
     "en": "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",

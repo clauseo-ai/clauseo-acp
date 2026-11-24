@@ -30,7 +30,8 @@ export type MatterState =
   | "moved"
   | "failed";
 
-/** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer;
+/** What a conversation is doing while the lawyer reads another. waiting: its message waits for the matter (an undo, a
+ * restore or a move holds it; in the gallery, another conversation's answer);
  * question and permission, as a matter's: it waits on the lawyer's hand. */
 export type ConversationState =
   | "idle"
@@ -99,8 +100,8 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
   }
 }
 
-/** A conversation's status line's words, in the language. `behind` is the title it waits behind; `day`, a failure's
- * day when it isn't today. */
+/** A conversation's status line's words, in the language. `behind` is the title it waits behind, "" for none (the
+ * app's: "Waiting to answer."); `day`, a failure's day when it isn't today. */
 export function conversationStatus(
   lang: Lang,
   state: ConversationState,
@@ -123,7 +124,10 @@ export function conversationStatus(
     case "stopped":
       return frame(lang, "Stopped at {time}", { time });
     case "waiting":
-      return mt(lang, "Waiting for '{title}'", { title: behind });
+      // the app names no title: a turn waits only for an undo, a restore or a move now (24 Nov)
+      return behind === ""
+        ? mt(lang, "Waiting to answer.")
+        : mt(lang, "Waiting for '{title}'", { title: behind });
     case "failed":
       return failed(lang, time, day);
     case "idle":

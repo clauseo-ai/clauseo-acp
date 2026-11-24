@@ -14,7 +14,8 @@
 // (`delivery: "send_now"`: the answer stops and the words go next) and Queue (composer-steer.tsx); at QUEUE_CAP Enter
 // sends nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
-// with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
+// with a thread (queue-slot.tsx), under the wait for the matter (MatterHoldWait: an undo, a restore or a move holds it;
+// queue-model.ts). Another conversation answering holds nothing back: Ask sends. After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
 // last queued, the working line says so until the next send or the drained turn starts (else the strip does). A steer
@@ -57,10 +58,10 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { EntryId, ErrorCode, StreamId, ThreadId } from "../../transport/protocol.ts";
+import type { EntryId, StreamId, ThreadId } from "../../transport/protocol.ts";
 import type { Conversations } from "../conversations.ts";
-import { OtherWait } from "../queue.tsx";
-import { useOtherWait } from "../queue-model.ts";
+import { MatterHoldWait } from "@clauseo/components/clauseo/queue-wait.tsx";
+import { useMatterHeld } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
@@ -153,13 +154,9 @@ export function WorkComposer({
   /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
   onAsk: (text: string, how?: AskHow) => Promise<boolean>;
   onStop: () => void;
-  /** U7: the matter's conversations, for the wait over the field while another of them holds the matter, whose Queue
-   * sends the field's words as Ask does; with a refused Stop the other's code going to `onRefused`. Null: no wait. */
-  others?: {
-    transport: HostTransport;
-    conversations: Conversations;
-    onRefused: (code: ErrorCode | null) => void;
-  } | null;
+  /** U7: the matter's conversations, for the wait over the field while an undo, a restore or a move holds the matter
+   * and the host has queued this conversation's message. Null: no wait. */
+  others?: { conversations: Conversations } | null;
   /** U12: the open thread paused at the plan's limit (limit-words.ts's pausedPick), for the status line's words; null
    * while it isn't. Send stays enabled: no limits state holds a question back. */
   paused?: Paused | null;
@@ -207,17 +204,8 @@ export function WorkComposer({
     return d === undefined || (d.typed.trim() === "" && d.pastes.length === 0);
   });
   const emptyNow = useRef(empty);
-  // U7: another conversation holding the matter, and whether Ask has raised its wait (design state.ts's `waiting`):
-  // Ask then sends nothing, Queue sends; emptying the field lowers it
-  const wait = useOtherWait(others?.conversations ?? null, draftKey);
-  const [raised, setRaised] = useState(false);
-  // Queue pressed: Stop the other takes the focus back until the message waits (queue.tsx)
-  const stopWanted = useRef(false);
-  const isStopWanted = useCallback(() => stopWanted.current, []);
-  const setStopWanted = useCallback((wanted: boolean) => {
-    stopWanted.current = wanted;
-  }, []);
-  if (raised && wait === null) setRaised(false);
+  // U7: the host queued this conversation's message while an undo, a restore or a move holds the matter
+  const holdWait = useMatterHeld(others?.conversations ?? null, draftKey);
   // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send, or until
   // the thread moves on (its status, or the agent's latest output: the drained turn has started), when it says
   // "Answering." again. `lost` holds the thread's mark as the edit was lost, null for none; each clear checks it first,
@@ -243,23 +231,18 @@ export function WorkComposer({
     if (emptyNow.current !== isEmpty) {
       emptyNow.current = isEmpty;
       setEmpty(isEmpty);
-      if (isEmpty) setRaised(false);
     }
     if (draftKey === null) return;
     if (isBlank(draft)) drafts.delete(draftKey);
     else drafts.set(draftKey, draft);
   };
   // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it steers the
-  // words where the agent takes words mid-answer, else queues them, but not past the cap, when they stay in the field;
-  // while another conversation holds the matter, it raises the wait instead, whose Queue sends
+  // words where the agent takes words mid-answer, else queues them, but not past the cap, when they stay in the field.
+  // Another conversation answering in the matter holds nothing back: the words go (24 Nov)
   const ask = (asked: string) => {
     if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     if (busy) {
       queue(asked, joinsIn(stream === null ? undefined : store?.view(stream)));
-      return;
-    }
-    if (wait !== null && !wait.sent) {
-      setRaised(true);
       return;
     }
     send(asked);
@@ -272,7 +255,7 @@ export function WorkComposer({
   };
   const send = (asked: string, how?: AskHow) => {
     if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
-    // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
+    // idle, Ask waits for the turn it sent; the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
@@ -303,8 +286,6 @@ export function WorkComposer({
       if (back !== null) field.current?.fill(draftOf(back));
     });
   };
-  // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
-  const queueNow = () => send(field.current?.text() ?? "");
   // the hint's Queue, as Enter where the agent takes no words mid-answer; its Send now stops the answer for the words
   const queueField = () => queue(field.current?.text() ?? "");
   const focusField = useCallback(() => field.current?.focus(), []);
@@ -356,14 +337,6 @@ export function WorkComposer({
     }
     field.current?.fill(draftOf(refillText));
   }, [refillKey, refillText]);
-  const waitTitle = wait?.title ?? mt(w.lang, "New conversation");
-  const said =
-    wait !== null && raised && !wait.sent && !busy
-      ? `${mt(w.lang, "Waiting for '{title}' to finish.", { title: waitTitle })} ${mt(
-          w.lang,
-          "One conversation changes a matter's papers at a time. Your message is ready to go.",
-        )}`
-      : "";
   // while the turn runs the pen writes after the words (working-line.tsx); the line is gone, and the pen with it,
   // once the turn ends. A single read stays a wait in its own words: check and series say "Checking" and "judgments",
   // which a plain read isn't
@@ -397,17 +370,10 @@ export function WorkComposer({
             },
             testId: "error",
           }
-        : wait !== null && (wait.sent || busy)
+        : holdWait
           ? {
-              // sent (or accepted, before the row says starting) and waiting behind the other: the design's wait
-              // (room.tsx), never "Answering."
-              state: {
-                kind: "wait",
-                words: mt(w.lang, "Waiting for '{title}' to finish.", {
-                  title: waitTitle,
-                }),
-                pill: null,
-              },
+              // queued while an undo, a restore or a move holds the matter: a wait, never "Answering."
+              state: { kind: "wait", words: mt(w.lang, "Waiting to answer."), pill: null },
               testId: "working",
             }
           : busy
@@ -455,37 +421,16 @@ export function WorkComposer({
       onInput={keep}
       onAsk={ask}
       acts={
-        // while Clauseo works and the field holds words, unless the conversation waits behind another (design
-        // room.tsx: `busy && hasText && live.behind === null`)
-        busy && !empty && !disabled && wait === null ? (
+        // while Clauseo works and the field holds words, unless the message waits for the matter (design room.tsx:
+        // `busy && hasText && live.behind === null`)
+        busy && !empty && !disabled && !holdWait ? (
           <ComposerSteer stream={stream} onSendNow={sendNowField} onQueue={queueField} />
         ) : null
       }
       queue={
         <>
-          {others !== null && (
-            <>
-              {/* what assistive technology hears of the raised wait: one status region, mounted for the composer's
-                life and empty until the wait is raised, so the wait is said as it comes; once sent it is empty
-                again, as the composer's own region then says the working line's wait */}
-              <p className="sr-only" role="status" data-testid="other-wait-said">
-                {said}
-              </p>
-              {wait !== null && (wait.sent || raised || busy) && (
-                <OtherWait
-                  transport={others.transport}
-                  wait={wait}
-                  busy={busy}
-                  empty={empty}
-                  onQueue={queueNow}
-                  onFocusField={focusField}
-                  onRefused={others.onRefused}
-                  stopWanted={isStopWanted}
-                  onStopWanted={setStopWanted}
-                />
-              )}
-            </>
-          )}
+          {/* the composer's working line says the wait, in its own status region */}
+          {holdWait && <MatterHoldWait testId="matter-hold" />}
           {transport !== null && thread !== null && (
             <QueueSlot
               transport={transport}

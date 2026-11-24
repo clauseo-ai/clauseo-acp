@@ -83,7 +83,8 @@ export const HI = {
     "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
-  "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
+  // matter.turn_running, reworded 24 Nov (several answers at once). hi: later
+  "Wait for the answers in this matter to finish.": null,
   "This is the top of a drive. Choose a folder on it.":
     "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
   "This is your home folder. Choose a folder inside it.":

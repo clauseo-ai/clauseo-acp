@@ -95,14 +95,13 @@ function conversationRows(
     const state = stopped !== null && stopped.day !== "" ? "idle" : words.state;
     // a failure keeps its mark on another day: its words, under the pointer, say the day
     const failed = words.state === "failed" ? clockOf(words.at, now, zone, lang) : null;
+    // a row waiting for its matter names no conversation: only an undo, a restore or a move holds one (24 Nov)
     const extra =
-      words.state === "waiting"
-        ? { behind: titleOf(talks.rows.find((r) => r.thread === words.behind)) }
-        : stopped !== null && state === "stopped"
-          ? { at: stopped.time }
-          : failed !== null
-            ? { at: failed.time, day: failed.day }
-            : {};
+      stopped !== null && state === "stopped"
+        ? { at: stopped.time }
+        : failed !== null
+          ? { at: failed.time, day: failed.day }
+          : {};
     return {
       id: row.key,
       title: titleOf(row),

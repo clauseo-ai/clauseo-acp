@@ -465,12 +465,13 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-43)"
   },
   "U3-err-matter.turn_running": {
-    "en": "Wait for the answer to finish first.",
-    "hi": "पहले उत्तर पूरा होने दें।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-44)"
+    "en": "Wait for the answers in this matter to finish.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "matter.turn_running: Undo, Restore, Move matter and Forget refused while any answer runs in the matter. Conversations of a matter now answer at the same time (issue 15), so the line names no one answer. Was \"Wait for the answer to finish first.\" (approved 2026-11-02, Rohan)."
   },
   "U3-err-transport.unauthorized": {
     "en": "That wasn't allowed, so nothing changed.",

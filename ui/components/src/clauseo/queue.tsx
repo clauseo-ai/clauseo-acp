@@ -13,7 +13,7 @@ import { QUEUE_CAP, type QueueHold, type QueuedMessage, type QueueTestIds } from
 
 // the wait for another conversation lives in its own file, so the room's first load carries it without the queue's
 // parts (the collapsible among them)
-export { OtherConversationWait } from "./queue-wait.tsx";
+export { MatterHoldWait, OtherConversationWait } from "./queue-wait.tsx";
 // the steer's parts live apart, for the same reason: the hint in the composer, the marks in the thread's chunk
 export { SteerHint } from "./steer-hint.tsx";
 export { SteerMark, SteerNote, SteerWaiting } from "./steer-marks.tsx";

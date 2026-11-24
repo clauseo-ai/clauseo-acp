@@ -416,7 +416,7 @@ export const U8: Entry[] = [
   state("U8-01", versionWords("Version history is kept on this computer."), {}, [OPEN]),
   state(
     "U8-02",
-    versionWords("Restore and Undo wait until the answer in {conversation} is done."),
+    versionWords("Restore and Undo wait until the answers in this matter are done."),
     { running: true },
     [OPEN, EARLIER],
   ),

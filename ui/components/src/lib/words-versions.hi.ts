@@ -239,9 +239,9 @@ const OWN = {
   "Try again": "फिर से प्रयास करें",
   "Restore and Undo wait until the answer in {conversation} is done, expected by {time}.":
     "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे। {time} बजे तक अपेक्षित।",
-  // the same wait without an end time: the room never estimates one
-  "Restore and Undo wait until the answer in {conversation} is done.":
-    "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे।",
+  // the same wait without an end time, naming no conversation: the room never estimates one, and several conversations
+  // of a matter may answer at once (24 Nov). hi: later
+  "Restore and Undo wait until the answers in this matter are done.": null,
   "Undo the restore": "पुनर्स्थापन पूर्ववत करें",
   "Restored to {time} on {date}. {n} documents changed.":
     "{date}, {time} बजे पर पुनर्स्थापित किया गया। {n} दस्तावेज़ बदले।",

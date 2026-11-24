@@ -182,7 +182,7 @@ test("switching: the other row's thread is watched and shown; the first's header
   expect(rowOf("Indemnity")?.dataset["state"]).toBe("idle");
 });
 
-test("a row not open says what it's doing: Answering., a question, waiting for another", async () => {
+test("a row not open says what it's doing: Answering., a question, waiting for its matter (naming no one)", async () => {
   h = await mountRoom({
     threads: [
       thread(T1, { title: "Lease notice", status: "running" }),
@@ -197,8 +197,9 @@ test("a row not open says what it's doing: Answering., a question, waiting for a
   expect(rowOf("Lease notice")?.querySelector(".room-conv-said")?.textContent).toBe("Answering.");
   expect(rowOf("Bank letters")?.textContent).toContain("A question for you");
   expect(rowOf("Indemnity")?.querySelector(".sr-only")?.textContent).toContain(
-    "Waiting for 'Lease notice'",
+    "Waiting to answer.",
   );
+  expect(rowOf("Indemnity")?.textContent).not.toContain("Lease notice");
 });
 
 test("in Hindi the draft says नई बातचीत", async () => {

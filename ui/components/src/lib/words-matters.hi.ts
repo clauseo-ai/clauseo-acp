@@ -212,6 +212,12 @@ export const HI = {
   "Your firm sets where new matters go, so it can't be changed here.": null,
   "Clauseo couldn't use that folder. Choose it again.": null,
   "Clauseo couldn't save the change. Try again.": null,
+  /* ---------- an undo, restore or move holds the matter (parallel answers, 24 Nov) ---------- */
+  // a conversation whose message waits for the hold: the rail's row and the composer's working line. hi: later
+  "Waiting to answer.": null,
+  // the card over the composer while the message waits. hi: later
+  "An undo, restore or move is changing this matter's papers. Your message goes once it's done.":
+    null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */
