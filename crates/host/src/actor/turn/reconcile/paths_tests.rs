@@ -19,6 +19,7 @@ fn inside(path: &str) -> ToolLocation {
 /// The start of tool call `n` of turn 1, of `kind`, naming `path`.
 fn started(n: u64, kind: ToolKind, path: &str) -> DomainEvent {
     DomainEvent::ToolCallStarted(Box::new(ToolCallStarted {
+        helper: None,
         turn: id::<TurnId>(1),
         tool_call: id::<ToolCallId>(n),
         acp_id: format!("t{n}").into(),

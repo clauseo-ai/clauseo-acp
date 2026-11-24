@@ -12,11 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::open_enum::enum_with_names;
 use crate::stream::{split_kind, unknown_prefix};
 use crate::{
-    CheckpointId, ContentBlock, Cost, Count, ElicitationId, Error, EventId, MatterId, MessageId,
-    PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, TurnId,
+    CheckpointId, ContentBlock, Cost, Count, ElicitationId, Error, EventId, HelperId, MatterId,
+    MessageId, PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
+    ToolCallId, TurnId,
 };
 
 mod entry;
+mod helpers;
 mod hold;
 mod tools;
 
@@ -26,6 +28,7 @@ pub use entry::{
     NoticeEntry, PermissionEntry, PermissionState, StepEntry, ToolCallEntry, ToolCallPage,
     ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
 };
+pub use helpers::{HelperEntry, HelperTextEntry};
 pub use hold::QueueHoldReason;
 pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
@@ -180,6 +183,10 @@ view_entries! {
         AgentContent(AgentContentEntry, event: EventId) = "agent_content",
         /// A tool call.
         ToolCall(Box<ToolCallEntry>, tool_call: ToolCallId) = "tool_call",
+        /// A helper (a subagent): what it was asked and how it ended.
+        Helper(Box<HelperEntry>, helper: HelperId) = "helper",
+        /// A run of a helper's own words.
+        HelperText(HelperTextEntry, event: EventId) = "helper_text",
         /// A permission request.
         Permission(PermissionEntry, request: PermissionRequestId) = "permission",
         /// An elicitation.
@@ -207,9 +214,10 @@ impl ViewEntry {
     ///
     /// Only `TextOrBlob` fields count, each through [`TextOrBlob::inline_len`] (a `Blob` costs
     /// 0), taken in this order, each item's fields in declaration order: for a `ToolCall`,
-    /// `raw_input`, `raw_output`, then `content` items; for a `UserMessage`, `content` items; for
-    /// an `AgentContent`, its block; for a compaction `Marker`, its `summary`. Every other entry
-    /// costs 0. Message text (`ContentBlock::Text`, an agent text's `text`) is a `String`, not a
+    /// `raw_input`, `raw_output`, then `content` items; for a `Helper`, `task` then `summary`;
+    /// for a `UserMessage`, `content` items; for an `AgentContent`, its block; for a compaction
+    /// `Marker`, its `summary`. Every other entry costs 0, a `HelperText` too: the host cuts each
+    /// one's text to the limit. Message text (`ContentBlock::Text`, an agent text's `text`) is a `String`, not a
     /// `TextOrBlob`, and is not counted here: the reducer splits it into text patches.
     pub fn inline_len(&self) -> usize {
         match self {
@@ -219,6 +227,7 @@ impl ViewEntry {
                     + e.content.iter().map(tool_content_len).sum::<usize>()
             }
             Self::UserMessage(e) => e.content.iter().map(block_len).sum(),
+            Self::Helper(e) => optional_len(e.task.as_ref()) + optional_len(e.summary.as_ref()),
             Self::AgentContent(e) => block_len(&e.block),
             Self::Marker(e) => match &e.kind {
                 MarkerKind::Compaction { summary, .. } => optional_len(summary.as_ref()),
@@ -228,6 +237,7 @@ impl ViewEntry {
             },
             Self::Header(_)
             | Self::AgentText(_)
+            | Self::HelperText(_)
             | Self::Permission(_)
             | Self::Elicitation(_)
             | Self::Step(_)

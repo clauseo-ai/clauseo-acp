@@ -26,12 +26,12 @@ pub use payload::{
     AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
     CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
     ContentAppended, ElicitationExpired, ElicitationRequested, ElicitationResolved, FilesChanged,
-    MatterCreated, MatterHold, MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited,
-    PermissionExpired, PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited,
-    SteerResolved, StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
-    TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    HelperEnded, HelperStarted, HelperText, MatterCreated, MatterHold, MatterRelocated,
+    ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
+    PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
+    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
+    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
+    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -233,6 +233,12 @@ domain_events! {
     ToolCallStarted(Box<ToolCallStarted>) = "tool_call_started", thread;
     /// A tool call changed (acp; host marks in-flight calls cancelled).
     ToolCallUpdated(Box<ToolCallUpdated>) = "tool_call_updated", thread;
+    /// The lead agent launched a helper (host, from acp).
+    HelperStarted(Box<HelperStarted>) = "helper_started", thread;
+    /// A run of a helper's own words (host, from acp).
+    HelperText(HelperText) = "helper_text", thread;
+    /// A helper ended (host, from acp; host when a Stop or a session end closes it).
+    HelperEnded(HelperEnded) = "helper_ended", thread;
     /// A web search the agent ran, with its results (acp).
     WebSearchRecorded(Box<WebSearchRecorded>) = "web_search_recorded", thread;
     /// A page the agent opened (acp).

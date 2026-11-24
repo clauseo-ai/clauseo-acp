@@ -82,6 +82,7 @@ fn turn_events() -> Vec<DomainEvent> {
         text(22, TextKind::Answer, "is void "),
         text(22, TextKind::Answer, "under s. 23."),
         DomainEvent::ToolCallStarted(Box::new(ToolCallStarted {
+            helper: None,
             turn: turn(),
             tool_call: id::<ToolCallId>(40),
             acp_id: "t1".into(),

@@ -37,6 +37,20 @@ open_unit_enum! {
 }
 
 open_unit_enum! {
+    /// How a helper (a subagent) ended.
+    pub enum HelperOutcome {
+        /// It finished its task, also when the agent cut it at its turn limit (the end's
+        /// `summary` then says so).
+        Done,
+        /// It failed.
+        Failed,
+        /// It was stopped: the lawyer pressed Stop, or the agent session ended under it.
+        Stopped,
+    }
+    test mod helper_outcome;
+}
+
+open_unit_enum! {
     /// How a page was opened: the agent's web fetch, Codex's open-page tool, the browser, or the
     /// case-law connector.
     pub enum PageVia {

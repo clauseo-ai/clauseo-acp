@@ -204,6 +204,7 @@ fn event(n: u64) -> DomainEvent {
             let call: ToolCallId = id(50_000 + turn_index * 25 + (at - 2) / 9);
             if (at - 2) % 9 == 7 {
                 DomainEvent::from(Box::new(ToolCallStarted {
+                    helper: None,
                     turn,
                     tool_call: call,
                     acp_id: CompactString::new(format!("toolu_{n}")),
