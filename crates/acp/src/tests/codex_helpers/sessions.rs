@@ -153,6 +153,15 @@ fn invalid_end(session: &str, error: &str) -> String {
     warned(session, "subagent_state_update", error)
 }
 
+/// What a helper's update `name` on `session` warns after the helper ended outside a turn.
+fn ended_update(session: &str, name: &str) -> String {
+    warned(
+        session,
+        name,
+        "an update of a helper that ended outside a turn",
+    )
+}
+
 fn shapes_of(steps: &[Vec<AcpEvent>]) -> Vec<Vec<String>> {
     steps.iter().map(|events| shapes(events)).collect()
 }
@@ -263,11 +272,7 @@ fn a_reload_announces_its_helpers_again() {
                     "root-a helper helper-a: options of 1".to_owned(),
                     "root-a ended helper-a: Disconnected".to_owned(),
                 ],
-                vec![warned(
-                    "helper-a",
-                    "usage_update",
-                    "an update of a helper stopped outside a turn"
-                )],
+                vec![ended_update("helper-a", "usage_update")],
             ][..]
         )
     );
@@ -279,9 +284,10 @@ fn a_reload_announces_its_helpers_again() {
     );
 }
 
-/// A helper's frames after its end still come as its own, on the root.
+/// A helper's frame after it completed outside a turn is dropped with a warning: it belongs to
+/// no turn of the root's.
 #[test]
-fn frames_after_a_helpers_end_still_find_the_root() {
+fn a_frame_after_a_helpers_end_outside_a_turn_is_dropped() {
     let got = run(&[
         Step::New("root-a"),
         Step::Send(vec![
@@ -293,9 +299,9 @@ fn frames_after_a_helpers_end_still_find_the_root() {
     assert_eq!(
         shapes_of(&got).last().unwrap(),
         &[
-            "root-a spawned helper-a by None: \"Lease\" None",
-            "root-a ended helper-a: Completed",
-            "root-a helper helper-a: usage 7",
+            "root-a spawned helper-a by None: \"Lease\" None".to_owned(),
+            "root-a ended helper-a: Completed".to_owned(),
+            ended_update("helper-a", "usage_update"),
         ]
     );
 }
@@ -373,8 +379,8 @@ fn a_second_end_warns() {
             &[
                 vec!["root-a ended helper-a: Completed".to_owned()],
                 vec![invalid_end("root-a", error), invalid_end("root-a", error)],
-                // Still completed, not stopped: its frame keeps the root's origin.
-                vec!["root-a helper helper-a: usage 7".to_owned()],
+                // The first end stands: the helper's frame is an ended helper's.
+                vec![ended_update("helper-a", "usage_update")],
             ][..]
         )
     );

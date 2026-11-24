@@ -4,13 +4,15 @@
 //! helper's, in `state/helper_sessions.rs`. Each function pushes its events onto `events`, which
 //! the caller sends.
 //!
-//! A helper that ended `cancelled`, `failed` or `disconnected` was stopped. What it sends after
-//! that is not the root's current turn's, even when it arrives while the root runs a later turn.
-//! Its updates come as the lead's own do after a cancel: tagged `Late` with the turn it was
-//! stopped in, which the host drops. When it was stopped outside a turn there is no turn to name,
-//! and they are dropped with a warning. Its permission requests and elicitations are answered
-//! `cancelled` here, with a warning; the host never sees them. Recorded codex-acp sends nothing
-//! after a cancel (X3), so none of this was seen from the agent.
+//! What a helper sends after its end, whatever the state (`completed`, `cancelled`, `failed`,
+//! `disconnected`), is not the root's current turn's, even when it arrives while the root runs
+//! a later turn. Its updates come as the lead's own do after a cancel: tagged `Late` with the
+//! turn it ended in, which the host drops. When it ended outside a turn there is no turn to
+//! name, and they are dropped with a warning. Its permission requests and elicitations are
+//! answered `cancelled` here, with a warning; the host never sees them. In the 18 recordings,
+//! over 32 ends (23 `completed`, 7 `cancelled`, 2 `disconnected`), the agent sends nothing on
+//! a helper's session after its end until a new process announces it again (F1d's replay), so
+//! none of this was seen from the agent.
 
 use agent_client_protocol::Responder;
 use agent_client_protocol::schema::v1 as acp;
@@ -18,15 +20,15 @@ use clauseo_protocol::{AgentSessionId, CompactString};
 use serde_json::Value;
 
 use super::Request;
-use crate::event::{AcpEvent, HelperState, Origin, ProtocolWarning};
+use crate::event::{AcpEvent, Origin, ProtocolWarning};
 use crate::map::{self, Quarantined, helpers::Subagent};
 use crate::state::{HelperEnd, Shared, State};
 
-/// What a stopped helper's dropped update warns.
-const STOPPED_UPDATE: &str = "an update of a helper stopped outside a turn";
+/// What an ended helper's dropped update warns.
+const ENDED_UPDATE: &str = "an update of a helper that ended outside a turn";
 
-/// What a stopped helper's refused request warns.
-const STOPPED_REQUEST: &str = "a request of a helper that was stopped, answered cancelled";
+/// What an ended helper's refused request warns.
+const ENDED_REQUEST: &str = "a request of a helper that has ended, answered cancelled";
 
 /// An update under an announced helper's session id: its root, and what the mapping needs from
 /// the raw JSON.
@@ -68,13 +70,13 @@ pub(super) fn route(
     })
 }
 
-/// The origin of a helper's update, given its root's origin and how the helper ended: the
-/// root's while it runs or after it completed; `Late` of the turn it was stopped in after a
-/// stop; `None` (drop it) after a stop outside a turn.
+/// The origin of a helper's update, given its root's origin and the helper's end: the root's
+/// while it runs; `Late` of the turn it ended in after its end; `None` (drop it) after an end
+/// outside a turn.
 fn update_origin(root: Origin, end: Option<HelperEnd>) -> Option<Origin> {
     match end {
-        None | Some(HelperEnd::Completed) => Some(root),
-        Some(HelperEnd::Stopped(turn)) => turn.map(Origin::Late),
+        None => Some(root),
+        Some(HelperEnd(turn)) => turn.map(Origin::Late),
     }
 }
 
@@ -102,7 +104,7 @@ pub(super) fn skipped(
         None => Err(Box::new(map::invalid(
             Some(session),
             None,
-            STOPPED_UPDATE.to_owned(),
+            ENDED_UPDATE.to_owned(),
         ))),
     }
 }
@@ -110,7 +112,7 @@ pub(super) fn skipped(
 /// Maps helper session `helper`'s update as the same update on its root session would map,
 /// with the root's folder and the origin `update_origin` gives, then makes the events the
 /// helper's (`map::helpers::helper_events`). It reads no other state of the root and changes
-/// none: a plan update sees no shown plan and keeps none. A stopped helper's update with no turn
+/// none: a plan update sees no shown plan and keeps none. An ended helper's update with no turn
 /// to name gives only a warning.
 pub(super) fn helper_update(
     shared: &Shared,
@@ -124,7 +126,7 @@ pub(super) fn helper_update(
         let root = state.sessions.get(routed.root.as_str());
         let origin = root.map_or(Origin::Idle, |root| root.origin);
         let Some(origin) = update_origin(origin, routed.end) else {
-            let error = STOPPED_UPDATE.to_owned();
+            let error = ENDED_UPDATE.to_owned();
             events.push(map::invalid(Some(helper.clone()), Some(routed.name), error));
             return;
         };
@@ -136,19 +138,16 @@ pub(super) fn helper_update(
     map::helpers::helper_events(helper, routed.final_answer, &routed.failure, events);
 }
 
-/// Whether `request` comes from an announced helper that was stopped.
-pub(super) fn stopped(state: &State, request: &Request) -> bool {
+/// Whether `request` comes from an announced helper that has ended.
+pub(super) fn ended(state: &State, request: &Request) -> bool {
     let session = match request {
         Request::Permission(request) => &request.session,
         Request::Elicitation(request) => &request.session,
     };
-    matches!(
-        state.helpers.end_of(session.as_str()),
-        Some(HelperEnd::Stopped(_))
-    )
+    state.helpers.end_of(session.as_str()).is_some()
 }
 
-/// Answers a stopped helper's request here: a permission request `cancelled`, an elicitation
+/// Answers an ended helper's request here: a permission request `cancelled`, an elicitation
 /// `cancel`. Gives the warning the host gets instead of the request.
 pub(super) fn refuse(request: Request, responder: Responder<Value>) -> AcpEvent {
     let (session, method, answer) = match request {
@@ -167,7 +166,7 @@ pub(super) fn refuse(request: Request, responder: Responder<Value>) -> AcpEvent 
     match responder.respond(answer) {
         Ok(()) | Err(_) => {}
     }
-    map::invalid(Some(session), Some(method), STOPPED_REQUEST.to_owned())
+    map::invalid(Some(session), Some(method), ENDED_REQUEST.to_owned())
 }
 
 /// A `subagent_spawned` or `subagent_state_update` (`name`) on `session`, read from the raw
@@ -269,15 +268,10 @@ pub(super) fn subagent(
                 Ok(ended) => ended,
                 Err(error) => return events.push(warn(&error)),
             };
-            let end = match ended {
-                HelperState::Completed => HelperEnd::Completed,
-                HelperState::Failed | HelperState::Cancelled | HelperState::Disconnected => {
-                    HelperEnd::Stopped(match origin {
-                        Origin::Turn(turn) | Origin::Late(turn) => Some(turn),
-                        Origin::Replay | Origin::Idle => None,
-                    })
-                }
-            };
+            let end = HelperEnd(match origin {
+                Origin::Turn(turn) | Origin::Late(turn) => Some(turn),
+                Origin::Replay | Origin::Idle => None,
+            });
             state.helpers.end(helper.as_str(), end);
             events.push(AcpEvent::HelperEnded {
                 session: root,

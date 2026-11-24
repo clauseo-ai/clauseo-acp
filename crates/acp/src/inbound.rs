@@ -109,7 +109,7 @@ impl Inbound {
     /// `tool_call_update` but showed no status becomes [`AcpEvent::UpdateSkipped`]. Another
     /// kind gives nothing (the reader logged it). Only what the line itself claimed passes on:
     /// its own session (its root, for an announced helper's), tool call and status. For a
-    /// helper stopped outside a turn, whose updates are dropped, it gives only a warning.
+    /// helper that ended outside a turn, whose updates are dropped, it gives only a warning.
     async fn skipped_update(&mut self, params: &Value) {
         let text = |key| params.get(key).and_then(Value::as_str);
         let tool_call_update = text("kind").map(|kind| kind == crate::line::TOOL_CALL_UPDATE);
@@ -269,7 +269,7 @@ impl Inbound {
         };
         let event = {
             let mut state = self.shared.state();
-            if helpers::stopped(&state, &request) {
+            if helpers::ended(&state, &request) {
                 helpers::refuse(request, responder)
             } else {
                 file(&mut state, request, responder)

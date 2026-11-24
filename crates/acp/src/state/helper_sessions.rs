@@ -6,11 +6,11 @@
 //! Only a session this connection started is a root, a helper is announced once, and a root
 //! takes at most [`MAX_PER_ROOT`] announcements between two starts, so the agent cannot grow
 //! the map with sessions nobody forgets, nor move a helper's requests to another root's cancel.
-//! An entry stays after the helper ends, so its late frames still find the root. It is forgotten with its root's entry in
-//! `State::sessions`: when the root is started again (`session/new`, `session/load`,
-//! `session/resume`; a load's replay announces its helpers again) or dropped (a failed load or
-//! resume), and with the connection. A session started under an id once announced as a helper
-//! stops being one.
+//! An entry stays after the helper ends, so its late frames still find the root. It is
+//! forgotten with its root's entry in `State::sessions`: when the root is started again
+//! (`session/new`, `session/load`, `session/resume`; a load's replay announces its helpers
+//! again) or dropped (a failed load or resume), and with the connection. A session started
+//! under an id once announced as a helper stops being one.
 
 use std::collections::BTreeMap;
 
@@ -32,16 +32,12 @@ struct Helper {
     end: Option<End>,
 }
 
-/// How an announced helper ended (its `subagent_state_update`).
+/// That an announced helper ended (its `subagent_state_update`, whatever the state), so nothing
+/// it sends afterwards belongs to the root's current turn. Holds the root's turn when the end
+/// came (its origin was `Turn` or `Late` of it), `None` when the root had no turn (`Idle`,
+/// `Replay`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum End {
-    /// `completed`: what it sends afterwards (none was recorded) keeps the root's origin.
-    Completed,
-    /// `cancelled`, `failed` or `disconnected`: it was stopped, so nothing it sends afterwards
-    /// belongs to the root's current turn. Holds the root's turn when the end came (its origin
-    /// was `Turn` or `Late` of it), `None` when the root had no turn (`Idle`, `Replay`).
-    Stopped(Option<TurnId>),
-}
+pub(crate) struct End(pub(crate) Option<TurnId>);
 
 impl HelperSessions {
     /// The root of helper session `id`, when `id` was announced.
@@ -49,7 +45,7 @@ impl HelperSessions {
         self.0.get(id).map(|helper| &helper.root)
     }
 
-    /// How helper session `id` ended; `None` while it runs, or when `id` was not announced.
+    /// Helper session `id`'s end; `None` while it runs, or when `id` was not announced.
     pub(crate) fn end_of(&self, id: &str) -> Option<End> {
         self.0.get(id).and_then(|helper| helper.end)
     }
