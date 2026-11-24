@@ -101,6 +101,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   };
   /** Choose folder…: an existing folder, its display for the form, or null when the lawyer cancelled. */
   const pickExisting = async () => {
+    // stage E: matters.pickFolder(existingStart()) once its binding takes a start (new-matter-answer.ts)
     const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return null;
     setExisting(picked);

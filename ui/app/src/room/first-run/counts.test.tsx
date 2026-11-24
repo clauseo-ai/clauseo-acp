@@ -78,8 +78,8 @@ test("counts: a new matter is the first act too, with the switch left on", async
     picked: { folder: "folder-ref", display: "Documents/Mehta" },
   });
   await press("Start a new matter");
-  await typeInto(byId<HTMLInputElement>("matter-name") as HTMLInputElement, "Mehta family trust");
   await press(byId("matter-existing"));
+  await typeInto(byId<HTMLInputElement>("matter-name") as HTMLInputElement, "Mehta family trust");
   // choosing the folder is no act yet: Create matter is
   expect(sent(t, "first_act")).toEqual([]);
   await press(byId("create-matter"));
@@ -159,4 +159,26 @@ test("D-003: What's sent opens Settings at Privacy, where the counts are said, n
   const t = await mountFirstRun({ matters: [], openSettings: true });
   await press("What's sent");
   expect(t.only("open_settings")).toEqual([{ call: "open_settings", section: "privacy" }]);
+});
+
+test("the first screen's New matter asks New folder or Existing folder first, as the rail's does", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    picked: { folder: "folder-ref", display: "Documents/Mehta" },
+  });
+  await press("Start a new matter");
+  // the question alone: no name field yet, and no offer of a new folder beside a picked one
+  expect(byId("matter-name")).toBeNull();
+  expect(byId("matter-made")).not.toBeNull();
+  await press(byId("matter-existing"));
+  expect(byId<HTMLInputElement>("matter-name")?.value).toBe("Mehta");
+  expect(document.body.textContent).not.toContain("Use a new folder");
+  expect(document.body.textContent).toContain(
+    "The folder stays where it is. Nothing is moved or copied.",
+  );
+  // Back goes to the question, nothing sent
+  await press("Back");
+  expect(byId("matter-name")).toBeNull();
+  expect(byId("matter-existing")).not.toBeNull();
+  expect(sent(t, "create_matter")).toEqual([]);
 });

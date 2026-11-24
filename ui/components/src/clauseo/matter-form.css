@@ -159,7 +159,7 @@
     text-align: start;
     cursor: default;
   }
-  .matter-choice-card:disabled {
+  .matter-choice-card[aria-disabled="true"] {
     opacity: 0.6;
   }
   .matter-choice-icon {

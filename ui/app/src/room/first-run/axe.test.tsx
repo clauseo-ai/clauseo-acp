@@ -27,8 +27,12 @@ test("axe: the first screen has one level-one heading and no violation, download
   ]);
   expect(await violations()).toEqual([]);
   await press(byId("start-new-matter"));
-  expect(byId("matter-name")).not.toBeNull();
+  // New matter's question, then the new folder's form
+  expect(byId("matter-made")).not.toBeNull();
   expect(document.querySelectorAll("h1")).toHaveLength(1);
+  expect(await violations()).toEqual([]);
+  await press(byId("matter-made"));
+  expect(byId("matter-name")).not.toBeNull();
   expect(await violations()).toEqual([]);
 });
 
