@@ -115,8 +115,8 @@ test("an unknown cause reads as none: today's line, and the words come back", as
   expect(line()).toBe(PLAIN);
 });
 
-test("#1314's not_sent status is read as ended too: the words come back, and it isn't shown as a question", async () => {
-  await endsWith("not_sent", "sent_now");
+test("sent_now: the removed message isn't shown as a question, its words are in the box", async () => {
+  await endsWith("removed", "sent_now");
   expect(field().value).toBe(LATER);
   expect(line()).toBe(SENT_NOW);
   const shown = [...h!.host.querySelectorAll("[data-entry-id]")].map((n) =>
