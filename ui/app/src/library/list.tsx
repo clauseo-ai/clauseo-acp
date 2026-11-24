@@ -1,7 +1,8 @@
 // A part's list: Skills as two groups (built in, then added); Connectors as Clauseo Case Law's
 // card, then the built-in connectors, then the lawyer's own (MCP servers). Each row is an item's
 // tile, name, line and where it is on, or the word for what stands in its way; pressing it shows
-// its detail beside the list. Read-only (L1): no switch yet.
+// its detail beside the list, and its switch for the head's lens (L2, switches.tsx), with the
+// firm's word when the firm holds it.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
@@ -12,6 +13,7 @@ import type { AddonView } from "./addons.ts";
 import { CaseLawCard, type CaseLawActs } from "./case-law.tsx";
 import { ItemTile } from "./glyphs.tsx";
 import { inPart, nameOf, rowLine, scopeTag, troubleTag, type Part } from "./model.ts";
+import { RowSwitch, type SwitchActs } from "./switches.tsx";
 
 export type ListProps = {
   part: Part;
@@ -20,6 +22,7 @@ export type ListProps = {
   selected: string | null;
   onSelect: (id: string) => void;
   caseLaw: CaseLawActs;
+  acts: SwitchActs;
 };
 
 function Row({ a, p }: { a: AddonView; p: ListProps }) {
@@ -50,8 +53,14 @@ function Row({ a, p }: { a: AddonView; p: ListProps }) {
           data-testid="library-row-tag"
         >
           {trouble ?? scopeTag(lang, a, p.names)}
+          {trouble === null && a.locked && (
+            <span className="lib-row-firm" data-testid="library-row-firm">
+              {lb(lang, "Set by your firm")}
+            </span>
+          )}
         </span>
       </button>
+      <RowSwitch a={a} acts={p.acts} />
     </li>
   );
 }
@@ -129,6 +138,7 @@ export function PartList(p: ListProps) {
           names={p.names}
           selected={p.selected === caseLaw.id}
           onSelect={() => p.onSelect(caseLaw.id)}
+          switches={p.acts}
         />
       )}
       {builtIn.length > 0 && (

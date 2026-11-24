@@ -2,14 +2,13 @@
 // built-in's are the app's own words), where it came from, where it is on, and what stands in its
 // way.
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { listOf } from "@clauseo/components/lib/words-core.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb, type LibraryKey } from "@clauseo/components/lib/words-library.ts";
 import { sk } from "@clauseo/components/lib/words-skills.ts";
 import { CASE_LAW } from "../store/connectors.ts";
-import type { MatterId } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "./addons.ts";
 import type { CaseLawFacts } from "./addons-source.ts";
+import { scopeSummary } from "./scope-model.ts";
 
 export type Part = "skills" | "connectors";
 
@@ -120,14 +119,9 @@ export function rowLine(lang: Lang, a: AddonView): string {
   return line === "" ? fromLine(lang, a) : line;
 }
 
-/** Where it is on, as the row's short tag says it: "Every matter", "Only Sharma v. State of Delhi",
- * or turned off. Scope "matter" names its matters when the host lists them (stage D's `switched`),
- * and says nothing otherwise. */
-export function scopeTag(lang: Lang, a: AddonView, names: ReadonlyMap<MatterId, string>): string {
-  if (a.scope === "all") return a.on ? lb(lang, "Every matter") : lb(lang, "Turned off");
-  const on = (a.switched ?? []).map((id) => names.get(id)).filter((n) => n !== undefined);
-  return on.length === 0 ? "" : lb(lang, "Only {matters}", { matters: listOf(lang, on) });
-}
+/** Where it is on, as the row's short tag says it (scope-model.ts): "Every matter", "Every matter
+ * but 1", "Only Sharma v. State of Delhi", "Only 2 matters", or turned off. */
+export const scopeTag = scopeSummary;
 
 /** The row's word in place of where it is on, when something is in the way; null when nothing is.
  * Case Law's statuses show on its own card. */

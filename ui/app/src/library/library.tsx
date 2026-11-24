@@ -1,8 +1,10 @@
-// Skills and connectors, the rail's place in the room's centre (24 Nov round, library L1,
-// read-only): the two parts as tabs, the part's list, and the panel beside it, which explains the
-// part until an item is picked and then shows that item. The list comes through addons-source.ts
-// alone, read again each time the place opens. Switches, scope, adding and removing come later (L2
-// to L4); Clauseo Case Law's Add opens today's flow, Settings at Connectors.
+// Skills and connectors, the rail's place in the room's centre (24 Nov round, library L1 and L2):
+// the two parts as tabs, the lens whose switches the rows show (the matter open last, or every
+// matter), the part's list, and the panel beside it, which explains the part until an item is
+// picked and then shows that item. The list comes through addons-source.ts alone, read again each
+// time the place opens; the changes go through addon-acts.ts, and a refusal says one line above the
+// list. Adding comes later (L3, L4); Clauseo Case Law's Add opens today's flow, Settings at
+// Connectors.
 import "./library.css";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
@@ -12,12 +14,15 @@ import { quietly } from "../room/open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { useKeychain } from "../room/first-run/keychain-state.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
+import { refusalLine, useAddonActs } from "./addon-acts.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
 import { useAssistant } from "./assistant.ts";
 import type { CaseLawActs } from "./case-law.tsx";
 import { Explainer, ItemDetail } from "./detail.tsx";
 import { PartList } from "./list.tsx";
-import { inPart, type Part } from "./model.ts";
+import { inPart, nameOf, type Part } from "./model.ts";
+import type { Lens } from "./scope-model.ts";
+import { LensSwitch, RemoveConfirm, type SwitchActs } from "./switches.tsx";
 import type { LibraryStart } from "./open-library.ts";
 
 export type { LibraryStart } from "./open-library.ts";
@@ -30,6 +35,7 @@ export function Library({
   names,
   plan,
   start,
+  here = null,
 }: {
   transport: HostTransport;
   source: AddonsSource;
@@ -40,11 +46,25 @@ export function Library({
   plan: AgentKind | undefined;
   /** Where the place opens: a part, and an item picked (the home card's "More about it"). */
   start?: LibraryStart | undefined;
+  /** The matter open last: the lens's first choice; null with none open. */
+  here?: MatterId | null;
 }) {
   const { lang } = useDisplay();
   const [part, setPart] = useState<Part>(start?.part ?? "skills");
   const [selected, setSelected] = useState<string | null>(start?.selected ?? null);
-  const { items, caseLaw: facts } = useAddons(source);
+  const { items: read, caseLaw: facts } = useAddons(source);
+  const changes = useAddonActs(transport, read);
+  const items = changes.items;
+  const known = here !== null && names.has(here) ? here : null;
+  const [lens, setLens] = useState<Lens>(known === null ? "all" : { matter: known });
+  const [removing, setRemoving] = useState<string | null>(null);
+  const acts: SwitchActs = {
+    lens,
+    names,
+    first: known ?? names.keys().next().value ?? null,
+    send: changes.send,
+  };
+  const removed = items?.find((a) => a.id === removing && a.source === "added") ?? null;
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
   const keychain = useKeychain(transport);
@@ -77,18 +97,26 @@ export function Library({
         }}
         className="lib-tabs"
       >
-        <TabsList
-          label={lb(lang, "Skills and connectors")}
-          tabs={[
-            { value: "skills", label: lb(lang, "Skills") },
-            { value: "connectors", label: lb(lang, "Connectors") },
-          ]}
-        />
+        <div className="lib-head">
+          <TabsList
+            label={lb(lang, "Skills and connectors")}
+            tabs={[
+              { value: "skills", label: lb(lang, "Skills") },
+              { value: "connectors", label: lb(lang, "Connectors") },
+            ]}
+          />
+          <LensSwitch here={known} names={names} lens={lens} onLens={setLens} />
+        </div>
         {PARTS.map((p) => (
           <TabsPanel key={p} value={p} className="lib-split">
             {p === part && (
               <>
                 <div className="lib-list">
+                  {changes.refusal !== null && (
+                    <p className="lib-refusal" role="alert" data-testid="library-refusal">
+                      {refusalLine(lang, changes.refusal.code, nameOf(lang, changes.refusal.a))}
+                    </p>
+                  )}
                   <PartList
                     part={part}
                     items={items}
@@ -96,13 +124,21 @@ export function Library({
                     selected={picked?.id ?? null}
                     onSelect={(id) => setSelected(selected === id ? null : id)}
                     caseLaw={caseLaw}
+                    acts={acts}
                   />
                 </div>
                 <aside className="lib-side" data-testid="library-side">
                   {picked === null ? (
-                    <Explainer part={part} who={assistant.who} />
+                    <Explainer part={part} who={assistant.who} lens={lens} names={names} />
                   ) : (
-                    <ItemDetail a={picked} names={names} assistant={assistant} caseLaw={caseLaw} />
+                    <ItemDetail
+                      a={picked}
+                      names={names}
+                      assistant={assistant}
+                      caseLaw={caseLaw}
+                      acts={acts}
+                      onRemove={() => setRemoving(picked.id)}
+                    />
                   )}
                 </aside>
               </>
@@ -110,6 +146,16 @@ export function Library({
           </TabsPanel>
         ))}
       </Tabs>
+      {removed !== null && (
+        <RemoveConfirm
+          a={removed}
+          onClose={() => setRemoving(null)}
+          onRemove={() => {
+            setRemoving(null);
+            changes.send(removed, [{ remove_addon: { kind: removed.kind, id: removed.id } }]);
+          }}
+        />
+      )}
     </div>
   );
 }

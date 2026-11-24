@@ -256,8 +256,13 @@ test("Skills lists the built-ins, then the added skills, each with where it is o
   ]);
   const heads = [...h!.host.querySelectorAll(".lib-group-head")].map((e) => e.textContent);
   expect(heads).toEqual(["Comes with Clauseo", "Added by you"]);
-  // nothing to switch, add or remove yet (L2 to L4)
-  expect(h!.one("library")?.querySelector('[role="switch"]')).toBeNull();
+  // L2: an added skill has a switch, a built-in skill none (library-switches.test.tsx)
+  expect(
+    h!.one("library")?.querySelector('[data-id="notice-drafting"] + [role="switch"]'),
+  ).not.toBeNull();
+  expect(
+    h!.one("library")?.querySelector('[data-id="legal-drafting"] + [role="switch"]'),
+  ).toBeNull();
 });
 
 test("with no skill added, Added by you says so", async () => {

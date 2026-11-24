@@ -1,7 +1,7 @@
 // The panel beside the list. With nothing picked, what this part is, for a lawyer who has never met
-// the word; with an item picked, everything about it, read-only (L1): where it came from, its line,
-// what stands in its way, its notes, how Clauseo reaches one of the lawyer's own connectors, and
-// where the assistant uses it.
+// the word, and what the switches do; with an item picked, everything about it: where it came from,
+// its line, what stands in its way, its notes, how Clauseo reaches one of the lawyer's own
+// connectors, where the assistant uses it (L2: the choice and the tick boxes), and Remove.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
@@ -15,8 +15,44 @@ import { caseLawShown } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import type { Part } from "./model.ts";
 import { descriptionOf, fromLine, nameOf, scopeTag, troubleLine } from "./model.ts";
+import { builtInSkill, type Lens } from "./scope-model.ts";
+import { DetailFoot, WhereBlock, type SwitchActs } from "./switches.tsx";
 
-export function Explainer({ part, who }: { part: Part; who: string }) {
+/** What the switches do, by the lens: one matter's, or every matter's. */
+function SwitchesNote({ lens, names }: { lens: Lens; names: ReadonlyMap<MatterId, string> }) {
+  const { lang } = useDisplay();
+  const matter = lens === "all" ? undefined : names.get(lens.matter);
+  if (lens === "all" && names.size === 0) return null;
+  return (
+    <>
+      <h3 className="lib-explain-head">{lb(lang, "Every matter, or some")}</h3>
+      <p data-testid="library-switches-note">
+        {matter === undefined
+          ? lb(
+              lang,
+              "The switch on each row turns it on or off in every matter. Choose a matter above to change only that matter.",
+            )
+          : lb(
+              lang,
+              "The switch on each row is for {matter}, the matter you had open. Choose Every matter above to change what new matters start with.",
+              { matter },
+            )}
+      </p>
+    </>
+  );
+}
+
+export function Explainer({
+  part,
+  who,
+  lens,
+  names,
+}: {
+  part: Part;
+  who: string;
+  lens: Lens;
+  names: ReadonlyMap<MatterId, string>;
+}) {
   const { lang } = useDisplay();
   if (part === "skills")
     return (
@@ -43,6 +79,7 @@ export function Explainer({ part, who }: { part: Part; who: string }) {
             "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.",
           )}
         </p>
+        <SwitchesNote lens={lens} names={names} />
       </div>
     );
   return (
@@ -68,6 +105,7 @@ export function Explainer({ part, who }: { part: Part; who: string }) {
           "It runs with the same access you have: your files, your programs and the internet. Add only connectors you trust.",
         )}
       </p>
+      <SwitchesNote lens={lens} names={names} />
     </div>
   );
 }
@@ -110,11 +148,15 @@ export function ItemDetail({
   names,
   assistant,
   caseLaw,
+  acts,
+  onRemove,
 }: {
   a: AddonView;
   names: ReadonlyMap<MatterId, string>;
   assistant: Assistant;
   caseLaw: CaseLawActs;
+  acts: SwitchActs;
+  onRemove: () => void;
 }) {
   const { lang } = useDisplay();
   const isCaseLaw = a.id === CASE_LAW && a.source === "built_in";
@@ -137,7 +179,10 @@ export function ItemDetail({
   const description = descriptionOf(lang, a);
   const where = scopeTag(lang, a, names);
   const showsWhere =
-    where !== "" && a.status !== "invalid" && a.status !== "needs_setup" && !isCaseLaw;
+    where !== "" &&
+    a.status !== "invalid" &&
+    a.status !== "needs_setup" &&
+    (!isCaseLaw || shown === "added");
   return (
     <div className="lib-detail" data-testid="library-detail">
       <header className="lib-detail-head">
@@ -178,7 +223,8 @@ export function ItemDetail({
       )}
       {isCaseLaw && <CaseLawBlocks a={a} acts={caseLaw} who={assistant.who} />}
       {a.kind === "tool" && a.source === "added" && <ToolFacts a={a} />}
-      {showsWhere && (
+      {showsWhere && !builtInSkill(a) && <WhereBlock a={a} who={assistant.who} acts={acts} />}
+      {showsWhere && builtInSkill(a) && (
         <section className="lib-detail-block">
           <h4 className="lib-detail-label">
             {lb(lang, "Where {who} uses it", { who: assistant.who })}
@@ -188,6 +234,7 @@ export function ItemDetail({
           </p>
         </section>
       )}
+      {(!isCaseLaw || shown === "added") && <DetailFoot a={a} onRemove={onRemove} />}
     </div>
   );
 }

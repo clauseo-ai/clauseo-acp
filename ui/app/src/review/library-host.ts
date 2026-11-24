@@ -1,4 +1,4 @@
-// Skills and connectors for the copy review and the shots (library L1): the real room over a
+// Skills and connectors for the copy review and the shots (library L1, L2): the real room over a
 // scripted host with four matters, the first open with several papers, Clauseo Case Law in the
 // state asked for on the connectors' feed, and the place's list given whole by a fixed source
 // (library/addons-source.ts's provideAddons), in stage D's shapes. The list is the approved
@@ -106,9 +106,10 @@ const tool = (p: Patch, source: AddonView["source"] = "added"): AddonView => ({
   ...p,
 });
 
-/** The list, Case Law in `caseLaw`'s status; `added` false for a lawyer who has added nothing yet.
- */
-export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
+/** The list, Case Law in `caseLaw`'s status; `added` false for a lawyer who has added nothing yet;
+ * `locked` for a firm that holds Notice drafting (scope matter) and PDF (scope all). */
+export function libraryItems(caseLaw: AddonStatus, added = true, locked = false): AddonView[] {
+  const firm = locked ? { locked: true, can_remove: false } : {};
   const own = [
     skill({
       id: "notice-drafting",
@@ -119,6 +120,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       scope: { matter: SHARMA! },
       switched: [SHARMA!],
       has_scripts: false,
+      ...firm,
     }),
     skill({
       id: "pdf",
@@ -127,6 +129,8 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       from: { kind: "skills_sh", text: "anthropics/skills/pdf" },
       icon: avatar("anthropics", 18),
       has_scripts: true,
+      switched: [MEHTA!],
+      ...firm,
     }),
     skill({
       id: "cheque-bounce",
@@ -259,6 +263,10 @@ export type LibraryState = {
   both?: boolean;
   /** The host lists no price (no live price list). */
   noPrice?: boolean;
+  /** L2: the firm holds two of the skills. */
+  locked?: boolean;
+  /** L2: the host refuses every change with this code. */
+  refuse?: string;
 };
 
 /** The room over the library's host, its list given before the room mounts. */
@@ -275,6 +283,13 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
     },
     ...(state.both === true ? { setup: { first: () => BOTH } } : {}),
     openSettings: () => {},
+    ...(state.refuse === undefined
+      ? {}
+      : {
+          dispatch: () => {
+            throw { code: state.refuse, message: "refused", retryable: false };
+          },
+        }),
   });
   const status: AddonStatus =
     caseLaw === "out"
@@ -286,7 +301,7 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
           : caseLaw;
   provideAddons(
     transport,
-    fixedAddons(libraryItems(status, state.added ?? true), {
+    fixedAddons(libraryItems(status, state.added ?? true, state.locked === true), {
       ...caseLawFacts(connectors, true),
       ...(state.noPrice === true ? { pack: null } : {}),
     }),

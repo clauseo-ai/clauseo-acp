@@ -37,11 +37,14 @@ export function useLibraryPlace({
   transport,
   names,
   plan,
+  here,
   onShow,
 }: {
   transport: HostTransport;
   names: ReadonlyMap<MatterId, string>;
   plan: AgentKind | undefined;
+  /** The matter open last, for the lens's first choice; null with none (or Scratch matter). */
+  here: MatterId | null;
   /** Heard each time it opens: a folded rail folds. */
   onShow: () => void;
 }): LibraryPlace {
@@ -78,6 +81,7 @@ export function useLibraryPlace({
           names={names}
           plan={plan}
           start={start}
+          here={here}
         />
       ) : null,
   };

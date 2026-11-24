@@ -363,3 +363,78 @@
     max-height: none;
   }
 }
+
+/* L2: the head's lens beside the tabs, the rows' switches, the firm's word, a refusal's line */
+.lib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3) var(--s5);
+  flex-wrap: wrap;
+}
+.lib-lens {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.lib-lens [role="group"] button {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-row-switch {
+  flex: none;
+}
+.lib-row-firm {
+  @apply text-small text-quiet;
+  display: block;
+}
+.lib-refusal {
+  @apply text-ui text-primary;
+  margin-bottom: var(--s3);
+  padding: var(--s2-5) var(--s3);
+  border-radius: var(--r-tile);
+  background: var(--neutral-tint);
+  box-shadow: inset var(--s0-5) 0 0 var(--yellow);
+}
+
+/* L2: "Where it is used": the two choices, one tick box per matter, and the detail's foot */
+.lib-choices {
+  display: grid;
+  gap: var(--s3);
+}
+.lib-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2-5);
+  cursor: default;
+}
+.lib-choice > span {
+  display: grid;
+}
+.lib-choice-name {
+  @apply text-ui text-primary;
+}
+.lib-choice-note {
+  @apply text-small text-muted;
+}
+.lib-matters {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s1) 0 0 calc(var(--size-check) + var(--s2-5));
+}
+.lib-matter {
+  @apply text-ui text-primary;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.lib-detail-foot {
+  display: grid;
+  gap: var(--s2);
+  padding-top: var(--s4);
+  border-top: var(--hairline) solid var(--faint);
+}
