@@ -213,10 +213,12 @@ pub enum HostCommand {
         /// missing field. A mode this version does not know is refused when the command decodes.
         #[serde(default, skip_serializing_if = "Delivery::is_queue")]
         delivery: DeliveryRequest,
-        /// Model and effort for this prompt, set on the agent's session just before the prompt
-        /// goes out (one the session does not offer is dropped), and before its session starts
-        /// when the thread has none yet. A steer that joins the running turn ignores it.
-        /// Missing sets none.
+        /// Model and effort for this prompt, set on the agent's session before its turn starts
+        /// (the effort checked against the model's answer), and before its session starts when
+        /// the thread has none yet. One the session does not offer, or the agent refuses, is not
+        /// used: the turn runs with what the session holds, and the thread gets one notice
+        /// (`NoticeKind::PickNotUsed`). A steer cannot change the running answer's model: its
+        /// config is ignored. Missing sets none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         config: Option<ConfigPicks>,
     },

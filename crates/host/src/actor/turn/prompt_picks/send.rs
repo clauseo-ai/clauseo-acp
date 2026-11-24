@@ -1,0 +1,292 @@
+//! Setting a turn's own picks at step 4, before its checkpoint and `TurnStarted` (module doc of
+//! `prompt_picks.rs`).
+//!
+//! - The model pick goes first, when the thread's options offer it and do not hold it. The
+//!   effort pick is then checked against the options of the model's answer (else the thread's,
+//!   when no model was set): sent when that answer offers it and does not hold it already. A
+//!   Claude model switch gives the new model its own default effort (claude-agent-acp 0.110.1,
+//!   `effortForModelSwitch`, `session-effort.js:152-169`), so an effort equal to the old one is
+//!   still sent, and one only the new model offers is not dropped.
+//! - A model or effort pick the options do not offer, one the agent refuses, and any still
+//!   unsent when [`PICKS_WAIT`] runs out, could not be used: the turn's `TurnStarted` is followed
+//!   by one `NoticeKind::PickNotUsed`. A pick of an option the session does not report at all is
+//!   not known to be a model or effort one, and goes without a word, as before.
+//! - The answer always comes back to the actor ([`on_picked`]), whatever happened, and the
+//!   checkpoint then runs: a cancel or an agent's end meanwhile is handled there as for any
+//!   checkpointing turn.
+
+use std::pin::pin;
+use std::sync::Arc;
+use std::time::Duration;
+
+use clauseo_protocol::{
+    AgentChoiceId, AgentSessionId, ConfigCategory, ConfigOption, ConfigOptionsReplaced,
+    ConfigValue, NamedChoice, Notice, NoticeKind, NoticeLevel, ThreadId, TurnId,
+};
+use futures::future::{Either, select as race};
+
+use super::super::super::Actor;
+use super::super::agents::Stage;
+use super::super::out::Out;
+use super::super::picks::Pick;
+use super::super::{AgentReply, Then, TurnPhase, current, state, steps};
+use super::{Ran, select};
+use crate::clock::Clock;
+use crate::log_file::{Cause, LIFECYCLE};
+
+/// The longest the picks may hold a turn's start: past it, those unsent could not be used.
+const PICKS_WAIT: Duration = Duration::from_secs(20);
+
+/// What setting a turn's picks did, for [`on_picked`].
+#[derive(Debug, Default)]
+pub(crate) struct Picked {
+    /// The agent's last answer, when it took a set.
+    answer: Option<Vec<ConfigOption>>,
+    /// A pick could not be used.
+    not_used: bool,
+}
+
+/// What to set: the model pick and the effort pick still to check; `not_used` when a pick is
+/// already known not to be usable.
+#[derive(Debug, Default)]
+struct Sets {
+    model: Option<Pick>,
+    effort: Option<Pick>,
+    not_used: bool,
+}
+
+/// How an effort pick stands against the options the session holds now.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Effort {
+    /// Offered and not held: it is sent.
+    Send,
+    /// Already held: nothing to send.
+    Held,
+    /// An effort option that does not offer it: it could not be used.
+    NotOffered,
+    /// No effort option of that id: not known to be an effort pick.
+    Unknown,
+}
+
+/// Step 4's picks for `turn`: sends them, off the actor, when the attached session has any to
+/// take, and answers true (the checkpoint then waits for [`on_picked`]). With none to send it
+/// notes what could not be used, for the turn's start, and answers false.
+pub(in crate::actor::turn) fn send_first(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+) -> bool {
+    let Some(picks) = state(actor, thread).and_then(|state| {
+        let picks = &state.prompt_picks;
+        let fresh = !picks.ran.contains_key(&turn);
+        picks.by_turn.get(&turn).filter(|_| fresh).cloned()
+    }) else {
+        return false;
+    };
+    let options = super::super::picks::thread_options(actor, thread);
+    let sets = sets(&options, picks.as_map());
+    let agent = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .filter(|agent| agent.stage == Stage::Attached)
+        .and_then(|agent| Some((agent.id, agent.link.client.clone(), agent.session.clone()?)));
+    let (Some((id, client, session)), true) =
+        (agent, sets.model.is_some() || sets.effort.is_some())
+    else {
+        if let Some(state) = state(actor, thread) {
+            let not_used = sets.not_used;
+            state.prompt_picks.ran.insert(
+                turn,
+                Ran {
+                    answer: None,
+                    not_used,
+                },
+            );
+        }
+        return false;
+    };
+    if let Some(state) = state(actor, thread) {
+        state.prompt_picks.ran.insert(turn, Ran::default());
+    }
+    let clock = Arc::clone(&actor.clock);
+    super::super::agents::call(actor, thread, id, async move {
+        let picked = send(&client, &session, (options, sets), clock.as_ref()).await;
+        AgentReply::PromptPicked { turn, picked }
+    });
+    true
+}
+
+/// The picks of `wanted` (a turn's) that matter at step 4: the model pick when `options` offer
+/// it and do not hold it, the effort pick to check after it.
+fn sets(
+    options: &[ConfigOption],
+    wanted: &std::collections::BTreeMap<AgentChoiceId, AgentChoiceId>,
+) -> Sets {
+    let mut sets = Sets::default();
+    for (option, value) in wanted {
+        let pick = (option.clone(), value.clone());
+        match select(options, option.as_str()) {
+            Some((ConfigCategory::Model, current, offered)) => {
+                if !offered.iter().any(|(id, _)| id == value.as_str()) {
+                    sets.not_used = true;
+                } else if current != value.as_str() {
+                    sets.model = Some(pick);
+                }
+            }
+            // An effort option, or one the session does not report yet (a model switch may
+            // bring it): checked against the model's answer.
+            Some((ConfigCategory::ThoughtLevel, ..)) | None => {
+                if options.iter().all(|known| known.id != option.as_str()) && sets.effort.is_some()
+                {
+                    continue;
+                }
+                sets.effort = Some(pick);
+            }
+            Some(_) => {}
+        }
+    }
+    sets
+}
+
+/// How the effort pick `(option, value)` stands against `options`.
+pub(super) fn effort(options: &[ConfigOption], (option, value): &Pick) -> Effort {
+    match select(options, option.as_str()) {
+        Some((ConfigCategory::ThoughtLevel, current, offered)) => {
+            if current == value.as_str() {
+                Effort::Held
+            } else if offered.iter().any(|(id, _)| id == value.as_str()) {
+                Effort::Send
+            } else {
+                Effort::NotOffered
+            }
+        }
+        Some(_) | None => Effort::Unknown,
+    }
+}
+
+/// Sets `sets` on `session`, the model first, then the effort as the model's answer stands,
+/// within [`PICKS_WAIT`] on `clock`.
+async fn send(
+    client: &clauseo_acp::AcpClient,
+    session: &AgentSessionId,
+    (options, sets): (Vec<ConfigOption>, Sets),
+    clock: &dyn Clock,
+) -> Picked {
+    let mut picked = Picked {
+        answer: None,
+        not_used: sets.not_used,
+    };
+    let work = async {
+        let mut latest = options;
+        if let Some(pick) = sets.model {
+            match set(client, session, &pick).await {
+                Some(answer) => {
+                    latest.clone_from(&answer);
+                    picked.answer = Some(answer);
+                }
+                None => picked.not_used = true,
+            }
+        }
+        let Some(pick) = sets.effort else {
+            return;
+        };
+        match effort(&latest, &pick) {
+            Effort::Send => match set(client, session, &pick).await {
+                Some(answer) => picked.answer = Some(answer),
+                None => picked.not_used = true,
+            },
+            Effort::NotOffered => picked.not_used = true,
+            Effort::Held | Effort::Unknown => {}
+        }
+    };
+    let timed_out = match race(pin!(work), clock.after(PICKS_WAIT)).await {
+        Either::Left(((), _)) => false,
+        Either::Right(((), _)) => true,
+    };
+    if timed_out {
+        tracing::warn!("a prompt's picks were not all set in time");
+        picked.not_used = true;
+    }
+    picked
+}
+
+/// One `session/set_config_option`; the agent's answer, or `None` when it refused.
+async fn set(
+    client: &clauseo_acp::AcpClient,
+    session: &AgentSessionId,
+    (option, value): &Pick,
+) -> Option<Vec<ConfigOption>> {
+    let select = ConfigValue::Select(value.clone());
+    match client
+        .set_config_option(session, option.clone(), select)
+        .await
+    {
+        Ok(options) => {
+            tracing::info!(target: LIFECYCLE, %option, %value, "a prompt's pick was set");
+            Some(options)
+        }
+        Err(error) => {
+            tracing::info!(%option, %value, error = %Cause(&error), "a prompt's pick was not set");
+            None
+        }
+    }
+}
+
+/// `turn`'s picks were set, from agent `same` or not: the agent's last answer is logged and
+/// kept for its `TurnStarted`, and its checkpoint runs.
+pub(in crate::actor::turn) fn on_picked(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    same: bool,
+    picked: Picked,
+) {
+    let answer = picked.answer.filter(|_| same);
+    if let Some(options) = &answer {
+        let options = options.clone();
+        let logged = Out::new(actor, thread, None).and_then(|mut out| {
+            out.push(actor, ConfigOptionsReplaced { options })?;
+            out.send(actor, Then::Nothing)
+        });
+        if let Err(error) = logged {
+            tracing::warn!(%thread, error = %Cause(&error), "a prompt's picks were not logged");
+        }
+    }
+    if let Some(state) = state(actor, thread) {
+        let not_used = picked.not_used;
+        state
+            .prompt_picks
+            .ran
+            .insert(turn, Ran { answer, not_used });
+    }
+    let waiting = current(actor, thread)
+        .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Checkpointing);
+    if waiting {
+        steps::checkpoint(actor, thread, turn);
+    }
+}
+
+/// The notice for a pick that could not be used, naming `model` and `effort`, what the turn
+/// runs with.
+pub(super) fn not_used(model: Option<&NamedChoice>, effort: Option<&NamedChoice>) -> Notice {
+    let model = model.map(|model| model.name.to_string());
+    let effort = effort.map(|effort| effort.name.to_string());
+    Notice {
+        level: NoticeLevel::Info,
+        text: not_used_text(model.as_deref(), effort.as_deref()),
+        kind: Some(NoticeKind::PickNotUsed { model, effort }),
+    }
+}
+
+/// The host English of [`not_used`], for a view that does not know the kind.
+pub(crate) fn not_used_text(model: Option<&str>, effort: Option<&str>) -> String {
+    let held = match (model, effort) {
+        (Some(model), Some(effort)) => format!("{model} at {effort} effort"),
+        (Some(model), None) => model.to_owned(),
+        (None, Some(effort)) => format!("{effort} effort"),
+        (None, None) => "the settings the conversation already had".to_owned(),
+    };
+    format!(
+        "Clauseo couldn't switch to the model or effort you picked for this answer, so it used \
+         {held}."
+    )
+}

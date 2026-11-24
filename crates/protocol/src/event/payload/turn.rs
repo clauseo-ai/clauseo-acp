@@ -30,9 +30,10 @@ pub struct UserMessage {
     #[serde(default, skip_serializing_if = "Delivery::is_queue")]
     pub delivery: Delivery,
     /// The prompt's own model and effort picks (`SendPrompt::config`): under each config
-    /// option's id, the value to set just before the prompt, kept in the log so a turn queued
-    /// across a restart still runs with them. The agent's plain text, as `ConfigOption` keeps
-    /// ids. Empty is written as a missing field, and a missing field reads as empty.
+    /// option's id, the value to set before the turn starts, kept in the log so a turn queued
+    /// across a restart, or put back for a sign-in, still runs with them. The agent's plain
+    /// text, as `ConfigOption` keeps ids. Empty is written as a missing field, and a missing
+    /// field reads as empty.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     #[cfg_attr(
         feature = "specta",
@@ -195,9 +196,9 @@ pub struct TurnStarted {
     pub turn: TurnId,
     /// The checkpoint taken before it; a turn never runs without one.
     pub checkpoint_before: CheckpointId,
-    /// The model it runs with, as the session's options and the prompt's picks
-    /// (`SendPrompt::config`) name it; `None` when the agent reports no model option, and in
-    /// an event logged before the field.
+    /// The model it runs with, as the session holds it once the prompt's picks
+    /// (`SendPrompt::config`) were set: the agent's answer to them, else the session's options;
+    /// `None` when the agent reports no model option, and in an event logged before the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model: Option<NamedChoice>,
     /// The effort it runs with, as `model`; `None` too for a model that takes none.

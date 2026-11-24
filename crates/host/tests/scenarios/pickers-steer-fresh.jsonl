@@ -1,0 +1,8 @@
+{"scenario":"pickers-steer-fresh","description":"A steer's picks go (prompt_picks.rs): a steer with a model pick on a thread with no session starts it with nothing set, so a set here is a mismatch","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Steered"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

@@ -183,7 +183,7 @@ pub(super) fn send_prompt(
     super::logout::refuse(actor, thread, &blocks)?;
     super::codex_cap::refuse(actor, thread, &blocks)?;
     with_stream(actor, ctx, thread, move |actor| {
-        super::prompt_picks::send_prompt(actor, thread, config, |actor| {
+        super::prompt_picks::send_prompt(actor, thread, (config, delivery), |actor| {
             route(actor, ctx, thread, blocks, delivery)
         })
     });

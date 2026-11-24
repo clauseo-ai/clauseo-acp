@@ -20,7 +20,9 @@
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
-use clauseo_protocol::{AgentId, ErrorCode, StopReason, ThreadId, TurnId};
+use std::collections::BTreeMap;
+
+use clauseo_protocol::{AgentId, CompactString, ErrorCode, StopReason, ThreadId, TurnId};
 
 use super::super::Actor;
 use super::super::input::SignInRequest;
@@ -245,10 +247,11 @@ pub(super) fn code_of(actor: &Actor, code: ErrorCode, text: &str, data: Option<&
 
 /// The turn `current` ends with `close`: what goes back to the queue for the sign-in, when it
 /// failed with `agent.auth_required`, or `stop_agents` cancelled it (`stopped` names it) and
-/// it did not end `EndTurn`.
+/// it did not end `EndTurn`. `config` is the turn's own picks, as its `UserMessage` logged them,
+/// which go back with it.
 pub(super) fn requeue_of(
     current: &mut Current,
-    stopped: Option<TurnId>,
+    (stopped, config): (Option<TurnId>, BTreeMap<CompactString, CompactString>),
     close: &TurnClose,
 ) -> Option<Requeue> {
     // An agent-started turn has no prompt to send again.
@@ -263,6 +266,7 @@ pub(super) fn requeue_of(
     (failed || stopped).then(|| Requeue {
         turn: close.turn,
         content: std::mem::take(&mut current.prompt),
+        config,
     })
 }
 

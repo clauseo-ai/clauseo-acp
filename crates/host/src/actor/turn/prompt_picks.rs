@@ -3,48 +3,67 @@
 //!
 //! - The picks belong to the turn the `SendPrompt` makes: [`send_prompt`] holds them while the
 //!   command is routed, and the step that mints the turn (`steps::accept`, `queued::log_queued`)
-//!   takes them for it ([`claim`]) and logs them on its `UserMessage` (`config`). A steer that
-//!   joins the running turn makes none, so its picks go. A turn queued across a restart gets them
-//!   back from its `UserMessage` (`queue/restore.rs`, [`restored`]).
-//! - While the thread has no session yet, they also become its `CreateThread` config, so its
-//!   first session starts with them (`picks.rs`).
-//! - At step 5, just before its prompt, the session gets each pick the thread's options offer
-//!   and do not hold, the model first ([`for_prompt`], `prompt.rs`); the agent's last answer is
-//!   logged as `ConfigOptionsReplaced` ([`on_set`]). One the agent refuses is skipped; the prompt
-//!   goes out whatever happens.
-//! - `TurnStarted` names the model and effort from the thread's options with the turn's picks
-//!   over them ([`started_with`]); after a model pick without an effort pick, the effort is the
-//!   current one when the new model takes it, else that model's default, as the agent's probe or
-//!   latest session gave its efforts (`AgentSummary::models`).
+//!   takes them for it ([`claim`]) and logs them on its `UserMessage` (`config`). A turn queued
+//!   across a restart gets them back from its `UserMessage` (`queue/restore.rs`, [`restored`]),
+//!   and so does a turn put back for the sign-in, whose new `UserMessage` logs them again
+//!   (`queue/sign_in.rs`, from [`finished`]). The turn keeps them until it ends.
+//! - A steer joins the running answer and cannot change its model: its picks go, and never
+//!   reach a starting session's `CreateThread` config either.
+//! - While the thread has no session yet, a prompt's picks also become its `CreateThread`
+//!   config, so its first session starts with them (`picks.rs`).
+//! - At step 4, once the session is attached and before the checkpoint and `TurnStarted`, the
+//!   session gets the model pick, then the effort pick checked against the model's answer
+//!   (`send.rs`); the agent's last answer is logged as `ConfigOptionsReplaced`.
+//! - `TurnStarted` names the model and effort that answer holds (else the thread's options,
+//!   when nothing was set) ([`started_with`]): what the session really runs. A pick that could
+//!   not be used (not offered, refused, or past the wait) gets the lawyer one notice in the turn,
+//!   `NoticeKind::PickNotUsed`, naming what the answer runs with.
 
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
     AgentChoiceId, AgentModels, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind,
-    ConfigOptionsReplaced, ConfigPicks, NamedChoice, ThreadId, TurnId,
+    ConfigPicks, DeliveryRequest, NamedChoice, Notice, ThreadId, TurnId,
 };
 
 use super::super::Actor;
-use super::out::Out;
-use super::picks::Pick;
-use super::{Then, state};
-use crate::log_file::Cause;
+use super::state;
 
-/// A thread's prompt picks: those of the `SendPrompt` being routed, and each turn's.
+mod send;
+
+pub(super) use send::{Picked, on_picked, send_first};
+
+/// A thread's prompt picks: those of the `SendPrompt` being routed, each turn's, and what
+/// setting them did.
 #[derive(Debug, Default)]
 pub(crate) struct PromptPicks {
     next: Option<ConfigPicks>,
+    /// Each turn's picks, from its `UserMessage` until it ends.
     by_turn: BTreeMap<TurnId, ConfigPicks>,
+    /// What setting a turn's picks did, until its `TurnStarted` names it.
+    ran: BTreeMap<TurnId, Ran>,
 }
 
-/// Routes a `SendPrompt` with `config` held for the turn it makes.
+/// What setting a turn's picks did (`send.rs`).
+#[derive(Debug, Default)]
+struct Ran {
+    /// The agent's last answer, when a set was taken: the options the turn runs with.
+    answer: Option<Vec<ConfigOption>>,
+    /// A pick could not be used.
+    not_used: bool,
+}
+
+/// Routes a `SendPrompt` with `config` held for the turn it makes. A steer's picks go: it
+/// joins the running answer, which keeps its model (module doc).
 pub(super) fn send_prompt<T>(
     actor: &mut Actor,
     thread: ThreadId,
-    config: Option<ConfigPicks>,
+    (config, delivery): (Option<ConfigPicks>, DeliveryRequest),
     route: impl FnOnce(&mut Actor) -> T,
 ) -> T {
-    let config = config.filter(|config| !config.is_empty());
+    let config = config
+        .filter(|config| !config.is_empty())
+        .filter(|_| delivery != DeliveryRequest::Steer);
     if let Some(config) = &config {
         before_session(actor, thread, config);
     }
@@ -124,67 +143,49 @@ pub(super) fn restored(
     }
 }
 
-/// The picks of `turn`'s prompt that `options` (the thread's now) offer and do not hold, the
-/// model first; they leave the turn.
-pub(super) fn for_prompt(
-    actor: &mut Actor,
-    thread: ThreadId,
+/// `turn` ends: its picks go, answered as a `UserMessage::config` logs them (empty for none),
+/// for a copy of it put back in the queue (`sign_in.rs`).
+pub(super) fn finished(
+    picks: &mut PromptPicks,
     turn: TurnId,
-    options: &[ConfigOption],
-) -> Vec<Pick> {
-    let Some(picks) =
-        state(actor, thread).and_then(|state| state.prompt_picks.by_turn.remove(&turn))
-    else {
-        return Vec::new();
-    };
-    let mut wanted: Vec<(u8, Pick)> = picks
-        .as_map()
-        .iter()
-        .filter_map(|(option, value)| {
-            let (category, current, offered) = select(options, option.as_str())?;
-            let rank = match category {
-                ConfigCategory::Model => 0,
-                ConfigCategory::ThoughtLevel => 1,
-                ConfigCategory::Mode | ConfigCategory::Other | ConfigCategory::Unknown => {
-                    return None;
-                }
-            };
-            (current != value.as_str() && offered.iter().any(|(id, _)| id == value.as_str()))
-                .then(|| (rank, (option.clone(), value.clone())))
+) -> BTreeMap<CompactString, CompactString> {
+    picks.ran.remove(&turn);
+    picks
+        .by_turn
+        .remove(&turn)
+        .map(|picks| {
+            picks
+                .as_map()
+                .iter()
+                .map(|(option, value)| (option.as_str().into(), value.as_str().into()))
+                .collect()
         })
-        .collect();
-    wanted.sort_by_key(|(rank, _)| *rank);
-    wanted.into_iter().map(|(_, pick)| pick).collect()
+        .unwrap_or_default()
 }
 
-/// The prompt's picks were set: the agent's last answer, `options`, is logged.
-pub(super) fn on_set(actor: &mut Actor, thread: ThreadId, options: Vec<ConfigOption>) {
-    let logged = Out::new(actor, thread, None).and_then(|mut out| {
-        out.push(actor, ConfigOptionsReplaced { options })?;
-        out.send(actor, Then::Nothing)
-    });
-    if let Err(error) = logged {
-        tracing::warn!(%thread, error = %Cause(&error), "a prompt's picks were not logged");
-    }
-}
-
-/// The model and effort `turn` runs with: the thread's options (`options`) with the turn's
-/// picks over them (module doc).
+/// The model and effort `turn` runs with, and the notice owed when a pick of its could not be
+/// used: those of the agent's last answer to its picks, else of the thread's options
+/// (`options`), the session's own (module doc).
 pub(super) fn started_with(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
-    options: &[ConfigOption],
-) -> (Option<NamedChoice>, Option<NamedChoice>) {
-    let picks = state(actor, thread)
-        .and_then(|state| state.prompt_picks.by_turn.get(&turn).cloned())
+    options: Vec<ConfigOption>,
+) -> (Option<NamedChoice>, Option<NamedChoice>, Option<Notice>) {
+    let ran = state(actor, thread)
+        .and_then(|state| state.prompt_picks.ran.remove(&turn))
         .unwrap_or_default();
+    let options = ran.answer.unwrap_or(options);
     let agent = actor
         .threads
         .get(&thread)
         .map(|entry| entry.row.agent.clone());
     let models = agent.and_then(|agent| actor.agent_options.models_of(agent.as_str()));
-    choose(options, &picks, models.as_ref())
+    let (model, effort) = choose(&options, &ConfigPicks::default(), models.as_ref());
+    let notice = ran
+        .not_used
+        .then(|| send::not_used(model.as_ref(), effort.as_ref()));
+    (model, effort, notice)
 }
 
 /// [`started_with`] over plain values.

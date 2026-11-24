@@ -29,7 +29,7 @@
 //!   it.
 //! - A `SetConfigOption` that succeeds keeps its pick in the matter's prefs for the thread's
 //!   agent kind ([`remember`]).
-//! - A prompt's own picks (`SendPrompt::config`) are set just before that prompt goes out
+//! - A prompt's own picks (`SendPrompt::config`) are set before that prompt's turn starts
 //!   (`prompt_picks.rs`).
 
 use clauseo_acp::{AcpClient, AcpEvent, AgentUpdate, SessionStart};

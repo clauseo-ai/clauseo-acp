@@ -1,0 +1,27 @@
+{"scenario":"pickers-turn-effort","description":"A prompt's effort pick is checked against the model pick's answer (prompt_picks/send.rs): after prompt One at opus/high, Two picks sonnet and max (only Sonnet offers max; the model answer resets the effort to medium), Three picks high, Four picks opus and high (equal to the old effort; the model answer resets it to medium): each effort is still set","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"One"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_config_option","as":"to-sonnet","params":{"sessionId":"sess-1","configId":"model","value":"sonnet"}}}
+{"respond":{"to":"to-sonnet","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"sonnet","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"medium","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}}
+{"note":"max: only the new model offers it","expect":{"method":"session/set_config_option","as":"to-max","params":{"sessionId":"sess-1","configId":"effort","value":"max"}}}
+{"respond":{"to":"to-max","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"sonnet","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"max","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Two"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p2","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_config_option","as":"to-high","params":{"sessionId":"sess-1","configId":"effort","value":"high"}}}
+{"respond":{"to":"to-high","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"sonnet","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p3","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Three"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p3","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p3","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_config_option","as":"to-opus","params":{"sessionId":"sess-1","configId":"model","value":"opus"}}}
+{"respond":{"to":"to-opus","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"medium","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"note":"high equals the effort before the switch, which reset it","expect":{"method":"session/set_config_option","as":"to-high-again","params":{"sessionId":"sess-1","configId":"effort","value":"high"}}}
+{"respond":{"to":"to-high-again","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p4","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Four"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p4","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p4","result":{"stopReason":"end_turn"}}}

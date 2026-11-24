@@ -421,6 +421,9 @@ mod pickers_seed;
 #[path = "host/pickers_seed_log.rs"]
 mod pickers_seed_log;
 #[cfg(test)]
+#[path = "host/pickers_turn.rs"]
+mod pickers_turn;
+#[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
 #[cfg(test)]
