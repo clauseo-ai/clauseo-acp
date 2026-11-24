@@ -43,7 +43,7 @@ const MARK: ViewEntry = {
     event: uuid(7, 10),
     level: "warning",
     text: "Clauseo Case Law is out of credit.",
-    kind: CASE_LAW_OUT_OF_CREDIT as never,
+    kind: CASE_LAW_OUT_OF_CREDIT,
     ts: 7_000,
   },
 };
