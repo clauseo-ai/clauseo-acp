@@ -126,6 +126,7 @@ fn opening(turn: TurnId) -> Vec<DomainEvent> {
             delivery: Delivery::Queue,
             config: std::collections::BTreeMap::new(),
             copy_of: None,
+            agent: None,
         }),
         DomainEvent::TurnStarted(TurnStarted {
             model: None,

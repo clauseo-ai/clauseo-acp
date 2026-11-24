@@ -12,8 +12,8 @@
 //! its escaped length at most once.
 
 use clauseo_protocol::{
-    CompactString, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, Delivery,
-    HelperEnded, HelperId, HelperOutcome, HelperStarted, INLINE_LIMIT_BYTES, MessageId,
+    AgentId, CompactString, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock,
+    Delivery, HelperEnded, HelperId, HelperOutcome, HelperStarted, INLINE_LIMIT_BYTES, MessageId,
     QueuedPromptEdited, TextKind, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch,
     ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
 };
@@ -180,7 +180,7 @@ pub(crate) fn user_message(
     message: MessageId,
     acp_message_id: Option<CompactString>,
     mut content: Vec<ContentBlock>,
-    delivery: Delivery,
+    (delivery, agent): (Delivery, Option<AgentId>),
 ) -> Built<UserMessage> {
     let mut fit = Fit::new(INLINE_LIMIT_BYTES);
     fit.blocks(&mut content);
@@ -192,6 +192,7 @@ pub(crate) fn user_message(
         delivery,
         config: std::collections::BTreeMap::new(),
         copy_of: None,
+        agent,
     })
 }
 

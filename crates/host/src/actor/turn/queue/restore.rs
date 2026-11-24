@@ -10,12 +10,13 @@
 //! queue has them. The queue comes back held, so nothing runs before the lawyer looks. Only a turn
 //! put back for the sign-in marks the queue as waiting for it, so `restart_agents` resumes that
 //! one; a steer does not, nor does an install's copy (its `copy_of` names `update`). An older log
-//! has no mark and restores in log order.
+//! has no mark and restores in log order. A message that named another agent keeps it
+//! (`UserMessage.agent`), so its turn still switches (`switch.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
-    CompactString, ContentBlock, Delivery, DomainEvent, Envelope, MessageId, SteerOutcome,
+    AgentId, CompactString, ContentBlock, Delivery, DomainEvent, Envelope, MessageId, SteerOutcome,
     SteerResolved, ThreadId, TurnId, TurnQueued, UnsentCause,
 };
 
@@ -36,6 +37,8 @@ struct Prompt {
     content: Vec<ContentBlock>,
     /// Its own model and effort picks, as its `UserMessage` logged them.
     config: Picks,
+    /// The agent its message named (`switch.rs`).
+    agent: Option<AgentId>,
     /// A steer with no `SteerResolved` yet.
     unsettled: bool,
 }
@@ -43,9 +46,12 @@ struct Prompt {
 /// A prompt's logged picks (`UserMessage::config`).
 type Picks = BTreeMap<CompactString, CompactString>;
 
+/// A restored prompt's content and the agent its message named.
+type Said = (Vec<ContentBlock>, Option<AgentId>);
+
 /// The queued turns of a log, in queue order, and the turn put back for the sign-in, if any.
 struct QueuedTurns {
-    turns: Vec<(Restored, MessageId, Vec<ContentBlock>, Picks)>,
+    turns: Vec<(Restored, MessageId, Said, Picks)>,
     sign_in: Option<TurnId>,
 }
 
@@ -69,7 +75,7 @@ pub(in super::super) fn restore(
 ) -> Result<(), Error> {
     let mut turns = Vec::new();
     let queued = queued_turns(log);
-    for (restored, message, content, config) in queued.turns {
+    for (restored, message, (content, agent), config) in queued.turns {
         let turn = match restored {
             Restored::Queued(turn) => {
                 if needs_queued(log, thread, turn) {
@@ -97,7 +103,7 @@ pub(in super::super) fn restore(
             content,
             forced: false,
             host_held: false,
-            agent: None,
+            agent,
         });
     }
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;
@@ -141,6 +147,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
                 turn: message.turn,
                 content: message.content.clone(),
                 config: message.config.clone(),
+                agent: message.agent.clone(),
                 unsettled: message.delivery == Delivery::Steer,
             };
             prompts.insert(message.message, prompt);
@@ -177,7 +184,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             done.insert(end.turn);
         }
     }
-    let mut queued: Vec<(Place, Restored, MessageId, Vec<ContentBlock>, Picks)> = prompts
+    let mut queued: Vec<(Place, Restored, MessageId, Said, Picks)> = prompts
         .into_iter()
         .filter_map(|(message, prompt)| {
             let (restored, head) = if prompt.unsettled {
@@ -192,7 +199,13 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             } else {
                 Place::Joined(prompt.at)
             };
-            Some((place, restored, message, prompt.content, prompt.config))
+            Some((
+                place,
+                restored,
+                message,
+                (prompt.content, prompt.agent),
+                prompt.config,
+            ))
         })
         .collect();
     queued.sort_by_key(|(place, ..)| *place);
