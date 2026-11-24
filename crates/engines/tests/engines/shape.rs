@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use clauseo_engines::Error;
 
 use crate::fixtures::{
-    BAD_GENERATED, BAD_SIZE, DUP_SIZE, EMPTY_APP, GOOD, MISSING_SIZE, NO_APPS, SEQ_HUGE, SEQ_ZERO,
-    UNKNOWN_FIELD, WRONG_FORMAT, ZERO_SIZE, check, refusal,
+    BAD_GENERATED, BAD_SIZE, DUP_SIZE, EMPTY_APP, EXTRA_SIZE, GOOD, MISSING_SIZE, NO_APPS,
+    SEQ_HUGE, SEQ_ZERO, UNKNOWN_FIELD, WRONG_FORMAT, ZERO_SIZE, check, refusal,
 };
 
 #[test]
@@ -41,9 +41,12 @@ fn a_seq_above_2_to_the_32_is_refused() {
 }
 
 #[test]
-fn an_unknown_os_in_sizes_is_refused() {
-    // serde refuses the row while reading it, so it is a shape error.
-    assert_eq!(refusal(&BAD_SIZE), Some(Error::Json));
+fn a_row_for_an_unknown_platform_is_skipped() {
+    // A row naming an OS this version doesn't know is skipped; the known rows must be complete.
+    assert_eq!(refusal(&BAD_SIZE), Some(Error::SizesIncomplete));
+    // A 13th row (linux riscv64) beside the 12: the list loads with the 12.
+    let list = check(&EXTRA_SIZE).unwrap();
+    assert_eq!(list.sizes().len(), 12);
 }
 
 #[test]

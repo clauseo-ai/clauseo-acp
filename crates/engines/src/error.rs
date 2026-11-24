@@ -30,7 +30,7 @@ pub enum Error {
     Generated,
     /// `apps` is empty, or an entry is empty.
     NoApps,
-    /// A `sizes` row with an unknown agent, OS or architecture, or a zero size.
+    /// A `sizes` row (of a known agent, OS and architecture) with a zero size.
     Size,
     /// Two `sizes` rows for the same (agent, os, arch).
     DuplicateSize,
