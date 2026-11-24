@@ -23,6 +23,9 @@ pub struct GetAccountResponse {
     pub account: Option<Account>,
     /// Whether the configured model provider needs an `OpenAI` sign-in.
     pub requires_openai_auth: bool,
+    /// The `ChatGPT` user ID of this account response, when the server has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 /// `Account`: which kind of sign-in the server holds, told apart by its `type` field.
@@ -34,6 +37,8 @@ pub enum Account {
     Chatgpt(ChatgptAccount),
     /// `"amazonBedrock"`: Amazon Bedrock credentials.
     AmazonBedrock(AmazonBedrockAccount),
+    /// `"gcp"`: Google Cloud Vertex AI with credentials managed outside Codex. It has no fields.
+    Gcp,
     /// A `type` this crate does not name, kept as it was sent; the other fields are dropped.
     Unknown(String),
 }
@@ -42,11 +47,12 @@ pub enum Account {
 const API_KEY: &str = "apiKey";
 const CHATGPT: &str = "chatgpt";
 const AMAZON_BEDROCK: &str = "amazonBedrock";
+const GCP: &str = "gcp";
 
 impl Account {
     /// Every `type` the vendored schema lists, in its order. The drift test decodes each one
     /// and fails if it lands in [`Self::Unknown`].
-    pub const VALUES: &'static [&'static str] = &[API_KEY, CHATGPT, AMAZON_BEDROCK];
+    pub const VALUES: &'static [&'static str] = &[API_KEY, CHATGPT, AMAZON_BEDROCK, GCP];
 
     /// The `type` as it appears on the wire.
     pub fn type_str(&self) -> &str {
@@ -54,6 +60,7 @@ impl Account {
             Self::ApiKey => API_KEY,
             Self::Chatgpt(_) => CHATGPT,
             Self::AmazonBedrock(_) => AMAZON_BEDROCK,
+            Self::Gcp => GCP,
             Self::Unknown(kind) => kind,
         }
     }
@@ -68,6 +75,9 @@ pub struct ChatgptAccount {
     pub email: Option<String>,
     /// The `ChatGPT` plan.
     pub plan_type: PlanType,
+    /// The display name of the selected `ChatGPT` workspace, when the server knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
 }
 
 /// `AmazonBedrockAccount`: the fields of an Amazon Bedrock sign-in, besides `type`.
@@ -83,7 +93,9 @@ impl Serialize for Account {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error as _;
         let fields = match self {
-            Self::ApiKey | Self::Unknown(_) => serde_json::Value::Object(serde_json::Map::new()),
+            Self::ApiKey | Self::Gcp | Self::Unknown(_) => {
+                serde_json::Value::Object(serde_json::Map::new())
+            }
             Self::Chatgpt(account) => serde_json::to_value(account).map_err(S::Error::custom)?,
             Self::AmazonBedrock(account) => {
                 serde_json::to_value(account).map_err(S::Error::custom)?
@@ -116,6 +128,7 @@ impl<'de> Deserialize<'de> for Account {
             AMAZON_BEDROCK => {
                 Self::AmazonBedrock(serde_json::from_value(fields).map_err(D::Error::custom)?)
             }
+            GCP => Self::Gcp,
             _ => Self::Unknown(kind),
         })
     }
@@ -158,6 +171,10 @@ open_enum! {
         EduPlus = "edu_plus",
         /// `"edu_pro"`.
         EduPro = "edu_pro",
+        /// `"sci"`.
+        Sci = "sci",
+        /// `"sci_plus"`.
+        SciPlus = "sci_plus",
         /// `"unknown"`: Codex itself does not know the plan. Not [`Self::Unknown`], which holds
         /// values this crate does not know.
         CodexUnknown = "unknown",

@@ -4,9 +4,9 @@
 //! # Owns
 //!
 //! - Hand-written serde types for the app-server messages the usage reader sends and receives,
-//!   named as in the app-server JSON schema at openai/codex tag `rust-v0.162.1`, the version
+//!   named as in the app-server JSON schema at openai/codex tag `rust-v0.171.0`, the version
 //!   codex-acp bundles (`types.rs`). The schema files the drift test reads are vendored in
-//!   `schema/rust-v0.162.1/` (the test reads the tag from `SCHEMA_TAG`); `schema/README.md`
+//!   `schema/rust-v0.171.0/` (the test reads the tag from `SCHEMA_TAG`); `schema/README.md`
 //!   gives their source, hashes and refresh steps.
 //! - The line format: one JSON message per line, each at most 8 MiB (`line.rs`). Written
 //!   messages carry no `"jsonrpc"` member, as the schema's `JSONRPCRequest` and

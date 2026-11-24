@@ -101,11 +101,17 @@ fn claude_signed_in_reads_the_account_and_plan() {
 #[test]
 fn codex_status_lines_are_read_by_their_signed_in_start_only() {
     assert!(codex_says_logged_in("Logged in using ChatGPT"));
+    assert!(codex_says_logged_in("Logged in using workload identity"));
+    // rust-v0.171.0's API-key line, and 0.162.1's, which the same prefix still reads.
+    assert!(codex_says_logged_in(
+        "API key configured - sk-proj-***ABCDE\r"
+    ));
     assert!(codex_says_logged_in(
         "Logged in using an API key - sk-proj-***ABCDE\r"
     ));
     for line in [
         "Not logged in",
+        "Authentication is checked when you send a request.",
         "",
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602}}",
         "Error: not logged in using ChatGPT",
@@ -161,6 +167,10 @@ fn account_read_gives_a_chatgpt_account_alone() {
         ),
         (
             r#"{"account":{"type":"amazonBedrock"},"requiresOpenaiAuth":false}"#,
+            None,
+        ),
+        (
+            r#"{"account":{"type":"gcp"},"requiresOpenaiAuth":false}"#,
             None,
         ),
         (

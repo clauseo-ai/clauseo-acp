@@ -89,15 +89,20 @@ pub(crate) fn claude_signed_in(
 }
 
 /// How Codex's `login status` begins the line that says it is signed in, on stderr: `Logged in
-/// using ChatGPT`, or `Logged in using an API key - <masked prefix>` (openai/codex
-/// `rust-v0.162.1`, `codex-rs/cli/src/login.rs`). Signed out it prints `Not logged in` and
+/// using ChatGPT`, or `Logged in using workload identity` and the like (openai/codex
+/// `rust-v0.171.0`, `codex-rs/cli/src/login.rs`). Signed out it prints `Not logged in` and
 /// exits 1.
 pub(crate) const CODEX_LOGGED_IN: &str = "Logged in using ";
+/// How the signed-in line begins for an API key in `rust-v0.171.0`, which replaced `Logged in
+/// using an API key - <masked prefix>` of 0.162.1. Codex then prints `Authentication is checked
+/// when you send a request.` on the next line, which says nothing about signed in.
+pub(crate) const CODEX_API_KEY_CONFIGURED: &str = "API key configured - ";
 
 /// Whether one output line of `codex login status` is its signed-in line. The line itself is
 /// never kept or logged: the API-key one carries a masked key prefix.
 pub(crate) fn codex_says_logged_in(line: &str) -> bool {
-    line.trim_start().starts_with(CODEX_LOGGED_IN)
+    let line = line.trim_start();
+    line.starts_with(CODEX_LOGGED_IN) || line.starts_with(CODEX_API_KEY_CONFIGURED)
 }
 
 /// Whether `codex login status` says signed in: exit 0 **and** its signed-in line
@@ -126,14 +131,14 @@ pub(crate) fn codex_detection(file_present: bool) -> SigninState {
 }
 
 /// The account behind `account/read`: a `ChatGPT` sign-in's `email` and `plan_type`. `None` for
-/// no account or another kind (an API key, Bedrock), which is not a plan login.
+/// no account or another kind (an API key, Bedrock, gcp), which is not a plan login.
 pub(crate) fn codex_identity(response: &GetAccountResponse) -> Option<Identity> {
     match response.account.as_ref()? {
         Account::Chatgpt(account) => Some(Identity {
             email: account.email.clone(),
             plan: Some(account.plan_type.as_str().to_owned()),
         }),
-        Account::ApiKey | Account::AmazonBedrock(_) | Account::Unknown(_) => None,
+        Account::ApiKey | Account::Gcp | Account::AmazonBedrock(_) | Account::Unknown(_) => None,
     }
 }
 
