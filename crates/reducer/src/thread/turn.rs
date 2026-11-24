@@ -52,6 +52,9 @@ pub(super) fn detached(
             not_yet(out, "agent_session_detached");
             return;
         }
+        // The thread's agent is being replaced at a turn's start: its `agent_switched` and the
+        // new agent's attach follow, so the status stays as it is.
+        DetachReason::Switched => return,
     };
     if state.running.is_some() {
         state.after_turn = Some(status);

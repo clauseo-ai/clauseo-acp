@@ -6,9 +6,10 @@ use std::collections::BTreeSet;
 use clauseo_protocol::{
     AgentId, AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeKind, NoticeLevel,
-    PageVia, PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
-    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
+    ElicitationResolved, Envelope, ErrorCode, HandoffSettled, HandoffStatus, LimitStopReason,
+    Notice, NoticeKind, NoticeLevel, PageVia, PageVisited, Principal, StepUndone, TextKind,
+    TextOrBlob, ToolCallStatus, TurnFailed, TurnStoppedAtLimit, ViewEntry, WebResult,
+    WebSearchRecorded,
 };
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply, view_snapshot,
@@ -23,7 +24,8 @@ use crate::helpers::{agent_text, delta, fold, round_trip};
 
 /// A thread whose entries are of every kind a thread holds: prompt, texts, agent content (an
 /// image with inline data, a resource link), tool call, permission, elicitations (pending and
-/// resolved), notice, compaction marker with a summary, step, limit stop and undo marker.
+/// resolved), notice, compaction marker with a summary, step, limit stop, undo marker and
+/// handoff.
 #[cfg(test)]
 fn every_entry_kind() -> Vec<Envelope> {
     let mut log = Log::thread(12).unwrap();
@@ -124,6 +126,12 @@ fn every_entry_kind() -> Vec<Envelope> {
         PageVia::Browser,
     );
     log.push(page).unwrap();
+    // A handover to another agent, settled, so the shape pins the handoff entry.
+    let handoff = log.fresh().unwrap();
+    log.push(crate::handoff::handoff_event(handoff, message))
+        .unwrap();
+    let status = HandoffStatus::Delivered;
+    log.push(HandoffSettled { handoff, status }).unwrap();
     log.into_events()
 }
 
@@ -243,6 +251,7 @@ fn snapshot_bytes_round_trip() {
         "agent_content",
         "agent_text",
         "elicitation",
+        "handoff",
         "limit_stop",
         "marker",
         "notice",

@@ -1,12 +1,14 @@
 //! The fold of a thread's events other than text: the header, tool calls, notices and markers
 //! here; turns, steps and the status in `thread/turn.rs`; permissions and elicitations in
 //! `thread/asks.rs`; the web records in `thread/web.rs`; the agent's wait to retry in
-//! `thread/retry.rs`; a helper's start, words and end in `thread/helpers.rs`.
+//! `thread/retry.rs`; a helper's start, words and end in `thread/helpers.rs`; the agent switch in
+//! `thread/handoff.rs`.
 //!
 //! Each field is compared as it is set, and an `Upsert` is emitted only when something changed;
 //! no old entry is cloned to compare afterwards.
 
 mod asks;
+mod handoff;
 mod helpers;
 mod queue;
 mod retry;
@@ -91,6 +93,9 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
             turn::detached(state, &event.reason, ts, out);
         }
         DomainEvent::AgentRetrying(event) => retry::retrying(state, ts, event, out),
+        DomainEvent::AgentSwitched(event) => handoff::agent_switched(state, event, out),
+        DomainEvent::ContextHandoff(event) => handoff::context_handoff(state, seq, ts, event, out),
+        DomainEvent::HandoffSettled(event) => handoff::handoff_settled(state, event, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),

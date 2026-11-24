@@ -8,7 +8,7 @@ expression: "Snapshot::of(&every)"
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000c00000000",
-      "seq": 20,
+      "seq": 22,
       "header": {
         "order": 1,
         "thread": "01900000-0000-7000-8000-000c00000000",
@@ -265,6 +265,26 @@ expression: "Snapshot::of(&every)"
               }
             },
             "ts": 18000
+          }
+        },
+        {
+          "handoff": {
+            "order": 21,
+            "handoff": "01900000-0000-7000-8000-000c0000001f",
+            "message": "01900000-0000-7000-8000-000c00000007",
+            "from": {
+              "agent": "claude-acp",
+              "model": "Opus",
+              "effort": "High"
+            },
+            "to": {
+              "agent": "codex-acp"
+            },
+            "answers_covered": 4,
+            "items_included": 9,
+            "items_left_out": 2,
+            "status": "delivered",
+            "ts": 21000
           }
         }
       ],

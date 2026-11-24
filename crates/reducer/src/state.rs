@@ -8,9 +8,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use clauseo_protocol::{
-    CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry, HelperId,
-    MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus, ViewEntry, utf16_len,
+    CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HandoffId, HeaderEntry,
+    HelperId, MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq,
+    SkippedFile, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus,
+    ViewEntry, utf16_len,
 };
 use serde::{Deserialize, Serialize};
 
@@ -267,6 +268,7 @@ pub(crate) struct Index {
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
     pub(crate) limit_stops: HashMap<TurnId, Seq>,
+    pub(crate) handoffs: HashMap<HandoffId, Seq>,
     /// The prompt of each turn that has neither started nor ended (queued, launching, or waiting
     /// for the writer), by its prompt's order. A short list (the queue holds at most ten), so a
     /// scan beats hashing on the fold's hot path, where every turn adds and removes one.
@@ -331,6 +333,9 @@ impl Index {
                 }
                 ViewEntry::LimitStop(stop) => {
                     index.limit_stops.insert(stop.turn, order);
+                }
+                ViewEntry::Handoff(handoff) => {
+                    index.handoffs.insert(handoff.handoff, order);
                 }
                 ViewEntry::Header(_)
                 | ViewEntry::AgentContent(_)
