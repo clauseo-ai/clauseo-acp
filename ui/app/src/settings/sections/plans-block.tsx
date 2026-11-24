@@ -39,6 +39,8 @@ import {
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { useOnline } from "../../transport/online.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
+import { KeychainAllow } from "../../room/first-run/keychain-pointer.tsx";
+import { pointsToKeychain, useKeychain } from "../../room/first-run/keychain-state.ts";
 import { Managed } from "./parts.tsx";
 import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
 import { PlansKey } from "./plans-key.tsx";
@@ -159,6 +161,8 @@ export function PlanBlock({
   const [, setAdding] = useState(false);
   const adding = addsOf(store).has(agent);
   const stand = standOf(setup, adding);
+  const keychain = useKeychain(transport);
+  const pointed = stand.kind === "failed" && pointsToKeychain(stand.code) ? keychain : null;
   const ready = isReady(setup?.install);
   const signedNow = stand.kind === "signed";
   useEffect(() => {
@@ -432,10 +436,15 @@ export function PlanBlock({
             line={s(
               plan === "claude" ? "Uses your Anthropic API key." : "Uses your OpenAI API key.",
             )}
-            note={errorWords(lang, stand.code)}
+            note={pointed === null ? errorWords(lang, stand.code) : pointed.line}
           >
-            {/* the key unreadable: Try again reads it again (desktop refuses the press with the code), never a sign-in */}
-            <MainAct label={fl(lang, "Try again")} onClick={signIn} testId="plans-sign-in" />
+            {/* the key unreadable: Try again reads it again (desktop refuses the press with the code), never a sign-in;
+                while the keychain row needs allowing, its Allow */}
+            {pointed === null ? (
+              <MainAct label={fl(lang, "Try again")} onClick={signIn} testId="plans-sign-in" />
+            ) : (
+              <KeychainAllow k={pointed} />
+            )}
           </PlanCard>
         );
         break;

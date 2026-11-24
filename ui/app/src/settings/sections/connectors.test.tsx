@@ -290,3 +290,29 @@ test("zero timers after any state", async () => {
   await r.play(stateOf({ status: SIGNED_IN, pay_url: "https://data.clauseo.chat/pay/1" }));
   expect(vi.getTimerCount()).toBe(0);
 });
+
+// stage E: while the window's one permissions read lists the keychain row as would_ask, signed out may be only
+// unreadable, so the card points at the keychain row's Allow; granted, today's words
+const KEYS = {
+  id: "keychain",
+  state: "would_ask",
+  folder: null,
+  settings_path: null,
+  note: null,
+} as const;
+
+test("signed out, keychain would_ask: the keychain line and Allow, which asks for it, never Sign in or the key link", async () => {
+  const ask = vi.fn(async () => ({ ...KEYS, state: "granted" as const }));
+  rig = await mountSettings({
+    state: stateOf({ status: "signed_out" }),
+    hash: "#connectors",
+    permissions: { list: async () => [KEYS], ask },
+  });
+  expect(rig.text()).toContain("Clauseo needs your Mac's permission to read its saved keys.");
+  expect(rig.text()).not.toContain("Signed out. Sign in to search case law again.");
+  expect(rig.buttons()).toEqual(["Allow", "Remove", "Turn off"]);
+  await rig.press("Allow");
+  expect(ask).toHaveBeenCalledWith("keychain");
+  expect(rig.text()).toContain("Signed out. Sign in to search case law again.");
+  expect(rig.buttons()).toEqual(["Sign in", "Use an API key instead", "Remove", "Turn off"]);
+});

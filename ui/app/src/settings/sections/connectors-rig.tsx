@@ -16,6 +16,7 @@ import type {
   PackView,
 } from "../../transport/protocol.ts";
 import { SettingsApp } from "../settings-app.tsx";
+import { providePermissions, type PermissionsHost } from "../../room/first-run/permissions-host.ts";
 
 export const PACKS: PackView[] = [
   // gross prices, GST included: 200 credits for ₹23.60 (₹20 and ₹3.60 GST)
@@ -78,11 +79,14 @@ export async function mountSettings({
   state = null,
   hash = "",
   dispatch,
+  permissions,
 }: {
   state?: ConnectorsState | null;
   hash?: string;
   /** Answers each dispatch; done when left out. */
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
+  /** The window's permissions host (permissions-host.ts); none lists no rows. */
+  permissions?: PermissionsHost;
 } = {}): Promise<Rig> {
   history.replaceState(null, "", `/settings.html${hash}`);
   const host: FakeHost = {
@@ -96,6 +100,7 @@ export async function mountSettings({
   };
   if (dispatch !== undefined) host.dispatch = dispatch;
   const transport = new FakeTransport(host);
+  if (permissions !== undefined) providePermissions(transport, permissions);
   const store = connectDisplay(transport).store;
   const el = document.createElement("div");
   document.body.append(el);
