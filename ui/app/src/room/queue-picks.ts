@@ -6,6 +6,7 @@ import type { StreamView } from "../store/view.ts";
 import type { StopReason, UserMessageEntry } from "../transport/protocol.ts";
 import { userIds, type Held, type Queued } from "./queue-entries.ts";
 import { questionText } from "./thread/live.ts";
+import { causeOf, endedUnsent } from "./thread/unsent-cause.ts";
 
 const STEP = "step:";
 const LIMIT = "limit_stop:";
@@ -80,4 +81,19 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
         (last.kind !== "held" && last.at === next.at && last.code === next.code));
     return same ? last : (last = next);
   };
+}
+
+/** Whether a message that ended because Clauseo was updating (#1314's update cause) has its copy waiting in the
+ * queue: a queued message after it, and no answer since. The strip says why it waits. */
+export function updatedPick(v: StreamView | undefined): boolean {
+  if (v === undefined) return false;
+  let updated = false;
+  for (const id of v.ids) {
+    if (id.startsWith(STEP)) updated = false;
+    const m = v.entries.get(id)?.user_message;
+    if (m === undefined) continue;
+    if (endedUnsent(m) && causeOf(m) === "update") updated = true;
+    else if (updated && m.status === "queued") return true;
+  }
+  return false;
 }

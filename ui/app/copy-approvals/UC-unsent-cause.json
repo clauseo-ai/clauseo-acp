@@ -1,0 +1,38 @@
+{
+  "UC-1296": {
+    "en": "Not sent, because you stopped it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's working line when the host says a message never started because it was stopped (#1314: TurnEnded.cause stopped). The words are back in the box. Replaces UC-1147's wording where the host gives the cause; UC-1147 stays for this window's own Stop with no cause."
+  },
+  "UC-1297": {
+    "en": "Not sent: you sent a newer message first.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's working line when a message never started because a newer one was sent now first (#1314: cause sent_now, status not_sent). The words are back in the box. New."
+  },
+  "UC-1298": {
+    "en": "Not sent, because the answer it was for stopped.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's working line when a message never started because the answer it was sent into stopped (#1314: cause not_sent, status not_sent). The words are back in the box. New."
+  },
+  "UC-1299": {
+    "en": "This waits because Clauseo was updating. It goes once Clauseo is ready.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The queue's line under its head while the copy of a message that ended because Clauseo was updating waits (#1314: cause update; the old message is hidden). The installing line (queue_held_reason update) takes its place while the update installs. New."
+  }
+}
