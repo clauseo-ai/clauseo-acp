@@ -163,15 +163,52 @@ fn byte_cap_holds_whatever_budget_is_passed() {
 }
 
 #[test]
-fn none_when_the_budget_is_under_the_header_and_one_item() {
+fn the_header_alone_when_no_item_fits_and_none_when_not_even_the_header_does() {
     let items = vec![lawyer("hi")];
     let need = reserve(1) + cost(&items[0]);
-    assert_eq!(build(&items, AGENT, need - 1), None);
+    let alone = build(&items, AGENT, need - 1).expect("the header alone fits");
+    assert_eq!((alone.included, alone.left_out), (0, 1));
+    assert_eq!(
+        alone.text,
+        "Earlier in this conversation the lawyer worked with Claude. The 1 earlier items are \
+         left out: not one fits in the room this request leaves. Files, tool state and \
+         reasoning are not included either."
+    );
+    let header = i64::try_from(alone.text.len()).unwrap();
+    assert_eq!(build(&items, AGENT, header).map(|h| h.included), Some(0));
+    assert_eq!(build(&items, AGENT, header - 1), None);
     assert_eq!(build(&items, AGENT, 0), None);
     assert_eq!(build(&items, AGENT, -5), None);
-    assert_eq!(build(&[], AGENT, 1_000_000), None);
+    assert_eq!(build(&[], AGENT, 1_000_000), None, "no items, no handover");
     let handover = build(&items, AGENT, need).expect("the header and the item fit");
     assert_eq!(handover.included, 1);
+}
+
+#[test]
+fn a_partial_undo_leaves_the_papers_it_kept() {
+    let t = turn(1);
+    let log = envelopes(vec![
+        user(t, 101, vec![text_block("edit both")]),
+        started(t),
+        files_changed(t, &["a.docx", "b.docx"]),
+        DomainEvent::StepUndone(StepUndone {
+            turn: t,
+            checkpoint: id::<CheckpointId>(50),
+            restored: vec![MatterPath::new("a.docx").unwrap()],
+            kept: vec![MatterPath::new("b.docx").unwrap()],
+            unversioned: Vec::new(),
+        }),
+        ended(t, StopReason::EndTurn),
+    ]);
+    let items = items_from_log(&log, None, &by_claude);
+    assert_eq!(
+        items,
+        vec![
+            lawyer("edit both"),
+            papers(&["b.docx"]),
+            Item::Undone(vec!["a.docx".to_owned()]),
+        ]
+    );
 }
 
 #[test]
@@ -298,6 +335,7 @@ fn user(turn_id: TurnId, message_id: u64, content: Vec<ContentBlock>) -> DomainE
         content,
         delivery: Delivery::Queue,
         config: std::collections::BTreeMap::new(),
+        agent: None,
     })
 }
 

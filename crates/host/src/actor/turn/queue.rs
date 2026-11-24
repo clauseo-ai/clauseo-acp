@@ -138,6 +138,20 @@ pub(super) fn queued_turns(actor: &Actor, thread: ThreadId) -> Vec<TurnId> {
     })
 }
 
+/// The agents the queued turns of `thread` named, in order (`switch.rs`).
+#[cfg(test)]
+pub(super) fn queued_agents(actor: &Actor, thread: ThreadId) -> Vec<Option<AgentId>> {
+    actor.threads.get(&thread).map_or_else(Vec::new, |entry| {
+        entry
+            .turn
+            .queue
+            .turns
+            .iter()
+            .map(|queued| queued.agent.clone())
+            .collect()
+    })
+}
+
 /// What a queue command's commit continues with.
 #[derive(Debug)]
 pub(crate) enum After {
@@ -175,7 +189,8 @@ pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQu
 
 /// `SendPrompt`: starts now, queues, sends now or steers, by the delivery and the thread's state.
 /// A message that names another agent is checked as that agent's, and refused while the
-/// thread's agent may still work in the background (`switch.rs`).
+/// thread may still work in the background or that agent's sign-in refuses it (`switch.rs`).
+/// The agent named is kept, the thread's own included: its turn decides whether to switch.
 pub(super) fn send_prompt(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -257,10 +272,16 @@ fn route(
     refuse_stuck(actor, thread)?;
     let holds = hold::holds(actor, thread);
     // Under an install's hold a steer joins no turn: the install stops it.
+    // A steer to another agent than the thread's cannot join its turn: it waits as the next.
+    let other = prompt.1.as_ref().is_some_and(|agent| {
+        actor
+            .threads
+            .get(&thread)
+            .is_some_and(|entry| entry.row.agent != *agent)
+    });
     if delivery == DeliveryRequest::Steer && !holds.update_now() {
         match steer::target(actor, thread) {
-            // A steer to another agent cannot join this one's turn: it waits as the next turn.
-            steer::Target::Join(running) if prompt.1.is_some() => {
+            steer::Target::Join(running) if other => {
                 return steer::next(actor, ctx, thread, running, prompt);
             }
             steer::Target::Join(turn) => {
@@ -335,6 +356,7 @@ fn append(
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
     let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
+    let named = agent.clone();
     let queued = |turn, message, content| Queued {
         turn,
         message,
@@ -348,7 +370,7 @@ fn append(
         ctx,
         thread,
         Some(ahead),
-        blocks,
+        (blocks, named),
         Joins::As(DeliveryRequest::Queue),
         |turn, message, content, queue| {
             queue.turns.push_back(queued(turn, message, content));
@@ -384,7 +406,7 @@ fn jump(
         ctx,
         thread,
         Some(running),
-        blocks,
+        (blocks, agent.clone()),
         Joins::As(delivery),
         |turn, message, content, queue| {
             queue.turns.push_front(Queued {

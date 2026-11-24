@@ -78,6 +78,11 @@ pub(crate) enum AgentReply {
         /// before `result` (`codex_reviewer.rs`).
         fell_back: bool,
     },
+    /// A prompt carrying a switch's handover passed the Codex `.codex` recheck and goes out
+    /// (`switch.rs`).
+    PromptOut {
+        turn: TurnId,
+    },
     /// A Codex prompt's `.codex` re-check (or its wait) refused it before it was sent.
     PromptRefused {
         turn: TurnId,

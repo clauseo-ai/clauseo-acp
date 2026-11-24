@@ -204,7 +204,7 @@ pub(super) fn next(
         ctx,
         thread,
         Some(running),
-        content,
+        (content, agent.clone()),
         Joins::Next,
         |turn, message, content, queue| {
             let at = queue
@@ -239,7 +239,13 @@ pub(super) fn steer(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let message: MessageId = actor.ids.mint(now)?;
-    let built = build::user_message(turn, message, None, content.clone(), Delivery::Steer);
+    let built = build::user_message(
+        turn,
+        message,
+        None,
+        content.clone(),
+        (Delivery::Steer, None),
+    );
     let outcome = CommandOutcome::PromptAccepted { turn, message };
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     out.push(actor, built.value)?;

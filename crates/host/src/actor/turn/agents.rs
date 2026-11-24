@@ -34,7 +34,9 @@ mod start_failure;
 pub(super) mod start_timer;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop, switch_stop};
+pub(super) use ended::{
+    hold_stop, idle_stop, log_detach, on_ended, stop, switch_stop, unswitch_stop,
+};
 use launch::launch;
 pub(super) use launch_now::launch_now;
 pub(super) use start_failure::launch_failed;
@@ -403,6 +405,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::PromptPicked { turn, picked } => {
             super::prompt_picks::on_picked(actor, thread, turn, same, picked);
         }
+        AgentReply::PromptOut { turn } => super::switch::delivered(actor, thread, turn),
         AgentReply::PromptRefused { turn, error } => {
             end::on_prompt_refused(actor, thread, turn, &error);
         }

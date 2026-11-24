@@ -138,6 +138,8 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
             );
         }
     }
+    // A handover a stop left pending settles failed (`switch.rs`).
+    super::switch::at_start(actor, thread);
     let needs = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())

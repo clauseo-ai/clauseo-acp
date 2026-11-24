@@ -55,7 +55,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     };
     current.phase = TurnPhase::Prompting;
     // After a switch, the handover goes before the lawyer's words (`switch.rs`).
-    let prompt = super::switch::prompt(current);
+    let (prompt, carries) = super::switch::prompt(current);
     let content = with_note(note, &prompt);
     let cancelled = current.cancelled;
     // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
@@ -75,7 +75,8 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     super::note::sent(actor, thread, turn);
-    super::switch::delivered(actor, thread);
+    // A handover is delivered once its prompt passes the recheck below (`switch.rs`).
+    let out = super::switch::going_out(actor, (thread, id, turn), carries);
     let retry = key_retry::for_call(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;
@@ -114,6 +115,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             };
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
+            }
+            if let Some(out) = out {
+                out.sent();
             }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let send = || client.prompt(&session, turn, content.clone());

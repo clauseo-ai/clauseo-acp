@@ -155,10 +155,8 @@ pub(crate) struct TurnState {
     prompt_picks: prompt_picks::PromptPicks,
     /// The conversation's helpers, from its first one on (`helpers.rs`).
     helpers: Option<Box<helpers::Helpers>>,
-    /// The agent the thread switched from, while the handover a switch logged has not reached
-    /// the new agent: the turn meant to carry it failed first, so the next one does
-    /// (`switch.rs`). In memory only.
-    handoff_owed: Option<clauseo_protocol::AgentId>,
+    /// A handover owed and a switch's commit in flight (`switch.rs`).
+    switch: switch::Kept,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.

@@ -92,7 +92,8 @@ pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, com
         } => answers::answer_elicitation(actor, ctx, thread, elicitation, response),
         TurnCommand::SetConfigOption { option_id, value } => {
             super::picks::settable(actor, thread, &option_id, &value).map(|()| {
-                agents::ensure(
+                // A switch that runs holds it for its new agent (`switch.rs`).
+                super::switch::ensure(
                     actor,
                     thread,
                     agents::Waiting::Config(ctx, option_id, value),
@@ -100,7 +101,7 @@ pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, com
             })
         }
         TurnCommand::SetMode { mode_id } => {
-            agents::ensure(actor, thread, agents::Waiting::Mode(ctx, mode_id));
+            super::switch::ensure(actor, thread, agents::Waiting::Mode(ctx, mode_id));
             Ok(())
         }
         TurnCommand::UndoStep { turn, files } => undo::undo_step(actor, ctx, thread, turn, files),

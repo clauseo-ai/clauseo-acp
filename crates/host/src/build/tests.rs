@@ -311,7 +311,7 @@ fn user_message_and_agent_content_match_view_counts() {
         image(base64_of(3_000)),
         image(base64_of(3_000)),
     ];
-    let built = user_message(turn(), message(), None, content, Delivery::Queue);
+    let built = user_message(turn(), message(), None, content, (Delivery::Queue, None));
     assert_eq!(built.blobs.len(), 1);
     let entry = ViewEntry::UserMessage(UserMessageEntry {
         order: Seq::FIRST,

@@ -124,7 +124,7 @@ pub(super) fn hold_prompt(
         ctx,
         thread,
         ahead,
-        blocks,
+        (blocks, agent.clone()),
         Joins::As(logged),
         |turn, message, content, queue| {
             let queued = Queued {

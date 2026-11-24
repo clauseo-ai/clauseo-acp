@@ -116,7 +116,13 @@ pub(super) fn accept(
     let turn: TurnId = actor.ids.mint(now)?;
     let config = super::prompt_picks::claim(actor, thread, turn);
     let message = actor.ids.mint(now)?;
-    let mut built = build::user_message(turn, message, None, blocks.clone(), delivery);
+    let mut built = build::user_message(
+        turn,
+        message,
+        None,
+        blocks.clone(),
+        (delivery, switch.clone()),
+    );
     built.value.config = config;
     let outcome = CommandOutcome::PromptAccepted { turn, message };
     let stream = StreamId::Thread(thread);
@@ -189,11 +195,12 @@ pub(super) fn on_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 /// Drops the current turn from memory without logging anything but the detach of an agent
 /// that exited while the turn waited.
 fn forget(actor: &mut Actor, thread: ThreadId) {
-    super::switch::settle_failed(actor, thread);
+    let held = super::switch::ends(actor, thread);
     let dropped = state(actor, thread).and_then(|state| state.current.take());
     if let Some(reason) = dropped.and_then(|current| current.detach) {
         agents::log_detach(actor, thread, reason);
     }
+    super::switch::release(actor, thread, held);
     if let Ok(matter) = matter_of(actor, thread) {
         end::release_writer(actor, matter, thread);
     }

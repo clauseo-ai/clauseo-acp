@@ -42,7 +42,7 @@ pub(super) fn log_queued(
     ctx: CommandCtx,
     thread: ThreadId,
     ahead: Option<TurnId>,
-    blocks: Vec<ContentBlock>,
+    (blocks, agent): super::Prompt,
     joins: Joins,
     place: impl FnOnce(TurnId, MessageId, Vec<ContentBlock>, &mut ThreadQueue) -> After,
 ) -> Result<(), Error> {
@@ -51,7 +51,13 @@ pub(super) fn log_queued(
     let config = super::super::prompt_picks::claim(actor, thread, turn);
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = joins.delivery();
-    let mut built = build::user_message(turn, message, None, blocks.clone(), delivery.into());
+    let mut built = build::user_message(
+        turn,
+        message,
+        None,
+        blocks.clone(),
+        (delivery.into(), agent),
+    );
     built.value.config = config;
     let mut waits = TurnQueued::new(thread, turn, thread, ahead)
         .map_err(|error| Error::Internal(error.to_string()))?;
@@ -130,7 +136,7 @@ pub(super) fn wait_late(
         ctx,
         thread,
         ahead,
-        blocks,
+        (blocks, agent.clone()),
         Joins::As(delivery),
         |turn, message, content, queue| {
             let queued = Queued {

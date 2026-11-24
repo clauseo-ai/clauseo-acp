@@ -82,15 +82,36 @@ pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
 }
 
 /// Stops `thread`'s agent for a switch to another agent (`switch.rs`) with the shutdown ladder:
-/// its `Ended` logs `AgentSessionDetached { reason: Switched }`, unless its connection was
-/// already gone. An idle stop under way becomes the switch's.
-pub(in super::super) fn switch_stop(actor: &mut Actor, thread: ThreadId) {
-    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
-        && matches!(agent.stop_cause, StopCause::Asked | StopCause::IdleStopped)
-    {
-        agent.stop_cause = StopCause::Switched;
+/// its `Ended` gives the switch `AgentSessionDetached { reason: Switched }` to log, unless its
+/// connection was already gone. An idle stop under way becomes the switch's. The config and mode
+/// calls waiting for it, or for the agent after it, come back: the switch runs them on the new
+/// agent.
+pub(in super::super) fn switch_stop(actor: &mut Actor, thread: ThreadId) -> Vec<Waiting> {
+    let mut calls = Vec::new();
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
+        if matches!(agent.stop_cause, StopCause::Asked | StopCause::IdleStopped) {
+            agent.stop_cause = StopCause::Switched;
+        }
+        for list in [&mut agent.waiting, &mut agent.after_stop] {
+            let (turns, other): (Vec<_>, Vec<_>) = std::mem::take(list)
+                .into_iter()
+                .partition(|item| matches!(item, Waiting::Turn(_)));
+            *list = turns;
+            calls.extend(other);
+        }
     }
     stop(actor, thread);
+    calls
+}
+
+/// The switch `thread`'s agent stops for is over before its end (`switch.rs`): the end logs
+/// the detach a plain stop logs, `Closed`.
+pub(in super::super) fn unswitch_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stop_cause == StopCause::Switched
+    {
+        agent.stop_cause = StopCause::Asked;
+    }
 }
 
 /// Stops `thread`'s agent for a sign-in hold or restart (`sign_in.rs`). An idle stop already
@@ -232,12 +253,20 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
                 current.detach = Some(reason);
             }
         }
-        (_, Some(reason)) => log_detach(actor, thread, reason),
+        (_, Some(reason)) => detach_unless_switching(actor, thread, reason),
         (_, None) => {}
     }
     start_after(actor, thread, after_stop);
     super::super::sign_in::agent_ended(actor, thread, unresponsive);
     actor.release(StreamId::Thread(thread));
+}
+
+/// Logs the detach of `thread`'s agent with `reason`, unless a switch logs it with the switch
+/// (`switch.rs`).
+fn detach_unless_switching(actor: &mut Actor, thread: ThreadId, reason: DetachReason) {
+    if let Some(reason) = super::super::switch::keeps_detach(actor, thread, reason) {
+        log_detach(actor, thread, reason);
+    }
 }
 
 /// After an agent's end: a new agent for the work that came while it stopped, or a switch that

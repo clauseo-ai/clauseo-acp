@@ -57,6 +57,8 @@ mod start_races;
 mod start_timeout;
 mod sweep;
 mod switch;
+mod switch_races;
+mod switch_send;
 mod title_window;
 mod together;
 mod together_order;

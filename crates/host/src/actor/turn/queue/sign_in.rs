@@ -86,7 +86,13 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     let turn: TurnId = actor.ids.mint(now)?;
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = DeliveryRequest::Queue.into();
-    let mut built = build::user_message(turn, message, None, requeue.content.clone(), delivery);
+    let mut built = build::user_message(
+        turn,
+        message,
+        None,
+        requeue.content.clone(),
+        (delivery, None),
+    );
     built.value.config.clone_from(&requeue.config);
     // `at_head`: a restart puts it back ahead of the turns queued before it (`restore.rs`).
     let waits = TurnQueued::new(thread, turn, thread, Some(requeue.turn))
