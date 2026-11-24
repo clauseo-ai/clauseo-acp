@@ -22,6 +22,8 @@ const CODEX_LIMIT: &str = "codex";
 const REF_API_KEY: &str = "api-key";
 /// The account ref of an Amazon Bedrock account.
 const REF_BEDROCK: &str = "bedrock";
+/// The account ref of a Google Cloud (Vertex) account.
+const REF_GCP: &str = "gcp";
 /// The account ref of a `ChatGPT` sign-in with no usable email.
 const REF_PLAN: &str = "plan";
 /// A week, in minutes.
@@ -43,8 +45,9 @@ pub(crate) fn outcome(answers: Answers) -> ReadOutcome {
     };
     match read.account {
         None => ReadOutcome::SignedOut,
-        // A gcp sign-in is no ChatGPT plan, so it reads as an API key does: no plan limits.
-        Some(Account::ApiKey | Account::Gcp) => pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY),
+        Some(Account::ApiKey) => pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY),
+        // A gcp sign-in is Google Cloud's (Vertex), no ChatGPT plan: pay as you go, no plan limits.
+        Some(Account::Gcp) => pay_as_you_go(BillingProvider::Vertex, REF_GCP),
         Some(Account::AmazonBedrock(_)) => pay_as_you_go(BillingProvider::Bedrock, REF_BEDROCK),
         Some(Account::Unknown(_)) => {
             ReadOutcome::Failed(ReadFailure::Malformed("unknown account type".to_owned()))
