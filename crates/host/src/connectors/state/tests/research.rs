@@ -132,3 +132,53 @@ fn the_research_question_estimates_pass_through_unchanged() {
     let json = serde_json::to_string(&connector).unwrap();
     assert!(!json.contains("research_question"), "{json}");
 }
+
+/// A research-question text reaches the page only as one plain line of at most 80 characters,
+/// on a pack and on the balance alike; a refused text is `None` and its number stays.
+#[test]
+fn a_research_question_text_is_kept_only_as_one_short_plain_line() {
+    let eighty = "a".repeat(80);
+    let eighty_one = "a".repeat(81);
+    for (text, kept) in [
+        ("about 5\nresearch questions", false),
+        ("about 5\rresearch questions", false),
+        (eighty_one.as_str(), false),
+        ("about 5 research questions\u{0007}", false),
+        (eighty.as_str(), true),
+    ] {
+        let mut pricing = fixture_pricing();
+        pricing.packs[0].research_questions = Some(5);
+        pricing.packs[0].research_questions_text = Some(text.to_owned());
+        let mut state = CaseLaw {
+            liveness: Some(Liveness {
+                live: true,
+                pricing: Some(pricing),
+                fetched_at: Some(SystemTime::UNIX_EPOCH),
+            }),
+            ..CaseLaw::default()
+        };
+        state.set_credential(CredentialStatus::SignedIn(CredentialKind::OAuth));
+        state.set_account(
+            Account {
+                research_questions: Some(5),
+                research_questions_text: Some(text.to_owned()),
+                ..account(2_000, "200.00")
+            },
+            at(1_000),
+        );
+        let connector = state.view(&CASE_LAW, true, false).connectors[0].clone();
+        let want = kept.then(|| text.to_owned());
+        let pack = &connector.packs[0];
+        assert_eq!(pack.research_questions, Some(5), "{text:?}");
+        assert_eq!(pack.research_questions_text, want, "{text:?}");
+        let ConnectorStatus::SignedIn {
+            balance: Some(balance),
+            ..
+        } = connector.status
+        else {
+            panic!("{:?}", connector.status);
+        };
+        assert_eq!(balance.research_questions, Some(5), "{text:?}");
+        assert_eq!(balance.research_questions_text, want, "{text:?}");
+    }
+}

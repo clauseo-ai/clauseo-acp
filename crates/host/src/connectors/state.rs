@@ -8,6 +8,7 @@
 //!   `credit_inr` plus `gst_rate`. A figure that does not read is left out, never guessed.
 //! - The research-question estimates (a pack's, the balance's, one question's) are the
 //!   connector's own, passed on as sent; the host computes none, and an absent one stays absent.
+//!   A text that is not one short plain line is left out (`shown_text`); its number stays.
 //! - A pay link is held only as a [`PayUrl`], which only the connector's own `/pay/` links
 //!   parse to; the view carries its text.
 //! - No token, key or account id is held here: the credential is the connectors crate's.
@@ -353,8 +354,21 @@ fn pack_view(pack: &Pack) -> Option<PackView> {
         credits,
         paise,
         research_questions: pack.research_questions.map(clamp),
-        research_questions_text: pack.research_questions_text.clone(),
+        research_questions_text: shown_text(pack.research_questions_text.as_deref()),
     })
+}
+
+/// The longest research-question text shown, in characters.
+const MAX_SHOWN_TEXT: usize = 80;
+
+/// The connector's research-question text, which the app shows as written, kept only when it is
+/// one line of at most [`MAX_SHOWN_TEXT`] characters with no control character; else `None`.
+fn shown_text(text: Option<&str>) -> Option<String> {
+    let text = text?;
+    let plain = !text.contains(['\n', '\r'])
+        && !text.chars().any(char::is_control)
+        && text.chars().count() <= MAX_SHOWN_TEXT;
+    plain.then(|| text.to_owned())
 }
 
 /// The connector's estimate of one research question, as sent; its `gross_inr` in paise.
@@ -380,7 +394,7 @@ fn balance(account: &Account, rate: Option<GrossRate>, as_of: Option<Timestamp>)
         paise: rate.and_then(|rate| rate.paise(account.balance_credits)),
         as_of,
         research_questions: account.research_questions.map(clamp),
-        research_questions_text: account.research_questions_text.clone(),
+        research_questions_text: shown_text(account.research_questions_text.as_deref()),
     }
 }
 
