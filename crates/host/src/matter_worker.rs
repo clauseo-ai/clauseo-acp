@@ -12,8 +12,8 @@ use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
     Card, Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe,
-    PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta, UndoRequest,
-    Undone, matter_path_of_resolved,
+    Overlap, PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta,
+    UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
@@ -48,10 +48,16 @@ fn card<'a>(
 /// resolved ([`network_paths::touchable`]; its walked path compared by
 /// [`matter_path_of_resolved`]).
 pub(crate) fn tool_paths(folder: &Path, paths: &TurnPaths) -> BTreeSet<MatterPath> {
+    places_in(folder, paths.written())
+}
+
+/// The matter paths of `places`: `inside` as it is, each `outside` place resolved on the disk
+/// as [`tool_paths`] says.
+fn places_in(folder: &Path, places: Places) -> BTreeSet<MatterPath> {
     let Places {
         mut inside,
         outside,
-    } = paths.written();
+    } = places;
     let net = NetEnv::current();
     let disk = Disk::resolved(&net);
     for path in outside {
@@ -166,11 +172,13 @@ pub(crate) enum MatterJob {
     },
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
     /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
-    /// (for a reused id's changes).
+    /// (for a reused id's changes). `overlap` is `Some` for a turn that ran beside others of
+    /// its matter: its changes are measured from its own start, without theirs (`beside.rs`).
     AfterTurn {
         meta: TurnMeta,
         tool_paths: TurnPaths,
         before: Option<CheckpointId>,
+        overlap: Option<Box<beside::TurnOverlap>>,
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
     /// the turn's own after-turn checkpoint when R8's timeline has one, `before` when another
@@ -472,10 +480,20 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             meta,
             tool_paths,
             before,
+            overlap,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
             let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
-            let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands, None)?;
+            let others = overlap
+                .as_deref()
+                .map(|o| beside::others(matter.folder(), o));
+            let overlap = overlap.as_deref().zip(others.as_ref());
+            let overlap = overlap.map(|(o, others)| Overlap {
+                since: o.since,
+                others,
+            });
+            let checkpoint =
+                matter.after_turn_named(&meta, &tool_paths, &commands, overlap.as_ref())?;
             turn_checkpoint(matter, checkpoint, before)
         })),
         MatterJob::Repair {
@@ -602,6 +620,7 @@ mod relocate;
 mod sides;
 mod too_deep;
 
+pub(crate) use beside::TurnOverlap;
 use checkpoints::{repair, root_commit, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 #[cfg(test)]

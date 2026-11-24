@@ -1,0 +1,7 @@
+{"scenario":"write-note-b","description":"One turn that creates notes/b.txt beside a completed edit tool_call naming it, then ends","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/b.txt","content":"Beta\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write","title":"Write notes/b.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/b.txt","newText":"Beta\n"}],"locations":[{"path":"{{cwd}}/notes/b.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Wrote notes/b.txt."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

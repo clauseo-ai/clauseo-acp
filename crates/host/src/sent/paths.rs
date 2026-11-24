@@ -211,6 +211,24 @@ impl TurnPaths {
         written
     }
 
+    /// The places the turn's tool calls name as ones they write, whatever their status: what
+    /// [`TurnPaths::written`] would hold were every call `Completed`. A turn running beside
+    /// another may be writing them now (`matter_worker/beside.rs`).
+    pub(crate) fn named(&self) -> Places {
+        let mut named = Places::default();
+        for call in self.calls.values() {
+            let kind = call.kind.unwrap_or(ToolKind::Unknown);
+            let done = ToolCallStatus::Completed;
+            if clauseo_matters::names_a_write(kind, done, false) {
+                named.extend(&call.located);
+            }
+            if clauseo_matters::names_a_write(kind, done, true) {
+                named.extend(&call.diffed);
+            }
+        }
+        named
+    }
+
     /// The files the turn's completed shell commands wrote ([`crate::shell_writes`]): paths
     /// relative to the matter's folder, or absolute ones the matter thread places in it. A
     /// command that failed, was cancelled or denied, or had not ended by the checkpoint wrote
