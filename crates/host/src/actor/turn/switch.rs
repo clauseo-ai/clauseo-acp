@@ -18,9 +18,13 @@
 //!   is read and the handover built from it (`handover.rs`). Before the commit no agent of the
 //!   thread may run or launch ([`quiet`]); one that does is stopped first. One commit then logs
 //!   the old session's `AgentSessionDetached { Switched }`, `AgentSwitched`, the row's new agent
-//!   with no session (the new agent always starts a new one), `ContextHandoff`, and the
-//!   thread's picks become the message's (none yet), so the new agent's come from the matter's
-//!   prefs for its kind. Once it is durable the new agent launches as any first launch does.
+//!   with no session (the new agent always starts a new one), and `ContextHandoff`, whose `to`
+//!   names the model and effort the message's picks and the new agent's kept options say it
+//!   starts with. The old agent's `CreateThread` picks go: the new session starts with the
+//!   message's own picks (`SendPrompt.config`), else the matter's prefs for the new agent's kind,
+//!   and step 4 checks the message's picks against it before the checkpoint and `TurnStarted`,
+//!   as for any turn (`prompt_picks.rs`). Once it is durable the new agent launches as any first
+//!   launch does.
 //! - While the switch runs (past the start, before its commit is durable) `SetConfigOption` and
 //!   `SetMode` wait on it ([`ensure`]), with those the old agent had waiting, and run on the new
 //!   agent after the commit; a switch that does not happen runs them on the thread's agent. A

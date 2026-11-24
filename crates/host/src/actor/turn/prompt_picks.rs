@@ -14,7 +14,9 @@
 //!   waits as the next turn, is sent now, or is held) keeps them as any prompt does. A joining
 //!   steer's picks never reach a starting session's `CreateThread` config.
 //! - While the thread has no session yet, the picks a turn takes also become its `CreateThread`
-//!   config, so its first session starts with them (`picks.rs`).
+//!   config, so its first session starts with them (`picks.rs`). So do a switch's (`switch.rs`):
+//!   the new agent's first session starts with the message's picks ([`switched`]), and the
+//!   handover's `to` names what they come to on that agent ([`starting_with`]).
 //! - At step 4, once the session is attached and before the checkpoint and `TurnStarted`, the
 //!   session gets the model pick, then the effort pick checked against the model's answer
 //!   (`send.rs`); the agent's last answer is logged as `ConfigOptionsReplaced`.
@@ -128,6 +130,36 @@ fn before_session(actor: &mut Actor, thread: ThreadId, config: &ConfigPicks) {
         }
     }
     entry.picks = Some(picks);
+}
+
+/// The thread switched agents (`switch.rs`) for `turn`, and its row has no session now: the new
+/// agent's first session starts with the turn's own picks as its `CreateThread` config, as a
+/// thread with no session yet does ([`claim`]); step 4 then checks them against that session
+/// before the checkpoint and `TurnStarted`, as for any turn.
+pub(super) fn switched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let picks =
+        state(actor, thread).and_then(|state| state.prompt_picks.by_turn.get(&turn).cloned());
+    if let Some(picks) = picks {
+        before_session(actor, thread, &picks);
+    }
+}
+
+/// The model and effort a switch's new agent `agent` should start `turn` with, as far as the
+/// host knows before its session: the turn's own picks over `agent`'s kept options, with the
+/// efforts of its models (`AgentSummary::models`), as [`started_with`] reads a session's.
+/// `None` for what the host does not know.
+pub(super) fn starting_with(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    agent: &str,
+) -> (Option<NamedChoice>, Option<NamedChoice>) {
+    let picks = state(actor, thread)
+        .and_then(|state| state.prompt_picks.by_turn.get(&turn).cloned())
+        .unwrap_or_default();
+    let models = actor.agent_options.models_of(agent);
+    let options = actor.agent_options.of(agent).to_vec();
+    choose(&options, &picks, models.as_ref())
 }
 
 /// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks (a thread
