@@ -8,11 +8,12 @@ use crate::{HostCommand, RestoreRequest};
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
-/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
-/// `InstallBrowser`, `CancelBrowserInstall`, `RecheckBrowserPolicy`, the four update commands, the
-/// connector commands, the two allowed-site commands and `SetNetwork` answer `Done`; the last three
-/// kinds store no receipt, as the three browser commands do not.
+/// `SetPrivacySettings`, `FirstAct`, `SetDefaultLocation`, `UpdateMatter`, `OpenMatter`,
+/// `ForgetMatter`, `RefreshLimits`, `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`,
+/// `MarkThreadDone`, `SweepDone`, `InstallBrowser`, `CancelBrowserInstall`,
+/// `RecheckBrowserPolicy`, the four update commands, the connector commands, the two
+/// allowed-site commands and `SetNetwork` answer `Done`; the last three kinds store no receipt,
+/// as the three browser commands do not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

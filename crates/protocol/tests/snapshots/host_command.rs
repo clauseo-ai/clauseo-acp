@@ -131,6 +131,9 @@ golden! { HostCommand::name_of {
         patch: privacy::privacy_patch(),
     };
     FirstAct => first_act: HostCommand::FirstAct { counts: true };
+    SetDefaultLocation => set_default_location: HostCommand::SetDefaultLocation {
+        folder: folder_ref_id(2),
+    };
     RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
         agent: Some(AgentKind::Claude),
         why: RefreshWhy::Shown,

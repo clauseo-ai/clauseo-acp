@@ -22,8 +22,11 @@
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
 //! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
-//! `offline`. The lawyer's MCP server commands (Settings › Tools) are the settings window's
-//! alone: each server is a program that runs with the lawyer's access.
+//! `offline`.
+//! The default location (`SetDefaultLocation`) is `main`'s alone, with a folder ref its own
+//! `pick_folder` issued in this run, as `CreateMatter` takes one. The lawyer's MCP server commands
+//! (Settings › Tools) are the settings window's alone: each server is a program that runs with
+//! the lawyer's access.
 
 use clauseo_protocol::{
     ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
@@ -83,16 +86,17 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// catch-all, so a command the host adds does not compile here until the bridge rules on it
 /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
 /// (`AnswerPermission`), what may not come from the window at all (`SetMode`, a
-/// `SetConfigOption` that is not a choice), and a `CreateMatter`, `RelocateMatter` or
-/// `ScanFolder` whose folder ref this run's `pick_folder` did not issue. `CancelScan` always
-/// passes: it starts nothing, and cancelling a scan that is not running does nothing.
+/// `SetConfigOption` that is not a choice), and a `CreateMatter`, `RelocateMatter`,
+/// `ScanFolder` or `SetDefaultLocation` whose folder ref this run's `pick_folder` did not issue.
+/// `CancelScan` always passes: it starts nothing, and cancelling a scan that is not running does
+/// nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
         HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
-        // Both read the folder the ref names: only one this run's picker issued.
-        HostCommand::RelocateMatter { folder, .. } | HostCommand::ScanFolder { folder } => {
-            picked(bridge, *folder)
-        }
+        // Each reads the folder the ref names: only one this run's picker issued.
+        HostCommand::RelocateMatter { folder, .. }
+        | HostCommand::ScanFolder { folder }
+        | HostCommand::SetDefaultLocation { folder } => picked(bridge, *folder),
         // `UpdateMatter`, `OpenMatter` and `ForgetMatter` name a matter only.
         HostCommand::UpdateMatter { .. }
         | HostCommand::OpenMatter { .. }

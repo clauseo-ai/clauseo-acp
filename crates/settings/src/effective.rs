@@ -3,9 +3,11 @@
 //! [`Effective::apply_tools_patch`], the `privacy` section through
 //! [`Effective::apply_privacy_patch`], `update.mode` through [`Effective::apply_update_mode`];
 //! one agent's launch entry through [`Effective::set_agent_launch`], one agent's plan
-//! through [`Effective::set_plan`], and one skill pack's entry in `skills.enabled` through
-//! [`Effective::set_skill_pack`].
+//! through [`Effective::set_plan`], one skill pack's entry in `skills.enabled` through
+//! [`Effective::set_skill_pack`], and `matters.default_location` through
+//! [`Effective::set_default_location`].
 
+mod locks;
 #[cfg(test)]
 mod mcp_tests;
 mod mcp_write;
@@ -40,7 +42,6 @@ mod update_tests;
 
 use crate::error::Error;
 use crate::files::Files;
-use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
 use crate::lock_reason::{self, LockReason};
 use crate::plans;
@@ -52,7 +53,8 @@ use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::update::UpdateChoice;
 use crate::user;
-use crate::warning::{Origin, Warning, WarningKind};
+use crate::warning::Warning;
+use locks::{lock_and_apply, lock_security_keys, policy_on_ignored, under_section_lock};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -288,6 +290,30 @@ impl Effective {
         Ok(())
     }
 
+    /// Changes where new matters go: saves `matters.default_location` to `settings.json` through
+    /// `files`, then sets it in memory, as [`Effective::apply_update_mode`] does. While policy
+    /// locks the key it is refused with [`Error::Locked`]; a `folder` that is not an absolute path
+    /// of text with [`Error::Refused`], naming the key, never the path. Nothing is made, moved or
+    /// read on the folder, and a refusal or a failed write changes nothing.
+    pub fn set_default_location(&mut self, files: &dyn Files, folder: &Path) -> Result<(), Error> {
+        const KEY: &str = "matters.default_location";
+        if self.is_locked(KEY) {
+            return Err(Error::Locked {
+                key: KEY.to_owned(),
+            });
+        }
+        let text = folder
+            .to_str()
+            .filter(|_| folder.is_absolute())
+            .ok_or_else(|| Error::Refused {
+                key: KEY.to_owned(),
+                reason: "the folder is not an absolute path",
+            })?;
+        user::write_default_location(&self.locations, files, text)?;
+        self.settings.matters.default_location = Some(folder.to_owned());
+        Ok(())
+    }
+
     /// Writes the launch entry `agents.<id>`: saves it to `settings.json` through `files`,
     /// then sets it in memory. Only Clauseo's own installs are written: `launch` must have an
     /// absolute `command` that lies under `<data_dir>/agents/`, or is a `node` (or `node.exe`)
@@ -512,76 +538,4 @@ impl Effective {
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
     }
-}
-
-/// The warning for a policy `true` on a key a policy may only turn off
-/// (`leaf::OFF_ONLY_KEYS`): it is ignored and locks nothing.
-fn policy_on_ignored(name: &str, key: String) -> Warning {
-    Warning {
-        origin: Origin::Store {
-            name: name.to_owned(),
-        },
-        kind: WarningKind::InvalidValue {
-            message: format!(
-                "a policy can only turn {key} off, so true is ignored and the lawyer's switch stands"
-            ),
-            key,
-        },
-    }
-}
-
-/// Locks each security key a stronger source has not set off ([`leaf::refuse`]), for the
-/// unreadable source `name`: what it held for the key is unknown, so the user's value must not
-/// stand in for it, and the default may be on. Returns the keys it locked.
-fn lock_security_keys(
-    name: &str,
-    settings: &mut Settings,
-    locked: &mut BTreeSet<String>,
-    warnings: &mut Vec<Warning>,
-) -> Vec<&'static str> {
-    let mut keys = Vec::new();
-    for key in leaf::SECURITY_KEYS {
-        if lock_and_apply(Leaf::Refused(key.to_owned()), settings, locked) {
-            let word = leaf::locked_word(key);
-            let message = format!("the policy source could not be read, so this is locked {word}");
-            keys.push(key);
-            warnings.push(Warning {
-                origin: Origin::Store {
-                    name: name.to_owned(),
-                },
-                kind: WarningKind::InvalidValue {
-                    key: key.to_owned(),
-                    message,
-                },
-            });
-        }
-    }
-    keys
-}
-
-/// Locks `leaf`'s key and applies it as policy, unless a stronger source locked that key, or a
-/// section over it (`plans.`), already. Each plan a stronger source locked stands through a
-/// refusal of the whole section. Returns whether it applied.
-fn lock_and_apply(leaf: Leaf, settings: &mut Settings, locked: &mut BTreeSet<String>) -> bool {
-    let key = leaf.key();
-    if locked.contains(&key) || under_section_lock(locked, &key) {
-        return false;
-    }
-    let kept: Vec<(String, Plan)> = settings
-        .plans
-        .iter()
-        .filter(|(id, _)| locked.contains(&format!("plans.{id}")))
-        .map(|(id, plan)| (id.clone(), plan.clone()))
-        .collect();
-    locked.insert(key);
-    leaf.apply_policy(settings);
-    settings.plans.extend(kept);
-    true
-}
-
-/// Whether a locked section (a key ending in `.`) holds `key`, which is not that section.
-fn under_section_lock(locked: &BTreeSet<String>, key: &str) -> bool {
-    locked
-        .iter()
-        .any(|lock| lock.ends_with('.') && key.len() > lock.len() && key.starts_with(lock.as_str()))
 }

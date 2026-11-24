@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 
 use super::Validate;
-use super::fixtures::{command_id, round_trips};
+use super::fixtures::{command_id, folder_ref_id, round_trips, v7_text};
 
 #[test]
 fn get_settings_is_a_plain_string_and_answers_settings() {
@@ -198,6 +198,37 @@ fn first_act_carries_the_switch_and_passes_validate() {
     for body in ["{}", r#"{"counts":"yes"}"#, r#"{"counts":true,"id":"x"}"#] {
         let json = format!(
             r#"{{"command_id":"{}","command":{{"first_act":{body}}}}}"#,
+            command_id(1)
+        );
+        assert!(
+            serde_json::from_str::<CommandEnvelope>(&json).is_err(),
+            "{body} decoded"
+        );
+    }
+}
+
+#[test]
+fn set_default_location_names_a_picked_folder_and_passes_validate() {
+    let command = HostCommand::SetDefaultLocation {
+        folder: folder_ref_id(4),
+    };
+    assert_eq!(
+        serde_json::to_string(&command).unwrap(),
+        format!(
+            r#"{{"set_default_location":{{"folder":"{}"}}}}"#,
+            v7_text(4)
+        )
+    );
+    round_trips(&command);
+    assert!(command.validate().is_ok());
+    // A path is not a folder ref, and an unknown field is refused.
+    for body in [
+        r#"{"folder":"/Users/lawyer/Matters"}"#,
+        "{}",
+        &format!(r#"{{"folder":"{}","path":"x"}}"#, v7_text(4)),
+    ] {
+        let json = format!(
+            r#"{{"command_id":"{}","command":{{"set_default_location":{body}}}}}"#,
             command_id(1)
         );
         assert!(

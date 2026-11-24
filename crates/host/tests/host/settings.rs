@@ -17,6 +17,10 @@ use serde_json::Value;
 use crate::privacy::privacy_defaults;
 use crate::support::{Dir, FAKE, Running, Scenario, command_id, matter_with_thread, wait};
 
+#[cfg(test)]
+#[path = "settings/default_location.rs"]
+mod default_location;
+
 /// The settings `GetSettings` gives.
 pub(crate) fn settings(host: &Running) -> SettingsView {
     match host.query(HostQuery::GetSettings).unwrap() {
