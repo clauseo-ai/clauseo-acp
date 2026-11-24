@@ -411,7 +411,7 @@ pub(super) fn after(
     if picked.sent {
         drop_held(actor, thread, "a pick was set since");
     }
-    answer_waiting(actor, thread, &picked.set);
+    answer_waiting(actor, thread, &picked.set, options);
     // The thread's kept values (`own.rs`): those the session does not report yet wait for its
     // list at step 4 (`prompt_picks/send.rs`); those it lost are told.
     let own = own::own(actor, thread);
@@ -476,8 +476,9 @@ pub(super) fn after(
 /// `set` picks cover are answered: for each option set, the last one waiting with the value
 /// set, and those of the option before it, which it overrode. One of the option after it, a
 /// pick made while that value was being set, keeps waiting ([`late`]). Each is kept in the
-/// matter's prefs as an answered one is (`answers::on_config`), in order, so the last stays.
-fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick]) {
+/// matter's prefs as an answered one is (`answers::on_config`), in order, so the last stays;
+/// `options`, the start's, are the thread's kept values then.
+fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick], options: &[ConfigOption]) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -510,9 +511,8 @@ fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick]) {
             continue;
         };
         let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
-            if let ConfigValue::Select(choice) = &value
-                && let Some(row) = own::keep(actor, thread, &[(option.clone(), choice.clone())])
-            {
+            // What the pick made run, the effort included (`own.rs`).
+            if let Some(row) = own::keep_running(actor, thread, options) {
                 out.draft.thread_row(row);
             }
             if let Some(row) = remember(actor, thread, &(option, value)) {

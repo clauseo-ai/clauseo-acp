@@ -329,8 +329,9 @@ fn field<'a>(object: &'a RawPayload, name: &str) -> Option<&'a RawPayload> {
         .map(|(_, value)| value)
 }
 
-/// `SetConfigOption` of `pick` returned: log every option as the agent now has them, and keep
-/// the pick in the matter's prefs (`picks.rs`), in the same commit.
+/// `SetConfigOption` of `pick` returned: log every option as the agent now has them, keep the
+/// pick in the matter's prefs (`picks.rs`) and what it runs with as the thread's own values,
+/// in the same commit.
 pub(super) fn on_config(
     actor: &mut Actor,
     thread: ThreadId,
@@ -341,11 +342,12 @@ pub(super) fn on_config(
     let done = answered(same, result).and_then(|options| {
         super::prompt_picks::config_set(actor, thread, &pick.0, &options);
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
+        // What the pick made run, the effort included, is kept (`picks/own.rs`).
+        let kept = matches!(pick.1, ConfigValue::Select(_))
+            .then(|| super::picks::own::keep_running(actor, thread, &options))
+            .flatten();
         out.push(actor, ConfigOptionsReplaced { options })?;
-        if let (option, ConfigValue::Select(value)) = &pick
-            && let Some(row) =
-                super::picks::own::keep(actor, thread, &[(option.clone(), value.clone())])
-        {
+        if let Some(row) = kept {
             out.draft.thread_row(row);
         }
         if let Some(row) = super::picks::remember(actor, thread, &pick) {

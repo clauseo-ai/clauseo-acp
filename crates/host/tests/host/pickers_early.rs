@@ -144,13 +144,13 @@ fn a_resumed_session_gets_the_threads_values_back_over_an_early_update() {
 
 /// A launcher that holds each launch until [`Gate::open`], so a command can wait for the
 /// session before the agent exists.
-struct Gate {
-    inner: PassthroughLauncher,
-    open: Arc<(Mutex<bool>, Condvar)>,
+pub(crate) struct Gate {
+    pub(crate) inner: PassthroughLauncher,
+    pub(crate) open: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Gate {
-    fn open(open: &(Mutex<bool>, Condvar)) {
+    pub(crate) fn open(open: &(Mutex<bool>, Condvar)) {
         *open.0.lock().unwrap() = true;
         open.1.notify_all();
     }
