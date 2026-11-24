@@ -80,12 +80,11 @@ export const HI = {
   "Its files changed after you added it, so Clauseo stopped using it.": null,
   "Your firm doesn't allow this one on this computer.": null,
   "Its saved key is missing, so {who} can't reach it.": null,
-  // UC-1227 to UC-1232: Clauseo Case Law, unreachable or added
+  // UC-1227 to UC-1230, UC-1232: Clauseo Case Law, unreachable or added
   "Can't reach it right now": null,
   Retry: null,
   "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.": null,
   "{credits} credits left": null,
-  "About {n} searches": null,
   "No credits left": null,
   // UC-1233 to UC-1236: Clauseo Case Law picked before it is added
   "What it covers": null,

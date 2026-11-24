@@ -236,6 +236,8 @@ export type LibraryState = {
   caseLaw?: CaseLawState;
   added?: boolean;
   both?: boolean;
+  /** The host lists no price (no live price list). */
+  noPrice?: boolean;
   /** Retry as it will be once list_addons checks again itself. */
   again?: boolean;
 };
@@ -265,7 +267,7 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
     transport,
     fixedAddons(
       libraryItems(status, state.added ?? true),
-      caseLawFacts(connectors, true),
+      { ...caseLawFacts(connectors, true), ...(state.noPrice === true ? { pack: null } : {}) },
       state.again === true ? "again" : "settings",
     ),
   );

@@ -1,7 +1,7 @@
 // Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1244; 24 Nov round, issues 6
 // to 8): the real room over library-host.ts, the place opened from the rail's row and pressed to
 // the state that shows each string. UC_LIBRARY_CASE_LAW registers Clauseo Case Law's shared words
-// (UC-1090 to UC-1095, carried here in UC-kanoon-card.json) on the library's card, so this branch
+// (UC-1090 to UC-1096 and UC-1300, carried here in UC-kanoon-card.json) on the library's card, so this branch
 // stands alone; the home card's branch (#1297), stacked on it, drops the spread and registers them
 // through its own export.
 import { cr, type ConnectorsRoomKey } from "@clauseo/components/lib/words-connectors-room.ts";
@@ -173,7 +173,6 @@ export const UC_LIBRARY: Entry[] = [
     at({ caseLaw: "unreachable" }, CONN, CARD),
   ),
   e("UC-1230", "{credits} credits left", at({ caseLaw: "ready" }, CONN)),
-  e("UC-1231", "About {n} searches", at({ caseLaw: "ready" }, CONN)),
   e("UC-1232", "No credits left", at({ caseLaw: "out" }, CONN)),
   e("UC-1233", "What it covers", at({}, CONN, CARD)),
   e(
@@ -222,7 +221,11 @@ export const UC_LIBRARY_CASE_LAW: Entry[] = [
   ),
   shared("UC-1091", "Add Clauseo Case Law"),
   shared("UC-1092", "Clauseo Case Law"),
-  shared("UC-1093", "From {price}, about {n} searches"),
+  shared("UC-1300", "From {price}."),
+  {
+    ...shared("UC-1096", "Prepaid credits. No subscription."),
+    render: at({ noPrice: true }, CONN),
+  },
   shared("UC-1095", "Prepaid, including GST. No subscription."),
   shared("UC-1094", "Powered by Indian Kanoon"),
 ];

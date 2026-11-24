@@ -12,7 +12,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { CaseLawFacts, Recheck } from "./addons-source.ts";
-import { caseLawShown, creditLines, priceLine } from "./case-law-model.ts";
+import { caseLawShown, creditLine, priceLines } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
 
@@ -56,11 +56,14 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   const shown = caseLawShown(a, acts.facts);
   if (shown === "waiting") return null;
   if (shown === "offer") {
-    const price = priceLine(lang, acts.facts.pack);
+    const lines = priceLines(lang, acts.facts.pack);
     return (
-      <span className="lib-feature-meta">
-        {price !== null && <span className="lib-credits">{price}</span>}
-        <span>{cr(lang, "Prepaid, including GST. No subscription.")}</span>
+      <span className="lib-feature-meta lib-feature-price">
+        {lines.map((line, i) => (
+          <span key={line} className={i === 0 && lines.length > 1 ? "lib-credits" : undefined}>
+            {line}
+          </span>
+        ))}
       </span>
     );
   }
@@ -72,12 +75,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   const credits = acts.facts.credits;
   return (
     <span className="lib-feature-meta">
-      {credits !== null &&
-        creditLines(lang, credits).map((line, i) => (
-          <span key={line} className={i === 0 ? "lib-credits" : undefined}>
-            {line}
-          </span>
-        ))}
+      {credits !== null && <span className="lib-credits">{creditLine(lang, credits)}</span>}
       <span>{scopeTag(lang, a, names)}</span>
     </span>
   );
@@ -174,7 +172,7 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
       </div>
     );
   if (shown === "offer") {
-    const price = priceLine(lang, acts.facts.pack);
+    const price = priceLines(lang, acts.facts.pack);
     return (
       <section className="lib-detail-block">
         <h4 className="lib-detail-label">{lb(lang, "What it covers")}</h4>
@@ -186,10 +184,7 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
           )}
         </p>
         <h4 className="lib-detail-label mt-s3">{lb(lang, "What it costs")}</h4>
-        <p className="text-ui text-primary">
-          {price === null ? "" : `${price}. `}
-          {cr(lang, "Prepaid, including GST. No subscription.")}
-        </p>
+        <p className="text-ui text-primary">{price.join(" ")}</p>
         <p className="text-small text-muted">{cost}</p>
         {open !== null && (
           <div className="lib-detail-acts">
@@ -207,7 +202,7 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
     <section className="lib-detail-block">
       {credits !== null && (
         <p className="text-ui text-primary">
-          <span className="lib-credits">{creditLines(lang, credits).join(" · ")}</span>
+          <span className="lib-credits">{creditLine(lang, credits)}</span>
         </p>
       )}
       <p className="text-small text-muted">{cost}</p>

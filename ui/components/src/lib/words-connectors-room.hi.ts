@@ -19,12 +19,15 @@ export const HI = {
   // the note's quiet icon button, its accessible name
   "Hide in this conversation": "इस बातचीत में छिपाएँ",
   // the home card offering the case-law connector, where no conversation is open yet (24 Nov round: Hindi later);
-  // {price} is rupees() of the smallest pack's gross price from the host's live price list, GST included
+  // {price} is rupees() of the smallest pack's gross price from the host's live price list, GST included;
+  // no count of searches: what a pack buys depends on the question
   "Clauseo Case Law": null,
   "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.":
     null,
-  "From {price}, about {n} searches": null,
+  "From {price}.": null,
   "Prepaid, including GST. No subscription.": null,
+  // the terms alone, while the host lists no price
+  "Prepaid credits. No subscription.": null,
   "Add Clauseo Case Law": null,
   "Powered by Indian Kanoon": null,
 } as const;
