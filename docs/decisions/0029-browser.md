@@ -605,7 +605,9 @@ netlog's URLs; Playwright's `chromiumSwitches` and its issue #42910 name the sam
   `optimizationguide-pa.googleapis.com`, seen from Google Chrome 157), `NetworkTimeServiceQuerying`
   (`clients2.google.com/time`), `AimEnabled` (`www.google.com/async/folae`),
   `PreconnectToSearch` (the preconnect to `www.google.com`), `MediaRouter` (Cast discovery on
-  the local network), `AutofillServerCommunication` (form predictions); and enabled
+  the local network), `AutofillServerCommunication` (form predictions), `MacAppCodeSignClone`
+  (on macOS Google Chrome clones its whole app at every start, which macOS counted as Clauseo
+  modifying an app: the "prevented from modifying apps" notice); and enabled
   `SkipListAccountsWithoutGaiaCookies`, Chrome 155's own fix for `ListAccounts`, which earlier
   Chrome ignores.
 - **Switches:** `--disable-field-trial-config` (Chromium's compiled-in variations config),
