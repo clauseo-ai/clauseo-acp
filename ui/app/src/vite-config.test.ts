@@ -203,7 +203,8 @@ test(
       BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
     );
     expect(bare.length).toBeGreaterThanOrEqual(BARE_CHUNKS.length);
-    // the one exception (isLazyShared): a small chunk that only bare chunks import, and that the first load lacks.
+    // the one exception (isLazyShared): a chunk under LAZY_SHARED_MAX that only bare chunks import, and that the
+    // first load lacks.
     // Nothing the entry imports reaches it, so it loads with the bare chunk that imports it
     for (const chunk of bare) {
       expect(chunk.isDynamicEntry, chunk.fileName).toBe(true);
@@ -214,7 +215,7 @@ test(
         for (const dep of chunk.imports)
           expect(
             loaded.has(dep) || isLazyShared(dep, chunks, first, bare),
-            `${chunk.fileName}: ${dep}`,
+            `${chunk.fileName}: ${dep}. ${lazySharedReport(dep, chunks, first, bare)}`,
           ).toBe(true);
       }
     }
@@ -225,10 +226,19 @@ test(
 type Chunk = Pick<Rolldown.OutputChunk, "fileName" | "code" | "imports">;
 
 /**
+ * The largest lazy-shared chunk, in brotli bytes: 8 KB. The app's files load from the local bundle, not a network, so
+ * one more request of at most 8 KB when a lazy part first opens costs nothing a lawyer can see; the first load is
+ * unchanged (first-load.test.ts keeps its own rule). It was 1000 B until three PRs of 24 Nov each tripped it by
+ * sharing a words or icons module between two lazy parts.
+ */
+export const LAZY_SHARED_MAX = 8 * 1024;
+
+/**
  * The exception to the bare-chunk rule: `dep` may be missing from the first load when it is a chunk outside `first`
- * (the first load's file names), under 1000 B brotli, that only bare chunks import (at least one does), and whose own
- * imports are all in the first load (so the exception adds no chunk that loads without a preload). Such a chunk is
- * reached by no static import of the entry, so it loads with the bare chunk that imports it, and no sooner.
+ * (the first load's file names), under {@link LAZY_SHARED_MAX} brotli, that only bare chunks import (at least one
+ * does), and whose own imports are all in the first load (so the exception adds no chunk that loads without a
+ * preload). Such a chunk is reached by no static import of the entry, so it loads with the bare chunk that imports
+ * it, and no sooner.
  */
 export function isLazyShared(
   dep: string,
@@ -244,8 +254,36 @@ export function isLazyShared(
   return (
     importers.length > 0 &&
     importers.every((c) => bareNames.has(c.fileName)) &&
-    brotliCompressSync(target.code).length < 1000
+    brotliCompressSync(target.code).length < LAZY_SHARED_MAX
   );
+}
+
+/**
+ * What the failure message says about `dep`, so a writer sees which chunk grew and why the exception refused it: its
+ * brotli size against the limit, whether the first load holds it, whether its own imports are all first-load, and
+ * which chunks import it (bare or not).
+ */
+export function lazySharedReport(
+  dep: string,
+  chunks: readonly Chunk[],
+  first: ReadonlySet<string>,
+  bare: readonly Chunk[],
+): string {
+  const target = chunks.find((c) => c.fileName === dep);
+  if (target === undefined) return "No chunk has that name.";
+  const bareNames = new Set(bare.map((c) => c.fileName));
+  const importers = chunks
+    .filter((c) => c.imports.includes(dep))
+    .map((c) => `${c.fileName}${bareNames.has(c.fileName) ? " (bare)" : " (not bare)"}`);
+  const outside = target.imports.filter((d) => !first.has(d));
+  return [
+    `${brotliCompressSync(target.code).length} B brotli (limit ${LAZY_SHARED_MAX} B)`,
+    first.has(dep) ? "in the first load" : "outside the first load",
+    outside.length === 0
+      ? "its imports are all first-load"
+      : `it imports ${outside.join(", ")} outside the first load`,
+    `imported by ${importers.join(", ") || "nothing"}`,
+  ].join("; ");
 }
 
 /** `n` characters of a seeded LCG, 7 bits each, so brotli cannot shrink them much. Shorter output is a prefix. */
@@ -261,14 +299,15 @@ function noise(n: number): string {
 
 const brotliSize = (code: string) => brotliCompressSync(code).length;
 
-/** The smallest length whose noise brotli-compresses to 1000 B or more, by bisection (brotli grows with length here). */
+/** The smallest length whose noise brotli-compresses to LAZY_SHARED_MAX or more, by bisection (brotli grows with
+ * length here). */
 function firstLengthAtLimit(): number {
   let below = 0;
-  let atOrAbove = 8000;
-  expect(brotliSize(noise(atOrAbove))).toBeGreaterThanOrEqual(1000);
+  let atOrAbove = 40000;
+  expect(brotliSize(noise(atOrAbove))).toBeGreaterThanOrEqual(LAZY_SHARED_MAX);
   while (atOrAbove - below > 1) {
     const mid = (below + atOrAbove) >> 1;
-    if (brotliSize(noise(mid)) < 1000) below = mid;
+    if (brotliSize(noise(mid)) < LAZY_SHARED_MAX) below = mid;
     else atOrAbove = mid;
   }
   return atOrAbove;
@@ -296,14 +335,14 @@ test("isLazyShared is false when a chunk that is not bare also imports it", () =
   expect(isLazyShared("assets/shared.js", chunks, FIRST, [list])).toBe(false);
 });
 
-test("isLazyShared is true just under 1000 B brotli and false from 1000 B up", () => {
+test("isLazyShared is true just under LAZY_SHARED_MAX (8 KB) brotli and false from it up", () => {
   const limit = firstLengthAtLimit();
   const list = synth("assets/list.js", ["assets/shared.js"]);
   const under = synth("assets/shared.js", [], noise(limit - 1));
   const over = synth("assets/shared.js", [], noise(limit));
-  // the edge: the first length at 1000 B or more (the length before it is under 1000 B)
-  expect(brotliSize(under.code)).toBeLessThan(1000);
-  expect(brotliSize(over.code)).toBeGreaterThanOrEqual(1000);
+  // the edge: the first length at the limit or more (the length before it is under the limit)
+  expect(brotliSize(under.code)).toBeLessThan(LAZY_SHARED_MAX);
+  expect(brotliSize(over.code)).toBeGreaterThanOrEqual(LAZY_SHARED_MAX);
   expect(
     isLazyShared("assets/shared.js", [synth("assets/index.js"), list, under], FIRST, [list]),
   ).toBe(true);
@@ -519,5 +558,21 @@ test("unwrapPreloads unwraps only the listed chunks, bodies with brackets and st
   ).toBe(`a = ${entities}; b = ${perf}; c = ${wrapped(other)};`);
   expect(() => unwrapPreloads('__vitePreload(() => import("./perf-x.js")')).toThrow(
     /cannot unwrap/,
+  );
+});
+
+test("the failure message names the shared chunk's size, the limit and its importers", () => {
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const markdown = synth("assets/markdown.js", ["assets/shared.js"]);
+  const shared = synth("assets/shared.js", ["assets/other.js"]);
+  const chunks = [synth("assets/index.js"), list, markdown, shared, synth("assets/other.js")];
+  const said = lazySharedReport("assets/shared.js", chunks, FIRST, [list]);
+  expect(said).toContain(`B brotli (limit ${LAZY_SHARED_MAX} B)`);
+  expect(said).toContain("outside the first load");
+  expect(said).toContain("it imports assets/other.js outside the first load");
+  expect(said).toContain("assets/list.js (bare)");
+  expect(said).toContain("assets/markdown.js (not bare)");
+  expect(lazySharedReport("assets/missing.js", chunks, FIRST, [list])).toBe(
+    "No chunk has that name.",
   );
 });
