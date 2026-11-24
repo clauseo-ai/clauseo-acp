@@ -4,7 +4,7 @@
 // file under the size limit.
 import type { AgentId, ThreadId } from "../transport/protocol.ts";
 import type { Used } from "./agent.ts";
-import { matterPlan } from "./agent.ts";
+import { planName } from "./agent.ts";
 import { NO_PICKS } from "./conversations-agents.ts";
 import type { MatterState } from "./conversations-state.ts";
 import {
@@ -36,6 +36,13 @@ export function agentOf(m: MatterState, choice: Choice, key: string | null = m.o
     chosen,
     [...m.threads.values()].filter((t) => t.status !== "archived"),
   );
+}
+
+/** The plan the rows are measured against: the one a new conversation in the matter runs with no
+ * choice made (agentOf with no draft choice, agent.ts's order), so a row names its plan only where
+ * it differs from the default, and the default and the baseline never disagree. */
+export function defaultPlan(m: MatterState, choice: Choice): string {
+  return planName(agentOf(m, choice, null), choice.agents);
 }
 
 /** What the view needs beyond the matter: whether the host offers Retry, and the focus asked for. */
@@ -86,7 +93,7 @@ export function makeView(
     thread,
     drafting: m.phase !== "loading" && thread === null,
     archived,
-    plan: matterPlan(listed, agents),
+    plan: defaultPlan(m, choice),
     agents,
     options,
     agent: agentOf(m, choice),

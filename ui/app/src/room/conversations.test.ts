@@ -172,17 +172,18 @@ test("a list that fails again: create rejects and makes nothing", async () => {
   expect(sent("create_thread")).toEqual([]);
 });
 
-test("the agent create_thread names: the plan chosen, else the one the matter uses most (archived left out), else DEFAULT_AGENT", async () => {
+test("the agent create_thread names: the plan chosen, else the matter's most recent conversation's (archived left out), else DEFAULT_AGENT", async () => {
   // nothing to go by
   const none = await rig(today(() => []));
   await none.talks.create(none.talks.view().open ?? "");
   expect(none.sent("create_thread")).toEqual([{ matter: A.matter, agent: DEFAULT_AGENT }]);
-  // the plan used most, over the newest thread's; an archived thread doesn't count
+  // the newest thread's plan, over the plan used most (round 24: recent, not most used); an archived
+  // thread doesn't count, though it is newer still
   const newest = await rig(
     today(() => [
-      thread(T1, { agent: "codex" }),
-      thread(T2, { agent: "codex" }),
-      thread(T3, { agent: "claude-acp" }),
+      thread(T1, { agent: "claude-acp" }),
+      thread(T2, { agent: "claude-acp" }),
+      thread(T3, { agent: "codex" }),
       thread(MADE, { agent: "claude-acp", status: "archived" }),
     ]),
   );

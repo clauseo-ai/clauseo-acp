@@ -1,5 +1,5 @@
 // The conversations inside the current matter, on the rail under the matter's own row. One line
-// each, so the rail sits back: the title, the plan only where it differs from the one the matter uses most, and,
+// each, so the rail sits back: the title, the plan only where it differs from the one a new conversation runs, and,
 // while the lawyer looks at another, what it's doing as the same 14 px icon the matters carry (rail-mark.tsx): answering, a
 // question for the lawyer on a court-yellow disc, an answer ready, stopped, or waiting for another conversation. Only a
 // question for the lawyer says its words on the row; the rest say theirs under the pointer and to assistive
@@ -206,8 +206,8 @@ export function ConversationList({
 }: {
   /** The matter's name as filed, to name the list. */
   matter: string;
-  /** The matter's plan: the one its conversations use most, a tie going to the one used most recently (HANDOFF item
-   * 9), as the room works it out; else the most common here. */
+  /** The matter's plan: the one a new conversation in it runs by default, as the room works it out
+   * (its latest conversation's, then the plan last asked with; round 24); else the most common here. */
   plan?: string | undefined;
   conversations: readonly ConversationRowProps[];
   onNew?: () => void;
@@ -224,8 +224,8 @@ export function ConversationList({
   const triage = conversations.find((c) => c.id === at?.id)?.triage;
   // the row it was opened on lost its Snooze (gone, or done) while open: the menu is gone for good, not back with it
   if (at !== null && triage === undefined) setAt(null);
-  // the plan is named only on a conversation whose plan differs from the matter's own: the one most of its
-  // conversations use; given no plan, the most common here, the first listed on a tie
+  // the plan is named only on a conversation whose plan differs from the matter's own: the one a new
+  // conversation runs; given no plan, the most common here, the first listed on a tie
   const count = (a: string) => conversations.filter((c) => c.agent === a).length;
   const first =
     plan ??

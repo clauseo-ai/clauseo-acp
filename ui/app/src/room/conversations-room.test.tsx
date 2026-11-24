@@ -118,7 +118,8 @@ test("the rows under the open matter: the draft says New conversation, a thread 
   expect(rowOf("Lease notice")?.getAttribute("aria-current")).toBeNull();
   await h.unmount();
 
-  // Claude used most: only the ChatGPT row names its plan, though it is the newest
+  // round 24: a new conversation runs the newest conversation's plan, ChatGPT, so the rows are measured
+  // against it: the Claude rows name theirs, though Claude is used most, and the ChatGPT row names none
   h = await mountRoom({
     threads: [
       thread(T1, { title: "Lease notice" }),
@@ -126,9 +127,9 @@ test("the rows under the open matter: the draft says New conversation, a thread 
       thread(T4, { title: "Indemnity", agent: "codex" }),
     ],
   });
-  expect(rowOf("Indemnity")?.querySelector(".room-conv-plan")?.textContent).toBe("ChatGPT");
-  expect(rowOf("Lease notice")?.querySelector(".room-conv-plan")).toBeNull();
-  expect(rowOf("Reply to notice")?.querySelector(".room-conv-plan")).toBeNull();
+  expect(rowOf("Indemnity")?.querySelector(".room-conv-plan")).toBeNull();
+  expect(rowOf("Lease notice")?.querySelector(".room-conv-plan")?.textContent).toBe("Claude");
+  expect(rowOf("Reply to notice")?.querySelector(".room-conv-plan")?.textContent).toBe("Claude");
   await h.click(h.one("new-conversation"));
   const [draft, ...rest] = rows();
   expect(draft?.querySelector(".room-conv-title")?.textContent).toBe("New conversation");
@@ -139,11 +140,11 @@ test("the rows under the open matter: the draft says New conversation, a thread 
     "Lease notice",
   ]);
   expect(rest.every((r) => r.getAttribute("aria-current") === null)).toBe(true);
-  // the draft runs the plan used most, Claude, the matter's own: it names none
+  // the draft runs the default, ChatGPT, the baseline itself (both from defaultPlan): it names none
   expect(draft?.querySelector(".room-conv-plan")).toBeNull();
   await h.unmount();
 
-  // a tie goes to the plan used most recently: ChatGPT, the newest, so the Claude row names its plan
+  // the newest is ChatGPT, so the Claude row names its plan
   h = await mountRoom({
     threads: [
       thread(T1, { title: "Lease notice" }),
