@@ -366,7 +366,11 @@ pub(super) fn on_after_turn(
         match result {
             Ok(mut done) => {
                 let left_out = std::mem::take(&mut done.checkpoint.left_out);
-                after_events(actor, &mut close, matter, thread, done)?;
+                if let Err(error) = after_events(actor, &mut close, matter, thread, done) {
+                    // No card: its papers other checkpoints took stay logged, as below.
+                    together::log_absorbed(actor, matter, thread, &mut close);
+                    return Err(error);
+                }
                 // Its card: the turns beside it keep what it credits (`together.rs`).
                 together::carded(actor, (matter, thread), &mut close, left_out);
             }

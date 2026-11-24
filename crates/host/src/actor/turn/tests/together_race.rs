@@ -5,7 +5,9 @@
 //!   outside edits on them;
 //! - the other turns' places are read when the matter's thread runs a checkpoint, not when the
 //!   job was sent;
-//! - a write call another answer made that was refused does not name it on a card.
+//! - a write call another answer made that was refused does not name it on a card;
+//! - a paper a failed turn's end logged as an outside edit is off the cards of the turns still
+//!   running beside it while it holds what was logged.
 
 use clauseo_protocol::{
     AgentChoiceId, CheckpointId, DomainEvent, HostCommand, MatterPath, ThreadId, TurnId,
@@ -30,6 +32,10 @@ const SAME_PAPER_REFUSED: &str = r#"{"one_of":[[{"expect":{"method":"session/pro
 /// "Ask, then write A." asks perm-a for an edit call naming notes/a.txt and, allowed, writes it
 /// and completes the call; "Write B." writes notes/b.txt with a completed edit call.
 pub(super) const ASK_THEN_A: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Ask, then write A."}]}}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"request":{"id":"perm-a","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}},{"expect_response":{"id":"perm-a","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-a","status":"completed"}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}]]}
+"#;
+
+/// `ASK_THEN_A` with "Write C.", which writes notes/c.txt with a completed edit call.
+const ASK_THEN_A_AND_C: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Ask, then write A."}]}}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"request":{"id":"perm-a","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}},{"expect_response":{"id":"perm-a","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-a","status":"completed"}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pc","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write C."}]}}},{"write_file":{"path":"notes/c.txt","content":"Gamma\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-c","title":"Write notes/c.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/c.txt"}]}}},{"respond":{"to":"pc","result":{"stopReason":"end_turn"}}}]]}
 "#;
 
 /// Whether `input` answers an after-turn checkpoint.
@@ -267,5 +273,44 @@ fn a_refused_write_call_of_another_answer_does_not_name_it_on_the_card() {
     assert!(beside.is_empty(), "{beside:?}");
     rig.release_held();
     until_ended(&mut rig, &[second]);
+    rig.finish();
+}
+
+#[test]
+fn a_failed_answers_logged_paper_is_off_the_card_of_the_answer_still_running() {
+    let mut rig = Rig::start("together-absorbed-running", ASK_THEN_A_AND_C);
+    let (c, b, a) = (rig.thread(), rig.thread_by(2), rig.thread_by(3));
+    // C starts and waits on the lawyer.
+    let turn_c = send_prompt(&mut rig, 10, c, "Ask, then write A.");
+    let request = until_asked(&mut rig, c);
+    // B starts beside C and writes notes/b.txt; its prompt's answer is held, so B runs on.
+    let turn_b = send_prompt(&mut rig, 11, b, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| prompt_answer_of(b, input));
+    // A writes notes/c.txt and ends beside both: its checkpoints hold b.txt, left out as B's.
+    let turn_a = send_prompt(&mut rig, 12, a, "Write C.");
+    until_ended(&mut rig, &[a]);
+    let log_a = rig.log(a);
+    assert_eq!(
+        card(&log_a, turn_a),
+        [("notes/c.txt".to_owned(), false, vec![])]
+    );
+
+    // B's after-turn checkpoint fails: b.txt is logged as an outside edit on A's start.
+    fail_b(&mut rig, b, turn_b);
+    let logged = outside_edits(&mut rig);
+    let [(_, paths, true)] = logged.as_slice() else {
+        panic!("{logged:?}");
+    };
+    assert_eq!(paths, &["notes/b.txt".to_owned()]);
+
+    // C writes notes/a.txt and ends: b.txt, as logged still, is not on its card too.
+    answer(&mut rig, 13, c, request, "allow-once");
+    until_ended(&mut rig, &[c]);
+    let log_c = rig.log(c);
+    assert_eq!(
+        card(&log_c, turn_c),
+        [("notes/a.txt".to_owned(), false, vec![])]
+    );
+    assert_eq!(outside_edits(&mut rig), logged, "b.txt is recorded once");
     rig.finish();
 }

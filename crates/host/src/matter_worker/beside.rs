@@ -41,6 +41,9 @@ pub(crate) struct TurnOverlap {
     pub(crate) failed: Vec<(ThreadId, TurnPaths)>,
     /// The papers the cards of turns that ran beside it and ended meanwhile credit.
     pub(crate) ended: BTreeMap<MatterPath, Ended>,
+    /// The papers checkpoints after `since` logged as outside edits (or, at start-up, put on a
+    /// card flagged), with the content logged: left off the card while they hold it.
+    pub(crate) logged: BTreeMap<MatterPath, Option<ContentId>>,
 }
 
 /// A paper the cards of turns that ended credit.
@@ -63,7 +66,7 @@ pub(super) struct Beside {
     /// The papers of `others` only the cards of turns that ended credit, with what they left.
     left: BTreeMap<MatterPath, Option<ContentId>>,
     /// The papers checkpoints after `since` logged as outside edits or put on a card flagged,
-    /// with the content logged (the start-up repair's; empty otherwise).
+    /// with the content logged ([`TurnOverlap::logged`]).
     logged: BTreeMap<MatterPath, Option<ContentId>>,
     /// Each paper the turns that ended with no card wrote, with their threads.
     failed: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
@@ -143,10 +146,9 @@ pub(super) fn of_repair(
         running,
         failed: Vec::new(),
         ended,
+        logged,
     };
-    let mut beside = others(folder, &overlap, own);
-    beside.logged = logged;
-    beside
+    others(folder, &overlap, own)
 }
 
 /// The papers `paths`, a running turn's, names in `folder` as ones it writes, whatever their
@@ -206,7 +208,7 @@ pub(super) fn others(folder: &Path, overlap: &TurnOverlap, own: &TurnPaths) -> B
         others,
         busy,
         left,
-        logged: BTreeMap::new(),
+        logged: overlap.logged.clone(),
         failed,
         own: named(folder, own),
     }

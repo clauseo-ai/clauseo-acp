@@ -19,7 +19,8 @@
 //!   outside edits, or off an after-turn checkpoint's card) is in that checkpoint already, so no
 //!   later checkpoint logs it. When that turn then ends with no card of its own, the paper is
 //!   logged as an outside edit on that checkpoint in its end's commit ([`log_absorbed`]), so it
-//!   stays on the record and undoable as any outside edit is.
+//!   stays on the record and undoable as any outside edit is. The turns still running beside it
+//!   leave it off their cards while it holds what was logged.
 //!
 //! What the matter's thread makes of the places is in `matter_worker/beside.rs`; it reads a
 //! running turn's places when the job runs (`sent/shared.rs`).
@@ -64,6 +65,12 @@ pub(super) struct Overlap {
     /// The changes of its papers other turns' checkpoints left out as its (of their outside
     /// edits, or off their cards), by checkpoint: logged as outside edits if it ends with no card.
     absorbed: BTreeMap<CheckpointId, Vec<FileChange>>,
+    /// The papers its end logged of `absorbed`, with the content logged, which the turns running
+    /// beside it leave off their cards while they hold it.
+    logs: Vec<(MatterPath, Option<ContentId>)>,
+    /// The papers turns that ran beside it and ended with no card logged as outside edits, with
+    /// the content logged: left off its card while they hold it, being on the record already.
+    logged: BTreeMap<MatterPath, Option<ContentId>>,
     /// The papers its card credits it with, set once its after-turn checkpoint is in its card.
     card: Option<Vec<(MatterPath, Option<ContentId>)>>,
 }
@@ -254,9 +261,10 @@ pub(super) fn carded(
     }
 }
 
-/// `thread`'s turn ends with no card (its after-turn checkpoint failed): the changes of its
-/// papers the checkpoints of turns that ended before it took are logged in `close`, its end's
-/// commit, as outside edits on those checkpoints.
+/// `thread`'s turn ends with no card (its after-turn checkpoint or that checkpoint's events
+/// failed): the changes of its papers the checkpoints of turns that ended before it took are
+/// logged in `close`, its end's commit, as outside edits on those checkpoints. The turns running
+/// beside it leave them off their cards while they hold what was logged ([`ended`]).
 pub(super) fn log_absorbed(
     actor: &mut Actor,
     matter: MatterId,
@@ -267,9 +275,20 @@ pub(super) fn log_absorbed(
         return;
     };
     let absorbed = std::mem::take(&mut own.overlap.absorbed);
+    let files = absorbed.values().flatten();
+    own.overlap.logs = files.flat_map(paths_of).collect();
     for (checkpoint, files) in absorbed {
         push_edits(actor, matter, close, checkpoint, files);
     }
+}
+
+/// The papers `change` touches, with what each holds after it: a rename's old path, nothing.
+fn paths_of(change: &FileChange) -> Vec<(MatterPath, Option<ContentId>)> {
+    let mut paths = vec![(change.path().clone(), change.after().cloned())];
+    if let ChangeKind::Renamed { from } = change.change() {
+        paths.push((from.clone(), None));
+    }
+    paths
 }
 
 /// `change` as an outside edit: neither flagged nor naming anyone.
@@ -325,13 +344,14 @@ fn push_edits(
 /// `thread`'s turn ends: each turn running beside it in `matter` keeps the papers its card
 /// credits, or, when it has no card (its after-turn checkpoint or that checkpoint's events
 /// failed), its tool calls' places: those papers stay on that turn's card, naming it, since
-/// they are on no other.
+/// they are on no other, unless its end logged them as outside edits and they hold that still.
 pub(super) fn ended(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
     let Some(own) = current(actor, thread) else {
         return;
     };
     let card = own.overlap.card.take();
     let places = own.overlap.ending.clone();
+    let logs = std::mem::take(&mut own.overlap.logs);
     let beside: Vec<ThreadId> = own.overlap.beside.iter().copied().collect();
     let running = actor
         .matters
@@ -358,6 +378,8 @@ pub(super) fn ended(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
             }
             (None, None) => {}
         }
+        // Set only by an end with no card (`log_absorbed`).
+        running.overlap.logged.extend(logs.iter().cloned());
     }
 }
 
@@ -384,6 +406,7 @@ pub(super) fn overlap_of(
         running,
         failed: own.overlap.failed.clone(),
         ended: own.overlap.ended.clone(),
+        logged: own.overlap.logged.clone(),
     }))
 }
 
