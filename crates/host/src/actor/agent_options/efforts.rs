@@ -1,15 +1,16 @@
 //! Which models take an effort: `ConfigChoice::takes_effort` on each choice of a `Model`
 //! option, so the app can hide its effort picker for a model that has none.
 //!
-//! No adapter reports it per model. claude-agent-acp 0.89.1 lists its models with a value, a
-//! name and a description only (`session-model.js:192-206`), and sends its `thought_level`
-//! option only while the current model has effort levels (`buildEffortConfigOption`,
-//! `session-effort.js:61-67`, called from `buildConfigOptions`, `acp-agent.js:8260-8262`, and
-//! rebuilt on each model switch, `acp-agent.js:6796-6805`). So a report says it for its current
-//! model alone: true when the report holds an option of the `ThoughtLevel` category, false when
-//! it holds none. Every other model keeps what an earlier report of the thread or of its agent
-//! said (a false there stays false), and is true when none said: unknown reads as true, as
-//! before the field.
+//! The host does not read it per model. claude-agent-acp 0.110.1 does put each model's levels on
+//! its row for an AIR client (`_meta.jetbrains.air.reasoningEfforts`, `session-model.js:268`; none
+//! on a model without effort, as Haiku 4.5 live), but Clauseo's map drops `_meta`. Claude sends its
+//! `thought_level` option only while the current model has effort levels
+//! (`buildEffortConfigOption`, `session-effort.js:112-118`, called from `buildConfigOptions`,
+//! `session-config-options.js:114`, and rebuilt on each model switch, `v1/acp-agent.js:7273-7276`).
+//! So a report says it for its current model alone: true when the report holds an option of the
+//! `ThoughtLevel` category, false when it holds none. Every other model keeps what an earlier
+//! report of the thread or of its agent said (a false there stays false), and is true when none
+//! said: unknown reads as true, as before the field.
 
 use clauseo_protocol::{ConfigCategory, ConfigOption, ConfigOptionKind, StreamId, ThreadId};
 

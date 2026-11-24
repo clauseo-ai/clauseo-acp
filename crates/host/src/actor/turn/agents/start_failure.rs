@@ -1,7 +1,7 @@
 //! A launch that failed after the agent started ([`launch_failed`]), and the log line about an
 //! agent that ended before its session was ready ([`log_start_tail`]).
 //!
-//! The adapter prints its session-start phases to stderr (claude-agent-acp 0.89.1:
+//! The adapter prints its session-start phases to stderr (claude-agent-acp 0.110.1:
 //! `[session/create] sessionId=… phase=validate-cwd durationMs=1 totalMs=1`, then `settings`,
 //! `prepare-query`, `sdk-initialize`, …), so the phases it reached tell where a start failed.
 //! Decision record 0047 keeps agent output, stderr tails included, out of the log file, so the
