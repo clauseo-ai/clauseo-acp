@@ -14,7 +14,7 @@ import {
   userMessage,
   uuid,
 } from "../testing/stream-script.ts";
-import type { ThreadStatus } from "../transport/protocol.ts";
+import type { MatterHold, ThreadStatus } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { Entry } from "./entry.ts";
@@ -42,16 +42,16 @@ import { matterWords, threadWords } from "./words.ts";
 export const OTHER = uuid(0, 1);
 
 /** A host whose matter has THREAD, with one question asked, in `status`, and "Draft petition", in `other` (running
- * unless said); with `hold`, THREAD's header names it (#1286's HeaderEntry.hold, a stand-in until that binding). */
+ * unless said); with `hold`, THREAD's header names it (HeaderEntry.hold). */
 export function heldHost(
   status: ThreadStatus,
   other: ThreadStatus = "running",
-  hold?: string,
+  hold?: MatterHold,
 ): FakeTransport {
   const head = header();
   head.header!.matter = MATTER.matter;
   head.header!.status = status;
-  if (hold !== undefined) Object.assign(head.header!, { hold });
+  if (hold !== undefined) head.header!.hold = hold;
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };

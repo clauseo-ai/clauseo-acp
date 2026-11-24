@@ -18,6 +18,7 @@ import {
 } from "../testing/stream-script.ts";
 import type {
   EntryId,
+  MatterHold,
   StreamId,
   ThreadStatus,
   ThreadSummary,
@@ -99,7 +100,7 @@ async function ask(text = QUESTION) {
   await h!.type(text);
   await h!.key({ key: "Enter", keyCode: 13 });
 }
-/** The card's words for each hold the host names (#1286's TurnQueued.hold, read as an optional field until then). */
+/** The card's words for each hold the host names (TurnQueued.hold, folded into HeaderEntry.hold). */
 const CARDS = {
   undo: "An undo is changing this matter's papers. Your message is queued and sends once it's done.",
   restore:
@@ -108,11 +109,11 @@ const CARDS = {
     "This matter's folder is being moved. Your message is queued and sends once that's done.",
 } as const;
 const OTHER_ANSWER = "Waiting for another answer in this matter.";
-/** THREAD's header queued with the host's hold (#1286's HeaderEntry.hold; a stand-in until that binding): the
+/** THREAD's header queued with the host's hold (HeaderEntry.hold), behind its own thread as the host logs it: the
  * message's own status stays sent. */
-const heldHeader = (hold: string): ViewEntry => {
+const heldHeader = (hold: MatterHold): ViewEntry => {
   const e = headerOf(THREAD, { queued: { behind: THREAD } });
-  return { header: { ...e.header!, hold } as NonNullable<ViewEntry["header"]> };
+  return { header: { ...e.header!, hold } };
 };
 /** What the composer's one status region says of its working line. */
 const composerSaid = () =>
@@ -183,7 +184,7 @@ test("queued with the host's hold: the card names that hold; the working line sa
   }
 });
 
-test("today's host: queued behind another conversation with no hold says another answer, never an undo, restore or move", async () => {
+test("an older host's log: queued behind another conversation with no hold says another answer, never an undo, restore or move", async () => {
   h = await mountWith("running");
   h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
   await h.settle();
@@ -197,7 +198,7 @@ test("today's host: queued behind another conversation with no hold says another
 test("a missing or unknown hold behind its own thread: the working line alone, no card that names a reason", async () => {
   for (const head of [
     headerOf(THREAD, { queued: { behind: THREAD } }),
-    heldHeader("something_new"),
+    heldHeader("something_new" as MatterHold),
   ]) {
     h = await mountWith("idle");
     h.deliver([reset([], head)]);

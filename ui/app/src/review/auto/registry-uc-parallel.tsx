@@ -1,7 +1,6 @@
 // UC's entries for parallel answers (issue 15, the UI side, 24 Nov; #1302 review): the conversations of a matter answer
-// at the same time, so a message waits only as the host queues it: for an undo, a restore or a move it names (#1286's
-// TurnQueued.hold, read as an optional field until its bindings land), or, on today's host, behind another
-// conversation's answer. The real room over U7's host.
+// at the same time, so a message waits only as the host queues it: for an undo, a restore or a move it names
+// (HeaderEntry.hold), or, in an older host's log, behind another conversation's answer. The real room over U7's host.
 import {
   agentText,
   batch,
@@ -14,7 +13,7 @@ import {
   uuid,
 } from "../../testing/stream-script.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
-import type { FileChange, ThreadStatus, ViewEntry } from "../../transport/protocol.ts";
+import type { FileChange, MatterHold, ThreadStatus, ViewEntry } from "../../transport/protocol.ts";
 import type { Entry } from "../entry.ts";
 import { MATTER } from "../hosts.ts";
 import { heldHost, OTHER } from "../registry-u7.tsx";
@@ -25,10 +24,8 @@ import { matterWords, threadWords, versionWords } from "../words.ts";
 /** Queued behind its own thread: with the header's hold (heldHost's third), what the host gives for a hold. */
 const QUEUED: ThreadStatus = { queued: { behind: THREAD } };
 /** Both conversations' messages wait for `hold`: the composer's working line and card, the other's rail row. */
-const held = (hold: "undo" | "restore" | "relocate") => () => (
-  <RoomOver host={() => heldHost(QUEUED, QUEUED, hold)} />
-);
-/** Today's host: the open conversation's message queued behind "Draft petition", which runs, with no hold. */
+const held = (hold: MatterHold) => () => <RoomOver host={() => heldHost(QUEUED, QUEUED, hold)} />;
+/** An older host's log: the open conversation's message queued behind "Draft petition", which runs, with no hold. */
 const behindOther = () => <RoomOver host={() => heldHost({ queued: { behind: OTHER } })} />;
 
 const LATER = "And does the renewal letter change the sublet clause?";
@@ -37,12 +34,11 @@ const later = (status: "sent" | "removed"): ViewEntry => {
   const e = userMessage(4, 2, LATER);
   return { user_message: { ...e.user_message!, status, turn: uuid(2, 4) } };
 };
-const headed = (status: ThreadStatus, hold?: string): ViewEntry => {
+const headed = (status: ThreadStatus, hold?: MatterHold): ViewEntry => {
   const head = header();
   head.header!.matter = MATTER.matter;
   head.header!.status = status;
-  // #1286's HeaderEntry.hold, a stand-in until that binding
-  if (hold !== undefined) Object.assign(head.header!, { hold });
+  if (hold !== undefined) head.header!.hold = hold;
   return head;
 };
 

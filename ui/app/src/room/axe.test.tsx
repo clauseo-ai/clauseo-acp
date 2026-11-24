@@ -158,8 +158,7 @@ function headerFor(scene: Scene): ViewEntry {
   const head = header("needs_you");
   if (scene.queued === true) {
     head.header!.status = { queued: { behind: THREAD } };
-    // #1286's HeaderEntry.hold, a stand-in until that binding
-    Object.assign(head.header!, { hold: "restore" });
+    head.header!.hold = "restore";
   }
   return head;
 }
