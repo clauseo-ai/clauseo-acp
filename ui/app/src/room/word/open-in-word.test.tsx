@@ -226,10 +226,9 @@ test("a change note naming one listed Word document offers Open in Word, which o
   expect(opened()).toEqual([uuid(1, 8)]);
 });
 
+// a .pdf, a .txt and two Word documents each get their own press (thread/paper-opens.test.tsx)
 for (const [name, paths, undone] of [
-  ["a .pdf and a .txt", ["Exhibit.pdf", "brief.txt"], false],
   ["a Word document the wall doesn't list", ["Unlisted.docx"], false],
-  ["two Word documents", ["drafts/Reply.docx", "Old notice.DOC"], false],
   ["a Word document whose change is undone", ["drafts/Reply.docx"], true],
 ] as const) {
   test(`a change note naming ${name} offers no Open in Word`, async () => {

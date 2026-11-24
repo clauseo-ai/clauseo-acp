@@ -412,6 +412,32 @@
     gap: var(--s1);
     margin-left: auto;
   }
+  /* a paper to a row, each with its own press (change-note-papers.tsx), under the line, past the note's icon */
+  .change-list {
+    flex: 1 0 100%;
+    display: grid;
+    padding-left: calc(var(--s4) + var(--s2));
+  }
+  .change-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .change-row + .change-row {
+    box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--divide);
+  }
+  .change-name {
+    @apply text-small-row text-muted;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .change-row > button {
+    flex: none;
+  }
+  .change-more {
+    margin-left: var(--s4);
+  }
   .change-error {
     @apply text-small-row text-muted;
     align-self: center;

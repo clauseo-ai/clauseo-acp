@@ -1,6 +1,7 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
 // on: Compare, and Undo, each when the caller gives it, and a way to open a paper where the caller gives one ("Open in
-// Word"). A refused undo, or a failed open, says why in a quiet line beside Undo, with the way on the caller gives for
+// Word"), or a way per paper, which lists the papers one to a row, each with its own press (change-note-papers.tsx).
+// A refused undo, or a failed open, says why in a quiet line beside Undo, with the way on the caller gives for
 // it (Show in folder, for a path too long for Word). The note itself takes focus (not by
 // Tab) when the control under it that held focus goes. When a paper was edited after Clauseo's change, Undo asks
 // first, in the alert dialog, with Keep current as the safe choice: at once when the paper is given (editedSince), or,
@@ -11,6 +12,7 @@ import { Button } from "../ui/button.tsx";
 import { IconCompare, IconOpen, IconPaperBookPage, IconUndo } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { Say } from "./say.tsx";
+import { ChangePapers, type PaperOpen } from "./change-note-papers.tsx";
 
 const loadAsk = () => late(import("./change-note-ask.tsx"));
 /** The dialog Undo opens when a paper changed since: its own chunk, as most notes never ask. */
@@ -40,6 +42,7 @@ export function ChangeNote({
   onUndo,
   onCompare,
   open,
+  opens,
   undoDisabled = false,
   error = null,
   errorAction,
@@ -61,6 +64,9 @@ export function ChangeNote({
   onCompare?: () => void;
   /** Opens a paper the note names, in the program the label says: shows only when given, while the changes stand. */
   open?: { label: string; onOpen: () => void };
+  /** Each paper's own press, by its place in papers (null for none): given, the papers stand one to a row, each with
+   * its press beside it, in place of the line naming them. */
+  opens?: readonly (PaperOpen | null)[] | undefined;
   /** Undo can't be pressed for now, such as while Clauseo answers. */
   undoDisabled?: boolean;
   /** A refused undo: its words, in the language, and its code, as a quiet line beside Undo. */
@@ -128,18 +134,20 @@ export function ChangeNote({
         <span className="change-what">
           <Say>{counts.changed}</Say>
         </span>
-        <span className="change-papers">
-          {papers.map((p, i) => (
-            <Fragment key={`${i}:${p}`}>
-              {i > 0 && ", "}
-              <span data-testid={testIds?.paper}>
-                <bdi>
-                  <Say>{p}</Say>
-                </bdi>
-              </span>
-            </Fragment>
-          ))}
-        </span>
+        {opens === undefined && (
+          <span className="change-papers">
+            {papers.map((p, i) => (
+              <Fragment key={`${i}:${p}`}>
+                {i > 0 && ", "}
+                <span data-testid={testIds?.paper}>
+                  <bdi>
+                    <Say>{p}</Say>
+                  </bdi>
+                </span>
+              </Fragment>
+            ))}
+          </span>
+        )}
       </p>
       <div className="change-actions">
         {error !== null && (
@@ -190,6 +198,9 @@ export function ChangeNote({
           </Button>
         )}
       </div>
+      {opens !== undefined && (
+        <ChangePapers papers={papers} opens={opens} paperTestId={testIds?.paper} />
+      )}
       {askAbout !== null && onUndo !== undefined && asked && (
         <Suspense fallback={null}>
           <UndoAsk name={askAbout} open={asking} onOpenChange={setAsking} onUndo={undo} />
