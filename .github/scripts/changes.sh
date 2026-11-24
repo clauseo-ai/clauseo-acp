@@ -94,8 +94,9 @@ classify() {
     ui/app/src/review/registry-nd.tsx) ui=true app=true rust=true ;;
     # The review registry pages and the room's commands: clauseo-desktop's menu and MCP words check
     # their tables against them (menu.rs, menu/words.rs, mcp/words.rs, mcp/import_words.rs), and
-    # new registry pages keep coming.
+    # new registry pages keep coming (in review/auto/, which registry-auto.ts collects).
     ui/app/src/review/registry-*.tsx | ui/app/src/room/room-commands.ts) ui=true app=true rust=true ;;
+    ui/app/src/review/auto/*.tsx) ui=true app=true rust=true ;;
     docs/firm-it.md) rust=true ;;
     ui/app/doc-approvals.json) ui=true app=true rust=true ;;
     # The copy approvals: profile's legal tests (crates/profile/tests/legal/) check its lines against them.

@@ -65,6 +65,7 @@ check "$T $T $T $T" ui/app/index.html
 check "$T $T $T $T" ui/app/src/review/registry-nd.tsx
 check "$T $T $T $T" ui/app/src/review/registry-uc-mcp-import.tsx
 check "$T $T $T $T" ui/app/src/review/registry-panels.tsx
+check "$T $T $T $T" ui/app/src/review/auto/registry-uc-example.tsx
 check "$T $T $T $T" ui/app/src/room/room-commands.ts
 check "$T $T $T $T" ui/e2e/app-windows/smoke.spec.ts
 check "$T $T $T $T" ui/e2e/app-windows/scenarios/word-one-docx.jsonl
