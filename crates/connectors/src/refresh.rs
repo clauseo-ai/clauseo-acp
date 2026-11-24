@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::connectors::{ConnectorHandle, Slot, lock};
 use crate::credential::{Credential, OAuthTokens};
-use crate::error::AuthError;
+use crate::error::{AuthError, StoreError};
 use crate::http::{self, Route, SendBody};
 use crate::oauth::{encode_form, oauth_error_code, parse_token_answer};
 use crate::secret::{Bearer, Secret};
@@ -60,7 +60,7 @@ pub(crate) fn after_401(
     let mut slot = lock(&handle.inner.slot);
     match handle.current(&mut slot)? {
         Credential::ApiKey(_) => {
-            handle.end_credential(&mut slot, Ended::KeyRevoked);
+            handle.end_credential(&mut slot, Ended::KeyRevoked)?;
             Err(AuthError::KeyRevoked)
         }
         Credential::OAuth(tokens) if tokens.access_token != *used => {
@@ -80,7 +80,9 @@ pub(crate) fn after_second_401(handle: &ConnectorHandle, used: &Secret) -> AuthE
         Ok(_) => return AuthError::SignedOut,
         Err(err) => return err,
     };
-    handle.end_credential(&mut slot, ended);
+    if let Err(err) = handle.end_credential(&mut slot, ended) {
+        return AuthError::Store(err);
+    }
     match ended {
         Ended::KeyRevoked => AuthError::KeyRevoked,
         Ended::SignedOut => AuthError::SignedOut,
@@ -103,9 +105,9 @@ fn refresh_locked(
         Credential::OAuth(tokens) => tokens.clone(),
         Credential::ApiKey(key) => return Ok(key.clone()),
     };
-    let current = match adopt_stored(handle, slot, current)? {
+    let (current, reread) = match adopt_stored(handle, slot, current)? {
         Adopted::Fresh(token) => return Ok(token),
-        Adopted::Refresh(tokens) => tokens,
+        Adopted::Refresh(tokens, reread) => (tokens, reread),
     };
     let old_refresh = current.refresh_token.clone();
     let keep_current = |why: &str| -> Option<Secret> {
@@ -153,11 +155,24 @@ fn refresh_locked(
     if reply.status != 200 {
         let code = oauth_error_code(&reply.body);
         if code == "invalid_grant" {
+            if reread == Reread::Refused {
+                // The item may hold a newer chain this one could not read: nothing is deleted
+                // or recorded, and the next look reads the item again.
+                tracing::info!(
+                    connector = handle.id(),
+                    "the refresh token was refused, and the keychain item could not be read; \
+                     kept"
+                );
+                handle.forget_unread(slot);
+                return Err(AuthError::Store(StoreError::Refused(
+                    "the keychain item could not be read before the refresh".to_owned(),
+                )));
+            }
             tracing::info!(
                 connector = handle.id(),
                 "the refresh token was refused; signed out"
             );
-            handle.end_credential(slot, Ended::SignedOut);
+            handle.end_credential(slot, Ended::SignedOut)?;
             return Err(AuthError::SignedOut);
         }
         let why = format!("the token endpoint answered HTTP {} ({code})", reply.status);
@@ -181,8 +196,17 @@ fn refresh_locked(
 enum Adopted {
     /// Another instance's access token, with more than 5 minutes left: no refresh.
     Fresh(Secret),
-    /// The tokens to refresh with.
-    Refresh(OAuthTokens),
+    /// The tokens to refresh with, and how the re-read went.
+    Refresh(OAuthTokens, Reread),
+}
+
+/// The re-read of the keychain item before a refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reread {
+    /// Read (or skipped: memory holds the newer tokens).
+    Read,
+    /// The keychain refused it: what the item holds is not known, so nothing deletes it.
+    Refused,
 }
 
 /// Reads the keychain item again before a refresh. Gone: signed out. A different refresh token
@@ -195,13 +219,13 @@ fn adopt_stored(
     current: OAuthTokens,
 ) -> Result<Adopted, AuthError> {
     if handle.inner.persist_failed.load(Ordering::Relaxed) {
-        return Ok(Adopted::Refresh(current));
+        return Ok(Adopted::Refresh(current, Reread::Read));
     }
     let stored = match handle.read_stored() {
         Ok(stored) => stored,
         Err(err) => {
             tracing::warn!(connector = handle.id(), error = %err, "the keychain item could not be read again before the refresh");
-            return Ok(Adopted::Refresh(current));
+            return Ok(Adopted::Refresh(current, Reread::Refused));
         }
     };
     match stored {
@@ -210,7 +234,7 @@ fn adopt_stored(
                 connector = handle.id(),
                 "the keychain item is gone; signed out"
             );
-            handle.end_credential(slot, Ended::SignedOut);
+            handle.end_credential(slot, Ended::SignedOut)?;
             Err(AuthError::SignedOut)
         }
         Some(Credential::OAuth(stored)) if stored.refresh_token != current.refresh_token => {
@@ -227,7 +251,7 @@ fn adopt_stored(
             if stored.access_expires_at > horizon {
                 Ok(Adopted::Fresh(stored.access_token))
             } else {
-                Ok(Adopted::Refresh(stored))
+                Ok(Adopted::Refresh(stored, Reread::Read))
             }
         }
         Some(Credential::ApiKey(key)) => {
@@ -239,7 +263,7 @@ fn adopt_stored(
             handle.inner.generation.fetch_add(1, Ordering::SeqCst);
             Ok(Adopted::Fresh(key))
         }
-        Some(Credential::OAuth(_)) => Ok(Adopted::Refresh(current)),
+        Some(Credential::OAuth(_)) => Ok(Adopted::Refresh(current, Reread::Read)),
     }
 }
 
@@ -256,6 +280,7 @@ fn persist(handle: &ConnectorHandle, tokens: &OAuthTokens) {
         match written {
             Ok(()) => {
                 handle.inner.persist_failed.store(false, Ordering::Relaxed);
+                handle.wrote_item();
                 return;
             }
             Err(err) => last = Some(err),

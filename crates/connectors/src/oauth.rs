@@ -21,7 +21,7 @@ use zeroize::Zeroizing;
 use crate::cancel::CancelFlag;
 use crate::connectors::{ConnectorHandle, lock};
 use crate::credential::{Credential, CredentialKind, OAuthTokens, WireSecret};
-use crate::error::SignInError;
+use crate::error::{SignInError, StoreError};
 use crate::http::{self, Route, SendBody};
 use crate::net::bind_loopback_exclusive;
 use crate::pkce::s256_challenge;
@@ -178,6 +178,9 @@ pub(crate) fn begin_sign_in(
     handle: &ConnectorHandle,
     login_hint: Option<&str>,
 ) -> Result<PendingSignIn, SignInError> {
+    // Before the browser opens: a credential the keychain refuses to read could not be revoked
+    // when the new one replaced it.
+    handle.check_readable()?;
     let metadata = metadata(handle)?;
     let verifier = Secret::new(URL_SAFE_NO_PAD.encode(*random::<32>(handle)));
     let state = Secret::new(URL_SAFE_NO_PAD.encode(*random::<16>(handle)));
@@ -421,7 +424,17 @@ fn exchange(
     let tokens =
         parse_token_answer(&reply.body, shared.unix_now(), None).map_err(SignInError::Exchange)?;
     let refresh_token = tokens.refresh_token.clone();
-    if !handle.store_new(Credential::OAuth(tokens), CredentialKind::OAuth, still)? {
+    let stored = handle.store_new(Credential::OAuth(tokens), CredentialKind::OAuth, still);
+    if let Err(StoreError::Refused(_)) = &stored
+        && !crate::refresh::revoke(handle, &refresh_token)
+    {
+        // The new tokens are never used: the item they would replace was refused.
+        tracing::warn!(
+            connector = handle.id(),
+            "the unused refresh token could not be revoked"
+        );
+    }
+    if !stored? {
         // Ended while the code was exchanged: the tokens are never used.
         if !crate::refresh::revoke(handle, &refresh_token) {
             tracing::warn!(

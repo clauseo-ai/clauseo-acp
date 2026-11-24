@@ -168,6 +168,10 @@ pub(crate) struct HandleInner {
     pub(crate) urls: ConnectorUrls,
     pub(crate) slot: Mutex<Slot>,
     pub(crate) persist_failed: AtomicBool,
+    /// Whether the last read of the keychain item was refused (an error, not "no item"): no
+    /// automatic delete runs while it is, since what the item holds is not known. A read that
+    /// works, or a write that lands, clears it.
+    pub(crate) read_refused: AtomicBool,
     /// Bumped whenever the credential is replaced or ends; the account cache is kept only for
     /// the generation it was read under.
     pub(crate) generation: AtomicU64,
@@ -232,6 +236,7 @@ impl ConnectorHandle {
                 urls: shared.config.origin.urls(known),
                 slot: Mutex::new(Slot::Unread),
                 persist_failed: AtomicBool::new(false),
+                read_refused: AtomicBool::new(false),
                 generation: AtomicU64::new(0),
                 forgets: AtomicU64::new(0),
                 account: Mutex::new(None),
@@ -253,7 +258,8 @@ impl ConnectorHandle {
     }
 
     /// What the app shows. Reads the keychain item once, the first time the connector is added;
-    /// after that, memory only.
+    /// after that, memory only. A read the keychain refused (any error but "no item") is
+    /// `Unreadable`, never signed out, and the next call reads the item again.
     pub fn status(&self) -> CredentialStatus {
         let mut slot = lock(&self.inner.slot);
         if !self.is_added() {
@@ -263,7 +269,7 @@ impl ConnectorHandle {
             Ok(credential) => credential.map(Credential::kind),
             Err(err) => {
                 tracing::warn!(connector = self.id(), error = %err, "the keychain item could not be read");
-                None
+                return CredentialStatus::Unreadable;
             }
         };
         lock(&self.inner.shared.state).status(self.id(), kind)
@@ -363,7 +369,10 @@ impl ConnectorHandle {
 
     /// Signs out: revokes the refresh token (`POST /revoke`; an API key has no revoke call),
     /// then deletes the keychain item, then clears the credential in memory. The item is
-    /// deleted whether or not the revoke worked.
+    /// deleted whether or not the revoke worked. A keychain that refuses to read the item (an
+    /// error that is not "no item") refuses the sign-out with `StoreError::Refused`, before
+    /// anything is revoked, deleted or recorded: its refresh token could not be revoked. A
+    /// delete it refuses records nothing either: `StoreError::Refused`, the item kept.
     pub fn sign_out(&self) -> Result<SignOutReport, Error> {
         if let Some((_, pending)) = lock(&self.inner.pending).take() {
             pending.cancel();
@@ -371,31 +380,51 @@ impl ConnectorHandle {
         // Asked before the lock: a slow proxy lookup never holds the credential.
         let route = self.inner.shared.agent.route();
         let mut slot = lock(&self.inner.slot);
-        let credential = match self.load(&mut slot) {
-            Ok(credential) => credential.cloned(),
-            Err(err) => {
-                tracing::warn!(connector = self.id(), error = %err, "the keychain item could not be read; deleting it");
-                None
-            }
+        let credential = self
+            .load(&mut slot)
+            .map_err(|err| self.unreadable(&err))?
+            .cloned();
+        // A later read of the item was refused (before a refresh, say): it is read again first,
+        // and its own refresh token is revoked too when it holds another one.
+        let stored = if self.inner.read_refused.load(Ordering::SeqCst) {
+            self.read_stored().map_err(|err| self.unreadable(&err))?
+        } else {
+            None
         };
-        let revoked = match &credential {
-            Some(Credential::OAuth(tokens)) => {
-                crate::refresh::revoke_on(self, &tokens.refresh_token, &route)
+        let mut tokens: Vec<&Secret> = Vec::new();
+        for held in [&credential, &stored].into_iter().flatten() {
+            if let Credential::OAuth(oauth) = held
+                && !tokens.contains(&&oauth.refresh_token)
+            {
+                tokens.push(&oauth.refresh_token);
             }
-            Some(Credential::ApiKey(_)) | None => false,
-        };
-        let deleted = self.inner.shared.store.delete(self.id());
+        }
+        let mut revoked = false;
+        for token in tokens {
+            revoked |= crate::refresh::revoke_on(self, token, &route);
+        }
+        if let Err(err) = self.inner.shared.store.delete(self.id()) {
+            // The item stays and the state file says what it said: nothing records a sign-out
+            // that did not happen. The next look reads the item again.
+            if !self.persist_failed() {
+                self.forget_unread(&mut slot);
+            }
+            return Err(self.unreadable(&err).into());
+        }
         *slot = Slot::Read(None);
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         self.inner.persist_failed.store(false, Ordering::Relaxed);
         self.save_state(|state| state.end(self.id(), Ended::SignedOut))?;
-        deleted?;
         Ok(SignOutReport { revoked })
     }
 
-    /// Signs out, then forgets the connector on this install.
+    /// Signs out, then forgets the connector on this install. A sign-out refused because the
+    /// item could not be read (`StoreError::Refused`) forgets nothing either.
     pub fn remove(&self) -> Result<(), Error> {
         let signed_out = self.sign_out();
+        if let Err(err @ Error::Store(StoreError::Refused(_))) = signed_out {
+            return Err(err);
+        }
         // The entry goes even when the keychain refused the delete.
         let _guard = lock(&self.inner.slot);
         self.save_state(|state| state.remove(self.id()))?;
@@ -404,6 +433,25 @@ impl ConnectorHandle {
 
     pub(crate) fn id(&self) -> &'static str {
         self.inner.known.id
+    }
+
+    /// `StoreError::Refused` for a keychain call that failed, logged without the item.
+    pub(crate) fn unreadable(&self, err: &StoreError) -> StoreError {
+        tracing::warn!(connector = self.id(), error = %err, "the keychain refused the item; nothing was changed");
+        match err {
+            StoreError::Refused(_) => err.clone(),
+            other => StoreError::Refused(other.to_string()),
+        }
+    }
+
+    /// Reads the item now if it was not read yet (memory only after that), so a sign-in or a
+    /// new key is refused with `StoreError::Refused` before it starts while the keychain
+    /// refuses the read: the credential it would replace could not be revoked.
+    pub(crate) fn check_readable(&self) -> Result<(), StoreError> {
+        let mut slot = lock(&self.inner.slot);
+        self.load(&mut slot)
+            .map(drop)
+            .map_err(|err| self.unreadable(&err))
     }
 
     pub(crate) fn account_url(&self) -> String {
@@ -417,13 +465,14 @@ impl ConnectorHandle {
     }
 
     /// The credential, reading the keychain item the first time. An item that does not parse
-    /// is deleted and the connector marked signed out.
+    /// is deleted and the connector marked signed out; a delete the keychain refuses changes
+    /// nothing and is `StoreError::Refused`.
     pub(crate) fn load<'a>(
         &self,
         slot: &'a mut Slot,
     ) -> Result<Option<&'a Credential>, StoreError> {
         if matches!(slot, Slot::Unread) {
-            let read = match self.inner.shared.store.get(self.id())? {
+            let read = match self.get_item()? {
                 None => None,
                 Some(bytes) => {
                     let bytes = Zeroizing::new(bytes);
@@ -433,9 +482,13 @@ impl ConnectorHandle {
                             connector = self.id(),
                             "the keychain item does not parse; deleted"
                         );
-                        if let Err(err) = self.inner.shared.store.delete(self.id()) {
-                            tracing::warn!(connector = self.id(), error = %err, "the keychain item could not be deleted");
-                        }
+                        // A delete refused leaves the item and the state file, and the slot
+                        // unread: the next look reads it again.
+                        self.inner
+                            .shared
+                            .store
+                            .delete(self.id())
+                            .map_err(|err| self.unreadable(&err))?;
                         self.mark_ended(Ended::SignedOut);
                     }
                     decoded
@@ -453,11 +506,22 @@ impl ConnectorHandle {
     /// parse.
     pub(crate) fn read_stored(&self) -> Result<Option<Credential>, StoreError> {
         Ok(self
-            .inner
-            .shared
-            .store
-            .get(self.id())?
+            .get_item()?
             .and_then(|bytes| Credential::decode(&Zeroizing::new(bytes))))
+    }
+
+    /// The keychain item's bytes, noting whether the read was refused (`read_refused`).
+    fn get_item(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        let read = self.inner.shared.store.get(self.id());
+        self.inner
+            .read_refused
+            .store(read.is_err(), Ordering::SeqCst);
+        read
+    }
+
+    /// Notes that a write landed: the item holds what this handle wrote.
+    pub(crate) fn wrote_item(&self) {
+        self.inner.read_refused.store(false, Ordering::SeqCst);
     }
 
     /// The usable credential, or why there is none.
@@ -471,20 +535,40 @@ impl ConnectorHandle {
         match lock(&self.inner.shared.state).status(self.id(), None) {
             CredentialStatus::KeyRevoked => Err(AuthError::KeyRevoked),
             CredentialStatus::NotAdded => Err(AuthError::NotAdded),
-            CredentialStatus::SignedOut | CredentialStatus::SignedIn(_) => {
-                Err(AuthError::SignedOut)
-            }
+            CredentialStatus::SignedOut
+            | CredentialStatus::SignedIn(_)
+            | CredentialStatus::Unreadable => Err(AuthError::SignedOut),
         }
     }
 
-    /// Ends the credential: deletes the item, clears memory and records `ended`.
-    pub(crate) fn end_credential(&self, slot: &mut Slot, ended: Ended) {
+    /// Ends the credential: deletes the item, clears memory and records `ended`. Never while the
+    /// last read of the item was refused (`read_refused`), and a delete the keychain refuses
+    /// does nothing either: the item and the state file stay as they were and the slot unread
+    /// (the next look reads the item again, `Unreadable` while refused): `StoreError::Refused`.
+    pub(crate) fn end_credential(&self, slot: &mut Slot, ended: Ended) -> Result<(), StoreError> {
+        self.inner.generation.fetch_add(1, Ordering::SeqCst);
+        if self.inner.read_refused.load(Ordering::SeqCst) {
+            // The last read of the item was refused: it may hold another credential than the one
+            // that ended, so nothing deletes it or records the end.
+            *slot = Slot::Unread;
+            return Err(self.unreadable(&StoreError::Refused(
+                "the last read of the keychain item was refused".to_owned(),
+            )));
+        }
         if let Err(err) = self.inner.shared.store.delete(self.id()) {
-            tracing::warn!(connector = self.id(), error = %err, "the keychain item could not be deleted");
+            *slot = Slot::Unread;
+            return Err(self.unreadable(&err));
         }
         *slot = Slot::Read(None);
-        self.inner.generation.fetch_add(1, Ordering::SeqCst);
         self.mark_ended(ended);
+        Ok(())
+    }
+
+    /// Forgets the credential in memory without touching the item or the state file, so the
+    /// next look reads the item again: after a keychain call refused.
+    pub(crate) fn forget_unread(&self, slot: &mut Slot) {
+        *slot = Slot::Unread;
+        self.inner.generation.fetch_add(1, Ordering::SeqCst);
     }
 
     fn mark_ended(&self, ended: Ended) {
@@ -514,7 +598,10 @@ impl ConnectorHandle {
     /// logged without the token. The new credential's own token is never revoked.
     ///
     /// `still` is asked under the slot's lock first: `false` stores nothing and answers
-    /// `Ok(false)` (the caller's credential ended while it was being made).
+    /// `Ok(false)` (the caller's credential ended while it was being made). A keychain that
+    /// refuses to read the credential being replaced stores nothing and answers
+    /// `StoreError::Refused`: its refresh token could not be revoked. A write it refuses
+    /// answers the same, the old item and the state file as they were.
     pub(crate) fn store_new(
         &self,
         credential: Credential,
@@ -527,8 +614,16 @@ impl ConnectorHandle {
             if !still() {
                 return Ok(false);
             }
-            let replaced = self.replaced_refresh_tokens(&mut slot, &credential);
-            self.inner.shared.store.set(self.id(), &bytes)?;
+            let replaced = self.replaced_refresh_tokens(&mut slot, &credential)?;
+            if let Err(err) = self.inner.shared.store.set(self.id(), &bytes) {
+                // The old item stays, as does the state file; the next look reads it again
+                // (unless memory holds a newer token than the item).
+                if !self.persist_failed() {
+                    self.forget_unread(&mut slot);
+                }
+                return Err(self.unreadable(&err));
+            }
+            self.wrote_item();
             self.save_state(|state| state.add(self.id(), kind))?;
             *slot = Slot::Read(Some(credential));
             self.inner.generation.fetch_add(1, Ordering::SeqCst);
@@ -547,8 +642,13 @@ impl ConnectorHandle {
     }
 
     /// The OAuth refresh tokens `new` replaces: the one in memory and the one in the keychain,
-    /// without duplicates and never `new`'s own. The slot is locked by the caller.
-    fn replaced_refresh_tokens(&self, slot: &mut Slot, new: &Credential) -> Vec<Secret> {
+    /// without duplicates and never `new`'s own. The slot is locked by the caller. Either read
+    /// refused (an error that is not "no item") is `StoreError::Refused`.
+    fn replaced_refresh_tokens(
+        &self,
+        slot: &mut Slot,
+        new: &Credential,
+    ) -> Result<Vec<Secret>, StoreError> {
         let own = match new {
             Credential::OAuth(tokens) => Some(&tokens.refresh_token),
             Credential::ApiKey(_) => None,
@@ -559,21 +659,17 @@ impl ConnectorHandle {
                 old.push(token);
             }
         };
-        match self.load(slot) {
-            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token.clone()),
-            Ok(_) => {}
-            Err(err) => {
-                tracing::warn!(connector = self.id(), error = %err, "the replaced credential could not be read");
-            }
+        if let Some(Credential::OAuth(tokens)) =
+            self.load(slot).map_err(|err| self.unreadable(&err))?
+        {
+            keep(tokens.refresh_token.clone());
         }
-        match self.read_stored() {
-            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token),
-            Ok(_) => {}
-            Err(err) => {
-                tracing::warn!(connector = self.id(), error = %err, "the replaced keychain item could not be read");
-            }
+        if let Some(Credential::OAuth(tokens)) =
+            self.read_stored().map_err(|err| self.unreadable(&err))?
+        {
+            keep(tokens.refresh_token);
         }
-        old
+        Ok(old)
     }
 
     /// The `Authorization` value for `token`.

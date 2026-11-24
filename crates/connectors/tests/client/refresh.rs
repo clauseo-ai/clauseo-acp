@@ -295,6 +295,33 @@ fn an_item_deleted_by_another_instance_is_signed_out_at_the_next_refresh() {
     assert_eq!(rig.fake.requests_to("/token").len(), 0);
 }
 
+/// The pin beside the one above: a re-read before the refresh that the keychain refuses (a
+/// platform failure such as errSecInteractionNotAllowed, not "no item") is not "gone". The
+/// refresh goes ahead with the tokens in memory; nothing is deleted and nothing is recorded as
+/// signed out.
+#[test]
+fn a_refused_reread_before_the_refresh_is_not_signed_out() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    rig.handle.bearer().unwrap();
+    rig.store.refuse_reads(true);
+    rig.fake.clear_requests();
+    rig.clock().advance(Duration::from_secs(3600));
+    rig.handle.bearer().unwrap();
+    assert_eq!(
+        presented_refresh_tokens(&rig).len(),
+        1,
+        "refreshed from memory"
+    );
+    assert_eq!(rig.store.deletes(), 0);
+    assert!(rig.store.peek("case-law").is_some());
+    assert!(state_file(&rig).contains(r#""ended":null"#));
+    assert_eq!(
+        rig.handle.status(),
+        CredentialStatus::SignedIn(clauseo_connectors::CredentialKind::OAuth)
+    );
+}
+
 /// A deviation from the brief's literal rule: a refresh that fails on the network while the
 /// access token has not expired yet returns that token (with a warning); once it has
 /// expired, the failure is `Network`.

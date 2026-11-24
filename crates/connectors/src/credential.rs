@@ -36,6 +36,10 @@ pub enum CredentialStatus {
     SignedOut,
     /// Added with an API key the connector refused.
     KeyRevoked,
+    /// Added, but the keychain refused to read the item (an error that is not "no item"): not
+    /// known to be signed in or out. Nothing is written or deleted on its strength; the next
+    /// look reads the item again.
+    Unreadable,
 }
 
 /// What `sign_out` did.

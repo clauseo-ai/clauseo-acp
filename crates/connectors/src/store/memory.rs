@@ -9,8 +9,8 @@ use super::{SecretStore, check_size};
 use crate::error::StoreError;
 
 /// A [`SecretStore`] in memory, for tests. Knobs: fail the next N writes, or one write after N
-/// that land, count reads, writes and deletes, read an item back. `Debug` names the accounts and
-/// never prints an item.
+/// that land, fail every read, write or delete with a given error, count reads, writes and
+/// deletes, read an item back. `Debug` names the accounts and never prints an item.
 #[derive(Default)]
 pub struct MemoryStore {
     inner: Mutex<Inner>,
@@ -34,6 +34,12 @@ struct Inner {
     fail_writes: usize,
     /// How many more writes land before the one that fails ([`MemoryStore::fail_write_after`]).
     fail_after: Option<usize>,
+    /// While set, every `get` fails with it (a keychain read refused).
+    read_error: Option<StoreError>,
+    /// While set, every `set` fails with it and changes nothing.
+    write_error: Option<StoreError>,
+    /// While set, every `delete` fails with it and the item stays.
+    delete_error: Option<StoreError>,
     reads: usize,
     writes: usize,
     deletes: usize,
@@ -58,6 +64,31 @@ impl MemoryStore {
     /// and changes nothing (a failure partway through a batch of writes).
     pub fn fail_write_after(&self, landing: usize) {
         self.lock().fail_after = Some(landing);
+    }
+
+    /// While `on`, every `get` fails with the error a keychain read refused without asking
+    /// gives (macOS's errSecInteractionNotAllowed, which keyring reports as a platform failure),
+    /// never `Ok(None)`: an item that is there but may not be read now.
+    pub fn refuse_reads(&self, on: bool) {
+        let error = on.then(|| StoreError::Platform("a platform failure".to_owned()));
+        self.fail_reads_with(error);
+    }
+
+    /// While `Some`, every `get` fails with that error (as the keychain's own refusals map to
+    /// it: a platform failure for errSecAuthFailed or a duplicate item, `NoAccess` for
+    /// errSecNoAccessForItem), never `Ok(None)`.
+    pub fn fail_reads_with(&self, error: Option<StoreError>) {
+        self.lock().read_error = error;
+    }
+
+    /// While `Some`, every `set` fails with that error and the item stays as it was.
+    pub fn fail_writes_with(&self, error: Option<StoreError>) {
+        self.lock().write_error = error;
+    }
+
+    /// While `Some`, every `delete` fails with that error and the item stays.
+    pub fn fail_deletes_with(&self, error: Option<StoreError>) {
+        self.lock().delete_error = error;
     }
 
     /// How many times `get` was called.
@@ -92,6 +123,9 @@ impl SecretStore for MemoryStore {
     fn get(&self, account: &str) -> Result<Option<Vec<u8>>, StoreError> {
         let mut inner = self.lock();
         inner.reads = inner.reads.saturating_add(1);
+        if let Some(error) = &inner.read_error {
+            return Err(error.clone());
+        }
         Ok(inner.items.get(account).cloned())
     }
 
@@ -114,6 +148,9 @@ impl SecretStore for MemoryStore {
                 "a write failure (MemoryStore)".to_owned(),
             ));
         }
+        if let Some(error) = &inner.write_error {
+            return Err(error.clone());
+        }
         if inner.fail_writes > 0 {
             inner.fail_writes -= 1;
             return Err(StoreError::Platform(
@@ -130,6 +167,9 @@ impl SecretStore for MemoryStore {
     fn delete(&self, account: &str) -> Result<(), StoreError> {
         let mut inner = self.lock();
         inner.deletes = inner.deletes.saturating_add(1);
+        if let Some(error) = &inner.delete_error {
+            return Err(error.clone());
+        }
         if let Some(mut old) = inner.items.remove(account) {
             old.zeroize();
         }
