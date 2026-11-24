@@ -10,6 +10,12 @@
 # - The environments `release` and `release-test` must allow deployments from `main`: today
 #   `release` allows only tag:v* and `release-test` only tag:test-v*.
 # - `release-test` must get a required reviewer too (`release` has its own already).
+# - Creating `v*` tags must be limited to the owner by a ruleset: the `github.ref ==
+#   'refs/heads/main'` checks below live in the dispatched ref's own copy of this file, so a tag
+#   whose copy drops them would otherwise reach `release` (which allows tag:v*).
+#
+# BEFORE APPROVING publish, the approver checks in plan's job summary: the ref is
+# refs/heads/main; the commit is on main; the pins (versions), apps and seq are the merged ones.
 #
 # - By hand only (workflow_dispatch), on main of clauseo-ai/clauseo-acp only (a fork's copy does
 #   nothing). Never on a push or a pull request. After an engine bump (engine-watch.yml) merges,
@@ -17,11 +23,11 @@
 # - Lanes: `engines` (the release `engines`, environment `release`, the app's updater key, apps =
 #   tauri.conf.json's version plus the latest v<X.Y.Z> release's) and `engines-test` (the release
 #   `engines-test`, environment `release-test`, the throwaway test key, apps = the apps input).
-# - Seq: engines.seq when the lane has no live list (<lane>/engines.json and its .sig both absent),
-#   else max(engines.seq, live + 1), where live comes only from a live list that verifies in plan
-#   (the lane's key, the exact trusted comment, the self-check); one file alone, or a list that
-#   does not verify, fails the run. The new seq must be above live and at most 2^16 above it (the
-#   verifier's ceiling); plan prints the choice and why, and publish re-downloads the live list
+# - Seq: engines.seq when there is no floor, else max(engines.seq, floor + 1). The floor is the
+#   larger of the live seq and the highest archived <lane>-<n>.json that verifies; the live seq
+#   comes only from a live list that verifies in plan (the lane's key, the exact trusted comment,
+#   the self-check), and one file alone, or a live list that does not verify, fails the run. The
+#   new seq must be above the floor and at most 2^16 above it (the verifier's ceiling); plan prints the choice and why, and publish re-downloads the live list
 #   right before signing and refuses if it is not the one plan saw. rollback_to=<n> publishes the archived <lane>-<n>.json
 #   again (its signature checked under the lane's key; its apps, pins and sizes kept) with seq =
 #   live + 1 and generated = now.
@@ -35,7 +41,10 @@
 #   and uploads <lane>-<seq>.json and its .sig, then engines.json.sig and engines.json. The release
 #   is a pre-release made with --latest=false and never marked latest.
 # - Permissions: plan contents: read, publish contents: write. checkout keeps no credentials; the
-#   signing key and its password reach only the probe and sign steps, through env:. No expression
+#   signing key and its password reach only the probe and sign steps, through env:. Before them
+#   only the Tauri CLI is installed (`--filter .`: ui/'s root project, @tauri-apps/cli and oxfmt),
+#   with --ignore-scripts, and the key steps run its JS entry with node, never pnpm. Each upload
+#   is tried 3 times; a list left half-uploaded is repaired as decision 0033 says. No expression
 #   is written inside a run: script. Every action is pinned by its full commit SHA.
 
 name: Engines publish
@@ -77,6 +86,7 @@ jobs:
       seq: ${{ steps.plan.outputs.seq }}
       live_seq: ${{ steps.plan.outputs.live_seq }}
       live_sha256: ${{ steps.plan.outputs.live_sha256 }}
+      floor_seq: ${{ steps.plan.outputs.floor_seq }}
       sha256: ${{ steps.plan.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,6 +130,7 @@ jobs:
       SEQ: ${{ needs.plan.outputs.seq }}
       LIVE_SEQ: ${{ needs.plan.outputs.live_seq }}
       PLANNED_LIVE_SHA256: ${{ needs.plan.outputs.live_sha256 }}
+      PLANNED_FLOOR: ${{ needs.plan.outputs.floor_seq }}
       PLANNED_SHA256: ${{ needs.plan.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -154,12 +165,14 @@ jobs:
           node .github/scripts/engines-publish.mjs --self-check "$RUNNER_TEMP/engines/engines.json"
           node .github/scripts/engines-publish.mjs --pubkey "$LANE" "$RUNNER_TEMP/lane.pub"
 
-      # Before the key: the Tauri CLI from the lock file.
-      - name: Install the ui workspace
-        run: pnpm -C ui install --frozen-lockfile
+      # Before the key: only ui/'s root project (@tauri-apps/cli with its platform binary, and
+      # oxfmt), from the lock file, running no install script.
+      - name: Install the Tauri CLI
+        run: pnpm -C ui install --frozen-lockfile --ignore-scripts --filter .
 
-      # The key only here and in the next step. tauri signer's output (a signature, public) goes
-      # nowhere; nothing prints the key or its password.
+      # The key only here and in the sign step, where no pnpm runs: the CLI's own JS entry (its
+      # package.json bin) with node. tauri signer's output (a signature, public) goes nowhere;
+      # nothing prints the key or its password.
       - name: The lane's key signs, and the lane's public key verifies it
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.lane == 'engines-test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || inputs.lane == 'engines' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -172,7 +185,7 @@ jobs:
           mkdir -p "$dir"
           name=probe-$GITHUB_RUN_ID.txt
           echo "Clauseo $LANE, probe of run $GITHUB_RUN_ID" > "$dir/$name"
-          pnpm -s -C ui tauri signer sign "$dir/$name" > /dev/null ||
+          node ui/node_modules/@tauri-apps/cli/tauri.js signer sign "$dir/$name" > /dev/null ||
             fail "tauri signer could not sign with the $LANE key (a wrong password, or not a key)"
           node .github/scripts/latest-json.mjs --verify "$dir/$name" "$RUNNER_TEMP/lane.pub" ||
             fail "the $LANE lane's signing key is not the key of its public key"
@@ -192,7 +205,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.lane == 'engines-test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || inputs.lane == 'engines' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: |
           set -euo pipefail
-          pnpm -s -C ui tauri signer sign "$RUNNER_TEMP/engines/engines.json" > /dev/null
+          node ui/node_modules/@tauri-apps/cli/tauri.js signer sign "$RUNNER_TEMP/engines/engines.json" > /dev/null
           [ -s "$RUNNER_TEMP/engines/engines.json.sig" ] || { echo "::error::tauri signer wrote no engines.json.sig"; exit 1; }
 
       - name: Verify the signature and its trusted comment
@@ -219,11 +232,20 @@ jobs:
               --title "Engine list ($LANE)" \
               --notes "Clauseo's signed engine list (engines.json), published by engines-publish.yml. Not an app release."
           fi
+          up() {
+            for try in 1 2 3; do
+              gh release upload "$LANE" "$@" --repo "$GITHUB_REPOSITORY" --clobber && return 0
+              echo "::warning::upload try $try of 3 failed: $*"
+              sleep $((try * 10))
+            done
+            echo "::error::upload failed 3 times: $*; repair it as decision 0033 says"
+            return 1
+          }
           cp "$src/engines.json" "$arc/$LANE-$SEQ.json"
           cp "$src/engines.json.sig" "$arc/$LANE-$SEQ.json.sig"
-          gh release upload "$LANE" "$arc/$LANE-$SEQ.json" "$arc/$LANE-$SEQ.json.sig" --repo "$GITHUB_REPOSITORY" --clobber
-          gh release upload "$LANE" "$src/engines.json.sig" --repo "$GITHUB_REPOSITORY" --clobber
-          gh release upload "$LANE" "$src/engines.json" --repo "$GITHUB_REPOSITORY" --clobber
+          up "$arc/$LANE-$SEQ.json" "$arc/$LANE-$SEQ.json.sig"
+          up "$src/engines.json.sig"
+          up "$src/engines.json"
 
       - name: Name what was published in the job summary
         run: |
