@@ -406,8 +406,14 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
         let claude_home = self.claude_home.clone();
         let gate = Arc::clone(self.gate(agent));
         Box::pin(async move {
-            let _running = gate.enter().await;
-            let launch = entry_now(&entries, launch_env.as_ref(), agent)?;
+            // Past any hold, the entry is taken as a read takes it; the probe then runs outside
+            // the gate, so its process (up to 25 s for Claude) never keeps a login change, or a
+            // read queued behind one (a limit stop may wait on it), waiting. A probe that races
+            // a login change reads the old login or fails; the change probes again.
+            let running = gate.enter().await;
+            let launch = entry_now(&entries, launch_env.as_ref(), agent);
+            drop(running);
+            let launch = launch?;
             match agent {
                 AgentKind::Claude => {
                     // The data folder: the run folder is `<data_dir>/limits/run`.
