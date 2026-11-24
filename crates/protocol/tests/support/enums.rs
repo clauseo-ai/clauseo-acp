@@ -94,7 +94,8 @@ macro_rules! logged_enums {
                 PermissionAbout,
                 PackSkipReason,
                 MatterHold,
-                HelperOutcome;
+                HelperOutcome,
+                UnsentCause;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

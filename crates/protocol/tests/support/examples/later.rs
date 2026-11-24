@@ -2,13 +2,13 @@
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
 //! host notices with a kind, which it chains on next, the skill pack notices among them, and the
 //! later stop reasons (`NotAllowed`'s moved here from it), which it chains on next, the later
-//! steer outcomes, which it chains on next, and a turn queued behind each matter hold, which it
-//! chains on last.
+//! steer outcomes, which it chains on next, a turn queued behind each matter hold, which it
+//! chains on next, and an unstarted turn's end for each unsent cause, which it chains on last.
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterHold, MatterPath, Notice, NoticeKind, NoticeLevel,
     PackId, PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved,
-    StopReason, TurnEnded, TurnFailed, TurnQueued, WebResult, WebSearchRecorded,
+    StopReason, TurnEnded, TurnFailed, TurnQueued, UnsentCause, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{checkpoint_id, message_id, thread_id, tool_call_id, turn_id};
@@ -589,4 +589,30 @@ pub(super) fn holds() -> Vec<DomainEvent> {
                 .into()
         })
         .collect()
+}
+
+/// One `TurnEnded { Cancelled }` of turn 3, a turn that never started, for each unsent cause
+/// (#1314): `Stopped`, `Removed`, `SentNow`, `SignIn`, `Update`, `NotSent`.
+pub(super) fn unsent() -> Vec<DomainEvent> {
+    [
+        UnsentCause::Stopped,
+        UnsentCause::Removed,
+        UnsentCause::SentNow,
+        UnsentCause::SignIn,
+        UnsentCause::Update,
+        UnsentCause::NotSent,
+    ]
+    .into_iter()
+    .map(|cause| {
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::Cancelled,
+            usage: None,
+            checkpoint_after: None,
+            code_mode: false,
+            cause: Some(cause),
+        }
+        .into()
+    })
+    .collect()
 }

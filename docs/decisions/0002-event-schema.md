@@ -343,6 +343,20 @@ The retry wait (`agent_retrying`, `agent_retry_ended`) adds the header's `retryi
 view type with no change to an old one, and `REDUCER_SCHEMA_VERSION` goes from 14 to 15 (after
 #1286's 13 to 14): old snapshots are passed over, as for the bumps above.
 
+A message whose turn never started says why (#1314). `TurnEnded.cause` (`UnsentCause`:
+`stopped`, `removed`, `sent_now`, `sign_in`, `update` or `not_sent`; an open unit enum, so a
+cause a newer host names reads as `Unknown`) is set only on the end of a turn that had no
+`TurnStarted`, and left out otherwise and in logs before the field. A start-up re-log of a wait
+is a `TurnQueued`, not an end, and has none. The fold settles that turn's user message by the
+cause: `UserMessageStatus::NotSent` (new) for `sent_now` and `not_sent`, `Removed` for the rest,
+for a missing cause and for `Unknown`, and copies the cause into `UserMessageEntry.unsent`. A copy
+queued again after a sign-in stop or an install's cancel logs `UserMessage.copy_of`
+(`CopyOf { message, cause }`, the original and why it was copied), which the fold copies into
+`UserMessageEntry.copy_of`. All three fields are additive (missing reads as `None`, and `None`
+is left out). Such a message used to fold to `Removed` whatever the cause, so
+`REDUCER_SCHEMA_VERSION` goes from 17 to 18 (after #1289's 16 to 17): old snapshots are passed
+over and each thread's log is folded once at its next reopen, as for the bumps above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
@@ -597,7 +611,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `MatterHold`, `HelperOutcome` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `MatterHold`, `HelperOutcome`, `UnsentCause` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
