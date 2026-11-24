@@ -59,6 +59,18 @@ pub(in crate::actor::turn) struct Handback {
     message: Option<String>,
 }
 
+impl Handback {
+    /// The agent's id for the helper handing back.
+    pub(super) fn helper(&self) -> &str {
+        &self.helper
+    }
+
+    /// Its report, when its input carried one.
+    pub(super) fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+}
+
 /// What a step update means for a helper, read before the update is logged.
 #[derive(Debug, Clone)]
 pub(in crate::actor::turn) enum Before {

@@ -2,9 +2,9 @@
 //! the agent's own turn from opening, a background helper's words pile up there chunk by chunk;
 //! past [`CAP_BYTES`] the oldest words go (the lead's or a helper's text chunks), down to
 //! [`KEEP_BYTES`], with one warning per pile-up. Only words go: every other event is kept, since
-//! each one changes what the turn does (a step a card points at, a helper's launch or handback,
-//! the costed usage that ends the agent's own turn, a permission request or an elicitation the
-//! agent waits on), and the words are where the weight is.
+//! each one changes what the turn does (a step a card points at, a helper's launch, handback or
+//! settle, the costed usage that ends the agent's own turn, a permission request or an
+//! elicitation the agent waits on), and the words are where the weight is.
 
 use clauseo_acp::{AcpEvent, AgentUpdate};
 use clauseo_protocol::{ContentBlock, ThreadId};

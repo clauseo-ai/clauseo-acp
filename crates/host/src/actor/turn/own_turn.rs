@@ -93,6 +93,12 @@ pub(super) fn output_waits(held: &Held) -> bool {
     !held.updates.is_empty()
 }
 
+/// Whether updates or requests of `thread` wait for a turn: what comes after them waits too,
+/// so it keeps its place.
+pub(super) fn waits(actor: &mut Actor, thread: ThreadId) -> bool {
+    state(actor, thread).is_some_and(|state| output_waits(&state.own_held))
+}
+
 /// Puts `event` in `thread`'s held output, as if it waited for a turn (tests).
 #[cfg(test)]
 pub(super) fn hold_for_test(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
@@ -189,8 +195,8 @@ pub(super) fn hold(
     }
 }
 
-/// A helper's update that came with no turn live (`Idle`) waits for one with the rest
-/// (`helpers.rs`), unless it is a cancelled turn's tail.
+/// A helper's update or settle that came with no turn live (`Idle`) waits for one with the
+/// rest (`helpers.rs`, `helpers/settle.rs`), unless it is a cancelled turn's tail.
 pub(super) fn hold_helper(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     if !hold_event(actor, thread, event) {
         tracing::debug!(%thread, "a helper's output after a cancelled turn was dropped");
@@ -396,6 +402,17 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             } => {
                 let origin = Origin::Turn(turn);
                 super::helpers::on_update(actor, thread, &session, origin, &helper, update);
+            }
+            // A helper's settle held behind them (`helpers/settle.rs`): `turn`'s, after the
+            // helper's words held before it.
+            AcpEvent::HelperSettled {
+                session,
+                helper,
+                outcome,
+                ..
+            } => {
+                let origin = Origin::Turn(turn);
+                super::helpers::on_settled(actor, thread, &session, origin, &helper, outcome);
             }
             event @ (AcpEvent::HelperInBackground { .. }
             | AcpEvent::PermissionRequested { .. }

@@ -53,6 +53,7 @@ fn end_open_of(
     let mut ended: Vec<(HelperId, HelperOutcome, Option<String>)> = Vec::new();
     for known in helpers.known.values_mut().filter(picked) {
         known.open = false;
+        helpers.last_words.remove(&known.id);
         let (outcome, summary) = helpers
             .sent_ends
             .get(&known.id)
