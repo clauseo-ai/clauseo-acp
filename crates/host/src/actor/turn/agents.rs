@@ -2,7 +2,7 @@
 //! the attach commit) and the work that waits for its session. Its stop and its end are in
 //! `agents/ended.rs`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
@@ -136,6 +136,9 @@ pub(super) struct Agent {
     /// (`forced_ask::applies`; for Codex only a failed check, since the other two refuse it):
     /// then none is, so Codex asks where Claude would.
     pub(super) mcp_sent: Option<Vec<String>>,
+    /// The MCP servers this session already told the lawyer did not start
+    /// (`updates/mcp_notice.rs`): one notice per server per session start.
+    pub(super) mcp_told: BTreeSet<String>,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
