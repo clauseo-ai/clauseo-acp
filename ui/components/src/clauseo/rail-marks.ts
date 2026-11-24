@@ -6,6 +6,7 @@ import {
   IconAnswerReady,
   IconChecking,
   IconFailed,
+  IconHistory,
   IconLocateFolder,
   IconNeedsPermission,
   IconPlanLimit,
@@ -19,8 +20,8 @@ import type { ConversationState, MatterState } from "./rail-words.ts";
 export type Mark = { icon: ComponentType<IconProps>; waits: boolean };
 
 /** Each matter status's mark: yellow only where the matter waits for the lawyer's hand. The plan's limit, waiting on the
- * reset or on the lawyer's choice, takes the gauge, not the clock, so it reads apart from an answer under way; working
- * and a conversation waiting behind another share the clock. */
+ * reset or on the lawyer's choice, takes the gauge, not the clock, so it reads apart from an answer under way. A
+ * conversation whose message waits for the matter takes the versions' clock (CONVERSATION_MARK). */
 export const MATTER_MARK: Record<Exclude<MatterState, "idle">, Mark> = {
   question: { icon: IconQuestion, waits: true },
   permission: { icon: IconNeedsPermission, waits: true },
@@ -41,7 +42,8 @@ export const CONVERSATION_MARK: Record<Exclude<ConversationState, "idle">, Mark>
   ready: { icon: IconAnswerReady, waits: false },
   working: { icon: IconChecking, waits: false },
   stopped: { icon: IconStop, waits: false },
-  waiting: { icon: IconChecking, waits: false },
+  // a message waiting for an undo, a restore or a move: the versions' clock, apart from Answering.'s (24 Nov)
+  waiting: { icon: IconHistory, waits: false },
   failed: { icon: IconFailed, waits: false },
 };
 

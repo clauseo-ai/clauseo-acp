@@ -82,16 +82,21 @@ function ConversationRow({
   const menuNow = other !== undefined || armed;
   const [openNow, setOpenNow] = useState(false);
   if (replace !== undefined) return <li className="room-conv-item">{replace}</li>;
-  const status = current ? null : (snoozed ?? conversationStatus(w.lang, state, at, behind, day));
-  // what needs the lawyer, and what's answering or answered, says its words on the row under the title, plainly: a
-  // question or a permission in the hand's weight, an answer ready, a failure or Answering. muted; a stop, a wait
-  // behind another and a snooze are their icon, with their words under the pointer and to assistive technology
+  // the open one says nothing of itself (the room does), but for a wait: its message waits for the matter, and the
+  // row says so, so the mark sits on the waiting row and never reads as the answering one's (24 Nov)
+  const status =
+    current && state !== "waiting"
+      ? null
+      : (snoozed ?? conversationStatus(w.lang, state, at, behind, day));
+  // what needs the lawyer, and what's answering, answered or waiting, says its words on the row under the title,
+  // plainly: a question or a permission in the hand's weight, an answer ready, a failure, Answering. or a wait muted;
+  // a stop and a snooze are their icon, with their words under the pointer and to assistive technology
   const asks =
     status !== null && snoozed === undefined && (state === "question" || state === "permission");
   const tells =
     status !== null &&
     snoozed === undefined &&
-    (state === "ready" || state === "working" || state === "failed");
+    (state === "ready" || state === "working" || state === "failed" || state === "waiting");
   const finished = current && done ? tw(w.lang, "Done") : null;
   const hint = [title, plan ? agent : null, status ?? finished]
     .filter((x) => x !== null && x !== "")

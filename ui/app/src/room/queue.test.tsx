@@ -84,7 +84,7 @@ async function ask(text = QUESTION) {
   await h!.key({ key: "Enter", keyCode: 13 });
 }
 const HOLD =
-  "An undo, restore or move is changing this matter's papers. Your message goes once it's done.";
+  "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.";
 /** What the composer's one status region says of its working line. */
 const composerSaid = () =>
   h!.host.querySelector('[data-composer] .room-entry > [role="status"]')?.textContent ?? "";
@@ -148,6 +148,10 @@ test("queued by the host for the matter: the working line says Waiting to answer
     // the composer's own region says the wait; the card holds none of its own
     expect(composerSaid()).toContain("Waiting to answer.");
     expect(wait()?.querySelector('[role="status"]')).toBeNull();
+    // the waiting mark is on the waiting (open) row, and the other row's says nothing of a wait
+    expect(rowTitled("Lease notice")?.dataset["state"]).toBe("waiting");
+    expect(rowSays("Lease notice")).toBe("Waiting to answer.");
+    expect(rowSays(TITLE)).not.toContain("Waiting");
     await h.unmount();
     h = null;
   }

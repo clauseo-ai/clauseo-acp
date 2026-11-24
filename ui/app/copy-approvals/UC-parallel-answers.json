@@ -9,12 +9,12 @@
     "note": "A conversation whose message waits while an undo, a restore or a move holds the matter: its rail row, and the composer's working line. Replaced \"Waiting for '{title}'\" (rail) and \"Waiting for '{title}' to finish.\" (U7-01, working line), which named the conversation it waited behind."
   },
   "UC-1146": {
-    "en": "An undo, restore or move is changing this matter's papers. Your message goes once it's done.",
+    "en": "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The card over the composer while that message waits, with no buttons. Replaced U7-02 \"One conversation changes a matter's papers at a time. Your message is ready to go.\" with Stop the other (U7-03) and Queue (U7-04): another conversation's answer no longer holds a message back (issue 15)."
+    "note": "The card over the composer while that message waits, with no buttons. First draft (24 Nov) ended \"Your message goes once it's done.\"; the Windows test asked it to say the message is queued. Replaced U7-02 \"One conversation changes a matter's papers at a time. Your message is ready to go.\" with Stop the other (U7-03) and Queue (U7-04): another conversation's answer no longer holds a message back (issue 15)."
   }
 }

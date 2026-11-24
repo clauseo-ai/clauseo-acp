@@ -216,7 +216,7 @@ export const HI = {
   // a conversation whose message waits for the hold: the rail's row and the composer's working line. hi: later
   "Waiting to answer.": null,
   // the card over the composer while the message waits. hi: later
-  "An undo, restore or move is changing this matter's papers. Your message goes once it's done.":
+  "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.":
     null,
 } as const;
 

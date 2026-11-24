@@ -18,7 +18,7 @@ export function MatterHoldWait({ testId }: { testId?: string }) {
         <p className="queue-say">
           <Say>
             {w.m(
-              "An undo, restore or move is changing this matter's papers. Your message goes once it's done.",
+              "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.",
             )}
           </Say>
         </p>
