@@ -3,7 +3,8 @@
 //! since, and those logged as outside edits since are left off its card, so each paper is on
 //! one card or logged as an outside edit, never on none and never on the wrong one. Repaired
 //! from its own after-turn checkpoint, a paper a card logged after it credits is left off while
-//! it held there what that card left, its answer never named.
+//! it held there what that card left, its answer never named, unless the repaired answer wrote
+//! it too: then it stays, naming the later card's answer.
 
 use clauseo_protocol::{DomainEvent, FilesChanged, MatterPath, ThreadId, TurnId};
 
@@ -16,6 +17,12 @@ use crate::actor::turn::{TurnPhase, steps};
 
 /// `ASK_THEN_A` with "Rewrite A.", which writes notes/a.txt anew with a completed edit call.
 const ASK_THEN_A_AND_REWRITE: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Ask, then write A."}]}}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"request":{"id":"perm-a","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}},{"expect_response":{"id":"perm-a","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-a","status":"completed"}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pr","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Rewrite A."}]}}},{"write_file":{"path":"notes/a.txt","content":"Gamma\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-r","title":"Write notes/a.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"respond":{"to":"pr","result":{"stopReason":"end_turn"}}}]]}
+"#;
+
+/// "Ask, then write A and B." asks perm-a for an edit call naming notes/a.txt and notes/b.txt
+/// and, allowed, writes both (notes/b.txt as "Write B." does) and completes the call; "Write B."
+/// writes notes/b.txt with a completed edit call.
+const ASK_THEN_A_AND_B: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Ask, then write A and B."}]}}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt and notes/b.txt","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/notes/a.txt"},{"path":"{{cwd}}/notes/b.txt"}]}}},{"request":{"id":"perm-a","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-a","title":"Write notes/a.txt and notes/b.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}},{"expect_response":{"id":"perm-a","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-a","status":"completed"}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}]]}
 "#;
 
 /// The `FilesChanged` of `turn` in `log`.
@@ -191,6 +198,50 @@ fn a_repair_from_its_own_checkpoint_leaves_off_what_a_later_card_credits() {
     );
     assert_eq!(beside(&log_a, turn_a), ["notes/b.txt"]);
     assert!(!outside_papers(&mut rig).contains(&"notes/b.txt".to_owned()));
+    rig.finish();
+}
+
+#[test]
+fn a_repair_from_its_own_checkpoint_keeps_what_it_wrote_too_naming_the_later_card() {
+    let mut rig = Rig::start("together-repair-own-shared", ASK_THEN_A_AND_B);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    // A starts and waits on the lawyer; B starts beside it and writes notes/b.txt, running on.
+    let turn_a = send_prompt(&mut rig, 10, first, "Ask, then write A and B.");
+    let request = until_asked(&mut rig, first);
+    let turn_b = send_prompt(&mut rig, 11, second, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| {
+        prompt_answer_of(second, input)
+    });
+    // A writes notes/a.txt and notes/b.txt too, and ends: both commits of its end fail.
+    rig.fail(2, |event| matches!(event, DomainEvent::TurnEnded(_)));
+    answer(&mut rig, 12, first, request, "allow-once");
+    rig.run_until("A's end gave up", |actor: &mut Actor| {
+        actor.threads[&first].turn.current.is_none() && actor.work.commits == 0
+    });
+    assert!(!has_ended(&rig.log(first), turn_a), "A's turn is open");
+    // B ends after a hand edit, its card crediting b.txt as A's checkpoint holds it.
+    rig.write_file("memo.txt", "Call the landlord.");
+    rig.release_held();
+    until_ended(&mut rig, &[second]);
+    let on_b = card(&rig.log(second), turn_b);
+    assert!(
+        on_b.iter()
+            .any(|(path, flagged, _)| path == "notes/b.txt" && !flagged),
+        "{on_b:?}"
+    );
+
+    // A's repair takes its own checkpoint: A wrote b.txt too, so it stays on A's card, naming B.
+    let mut rig = crash(rig, &[]);
+    let log_a = rig.log(first);
+    assert!(has_ended(&log_a, turn_a), "A's turn is repaired");
+    assert_eq!(
+        card(&log_a, turn_a),
+        [
+            ("notes/a.txt".to_owned(), true, vec![]),
+            ("notes/b.txt".to_owned(), true, vec![second])
+        ]
+    );
+    assert!(!beside(&log_a, turn_a).contains(&"notes/b.txt".to_owned()));
     rig.finish();
 }
 
