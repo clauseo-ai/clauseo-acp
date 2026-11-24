@@ -45,8 +45,7 @@ pub(crate) fn failed_update(update: &acp::ToolCallUpdate) -> Option<ProtocolWarn
         Some(title) => server_of_title(title)?,
         None => rest
             .rsplit_once('.')
-            .map(|(name, _)| name)
-            .unwrap_or(rest)
+            .map_or(rest, |(name, _)| name)
             .to_owned(),
     };
     let content = fields.content.as_deref().unwrap_or_default();
@@ -66,12 +65,14 @@ fn server_of_title(title: &str) -> Option<String> {
 
 /// The first text block of `content`.
 fn text(content: &[acp::ToolCallContent]) -> Option<&str> {
-    content.iter().find_map(|item| match item {
-        acp::ToolCallContent::Content(content) => match &content.content {
-            acp::ContentBlock::Text(text) => Some(text.text.as_str()),
-            _ => None,
-        },
-        _ => None,
+    content.iter().find_map(|item| {
+        if let acp::ToolCallContent::Content(content) = item
+            && let acp::ContentBlock::Text(text) = &content.content
+        {
+            Some(text.text.as_str())
+        } else {
+            None
+        }
     })
 }
 

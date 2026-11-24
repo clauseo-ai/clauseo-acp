@@ -134,16 +134,22 @@ fn a_call_of_another_shape_stays_a_step() {
     let events = events_for(&[&calls[..], &updates[..]].concat());
     let steps: Vec<_> = events
         .iter()
-        .map(|event| match event {
-            AcpEvent::Update {
+        .map(|event| {
+            if let AcpEvent::Update {
                 update: AgentUpdate::ToolCall(call),
                 ..
-            } => call.acp_id.to_string(),
-            AcpEvent::Update {
+            } = event
+            {
+                return call.acp_id.to_string();
+            }
+            let AcpEvent::Update {
                 update: AgentUpdate::ToolCallUpdate { acp_id, .. },
                 ..
-            } => acp_id.to_string(),
-            other => panic!("expected a step, got {other:?}"),
+            } = event
+            else {
+                panic!("expected a step, got {event:?}");
+            };
+            acp_id.to_string()
         })
         .collect();
     assert_eq!(
