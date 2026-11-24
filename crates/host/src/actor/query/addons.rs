@@ -91,6 +91,8 @@ pub(super) struct Places {
     /// The matter a scope `matter` names when none is switched on: the Scratch matter, else the
     /// first.
     fallback: Option<MatterId>,
+    /// The firm's locks: a locked item with scope `all` ignores every matter's switch.
+    locks: crate::actor::addon_rules::Locks,
 }
 
 impl Places {
@@ -113,6 +115,7 @@ impl Places {
                 .filter_map(|row| Some((row.id, row.addon_switches.clone()?)))
                 .collect(),
             fallback: scratch.or(rows.clone().next()).map(|row| row.id),
+            locks: crate::actor::addon_rules::Locks::of(&actor.effective),
         }
     }
 
@@ -126,11 +129,14 @@ impl Places {
     /// [`Self::placed`] with the scope given: `all` when `all`.
     pub(super) fn placed_as(&self, mut row: Addon, all: bool) -> Addon {
         let (kind, item) = (row.kind, row.id.clone());
+        // Under the firm's lock an item with scope `all` is on everywhere, as launches have it.
+        let ignored = all && self.locks.covers(kind, &item);
         let switch = |matter: &MatterId| {
             self.switches
                 .iter()
                 .find(|(id, _)| id == matter)
                 .and_then(|(_, switches)| switches.get(kind, &item))
+                .filter(|_| !ignored)
         };
         row.switched = self
             .switches
