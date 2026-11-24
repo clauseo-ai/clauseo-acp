@@ -166,6 +166,7 @@ pub(crate) fn helper_events(
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
             | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

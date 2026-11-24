@@ -6,6 +6,7 @@ pub(crate) mod helpers;
 mod limit;
 mod mcp_startup;
 mod session;
+pub(crate) mod task;
 mod too_long;
 mod tool;
 
@@ -313,6 +314,7 @@ pub(crate) fn helper_updates(helper: &CompactString, events: &mut Vec<AcpEvent>)
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
             | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

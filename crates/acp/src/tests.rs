@@ -26,6 +26,7 @@ mod sdk_refused_lines;
 mod skipped_updates;
 mod start_errors;
 mod stdout;
+mod task_frames;
 mod too_long;
 mod unread;
 mod updates;
