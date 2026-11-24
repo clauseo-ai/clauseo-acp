@@ -3,8 +3,9 @@
 // remembered ones over what a new session starts on, each pick kept in the draft (conversations.ts) for create_thread;
 // a conversation's from its header's options read with its agent's models. A conversation's line names the turn's
 // record (the header's model and effort), during and after an answer; the lawyer's pick stays in the composer, ticked
-// in the menu and named as "Next message: …", and goes with every send as SendPrompt.config (a change of model with
-// the effort beside it), steers included: the host drops it from a steer that joins the running answer. It stands
+// in the menu and named as "Next message: …", and goes with every send while it stands as SendPrompt.config (a change
+// of model with the effort beside it), steers included: the host drops it from a steer that joins the running answer.
+// With no pick standing a send carries no config. It stands
 // until a turn starts whose record matches it, or a pick_not_used notice comes after it. Until the agent's models are
 // in, one quiet line stands in the menus' place, never a made-up default.
 import { useCallback, useMemo, useState } from "react";
@@ -258,8 +259,17 @@ export function useThreadMenus(
       return { menus: loadingMenus(lang, scope, summary, sandboxRequired), config: undefined };
     const next = nextPicks(shown, stands);
     const menus = menusOf(lang, shown, (picks) => choose(picks, shown), scope, next);
-    const config = configOf(shown.models, next);
-    if (stands === null) return { menus, config };
+    // config only while a pick stands: the model and effort the next message goes with, each only as a value the list
+    // offers. With no pick the host keeps the session's own (the record may name one the list no longer has)
+    if (stands === null) return { menus, config: undefined };
+    const listed = shown.models.models.some((m) => m.id === next.model);
+    const config = configOf(shown.models, {
+      model: listed ? next.model : "",
+      effort:
+        listed && effortsOf(shown.models, next.model).some((e) => e.id === next.effort)
+          ? next.effort
+          : "",
+    });
     // the pick, named for the next message beside the record the triggers name
     const name = (id: string, list: readonly { id: string; name: string }[]) =>
       list.find((m) => m.id === id)?.name;

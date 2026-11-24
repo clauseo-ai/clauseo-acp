@@ -363,12 +363,12 @@ test("in a conversation a pick stays in the composer, named for the next message
   });
 });
 
-test("with no pick every send still names the model and effort the line shows", async () => {
+test("with no pick standing a send carries no config: the host keeps the session's own", async () => {
   h = await mountRoom({ next: withAgents([claude(MODELS)]) });
   h.deliver([reset([], headerWith([MODEL, EFFORT], "idle", "claude-acp", RAN_OPUS))]);
   await h.settle();
   await ask("Summarise the indemnity clause");
-  expect(h.sent("send_prompt").at(-1)).toMatchObject({ config: { model: "opus", effort: "high" } });
+  expect("config" in h.sent("send_prompt").at(-1)!).toBe(false);
 });
 
 test("a conversation with no session yet names what its last turn ran with, from the header", async () => {
