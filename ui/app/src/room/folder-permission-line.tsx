@@ -2,7 +2,6 @@
 // what won't work and where in System Settings to change it. A status with the synced notice's look.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconAbout } from "@clauseo/components/icons/icons.tsx";
-import { bl } from "@clauseo/components/lib/words-blocklist.ts";
 import { mf } from "@clauseo/components/lib/words-matter-form.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
@@ -61,7 +60,7 @@ export function FolderPermissionLine({
             if (asked.state === "ask") void press();
           }}
         >
-          <span className="deva-nudge">{bl(lang, "Allow")}</span>
+          <span className="deva-nudge">{mf(lang, "Allow")}</span>
         </Button>
       )}
     </div>

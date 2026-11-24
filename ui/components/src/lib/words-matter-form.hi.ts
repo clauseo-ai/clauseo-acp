@@ -46,6 +46,8 @@ export const HI = {
   // Settings, as the desktop answers it ("System Settings › Privacy & Security › Files and Folders")
   "Without it, Clauseo can't open or save papers in this folder. You can allow it later in {path}.":
     null,
+  // UC-1256 (provisional; Hindi later): the button beside UC-1250 to UC-1254, which raises macOS's dialog
+  Allow: null,
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */
