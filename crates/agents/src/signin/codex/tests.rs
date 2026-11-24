@@ -117,6 +117,11 @@ fn the_app_server_runs_with_the_file_store_and_the_overrides() {
     let args: Vec<&str> = args.iter().map(|arg| arg.to_str().unwrap()).collect();
     assert_eq!(args[..2], ["-c", "cli_auth_credentials_store=\"file\""]);
     assert!(args.contains(&"features.plugins=false"));
+    // No native skill reaches the model's catalog from any root (codex 0.171.0's skills
+    // extension returns none with `include_instructions` off), so codex-acp 2.10.0's
+    // `.agents/skills` folders and a skill switched off for a matter stay out.
+    assert!(args.contains(&"skills.bundled.enabled=false"));
+    assert!(args.contains(&"skills.include_instructions=false"));
     assert_eq!(args.last(), Some(&"app-server"));
     assert_eq!(args.len(), 2 + 12 + 1);
 }
