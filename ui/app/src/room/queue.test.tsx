@@ -108,9 +108,12 @@ const CARDS = {
     "This matter's folder is being moved. Your message is queued and sends once that's done.",
 } as const;
 const OTHER_ANSWER = "Waiting for another answer in this matter.";
-/** A queued status with the host's hold, as the bindings don't carry it yet. */
-const heldBy = (hold: keyof typeof CARDS, behind = THREAD) =>
-  ({ queued: { behind, hold } }) as unknown as ThreadStatus;
+/** THREAD's header queued with the host's hold (#1286's HeaderEntry.hold; a stand-in until that binding): the
+ * message's own status stays sent. */
+const heldHeader = (hold: string): ViewEntry => {
+  const e = headerOf(THREAD, { queued: { behind: THREAD } });
+  return { header: { ...e.header!, hold } as NonNullable<ViewEntry["header"]> };
+};
 /** What the composer's one status region says of its working line. */
 const composerSaid = () =>
   h!.host.querySelector('[data-composer] .room-entry > [role="status"]')?.textContent ?? "";
@@ -163,7 +166,7 @@ test("two conversations answering at once: the open one's working line says Answ
 test("queued with the host's hold: the card names that hold; the working line says Waiting to answer.; nothing to press", async () => {
   for (const hold of ["undo", "restore", "relocate"] as const) {
     h = await mountWith("idle");
-    h.deliver([reset([], headerOf(THREAD, heldBy(hold)))]);
+    h.deliver([reset([], heldHeader(hold))]);
     await h.settle();
     expect(working(), hold).toBe("Waiting to answer.");
     expect(wait()?.textContent, hold).toBe(CARDS[hold]);
@@ -192,12 +195,12 @@ test("today's host: queued behind another conversation with no hold says another
 });
 
 test("a missing or unknown hold behind its own thread: the working line alone, no card that names a reason", async () => {
-  for (const status of [
-    { queued: { behind: THREAD } },
-    { queued: { behind: THREAD, hold: "something_new" } } as unknown as ThreadStatus,
+  for (const head of [
+    headerOf(THREAD, { queued: { behind: THREAD } }),
+    heldHeader("something_new"),
   ]) {
     h = await mountWith("idle");
-    h.deliver([reset([], headerOf(THREAD, status))]);
+    h.deliver([reset([], head)]);
     await h.settle();
     expect(working()).toBe("Waiting to answer.");
     expect(wait()).toBeNull();
@@ -214,7 +217,7 @@ test("a row queued for the matter says Waiting to answer. on the rail, naming no
 
 test("the wait goes once the turn starts", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([], headerOf(THREAD, heldBy("restore")))]);
+  h.deliver([reset([], heldHeader("restore"))]);
   await h.settle();
   expect(wait()).not.toBeNull();
   h.deliver([upsert(headerOf(THREAD, "running"))]);
@@ -284,7 +287,7 @@ const openTitle = () =>
 
 test("Stop on a later message that waits: its words come back into the same conversation's field, because you stopped it", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], heldHeader("undo"))]);
   await h.settle();
   await h.click(h.one("cancel"));
   expect(h.sent("cancel")).toEqual([{ thread: THREAD }]);
@@ -302,9 +305,7 @@ test("Stop on a later message that waits: its words come back into the same conv
 
 test("a message ended before it started with no Stop in this window: the words come back, with neutral words", async () => {
   h = await mountWith("idle");
-  h.deliver([
-    reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("restore"))),
-  ]);
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], heldHeader("restore"))]);
   await h.settle();
   h.deliver([upsert(asked(3, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
@@ -314,7 +315,7 @@ test("a message ended before it started with no Stop in this window: the words c
 
 test("words typed meanwhile keep their place: the stopped message comes after them", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], heldHeader("undo"))]);
   await h.settle();
   await h.type("Also the deposit.");
   h.deliver([upsert(asked(3, 2, LATER, "removed"))]);
@@ -328,7 +329,7 @@ test("Stop on one of two waiting messages: only the stopped one comes back; the 
   h.deliver([
     reset(
       [...ANSWERED, asked(3, 2, LATER, "sent"), asked(4, 3, NEXT, "queued")],
-      headerOf(THREAD, heldBy("undo")),
+      heldHeader("undo"),
     ),
   ]);
   await h.settle();
@@ -342,7 +343,7 @@ test("Stop on one of two waiting messages: only the stopped one comes back; the 
 
 test("the only message removed, with no removal from the host: no new draft opens, the conversation stays open", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h.settle();
   h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
@@ -354,7 +355,7 @@ test("the only message removed, with no removal from the host: no new draft open
 
 test("the only message stopped, then the host's removal: a new draft holds its words, with the focus and the line, and its row goes", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h.settle();
   await h.click(h.one("cancel"));
   h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
@@ -371,7 +372,7 @@ test("the only message stopped, then the host's removal: a new draft holds its w
 
 test("the host's removal before the stream says the message was removed: the words go to a new draft, once", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h.settle();
   await h.click(h.one("cancel"));
   await leaves(THREAD);
@@ -383,7 +384,7 @@ test("the host's removal before the stream says the message was removed: the wor
 
 test("Stop, then switching to another conversation before the host's removal: the words wait in the matter's draft", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h.settle();
   await h.click(h.one("cancel"));
   await h.click(rowTitled(TITLE));
@@ -430,7 +431,7 @@ const draftRow = () =>
   h!.all("conversation").find((b) => b.textContent?.includes("New conversation"));
 /** The only message of THREAD waiting for an undo, and this window's Stop pressed on it. */
 async function stoppedOnly() {
-  h!.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h!.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h!.settle();
   await h!.click(h!.one("cancel"));
 }
@@ -510,7 +511,7 @@ test("Stop of a running answer, then a later message ended before it started wit
   // the answer ends: the Stop has nothing left to say of
   h.deliver([upsert(step(3, { stop: "cancelled" })), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
-  h.deliver([upsert(asked(4, 2, LATER, "sent")), upsert(headerOf(THREAD, heldBy("restore")))]);
+  h.deliver([upsert(asked(4, 2, LATER, "sent")), upsert(heldHeader("restore"))]);
   await h.settle();
   h.deliver([upsert(asked(4, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
@@ -520,7 +521,7 @@ test("Stop of a running answer, then a later message ended before it started wit
 
 test("the store dropped the conversation's view before the host's removal: the words seen while it was open come back", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
   await h.settle();
   h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();

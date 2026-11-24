@@ -570,7 +570,6 @@ function RoomFrame({
                               focus={talks.focus?.n ?? null}
                               archived={talks.archived}
                               onThread={matters.onThread}
-                              conversations={conversations}
                               folderShut={folderShut}
                               openRefused={opened?.act === "open" ? opened.code : null}
                             />

@@ -21,7 +21,6 @@ import type {
   MatterSummary,
   ThreadId,
 } from "../../transport/protocol.ts";
-import type { Conversations } from "../conversations.ts";
 import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
@@ -96,7 +95,6 @@ export function Work({
   plan = "",
   focus = null,
   onThread,
-  conversations,
   archived = false,
   folderShut,
   openRefused = null,
@@ -119,8 +117,6 @@ export function Work({
   focus?: number | null;
   /** Hears the open thread: null until there is one. */
   onThread?: (thread: ThreadId | null) => void;
-  /** The matter's conversations, for the wait while another of them holds the matter (U7); none, no wait. */
-  conversations?: Conversations | undefined;
   /** The open conversation is archived: read only, its line in the composer's place (archived.tsx). */
   archived?: boolean;
   /** The matters whose folder notice the lawyer closed (room.tsx keeps them above Work's key, as the drafts). */
@@ -317,7 +313,6 @@ export function Work({
           onAsk={ask}
           onStop={session.stop}
           paused={paused}
-          others={conversations === undefined ? null : { conversations }}
           transport={transport}
           stream={stream}
           thread={session.thread}
