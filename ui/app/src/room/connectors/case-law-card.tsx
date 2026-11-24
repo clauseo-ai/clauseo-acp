@@ -1,12 +1,11 @@
 // The home card's look (case-law-offer.tsx decides when it shows): NoticeCard's look with no rows, the case-law glyph
-// in its tile (ToolKindIcon's case_law, as the connector's steps draw it), the connector's own name as the title, one
-// sentence on what the lawyer gets, then the price and the terms as two lines ("Prepaid credits. No subscription."
+// in its tile (IconSearch, which ToolKindIcon draws for case_law), the connector's own name as the title, one sentence on what the lawyer gets, then the price and the terms as two lines ("Prepaid credits. No subscription."
 // alone, with no figure, while the host lists no price), and the button that opens Clauseo Case Law in Skills and
 // connectors, with "Powered by Indian Kanoon" beside it. No Indian Kanoon logo: their terms forbid it without
 // written permission. At the reading column's top, as the new conversation's line is, so the composer keeps its place.
 import { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
-import { ToolKindIcon } from "@clauseo/components/clauseo/tool-kind-icons.tsx";
+import { IconSearch } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { rupees } from "@clauseo/components/lib/money.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
@@ -37,7 +36,7 @@ export function CaseLawCard({ pack, onAdd }: { pack: Pack | null; onAdd: () => v
     <div className="w-full shrink-0 px-thread-pad pb-s4" data-testid="case-law-offer">
       <div className="mx-auto max-w-measure">
         <NoticeCard
-          icon={<ToolKindIcon kind="case_law" size={18} />}
+          icon={<IconSearch size={18} />}
           label={cr(lang, "Clauseo Case Law")}
           title={cr(lang, "Clauseo Case Law")}
           sub={
