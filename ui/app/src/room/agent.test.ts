@@ -28,13 +28,13 @@ const T5 = "00000000-0000-7000-8000-000000000005";
 const T6 = "00000000-0000-7000-8000-000000000006";
 const T7 = "00000000-0000-7000-8000-000000000007";
 
-test("agentFor: the plan the matter uses most wins over the newest thread's and over the setting", () => {
+test("agentFor: the matter's most recent conversation wins over the plan it uses most and over the setting", () => {
   const threads = [
     { thread: T1, agent: "codex-acp" },
     { thread: T2, agent: "codex-acp" },
     { thread: T3, agent: "claude-acp" },
   ];
-  expect(agentFor({ chosen: null, setting: "claude-acp", threads, agents: [] })).toBe("codex-acp");
+  expect(agentFor({ chosen: null, setting: "codex-acp", threads, agents: [] })).toBe("claude-acp");
 });
 
 test("agentFor: a tie goes to the plan used most recently: by H6's last activity, else the newest thread", () => {

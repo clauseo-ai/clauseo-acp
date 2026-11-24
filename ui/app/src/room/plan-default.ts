@@ -1,13 +1,14 @@
 // What a new conversation's default plan weighs beyond its matter (agent.ts's agentFor, D-014, D-043): which plans are
 // signed in, from the setup store the first run keeps (store/setup.ts, one per transport, started by first-run.tsx), so
 // the default follows a sign-in or sign-out as it happens; and the plan the lawyer last asked a question with, in any
-// matter, kept in this computer's localStorage beside the display settings (display-store.ts's clauseo.display). The
+// matter, kept in this computer's localStorage beside the display settings (display-store.ts's
+// clauseo.display), seeded by the first sign-in while none is kept. The
 // per-matter memory waits for the pickers' host prefs (UpdateMatter.agent_prefs); a matter's own threads stand for it.
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { AgentId, AgentKind } from "../transport/protocol.ts";
 import { isSignedIn, setupStoreOf, type SetupSource, type SetupState } from "../store/setup.ts";
 import { hasSetup } from "./first-run/hold.ts";
-import { kindOf } from "./agent.ts";
+import { canonicalAgent, kindOf } from "./agent.ts";
 
 /** The plans signed in, by kind; null while no sign-in state has been heard. */
 export type Signed = ReadonlySet<AgentKind> | null;
@@ -58,6 +59,17 @@ export function signedKinds(state: SetupState): Signed {
   return kinds;
 }
 
+/** The first sign-in seeds the plan last asked with, so a new install's first conversations go to
+ * the plan the lawyer signed in to first: when none is kept yet and `next` adds exactly one kind
+ * to `prev`, that kind's agent is kept. Two plans signed in at once say nothing of which came
+ * first, so they keep nothing. Never over a kept one. */
+export function seedLastPlan(prev: Signed, next: Signed, storage: Store | null = local()): void {
+  if (next === null || lastPlan(storage) !== null) return;
+  const added = [...next].filter((k) => prev === null || !prev.has(k));
+  const [first] = added;
+  if (added.length === 1 && first !== undefined) rememberPlan(canonicalAgent(first), storage);
+}
+
 const same = (a: Signed, b: Signed) =>
   a === b || (a !== null && b !== null && a.size === b.size && [...a].every((k) => b.has(k)));
 
@@ -73,6 +85,7 @@ export class SignedPlans {
     const read = () => {
       const next = signedKinds(store.state());
       if (same(next, this.signed)) return;
+      seedLastPlan(this.signed, next);
       this.signed = next;
       changed();
     };
