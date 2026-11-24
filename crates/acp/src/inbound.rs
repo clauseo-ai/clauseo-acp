@@ -177,7 +177,9 @@ impl Inbound {
             Some(known) => known,
             None => match map::helpers::subagent_name(name) {
                 Some(subagent) if self.shared.helper_sessions => {
-                    return self.subagent(session, subagent, update).await;
+                    let read = (subagent, update);
+                    helpers::subagent(&self.shared, session, read, &mut self.events);
+                    return self.send_events().await;
                 }
                 Some(_) | None => return self.shared.emit(map::unknown(session, name)).await,
             },
@@ -186,7 +188,7 @@ impl Inbound {
         // `map::helper_in_background`, and for a helper's session `inbound/helpers.rs`).
         let helper = map::helper(update);
         let in_background = map::helper_in_background(update);
-        let routed = self.route(session.as_ref(), update);
+        let routed = helpers::route(&self.shared, session.as_ref(), update);
         let quarantined = params
             .get_mut("update")
             .map(map::quarantine_unknown_blocks)
@@ -208,11 +210,9 @@ impl Inbound {
                 .await;
         };
         if let Some(routed) = routed {
-            self.helper_update(&session, routed, notification.update, quarantined);
-            for event in self.events.drain(..) {
-                self.shared.emit(event).await;
-            }
-            return;
+            let update = (notification.update, quarantined);
+            helpers::helper_update(&self.shared, &session, routed, update, &mut self.events);
+            return self.send_events().await;
         }
         {
             let mut state = self.shared.state();
@@ -242,6 +242,11 @@ impl Inbound {
         if let Some(helper) = &helper {
             map::helper_updates(helper, &mut self.events);
         }
+        self.send_events().await;
+    }
+
+    /// Sends the events mapping pushed onto `self.events`, in order.
+    async fn send_events(&mut self) {
         for event in self.events.drain(..) {
             self.shared.emit(event).await;
         }
