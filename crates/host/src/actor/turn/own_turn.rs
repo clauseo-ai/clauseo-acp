@@ -65,6 +65,8 @@ pub(crate) struct Held {
     updates: Vec<AcpEvent>,
     /// What `updates` weighs (`cap.rs`), counted from its first event on.
     bytes: usize,
+    /// The cap dropped words of this pile-up and said so (`cap.rs`): it says so once per pile.
+    cap_warned: bool,
     /// When the thread's last cancelled turn ended, on the monotonic clock.
     cancelled_at: Option<Duration>,
     /// The late window of a cancelled agent-started turn, while it is open.
@@ -252,7 +254,7 @@ fn hold_event(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> bool {
     let held = &mut state.own_held;
     if held.updates.is_empty() {
         tracing::info!(target: LIFECYCLE, %thread, "agent output outside a turn waits for a turn");
-        held.bytes = 0;
+        cap::new_pile(held);
     }
     held.bytes += cap::weight(&event);
     held.updates.push(event);
