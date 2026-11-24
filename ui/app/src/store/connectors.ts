@@ -116,7 +116,8 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
   // the credit by the one rule, and the balance last read while signed in, for the figure once out of credit
   let shown: CaseLawCredit | null = null;
   let last: number | null = null;
-  // the threads whose turn ran as the credit went out (refused for it), and those that heard credits arrive since
+  // the threads whose turn ran as the credit went out or while it was out (refused for it), in every conversation of
+  // every matter, kept here so switching conversations keeps them; and those that heard credits arrive since
   const refused = new Set<string>();
   const added = new Set<string>();
   // the running-low line: the credit last heard, each thread's running turn, and the turns that keep the line
@@ -188,6 +189,8 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
     hidden: (conversation) => hid.has(conversation),
     turnStarted: (thread, turn) => {
       running.set(thread, turn);
+      // a turn run while out of credit meets the refusal too: marked, so the line shows there once credits arrive
+      if (outOf(shown) !== null) refused.add(thread);
       // the next message sent: the credits-added line goes
       if (added.delete(thread)) tell();
     },
