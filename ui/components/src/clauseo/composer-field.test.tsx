@@ -560,3 +560,61 @@ test("a dead key's mark taken out and put back, as macOS commits it, never colla
   expect(a.style.height).toBe("52px");
   vi.useRealTimers();
 });
+
+// append (parallel answers, #1302): words given back to a field the lawyer may be typing in go after what it holds,
+// a blank line between, with the caret, the focus and any composition left alone
+test("append while the lawyer is in the field: at its end through the engine, the caret kept mid-text, the focus kept", async () => {
+  const calls = engine();
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, initialText: "Dear Sir, notice" }));
+  field().focus();
+  field().setSelectionRange(5, 5);
+  await act(async () => ref.current?.append("Does the lease allow a sublet?"));
+  expect(field().value).toBe("Dear Sir, notice\n\nDoes the lease allow a sublet?");
+  expect(calls).toEqual([["insertText", "\n\nDoes the lease allow a sublet?"]]);
+  expect(document.activeElement).toBe(field());
+  expect([field().selectionStart, field().selectionEnd]).toEqual([5, 5]);
+});
+
+test("append with the focus elsewhere puts the words in place and leaves the focus there", async () => {
+  const calls = engine();
+  const onInput = vi.fn();
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, onInput, initialText: "My note." }));
+  const elsewhere = document.createElement("input");
+  document.body.append(elsewhere);
+  elsewhere.focus();
+  await act(async () => ref.current?.append("Stopped words"));
+  expect(calls).toEqual([]);
+  expect(field().value).toBe("My note.\n\nStopped words");
+  expect(document.activeElement).toBe(elsewhere);
+  expect(onInput).toHaveBeenLastCalledWith(
+    { typed: "My note.\n\nStopped words", pastes: [] },
+    false,
+  );
+  elsewhere.remove();
+});
+
+test("an append asked for during a Devanagari composition waits for its end, then adds after the composed words", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  try {
+    const calls = engine();
+    const ref = createRef<ComposerHandle>();
+    await mount(composer({ ref, initialText: "सूचना" }));
+    field().focus();
+    await compose("compositionstart");
+    await act(async () => ref.current?.append("Stopped words"));
+    // nothing touched inside the composition
+    expect(calls).toEqual([]);
+    expect(field().value).toBe("सूचना");
+    await type("सूचना पत्र");
+    const at = field().selectionStart;
+    await compose("compositionend");
+    await act(async () => vi.runAllTimers());
+    expect(field().value).toBe("सूचना पत्र\n\nStopped words");
+    expect(field().selectionStart).toBe(at);
+    expect(document.activeElement).toBe(field());
+  } finally {
+    vi.useRealTimers();
+  }
+});

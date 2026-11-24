@@ -27,7 +27,7 @@ import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { PasteChips } from "./paste-chips.tsx";
 import { usePasteChips } from "./paste-chips-state.ts";
-import { chipOf, EMPTY_DRAFT, sentOf, type Draft } from "./paste-chips-logic.ts";
+import { chipOf, EMPTY_DRAFT, joinDrafts, sentOf, type Draft } from "./paste-chips-logic.ts";
 import { chipsFor, draftIn, pasteLong, undone } from "./composer-paste.ts";
 import type { ComposerHandle } from "./composer-handle.ts";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
@@ -228,6 +228,8 @@ export function Composer<V extends string = string>({
   const clearAfter = useRef<string | null>(null);
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | Draft | null>(null);
+  // words to add asked for while an input method composed: added at the composition's end
+  const appendAfter = useRef<Draft | null>(null);
   // fits the field to its words; `grow` after an input event, when words only put in can only keep or grow it
   const fitRef = useRef<(grow?: boolean, kind?: string) => void>(() => {});
   // the words as the field was last fitted to them
@@ -320,8 +322,39 @@ export function Composer<V extends string = string>({
     if (a.value !== "" || chips.has()) return;
     replace(a, draftIn(text), mayTakeFocus(a), inPlace);
   };
-  // the held clear and fill, once the composition is over; in place when the field is losing focus, which it never
-  // takes back
+  // words added after what the field holds, a blank line between, the caret and the focus left where they are: through
+  // the engine at the field's end while the lawyer is in it (one undo step), in place otherwise; into an empty field as
+  // fill puts them. While an input method composes it waits for the composition's end.
+  const append = (text: string | Draft, inPlace = false) => {
+    const a = area.current;
+    if (a === null) return;
+    const next = draftIn(text);
+    if (composing.current) {
+      const held = appendAfter.current;
+      appendAfter.current = held === null ? next : joinDrafts(held, next, "\n\n");
+      return;
+    }
+    if (a.value === "" && !chips.has()) {
+      replace(a, next, mayTakeFocus(a), inPlace);
+      return;
+    }
+    const joined = joinDrafts(draft(), next, "\n\n");
+    const { selectionStart, selectionEnd, selectionDirection } = a;
+    const focused = a.ownerDocument.activeElement === a;
+    const step = chips.set(chipsFor(chips.now(), joined.pastes), joined.typed);
+    const tail = joined.typed.slice(a.value.length);
+    let engine = false;
+    if (!inPlace && focused && tail !== "" && typeof a.ownerDocument.execCommand === "function") {
+      a.setSelectionRange(a.value.length, a.value.length);
+      engine = a.ownerDocument.execCommand("insertText", false, tail) && a.value === joined.typed;
+    }
+    if (!engine) a.value = joined.typed;
+    a.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
+    if (step !== null) step.engine = engine;
+    if (!engine) changed();
+  };
+  // the held clear, fill and append, once the composition is over; in place when the field is losing focus, which it
+  // never takes back
   const settle = (inPlace: boolean) => {
     const held = clearAfter.current;
     clearAfter.current = null;
@@ -329,6 +362,9 @@ export function Composer<V extends string = string>({
     const filling = fillAfter.current;
     fillAfter.current = null;
     if (filling !== null) fill(filling, inPlace);
+    const adding = appendAfter.current;
+    appendAfter.current = null;
+    if (adding !== null) append(adding, inPlace);
   };
   // made anew each render, as changed reads the caller's onInput: the composer renders rarely, never per keystroke
   useImperativeHandle(ref, () => ({
@@ -338,6 +374,7 @@ export function Composer<V extends string = string>({
     setText: put,
     clear: (only) => clear(only),
     fill: (text) => fill(text),
+    append: (text) => append(text),
     mentioned: () => picks.current?.() ?? [],
   }));
   // the room keeps the composer's height, so what scrolls into view on a phone stands above it, and the turned page
@@ -471,7 +508,11 @@ export function Composer<V extends string = string>({
               composing.current = false;
               // a clear held for the composition runs once the engine has settled the value, as the spike's
               // triggers do
-              if (clearAfter.current !== null || fillAfter.current !== null)
+              if (
+                clearAfter.current !== null ||
+                fillAfter.current !== null ||
+                appendAfter.current !== null
+              )
                 setTimeout(() => settle(false), 0);
             }}
             onBlur={() => {

@@ -131,7 +131,7 @@ test.each([
 test("another known code says its own words from words-errors", async () => {
   const { stop, press, alert } = await mount(() => refusal("matter.turn_running"));
   await press();
-  expect(alert()).toBe("Wait for the answer to finish first.");
+  expect(alert()).toBe("Wait for the answers in this matter to finish.");
   stop();
 });
 

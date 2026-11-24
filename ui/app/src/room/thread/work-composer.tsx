@@ -206,6 +206,7 @@ export function WorkComposer({
       setText: (text: string | Draft) => field.current?.setText(text),
       clear: (only?: string) => field.current?.clear(only),
       fill: (text: string | Draft) => field.current?.fill(text),
+      append: (text: string | Draft) => field.current?.append(text),
       mentioned: () => field.current?.mentioned() ?? [],
     }),
     [],
@@ -335,9 +336,9 @@ export function WorkComposer({
     const f = field.current;
     const back = draftOf(text);
     if (f !== null) {
-      const there = f.draft();
-      if (isBlank(there)) f.fill(back);
-      else f.setText(joinDrafts(there, back, "\n\n"));
+      // after the words there, the caret, the focus and any composition left as they are: this comes while the
+      // lawyer may be typing
+      f.append(back);
       setUnsent(why);
     } else if (draftKey !== null) {
       const there = drafts.get(draftKey);

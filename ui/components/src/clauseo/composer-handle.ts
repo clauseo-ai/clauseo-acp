@@ -26,6 +26,10 @@ export type ComposerHandle = {
    * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
    * method composes it waits for the composition's end, and fills then only if the field is still empty. */
   fill: (text: string | Draft) => void;
+  /** Adds `text` after what the field holds, a blank line between (into an empty field as fill does), and never moves
+   * the caret or the focus: while the lawyer is in the field, at its end through the engine, as one undoable step;
+   * elsewhere in place. While an input method composes it waits for the composition's end. */
+  append: (text: string | Draft) => void;
   /** The things the field's `@` tokens mention now, in the order they first stand in it, each once: what a send of
    * its words names alongside them. A token edited or deleted mentions nothing. */
   mentioned: () => readonly MentionItem[];

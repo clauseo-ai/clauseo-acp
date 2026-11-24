@@ -232,7 +232,9 @@ test("no hint while the conversation waits behind another", async () => {
   });
   h.deliver([reset([], running(true, "claude-acp", { queued: { behind: OTHER } }))]);
   await h.type(QUESTION);
-  expect(h.one("working")?.textContent).toContain("Draft petition");
+  // the wait names no conversation (parallel answers): today's host's wait behind another says another answer
+  expect(h.one("working")?.textContent).toContain("Waiting to answer.");
+  expect(h.one("matter-hold")?.textContent).toBe("Waiting for another answer in this matter.");
   expect(hint()).toBeNull();
 });
 
