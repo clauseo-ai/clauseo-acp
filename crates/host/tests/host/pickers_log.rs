@@ -1,6 +1,7 @@
 //! The pickers' lines in host.log (`actor/turn/picks.rs`): the picks a session start set, and
 //! the ones the agent does not take, each as one lifecycle line with the agent id, the model and
-//! the effort and nothing else (no thread, path, prompt, title or matter name).
+//! the effort (and, for those dropped, each option's id and whether the agent did not list it or
+//! refused it) and nothing else (no thread, path, prompt, title or matter name).
 //!
 //! The log is the process's global subscriber, so this module holds one test: nextest runs it
 //! in a process of its own.
@@ -75,7 +76,8 @@ fn the_picks_set_and_dropped_are_logged_with_the_agent_model_and_effort_only() {
     assert_eq!(
         line(&log, "the agent does not take a config pick"),
         // The session does not list max, so it shows as `-` (record 0047: listed short ids only).
-        "the agent does not take a config pick; dropped agent=claude-acp model=opus effort=-"
+        "the agent does not take a config pick; dropped agent=claude-acp model=opus effort=- \
+         why=model refused, effort not listed"
     );
     for line in log
         .lines()
