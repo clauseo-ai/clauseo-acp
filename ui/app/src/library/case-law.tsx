@@ -121,7 +121,7 @@ export function CaseLawCard({
   const open = acts.openConnectors;
   const action =
     shown === "ended" && acts.keychain ? (
-      <KeychainAllow k={acts.keychain} small={false} />
+      <KeychainAllow k={acts.keychain} small={false} className="lib-feature-add" />
     ) : shown === "offer" && open !== null ? (
       <Button kind="primary" className="lib-feature-add" onClick={open}>
         {cr(lang, "Add Clauseo Case Law")}
