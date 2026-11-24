@@ -110,17 +110,19 @@ fn count(n: usize) -> Count {
 }
 
 /// `agent` as the thread shows it now: the model and effort from its logged options when it has
-/// them. The agent a switch goes to shows neither: its session has not reported yet.
+/// them, else those its last turn ran with (`TurnStarted`, kept on the header). With `shown`
+/// false, neither: the agent a switch goes to is filled by the switch (`commit.rs`).
 pub(super) fn endpoint(actor: &Actor, thread: ThreadId, agent: &AgentId, shown: bool) -> Endpoint {
-    let options = shown
-        .then(|| header(actor, thread))
-        .flatten()
+    let header = shown.then(|| header(actor, thread)).flatten();
+    let options = header
         .map(|header| header.config_options.as_slice())
         .unwrap_or_default();
     Endpoint {
         agent: agent.clone(),
-        model: current_choice(options, ConfigCategory::Model),
-        effort: current_choice(options, ConfigCategory::ThoughtLevel),
+        model: current_choice(options, ConfigCategory::Model)
+            .or_else(|| header.and_then(|header| header.model.clone())),
+        effort: current_choice(options, ConfigCategory::ThoughtLevel)
+            .or_else(|| header.and_then(|header| header.effort.clone())),
     }
 }
 
