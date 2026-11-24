@@ -20,6 +20,10 @@ use serde_json::{Map, Value};
 /// The built-in tools every Claude session is offered, on every system, and why:
 /// - `Read`, `Edit`, `Write`, `NotebookEdit`: the papers. A background command's output is read
 ///   with `Read` too (Claude Code names its output file and says so).
+/// - `Glob`, `Grep`: list and search the matter and the notes folder. Claude Code 2.1.330 offers
+///   them on macOS and Linux only when `tools` names them, and the instructions send every
+///   listing, search and read here, as the shell's go to auto mode's classifier
+///   (`clauseo_profile::instructions::CLAUDE_FILES`).
 /// - `Bash`: the shell on macOS and Linux; Windows leaves it out ([`WINDOWS_LEFT_OUT`]).
 /// - `Agent`: Clauseo's helpers (`clauseo_profile::subagents`) alone. Every Claude launch turns
 ///   Claude Code's own agent types off (`loads.rs`, `CLAUDE_BUILTIN_AGENTS_OFF_VAR`).
@@ -40,8 +44,10 @@ use serde_json::{Map, Value};
 ///   `Bash`, `PowerShell`, `Monitor` or `Agent` is listed; named here so the list says so.
 ///   Without it the lead answers first and a helper's hand-back wakes it again, which
 ///   claude-agent-acp 0.110.1 keeps inside the same prompt turn for Clauseo.
-pub(crate) const CLAUDE_TOOLS: [&str; 20] = [
+pub(crate) const CLAUDE_TOOLS: [&str; 22] = [
     "Read",
+    "Glob",
+    "Grep",
     "Edit",
     "Write",
     "NotebookEdit",
@@ -63,11 +69,9 @@ pub(crate) const CLAUDE_TOOLS: [&str; 20] = [
     "Yield",
 ];
 
-/// The tools only Windows adds to [`CLAUDE_TOOLS`]: `PowerShell`, its one shell
-/// (`agent/one_shell.rs`), and `Glob` and `Grep`, which Windows' build ships because it has no
-/// embedded search behind its shell; macOS's and Linux's builds search through `Bash` and offer
-/// neither (the request's `tools`, live and offline).
-pub(crate) const WINDOWS_TOOLS: [&str; 3] = ["PowerShell", "Glob", "Grep"];
+/// The tool only Windows adds to [`CLAUDE_TOOLS`]: `PowerShell`, its one shell
+/// (`agent/one_shell.rs`).
+pub(crate) const WINDOWS_TOOLS: [&str; 1] = ["PowerShell"];
 
 /// What Windows takes out of [`CLAUDE_TOOLS`]: `Bash`, as `agent/one_shell.rs` denies it there in
 /// the flag settings' `permissions.deny`.

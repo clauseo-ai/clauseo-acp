@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, BrowserRoute, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, LEGAL, SCALE_CLAUDE, STETDOC_CLI,
-    TOOLS, browser_part, browser_part_for, codex_shell, codex_shell_net, codex_shell_net_on,
-    connectors_part, word_count,
+    BrowserPart, BrowserRoute, CLAUDE_FILES, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, LEGAL,
+    SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_agents_md, codex_shell,
+    codex_shell_net, codex_shell_net_on, connectors_part, word_count,
 };
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_HISTORY, MATTER_NOTES, WORK_FOLDER,
@@ -22,19 +22,26 @@ use clauseo_protocol::AgentKind;
 /// and again for the permission-settings line.
 const LEGAL_MAX: usize = 1450;
 /// The text both agents share (the tools part with the stetdoc line, and the legal part), filled:
-/// 0058's cap, raised to the next 50 for the permission-settings line.
-const SHARED_MAX: usize = 1850;
+/// 0058's cap, raised to the next 50 for the permission-settings line, and again for the
+/// unfinished-work line and the mechanics' examples (orchestrator, 24 Nov: caps rise by what a
+/// ruled line needs).
+const SHARED_MAX: usize = 1900;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
-/// legal part, the shell line and "Working at scale"; raised to the next 50 for the version
-/// history line, and again for the permission-settings line.
-const CLAUDE_MAX: usize = 2350;
+/// legal part, the files line, the shell line and "Working at scale"; raised to the next 50 for
+/// the version history line, again for the permission-settings line, and again for the files
+/// line (the orchestrator's ruling, 24 Nov: the cap rises by what it needs).
+const CLAUDE_MAX: usize = 2400;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
 /// legal part, the shell-net line (online with web search), the refusal line, the shell line and
 /// the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 /// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
-/// 2016; 2100 for the version history line; 2150 for the permission-settings line.
-const CODEX_MAX: usize = 2150;
+/// 2016; 2100 for the version history line; 2150 for the permission-settings line; 2200 for the
+/// unfinished-work line and the mechanics' examples (24 Nov).
+const CODEX_MAX: usize = 2200;
+/// Codex's `AGENTS.md` (when to start sub-agents): its own cap, as it is no part of
+/// `developer_instructions`; 24 Nov's text is about 145 words.
+const CODEX_AGENTS_MAX: usize = 150;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -113,7 +120,13 @@ fn claude_standing_text_budget() {
         &profile.claude_instructions_for(true),
         browser_part(BrowserPart::NotInstalled),
     );
-    for part in [LEGAL, STETDOC_CLI, CLAUDE_SHELL_MACOS, SCALE_CLAUDE] {
+    for part in [
+        LEGAL,
+        STETDOC_CLI,
+        CLAUDE_FILES,
+        CLAUDE_SHELL_MACOS,
+        SCALE_CLAUDE,
+    ] {
         let head = part.trim().lines().next().unwrap();
         assert!(text.contains(head.split('{').next().unwrap()), "{head}");
     }
@@ -168,4 +181,14 @@ fn each_helper_prompt_is_within_its_budget() {
             "{arm:?}'s prompt has {count} words"
         );
     }
+}
+
+/// Codex's `AGENTS.md` fits its own cap.
+#[test]
+fn codex_agents_md_budget() {
+    let count = word_count(codex_agents_md());
+    assert!(
+        count <= CODEX_AGENTS_MAX,
+        "Codex's AGENTS.md has {count} words"
+    );
 }
