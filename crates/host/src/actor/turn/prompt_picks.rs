@@ -33,6 +33,8 @@ use super::state;
 
 mod send;
 
+#[cfg(test)]
+pub(super) use send::sets_out;
 pub(super) use send::{Picked, on_picked, send_first};
 
 /// A thread's prompt picks: those of the `SendPrompt` being routed, each turn's, and what
