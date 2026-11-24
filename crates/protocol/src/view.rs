@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::open_enum::enum_with_names;
 use crate::stream::{split_kind, unknown_prefix};
 use crate::{
-    CheckpointId, ContentBlock, Cost, Count, ElicitationId, Error, EventId, HelperId, MatterId,
-    MessageId, PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
-    ToolCallId, TurnId,
+    CheckpointId, ContentBlock, Cost, Count, ElicitationId, Error, EventId, HandoffId, HelperId,
+    MatterId, MessageId, PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp,
+    ToolCallContent, ToolCallId, TurnId,
 };
 
 mod entry;
+mod handoff;
 mod helpers;
 mod hold;
 mod tools;
@@ -28,6 +29,7 @@ pub use entry::{
     NoticeEntry, PermissionEntry, PermissionState, StepEntry, ToolCallEntry, ToolCallPage,
     ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
 };
+pub use handoff::{HandoffEntry, HandoffEntryStatus};
 pub use helpers::{HelperEntry, HelperTextEntry};
 pub use hold::QueueHoldReason;
 pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
@@ -204,6 +206,8 @@ view_entries! {
         MatterHeader(MatterHeaderEntry, matter: MatterId) = "matter_header",
         /// One version of the matter's files.
         Version(VersionEntry, checkpoint: CheckpointId) = "version",
+        /// The earlier conversation handed to the agent the thread switched to.
+        Handoff(HandoffEntry, handoff: HandoffId) = "handoff",
     }
 }
 
@@ -245,7 +249,8 @@ impl ViewEntry {
             | Self::LimitStop(_)
             | Self::Notice(_)
             | Self::MatterHeader(_)
-            | Self::Version(_) => 0,
+            | Self::Version(_)
+            | Self::Handoff(_) => 0,
         }
     }
 }

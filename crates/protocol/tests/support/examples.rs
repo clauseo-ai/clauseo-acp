@@ -10,22 +10,23 @@
 
 use clauseo_protocol::{
     AgentCapabilities, AgentId, AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached,
-    AgentSessionDetached, ChangeKind, CheckpointKind, CheckpointRecorded, CompactionChanged,
-    CompactionStatus, ContentAppended, ContentBlock, ContentId, Cost, Delivery, DetachReason,
-    DomainEvent, DoneBy, ErrorCode, FileChange, FilesChanged, HelperOutcome, ImportSummary,
-    LimitStopReason, MatterCreated, MatterKind, MatterRelocated, Notice, NoticeLevel, OutsideEdits,
-    PageVia, PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource,
-    RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome,
-    SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp,
-    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
-    ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage,
-    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    AgentSessionDetached, AgentSwitched, ChangeKind, CheckpointKind, CheckpointRecorded,
+    CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, ContentId, ContextHandoff,
+    Cost, Delivery, DetachReason, DomainEvent, DoneBy, Endpoint, ErrorCode, FileChange,
+    FilesChanged, HandoffSettled, HandoffStatus, HelperOutcome, ImportSummary, LimitStopReason,
+    MatterCreated, MatterKind, MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia,
+    PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
+    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
+    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
+    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
-    checkpoint_id, count, finite, matter_id, message_id, path, short, thread_id, tool_call_id,
-    turn_id,
+    agent, checkpoint_id, count, finite, handoff_id, matter_id, message_id, path, short, thread_id,
+    tool_call_id, turn_id,
 };
 
 #[path = "examples/helpers.rs"]
@@ -224,6 +225,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::steers())
     .chain(later::holds())
     .chain(helpers::other_ends())
+    .chain(later::switches())
     .collect()
 }
 
@@ -307,6 +309,34 @@ fn thread_events() -> Vec<DomainEvent> {
         }
         .into(),
         AgentRetryEnded { turn: turn_id(3) }.into(),
+        AgentSwitched {
+            from: agent("claude-acp"),
+            to: agent("codex-acp"),
+        }
+        .into(),
+        ContextHandoff {
+            handoff: handoff_id(19),
+            message,
+            from: Endpoint {
+                agent: agent("claude-acp"),
+                model: Some("Opus".to_owned()),
+                effort: Some("High".to_owned()),
+            },
+            to: Endpoint {
+                agent: agent("codex-acp"),
+                model: None,
+                effort: None,
+            },
+            answers_covered: count(4),
+            items_included: count(9),
+            items_left_out: count(2),
+        }
+        .into(),
+        HandoffSettled {
+            handoff: handoff_id(19),
+            status: HandoffStatus::Delivered,
+        }
+        .into(),
         UserMessage {
             turn,
             message,

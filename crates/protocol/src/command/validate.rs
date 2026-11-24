@@ -133,12 +133,8 @@ impl HostCommand {
                 }
                 MatterSource::ExistingFolder { folder: _ } => Ok(()),
             },
-            Self::SendPrompt {
-                thread: _,
-                content,
-                delivery: _,
-                config: _,
-            } => check_prompt("SendPrompt", content),
+            // Its delivery, picks and agent are checked by their types as they decode.
+            Self::SendPrompt { content, .. } => check_prompt("SendPrompt", content),
             Self::EditQueuedPrompt {
                 thread: _,
                 turn: _,

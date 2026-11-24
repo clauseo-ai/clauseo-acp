@@ -299,6 +299,7 @@ fn prompt_until_done(
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     });
     loop {
         let text = messages.next_text();

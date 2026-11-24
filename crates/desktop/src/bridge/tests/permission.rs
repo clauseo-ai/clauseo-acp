@@ -70,6 +70,7 @@ fn answer_permission_checks_the_option_and_confirms_always_allow() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     });
     let answer = |confirm: &dyn Confirm, request, option: &str| {
         let option = AgentChoiceId::new(option).unwrap();
@@ -131,6 +132,7 @@ fn answer_permission_refuses_the_plan_exit_options_that_change_the_mode() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     });
     let request = until_pending(&messages, &mut Vec::new(), 1);
     for option in MODE_OPTIONS {
@@ -168,6 +170,7 @@ fn a_conversation_only_allow_is_sent_with_no_confirm() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     });
     let request = until_pending(&messages, &mut Vec::new(), 1);
     let option = AgentChoiceId::new("allow_for_session").unwrap();

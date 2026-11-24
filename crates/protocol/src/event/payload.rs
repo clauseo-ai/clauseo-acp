@@ -18,8 +18,9 @@ pub use matter::{
 };
 pub use thread::{
     AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
-    CommandsAvailable, CompactionChanged, ConfigOptionsReplaced, ModeChanged, Notice, PlanReplaced,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, UsageUpdated,
+    AgentSwitched, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced, ContextHandoff,
+    Endpoint, HandoffSettled, HandoffStatus, ModeChanged, Notice, PlanReplaced, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, UsageUpdated,
 };
 pub use tool::{
     ElicitationExpired, ElicitationRequested, ElicitationResolved, PageVisited, PermissionExpired,

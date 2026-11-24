@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"handoff_settled\")"
+---
+{
+  "handoff_settled": {
+    "handoff": "01900000-0000-7000-8000-000000000013",
+    "status": "delivered"
+  }
+}
