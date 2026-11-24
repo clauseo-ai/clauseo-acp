@@ -178,7 +178,8 @@ pub(super) fn refuse(request: Request, responder: Responder<Value>) -> AcpEvent 
 /// A `subagent_spawned` records its helper under that root. It only warns when the root is not
 /// a session this connection started, when it names `session` or such a session, when the
 /// helper was announced before (under this root or another, which it keeps), and when the root
-/// has `MAX_PER_ROOT` (1024, `state/helper_sessions.rs`) helpers already.
+/// has used its `MAX_PER_ROOT` (1024, `state/helper_sessions.rs`) helpers since it was last
+/// started.
 ///
 /// A `subagent_state_update` ends a helper announced under that root, once. It only warns for a
 /// helper not announced under that root, for one that already ended, and for a state that is not
@@ -231,7 +232,7 @@ pub(super) fn subagent(
             } else if known.is_some() {
                 Some("a subagentSessionId already announced")
             } else if state.helpers.full(root.as_str()) {
-                Some("a subagentSessionId past the cap on helpers under one session")
+                Some("this session has used its 1024 helpers since it was last started")
             } else {
                 None
             };

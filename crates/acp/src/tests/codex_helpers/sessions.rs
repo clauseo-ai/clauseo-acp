@@ -443,7 +443,7 @@ fn a_root_takes_at_most_1024_helpers() {
         .filter(|event| matches!(event, AcpEvent::HelperSpawned { .. }))
         .count();
     assert_eq!(spawned_events, 1024);
-    let error = "a subagentSessionId past the cap on helpers under one session";
+    let error = "this session has used its 1024 helpers since it was last started";
     assert_eq!(
         shapes_of(&got).get(4..),
         Some(
