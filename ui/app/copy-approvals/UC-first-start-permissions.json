@@ -178,5 +178,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "New. Under Choose a matters folder outside Documents (first screen's Windows row, open matter's line) once set_default_location exists: done, then its refusals settings.locked, command.invalid, store.io (and any other). Promises no move: existing matters stay"
+  },
+  "UC-1260": {
+    "en": "Permissions",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). Heading of Settings › Privacy's Permissions group, first in the pane, shown only while the desktop lists a row: the first-start step's rows (UC-1151 to UC-1166) for a lawyer who already has matters"
   }
 }

@@ -131,6 +131,9 @@ export const HI = {
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo इस कंप्यूटर पर उत्तर नहीं देता।",
   "Your firm doesn't allow Clauseo to work without asking on this computer.":
     "आपकी फ़र्म इस कंप्यूटर पर Clauseo को बिना पूछे काम करने की अनुमति नहीं देती।",
+  // the Permissions group at the head of Privacy (issue 5, #1303; UC-1260, the app track's, provisional, hi: later):
+  // the first-start step's rows for a lawyer who already has matters
+  Permissions: null,
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */
