@@ -19,8 +19,9 @@
 //!    error) with the right types; `generated` has the shape `YYYY-MM-DDTHH:MM:SSZ` (never
 //!    compared with a clock); 1 ≤ `seq` ≤ [`MAX_SEQ`]; `apps` is non-empty; each `sizes` row
 //!    names a known agent, OS and architecture with non-zero sizes, with exactly one row for
-//!    each of the 12 (agent, os, arch). A key repeated in a JSON object keeps its last value, as npm's `JSON.parse` does,
-//!    and the caller stores the verified bytes, so both read the same list.
+//!    each of the 12 (agent, os, arch). A key repeated in a JSON object keeps its last value,
+//!    as npm's `JSON.parse` does, and the caller stores the verified bytes, so both read the
+//!    same list.
 //! 5. Official names only: `package_json` has only the fields an engines pin file has (no
 //!    `scripts`), its `dependencies` keys are exactly [`DEPENDENCIES`], its `overrides` keys
 //!    are within [`OVERRIDES`] and include each one the bundle pins, and every dependency and
