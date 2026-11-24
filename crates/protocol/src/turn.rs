@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{ContentId, Count, Error, MatterPath, TurnId};
+use crate::{ContentId, Count, Error, MatterPath, ThreadId, TurnId};
 
 open_unit_enum! {
     /// How the lawyer asked a prompt to be delivered while a turn runs in its thread.
@@ -145,6 +145,10 @@ pub struct FileChange {
     /// The watcher saw it change during the turn with no matching agent tool call, so it may
     /// hold the lawyer's own edits. Undo shows it unticked.
     may_include_lawyer_edits: bool,
+    /// Other conversations whose answers ran at the same time also changed this paper, sorted:
+    /// undoing this change takes theirs away too. Undo shows it unticked.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    also_changed_by: Vec<ThreadId>,
 }
 
 impl FileChange {
@@ -181,6 +185,7 @@ impl FileChange {
             after,
             size_bytes,
             may_include_lawyer_edits: false,
+            also_changed_by: Vec::new(),
         })
     }
 
@@ -188,6 +193,14 @@ impl FileChange {
     #[must_use]
     pub const fn with_lawyer_edits(mut self) -> Self {
         self.may_include_lawyer_edits = true;
+        self
+    }
+
+    /// The same change, marked as one other conversations, whose answers ran at the same time,
+    /// also made (`threads`, sorted).
+    #[must_use]
+    pub fn with_also_changed_by(mut self, threads: Vec<ThreadId>) -> Self {
+        self.also_changed_by = threads;
         self
     }
 
@@ -219,6 +232,12 @@ impl FileChange {
     /// Whether it may hold the lawyer's own edits; undo shows it unticked.
     pub const fn may_include_lawyer_edits(&self) -> bool {
         self.may_include_lawyer_edits
+    }
+
+    /// The other conversations, whose answers ran at the same time, that also changed it,
+    /// sorted; undoing it takes theirs away too, so Undo shows it unticked.
+    pub fn also_changed_by(&self) -> &[ThreadId] {
+        &self.also_changed_by
     }
 }
 

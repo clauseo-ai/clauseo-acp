@@ -45,7 +45,7 @@ fn turn(name: &str, before: bool, calls: &[Call], commands: &[&str]) -> Vec<File
     );
     let commands: BTreeSet<String> = commands.iter().map(|path| (*path).to_owned()).collect();
     let checkpoint = matter
-        .after_turn_named(&meta(3), &written(calls), &commands)
+        .after_turn_named(&meta(3), &written(calls), &commands, None)
         .unwrap();
     created(checkpoint, 3)
 }
