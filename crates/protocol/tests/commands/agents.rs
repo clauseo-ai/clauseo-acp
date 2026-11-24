@@ -14,12 +14,14 @@ fn list_agents_is_a_plain_string_and_answers_agents() {
     let answer = QueryResult::Agents(vec![
         AgentSummary {
             models: None,
+            models_unread: false,
             id: AgentId::new("codex-acp").unwrap(),
             kind: Some(AgentKind::Codex),
             config_options: Vec::new(),
         },
         AgentSummary {
             models: None,
+            models_unread: false,
             id: AgentId::new("fake-agent").unwrap(),
             kind: None,
             config_options: Vec::new(),

@@ -364,6 +364,12 @@ pub struct AgentSummary {
     /// across restarts. `None`, and left out of the JSON, until either has run.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub models: Option<AgentModels>,
+    /// True when the host's last probe of the agent's models failed or timed out and neither a
+    /// kept list nor a session has filled `models`: the list could not be read (the host tries
+    /// again, a few times), as against a probe still running. Cleared once a probe or a session
+    /// fills `models`. Left out of the JSON when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub models_unread: bool,
 }
 
 /// Where new matters go, for `GetDefaultLocation`.

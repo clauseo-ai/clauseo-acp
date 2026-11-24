@@ -211,11 +211,19 @@ fn list_agents(
 ) -> Vec<AgentSummary> {
     ids.into_iter()
         .filter_map(|id| AgentId::new(id.as_str()).ok())
-        .map(|id| AgentSummary {
-            kind: AgentKind::of(&id),
-            config_options: options.of(id.as_str()).to_vec(),
-            models: options.models_of(id.as_str()),
-            id,
+        .map(|id| {
+            let models = options.models_of(id.as_str());
+            AgentSummary {
+                kind: AgentKind::of(&id),
+                config_options: options.of(id.as_str()).to_vec(),
+                models_unread: super::agent_options::probe::unread(
+                    &options.probes,
+                    id.as_str(),
+                    models.as_ref(),
+                ),
+                models,
+                id,
+            }
         })
         .collect()
 }
