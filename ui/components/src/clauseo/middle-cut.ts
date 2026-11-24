@@ -1,5 +1,7 @@
 // A file's name on a tile, in at most two lines: a name too long for them loses letters from its
-// middle, never its last letters and extension ("Statement of claim… final.pdf"). The span's lines
+// middle, never its last letters and extension ("Statement of claim… final.pdf"). Its start and its
+// end share the letters the lines hold, half each, so names that begin alike (a matter's papers) still
+// differ at the end. The span's lines
 // are clamped in CSS (wall.css, .tile-name-text); this fits the words to them, measuring the span
 // itself, again whenever its width changes. A script's taller glyph box (Hindi) can make a one-line
 // span a few px taller than its line, so an overflow counts only past half a line, a real one being
@@ -11,8 +13,8 @@ import { useLayoutEffect, type RefObject } from "react";
 /** How many of a name's last letters stay with its extension. */
 const TAIL = 6;
 
-/** A name's two parts: what may lose letters, and its last letters with the extension, which always show. A name with
- * no extension keeps its last letters alone. */
+/** A name's two parts: what may lose letters, and its last letters with the extension, which always show: the fewest
+ * letters its end keeps. A name with no extension keeps its last letters alone. */
 export function nameParts(name: string): { head: string; tail: string } {
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 && name.length - dot <= 8 ? dot : name.length;
@@ -36,16 +38,22 @@ const overflows = (el: Fitted) => {
   return el.scrollHeight - el.clientHeight > slack;
 };
 
-/** Sets `el`'s text to `name`, or, when that overflows, to as much of its head as fits, an ellipsis and its tail;
- * whether it cut. */
+/** Sets `el`'s text to `name`, or, when that overflows, to as much of its start and its end as fit, an ellipsis
+ * between them: the end at least its extension and the six letters before it (nameParts), else half of what is kept.
+ * Whether it cut. */
 export function fit(el: Fitted, name: string): boolean {
   el.textContent = name;
   if (!overflows(el)) return false;
-  const { head, tail } = nameParts(name);
-  const shown = (n: number) => `${head.slice(0, n).trimEnd()}…${tail}`;
-  // the most letters of the head that still fit: a binary search, each step one measure
+  const least = nameParts(name).tail.length;
+  // `kept` letters in all, the end's half of them (its least at need) and the start's the rest
+  const shown = (kept: number) => {
+    const tail = Math.max(least, Math.ceil(kept / 2));
+    const head = Math.max(0, kept - tail);
+    return `${name.slice(0, head).trimEnd()}…${name.slice(name.length - tail)}`;
+  };
+  // the most letters that still fit: a binary search, each step one measure
   let lo = 0;
-  let hi = head.length - 1;
+  let hi = name.length - 1;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
     el.textContent = shown(mid);
