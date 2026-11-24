@@ -17,16 +17,19 @@
 // crates/agents/src/pins.rs writes it). The live list is the release assets <lane>/engines.json
 // and its .sig: both absent is none; one alone, or a pair whose signature (the lane's key, the
 // exact trusted comment) or self-check fails, stops the plan, so an unverified seq is never used.
-// The seq is engines.seq with no live list, else max(engines.seq, live + 1); a rollback
-// (ROLLBACK_TO=<n>) takes the archived <lane>-<n>.json, whose signature must hold under the lane's
-// key, and publishes its apps, pins and sizes again with seq live + 1 and generated now. The new
-// seq must be above the live one and at most 2^16 above it (the verifier's ceiling). On the engines lane apps are tauri.conf.json's version and the latest published v*
-// release's (a 404 or a tag that is not v<X.Y.Z> adds none). Under GitHub Actions it writes seq,
-// live_seq and live_sha256 (each `none` with no live list) and sha256 to $GITHUB_OUTPUT, and what
-// will be signed, with the seq choice, to $GITHUB_STEP_SUMMARY.
+// The floor is the larger of the live seq and the highest archived <lane>-<n>.json that verifies
+// (the release's assets listed through the API). The seq is engines.seq with no floor, else
+// max(engines.seq, floor + 1); a rollback (ROLLBACK_TO=<n>) takes the archived <lane>-<n>.json,
+// whose signature must hold under the lane's key, and publishes its apps, pins and sizes again
+// with seq floor + 1 and generated now. The new seq must be above the floor and at most 2^16 above
+// it (the verifier's ceiling). On the engines lane apps are tauri.conf.json's version and the
+// latest published v* release's (a 404 or a tag that is not v<X.Y.Z> adds none). Under GitHub
+// Actions it writes seq, live_seq and live_sha256 (each `none` with no live list), floor_seq and
+// sha256 to $GITHUB_OUTPUT, and what will be signed (ref, commit, seq choice) to
+// $GITHUB_STEP_SUMMARY.
 // --live-check, run by publish right before signing, downloads and verifies the live list again
 // and refuses unless it is the one plan saw (PLANNED_LIVE_SHA256, or none) and SEQ is still above it
-// and within the ceiling.
+// and plan's floor (PLANNED_FLOOR), within the ceiling.
 // --pubkey writes the lane's updater public key (Tauri's base64 form): engines, tauri.conf.json's
 // plugins.updater.pubkey; engines-test, crates/desktop/release/updater-test.pub (as release.yml's
 // test mode reads it for CLAUSEO_UPDATER_PUBKEY).
@@ -152,17 +155,23 @@ export function seqGate(next, live) {
   if (next > MAX_SEQ) throw new Error(`seq ${next} is above 2^32`);
 }
 
-/** The seq to publish: engines.seq with no live list, else max(engines.seq, live + 1). */
-export function chooseSeq(fileSeq, live) {
-  return live === null ? fileSeq : Math.max(fileSeq, live.seq + 1);
+/** The seq to publish: engines.seq with no floor (no live or archived list that verifies), else
+ * max(engines.seq, floor + 1). */
+export function chooseSeq(fileSeq, floor) {
+  return floor === null ? fileSeq : Math.max(fileSeq, floor + 1);
+}
+
+/** The floor: the larger of the live seq and the highest archived seq that verifies, or null. */
+export function floorOf(live, archived) {
+  return live === null && archived === null ? null : Math.max(live?.seq ?? 0, archived ?? 0);
 }
 
 /** Refuses unless the live list now is the one plan saw (by sha256, or both none), and `seq` still
- * passes the gate against it. */
-export function liveUnchanged(plannedSha256, now, seq) {
+ * passes the gate against it and plan's floor. */
+export function liveUnchanged(plannedSha256, now, seq, plannedFloor = 0) {
   const got = now === null ? "none" : now.sha256;
   if (got !== plannedSha256) throw new Error(`the live list changed since plan: ${plannedSha256} then, ${got} now`);
-  seqGate(seq, now === null ? 0 : now.seq);
+  seqGate(seq, Math.max(now === null ? 0 : now.seq, plannedFloor));
 }
 
 /** RFC 3339 UTC to the second. */
@@ -214,10 +223,44 @@ export async function liveList(fetchImpl, repo, lane, pubkey) {
   return { seq: list.seq, sha256: createHash("sha256").update(json).digest("hex") };
 }
 
+const apiHeaders = (token) => ({ accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) });
+const API = (repo) => `https://api.github.com/repos/${repo}`;
+
+/** The highest n whose archived <lane>-<n>.json and .sig verify (the lane's key, the exact trusted
+ * comment, the self-check, seq n), trying from the highest down; null when none does. An older
+ * signed list can't then be published again over a newer one that only the archive still holds. */
+export async function archivedFloor(fetchImpl, repo, lane, pubkey, token) {
+  const headers = apiHeaders(token);
+  const release = await getText(fetchImpl, `${API(repo)}/releases/tags/${lane}`, headers);
+  if (release === null) return null;
+  const id = JSON.parse(release).id;
+  if (!Number.isSafeInteger(id)) throw new Error(`the ${lane} release has no id`);
+  const name = new RegExp(`^${lane}-([1-9]\\d{0,9})\\.json$`);
+  const seqs = [];
+  for (let page = 1; page <= 20; page++) {
+    const assets = JSON.parse((await getText(fetchImpl, `${API(repo)}/releases/${id}/assets?per_page=100&page=${page}`, headers)) ?? "[]");
+    if (!Array.isArray(assets)) throw new Error(`the ${lane} release's assets are not a list`);
+    for (const asset of assets) {
+      const m = name.exec(asset?.name ?? "");
+      if (m) seqs.push(Number(m[1]));
+    }
+    if (assets.length < 100) break;
+  }
+  for (const n of seqs.sort((a, b) => b - a)) {
+    const [json, sig] = await Promise.all([`${lane}-${n}.json`, `${lane}-${n}.json.sig`].map((f) => getText(fetchImpl, assetUrl(repo, lane, f))));
+    if (json === null || sig === null || engineSignatureProblems(Buffer.from(json), sig, pubkey).length) continue;
+    try {
+      if (selfCheck(JSON.parse(json)).seq === n) return n;
+    } catch {
+      // not a list that verifies: try the next one down
+    }
+  }
+  return null;
+}
+
 /** The latest release's tag (GitHub's `releases/latest`), null when there is none. */
 export async function latestTag(fetchImpl, repo, token) {
-  const headers = { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) };
-  const text = await getText(fetchImpl, `https://api.github.com/repos/${repo}/releases/latest`, headers);
+  const text = await getText(fetchImpl, `${API(repo)}/releases/latest`, apiHeaders(token));
   if (text === null) return null;
   const tag = JSON.parse(text).tag_name;
   return typeof tag === "string" ? tag : null;
@@ -367,12 +410,14 @@ export async function plan(root, { env, fetchImpl = fetch, now = new Date() }) {
   if (lane === "engines" && env.APPS) throw new Error("apps is for the engines-test lane only");
   const pubkey = lanePubkey(root, lane);
   const live = await liveList(fetchImpl, repo, lane, pubkey);
-  const liveSeq = live === null ? 0 : live.seq;
+  const archived = await archivedFloor(fetchImpl, repo, lane, pubkey, env.GH_TOKEN);
+  const floor = floorOf(live, archived);
+  const liveSeq = floor ?? 0;
   const fileSeq = parseSeq(readFileSync(join(root, LIVE, "engines.seq"), "utf8"));
   const generated = stamp(now);
   let list;
   if (n !== null) {
-    if (n >= liveSeq) throw new Error(`rollback_to ${n} is not below the live seq ${live === null ? "(none)" : liveSeq}`);
+    if (n >= liveSeq) throw new Error(`rollback_to ${n} is not below the floor ${floor === null ? "(none)" : liveSeq}`);
     const [json, sig] = await Promise.all(
       [`${lane}-${n}.json`, `${lane}-${n}.json.sig`].map((name) => getText(fetchImpl, assetUrl(repo, lane, name))),
     );
@@ -382,33 +427,37 @@ export async function plan(root, { env, fetchImpl = fetch, now = new Date() }) {
       lane === "engines"
         ? enginesApps(JSON.parse(readFileSync(join(root, "crates/desktop/tauri.conf.json"), "utf8")).version, await latestTag(fetchImpl, repo, env.GH_TOKEN))
         : testApps(env.APPS);
-    list = buildList(root, { seq: chooseSeq(fileSeq, live), apps, generated });
+    list = buildList(root, { seq: chooseSeq(fileSeq, floor), apps, generated });
   }
   seqGate(list.seq, liveSeq);
   selfCheck(list);
   const text = canonical(list);
   const sha256 = createHash("sha256").update(text).digest("hex");
-  return { list, text, sha256, live, fileSeq, n, summary: summary({ lane, list, text, sha256, live, fileSeq, n, sha: env.GITHUB_SHA }) };
+  const choice = { fileSeq, live, archived, seq: list.seq, n };
+  return { list, text, sha256, live, floor, choice, summary: summary({ lane, list, text, sha256, choice, ref: env.GITHUB_REF, sha: env.GITHUB_SHA }) };
 }
 
-/** `engines.seq N, live M (verified, sha256 …) or none, chosen K`, and why. */
-export function seqChoice({ fileSeq, live, seq, n = null }) {
+/** `engines.seq N, live M (verified, sha256 …) or none, archived A or none, chosen K`, and why. */
+export function seqChoice({ fileSeq, live, archived = null, seq, n = null }) {
   const liveText = live === null ? "live none" : `live ${live.seq} (verified, sha256 ${live.sha256})`;
-  const why = n !== null ? `rollback to ${n}: live + 1` : live === null ? "no live list: engines.seq" : seq === fileSeq ? "engines.seq is above live" : "live + 1";
-  return `engines.seq ${fileSeq}, ${liveText}, chosen ${seq} (${why})`;
+  const archivedText = archived === null ? "archived none" : `archived ${archived} (verified)`;
+  const none = live === null && archived === null;
+  const why = n !== null ? `rollback to ${n}: floor + 1` : none ? "no live or archived list: engines.seq" : seq === fileSeq ? "engines.seq is above the floor" : "floor + 1";
+  return `engines.seq ${fileSeq}, ${liveText}, ${archivedText}, chosen ${seq} (${why})`;
 }
 
 /** What will be signed, for the job summary. */
-export function summary({ lane, list, text, sha256, live, fileSeq, n, sha }) {
+export function summary({ lane, list, text, sha256, choice, ref, sha }) {
   const pins = { ...list.package_json.dependencies, ...list.package_json.overrides };
   return [
-    `### ${lane}: engines.json to sign${n === null ? "" : ` (rollback to ${n})`}`,
+    `### ${lane}: engines.json to sign${choice.n === null ? "" : ` (rollback to ${choice.n})`}`,
     "",
-    `- seq: ${seqChoice({ fileSeq, live, seq: list.seq, n })}`,
+    `- ref: \`${ref ?? "(local)"}\`${ref === "refs/heads/main" ? "" : " (NOT refs/heads/main: do not approve)"}`,
+    `- commit: \`${sha ?? "(local)"}\``,
+    `- seq: ${seqChoice(choice)}`,
+    `- sha256: \`${sha256}\``,
     ...Object.entries(pins).map(([name, v]) => `- \`${name}\` ${v}`),
     `- apps: ${list.apps.join(", ")}`,
-    `- commit: ${sha ?? "(local)"}`,
-    `- sha256: \`${sha256}\``,
     "",
     "<details><summary>engines.json</summary>",
     "",
@@ -432,16 +481,19 @@ export async function main(argv, { env = process.env, fetchImpl = fetch, now = n
     mkdirSync(args[1], { recursive: true });
     writeFileSync(join(args[1], "engines.json"), p.text);
     const [liveSeq, liveSha] = p.live === null ? ["none", "none"] : [p.live.seq, p.live.sha256];
-    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `seq=${p.list.seq}\nlive_seq=${liveSeq}\nlive_sha256=${liveSha}\nsha256=${p.sha256}\n`);
+    const out = `seq=${p.list.seq}\nlive_seq=${liveSeq}\nlive_sha256=${liveSha}\nfloor_seq=${p.floor ?? 0}\nsha256=${p.sha256}\n`;
+    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, out);
     if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, p.summary);
-    log(`${seqChoice({ fileSeq: p.fileSeq, live: p.live, seq: p.list.seq, n: p.n })}; sha256 ${p.sha256}`);
+    log(`${seqChoice(p.choice)}; sha256 ${p.sha256}`);
     return 0;
   }
   if (args[0] === "--live-check" && args.length === 1) {
     const lane = parseLane(env.LANE);
-    if (!/^[1-9]\d*$/.test(env.SEQ ?? "") || !/^([0-9a-f]{64}|none)$/.test(env.PLANNED_LIVE_SHA256 ?? "")) throw new Error("SEQ or PLANNED_LIVE_SHA256 is not plan's output");
+    if (!/^[1-9]\d*$/.test(env.SEQ ?? "") || !/^([0-9a-f]{64}|none)$/.test(env.PLANNED_LIVE_SHA256 ?? "") || !/^\d+$/.test(env.PLANNED_FLOOR ?? "")) {
+      throw new Error("SEQ, PLANNED_LIVE_SHA256 or PLANNED_FLOOR is not plan's output");
+    }
     const now = await liveList(fetchImpl, env.GITHUB_REPOSITORY, lane, lanePubkey(root, lane));
-    liveUnchanged(env.PLANNED_LIVE_SHA256, now, Number(env.SEQ));
+    liveUnchanged(env.PLANNED_LIVE_SHA256, now, Number(env.SEQ), Number(env.PLANNED_FLOOR));
     log(`live check: the live ${lane} list is still ${env.PLANNED_LIVE_SHA256}; seq ${env.SEQ} passes`);
     return 0;
   }

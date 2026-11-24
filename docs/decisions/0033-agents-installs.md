@@ -99,15 +99,31 @@ lanes: `engines` (environment `release`, the app's key; apps are `tauri.conf.jso
 the latest `v<X.Y.Z>` release's) and `engines-test` (environment `release-test`, the test key; apps
 from the dispatch input). The live list counts only when it verifies in `plan` (the lane's key, the
 exact trusted comment, the self-check); one that does not, or one of its two files alone, fails the
-run. The seq is `engines.seq` with no live list, else max(`engines.seq`, live + 1), above the live
-seq and at most 2^16 above it (the verifier's ceiling), and `publish` refuses if the live list
-changed since `plan`. Each list is also kept as `<lane>-<seq>.json`;
-`rollback_to=<n>` publishes that one again, its signature checked, with seq live + 1. A `plan` job
-with no environment and no secret builds and self-checks the file and prints it in its summary;
-`publish`, the only job with the environment, refuses anything but that file's sha256, checks the
-key signs for the lane's public key, signs, verifies and uploads. Precondition, an admin's: both
+run. Each list is also kept as `<lane>-<seq>.json` with its `.sig`, and the floor is the larger of
+the live seq and the highest archived seq that verifies (so an older signed list is never
+published over a newer one that only the archive holds). The seq is `engines.seq` with no floor,
+else max(`engines.seq`, floor + 1), at most 2^16 above the floor (the verifier's ceiling), and
+`publish` refuses if the live list changed since `plan`. A `plan` job with no environment and no
+secret builds and self-checks the file and prints, first, the run's ref and commit, the seq choice
+and the sha256, then the pins, apps and whole file. `publish`, the only job with the environment,
+refuses anything but that file's sha256, installs only the Tauri CLI (`--ignore-scripts`), checks
+the key signs for the lane's public key, signs with the CLI's own JS entry under `node` (no pnpm
+while the key is in the environment), verifies and uploads, each upload tried 3 times.
+
+Before approving `publish`, the approver checks `plan`'s summary: the ref is `refs/heads/main`,
+the commit is on main, and the pins are the merged ones. Preconditions, an admin's: both
 environments must allow deployments from `main` (today `release` allows only `v*` tags and
-`release-test` only `test-v*`), and `release-test` needs a required reviewer.
+`release-test` only `test-v*`), `release-test` needs a required reviewer, and creating `v*` tags
+must be limited to the owner by a ruleset, because the workflow's `github.ref ==
+'refs/heads/main'` checks live in the dispatched ref's own copy of the file. A failed upload is
+repaired by hand: the archive goes up first, so copy `<lane>-<SEQ>.json` and its `.sig` from the
+release back over `engines.json` and `engines.json.sig` (`gh release download`, rename,
+`gh release upload --clobber`, the `.sig` first), which republishes exactly what was signed.
+
+**Rollback.** `rollback_to=<n>` re-signs the archived `<lane>-<n>.json` unchanged (its pins, sizes
+and apps, after its signature checks out) at seq floor + 1. It reaches only the apps that old list
+names, and of those only the ones whose bundled pins are no newer than its pins: an app refuses a
+list older than what it shipped with, so a rollback can never take an app below its bundled pins.
 
 **The layout** under `Locations::data_dir`:
 - `agents/runtime/node-v24.22.0-<os>-<arch>/`: a downloaded Node.
