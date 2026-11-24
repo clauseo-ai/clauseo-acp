@@ -124,10 +124,14 @@
     align-items: center;
     gap: var(--s2);
   }
+  /* the tools stand on the lead's line, the corner lights' centre (26 px), not the title's: the sidebar's toggle
+     and the papers' toggle share one centre line, on the Mac and off it */
   .room-tools {
     margin-left: auto;
     flex: 0 1 auto;
     min-width: 0;
+    align-self: flex-start;
+    height: var(--lead-h);
     display: flex;
     align-items: center;
     gap: var(--s3);
