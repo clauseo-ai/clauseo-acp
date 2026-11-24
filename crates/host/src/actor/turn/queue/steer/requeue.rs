@@ -61,6 +61,8 @@ fn log_requeue(
         .at_head();
     let mut out = Out::new(actor, thread, None)?;
     out.push(actor, requeued(ask.message, turn))?;
+    // The new turn runs with the lawyer's picks for the steer.
+    super::super::super::prompt_picks::carry(actor, thread, turn, ask.picks);
     out.push(actor, waits)?;
     queue(actor, thread)
         .ok_or_else(|| lost("a thread"))?

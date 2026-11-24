@@ -22,8 +22,8 @@
 
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
-    AgentKind, CommandOutcome, ContentBlock, Delivery, MessageId, SteerOutcome, SteerResolved,
-    StopReason, StreamId, ThreadId, Timestamp, TurnId,
+    AgentKind, CommandOutcome, ConfigPicks, ContentBlock, Delivery, MessageId, SteerOutcome,
+    SteerResolved, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 
 use super::super::super::Actor;
@@ -90,6 +90,9 @@ pub(crate) struct Ask {
     pub(super) sent: Timestamp,
     /// Claude's transcripts, marked as the steer went out (`confirm::mark`).
     pub(super) places: Vec<super::transcript::Place>,
+    /// The lawyer's picks for it: they go once the agent takes it in, and a new turn it moves to
+    /// takes them (`requeue.rs`).
+    pub(super) picks: Option<ConfigPicks>,
 }
 
 /// The agent's answer to a steer.
@@ -231,7 +234,7 @@ pub(super) fn steer(
     ctx: CommandCtx,
     thread: ThreadId,
     turn: TurnId,
-    content: Vec<ContentBlock>,
+    (content, picks): (Vec<ContentBlock>, Option<ConfigPicks>),
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let message: MessageId = actor.ids.mint(now)?;
@@ -248,6 +251,7 @@ pub(super) fn steer(
         content,
         sent: now,
         places: Vec::new(),
+        picks,
     };
     out.send_tagged(
         actor,

@@ -3,7 +3,8 @@
 //! agent's answer holds, not what was picked (`pickers-turn-record`); a refused pick gets one
 //! `PickNotUsed` notice; an effort pick is checked against the model pick's answer
 //! (`pickers-turn-effort`); a steer that runs as its own turn keeps its picks
-//! (`pickers-steer-fresh`) and one that joins the running answer drops them (`steer-injected`);
+//! (`pickers-steer-fresh`), one that joins the running answer drops them (`steer-injected`) and
+//! one moved to a new turn after joining hands them to it (`pickers-steer-requeued`);
 //! a turn put back for the sign-in keeps its picks (`pickers-sign-in-requeue`).
 
 use clauseo_protocol::{
@@ -311,6 +312,50 @@ fn a_steer_that_joins_the_running_answer_drops_its_picks() {
         configs.iter().all(std::collections::BTreeMap::is_empty),
         "a joining steer logs no picks: {configs:?}"
     );
+    host.shutdown();
+}
+
+#[test]
+fn a_joining_steer_moved_to_a_new_turn_keeps_its_picks() {
+    let dir = Dir::new(
+        "pickers_steer_requeued",
+        &[(FAKE, Scenario::Local("pickers-steer-requeued"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    host.wait_armed(crate::queue::DURABLE);
+    let steered = send(
+        &host,
+        thread,
+        "Focus on clause 4",
+        (&[("model", "sonnet")], DeliveryRequest::Steer),
+    );
+    assert_eq!(steered, first, "the steer joins the running turn");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    let second = |event: &DomainEvent| matches!(event, DomainEvent::TurnQueued(queued) if queued.behind_turn() == Some(first));
+    events.until("the steer's new turn", |events| {
+        events.position(second).is_some()
+    });
+    let again = events
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::TurnQueued(queued) if queued.behind_turn() == Some(first) => {
+                Some(queued.turn())
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(events.until_turn_ended(again).stop, StopReason::EndTurn);
+    events.assert_no_mismatch();
+    assert_eq!(
+        started(&events, again).model,
+        Some(named("sonnet", "Sonnet 5.5")),
+        "{}",
+        events.dump()
+    );
+    assert!(not_used(&events).is_empty(), "{}", events.dump());
     host.shutdown();
 }
 
