@@ -201,7 +201,7 @@ pub(in crate::actor::turn) fn before_update(
     let status = patch.status;
     let text = status
         .filter(|status| *status == ToolCallStatus::Completed)
-        .and_then(|_| patch.content.as_deref())
+        .and(patch.content.as_deref())
         .and_then(text_of);
     Ok(Before::Launch(LaunchPatch {
         raw_input: patch.raw_input.clone(),
@@ -235,21 +235,24 @@ pub(in crate::actor::turn) fn after_launch_update(
     };
     let outcome = match status {
         ToolCallStatus::Failed => HelperOutcome::Failed,
-        _ if known.background => return Ok(()),
+        ToolCallStatus::Completed | ToolCallStatus::Cancelled if known.background => return Ok(()),
         // A foreground helper that hands back: the call's text only points at the handback,
         // which ends the helper with its report, before or after this.
         ToolCallStatus::Completed if hands_back(actor, thread, acp_id, patch.text.as_deref()) => {
             return Ok(());
         }
         ToolCallStatus::Completed => HelperOutcome::Done,
-        _ => HelperOutcome::Stopped,
+        ToolCallStatus::Cancelled => HelperOutcome::Stopped,
+        ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
+            return Ok(());
+        }
     };
     end(actor, thread, acp_id, outcome, patch.text)
 }
 
 /// The words of a launch call's result that point at the helper's handback instead of holding
 /// its report, as Claude Code 2.1.330 writes them ("This agent's report was delivered to you as
-/// a message from … (its SubagentHandback call). Read it there; it is not repeated here.";
+/// a message from … (its `SubagentHandback` call). Read it there; it is not repeated here.";
 /// recorded for two foreground helpers at once).
 const HANDBACK_POINTER: &str = "(its SubagentHandback call)";
 
@@ -330,9 +333,10 @@ fn object_of(raw: Option<&TextOrBlob>) -> Option<serde_json::Map<String, Value>>
     let Some(TextOrBlob::Inline(text)) = raw else {
         return None;
     };
-    match serde_json::from_str(text) {
-        Ok(Value::Object(object)) => Some(object),
-        _ => None,
+    if let Ok(Value::Object(object)) = serde_json::from_str(text) {
+        Some(object)
+    } else {
+        None
     }
 }
 
@@ -361,7 +365,19 @@ fn text_of(content: &[ToolCallContent]) -> Option<String> {
             | ToolCallContent::Content {
                 content: ContentBlock::Text { text },
             } => text.as_str(),
-            _ => continue,
+            ToolCallContent::Text {
+                text: TextOrBlob::Blob(_),
+            }
+            | ToolCallContent::Content {
+                content:
+                    ContentBlock::Image { .. }
+                    | ContentBlock::Audio { .. }
+                    | ContentBlock::ResourceLink { .. }
+                    | ContentBlock::Resource { .. }
+                    | ContentBlock::Unsupported { .. },
+            }
+            | ToolCallContent::Diff { .. }
+            | ToolCallContent::Unknown { .. } => continue,
         };
         if !joined.is_empty() {
             joined.push_str("\n\n");
