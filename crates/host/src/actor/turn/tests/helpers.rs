@@ -2,8 +2,9 @@
 //! reader hands them over (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`), shaped as
 //! the recorded run has them (`fake_agent`'s `claude-helper-background` scenario): one background
 //! helper with two steps and words that hands back; a refused handback, then one that lands; two
-//! foreground helpers interleaved, one failing; a Stop with two open; a turn that ends with one
-//! still open; a step stamped with a helper never started; a replayed frame. The ends a run's
+//! foreground helpers interleaved, one failing; a Stop with two open; a turn that ends by itself
+//! with a foreground and a background helper open; words before the launch input; a step
+//! stamped with a helper never started; a replayed frame. The ends a run's
 //! stop or a reopen brings are in `helpers_ends.rs`, the recorded runs in `helpers_recorded.rs`.
 
 use std::collections::HashMap;
@@ -521,14 +522,15 @@ fn a_stop_ends_every_open_helper_stopped() {
     rig.finish();
 }
 
-/// A turn that ends by itself with a helper that never handed back ends it `Failed`, with no
-/// summary.
+/// A turn that ends by itself ends a foreground helper that never handed back `Failed`, with no
+/// summary, and leaves a background helper open: it works on after the prompt and ends later.
 #[test]
-fn a_turn_that_ends_with_a_helper_open_ends_it_failed() {
+fn a_turn_that_ends_by_itself_fails_a_foreground_helper_and_keeps_a_background_one() {
     let mut rig = Rig::start("helpers-open-at-end", &one_turn("end_turn"));
     let thread = rig.thread();
     let turn = live_turn(&mut rig, thread);
     let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    let checker = r#"{"subagent_type":"checker","prompt":"Check."}"#;
     lead(
         &mut rig,
         thread,
@@ -542,6 +544,12 @@ fn a_turn_that_ends_with_a_helper_open_ends_it_failed() {
         turn,
         patch("toolu_A", None, COMPLETED, Some("Launched.")),
     );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_B", "Agent", Some(checker)),
+    );
     rig.release_held();
     until_ended(&mut rig, thread);
     assert_eq!(
@@ -550,10 +558,57 @@ fn a_turn_that_ends_with_a_helper_open_ends_it_failed() {
             "step tc-0 -",
             "step toolu_A -",
             "start paper-reader call=toolu_A model=haiku label=- task=true",
-            "end paper-reader Failed -",
+            "step toolu_B -",
+            "start checker call=toolu_B model=- label=- task=true",
+            "end checker Failed -",
             "turn_ended EndTurn",
         ]
     );
+    let open = rig
+        .actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .map(clauseo_reducer::ThreadState::open_helpers);
+    assert_eq!(open, Some(1), "the background helper is still open");
+    rig.finish();
+}
+
+/// A helper that talks before its launch call's input has come: its words are kept under the
+/// id the launch already took, which the helper then starts with.
+#[test]
+fn words_before_the_launch_input_stay_under_the_helper() {
+    let mut rig = Rig::start("helpers-early-words", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    lead(&mut rig, thread, turn, call("toolu_A", "Agent", None));
+    stamped(&mut rig, thread, at, "toolu_A", words("Early."));
+    let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_A", Some(input), None, None),
+    );
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    let started = log.iter().find_map(|event| {
+        if let DomainEvent::HelperStarted(started) = event {
+            Some(started.helper)
+        } else {
+            None
+        }
+    });
+    let spoke = log.iter().find_map(|event| {
+        if let DomainEvent::HelperText(text) = event {
+            Some((text.helper, text.text.clone()))
+        } else {
+            None
+        }
+    });
+    assert!(started.is_some(), "{log:?}");
+    assert_eq!(spoke, started.map(|helper| (helper, "Early.".to_owned())));
     rig.finish();
 }
 
