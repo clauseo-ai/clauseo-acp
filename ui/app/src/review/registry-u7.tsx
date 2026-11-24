@@ -42,11 +42,16 @@ import { matterWords, threadWords } from "./words.ts";
 export const OTHER = uuid(0, 1);
 
 /** A host whose matter has THREAD, with one question asked, in `status`, and "Draft petition", in `other` (running
- * unless said). */
-export function heldHost(status: ThreadStatus, other: ThreadStatus = "running"): FakeTransport {
+ * unless said); with `hold`, THREAD's header names it (#1286's HeaderEntry.hold, a stand-in until that binding). */
+export function heldHost(
+  status: ThreadStatus,
+  other: ThreadStatus = "running",
+  hold?: string,
+): FakeTransport {
   const head = header();
   head.header!.matter = MATTER.matter;
   head.header!.status = status;
+  if (hold !== undefined) Object.assign(head.header!, { hold });
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };

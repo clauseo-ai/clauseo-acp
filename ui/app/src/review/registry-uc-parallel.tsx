@@ -22,12 +22,11 @@ import { state } from "./registry-u8.tsx";
 import { RoomOver, RoomPressing } from "./states.tsx";
 import { matterWords, threadWords, versionWords } from "./words.ts";
 
-/** A queued status with the host's hold, as the bindings don't carry it yet. */
-const heldBy = (hold: "undo" | "restore" | "relocate"): ThreadStatus =>
-  ({ queued: { behind: THREAD, hold } }) as unknown as ThreadStatus;
+/** Queued behind its own thread: with the header's hold (heldHost's third), what the host gives for a hold. */
+const QUEUED: ThreadStatus = { queued: { behind: THREAD } };
 /** Both conversations' messages wait for `hold`: the composer's working line and card, the other's rail row. */
 const held = (hold: "undo" | "restore" | "relocate") => () => (
-  <RoomOver host={() => heldHost(heldBy(hold), heldBy(hold))} />
+  <RoomOver host={() => heldHost(QUEUED, QUEUED, hold)} />
 );
 /** Today's host: the open conversation's message queued behind "Draft petition", which runs, with no hold. */
 const behindOther = () => <RoomOver host={() => heldHost({ queued: { behind: OTHER } })} />;
@@ -38,10 +37,12 @@ const later = (status: "sent" | "removed"): ViewEntry => {
   const e = userMessage(4, 2, LATER);
   return { user_message: { ...e.user_message!, status, turn: uuid(2, 4) } };
 };
-const headed = (status: ThreadStatus): ViewEntry => {
+const headed = (status: ThreadStatus, hold?: string): ViewEntry => {
   const head = header();
   head.header!.matter = MATTER.matter;
   head.header!.status = status;
+  // #1286's HeaderEntry.hold, a stand-in until that binding
+  if (hold !== undefined) Object.assign(head.header!, { hold });
   return head;
 };
 
@@ -74,7 +75,7 @@ function stoppedHost(): FakeTransport {
           later("sent"),
         ];
         transport.deliver(
-          event(batch(1, [reset(window, headed(heldBy("undo")))], undefined, stream)),
+          event(batch(1, [reset(window, headed(QUEUED, "undo"))], undefined, stream)),
         );
         setTimeout(() => {
           const bodies = [upsert(later("removed")), upsert(headed("idle"))];

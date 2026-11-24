@@ -59,7 +59,6 @@ import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, ThreadId } from "../../transport/protocol.ts";
-import type { Conversations } from "../conversations.ts";
 import { MatterHoldWait } from "@clauseo/components/clauseo/queue-wait.tsx";
 import { useMatterHeld } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
@@ -110,7 +109,6 @@ export function WorkComposer({
   refill = null,
   onAsk,
   onStop,
-  others = null,
   paused = null,
   transport = null,
   stream = null,
@@ -161,9 +159,6 @@ export function WorkComposer({
   /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
   onAsk: (text: string, how?: AskHow) => Promise<boolean>;
   onStop: () => void;
-  /** U7: the matter's conversations, for the wait over the field while an undo, a restore or a move holds the matter
-   * and the host has queued this conversation's message. Null: no wait. */
-  others?: { conversations: Conversations } | null;
   /** U12: the open thread paused at the plan's limit (limit-words.ts's pausedPick), for the status line's words; null
    * while it isn't. Send stays enabled: no limits state holds a question back. */
   paused?: Paused | null;
@@ -217,8 +212,8 @@ export function WorkComposer({
     return d === undefined || (d.typed.trim() === "" && d.pastes.length === 0);
   });
   const emptyNow = useRef(empty);
-  // U7: the host queued this conversation's message while an undo, a restore or a move holds the matter
-  const holdWait = useMatterHeld(others?.conversations ?? null, draftKey);
+  // U7: what the host queued this conversation's message for, from its header (queue-model.ts)
+  const holdWait = useMatterHeld(store, stream);
   // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send, or until
   // the thread moves on (its status, or the agent's latest output: the drained turn has started), when it says
   // "Answering." again. `lost` holds the thread's mark as the edit was lost, null for none; each clear checks it first,
@@ -492,11 +487,8 @@ export function WorkComposer({
       queue={
         <>
           {/* the composer's working line says the wait, in its own status region */}
-          {holdWait !== null && !("unknown" in holdWait) && (
-            <MatterHoldWait
-              reason={"hold" in holdWait ? holdWait.hold : "other"}
-              testId="matter-hold"
-            />
+          {holdWait !== null && holdWait !== "unknown" && (
+            <MatterHoldWait reason={holdWait} testId="matter-hold" />
           )}
           {transport !== null && thread !== null && (
             <QueueSlot
