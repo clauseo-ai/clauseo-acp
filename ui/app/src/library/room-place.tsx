@@ -3,16 +3,20 @@
 // place closes when a matter or a conversation opens from the rail, or a new matter is made (the
 // room calls close). The list's source starts with the room, so the rail's count and the MCP
 // servers' catch-up are heard from the first frame.
-import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
 import { useState, type ReactNode } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { addonsSourceOf, useAddons } from "./addons-source.ts";
+import { haveCount } from "./model.ts";
 import { LibraryRow } from "./library-entry.tsx";
 import { LibraryLazy } from "./library-lazy.tsx";
 import { markSeen, wasSeen } from "./seen.ts";
-import type { LibraryStart } from "./library.tsx";
+import type { LibraryStart } from "./open-library.ts";
+
+const countLine = (lang: Lang, n: { skills: number; connectors: number }) =>
+  lb(lang, "{skills} skills, {connectors} connectors", n);
 
 export type LibraryPlace = {
   /** Whether the place stands in the centre. */
@@ -43,11 +47,14 @@ export function useLibraryPlace({
 }): LibraryPlace {
   const { lang } = useDisplay();
   const [source] = useState(() => addonsSourceOf(transport));
-  const { items } = useAddons(source);
+  const { items, complete, caseLaw } = useAddons(source);
   const [start, setStart] = useState<LibraryStart | null>(null);
+  // each opening mounts the place afresh, so an opening at Case Law lands there even while it is open
+  const [opened, setOpened] = useState(0);
   const [seen, setSeen] = useState(wasSeen);
   const show = (where: LibraryStart = {}) => {
     setStart(where);
+    setOpened((n) => n + 1);
     onShow();
     if (!seen) {
       markSeen();
@@ -55,14 +62,7 @@ export function useLibraryPlace({
     }
   };
   const shown = start !== null;
-  const listed = items?.filter((a) => a.id !== "agent-browser") ?? null;
-  const count =
-    listed === null
-      ? ""
-      : lb(lang, "{skills} skills, {connectors} connectors", {
-          skills: listed.filter((a) => a.kind === "skill").length,
-          connectors: listed.filter((a) => a.kind === "tool").length,
-        });
+  const count = !complete || items === null ? "" : countLine(lang, haveCount(items, caseLaw));
   return {
     shown,
     title: lb(lang, "Skills and connectors"),
@@ -72,6 +72,7 @@ export function useLibraryPlace({
     centre:
       start !== null ? (
         <LibraryLazy
+          key={opened}
           transport={transport}
           source={source}
           names={names}

@@ -3,8 +3,9 @@
 import { expect, test } from "vitest";
 import type { AddonView } from "./addons.ts";
 import { caseLawStatus, interimItems, packItem, serverItem } from "./addons-interim.ts";
+import { caseLawFacts } from "./addons-source.ts";
 import { assistantName } from "./assistant.ts";
-import { fromLine, nameOf, rowLine, scopeTag } from "./model.ts";
+import { fromLine, haveCount, nameOf, rowLine, scopeTag } from "./model.ts";
 
 const NAMES = new Map([
   ["sharma", "Sharma v. State of Delhi"],
@@ -112,4 +113,39 @@ test("the interim list: packs, servers and Case Law's status from today's reads"
     "case-law",
     "browser",
   ]);
+});
+
+test("Case Law's facts and the rail's count: what the lawyer has", () => {
+  const off = { available: false, locked: false, connectors: [] };
+  expect(caseLawFacts(off, false)).toEqual({ heard: false, off: null, pack: null, credits: null });
+  expect(caseLawFacts(off, true).off).toBe("lawyer");
+  expect(caseLawFacts({ ...off, locked: true }, true).off).toBe("firm");
+  const signedIn = {
+    available: true,
+    locked: false,
+    connectors: [
+      {
+        id: "case-law",
+        name: "Indian Kanoon",
+        packs: [
+          { pack: "big", credits: 10_000, paise: 99_000 },
+          { pack: "small", credits: 2_000, paise: 23_600 },
+        ],
+        status: { signed_in: { low: false, balance: { credits: 1_240 } } },
+      },
+    ],
+  };
+  const facts = caseLawFacts(signedIn, true);
+  expect(facts).toEqual({
+    heard: true,
+    off: null,
+    pack: { paise: 23_600, credits: 2_000 },
+    credits: 1_240,
+  });
+  const items = interimItems([], null, signedIn, true);
+  expect(haveCount(items, facts)).toEqual({ skills: 4, connectors: 1 });
+  expect(haveCount(interimItems([], null, off, true), caseLawFacts(off, true))).toEqual({
+    skills: 4,
+    connectors: 0,
+  });
 });

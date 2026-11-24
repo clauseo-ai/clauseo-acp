@@ -83,8 +83,7 @@ export const HI = {
   // UC-1227 to UC-1232: Clauseo Case Law, unreachable or added
   "Can't reach it right now": null,
   Retry: null,
-  "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.":
-    null,
+  "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.": null,
   "{credits} credits left": null,
   "About {n} searches": null,
   "No credits left": null,
@@ -101,4 +100,9 @@ export const HI = {
   // UC-1239, UC-1240: {who} and {Who} when both plans are signed in, so no one assistant is named
   "the assistant": null,
   "The assistant": null,
+  // UC-1241: the button beside "Can't reach it right now" until list_addons can check again itself:
+  // it opens Settings at Connectors, whose opening checks
+  "Open Settings to check": null,
+  // UC-1242: Clauseo Case Law's detail while the lawyer has turned connectors off
+  "Connectors are turned off. You can turn them on in Settings, under Connectors.": null,
 } as const;

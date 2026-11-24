@@ -9,6 +9,7 @@ import { sk } from "@clauseo/components/lib/words-skills.ts";
 import { CASE_LAW } from "../store/connectors.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "./addons.ts";
+import type { CaseLawFacts } from "./addons-source.ts";
 
 export type Part = "skills" | "connectors";
 
@@ -16,6 +17,24 @@ export type Part = "skills" | "connectors";
  * detail instead. */
 export const inPart = (part: Part, a: AddonView): boolean =>
   a.id !== "agent-browser" && (part === "skills" ? a.kind === "skill" : a.kind === "tool");
+
+/** What the lawyer has, for the rail's count: every skill listed, and the connectors that are
+ * their own or added (Clauseo Case Law once added and on); not the built-in browser. */
+export function haveCount(
+  items: readonly AddonView[],
+  caseLaw: CaseLawFacts,
+): { skills: number; connectors: number } {
+  const listed = items.filter((a) => a.id !== "agent-browser");
+  const added = (a: AddonView) =>
+    a.source === "added" ||
+    (a.id === CASE_LAW &&
+      caseLaw.off === null &&
+      (a.status === "ready" || caseLaw.credits !== null));
+  return {
+    skills: listed.filter((a) => a.kind === "skill").length,
+    connectors: listed.filter((a) => a.kind === "tool" && added(a)).length,
+  };
+}
 
 /** The built-ins the app names in its own words: their name and their one line. */
 const BUILT_IN: Record<string, { name: LibraryKey; line: LibraryKey }> = {
@@ -141,7 +160,10 @@ export function troubleLine(lang: Lang, status: AddonStatus, who: string): strin
     case "unreachable":
       return lb(
         lang,
-        "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.",
+        "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.",
+        {
+          who,
+        },
       );
     default:
       return null;

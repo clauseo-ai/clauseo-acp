@@ -1,31 +1,132 @@
-// The one place Skills and connectors reads its list from. Every part of the place reads through
-// here, so wiring stage D's list_addons is a change to this file alone.
-// TODO(stage D, D1: list_addons + addons_changed): make createAddonsSource ask
-// `transport.query({ list_addons: {} })`, read again on each `addons_changed` app event and on
-// `read()`, and give `recheck` as one more read (draft 2: list_addons checks Case Law's liveness
-// again). Then delete addons-interim.ts.
-import type { HostTransport } from "../transport/host-transport.ts";
+// The one place Skills and connectors reads from: the list, and Clauseo Case Law's facts from the
+// connectors' state (its credits and price, whether connectors are on), and the two things the
+// place can ask of the host (its Retry, and today's add flow, Settings at Connectors). Every part of
+// the place reads through here, so wiring stage D's list_addons is a change to this file alone.
+// TODO(stage D, D1: list_addons + addons_changed): replace interimList below with a reader that asks
+// `transport.query({ list_addons: {} })`, complete with its first answer, and reads again on each
+// `addons_changed` app event and on `read()`; make `recheck` { how: "again", run: read } (each
+// list_addons checks Case Law's reach again). Then delete addons-interim.ts.
 import { useSyncExternalStore } from "react";
+import { quietly } from "../room/open.ts";
+import { CASE_LAW, connectorsStoreOf } from "../store/connectors.ts";
+import type { HostTransport } from "../transport/host-transport.ts";
+import type { ConnectorsState } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
-import { interimSource } from "./addons-interim.ts";
+import { interimList } from "./addons-interim.ts";
 
-export type AddonsState = {
-  /** The items in the place's order; null until the first answer. */
-  items: readonly AddonView[] | null;
+/** The list as read: null until the first answer; complete once every source has been heard. */
+export type ListState = { items: readonly AddonView[] | null; complete: boolean };
+
+/** A reader of the list. */
+export type ListReader = {
+  subscribe: (listener: () => void) => () => void;
+  state: () => ListState;
+  read: () => void;
 };
+
+/** Clauseo Case Law's facts beyond its list item, from the connectors' state. */
+export type CaseLawFacts = {
+  /** Whether the connectors' state has arrived; before it, the card waits. */
+  heard: boolean;
+  /** Connectors turned off: by the lawyer, or by the firm; null while on. */
+  off: "lawyer" | "firm" | null;
+  /** The smallest pack: its gross price in paise and its credits; null while none is listed. */
+  pack: { paise: number; credits: number } | null;
+  /** The credits left, from the last account read; null before one, or while not added. */
+  credits: number | null;
+};
+
+export type AddonsState = ListState & { caseLaw: CaseLawFacts };
+
+/** Case Law's Retry: what it does, so the button says it ("settings": opens Settings, whose opening
+ * checks; "again": asks the list again, which checks). */
+export type Recheck = { how: "settings" | "again"; run: () => void };
 
 export type AddonsSource = {
   subscribe: (listener: () => void) => () => void;
   state: () => AddonsState;
   /** Reads the list again: when the place opens. */
   read: () => void;
-  /** Asks for Clauseo Case Law's reach to be checked again (its Retry); null where it can't be. */
-  recheck: (() => void) | null;
+  /** Case Law's Retry; null where it can't be. */
+  recheck: Recheck | null;
+  /** Today's add flow and the connectors' switch: Settings at Connectors; null without it. */
+  openConnectors: (() => void) | null;
 };
 
-/** The list's source over a transport, listening from the moment it is made. */
+const NO_FACTS: CaseLawFacts = { heard: false, off: null, pack: null, credits: null };
+
+/** Case Law's facts from the connectors' state. */
+export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFacts {
+  if (!heard) return NO_FACTS;
+  const c = state.connectors.find((v) => v.id === CASE_LAW);
+  const smallest = [...(c?.packs ?? [])].sort((a, b) => a.paise - b.paise)[0];
+  const s = c?.status;
+  const credits =
+    typeof s !== "object"
+      ? null
+      : "out_of_credit" in s
+        ? 0
+        : "signed_in" in s
+          ? (s.signed_in.balance?.credits ?? null)
+          : null;
+  return {
+    heard,
+    off: state.available ? null : state.locked ? "firm" : "lawyer",
+    pack: smallest === undefined ? null : { paise: smallest.paise, credits: smallest.credits },
+    credits,
+  };
+}
+
+/** The source: a list reader, with Case Law's facts and the host's two asks. */
+export function sourceOver(
+  transport: HostTransport,
+  list: ListReader,
+  recheck: (open: () => void) => Recheck,
+): AddonsSource {
+  const connectors = connectorsStoreOf(transport);
+  let state: AddonsState = { ...list.state(), caseLaw: NO_FACTS };
+  let key = "";
+  const compose = () => {
+    const facts = caseLawFacts(connectors.state(), connectors.heard());
+    const next = list.state();
+    const nextKey = JSON.stringify(facts);
+    if (next.items === state.items && next.complete === state.complete && nextKey === key) return;
+    key = nextKey;
+    state = { ...next, caseLaw: facts };
+  };
+  compose();
+  const open = transport.openSettings;
+  const openConnectors =
+    open === undefined
+      ? null
+      : () => void quietly("open_settings", open.call(transport, "connectors"));
+  return {
+    subscribe: (listener) => {
+      const tell = () => {
+        compose();
+        listener();
+      };
+      const offList = list.subscribe(tell);
+      const offConnectors = connectors.subscribe(tell);
+      return () => {
+        offList();
+        offConnectors();
+      };
+    },
+    state: () => {
+      compose();
+      return state;
+    },
+    read: list.read,
+    recheck: openConnectors === null ? null : recheck(openConnectors),
+    openConnectors,
+  };
+}
+
+/** The list's source over a transport, listening from the moment it is made. Until list_addons, Retry
+ * opens Settings at Connectors, whose opening runs the host's check (refused from the main window). */
 export function createAddonsSource(transport: HostTransport): AddonsSource {
-  return interimSource(transport);
+  return sourceOver(transport, interimList(transport), (open) => ({ how: "settings", run: open }));
 }
 
 const sources = new WeakMap<HostTransport, AddonsSource>();
@@ -47,13 +148,21 @@ export function provideAddons(transport: HostTransport, source: AddonsSource): v
   sources.set(transport, source);
 }
 
-/** A source that lists `items` and never changes: the review page's and the shots'. */
+/** A source that lists `items` with `caseLaw`'s facts and never changes: the review page's and the
+ * shots'. */
 export function fixedAddons(
   items: readonly AddonView[],
-  recheck: (() => void) | null = null,
+  caseLaw: CaseLawFacts = { heard: true, off: null, pack: null, credits: null },
+  how: Recheck["how"] = "settings",
 ): AddonsSource {
-  const state: AddonsState = { items };
-  return { subscribe: () => () => {}, state: () => state, read: () => {}, recheck };
+  const state: AddonsState = { items, complete: true, caseLaw };
+  return {
+    subscribe: () => () => {},
+    state: () => state,
+    read: () => {},
+    recheck: { how, run: () => {} },
+    openConnectors: () => {},
+  };
 }
 
 /** The list as it changes. */

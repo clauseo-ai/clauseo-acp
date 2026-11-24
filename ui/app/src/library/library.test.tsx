@@ -42,7 +42,7 @@ const TOOLS: McpToolsView = {
       kind: "local",
       command: "npx",
       args: ["-y", "court-diary-mcp"],
-      env: [{ name: "DIARY_TOKEN", held: true }],
+      env: [{ name: "DIARY_TOKEN", saved: true }],
       headers: [],
       enabled: true,
     },
@@ -52,15 +52,19 @@ const TOOLS: McpToolsView = {
       url: "https://precedents.raoandco.in/mcp",
       args: [],
       env: [],
-      headers: [{ name: "Authorization", held: false }],
+      headers: [{ name: "Authorization", saved: false }],
       enabled: true,
     },
   ],
 } as McpToolsView;
 
-const caseLaw = (status: ConnectorStatus | null, available = true): ConnectorsState => ({
+const caseLaw = (
+  status: ConnectorStatus | null,
+  available = true,
+  locked = !available,
+): ConnectorsState => ({
   available,
-  locked: !available,
+  locked,
   connectors:
     status === null
       ? []
@@ -120,11 +124,16 @@ const rows = () =>
 const row = (name: string) =>
   h!.all("library-row").find((r) => r.querySelector(".lib-row-name")?.textContent === name);
 
-test("the rail's row counts the list, says New until opened, and opens the place with the wall hidden", async () => {
+test("the rail's row counts what the lawyer has, once every source is heard, says New until opened, and opens the place with the wall hidden", async () => {
   await mount();
+  // no count until the MCP servers and the connectors' state have both been heard: it never jumps
+  expect(h!.one("library-entry")?.textContent).toBe("Skills and connectorsNew");
   await play({ mcp_tools_changed: TOOLS });
+  expect(h!.one("library-entry")?.textContent).toBe("Skills and connectorsNew");
+  await play({ connectors_changed: caseLaw("not_added") });
+  // the skills listed, and the connectors that are the lawyer's: not Case Law unadded, nor the browser
   const entry = h!.one("library-entry")!;
-  expect(entry.textContent).toBe("Skills and connectors7 skills, 4 connectorsNew");
+  expect(entry.textContent).toBe("Skills and connectors7 skills, 2 connectorsNew");
   expect(h!.one("library")).toBeNull();
   await open();
   expect(h!.one("library")).not.toBeNull();
@@ -132,7 +141,10 @@ test("the rail's row counts the list, says New until opened, and opens the place
   expect(h!.host.querySelector(".room-window")?.getAttribute("data-wall")).toBe("hidden");
   expect(h!.one("wall-toggle")).toBeNull();
   expect(h!.one("library-entry")?.getAttribute("aria-current")).toBe("page");
-  expect(h!.one("library-entry")?.textContent).toBe("Skills and connectors7 skills, 4 connectors");
+  expect(h!.one("library-entry")?.textContent).toBe("Skills and connectors7 skills, 2 connectors");
+  // the rail's row may fold away: the chosen tab has the focus, and controls the panel shown
+  expect(document.activeElement?.textContent).toBe("Skills");
+  expect(h!.host.querySelector('[role="tabpanel"] .lib-list')).not.toBeNull();
   expect(localStorage.getItem(SEEN_KEY)).toBe("1");
   const tabs = [...h!.host.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
   expect(tabs).toEqual(["Skills", "Connectors"]);
@@ -207,7 +219,7 @@ test("Clauseo Case Law not added: the agreed words, and its button opens Setting
   await open();
   await tab("Connectors");
   const card = h!.one("case-law-card")!;
-  expect(card.getAttribute("data-status")).toBe("needs_setup");
+  expect(card.getAttribute("data-shown")).toBe("offer");
   expect(card.querySelector(".lib-feature-name")?.textContent).toBe("Clauseo Case Law");
   expect(card.querySelector(".lib-powered")?.textContent).toBe("Powered by Indian Kanoon");
   expect(card.querySelector(".lib-feature-line")?.textContent).toBe(GIVES);
@@ -236,7 +248,7 @@ test("Clauseo Case Law added: its credits and where it is on", async () => {
   await open();
   await tab("Connectors");
   const card = h!.one("case-law-card")!;
-  expect(card.getAttribute("data-status")).toBe("ready");
+  expect(card.getAttribute("data-shown")).toBe("added");
   expect(card.querySelector(".lib-feature-meta")?.textContent).toBe(
     "1,240 credits leftAbout 62 searchesEvery matter",
   );
@@ -245,23 +257,23 @@ test("Clauseo Case Law added: its credits and where it is on", async () => {
   expect(text("library-detail")).toContain("1,240 credits left · About 62 searches");
 });
 
-test("Clauseo Case Law out of reach: it keeps its name and line, says so, and Retry asks again", async () => {
+test("the host lists no connector (its liveness check failed): Case Law is unreachable, and its button opens Settings to check", async () => {
   await mount();
   await play({ connectors_changed: caseLaw(null) });
   await open();
   await tab("Connectors");
   const card = h!.one("case-law-card")!;
-  expect(card.getAttribute("data-status")).toBe("unreachable");
+  expect(card.getAttribute("data-shown")).toBe("unreachable");
   expect(card.querySelector(".lib-feature-name")?.textContent).toBe("Clauseo Case Law");
   expect(card.querySelector(".lib-feature-line")?.textContent).toBe(GIVES);
   expect(text("case-law-trouble")).toBe("Can't reach it right now");
   const retry = card.querySelector(".lib-feature-add")!;
-  expect(retry.textContent).toBe("Retry");
+  expect(retry.textContent).toBe("Open Settings to check");
   await h!.click(retry);
   expect(h!.transport.calls).toContainEqual({ call: "open_settings", section: "connectors" });
   await h!.click(card.querySelector(".lib-feature-hit"));
   expect(h!.one("library-detail")?.querySelector(".lib-trouble p")?.textContent).toBe(
-    "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.",
+    "Clauseo can't reach Clauseo Case Law right now, so Claude can't search judgments.",
   );
 });
 
@@ -305,4 +317,42 @@ test("opening a matter from the rail closes the place", async () => {
   await h!.click(matter);
   expect(h!.one("library")).toBeNull();
   expect(text("matter")).toBe("Sharma v. State of Delhi");
+});
+
+test("before the connectors' state arrives, Case Law waits: no offer, nothing to press", async () => {
+  await mount();
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("waiting");
+  expect(card.getAttribute("aria-busy")).toBe("true");
+  expect(card.querySelector(".lib-feature-add")).toBeNull();
+  expect(card.textContent).not.toContain("From ₹236");
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  expect(text("library-detail")).not.toContain("Add Clauseo Case Law");
+  // a lawyer who holds credits, once the state arrives, sees them, never the offer
+  await play({
+    connectors_changed: caseLaw({ signed_in: { low: false, balance: { credits: 400 } } }),
+  });
+  expect(h!.one("case-law-card")?.getAttribute("data-shown")).toBe("added");
+});
+
+test("connectors turned off by the lawyer: Turned off, and how to turn them on", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw("not_added", false, false) });
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("off");
+  expect(text("case-law-trouble")).toBe("Turned off");
+  const button = card.querySelector(".lib-feature-add")!;
+  expect(button.textContent).toBe("Open Settings");
+  await h!.click(button);
+  expect(h!.transport.calls).toContainEqual({ call: "open_settings", section: "connectors" });
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  const detail = text("library-detail")!;
+  expect(detail).toContain(
+    "Connectors are turned off. You can turn them on in Settings, under Connectors.",
+  );
+  expect(detail).not.toContain("Add Clauseo Case Law");
 });

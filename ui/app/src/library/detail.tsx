@@ -5,12 +5,12 @@
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
-import { Button } from "@clauseo/components/ui/button.tsx";
 import { CASE_LAW } from "../store/connectors.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { Assistant } from "./assistant.ts";
-import { CaseLawBlocks, type CaseLawActs } from "./case-law.tsx";
+import { CaseLawBlocks, RecheckButton, type CaseLawActs } from "./case-law.tsx";
+import { caseLawShown } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import type { Part } from "./model.ts";
 import { descriptionOf, fromLine, nameOf, scopeTag, troubleLine } from "./model.ts";
@@ -117,7 +117,14 @@ export function ItemDetail({
 }) {
   const { lang } = useDisplay();
   const isCaseLaw = a.id === CASE_LAW && a.source === "built_in";
-  const trouble = troubleLine(lang, a.status, assistant.who);
+  // Case Law's own state decides its line: the firm's off is "blocked", the lawyer's off is said in
+  // its blocks, and before the connectors' state arrives nothing is said yet
+  const shown = isCaseLaw ? caseLawShown(a, caseLaw.facts) : null;
+  const status = shown === "trouble" && caseLaw.facts.off === "firm" ? "blocked" : a.status;
+  const trouble =
+    shown === "off" || shown === "waiting" || shown === "added"
+      ? null
+      : troubleLine(lang, status, assistant.who);
   const description = descriptionOf(lang, a);
   const where = scopeTag(lang, a, names);
   const showsWhere =
@@ -139,11 +146,7 @@ export function ItemDetail({
       {trouble !== null && (
         <div className="lib-trouble" role="status">
           <p>{trouble}</p>
-          {a.status === "unreachable" && caseLaw.onRetry !== null && (
-            <Button kind="tone" size="small" onClick={caseLaw.onRetry}>
-              {lb(lang, "Retry")}
-            </Button>
-          )}
+          {shown === "unreachable" && <RecheckButton recheck={caseLaw.recheck} small />}
         </div>
       )}
       {a.has_scripts === true && (

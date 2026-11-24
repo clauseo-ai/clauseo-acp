@@ -165,10 +165,11 @@ export const UC_LIBRARY: Entry[] = [
     at({}, CONN, row("precedents")),
   ),
   e("UC-1227", "Can't reach it right now", at({ caseLaw: "unreachable" }, CONN)),
-  e("UC-1228", "Retry", at({ caseLaw: "unreachable" }, CONN)),
+  // Retry once list_addons checks again itself (stage D's D1); until then the button opens Settings
+  e("UC-1228", "Retry", at({ caseLaw: "unreachable", again: true }, CONN)),
   e(
     "UC-1229",
-    "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.",
+    "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.",
     at({ caseLaw: "unreachable" }, CONN, CARD),
   ),
   e("UC-1230", "{credits} credits left", at({ caseLaw: "ready" }, CONN)),
@@ -188,6 +189,12 @@ export const UC_LIBRARY: Entry[] = [
   ),
   e("UC-1237", "You haven't added a skill yet.", at({ added: false })),
   e("UC-1238", "You haven't added a connector of your own yet.", at({ added: false }, CONN)),
+  e("UC-1241", "Open Settings to check", at({ caseLaw: "unreachable" }, CONN)),
+  e(
+    "UC-1242",
+    "Connectors are turned off. You can turn them on in Settings, under Connectors.",
+    at({ caseLaw: "off" }, CONN, CARD),
+  ),
   e("UC-1239", "the assistant", at({ both: true })),
   e("UC-1240", "The assistant", at({ both: true }, row("pdf"))),
 ];

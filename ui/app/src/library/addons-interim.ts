@@ -13,7 +13,7 @@ import type {
   PackStatus,
 } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "./addons.ts";
-import type { AddonsSource, AddonsState } from "./addons-source.ts";
+import type { ListReader, ListState } from "./addons-source.ts";
 
 const builtIn = (kind: AddonView["kind"], id: string, name: string): AddonView => ({
   kind,
@@ -101,13 +101,13 @@ export function serverItem(server: McpServerView, locked: boolean): AddonView {
       ...(server.command === undefined ? {} : { command: server.command }),
       args: server.args,
       ...(server.url === undefined ? {} : { url: server.url }),
-      env: server.env.map((s) => ({ name: s.name, saved: s.held })),
-      headers: server.headers.map((s) => ({ name: s.name, saved: s.held })),
+      env: server.env.map((s) => ({ name: s.name, saved: s.saved })),
+      headers: server.headers.map((s) => ({ name: s.name, saved: s.saved })),
       enabled: server.enabled,
     },
     scope: "all",
     on: server.enabled,
-    status: secrets.some((s) => !s.held) ? "needs_secret" : "ready",
+    status: secrets.some((s) => !s.saved) ? "needs_secret" : "ready",
     can_remove: !locked,
     locked,
   };
@@ -144,20 +144,23 @@ export function interimItems(
   ];
 }
 
-/** The source over today's reads. `recheck` opens Settings at Connectors, whose opening runs the
- * host's liveness check (`connector check`, refused from the main window); none where there is no
- * settings window. */
-export function interimSource(transport: HostTransport): AddonsSource {
+/** The list over today's reads: complete once the packs, the MCP servers and the connectors' state
+ * have each been heard (the rail's count waits for that). */
+export function interimList(transport: HostTransport): ListReader {
   const next = nextHostOf(transport);
   const connectors = connectorsStoreOf(transport);
   let packs: readonly PackStatus[] | null = null;
   let tools: McpToolsView | null = null;
-  let state: AddonsState = { items: null };
+  let state: ListState = { items: null, complete: false };
   let asked = 0;
   const listeners = new Set<() => void>();
   const compose = () => {
     if (packs === null) return;
-    state = { items: interimItems(packs, tools, connectors.state(), connectors.heard()) };
+    const heard = connectors.heard();
+    state = {
+      items: interimItems(packs, tools, connectors.state(), heard),
+      complete: tools !== null && heard,
+    };
     for (const listener of listeners) listener();
   };
   const read = async () => {
@@ -179,7 +182,6 @@ export function interimSource(transport: HostTransport): AddonsSource {
   connectors.subscribe(compose);
   next.settings?.onSettingsChanged(() => void read());
   void read();
-  const open = transport.openSettings;
   return {
     subscribe: (listener) => {
       listeners.add(listener);
@@ -187,7 +189,5 @@ export function interimSource(transport: HostTransport): AddonsSource {
     },
     state: () => state,
     read: () => void read(),
-    recheck:
-      open === undefined ? null : () => void open.call(transport, "connectors").catch(() => {}),
   };
 }

@@ -6,10 +6,8 @@
 import "./library.css";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
-import { Tabs, TabsList } from "@clauseo/components/ui/tabs.tsx";
-import { useEffect, useMemo, useState } from "react";
-import { quietly } from "../room/open.ts";
-import { CASE_LAW, connectorsStoreOf, useConnector } from "../store/connectors.ts";
+import { Tabs, TabsList, TabsPanel } from "@clauseo/components/ui/tabs.tsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
@@ -18,8 +16,11 @@ import type { CaseLawActs } from "./case-law.tsx";
 import { Explainer, ItemDetail } from "./detail.tsx";
 import { PartList } from "./list.tsx";
 import { inPart, type Part } from "./model.ts";
+import type { LibraryStart } from "./open-library.ts";
 
-export type LibraryStart = { part?: Part; selected?: string | null };
+export type { LibraryStart } from "./open-library.ts";
+
+const PARTS: readonly Part[] = ["skills", "connectors"];
 
 export function Library({
   transport,
@@ -41,31 +42,28 @@ export function Library({
   const { lang } = useDisplay();
   const [part, setPart] = useState<Part>(start?.part ?? "skills");
   const [selected, setSelected] = useState<string | null>(start?.selected ?? null);
-  const { items } = useAddons(source);
+  const { items, caseLaw: facts } = useAddons(source);
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
-  const view = useConnector(connectorsStoreOf(transport), CASE_LAW);
-  const caseLaw = useMemo<CaseLawActs>(() => {
-    const open = transport.openSettings;
-    return {
-      view,
-      onAdd:
-        open === undefined
-          ? null
-          : () => void quietly("open_settings", open.call(transport, "connectors")),
-      onRetry: source.recheck,
-    };
-  }, [transport, view, source]);
+  const caseLaw = useMemo<CaseLawActs>(
+    () => ({ facts, openConnectors: source.openConnectors, recheck: source.recheck }),
+    [facts, source],
+  );
+  // the rail's row that opened the place may fold away under the focus: the chosen tab takes it
+  const place = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    place.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  }, []);
   const picked = items?.find((a) => a.id === selected && inPart(part, a)) ?? null;
   return (
-    <div className="lib-place" data-testid="library">
+    <div className="lib-place" data-testid="library" ref={place}>
       <Tabs
         value={part}
         onValueChange={(v) => {
           setPart(v as Part);
           setSelected(null);
         }}
-        className="lib-head"
+        className="lib-tabs"
       >
         <TabsList
           label={lb(lang, "Skills and connectors")}
@@ -74,26 +72,32 @@ export function Library({
             { value: "connectors", label: lb(lang, "Connectors") },
           ]}
         />
+        {PARTS.map((p) => (
+          <TabsPanel key={p} value={p} className="lib-split">
+            {p === part && (
+              <>
+                <div className="lib-list">
+                  <PartList
+                    part={part}
+                    items={items}
+                    names={names}
+                    selected={picked?.id ?? null}
+                    onSelect={(id) => setSelected(selected === id ? null : id)}
+                    caseLaw={caseLaw}
+                  />
+                </div>
+                <aside className="lib-side" data-testid="library-side">
+                  {picked === null ? (
+                    <Explainer part={part} who={assistant.who} />
+                  ) : (
+                    <ItemDetail a={picked} names={names} assistant={assistant} caseLaw={caseLaw} />
+                  )}
+                </aside>
+              </>
+            )}
+          </TabsPanel>
+        ))}
       </Tabs>
-      <div className="lib-split">
-        <div className="lib-list">
-          <PartList
-            part={part}
-            items={items}
-            names={names}
-            selected={picked?.id ?? null}
-            onSelect={(id) => setSelected(selected === id ? null : id)}
-            caseLaw={caseLaw}
-          />
-        </div>
-        <aside className="lib-side" data-testid="library-side">
-          {picked === null ? (
-            <Explainer part={part} who={assistant.who} />
-          ) : (
-            <ItemDetail a={picked} names={names} assistant={assistant} caseLaw={caseLaw} />
-          )}
-        </aside>
-      </div>
     </div>
   );
 }
