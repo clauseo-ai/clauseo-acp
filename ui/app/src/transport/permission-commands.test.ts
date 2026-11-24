@@ -1,6 +1,6 @@
 // The desktop's permissions commands as the page calls them (permission-commands.ts), over a mocked Tauri invoke: the
 // rows permissions() answers come back as the desktop writes them (crates/desktop/src/permissions.rs), ask_permission
-// takes the id alone, and a refusal rejects as a HostError. Also the folder pick's start, as TauriTransport sends it.
+// takes a listed id with no folder, and a refusal rejects as a HostError. Also the folder pick's start, as TauriTransport sends it.
 import { afterEach, expect, test, vi } from "vitest";
 
 const answers = new Map<string, (args: unknown) => unknown>();
@@ -53,10 +53,10 @@ test("permissions(): the desktop's rows as it wrote them, by the real command's 
   expect(invoked).toEqual([{ command: "permissions", args: undefined }]);
 });
 
-test("ask_permission(id): the id alone, and the row after", async () => {
+test("ask_permission(id): a listed id with no folder, and the row after", async () => {
   answers.set("ask_permission", () => ({ ...MAC[1], state: "granted" }));
   expect((await askPermissionCommand("keychain")).state).toBe("granted");
-  expect(invoked).toEqual([{ command: "ask_permission", args: { id: "keychain" } }]);
+  expect(invoked).toEqual([{ command: "ask_permission", args: { id: "keychain", folder: null } }]);
 });
 
 test("a refusal rejects as the host's error", async () => {
