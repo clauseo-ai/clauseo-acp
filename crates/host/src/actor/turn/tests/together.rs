@@ -1,6 +1,7 @@
 //! Turns of two threads of one matter against a restore holding the matter: both wait for it
-//! with `TurnQueued` behind their own threads, held by the restore, and both start, together, when it ends; a cancel
-//! of one while it waits ends it once; an abort of the host keeps a waiting turn queued.
+//! with `TurnQueued` behind their own threads, held by the restore, and both start, together,
+//! when it ends; a cancel of one while it waits ends it once; an abort of the host keeps a
+//! waiting turn queued.
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DomainEvent, HostCommand, MatterHold, PromptBlock,
