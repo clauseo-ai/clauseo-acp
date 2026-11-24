@@ -62,6 +62,7 @@ bundled! {
         "codex-deny-ends-turn",
         "codex-files",
         "codex-handshake",
+        "codex-helpers",
         "codex-hook-trusted",
         "codex-hook-untrusted",
         "codex-input-too-long",
