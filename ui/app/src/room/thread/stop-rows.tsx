@@ -17,6 +17,8 @@ import { errorWords, errorWordsOf } from "@clauseo/components/lib/words-errors.t
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { listOf } from "@clauseo/components/lib/words-core.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
@@ -50,6 +52,7 @@ import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { loadVersions } from "../versions/use-versions.ts";
+import { alsoChanged } from "../versions/also-changed.ts";
 import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
 
 /** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
@@ -96,6 +99,8 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [protectedView, setProtectedView] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
+  // the papers another conversation's answer, running at the same time, also changed (15a): the card says so
+  const shared = entry.files.filter(alsoChanged).map((f) => fileNameOf(f.path));
   // undone: the files the host's marker says stayed as they are, Clauseo having no earlier copy of
   // them, and those it says went back: the note counts those, and says nothing of its own when
   // none went back
@@ -168,9 +173,10 @@ function Changed({ entry }: { entry: StepEntry }) {
   // waits for it. A step with a file that may hold the lawyer's own edits (saved during the answer, written by no tool
   // call of Clauseo's) asks in Versions' undo dialog whatever PreviewUndo says, each such file kept unless the lawyer
   // says otherwise: unchanged since, it is still not Clauseo's to delete. Where the query fails (an older host, or
-  // any error) that dialog asks too, with nothing known as changed since; with no such file, Undo goes ahead.
+  // any error) that dialog asks too, with nothing known as changed since; with no such file, Undo goes ahead. A file
+  // another conversation's answer also changed asks the same way, kept unless the lawyer says otherwise.
   const askUndo = (): Promise<string | null | false> => {
-    const flagged = entry.files.some((f) => f.may_include_lawyer_edits);
+    const flagged = entry.files.some((f) => f.may_include_lawyer_edits || alsoChanged(f));
     const asked =
       previewUndo === undefined
         ? Promise.resolve(null)
@@ -245,6 +251,17 @@ function Changed({ entry }: { entry: StepEntry }) {
             open: "open-in-word",
           }}
         />
+      )}
+      {!entry.undone && shared.length > 0 && (
+        <p className={QUIET} data-testid="also-changed">
+          <Say>
+            {vt(
+              w.lang,
+              "Another conversation also changed {papers}. Undoing this takes its change away too.",
+              { papers: listOf(w.lang, shared) },
+            )}
+          </Say>
+        </p>
       )}
       {kept.length > 0 && (
         <Suspense fallback={null}>

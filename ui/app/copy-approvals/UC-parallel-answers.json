@@ -25,5 +25,23 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "The composer's working line after Stop on a message that had not started (it waited for the matter): its words are back in the field, or, when it was the conversation's only message, in a new draft in the same matter. Until the next send. New: before, the message vanished with no word (Windows test, 24 Nov)."
+  },
+  "UC-1148": {
+    "en": "Another conversation also changed this paper; undoing takes its change away too.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Undo dialog (Versions, and Undo on the changed-paper card), the row of a paper whose FileChange.also_changed_by is not empty (15a: another conversation's overlapping answer also changed it). The paper is unticked (kept) by default, as for may_include_lawyer_edits. New."
+  },
+  "UC-1149": {
+    "en": "Another conversation also changed {papers}. Undoing this takes its change away too.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The changed-paper card in the thread, under the papers, when any of its papers has also_changed_by (15a); {papers} names them. Hidden once the change is undone. New."
   }
 }

@@ -14,12 +14,13 @@ import {
   uuid,
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { ThreadStatus, ViewEntry } from "../transport/protocol.ts";
+import type { FileChange, ThreadStatus, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
-import { heldHost } from "./registry-u7.tsx";
+import { heldHost, OTHER } from "./registry-u7.tsx";
+import { state } from "./registry-u8.tsx";
 import { RoomOver } from "./states.tsx";
-import { matterWords } from "./words.ts";
+import { matterWords, versionWords } from "./words.ts";
 
 const HELD = { queued: { behind: THREAD } };
 /** Both conversations' messages wait for a restore: the composer's working line and card, the other's rail row. */
@@ -80,6 +81,24 @@ function stoppedHost(): FakeTransport {
   return transport;
 }
 
+/** The turn three days ago changed the notice, which another conversation's answer also changed, and the reply. */
+const paper = (path: string, also: boolean): FileChange => ({
+  path,
+  change: "modified",
+  size_bytes: 1200,
+  may_include_lawyer_edits: false,
+  ...(also ? { also_changed_by: [OTHER] } : {}),
+});
+const SHARED = {
+  files: [paper("Notice to the bank.docx", true), paper("Reply to the bank.docx", false)],
+};
+/** Versions open, the turn's version picked, Undo pressed: the dialog. */
+const UNDOING = [
+  ".room-pair button",
+  '[data-testid="version"][data-checkpoint="cp2"]',
+  '[data-testid="version-undo"]',
+];
+
 export const UC_PARALLEL: Entry[] = [
   {
     id: "UC-1145",
@@ -103,4 +122,21 @@ export const UC_PARALLEL: Entry[] = [
     screen: "matters/other",
     render: () => <RoomOver host={stoppedHost} />,
   },
+  // 15a's also_changed_by: the undo dialog's row (kept by default), and the changed-paper card's line
+  state(
+    "UC-1148",
+    versionWords(
+      "Another conversation also changed this paper; undoing takes its change away too.",
+    ),
+    SHARED,
+    UNDOING,
+  ),
+  state(
+    "UC-1149",
+    versionWords(
+      "Another conversation also changed {papers}. Undoing this takes its change away too.",
+    ),
+    SHARED,
+    [],
+  ),
 ];

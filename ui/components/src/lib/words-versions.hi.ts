@@ -277,6 +277,10 @@ const OWN = {
   "1 document may hold your own edits.": "1 दस्तावेज़ में आपके अपने बदलाव हो सकते हैं।",
   "{n} documents may hold your own edits.": "{n} दस्तावेज़ों में आपके अपने बदलाव हो सकते हैं।",
   "Choose for each document.": "हर दस्तावेज़ के लिए चुनें।",
+  // FileChange.also_changed_by (parallel answers, 24 Nov): a paper another conversation's answer also changed, on its
+  // row in the undo dialog (kept by default) and on the changed-paper card. hi: later
+  "Another conversation also changed this paper; undoing takes its change away too.": null,
+  "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
   "Undid the change at {time}. {papers} went back, and the undo is a version of its own.":
     "{time} बजे का बदलाव पूर्ववत किया गया। {papers} पहले जैसे हो गए, और यह पूर्ववत करना एक अलग संस्करण है।",
   // after an undo, a file it kept because Clauseo had no earlier copy (Hindi provisional,
