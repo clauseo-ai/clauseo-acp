@@ -196,10 +196,9 @@ impl Agent {
 
     pub(super) fn send_bytes(&mut self, line: &[u8]) {
         // A relay that closed may refuse the bytes; the read that follows says so.
-        let _sent = self
-            .writer
-            .write_all(line)
-            .and_then(|()| self.writer.write_all(b"\n"));
+        // One write, as `clauseo-mcp` does, so no line waits on a delayed ACK.
+        let whole = [line, b"\n"].concat();
+        let _sent = self.writer.write_all(&whole);
     }
 
     /// Writes `bytes` as they are, with no newline.

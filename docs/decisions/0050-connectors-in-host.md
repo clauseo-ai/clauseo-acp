@@ -137,6 +137,22 @@ slices, a small `id`, `initialize`'s `protocolVersion`, and a `tools/call`'s `is
 8 MB dense reply peaks at 8 MiB, not 432 (#496's `relay_memory` test). The relay's own 4 MB reply
 check (`MAX_REPLY_BYTES`) stands in front, since S28's limit is 8 MB.
 
+### Ready at once (relay_fast)
+
+Codex lists a turn's tools only from MCP servers already ready and leaves a pending optional one
+out; on a slow link the case-law handshake took 14 to 34 s, so new conversations had no case law.
+The relay now answers `initialize` and `tools/list` itself, at once, from the copies the
+connectors crate ships (`CASE_LAW_INITIALIZE`, `CASE_LAW_TOOLS_LIST`, the files the fake serves),
+with no network (`connectors/relay/forward/local.rs`). It negotiates the protocol version as a
+server does: the agent's when it is one of `SUPPORTED_VERSIONS`, else the newest. A warm-up thread
+then sends the server the agent's `initialize` (capabilities blanked, that version) and
+`notifications/initialized` (`forward/warm.rs`); every forwarded message of the connection waits
+for it, so the first `tools/call` carries the server's `MCP-Protocol-Version` and
+`Mcp-Session-Id`, and the credential as before. A failed warm-up is tried again by the next
+forwarded message; a `tools/call` that cannot get it is refunded and answered as unreachable.
+The relay writes lifecycle lines to host.log: opened, first `initialize`, first `tools/list` and
+first `tools/call` with its outcome class, each with the ms since it opened.
+
 ### The state and the commands
 
 - `HostCommand::Connector(ConnectorCommand)` (`protocol/src/command/connectors.rs`): `check`,

@@ -21,6 +21,8 @@ fn initialize_list_and_call_carry_the_headers() {
     agent.send_value(&call(3, "search_law"));
     assert_eq!(agent.recv()["result"]["isError"], false);
     let bearer = format!("Bearer {}", rig.handle.bearer().unwrap().0.expose());
+    // The relay answered `initialize` and `tools/list` itself; the server got its `initialize`
+    // and `notifications/initialized` from the warm-up, then the call.
     let requests = rig.mcp_requests();
     assert_eq!(requests.len(), 3);
     for request in &requests {
@@ -42,9 +44,9 @@ fn initialize_list_and_call_carry_the_headers() {
         assert_eq!(request.header("mcp-protocol-version"), Some("2025-06-18"));
         assert_eq!(request.header("mcp-session-id"), Some("fake-session-0001"));
     }
-    // One overhead figure per forwarded message.
+    // One overhead figure per forwarded message: the call.
     rig.session.shared().first_flight().unwrap().wait_idle();
-    assert_eq!(rig.events.overheads.lock().unwrap().len(), 3);
+    assert_eq!(rig.events.overheads.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -111,7 +113,7 @@ fn a_server_to_client_request_is_dropped_and_logged() {
     let ask = json!({"jsonrpc": "2.0", "id": 77, "method": "elicitation/create", "params": {"message": "secret-ask"}});
     rig.fake
         .answer_next("/mcp/case-law", 200, &json_type, ask.to_string().as_bytes());
-    agent.send_value(&request(1, "tools/list"));
+    agent.send_value(&request(1, "ping"));
     // The request still gets its one answer.
     assert_eq!(
         agent.recv(),
@@ -123,7 +125,7 @@ fn a_server_to_client_request_is_dropped_and_logged() {
     let sse_type = [("Content-Type", "text/event-stream")];
     rig.fake
         .answer_next("/mcp/case-law", 200, &sse_type, stream.as_bytes());
-    agent.send_value(&request(2, "tools/list"));
+    agent.send_value(&request(2, "ping"));
     assert_eq!(agent.recv(), answer);
     let log = captured.text();
     assert!(log.contains("elicitation/create"), "{log}");
@@ -170,11 +172,11 @@ fn each_event_of_a_stream_comes_back_as_one_line() {
     let rig = rig();
     rig.fake.respond_as_sse(true);
     let mut agent = rig.agent();
-    agent.send_value(&request(1, "tools/list"));
+    agent.send_value(&request(1, "ping"));
     let line = agent.recv_line().unwrap();
     let reply: Value = serde_json::from_slice(&line).unwrap();
     assert_eq!(reply["id"], 1);
-    assert!(reply["result"]["tools"].is_array());
+    assert_eq!(reply["result"], json!({}));
     // The fake writes its event compact; the relay passes it on as it came.
     assert_eq!(
         line,
@@ -192,7 +194,7 @@ fn slow_calls_come_back_in_completion_order_each_line_whole() {
     });
     let mut agent = rig.agent();
     for id in 1..=3 {
-        agent.send_value(&request(id, "tools/list"));
+        agent.send_value(&request(id, "ping"));
     }
     gated.wait_arrived(3);
     for id in [3, 1, 2] {
@@ -212,7 +214,7 @@ fn the_agent_closing_its_side_still_gets_the_answers_in_flight() {
         ..RigOptions::default()
     });
     let mut agent = rig.agent();
-    agent.send_value(&request(1, "tools/list"));
+    agent.send_value(&request(1, "ping"));
     gated.wait_arrived(1);
     agent.shut_write();
     gated.release(1);
@@ -244,7 +246,7 @@ fn only_the_answer_to_the_request_is_passed_on() {
     let sse_type = [("Content-Type", "text/event-stream")];
     rig.fake
         .answer_next("/mcp/case-law", 200, &sse_type, stream.as_bytes());
-    agent.send_value(&request(2, "tools/list"));
+    agent.send_value(&request(2, "ping"));
     assert_eq!(agent.recv(), answer);
     agent.send_value(&request(3, "ping"));
     assert_eq!(agent.recv()["id"], 3, "one line for request 2, no more");
@@ -263,7 +265,7 @@ fn each_forwarded_message_starts_and_ends_a_call() {
     let flight = rig.session.shared().first_flight().unwrap();
     flight.wait_idle();
     assert!(rig.events.calls.lock().unwrap().is_empty());
-    agent.send_value(&request(1, "tools/list"));
+    agent.send_value(&request(1, "ping"));
     assert_eq!(agent.recv()["id"], 1);
     // Each one ended before the next is sent, so the order is fixed.
     flight.wait_idle();

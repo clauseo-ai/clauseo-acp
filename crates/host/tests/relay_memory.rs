@@ -202,7 +202,7 @@ mod memory {
 
         fn list(&mut self, id: u64) {
             self.send(&format!(
-                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/list","params":{{}}}}"#
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"ping","params":{{}}}}"#
             ));
         }
 

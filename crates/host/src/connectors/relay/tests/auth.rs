@@ -80,7 +80,7 @@ fn not_added_sends_no_call_but_lists_tools_without_authorization() {
     agent.send_value(&call(1, "search_law"));
     assert_eq!(error_text(&agent.recv()), texts::SIGNED_OUT);
     assert_eq!(rig.mcp_requests().len(), 0);
-    agent.send_value(&request(2, "tools/list"));
+    agent.send_value(&request(2, "ping"));
     assert_eq!(agent.recv()["id"], 2);
     assert_eq!(rig.mcp_requests()[0].header("authorization"), None);
     assert_eq!(

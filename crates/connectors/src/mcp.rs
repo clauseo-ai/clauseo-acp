@@ -9,6 +9,16 @@ use crate::error::Error;
 use crate::known::KnownConnector;
 use crate::recharge::{PaymentRef, is_insufficient_credits, payment_ref};
 
+/// The case-law server's `initialize` result as Clauseo ships it: its capabilities, server name
+/// and instructions. The relay answers the agent's `initialize` from it at once, with the
+/// protocol version it negotiates in place of this one, and the fake connector serves it too.
+pub const CASE_LAW_INITIALIZE: &str = include_str!("../fixtures/mcp/initialize.json");
+/// The case-law server's `tools/list` result as Clauseo ships it, one page. The relay answers
+/// the agent's `tools/list` from it at once; the fake connector serves the same file. The host's
+/// tool rules already name these tools (`UNASKED_TOOLS`, `Spend::of`), so a tool the server
+/// adds reaches lawyers with a release, as those rules do.
+pub const CASE_LAW_TOOLS_LIST: &str = include_str!("../fixtures/mcp/tools-list.json");
+
 /// The MCP headers the relay forwards; each is sent only when given.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct McpRequestHeaders {

@@ -149,28 +149,35 @@ fn initialize_answer(rig: &Rig, version: &str, session: &str) {
 #[test]
 fn a_protocol_version_or_session_id_unfit_for_a_header_is_not_sent_back() {
     let rig = rig();
-    let mut agent = rig.agent();
     let long = "s".repeat(257);
-    for (version, session) in [("2025-06-18 x", "a b"), ("2025/06/18", long.as_str())] {
+    let fit = "s".repeat(256);
+    // Each connection's first `initialize` reaches the server once, from the warm-up; the
+    // `ping` after it waits for that answer, then carries what was fit of it.
+    for (version, session, fits) in [
+        ("2025-06-18 x", "a b", false),
+        ("2025/06/18", long.as_str(), false),
+        ("2026-07-28", fit.as_str(), true),
+    ] {
+        let mut agent = rig.agent();
         initialize_answer(&rig, version, session);
         agent.send_value(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
         agent.recv();
-        agent.send_value(&request(2, "tools/list"));
+        agent.send_value(&request(2, "ping"));
         agent.recv();
-        let list = rig.mcp_requests().pop().unwrap();
-        assert_eq!(list.header("mcp-protocol-version"), None, "{version}");
-        assert_eq!(list.header("mcp-session-id"), None, "{session}");
+        let ping = rig.mcp_requests().pop().unwrap();
+        assert_eq!(ping.json().unwrap()["method"], "ping");
+        let (want_version, want_session) = if fits {
+            (Some(version), Some(session))
+        } else {
+            (None, None)
+        };
+        assert_eq!(
+            ping.header("mcp-protocol-version"),
+            want_version,
+            "{version}"
+        );
+        assert_eq!(ping.header("mcp-session-id"), want_session, "{session}");
     }
-    // Fit ones are sent back as they came.
-    let fit = "s".repeat(256);
-    initialize_answer(&rig, "2026-07-28", &fit);
-    agent.send_value(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
-    agent.recv();
-    agent.send_value(&request(2, "tools/list"));
-    agent.recv();
-    let list = rig.mcp_requests().pop().unwrap();
-    assert_eq!(list.header("mcp-protocol-version"), Some("2026-07-28"));
-    assert_eq!(list.header("mcp-session-id"), Some(fit.as_str()));
 }
 
 #[test]
@@ -201,8 +208,10 @@ fn a_call_read_while_the_session_ends_counts_nothing() {
     rig.add_api_key();
     rig.session.end();
     let (ours, theirs) = socket_pair();
-    let conn =
-        super::super::conn::Conn::for_test(std::sync::Arc::clone(rig.session.shared()), ours);
+    let conn = std::sync::Arc::new(super::super::conn::Conn::for_test(
+        std::sync::Arc::clone(rig.session.shared()),
+        ours,
+    ));
     super::super::forward::message(&conn, call(1, "search_law").to_string().as_bytes());
     drop(theirs);
     assert_eq!(rig.paid_today(), 0);

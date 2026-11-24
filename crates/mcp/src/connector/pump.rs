@@ -173,10 +173,11 @@ fn forward(writer: &mut Option<Writer>, line: &[u8]) -> bool {
     false
 }
 
-/// Writes `line` and a newline.
+/// Writes `line` and a newline, in one write: two small writes would wait on the relay's
+/// delayed ACK (Nagle), about 40 ms a line on Linux.
 fn send(socket: &TcpStream, line: &[u8]) -> io::Result<()> {
-    socket::write_all(socket, line, None)?;
-    socket::write_all(socket, b"\n", None)
+    let whole = [line, b"\n"].concat();
+    socket::write_all(socket, &whole, None)
 }
 
 /// Starts the relay thread on `link`'s reader, and returns the stdin side's [`Writer`] with the

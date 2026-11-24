@@ -85,14 +85,8 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../fixtures/recharge-get-held-with-id.json"),
     ),
     ("api-402.json", include_str!("../../fixtures/api-402.json")),
-    (
-        "mcp/initialize.json",
-        include_str!("../../fixtures/mcp/initialize.json"),
-    ),
-    (
-        "mcp/tools-list.json",
-        include_str!("../../fixtures/mcp/tools-list.json"),
-    ),
+    ("mcp/initialize.json", crate::mcp::CASE_LAW_INITIALIZE),
+    ("mcp/tools-list.json", crate::mcp::CASE_LAW_TOOLS_LIST),
     (
         "mcp/search-law-result.json",
         include_str!("../../fixtures/mcp/search-law-result.json"),
