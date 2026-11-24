@@ -7,35 +7,36 @@
 //!   Claude model switch gives the new model its own default effort (claude-agent-acp 0.110.1,
 //!   `effortForModelSwitch`, `session-effort.js:152-169`), so an effort equal to the old one is
 //!   still sent, and one only the new model offers is not dropped.
-//! - A model or effort pick the options do not offer, one the agent refuses, and any still
-//!   unsent when [`PICKS_WAIT`] runs out, could not be used: the turn's `TurnStarted` is followed
-//!   by one `NoticeKind::PickNotUsed`. A pick of an option the session does not report at all is
+//! - A model or effort pick the options do not offer, one the agent refuses, and every pick
+//!   when [`PICKS_WAIT`] runs out before the agent's answers, could not be used: the turn's
+//!   `TurnStarted` is followed by one `NoticeKind::PickNotUsed`.
+//! - Past [`PICKS_WAIT`] the turn goes on with the thread's options, but the sets are not
+//!   dropped: they finish in the background, and their answer, when it comes, is logged as
+//!   `ConfigOptionsReplaced`, so the thread's options say what the session holds and a later
+//!   pick is compared against that. A pick of an option the session does not report at all is
 //!   not known to be a model or effort one, and goes without a word, as before.
 //! - The answer always comes back to the actor ([`on_picked`]), whatever happened, and the
 //!   checkpoint then runs: a cancel or an agent's end meanwhile is handled there as for any
 //!   checkpointing turn.
 
-use std::pin::pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, ConfigCategory, ConfigOption, ConfigOptionsReplaced,
     ConfigValue, NamedChoice, Notice, NoticeKind, NoticeLevel, ThreadId, TurnId,
 };
-use futures::future::{Either, select as race};
 
 use super::super::super::Actor;
 use super::super::agents::Stage;
 use super::super::out::Out;
 use super::super::picks::Pick;
-use super::super::{AgentReply, Then, TurnPhase, current, state, steps};
+use super::super::{AgentReply, Then, TurnInput, TurnPhase, current, state, steps};
 use super::{Ran, select};
-use crate::clock::Clock;
+use crate::actor::input::Input;
 use crate::log_file::{Cause, LIFECYCLE};
 
 /// The longest the picks may hold a turn's start: past it, those unsent could not be used.
-const PICKS_WAIT: Duration = Duration::from_secs(20);
+pub(super) const PICKS_WAIT: Duration = Duration::from_secs(20);
 
 /// What setting a turn's picks did, for [`on_picked`].
 #[derive(Debug, Default)]
@@ -44,6 +45,8 @@ pub(crate) struct Picked {
     answer: Option<Vec<ConfigOption>>,
     /// A pick could not be used.
     not_used: bool,
+    /// Not an answer: [`PICKS_WAIT`] ran out first.
+    timed_out: bool,
 }
 
 /// What to set: the model pick and the effort pick still to check; `not_used` when a pick is
@@ -97,19 +100,39 @@ pub(in crate::actor::turn) fn send_first(
             state.prompt_picks.ran.insert(
                 turn,
                 Ran {
-                    answer: None,
                     not_used,
+                    ..Ran::default()
                 },
             );
         }
         return false;
     };
+    // The first of the answer and the wait's end goes on with the turn (`on_picked`).
+    let timed_out = Picked {
+        not_used: true,
+        timed_out: true,
+        ..Picked::default()
+    };
+    let wait = actor.post_after(
+        PICKS_WAIT,
+        Input::Turn(TurnInput::Agent {
+            thread,
+            agent: id,
+            reply: AgentReply::PromptPicked {
+                turn,
+                picked: timed_out,
+            },
+        }),
+    );
     if let Some(state) = state(actor, thread) {
-        state.prompt_picks.ran.insert(turn, Ran::default());
+        let ran = Ran {
+            waiting: Some(wait),
+            ..Ran::default()
+        };
+        state.prompt_picks.ran.insert(turn, ran);
     }
-    let clock = Arc::clone(&actor.clock);
     super::super::agents::call(actor, thread, id, async move {
-        let picked = send(&client, &session, (options, sets), clock.as_ref()).await;
+        let picked = send(&client, &session, (options, sets)).await;
         AgentReply::PromptPicked { turn, picked }
     });
     true
@@ -163,48 +186,37 @@ pub(super) fn effort(options: &[ConfigOption], (option, value): &Pick) -> Effort
     }
 }
 
-/// Sets `sets` on `session`, the model first, then the effort as the model's answer stands,
-/// within [`PICKS_WAIT`] on `clock`.
+/// Sets `sets` on `session`, the model first, then the effort as the model's answer stands.
+/// Nothing bounds it here: [`PICKS_WAIT`] bounds the turn's wait for it, not the sets.
 async fn send(
     client: &clauseo_acp::AcpClient,
     session: &AgentSessionId,
     (options, sets): (Vec<ConfigOption>, Sets),
-    clock: &dyn Clock,
 ) -> Picked {
     let mut picked = Picked {
-        answer: None,
         not_used: sets.not_used,
+        ..Picked::default()
     };
-    let work = async {
-        let mut latest = options;
-        if let Some(pick) = sets.model {
-            match set(client, session, &pick).await {
-                Some(answer) => {
-                    latest.clone_from(&answer);
-                    picked.answer = Some(answer);
-                }
-                None => picked.not_used = true,
+    let mut latest = options;
+    if let Some(pick) = sets.model {
+        match set(client, session, &pick).await {
+            Some(answer) => {
+                latest.clone_from(&answer);
+                picked.answer = Some(answer);
             }
+            None => picked.not_used = true,
         }
-        let Some(pick) = sets.effort else {
-            return;
-        };
-        match effort(&latest, &pick) {
-            Effort::Send => match set(client, session, &pick).await {
-                Some(answer) => picked.answer = Some(answer),
-                None => picked.not_used = true,
-            },
-            Effort::NotOffered => picked.not_used = true,
-            Effort::Held | Effort::Unknown => {}
-        }
+    }
+    let Some(pick) = sets.effort else {
+        return picked;
     };
-    let timed_out = match race(pin!(work), clock.after(PICKS_WAIT)).await {
-        Either::Left(((), _)) => false,
-        Either::Right(((), _)) => true,
-    };
-    if timed_out {
-        tracing::warn!("a prompt's picks were not all set in time");
-        picked.not_used = true;
+    match effort(&latest, &pick) {
+        Effort::Send => match set(client, session, &pick).await {
+            Some(answer) => picked.answer = Some(answer),
+            None => picked.not_used = true,
+        },
+        Effort::NotOffered => picked.not_used = true,
+        Effort::Held | Effort::Unknown => {}
     }
     picked
 }
@@ -231,8 +243,9 @@ async fn set(
     }
 }
 
-/// `turn`'s picks were set, from agent `same` or not: the agent's last answer is logged and
-/// kept for its `TurnStarted`, and its checkpoint runs.
+/// `turn`'s picks were set, from agent `same` or not, or [`PICKS_WAIT`] ran out first: the
+/// first of the two is kept for its `TurnStarted` and runs its checkpoint. The agent's last
+/// answer is logged whenever it comes, after the wait's end too.
 pub(in crate::actor::turn) fn on_picked(
     actor: &mut Actor,
     thread: ThreadId,
@@ -240,6 +253,19 @@ pub(in crate::actor::turn) fn on_picked(
     same: bool,
     picked: Picked,
 ) {
+    let waiting = state(actor, thread)
+        .and_then(|state| state.prompt_picks.ran.get_mut(&turn))
+        .and_then(|ran| ran.waiting.take());
+    if picked.timed_out {
+        if waiting.is_some() {
+            tracing::warn!(%thread, "a prompt's picks were not all set in time; the turn goes on");
+            went_on(actor, thread, turn, Ran::from(picked));
+        }
+        return;
+    }
+    if let Some(wait) = &waiting {
+        wait.abort();
+    }
     let answer = picked.answer.filter(|_| same);
     if let Some(options) = &answer {
         let options = options.clone();
@@ -251,17 +277,39 @@ pub(in crate::actor::turn) fn on_picked(
             tracing::warn!(%thread, error = %Cause(&error), "a prompt's picks were not logged");
         }
     }
+    if waiting.is_none() {
+        // After the wait's end: the turn went on without it.
+        return;
+    }
+    let not_used = picked.not_used;
+    let ran = Ran {
+        answer,
+        not_used,
+        waiting: None,
+    };
+    went_on(actor, thread, turn, ran);
+}
+
+/// `turn` goes on with `ran`, what its picks did: kept for its `TurnStarted`, and its
+/// checkpoint runs when it waits for them.
+fn went_on(actor: &mut Actor, thread: ThreadId, turn: TurnId, ran: Ran) {
     if let Some(state) = state(actor, thread) {
-        let not_used = picked.not_used;
-        state
-            .prompt_picks
-            .ran
-            .insert(turn, Ran { answer, not_used });
+        state.prompt_picks.ran.insert(turn, ran);
     }
     let waiting = current(actor, thread)
         .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Checkpointing);
     if waiting {
         steps::checkpoint(actor, thread, turn);
+    }
+}
+
+impl From<Picked> for Ran {
+    fn from(picked: Picked) -> Self {
+        Self {
+            answer: picked.answer,
+            not_used: picked.not_used,
+            waiting: None,
+        }
     }
 }
 
