@@ -147,9 +147,11 @@ impl State {
         PendingKey(self.next_key)
     }
 
-    /// Starts session `key` afresh, forgetting the helpers announced under it before.
+    /// Starts session `key` afresh, forgetting the helpers announced under it before, and `key`
+    /// itself if it was once announced as a helper: its frames are its own from now on.
     pub(crate) fn start_session(&mut self, key: CompactString, entry: SessionState) {
         self.helpers.forget_root(&key);
+        self.helpers.forget(&key);
         self.sessions.insert(key, entry);
     }
 

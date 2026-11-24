@@ -10,6 +10,7 @@ use clauseo_protocol::{StopReason, ToolLocation};
 use super::*;
 
 mod edges;
+mod sessions;
 
 const X1: &str = include_str!("fixtures/codex-acp-2.10.0-helpers-x1.jsonl");
 const X2: &str = include_str!("fixtures/codex-acp-2.10.0-helpers-x2.jsonl");

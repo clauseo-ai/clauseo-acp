@@ -132,9 +132,8 @@ impl Inbound {
             }
             (_, session, tool_call, _) => {
                 // A helper's is its root's, as its updates are (`inbound/helpers.rs`).
-                let session = session
-                    .and_then(|session| AgentSessionId::new(session).ok())
-                    .map(|session| self.shared.state().root_of(session));
+                let session = session.and_then(|session| AgentSessionId::new(session).ok());
+                let session = session.map(|session| helpers::root_of(&self.shared, session));
                 let origin = session
                     .as_ref()
                     .map_or(crate::event::Origin::Idle, |session| {
