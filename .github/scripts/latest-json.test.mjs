@@ -1469,7 +1469,7 @@ test("no workflow's release takes releases/latest but a published v* app release
   assert.deepEqual(latestProblems(workflows), []);
   // The ones that make a release today, so the rule above is known to have looked at them.
   const making = workflows.filter(([, text]) => /\bgh release create\b/.test(text)).map(([name]) => name);
-  assert.deepEqual(making, ["agent-browser-build.yml", "python-runtime.yml", "release.yml"]);
+  assert.deepEqual(making, ["agent-browser-build.yml", "engines-publish.yml", "python-runtime.yml", "release.yml"]);
   assert.equal(
     workflows.flatMap(([, text]) => text.split("\n")).filter((line) => line.trim() === PUBLISH_LINE).length,
     1,

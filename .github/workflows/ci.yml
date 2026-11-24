@@ -202,10 +202,10 @@ jobs:
       # release.yml runs only on tags and on demand, so its rules (pull request triggers, pinned
       # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer, the
       # sidecar script, the VC++ runtime import check, the Apple Developer ID path, and the engine
-      # watch's bump script with engine-watch.yml's rules are tested here, in plain Node, without
-      # the network or cargo.
+      # watch's bump script with engine-watch.yml's rules, and the engine list's builder with
+      # engines-publish.yml's rules are tested here, in plain Node, without the network or cargo.
       - name: Test the release scripts and release.yml's rules
-        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs .github/scripts/pe-subsystem.test.mjs .github/scripts/copy-release-gate.test.mjs .github/scripts/release-apple.test.mjs .github/scripts/engine-watch.test.mjs
+        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs .github/scripts/pe-subsystem.test.mjs .github/scripts/copy-release-gate.test.mjs .github/scripts/release-apple.test.mjs .github/scripts/engine-watch.test.mjs .github/scripts/engines-publish.test.mjs
 
       # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
       # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
