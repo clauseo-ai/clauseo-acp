@@ -138,6 +138,7 @@ export function RoomRail({
   onEscape,
   onSettings,
   notice,
+  place,
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
@@ -169,6 +170,8 @@ export function RoomRail({
   onSettings?: (() => void) | undefined;
   /** Optional: what the room says about Clauseo itself (R23's update notice), at the rail's foot above Scratch matter. */
   notice?: ReactNode;
+  /** Optional: Skills and connectors' row (library/room-place.tsx), above Scratch matter. */
+  place?: ReactNode;
 }) {
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
@@ -459,6 +462,7 @@ export function RoomRail({
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
       {...(notice === undefined ? {} : { notice })}
+      {...(place === undefined ? {} : { place })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );

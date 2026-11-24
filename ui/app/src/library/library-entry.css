@@ -1,0 +1,19 @@
+/* Skills and connectors' row on the rail's foot (library-entry.tsx), in the room's first load: the scratch matter's row
+   with its count and, until the place is first opened, a yellow "New" tag. */
+@reference "../styles/index.css";
+
+.lib-entry .room-matter-row {
+  position: relative;
+}
+.lib-entry-note {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.lib-new {
+  @apply text-small font-chip;
+  padding: 0 var(--s1-5);
+  border-radius: var(--r-chip);
+  background: var(--chip-yellow);
+  color: var(--on-yellow);
+}

@@ -1,0 +1,596 @@
+{
+  "UC-1050": {
+    "en": "Skills and connectors",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Skills and connectors' row on the rail's foot, above Scratch matter (library/library-entry.tsx); UC-1050 is also the title bar's words while the place is open and the tabs' accessible name. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1051": {
+    "en": "{skills} skills, {connectors} connectors",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Skills and connectors' row on the rail's foot, above Scratch matter (library/library-entry.tsx); UC-1050 is also the title bar's words while the place is open and the tabs' accessible name. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1052": {
+    "en": "New",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Skills and connectors' row on the rail's foot, above Scratch matter (library/library-entry.tsx); UC-1050 is also the title bar's words while the place is open and the tabs' accessible name. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1053": {
+    "en": "Skills",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The place's two tabs (library/library.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1054": {
+    "en": "Connectors",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The place's two tabs (library/library.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1055": {
+    "en": "Comes with Clauseo",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The lists' group heads (library/list.tsx); MCP servers is the quiet note beside Your own connectors. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1056": {
+    "en": "Added by you",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The lists' group heads (library/list.tsx); MCP servers is the quiet note beside Your own connectors. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1057": {
+    "en": "Your own connectors",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The lists' group heads (library/list.tsx); MCP servers is the quiet note beside Your own connectors. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1058": {
+    "en": "MCP servers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The lists' group heads (library/list.tsx); MCP servers is the quiet note beside Your own connectors. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1059": {
+    "en": "Legal drafting",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1060": {
+    "en": "Drafts and revises notices, replies, opinions and agreements from the matter's papers, and checks every citation before handing the draft over.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1061": {
+    "en": "Legal research",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1062": {
+    "en": "Researches Indian law over several searches, reads the later judgments that cite a case, and ties every quote to a page it read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1063": {
+    "en": "Matter brief",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1064": {
+    "en": "Keeps a short brief of the matter in its notes folder: parties, facts, forum, positions taken and open questions.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1065": {
+    "en": "Word documents",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1066": {
+    "en": "Opens and edits Word files in the matter, with each change shown as a tracked change you can accept or reject.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1067": {
+    "en": "Web browser",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1068": {
+    "en": "Opens web pages that need a real browser, such as court websites with forms to fill.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A built-in's name or its one line, on its row and in its detail (library/model.ts). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1069": {
+    "en": "Every matter",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag for where the item is on, and the detail's Where {who} uses it (library/model.ts scopeTag); {matters} is one matter's name or several joined with 'and'. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1070": {
+    "en": "Only {matters}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag for where the item is on, and the detail's Where {who} uses it (library/model.ts scopeTag); {matters} is one matter's name or several joined with 'and'. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1071": {
+    "en": "Turned off",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag for where the item is on, and the detail's Where {who} uses it (library/model.ts scopeTag); {matters} is one matter's name or several joined with 'and'. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1072": {
+    "en": "Stopped",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag with a yellow dot when something is in the way (library/model.ts troubleTag). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1073": {
+    "en": "Can't be used",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag with a yellow dot when something is in the way (library/model.ts troubleTag). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1074": {
+    "en": "Not allowed",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag with a yellow dot when something is in the way (library/model.ts troubleTag). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1075": {
+    "en": "Key missing",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A row's tag with a yellow dot when something is in the way (library/model.ts troubleTag). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1076": {
+    "en": "From a folder on this computer",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1077": {
+    "en": "From a zip file on this computer",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1078": {
+    "en": "From {source}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1079": {
+    "en": "MCP server, a program on this computer",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1080": {
+    "en": "MCP server at {host}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1081": {
+    "en": "MCP server, brought over from {app}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Where an added item came from: under its name in the detail, and as the row's line when it has no description (library/model.ts fromLine). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1082": {
+    "en": "What a skill is",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1083": {
+    "en": "A skill is a page of instructions for one kind of work, such as drafting a legal notice the way your chamber does. When a question calls for it, {who} reads the skill and follows it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1084": {
+    "en": "Most skills are instructions only. A skill that holds programs says so, because {who} may run those programs on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1085": {
+    "en": "Where skills come from",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1086": {
+    "en": "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1087": {
+    "en": "What a connector is",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Connectors with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1088": {
+    "en": "A connector lets {who} reach something outside the matter's papers: a case-law database, a website, a program your firm runs. When one is used, the conversation shows it as a step.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Connectors with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1089": {
+    "en": "Your own connectors are MCP servers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Connectors with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1215": {
+    "en": "MCP is the common way apps such as Claude Desktop connect to outside tools, so one made for those apps works here too. You add it by its address on the internet, or by the command that starts it on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Connectors with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1216": {
+    "en": "It runs with the same access you have: your files, your programs and the internet. Add only connectors you trust.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The side panel on Connectors with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1217": {
+    "en": "Where {who} uses it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail, read-only (library/detail.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1218": {
+    "en": "How Clauseo reaches it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail, read-only (library/detail.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1219": {
+    "en": "Address",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail, read-only (library/detail.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1220": {
+    "en": "Command",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail, read-only (library/detail.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1221": {
+    "en": "Saved values",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail, read-only (library/detail.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1222": {
+    "en": "This skill holds programs. {Who} may run them on this computer, with the same access you have.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail: a note, or what stands in its way (library/detail.tsx, model.ts troubleLine); UC-977's 'Clauseo can't use this skill as it is.' is reused for an invalid skill. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1223": {
+    "en": "It comes with its own skill, Using the browser, with rules for using a browser on legal work. The sites it may open are in Settings, under Allowed sites.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail: a note, or what stands in its way (library/detail.tsx, model.ts troubleLine); UC-977's 'Clauseo can't use this skill as it is.' is reused for an invalid skill. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1224": {
+    "en": "Its files changed after you added it, so Clauseo stopped using it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail: a note, or what stands in its way (library/detail.tsx, model.ts troubleLine); UC-977's 'Clauseo can't use this skill as it is.' is reused for an invalid skill. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1225": {
+    "en": "Your firm doesn't allow this one on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail: a note, or what stands in its way (library/detail.tsx, model.ts troubleLine); UC-977's 'Clauseo can't use this skill as it is.' is reused for an invalid skill. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1226": {
+    "en": "Its saved key is missing, so {who} can't reach it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "An item's detail: a note, or what stands in its way (library/detail.tsx, model.ts troubleLine); UC-977's 'Clauseo can't use this skill as it is.' is reused for an invalid skill. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1227": {
+    "en": "Can't reach it right now",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1228": {
+    "en": "Retry",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1229": {
+    "en": "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1230": {
+    "en": "{credits} credits left",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1231": {
+    "en": "About {n} searches",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1232": {
+    "en": "No credits left",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1233": {
+    "en": "What it covers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1234": {
+    "en": "Judgments of the Supreme Court, the High Courts and tribunals, and central Acts. For any judgment, {who} can see which later judgments cite it, and how.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1235": {
+    "en": "What it costs",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1236": {
+    "en": "A page of search results is 20 credits. Opening a judgment is 3 credits, plus 1 for each 4,000 tokens {who} reads (about 3,000 words).",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1237": {
+    "en": "You haven't added a skill yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A list with nothing added yet, in place of rows (library/list.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1238": {
+    "en": "You haven't added a connector of your own yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A list with nothing added yet, in place of rows (library/list.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1239": {
+    "en": "the assistant",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "{who} or {Who} in the place's words when both plans are signed in (library/assistant.ts); with one, the plan's name (Claude or ChatGPT). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1240": {
+    "en": "The assistant",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "{who} or {Who} in the place's words when both plans are signed in (library/assistant.ts); with one, the plan's name (Claude or ChatGPT). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  }
+}
