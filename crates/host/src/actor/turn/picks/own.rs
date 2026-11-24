@@ -5,10 +5,11 @@
 //!   write here takes the entry of the thread's agent now (`ThreadRow::agent`), so one agent's
 //!   model id is never set on another. A thread whose agent changed starts with the new agent's
 //!   entry (none the first time) and gets the first agent's back when it changes back.
-//! - A pick that the agent takes becomes the kept value of its option ([`keep`]): a
-//!   `SetConfigOption` (answered at once, or waiting for the session and covered by its start)
-//!   and a prompt's own pick (`prompt_picks/send.rs`). A pick made while the session runs on a
-//!   fallback list counts too.
+//! - A pick that the agent takes makes what its answer runs with the kept values ([`keep`],
+//!   [`keep_running`]): a `SetConfigOption` (answered at once, or waiting for the session and
+//!   covered by its start) keeps the answer's model and effort, since the efforts on offer
+//!   follow the model; a prompt's own pick (`prompt_picks/send.rs`) keeps its values. A pick
+//!   made while the session runs on a fallback list counts too.
 //! - `CreateThread`'s config (else the matter's prefs) is kept at the agent's first session
 //!   ([`keep_created`]) when the session holds it, or, for a Codex model, does not list it
 //!   (Codex's fallback list: the lawyer's choice stays, and the start tells it was not used).
@@ -104,6 +105,18 @@ pub(in crate::actor::turn) fn keep(
     }
     row.own_picks = Some(all);
     Some(row.clone())
+}
+
+/// A pick of the lawyer's was taken and `options` are the agent's answer: the model and effort
+/// they run with become the kept values, the effort included, since the efforts on offer follow
+/// the model and the agent may have changed it with the model.
+pub(in crate::actor::turn) fn keep_running(
+    actor: &mut Actor,
+    thread: ThreadId,
+    options: &[ConfigOption],
+) -> Option<ThreadRow> {
+    let picks: Vec<Pick> = options.iter().filter_map(current_pick).collect();
+    keep(actor, thread, &picks)
 }
 
 /// Whether `thread`'s session is the first of its agent: no session of it has attached yet
