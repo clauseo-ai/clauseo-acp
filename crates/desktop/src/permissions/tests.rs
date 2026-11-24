@@ -3,7 +3,9 @@
 // unix-paths-ok: the macOS paths are only compared, both sides resolved alike
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Files as _, SystemFiles};
@@ -26,6 +28,8 @@ struct Fake {
     refused: Vec<&'static str>,
     /// Every folder listed and keychain account read, in order.
     asked: Mutex<Vec<String>>,
+    /// How many times Controlled folder access was read.
+    cfa_reads: AtomicUsize,
 }
 
 impl Fake {
@@ -40,6 +44,7 @@ impl Fake {
             listed: true,
             refused: Vec::new(),
             asked: Mutex::new(Vec::new()),
+            cfa_reads: AtomicUsize::new(0),
         }
     }
 
@@ -74,6 +79,9 @@ impl Probe for Fake {
         self.keychain.clone()
     }
     fn controlled_folder_access(&self) -> Option<Cfa> {
+        self.cfa_reads.fetch_add(1, Ordering::SeqCst);
+        // Long enough for a second caller to arrive while this read is under way.
+        std::thread::sleep(Duration::from_millis(20));
         self.cfa.clone()
     }
     fn protected_defaults(&self) -> Vec<PathBuf> {
@@ -395,33 +403,68 @@ fn the_running_executable_has_an_identity() {
 }
 
 #[test]
-fn defender_s_preference_parses() {
-    let text = r#"{
-        "EnableControlledFolderAccess": 1,
-        "ControlledFolderAccessProtectedFolders": ["D:\\Matters", "E:\\Firm"]
-    }"#;
+fn controlled_folder_access_is_read_once_per_process_and_shared_while_under_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(&dir, "1");
+    let probe = ReadOnce::new(Fake::windows(true));
+    // Two at once (a reload while the first screen's read is under way): one read, both rows.
+    let both = std::thread::scope(|scope| {
+        let first = scope.spawn(|| rows(&probe, &store));
+        let second = scope.spawn(|| rows(&probe, &store));
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    assert!(
+        both.iter()
+            .all(|listed| ids(listed) == [PermissionId::ControlledFolderAccess])
+    );
+    // Later calls and an ask reuse it.
     assert_eq!(
-        parse_preference(text),
+        ids(&rows(&probe, &store)),
+        [PermissionId::ControlledFolderAccess]
+    );
+    ask(&probe, &store, PermissionId::ControlledFolderAccess).unwrap();
+    assert_eq!(probe.probe.cfa_reads.load(Ordering::SeqCst), 1);
+    // A read that could not tell is kept too: it is not tried again on every call.
+    let mut unreadable = Fake::windows(true);
+    unreadable.cfa = None;
+    let probe = ReadOnce::new(unreadable);
+    assert_eq!(rows(&probe, &store), NONE);
+    assert_eq!(rows(&probe, &store), NONE);
+    assert_eq!(probe.probe.cfa_reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn controlled_folder_access_follows_the_most_specific_registry_place() {
+    use CfaLayer::{Set, Unreadable, Unset};
+    let on = Some(Cfa {
+        on: true,
+        protected: Vec::new(),
+    });
+    let off = Some(Cfa::default());
+    let from = |layers: &[CfaLayer]| cfa_from_layers(layers, Vec::new());
+    // Group policy over MDM over Defender's own.
+    assert_eq!(from(&[Set(1), Set(0), Set(0)]), on);
+    assert_eq!(from(&[Unset, Set(0), Set(1)]), off);
+    assert_eq!(from(&[Unset, Unset, Set(1)]), on);
+    // A place that cannot be read falls through to the next.
+    assert_eq!(from(&[Unreadable, Unset, Set(1)]), on);
+    // Audit and disk-only modes do not block; another value cannot be told.
+    assert_eq!(from(&[Set(2)]), off);
+    assert_eq!(from(&[Set(4)]), off);
+    assert_eq!(from(&[Set(7)]), None);
+    // Nothing set anywhere: Defender's default, off. Nothing set and a place unread: cannot be
+    // told, as with no place at all (off Windows), and no row is listed, as before.
+    assert_eq!(from(&[Unset, Unset, Unset]), off);
+    assert_eq!(from(&[Unset, Unreadable, Unset]), None);
+    assert_eq!(from(&[]), None);
+    // The places' added folders come along.
+    assert_eq!(
+        cfa_from_layers(&[Set(1)], vec![PathBuf::from("D:/Matters")]),
         Some(Cfa {
             on: true,
-            protected: vec![PathBuf::from(r"D:\Matters"), PathBuf::from(r"E:\Firm")],
+            protected: vec![PathBuf::from("D:/Matters")],
         })
     );
-    let one = r#"{"EnableControlledFolderAccess": 1,
-        "ControlledFolderAccessProtectedFolders": "D:\\Matters"}"#;
-    assert_eq!(
-        parse_preference(one).map(|cfa| cfa.protected),
-        Some(vec![PathBuf::from(r"D:\Matters")])
-    );
-    let off = r#"{"EnableControlledFolderAccess": 2,
-        "ControlledFolderAccessProtectedFolders": null}"#;
-    assert_eq!(parse_preference(off), Some(Cfa::default()));
-    assert_eq!(
-        parse_preference(r#"{"EnableControlledFolderAccess": null}"#),
-        None
-    );
-    assert_eq!(parse_preference(""), None);
-    assert_eq!(parse_preference("Get-MpPreference : not recognised"), None);
 }
 
 #[test]

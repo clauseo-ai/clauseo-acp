@@ -15,12 +15,14 @@
 //!   the matters folder is under a protected folder. What it blocks is the assistants' own tools
 //!   (the Windows VM's block, event 1123, named `powershell.exe`), not `Clauseo.exe`, so
 //!   whether Clauseo itself is allowed changes nothing. Only an administrator can allow a tool,
-//!   so asking grants nothing: the row says to move the matters folder or ask IT.
+//!   so asking grants nothing: the row says to move the matters folder or ask IT. Its setting
+//!   is read in this process from the registry (`permissions/windows.rs`), once per process
+//!   ([`ReadOnce`]): no child process, so no console and nothing to outlive the app.
 //!
 //! Linux lists none. The OS reads sit behind [`Probe`], so the rules are tested anywhere.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::SystemFiles;
@@ -126,7 +128,7 @@ pub(crate) struct KeychainCheck {
     pub(crate) unknown: Vec<KeychainItem>,
 }
 
-/// Defender's Controlled folder access, as `Get-MpPreference` gives it.
+/// Defender's Controlled folder access, as the registry gives it (`windows.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Cfa {
     /// `EnableControlledFolderAccess` is 1 (on, blocking); 2 to 4 only audit or guard disks.
@@ -167,7 +169,7 @@ pub(crate) async fn permissions<R: Runtime>(
 ) -> Result<Vec<PermissionRow>, HostError> {
     crate::ipc::timed("permissions", async {
         let store = system_store(&app, &app_data.0);
-        blocking(move || Ok(list(&SystemProbe, &store.asked()).rows)).await
+        blocking(move || Ok(list(&SYSTEM, &store.asked()).rows)).await
     })
     .await
 }
@@ -184,10 +186,13 @@ pub(crate) async fn ask_permission<R: Runtime>(
 ) -> Result<PermissionRow, HostError> {
     crate::ipc::timed("ask_permission", async {
         let store = system_store(&app, &app_data.0);
-        blocking(move || ask(&SystemProbe, &store, id)).await
+        blocking(move || ask(&SYSTEM, &store, id)).await
     })
     .await
 }
+
+/// The OS, its Controlled folder access read once per process.
+static SYSTEM: ReadOnce<SystemProbe> = ReadOnce::new(SystemProbe);
 
 /// The store in `data_dir` for this app's build.
 fn system_store<R: Runtime>(app: &AppHandle<R>, data_dir: &Path) -> Store {
@@ -434,38 +439,87 @@ fn same_part(a: std::path::Component<'_>, b: std::path::Component<'_>) -> bool {
     a.as_os_str().to_string_lossy().to_lowercase() == b.as_os_str().to_string_lossy().to_lowercase()
 }
 
-/// `Get-MpPreference`'s JSON (`windows.rs`). A list of one may come as a bare string.
-#[derive(Debug, Deserialize)]
-struct Preference {
-    #[serde(rename = "EnableControlledFolderAccess")]
-    enable: Option<i64>,
-    #[serde(rename = "ControlledFolderAccessProtectedFolders", default)]
-    protected: Option<OneOrMany>,
+/// One registry place Defender's Controlled folder access setting may be kept in
+/// (`windows.rs`), as read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CfaLayer {
+    /// The key or its value could not be read (access denied, or another error).
+    Unreadable,
+    /// Readable, with no `EnableControlledFolderAccess` here.
+    Unset,
+    /// `EnableControlledFolderAccess` here.
+    Set(u32),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum OneOrMany {
-    One(String),
-    Many(Vec<String>),
+/// Controlled folder access from its registry places, most specific first (group policy, MDM,
+/// Defender's own): the first that sets `EnableControlledFolderAccess` decides; 1 is on
+/// (blocking), 0 off and 2 to 4 only audit or guard disks, and anything else cannot be told.
+/// Places that set nothing fall through, and none set reads as off, Defender's default; when no
+/// place sets it and one could not be read, it cannot be told (`None`, as no layer at all).
+/// `protected`: the folders the places add to Windows' defaults.
+pub(crate) fn cfa_from_layers(layers: &[CfaLayer], protected: Vec<PathBuf>) -> Option<Cfa> {
+    let mut unreadable = layers.is_empty();
+    for layer in layers {
+        match layer {
+            CfaLayer::Unreadable => unreadable = true,
+            CfaLayer::Unset => {}
+            CfaLayer::Set(enable) => {
+                return (*enable <= 4).then(|| Cfa {
+                    on: *enable == 1,
+                    protected,
+                });
+            }
+        }
+    }
+    (!unreadable).then(|| Cfa {
+        on: false,
+        protected,
+    })
 }
 
-impl OneOrMany {
-    fn paths(this: Option<Self>) -> Vec<PathBuf> {
-        match this {
-            None => Vec::new(),
-            Some(Self::One(one)) => vec![PathBuf::from(one)],
-            Some(Self::Many(many)) => many.into_iter().map(PathBuf::from).collect(),
+/// A probe whose Controlled folder access is read at most once per value: the first read is
+/// kept, and a read already under way is waited for, not started again. A page reload, a second
+/// `permissions` or an `ask_permission` reuses it; a change to Defender's setting shows at the
+/// next start. The other reads pass through.
+pub(crate) struct ReadOnce<P> {
+    probe: P,
+    cfa: OnceLock<Option<Cfa>>,
+}
+
+impl<P> ReadOnce<P> {
+    pub(crate) const fn new(probe: P) -> Self {
+        Self {
+            probe,
+            cfa: OnceLock::new(),
         }
     }
 }
 
-/// Controlled folder access from `Get-MpPreference | ConvertTo-Json`; `None` when the text does
-/// not parse or gives no `EnableControlledFolderAccess` (Defender off, or another antivirus).
-pub(crate) fn parse_preference(text: &str) -> Option<Cfa> {
-    let preference: Preference = serde_json::from_str(text.trim()).ok()?;
-    Some(Cfa {
-        on: preference.enable? == 1,
-        protected: OneOrMany::paths(preference.protected),
-    })
+impl<P: Probe> Probe for ReadOnce<P> {
+    fn platform(&self) -> Platform {
+        self.probe.platform()
+    }
+    fn matters_folder(&self) -> Option<PathBuf> {
+        self.probe.matters_folder()
+    }
+    fn documents(&self) -> Option<PathBuf> {
+        self.probe.documents()
+    }
+    fn keychain(&self) -> KeychainCheck {
+        self.probe.keychain()
+    }
+    fn controlled_folder_access(&self) -> Option<Cfa> {
+        self.cfa
+            .get_or_init(|| self.probe.controlled_folder_access())
+            .clone()
+    }
+    fn protected_defaults(&self) -> Vec<PathBuf> {
+        self.probe.protected_defaults()
+    }
+    fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
+        self.probe.list_folder(folder)
+    }
+    fn read_keychain(&self, item: &KeychainItem) -> bool {
+        self.probe.read_keychain(item)
+    }
 }

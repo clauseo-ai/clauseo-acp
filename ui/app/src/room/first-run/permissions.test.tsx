@@ -28,8 +28,9 @@ function fakeHost(
   }),
 ) {
   const ask = vi.fn(async (id: PermissionId) => answer(id));
-  const host: PermissionsHost = { list: vi.fn(async () => rows), ask };
-  return { host, ask };
+  const list = vi.fn(async () => rows);
+  const host: PermissionsHost = { list, ask };
+  return { host, ask, list };
 }
 
 const shown = () =>
@@ -55,6 +56,32 @@ test("no rows on Windows: no step", async () => {
   await mountFirstRun({ matters: [], platform: "windows", permissions: fakeHost([]).host });
   expect(byId("first-screen")).not.toBeNull();
   expect(byId("permissions-step")).toBeNull();
+});
+
+test("mounting the step on the Mac only reads: nothing is asked without a press", async () => {
+  const { host, ask, list } = fakeHost([DOCS, KEYS]);
+  await mountFirstRun({ matters: [], permissions: host });
+  expect(shown()).toEqual([
+    ["files_documents", "ask"],
+    ["keychain", "later"],
+  ]);
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(ask).not.toHaveBeenCalled();
+});
+
+test("mounting the step on Windows only reads: the blocking row needs no ask for its detail", async () => {
+  const blocking: PermissionRow = {
+    ...NONE,
+    id: "controlled_folder_access",
+    state: "blocking",
+    settings_path: WIN_PATH,
+  };
+  const { host, ask, list } = fakeHost([blocking]);
+  await mountFirstRun({ matters: [], platform: "windows", permissions: host });
+  expect(shown()).toEqual([["controlled_folder_access", "blocking"]]);
+  expect(byId("permission-path")?.textContent).toContain("In Windows Security:");
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(ask).not.toHaveBeenCalled();
 });
 
 test("a window with no permissions host shows no step", async () => {
@@ -227,11 +254,7 @@ test("Windows, Controlled folder access blocking: said plainly, a matters folder
     folder: "Documents\\Clauseo",
   };
   const note = "Clauseo's helper programs need allowing too.";
-  const { host, ask } = fakeHost([blocking], () => ({
-    ...blocking,
-    settings_path: WIN_PATH,
-    note,
-  }));
+  const { host, ask } = fakeHost([{ ...blocking, settings_path: WIN_PATH, note }]);
   const transport = await mountFirstRun({ matters: [], platform: "windows", permissions: host });
   expect(shown()).toEqual([["controlled_folder_access", "blocking"]]);
   expect(byId("permission-folder")?.textContent).toBe("Documents\\Clauseo");
@@ -249,7 +272,7 @@ test("Windows, Controlled folder access blocking: said plainly, a matters folder
   // nothing for the lawyer to allow here: no Allow, no macOS lead
   expect(allowIn("controlled_folder_access")).toBeNull();
   expect(byId("permissions-step")?.textContent).not.toContain("macOS");
-  expect(ask).toHaveBeenCalledTimes(1);
+  expect(ask).not.toHaveBeenCalled();
   // the first screen's own Open the folder: the picker (cancelled here)
   const picks = vi.spyOn(transport, "pickFolder").mockResolvedValue(null);
   await press(byId("permission-other-folder"));
