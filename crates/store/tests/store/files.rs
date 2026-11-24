@@ -43,6 +43,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0006_matter_agent_prefs.sql"),
         include_str!("../../src/migrations/0007_pending_actions.sql"),
         include_str!("../../src/migrations/0008_matter_addon_switches.sql"),
+        include_str!("../../src/migrations/0009_thread_own_picks.sql"),
     ];
     let mut rest = record;
     for migration in migrations {
@@ -104,7 +105,11 @@ fn migrations_set_user_version() {
 #[test]
 fn newer_user_version_is_refused() {
     let dir = TestDir::new("newer_user_version_is_refused");
-    block_on(dir.open().close()).unwrap();
+    // A file with a thread's own picks (schema 9), as this build leaves it; a build before it
+    // sees a newer version here, as this build sees `SCHEMA + 1`.
+    let store = dir.open();
+    block_on(store.commit(crate::own_picks::kept_thread())).unwrap();
+    block_on(store.close()).unwrap();
     let conn = Connection::open(db(dir.path())).unwrap();
     conn.execute_batch(&format!("PRAGMA user_version = {}", SCHEMA + 1))
         .unwrap();
@@ -119,9 +124,14 @@ fn newer_user_version_is_refused() {
     );
     assert_eq!(error.code(), ErrorCode::StoreNewerVersion);
 
-    // The refused open changed nothing: the file still says the newer version.
+    // The refused open changed nothing: the file still says the newer version, and the thread
+    // keeps its own picks.
     let conn = Connection::open(db(dir.path())).unwrap();
     assert_eq!(user_version(&conn), i64::from(SCHEMA + 1));
+    let own: String = conn
+        .query_row("SELECT own_picks FROM threads", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(own, r#"{"model":"gpt-6-luna"}"#);
 }
 
 #[test]

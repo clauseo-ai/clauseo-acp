@@ -342,6 +342,12 @@ pub(super) fn on_config(
         super::prompt_picks::config_set(actor, thread, &pick.0, &options);
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         out.push(actor, ConfigOptionsReplaced { options })?;
+        if let (option, ConfigValue::Select(value)) = &pick
+            && let Some(row) =
+                super::picks::own::keep(actor, thread, &[(option.clone(), value.clone())])
+        {
+            out.draft.thread_row(row);
+        }
         if let Some(row) = super::picks::remember(actor, thread, &pick) {
             out.draft.matter_row(row);
         }

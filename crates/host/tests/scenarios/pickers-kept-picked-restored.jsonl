@@ -1,0 +1,12 @@
+{"scenario":"pickers-kept-picked-restored","description":"After a host restart, the session/load of a thread whose lawyer picked gpt-6-astra on a fallback list lists every model again, at gpt-6: the client sets gpt-6-astra, not gpt-6-luna, before the prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.10.0"}}}}
+{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}"}}}
+{"respond":{"to":"load","result":{"modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]},"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6","options":[{"value":"gpt-6","name":"GPT-6"},{"value":"gpt-6-luna","name":"GPT-6 Luna"},{"value":"gpt-6-astra","name":"GPT-6 Astra"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"agent"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"expect":{"method":"session/set_config_option","as":"back-astra","params":{"sessionId":"sess-1","configId":"model","value":"gpt-6-astra"}}}
+{"respond":{"to":"back-astra","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6-astra","options":[{"value":"gpt-6","name":"GPT-6"},{"value":"gpt-6-luna","name":"GPT-6 Luna"},{"value":"gpt-6-astra","name":"GPT-6 Astra"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p3","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p3","content":{"type":"text","text":"Astra answer."}}}}
+{"respond":{"to":"p3","result":{"stopReason":"end_turn"}}}

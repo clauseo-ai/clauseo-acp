@@ -41,6 +41,7 @@ fn thread_row(n: u64, matter: MatterId) -> ThreadRow {
         created: ts(1),
         updated: ts(i64::try_from(n).unwrap()),
         seen_seq: None,
+        own_picks: None,
     }
 }
 
@@ -82,7 +83,7 @@ fn a_schema_2_database_opens_with_its_threads_seen_up_to_their_last_seq() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 8);
+    assert_eq!(SCHEMA, 9);
 }
 
 #[test]

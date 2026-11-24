@@ -1,8 +1,8 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    AddonSwitches, AgentPrefs, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList,
-    RenameSource, SCHEMA_VERSION, Seq, StreamId, Timestamp,
+    AddonSwitches, AgentPrefs, ConfigPicks, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind,
+    PackList, RenameSource, SCHEMA_VERSION, Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -158,6 +158,20 @@ pub(crate) fn agent_prefs_text(prefs: &AgentPrefs) -> Result<String, Error> {
 pub(crate) fn agent_prefs(text: &str) -> Result<AgentPrefs, Error> {
     serde_json::from_str(text)
         .map_err(|error| Error::corrupt(format!("a matter's agent prefs do not parse: {error}")))
+}
+
+/// The `threads.own_picks` text: a JSON object of option id to value id.
+pub(crate) fn own_picks_text(picks: &ConfigPicks) -> Result<String, Error> {
+    serde_json::to_string(picks).map_err(|error| Error::Encode {
+        detail: format!("a thread's own picks: {error}"),
+    })
+}
+
+/// A `threads.own_picks` read back: text that is not such an object is corrupt. The error leaves
+/// the text out, as `agent_prefs` does.
+pub(crate) fn own_picks(text: &str) -> Result<ConfigPicks, Error> {
+    serde_json::from_str(text)
+        .map_err(|error| Error::corrupt(format!("a thread's own picks do not parse: {error}")))
 }
 
 /// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that

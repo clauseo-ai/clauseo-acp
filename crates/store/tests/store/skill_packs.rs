@@ -200,7 +200,7 @@ fn schema_4_database_migrates_and_reads_skill_packs_as_null() {
     block_on(store.close()).unwrap();
     let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
     assert_eq!(user_version(&conn), i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 8);
+    assert_eq!(SCHEMA, 9);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), [narrowed]);

@@ -299,6 +299,7 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     if !start.config_options.is_empty() {
         super::picks::drop_held(actor, thread, "the session's answer is newer");
     }
+    super::picks::own::seed(actor, thread);
     let picks = super::picks::wanted(actor, thread, &start.config_options);
     let kind = actor
         .threads

@@ -10,7 +10,7 @@ use crate::actor::turn::{TurnPhase, prompt_picks};
 
 /// The notice `turn`'s `TurnStarted` would be followed by.
 fn notice(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<Notice> {
-    let (_, _, notice) = prompt_picks::started_with(&mut rig.actor, thread, turn, Vec::new());
+    let (_, _, notice, _) = prompt_picks::started_with(&mut rig.actor, thread, turn, Vec::new());
     notice
 }
 

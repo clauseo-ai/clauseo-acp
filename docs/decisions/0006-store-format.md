@@ -188,6 +188,26 @@ one commit (`Commit::more_matters`).
 ALTER TABLE matters ADD COLUMN addon_switches TEXT /* JSON {"skill":{id:bool},"tool":{name:bool}}; NULL = no switch, each item follows its scope */;
 ```
 
+### Schema version 9
+
+`crates/store/src/migrations/0009_thread_own_picks.sql`, verbatim (the same test checks this
+copy too). A thread keeps the model and effort the lawyer last chose in it, such as
+`{"model":"gpt-6-luna","reasoning_effort":"low"}` (protocol's `ConfigPicks`). The log's options
+record what each session ran with, which is a fallback when the agent's model list lacked the
+lawyer's model at that start; this column keeps the lawyer's values apart, so every session start
+tries them again. NULL, as on every thread before it, means none yet: the host fills it from the
+thread's logged options at its next session start. A row, not an event: the reducer's view does
+not show it.
+
+```sql
+-- Schema version 9: the model and effort the lawyer last chose in each thread, kept apart from
+-- what a session ran with, so a fallback model list never replaces them.
+-- docs/decisions/0006-store-format.md gives the reason for the column and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE threads ADD COLUMN own_picks TEXT /* JSON object: {option id: value id}; NULL = none yet, and on rows from before schema 9 */;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.

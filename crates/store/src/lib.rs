@@ -3,12 +3,13 @@
 //!
 //! # Owns
 //!
-//! `state.sqlite` in the folder the caller passes: schema version 8 and its numbered
+//! `state.sqlite` in the folder the caller passes: schema version 9 and its numbered
 //! migrations (`PRAGMA user_version`; `0002_matter_details.sql` adds a matter's details,
 //! `0003_thread_seen.sql` a thread's seen mark, `0004_thread_title_source.sql` a thread's title
 //! source, `0005_matter_skill_packs.sql` a matter's skill packs, `0006_matter_agent_prefs.sql` its
 //! model and effort picks, `0007_pending_actions.sql` the file action a matter's writer runs,
-//! `0008_matter_addon_switches.sql` a matter's own switches for skills and tools), the
+//! `0008_matter_addon_switches.sql` a matter's own switches for skills and tools,
+//! `0009_thread_own_picks.sql` a thread's own model and effort), the
 //! pragmas, the stored `MessagePack` envelope, the exclusive lock (`state.sqlite.lock`), the
 //! private file mode, and the mapping of every disk failure to `store.disk_full`,
 //! `store.corrupt` or `store.io`.

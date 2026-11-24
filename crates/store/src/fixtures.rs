@@ -122,6 +122,7 @@ pub fn thread_row() -> ThreadRow {
         created: time(0),
         updated: time(EVENTS),
         seen_seq: None,
+        own_picks: None,
     }
 }
 

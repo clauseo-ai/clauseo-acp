@@ -337,7 +337,7 @@ pub(crate) fn tail_times(conn: &Connection) -> Result<Vec<(StreamId, Timestamp)>
 pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, matter_id, agent_id, title, acp_session_id, archived, created_ms, \
-         updated_ms, seen_seq, title_source FROM threads WHERE matter_id = ?1 \
+         updated_ms, seen_seq, title_source, own_picks FROM threads WHERE matter_id = ?1 \
          ORDER BY updated_ms DESC, id",
     )?;
     let mut rows = statement.query([matter.to_string()])?;
@@ -358,6 +358,11 @@ pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadR
             created: timestamp(row, 6)?,
             updated: timestamp(row, 7)?,
             seen_seq: seen_seq(row, 8)?,
+            own_picks: row
+                .get_ref(10)?
+                .as_str_or_null()?
+                .map(codec::own_picks)
+                .transpose()?,
         });
     }
     Ok(out)

@@ -137,7 +137,7 @@ fn a_schema_7_database_migrates_with_no_switches() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 8);
+    assert_eq!(SCHEMA, 9);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), [switched]);

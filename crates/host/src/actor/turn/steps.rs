@@ -481,8 +481,11 @@ pub(super) fn on_before_turn(
             out.push_matter(actor, matter, event)?;
         }
         let options = super::picks::thread_options(actor, thread);
-        let (model, effort, notice) =
+        let (model, effort, notice, row) =
             super::prompt_picks::started_with(actor, thread, turn, options);
+        if let Some(row) = row {
+            out.draft.thread_row(row);
+        }
         out.push(
             actor,
             TurnStarted {
