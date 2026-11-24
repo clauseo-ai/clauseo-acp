@@ -103,7 +103,7 @@ export function Permissions({
       onSettings={mac ? onSettings : undefined}
       onCheck={read}
       onOtherFolder={mac ? undefined : onOtherFolder}
-      onChooseFolder={mac ? undefined : host.chooseMattersFolder}
+      onChooseFolder={host.chooseMattersFolder}
     />,
   );
 }

@@ -169,6 +169,42 @@ test("refused: Not allowed, where to change it as the desktop says, and System S
   expect(opened).toHaveBeenCalledTimes(1);
 });
 
+test("Documents refused on the Mac: the matters-folder choice beside the ways on, and its press runs the choice", async () => {
+  const choose = vi.fn(async () => ({ done: "/Users/asha/Matters" }));
+  const { host } = fakeHost([DOCS], () => ({ ...DOCS, state: "denied", settings_path: MAC_PATH }));
+  await mountFirstRun({ matters: [], permissions: { ...host, chooseMattersFolder: choose } });
+  // not before a refusal: a row still to ask has only its Allow
+  expect(byId("folder-choice")).toBeNull();
+  await press(allowIn("files_documents"));
+  expect(shown()).toEqual([["files_documents", "denied"]]);
+  expect(byId("permission-settings")).not.toBeNull();
+  expect(byId("folder-choice")?.textContent).toBe("Choose a matters folder outside Documents");
+  await press(byId("folder-choice"));
+  expect(choose).toHaveBeenCalledTimes(1);
+  expect(byId("folder-choice-said")?.textContent).toBe(
+    "New matters now go in /Users/asha/Matters. Matters you already have stay where they are.",
+  );
+});
+
+test("Documents refused, the picker cancelled: no line, and the choice stays for another try", async () => {
+  const choose = vi.fn(async () => null);
+  const { host } = fakeHost([DOCS], () => ({ ...DOCS, state: "denied", settings_path: MAC_PATH }));
+  await mountFirstRun({ matters: [], permissions: { ...host, chooseMattersFolder: choose } });
+  await press(allowIn("files_documents"));
+  await press(byId("folder-choice"));
+  expect(choose).toHaveBeenCalledTimes(1);
+  expect(byId("folder-choice-said")).toBeNull();
+  expect(byId("folder-choice")?.hasAttribute("disabled")).toBe(false);
+});
+
+test("Documents refused where the host can't set a matters folder: no choice", async () => {
+  const { host } = fakeHost([DOCS], () => ({ ...DOCS, state: "denied", settings_path: MAC_PATH }));
+  await mountFirstRun({ matters: [], permissions: host });
+  await press(allowIn("files_documents"));
+  expect(byId("permission-settings")).not.toBeNull();
+  expect(byId("folder-choice")).toBeNull();
+});
+
 test("the keychain refused: it can be allowed here at any time, its Allow stays, and the items are said plainly", async () => {
   // the desktop's note as permissions.rs writes it: "service (account)", joined with ", "
   const note = "ai.clauseo.desktop.connectors (westlaw), ai.clauseo.desktop.connectors (manupatra)";
