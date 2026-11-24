@@ -23,6 +23,7 @@ import type {
   HostError,
   MatterId,
   MatterSummary,
+  PickedFolder,
   ThreadId,
   ThreadStatus,
   Timestamp,
@@ -386,7 +387,7 @@ export class Matters {
   }
 
   /** The folder picker, for the form: the folder and how it reads, or null when the lawyer cancelled. */
-  pickFolder(): Promise<{ folder: FolderRefId; display: string } | null> {
+  pickFolder(): Promise<PickedFolder | null> {
     return this.#transport.pickFolder();
   }
 
