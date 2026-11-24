@@ -315,10 +315,9 @@ fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
     };
     entries
         .into_iter()
-        .filter(|entry| match entry {
-            ViewEntry::Helper(_) | ViewEntry::HelperText(_) => true,
-            ViewEntry::ToolCall(call) => call.helper.is_some(),
-            _ => false,
+        .filter(|entry| {
+            matches!(entry, ViewEntry::Helper(_) | ViewEntry::HelperText(_))
+                || matches!(entry, ViewEntry::ToolCall(call) if call.helper.is_some())
         })
         .collect()
 }
