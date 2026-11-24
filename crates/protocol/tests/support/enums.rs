@@ -93,7 +93,8 @@ macro_rules! logged_enums {
                 SnoozeBy,
                 PermissionAbout,
                 PackSkipReason,
-                MatterHold;
+                MatterHold,
+                HelperOutcome;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };
