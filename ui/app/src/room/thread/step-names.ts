@@ -16,6 +16,7 @@ import { waitingWords, workingHelpers } from "./helper-view.ts";
 import { taskOf } from "./task-words.ts";
 import {
   caseLawOf,
+  codeModeOf,
   helperStartOf,
   helpersWaitOf,
   helperToolOf,
@@ -386,6 +387,8 @@ export function doingPick(lang: Lang): (v: StreamView | undefined) => string | n
           launched = true;
           continue;
         }
+        // a code mode tool shows nothing (tool-names.ts): the step before it says what is being done
+        if (call !== undefined && codeModeOf(call)) continue;
         return call !== undefined && unsettled(call) ? doingOf(lang, call) : null;
       }
       if (id.startsWith(TEXT))

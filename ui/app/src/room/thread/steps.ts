@@ -28,6 +28,7 @@ import {
   helpersWaitOf,
   helperStartOf,
   helperToolOf,
+  codeModeOf,
   mcpOf,
   ownToolOf,
   toolLabelOf,
@@ -56,8 +57,8 @@ export type Segment =
   | { readonly row: EntryId; readonly group?: never }
   | { readonly group: readonly EntryId[]; readonly row?: never };
 
-/** How a row takes part: a tool call, a thought, or a row that stands alone. */
-export type Part = "tool" | "thought" | "alone";
+/** How a row takes part: a tool call, a thought, a row that stands alone, or one never shown (codeModeOf). */
+export type Part = "tool" | "thought" | "alone" | "hidden";
 
 const TOOL = "tool_call:";
 const TEXT = "agent_text:";
@@ -76,6 +77,7 @@ export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Par
   };
   for (const id of ids) {
     const part = partOf(id);
+    if (part === "hidden") continue;
     if (part === "alone") {
       close();
       out.push({ row: id });
@@ -121,6 +123,11 @@ export function promptsAtTheirCalls(
   return out;
 }
 
+/** A tool call's part: hidden for a code mode tool (tool-names.ts, codeModeOf), else a tool call; one not in yet is
+ * a tool call. */
+const toolPart = (entry: ViewEntry | undefined): Part =>
+  entry?.tool_call !== undefined && codeModeOf(entry.tool_call) ? "hidden" : "tool";
+
 /** A row's part from its entry. */
 export function partOfEntry(entry: ViewEntry | undefined): Part {
   if (entry?.tool_call !== undefined) return "tool";
@@ -145,7 +152,7 @@ export function segmentsPick(
     // a helper's steps and words leave the lead's rows, its card in its launching step's place
     // (helper-view.ts)
     const grouped = segmentsOf(leadRows(ids, entry), (id) =>
-      id.startsWith(TOOL) ? "tool" : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
+      id.startsWith(TOOL) ? toolPart(entry(id)) : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
     );
     last = promptsAtTheirCalls(grouped, (row) => {
       const asked = row.startsWith(PERMISSION) ? entry(row)?.permission : undefined;
@@ -501,7 +508,7 @@ export function lineOf(
   for (const e of entries)
     if (e?.tool_call !== undefined) {
       if (internalOf(e.tool_call)) upkeep = true;
-      else calls.push(e.tool_call);
+      else if (!codeModeOf(e.tool_call)) calls.push(e.tool_call);
     }
   const aside = backgroundLine(lang, calls);
   // the pages that couldn't open and the steps held back, muted beside the line unless they are the line
@@ -521,6 +528,7 @@ export function lineOf(
   for (let i = entries.length - 1; i >= 0 && now === null; i -= 1) {
     const e = entries[i];
     if (e?.agent_text !== undefined) now = "thought";
+    else if (e?.tool_call !== undefined && codeModeOf(e.tool_call)) continue;
     else if (e?.tool_call !== undefined && unsettled(e.tool_call)) now = e.tool_call;
     else if (e?.tool_call !== undefined) break;
   }
