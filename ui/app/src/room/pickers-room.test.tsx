@@ -1,15 +1,22 @@
 // @vitest-environment happy-dom
 // The model and effort on the composer's status line, in the real room over FakeTransport (config-menus.ts,
-// pickers.ts): a new conversation's from its plan's options as the agent last reported them, the matter's remembered
-// picks preselected, a pick sent with create_thread; a conversation's from its header, a pick sent as
-// set_config_option and shown at once, the header's later options followed with no error; no effort without the
-// agent's thought_level option, and no menus at all without options. Real menus: a named button, the chosen value
-// checked, Escape closes it, and axe finds nothing.
+// pickers.ts): a new conversation's from its plan's models (AgentSummary.models), the matter's remembered picks
+// preselected, a pick sent with create_thread under the agent's own keys; every model listed, each model's own
+// efforts, the effort kept or defaulted on a change of model; a quiet loading line until the models are in, never a
+// made-up default; a conversation's from its header, a pick sent as set_config_option and shown at once, the header's
+// later options followed with no error. Real menus: a named button, the chosen value checked, Escape closes it, and
+// axe finds nothing. Code mode's tag: thread/code-mode.test.tsx.
 import axe from "axe-core";
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { header, reset, THREAD, upsert } from "../testing/stream-script.ts";
-import type { ConfigOption, MatterSummary, ThreadId, ViewEntry } from "../transport/protocol.ts";
+import { header, reset, upsert } from "../testing/stream-script.ts";
+import type {
+  AgentModels,
+  ConfigOption,
+  MatterSummary,
+  ThreadId,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import { fakeNext } from "./fake-next.ts";
 import type { AgentSummary } from "./host-next.ts";
 import { defaultOutcome, mountRoom, summary, THE_MATTER, type Harness } from "./thread/harness.ts";
@@ -46,6 +53,46 @@ const select = (
     },
   }) as ConfigOption;
 
+const level = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) });
+const LMH = ["low", "medium", "high"].map(level);
+
+/** Claude's models as the probe fills them: Opus takes three efforts, Sonnet two, Haiku none. */
+const MODELS: AgentModels = {
+  model_option: "model",
+  effort_option: "effort",
+  current_model: "opus",
+  current_effort: "high",
+  models: [
+    {
+      id: "opus",
+      name: "Opus",
+      description: "For the hardest questions",
+      efforts: LMH,
+      default_effort: "medium",
+    },
+    {
+      id: "sonnet",
+      name: "Sonnet",
+      efforts: [level("low"), level("medium")],
+      default_effort: "medium",
+    },
+    { id: "haiku", name: "Haiku", efforts: [] },
+  ],
+};
+
+/** ChatGPT's, its effort under its own key. */
+const CODEX_MODELS: AgentModels = {
+  model_option: "model",
+  effort_option: "reasoning_effort",
+  current_model: "gpt-6.2-sol",
+  current_effort: "medium",
+  models: [
+    { id: "gpt-6.2-sol", name: "gpt-6.2-sol", efforts: LMH, default_effort: "medium" },
+    { id: "gpt-6-luna", name: "gpt-6-luna", efforts: LMH, default_effort: "low" },
+  ],
+};
+
+/** The session's options as a conversation's header holds them: the model, the effort, and a mode never drawn. */
 const MODEL = select("model", "Model", "model", "opus", [
   ["opus", "Opus", "For the hardest questions"],
   ["sonnet", "Sonnet"],
@@ -57,25 +104,16 @@ const EFFORT = select("effort", "Effort", "thought_level", "high", [
   ["high", "High"],
 ]);
 const MODE = select("mode", "Mode", "mode", "default", [["default", "Default"]]);
-/** A model menu whose Haiku sets takes_effort false; the others leave the flag out. */
-const NO_EFFORT_MODEL: ConfigOption = {
-  ...MODEL,
-  kind: {
-    select: {
-      current_value: "sonnet",
-      options: [
-        { value: "opus", name: "Opus" },
-        { value: "sonnet", name: "Sonnet" },
-        { value: "haiku", name: "Haiku", takes_effort: false },
-      ],
-    },
-  },
-} as ConfigOption;
 
-const claude = (config_options?: ConfigOption[]): AgentSummary => ({
+const claude = (models?: AgentModels): AgentSummary => ({
   id: "claude-acp",
   kind: "claude",
-  ...(config_options === undefined ? {} : { config_options }),
+  ...(models === undefined ? {} : { models }),
+});
+const codex = (models?: AgentModels): AgentSummary => ({
+  id: "codex-acp",
+  kind: "codex",
+  ...(models === undefined ? {} : { models }),
 });
 
 const withAgents = (agents: AgentSummary[]) =>
@@ -91,6 +129,15 @@ const said = (id: string) => trigger(id)?.textContent?.trim() ?? null;
 const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
 const item = (name: string) => items().find((i) => i.textContent?.startsWith(name)) ?? null;
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]');
+const line = () => h!.host.querySelector(".room-status")?.textContent ?? "";
+
+/** Closes the open menu, as Escape does. */
+async function closeMenu() {
+  await act(async () => {
+    menu()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await h!.settle();
+}
 
 /** Opens a menu from its trigger, as a click does. */
 async function open(id: string) {
@@ -103,20 +150,36 @@ const headerWith = (
   config_options: ConfigOption[],
   status: "idle" | "running" = "idle",
   agent = "claude-acp",
+  more: Partial<NonNullable<ViewEntry["header"]>> = {},
 ): ViewEntry => {
   const base = header(status);
-  return { header: { ...base.header!, agent, config_options } };
+  return { header: { ...base.header!, agent, config_options, ...more } };
 };
+
+/** What a turn on Opus at High runs with, as its TurnStarted sets the header. */
+const RAN_OPUS = {
+  model: { id: "opus", name: "Opus" },
+  effort: { id: "high", name: "High" },
+};
+
+const making = (command: Parameters<typeof defaultOutcome>[0]) =>
+  command.create_thread !== undefined
+    ? { thread_created: { thread: MADE } }
+    : defaultOutcome(command);
+
+/** Asks a question from the composer, as Enter does. */
+async function ask(text: string) {
+  await h!.type(text);
+  await h!.key({ key: "Enter", keyCode: 13 });
+  await h!.settle();
+}
 
 test("a new conversation shows the model and effort the matter remembers, and a pick goes with create_thread", async () => {
   h = await mountRoom({
     matters: [REMEMBERED],
     threads: [],
-    next: withAgents([claude([MODE, MODEL, EFFORT])]),
-    dispatch: (command) =>
-      command.create_thread !== undefined
-        ? { thread_created: { thread: MADE } }
-        : defaultOutcome(command),
+    next: withAgents([claude(MODELS)]),
+    dispatch: making,
   });
   // the remembered picks preselected; the mode is never offered
   expect(said("model")).toBe("Sonnet");
@@ -126,18 +189,19 @@ test("a new conversation shows the model and effort the matter remembers, and a 
   await open("model");
   expect(menu()).not.toBeNull();
   expect(item("Sonnet")?.getAttribute("aria-checked")).toBe("true");
-  // the agent's own description, under its name
-  expect(item("Opus")?.textContent).toContain("For the hardest questions");
-  await h.click(item("Haiku"));
+  // the agent's own description, under its name; none for a model the agent describes not
+  expect(item("Opus")?.textContent).toBe("OpusFor the hardest questions");
+  expect(item("Sonnet")?.textContent).toBe("Sonnet");
+  await h.click(item("Opus"));
   await h.settle();
-  expect(said("model")).toBe("Haiku");
+  // Opus takes the Low shown: kept
+  expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("Low");
   // nothing reached the host for the pick: a draft sends nothing until its first question
   expect(h.sent("set_config_option")).toEqual([]);
-  await h.type("What does clause nine say about notice?");
-  await h.key({ key: "Enter", keyCode: 13 });
-  await h.settle();
+  await ask("What does clause nine say about notice?");
   expect(h.sent("create_thread")).toEqual([
-    { matter: THE_MATTER.matter, agent: "claude-acp", config: { model: "haiku", effort: "low" } },
+    { matter: THE_MATTER.matter, agent: "claude-acp", config: { model: "opus", effort: "low" } },
   ]);
 });
 
@@ -145,114 +209,278 @@ test("with no pick in the draft create_thread sends no config: the host applies 
   h = await mountRoom({
     matters: [REMEMBERED],
     threads: [],
-    next: withAgents([claude([MODEL, EFFORT])]),
-    dispatch: (command) =>
-      command.create_thread !== undefined
-        ? { thread_created: { thread: MADE } }
-        : defaultOutcome(command),
+    next: withAgents([claude(MODELS)]),
+    dispatch: making,
   });
-  await h.type("Summarise the indemnity clause");
-  await h.key({ key: "Enter", keyCode: 13 });
-  await h.settle();
+  await ask("Summarise the indemnity clause");
   expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
 });
 
-test("a draft's model that takes no effort hides the effort row, and create_thread sends no effort for it", async () => {
-  h = await mountRoom({
-    matters: [REMEMBERED],
-    threads: [],
-    next: withAgents([claude([NO_EFFORT_MODEL, EFFORT])]),
-    dispatch: (command) =>
-      command.create_thread !== undefined
-        ? { thread_created: { thread: MADE } }
-        : defaultOutcome(command),
-  });
-  // the remembered Sonnet takes an effort: its row shows, with the remembered Low
-  expect(said("model")).toBe("Sonnet");
-  expect(said("effort")).toBe("Low");
+test("each model its own efforts: a change of model keeps the effort it takes, else takes its default", async () => {
+  h = await mountRoom({ threads: [], next: withAgents([claude(MODELS)]), dispatch: making });
+  expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("High");
   await open("model");
-  await h.click(item("Haiku"));
+  await h.click(item("Sonnet"));
   await h.settle();
-  expect(said("model")).toBe("Haiku");
-  expect(trigger("effort")).toBeNull();
-  // back to a model that takes one: the row is there again
+  // Sonnet has no High: its own default
+  expect(said("effort")).toBe("Medium");
+  await open("effort");
+  expect(items().map((i) => i.textContent)).toEqual(["Low", "Medium"]);
+  await h.click(item("Low"));
+  await h.settle();
+  // back to Opus: Low is kept, as Opus takes it
   await open("model");
   await h.click(item("Opus"));
   await h.settle();
   expect(said("effort")).toBe("Low");
+  // Haiku takes none: no effort menu, and none sent
   await open("model");
   await h.click(item("Haiku"));
   await h.settle();
-  await h.type("What does clause nine say about notice?");
-  await h.key({ key: "Enter", keyCode: 13 });
-  await h.settle();
-  // the remembered Low is not sent: Haiku takes no effort
+  expect(trigger("effort")).toBeNull();
+  await ask("What does clause nine say about notice?");
   expect(h.sent("create_thread")).toEqual([
     { matter: THE_MATTER.matter, agent: "claude-acp", config: { model: "haiku" } },
   ]);
 });
 
-test("in a conversation, a model that takes no effort hides the effort row at once", async () => {
-  h = await mountRoom({ next: withAgents([claude([NO_EFFORT_MODEL, EFFORT])]) });
-  h.deliver([reset([], headerWith([NO_EFFORT_MODEL, EFFORT]))]);
+test("ChatGPT's picks go under its own keys, and its whole list is offered", async () => {
+  const many: AgentModels = {
+    ...CODEX_MODELS,
+    models: [
+      ...CODEX_MODELS.models,
+      ...Array.from({ length: 10 }, (_, i) => ({
+        id: `gpt-5.${i}`,
+        name: `gpt-5.${i}`,
+        efforts: LMH,
+      })),
+    ],
+  };
+  h = await mountRoom({
+    threads: [],
+    next: withAgents([claude(MODELS), codex(many)]),
+    dispatch: making,
+  });
+  await h.click(h.host.querySelector(".room-status-seg button:nth-of-type(2)"));
   await h.settle();
-  expect(said("effort")).toBe("High");
+  expect(said("model")).toBe("gpt-6.2-sol");
+  expect(said("reasoning_effort")).toBe("Medium");
   await open("model");
-  await h.click(item("Haiku"));
+  expect(items()).toHaveLength(12);
+  await h.click(item("gpt-6-luna"));
   await h.settle();
-  expect(said("model")).toBe("Haiku");
-  expect(trigger("effort")).toBeNull();
-  expect(h.sent("set_config_option")).toEqual([
-    { thread: THREAD, option_id: "model", value: { select: "haiku" } },
+  await ask("Draft a reply to the notice");
+  expect(h.sent("create_thread")).toEqual([
+    {
+      matter: THE_MATTER.matter,
+      agent: "codex-acp",
+      config: { model: "gpt-6-luna", reasoning_effort: "medium" },
+    },
   ]);
 });
 
-test("a remembered value the agent no longer offers falls back to the agent's own, with nothing said", async () => {
+test("an account's own list renders as the host gives it, in its order, each row its name", async () => {
+  const account: AgentModels = {
+    ...MODELS,
+    current_model: "claude-fable-5-1[1m]",
+    models: [
+      { id: "claude-fable-5-1[1m]", name: "Fable 5.1 [1m]", efforts: LMH },
+      { id: "claude-opus-5-5", name: "Opus 5.5", efforts: LMH },
+      { id: "claude-haiku-5-5", name: "Haiku 5.5" },
+      { id: "claude-fable-5-1", name: "Fable 5.1", efforts: LMH },
+    ],
+  };
+  h = await mountRoom({ threads: [], next: withAgents([claude(account)]) });
+  expect(said("model")).toBe("Fable 5.1 [1m]");
+  await open("model");
+  expect(items().map((i) => i.textContent)).toEqual([
+    "Fable 5.1 [1m]",
+    "Opus 5.5",
+    "Haiku 5.5",
+    "Fable 5.1",
+  ]);
+});
+
+test("a remembered value the agent no longer offers falls back to what a new session starts on, with nothing said", async () => {
   h = await mountRoom({
     matters: [{ ...THE_MATTER, agent_prefs: { claude: { model: "retired-model" } } }],
     threads: [],
-    next: withAgents([claude([MODEL, EFFORT])]),
+    next: withAgents([claude(MODELS)]),
   });
   expect(said("model")).toBe("Opus");
   expect(said("effort")).toBe("High");
   expect(h.host.textContent).not.toContain("retired-model");
 });
 
-test("no thought_level option, no effort; no options reported yet, no menus and no placeholder word", async () => {
-  h = await mountRoom({ threads: [], next: withAgents([claude([MODEL])]) });
-  expect(said("model")).toBe("Opus");
-  expect(trigger("effort")).toBeNull();
-  await h.unmount();
+test("until the agent's models are in, the line says they are loading, never a default", async () => {
   h = await mountRoom({ threads: [], next: withAgents([claude()]) });
   expect(trigger("model")).toBeNull();
   expect(trigger("effort")).toBeNull();
-  expect(h.host.querySelector(".room-status")?.textContent ?? "").not.toContain("Default");
+  expect(line()).toContain("Loading models…");
+  expect(line()).not.toContain("default");
+  expect(line()).not.toContain("Default");
+  await h.unmount();
+  // a conversation with no session's options and no models yet: the same
+  h = await mountRoom({ next: withAgents([claude()]) });
+  h.deliver([reset([], headerWith([]))]);
+  await h.settle();
+  expect(line()).toContain("Loading models…");
 });
 
-test("in a conversation: the header's options, the plan fixed, a pick sent as set_config_option and shown at once", async () => {
-  h = await mountRoom({ next: withAgents([claude([MODEL, EFFORT])]) });
-  h.deliver([reset([], headerWith([MODEL, EFFORT]))]);
+const next = () =>
+  h!.host.querySelector(".room-status")?.textContent?.match(/Next message: [^·]+(· \S+)?/)?.[0];
+
+test("in a conversation a pick stays in the composer, named for the next message, and goes with that send", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([reset([], headerWith([MODE, MODEL, EFFORT]))]);
   await h.settle();
-  // the plan is fixed: no plan switch, its words stand, the menus after them
+  // no record yet: the session's options; the plan's words stand, no segmented switch
   expect(h.host.querySelector(".room-status [role=group]")).toBeNull();
-  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your Claude plan");
   expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("High");
+  expect(trigger("mode")).toBeNull();
+  await open("model");
+  await h.click(item("Sonnet"));
+  await h.settle();
+  // nothing goes to the host on a pick
+  expect(h.sent("set_config_option")).toEqual([]);
+  // the triggers keep naming what the session holds; the pick is ticked and named for the next message
+  expect(said("model")).toBe("Opus");
+  expect(line()).toContain("Next message: Sonnet · Medium");
+  await open("model");
+  expect(item("Sonnet")?.getAttribute("aria-checked")).toBe("true");
+  await closeMenu();
+  await open("effort");
+  // Sonnet's efforts, Medium (its default, as Sonnet has no High) ticked
+  expect(items().map((i) => i.textContent)).toEqual(["Low", "Medium"]);
+  expect(item("Medium")?.getAttribute("aria-checked")).toBe("true");
+  await closeMenu();
+  await ask("And the notice clause?");
+  // the model and its effort together, with the message
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({
+    config: { model: "sonnet", effort: "medium" },
+  });
+});
+
+test("with no pick every send still names the model and effort the line shows", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT], "idle", "claude-acp", RAN_OPUS))]);
+  await h.settle();
+  await ask("Summarise the indemnity clause");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({ config: { model: "opus", effort: "high" } });
+});
+
+test("a conversation with no session yet names what its last turn ran with, from the header", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([
+    reset(
+      [],
+      headerWith([], "idle", "claude-acp", {
+        model: { id: "sonnet", name: "Sonnet" },
+        effort: { id: "low", name: "Low" },
+      }),
+    ),
+  ]);
+  await h.settle();
+  expect(said("model")).toBe("Sonnet");
+  expect(said("effort")).toBe("Low");
+  await open("model");
+  await h.click(item("Opus"));
+  await h.settle();
+  // Opus takes the Low shown: kept, for the next message
+  expect(h.sent("set_config_option")).toEqual([]);
+  expect(said("model")).toBe("Sonnet");
+  expect(line()).toContain("Next message: Opus · Low");
+  await ask("Draft the reply");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({ config: { model: "opus", effort: "low" } });
+});
+
+test("a pick mid-answer: the line keeps the record, the pick named for the next message, and it goes with the next send", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT], "running", "claude-acp", RAN_OPUS))]);
+  await h.settle();
   await open("effort");
   await h.click(item("Medium"));
   await h.settle();
-  expect(h.sent("set_config_option")).toEqual([
-    { thread: THREAD, option_id: "effort", value: { select: "medium" } },
+  expect(said("effort")).toBe("High");
+  expect(line()).toContain("Next message: Opus · Medium");
+  // the answer ends: the pick stays
+  h.deliver([upsert(headerWith([MODEL, EFFORT], "idle", "claude-acp", RAN_OPUS))]);
+  await h.settle();
+  expect(said("effort")).toBe("High");
+  expect(line()).toContain("Next message: Opus · Medium");
+  await ask("Then the indemnity");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({
+    config: { model: "opus", effort: "medium" },
+  });
+  // the next turn starts with it: the record names it, and the pick is spent
+  h.deliver([
+    upsert(
+      headerWith([MODEL, EFFORT], "running", "claude-acp", {
+        ...RAN_OPUS,
+        effort: { id: "medium", name: "Medium" },
+      }),
+    ),
   ]);
-  expect(said("effort")).toBe("Medium");
-  // the agent took it: the header says so, and the menu reads it
-  const took = select("effort", "Effort", "thought_level", "medium", [
-    ["low", "Low"],
-    ["medium", "Medium"],
-    ["high", "High"],
-  ]);
-  h.deliver([upsert(headerWith([MODEL, took]))]);
   await h.settle();
   expect(said("effort")).toBe("Medium");
+  expect(next()).toBeUndefined();
+});
+
+test("a steer carries the picks; after it joins the answer the pick stays and the line keeps the record", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([
+    reset(
+      [],
+      headerWith([MODEL, EFFORT], "running", "claude-acp", { ...RAN_OPUS, steer_joins_turn: true }),
+    ),
+  ]);
+  await h.settle();
+  await open("model");
+  await h.click(item("Sonnet"));
+  await h.settle();
+  await ask("And the notice clause?");
+  await h.type("Check clause 14 too");
+  await h.click(h.one("steer-send-now"));
+  await h.settle();
+  const sent = h.sent("send_prompt");
+  expect(sent.map((s) => s.delivery)).toEqual(["steer", "send_now"]);
+  for (const s of sent) expect(s.config).toEqual({ model: "sonnet", effort: "medium" });
+  // the steer joined the running answer, which keeps its model: the record stands, the pick stays for the next message
+  expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("High");
+  expect(line()).toContain("Next message: Sonnet · Medium");
+});
+
+test("a pick the agent couldn't use: the host's pick_not_used clears it, and the line shows what ran", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT], "idle", "claude-acp", RAN_OPUS))]);
+  await h.settle();
+  await open("model");
+  await h.click(item("Haiku"));
+  await h.settle();
+  expect(line()).toContain("Next message: Haiku");
+  await ask("Summarise clause 9");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({ config: { model: "haiku" } });
+  // the turn starts on Opus at High, with the notice that the pick wasn't used
+  h.deliver([
+    upsert(headerWith([MODEL, EFFORT], "running", "claude-acp", RAN_OPUS)),
+    upsert({
+      notice: {
+        order: 40,
+        event: "00000000-0000-7000-8000-0000000000ee",
+        level: "info",
+        text: "Clauseo couldn't switch to the model or effort you picked for this answer, so it used Opus at High effort.",
+        kind: { pick_not_used: { model: "Opus", effort: "High" } },
+        ts: 40_000,
+      },
+    }),
+  ]);
+  await h.settle();
+  expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("High");
+  expect(next()).toBeUndefined();
 });
 
 test("an option the composer doesn't know (ChatGPT's collaboration_mode, fast mode) draws nothing", async () => {
@@ -265,7 +493,7 @@ test("an option the composer doesn't know (ChatGPT's collaboration_mode, fast mo
     ["on", "On"],
   ]);
   const options = [collaboration, odd, MODEL, EFFORT];
-  h = await mountRoom({ next: withAgents([claude(options)]) });
+  h = await mountRoom({ next: withAgents([claude(MODELS)]) });
   h.deliver([reset([], headerWith(options))]);
   await h.settle();
   expect(said("model")).toBe("Opus");
@@ -273,25 +501,21 @@ test("an option the composer doesn't know (ChatGPT's collaboration_mode, fast mo
   expect(trigger("collaboration_mode")).toBeNull();
   expect(trigger("fast_mode")).toBeNull();
   expect(h.host.querySelectorAll(".room-status-menu")).toHaveLength(2);
-  const line = h.host.querySelector(".room-status")?.textContent ?? "";
-  for (const word of ["Collaboration", "Plan", "Fast", "Off"]) expect(line).not.toContain(word);
+  for (const word of ["Collaboration", "Plan to", "Fast", "Off"])
+    expect(line()).not.toContain(word);
 });
 
-// issue 11: while an answer runs the status line stays over the working line, naming the model and effort in use,
-// and a pick still goes to the host (it takes set_config_option mid-answer) for the next message
+// issue 11: while an answer runs the status line stays over the working line, naming the model and effort in use
+// from the record, and a pick there is for the next message
 test.each([
   ["Claude", "claude-acp", "Uses your Claude plan"],
   ["ChatGPT", "codex-acp", "Uses your ChatGPT plan"],
 ] as const)(
-  "while %s answers, its model and effort stay named over the working line and can still be changed",
+  "while %s answers, its model and effort stay named over the working line, and a pick is for the next message",
   async (_, agent, plan) => {
     const thread = { ...summary(), agent };
-    const agents: AgentSummary[] = [
-      claude([MODEL, EFFORT]),
-      { id: "codex-acp", kind: "codex", config_options: [MODEL, EFFORT] },
-    ];
-    h = await mountRoom({ threads: [thread], next: withAgents(agents) });
-    h.deliver([reset([], headerWith([MODEL, EFFORT], "running", agent))]);
+    h = await mountRoom({ threads: [thread], next: withAgents([claude(MODELS), codex(MODELS)]) });
+    h.deliver([reset([], headerWith([MODEL, EFFORT], "running", agent, RAN_OPUS))]);
     await h.settle();
     expect(h.one("cancel")).not.toBeNull();
     expect(h.one("working")?.textContent).toContain("Answering.");
@@ -304,55 +528,22 @@ test.each([
     await open("effort");
     await h.click(item("Medium"));
     await h.settle();
-    expect(h.sent("set_config_option")).toEqual([
-      { thread: THREAD, option_id: "effort", value: { select: "medium" } },
-    ]);
-    expect(said("effort")).toBe("Medium");
-    // the answer done: the line as it always stood
-    h.deliver([upsert(headerWith([MODEL, EFFORT], "idle", agent))]);
+    expect(h.sent("set_config_option")).toEqual([]);
+    // the record, not the pick, names what runs
+    expect(said("effort")).toBe("High");
+    expect(line()).toContain("Next message: Opus · Medium");
+    // the answer done: the line as it always stood, the pick still for the next message
+    h.deliver([upsert(headerWith([MODEL, EFFORT], "idle", agent, RAN_OPUS))]);
     await h.settle();
     expect(h.one("cancel")).toBeNull();
     expect(h.host.querySelector<HTMLElement>(".room-status")?.hidden).toBe(false);
     expect(said("model")).toBe("Opus");
+    expect(line()).toContain("Next message: Opus · Medium");
   },
 );
 
-test("a pick the host refuses, or the agent replaces, gives way to the options as they are, with no error", async () => {
-  let refuse = true;
-  h = await mountRoom({
-    next: withAgents([claude([MODEL, EFFORT])]),
-    dispatch: (command) => {
-      if (command.set_config_option !== undefined && refuse)
-        throw { code: "agent.config_invalid", message: "not offered" };
-      return defaultOutcome(command);
-    },
-  });
-  vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  h.deliver([reset([], headerWith([MODEL, EFFORT]))]);
-  await h.settle();
-  await open("model");
-  await h.click(item("Haiku"));
-  await h.settle();
-  expect(said("model")).toBe("Opus");
-  expect(h.host.querySelector('[role="alert"]')).toBeNull();
-  // accepted, then the agent's options come back on another value (the host fell back): the menu follows them
-  refuse = false;
-  await open("model");
-  await h.click(item("Haiku"));
-  await h.settle();
-  expect(said("model")).toBe("Haiku");
-  const fellBack = select("model", "Model", "model", "sonnet", [
-    ["opus", "Opus"],
-    ["sonnet", "Sonnet"],
-  ]);
-  h.deliver([upsert(headerWith([fellBack, EFFORT]))]);
-  await h.settle();
-  expect(said("model")).toBe("Sonnet");
-  expect(h.host.querySelector('[role="alert"]')).toBeNull();
-});
-
 test("a real menu: a named button that opens it, its title, axe finds nothing, and Escape closes it", async () => {
-  h = await mountRoom({ threads: [], next: withAgents([claude([MODEL, EFFORT])]) });
+  h = await mountRoom({ threads: [], next: withAgents([claude(MODELS)]) });
   const t = trigger("model")!;
   expect(t.tagName).toBe("BUTTON");
   expect(t.getAttribute("aria-haspopup")).toBe("menu");

@@ -16,6 +16,7 @@ import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../sto
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
+  AgentSummary,
   AvailableCommand,
   MatterId,
   MatterSummary,
@@ -28,6 +29,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
+import { codeModeTag, runningCodeMode } from "./code-mode.ts";
 import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
@@ -64,6 +66,8 @@ const heldPick = (v: StreamView | undefined): string | null => {
 };
 const agentPick = (v: StreamView | undefined) => v?.header?.header?.agent ?? null;
 
+const NO_AGENTS: readonly AgentSummary[] = [];
+
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
 const sameCommand = (a: AvailableCommand | undefined, b: AvailableCommand) =>
@@ -93,6 +97,8 @@ export function Work({
   choice,
   menus: draftMenus,
   plan = "",
+  agents = NO_AGENTS,
+  sandboxRequired = false,
   focus = null,
   onThread,
   archived = false,
@@ -113,6 +119,10 @@ export function Work({
   menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words ("Uses your Claude plan"), "" for none. */
   plan?: string;
+  /** The agents the host lists, for a conversation's models (conversations-view.ts). */
+  agents?: readonly AgentSummary[];
+  /** The firm requires the sandbox: no probe of the agents' models runs (config-menus.ts's missingModels). */
+  sandboxRequired?: boolean;
   /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
   focus?: number | null;
   /** Hears the open thread: null until there is one. */
@@ -152,9 +162,13 @@ export function Work({
   // the tool line on the status line, from the open thread's header: none for a draft, or a header without tools
   // (tool-line-load.ts: its chunk loads once a header has tools, and until then the line has no tool segment)
   const tools = useToolsSegment(store, stream, lang);
-  // the model and effort: the draft's until there is a thread, then the thread's own, from its header
-  const threadMenus = useThreadMenus(transport, store, stream, session.thread, lang);
-  const menus = session.thread === null ? draftMenus : threadMenus;
+  // the model and effort: the draft's until there is a thread, then the thread's own, from its header and its agent's
+  // models
+  const thread = useThreadMenus(store, stream, session.thread, agents, lang, sandboxRequired);
+  const menus = session.thread === null ? draftMenus : thread.menus;
+  // Claude's code mode, after the effort, only while an answer that has used it runs (code-mode.ts)
+  const codeMode = useStreamPart(store, stream, runningCodeMode);
+  const mark = codeMode ? codeModeTag(lang) : null;
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -214,7 +228,10 @@ export function Work({
   const shownRefused = session.refused ?? openRefused;
   // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
   const locate = useLocateFolder();
-  const ask = (text: string, how?: AskHow) => session.ask(text, how);
+  // every send in a conversation carries the model and effort the next message goes with, steers included: the host
+  // drops them from a steer that joins the running answer (a draft's go with create_thread)
+  const ask = (text: string, how?: AskHow) =>
+    session.ask(text, thread.config === undefined ? how : { ...how, config: thread.config });
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
@@ -278,6 +295,7 @@ export function Work({
           draftKey={draftKey}
           choice={choice}
           menus={menus}
+          mark={mark}
           plan={plan}
           tools={tools}
           commands={commands}

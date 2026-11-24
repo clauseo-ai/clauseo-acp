@@ -1,136 +1,236 @@
-// The model and effort pickers' rules, pure (the host's half: crates/host/src/actor/turn/picks.rs). The
-// model is the agent's select option of category `model`, the effort its select option of category `thought_level`;
-// any other option (a mode, say) is never offered, since the host refuses it
-// from the window. A new conversation's draft reads the agent's options as its last session reported them
-// (AgentSummary.config_options); each value shown is the lawyer's pick in the draft, else the matter's remembered pick
-// (MatterSummary.agent_prefs) where the agent still offers it, else the agent's own current value. A conversation reads
-// its own options from its header, and a pick there is a SetConfigOption.
-import type { ConfigChoice, ConfigOption, ConfigPicks, ThreadId } from "../transport/protocol.ts";
+// The model and effort pickers' rules, pure (the host's half: crates/host/src/actor/agent_options/models.rs and
+// crates/host/src/actor/turn/prompt_picks.rs). The menus read an agent's models by name (AgentSummary.models): every
+// model the host sends, in its order, each with its own efforts, so the effort menu follows the model shown. A new
+// conversation's draft shows the lawyer's pick, else the matter's remembered pick (MatterSummary.agent_prefs) where
+// the agent still offers it, else the model and effort a new session starts on; its picks go with create_thread under
+// the agent's own keys (AgentModels.model_option, effort_option). A conversation reads its header's options as the
+// host's `view` reads them, with the agent's models for each model's efforts; its line names the turn's record, and a
+// pick there stays in the composer until a send carries it as SendPrompt.config.
+// Only the model and the effort are ever drawn: any other option (a mode, Claude's fast mode, ChatGPT's
+// collaboration mode) is not read at all. Until the host's probe has filled an agent's models there is nothing to
+// draw, and the status line says the list is loading (config-menus.ts); nothing here makes up a default.
+import type {
+  AgentModels,
+  ConfigChoice,
+  ConfigOption,
+  ConfigPicks,
+  ModelEntry,
+  NamedChoice,
+} from "../transport/protocol.ts";
 
-/** The pickers, in the order the status line shows them: the model, then the effort. */
+/** The options a conversation's header is read for, as the host reads them: the model, then the effort. */
 export const PICKED_CATEGORIES = ["model", "thought_level"] as const;
-export type PickedCategory = (typeof PICKED_CATEGORIES)[number];
 
-/** A select option the window may set: its id, its category, its current value and its values. */
-export type Pickable = {
-  id: string;
-  category: PickedCategory;
-  current: string;
-  choices: readonly ConfigChoice[];
+const NO_EFFORTS: readonly NamedChoice[] = [];
+
+/** What the two menus show: the models, the model shown, that model's efforts, and the effort shown ("" for none:
+ * a model that takes none, or one whose efforts give no value to stand on). */
+export type Shown = {
+  models: AgentModels;
+  model: string;
+  efforts: readonly NamedChoice[];
+  effort: string;
+  /** A conversation's record: "" means the turn named none, and its menu is left out, never filled with a guess. */
+  record?: true;
 };
 
-const NONE: readonly Pickable[] = [];
-
-/** Whether a model choice takes an effort (its `takes_effort`); a missing flag means it does. */
-export const takesEffort = (choice: ConfigChoice | undefined): boolean =>
-  choice?.takes_effort !== false;
-
-/** The options the pickers show, model first: the first select option of each picked category
- * that has a value to choose. None for no options, and none for an option with no values, so no
- * menu is ever empty. The effort is left out while the model shown takes none. `modelShown`
- * gives the value the model's menu shows: the agent's current value by default; a draft's pick,
- * else the remembered, else that. */
-export function pickables(
-  options: readonly ConfigOption[] | undefined,
-  modelShown: (model: Pickable) => string = (model) => model.current,
-): readonly Pickable[] {
-  if (options === undefined || options.length === 0) return NONE;
-  const out: Pickable[] = [];
-  for (const category of PICKED_CATEGORIES) {
-    for (const o of options) {
-      if (o.category !== category || typeof o.kind !== "object" || o.kind.select === undefined)
-        continue;
-      const { current_value, options: choices } = o.kind.select;
-      if (choices.length === 0) continue;
-      out.push({ id: o.id, category, current: current_value, choices });
-      break;
-    }
-  }
-  const model = out.find((p) => p.category === "model");
-  const takes =
-    model === undefined || takesEffort(model.choices.find((c) => c.value === modelShown(model)));
-  const kept = takes ? out : out.filter((p) => p.category !== "thought_level");
-  return kept.length === 0 ? NONE : kept;
+/** The efforts a model takes, lowest first; none for a model the list doesn't hold or the agent with no effort. */
+export function effortsOf(models: AgentModels, model: string): readonly NamedChoice[] {
+  if (models.effort_option === undefined) return NO_EFFORTS;
+  return models.models.find((m) => m.id === model)?.efforts ?? NO_EFFORTS;
 }
 
-/** The value of an agent's "Default" row: the agent's own choice, whatever it stands at. */
-export const DEFAULT_VALUE = "default";
-
-/** The value of a choice the host makes up for an agent that hasn't reported its options yet: the one choice of each
- * option in its seed (AgentSummary.config_options before the agent's first session), meaning the agent picks its own
- * default. Mirrors the host's sentinel (crates/host/src/actor/agent_options/seed.rs, `AGENT_DEFAULT`); the host never
- * sends it to the agent and refuses a SetConfigOption of it, so a draft never sends it either. */
-export const AGENT_DEFAULT_VALUE = "clauseo-agent-default";
-
-/** The options a draft's pickers show: a seeded option is left out when the matter remembers a pick for it, since that
- * pick runs, not the agent's default the seed would name; with the agent's options lost, the draft shows no picker for
- * it, as before the seed. */
-export function draftPickables(
-  shown: readonly Pickable[],
-  remembered: Readonly<Record<string, string>> | undefined,
-): readonly Pickable[] {
-  if (remembered === undefined) return shown;
-  const kept = shown.filter(
-    (p) => p.current !== AGENT_DEFAULT_VALUE || remembered[p.id] === undefined,
-  );
-  return kept.length === shown.length ? shown : kept;
+/** The effort a model runs with: the first of `wanted` it takes, else its default effort; "" with neither. So a change
+ * of model keeps the effort when the new model takes it, else takes that model's default. */
+export function effortFor(
+  models: AgentModels,
+  model: string,
+  ...wanted: (string | undefined)[]
+): string {
+  const efforts = effortsOf(models, model);
+  const takes = (id: string | undefined): id is string =>
+    id !== undefined && efforts.some((e) => e.id === id);
+  const kept = wanted.find(takes);
+  if (kept !== undefined) return kept;
+  const fallback = models.models.find((m) => m.id === model)?.default_effort;
+  return takes(fallback) ? fallback : "";
 }
 
-/** What an option's "Default" row stands for, when the agent says: claude-agent-acp gives its model's Default row the
- * resolved model's name as the description ("Opus 5.5", session-model.js), and its effort's Default row none, since
- * Claude Code settles the effort itself and says nothing of it. Undefined with no Default row (codex-acp's values are
- * all concrete) or no description. */
-export function resolvedDefault(p: Pickable): string | undefined {
-  const row = p.choices.find((c) => c.value === DEFAULT_VALUE);
-  const name = row?.description?.trim();
-  return name === undefined || name === "" ? undefined : name;
+/** Whether the list holds the model. */
+const offers = (models: AgentModels, model: string | undefined): model is string =>
+  model !== undefined && models.models.some((m) => m.id === model);
+
+/** What a new conversation's menus show: the draft's pick, else the matter's remembered one, each only while the
+ * agent offers it, else what a new session starts on. Undefined until the agent's models are in. */
+export function draftShown(
+  models: AgentModels | undefined,
+  picks: ConfigPicks | undefined,
+  remembered: ConfigPicks | undefined,
+): Shown | undefined {
+  if (models === undefined || models.models.length === 0) return undefined;
+  const key = models.model_option;
+  const model =
+    [picks?.[key], remembered?.[key]].find((m) => offers(models, m)) ?? models.current_model;
+  const ek = models.effort_option;
+  const starts = model === models.current_model ? models.current_effort : undefined;
+  const effort =
+    ek === undefined ? "" : effortFor(models, model, picks?.[ek], remembered?.[ek], starts);
+  return { models, model, efforts: effortsOf(models, model), effort };
 }
 
-/** Whether the option still offers `value`. */
-export const offers = (p: Pickable, value: string | undefined): value is string =>
-  value !== undefined && p.choices.some((c) => c.value === value);
-
-/** The value a draft shows for an option: the draft's pick, else the matter's remembered one, each only while the
- * option offers it, else the agent's current value. */
-export function draftValue(p: Pickable, pick?: string, remembered?: string): string {
-  if (offers(p, pick)) return pick;
-  if (offers(p, remembered)) return remembered;
-  return p.current;
-}
-
-/** What `create_thread` sends as `config`: nothing while the lawyer picked nothing in the draft, so the host applies
- * the matter's remembered picks or the agent's defaults by itself; otherwise every picker's value as the draft shows
- * it (the picks over the remembered ones), so a pick of the model alone keeps the remembered effort. Only values the
- * options offer, and only the pickers' options; never the host's seed sentinel (AGENT_DEFAULT_VALUE), which the agent
- * settles by itself. */
+/** What `create_thread` (or a held agent's `send_prompt`) sends as `config`: nothing while the lawyer picked nothing,
+ * so the host applies the matter's remembered picks or the agent's own by itself; otherwise the model and the effort
+ * as the menus show them, under the agent's keys, so a pick of the model alone keeps the effort shown with it. */
 export function draftConfig(
-  options: readonly ConfigOption[] | undefined,
+  models: AgentModels | undefined,
   picks: ConfigPicks | undefined,
   remembered: ConfigPicks | undefined,
 ): ConfigPicks | undefined {
-  const shown = draftShown(options, picks, remembered);
-  const picked = (p: Pickable) => offers(p, picks?.[p.id]) && picks?.[p.id] !== AGENT_DEFAULT_VALUE;
-  if (picks === undefined || !shown.some(picked)) return undefined;
-  const config: ConfigPicks = {};
-  for (const p of shown) {
-    const value = draftValue(p, picks[p.id], remembered?.[p.id]);
-    if (offers(p, value) && value !== AGENT_DEFAULT_VALUE) config[p.id] = value;
-  }
+  const shown = draftShown(models, picks, remembered);
+  if (shown === undefined || picks === undefined) return undefined;
+  const ek = shown.models.effort_option;
+  const picked =
+    picks[shown.models.model_option] !== undefined || (ek !== undefined && picks[ek] !== undefined);
+  if (!picked) return undefined;
+  const config: ConfigPicks = { [shown.models.model_option]: shown.model };
+  if (ek !== undefined && shown.effort !== "") config[ek] = shown.effort;
   return config;
 }
 
-/** The pickers a draft shows, over its picks and the matter's remembered ones: the effort is
- * left out while the draft's model takes none, so a pick or a remembered effort for it is never
- * sent. */
-export const draftShown = (
-  options: readonly ConfigOption[] | undefined,
-  picks: ConfigPicks | undefined,
-  remembered: ConfigPicks | undefined,
-): readonly Pickable[] =>
-  pickables(options, (m) => draftValue(m, picks?.[m.id], remembered?.[m.id]));
+/** The picks a change of model makes in a draft or a hold: the model, and the effort the new model takes (the one
+ * shown when it takes it, else its default), so the effort menu never stands on a value the model doesn't have. */
+export function modelPick(shown: Shown, model: string): ConfigPicks {
+  const picks: ConfigPicks = { [shown.models.model_option]: model };
+  const ek = shown.models.effort_option;
+  const effort = effortFor(shown.models, model, shown.effort);
+  if (ek !== undefined && effort !== "") picks[ek] = effort;
+  return picks;
+}
 
-/** The command a pick in a conversation sends: the host checks the option's category, sets it, and keeps it in the
- * matter's remembered picks. */
-export const setOption = (thread: ThreadId, option_id: string, value: string) => ({
-  set_config_option: { thread, option_id, value: { select: value } },
-});
+/** The first select option of a category, as the host's `select_of` finds it. */
+function selectOf(options: readonly ConfigOption[], category: (typeof PICKED_CATEGORIES)[number]) {
+  for (const o of options) {
+    if (o.category !== category || typeof o.kind !== "object" || o.kind.select === undefined)
+      continue;
+    return { id: o.id, current: o.kind.select.current_value, choices: o.kind.select.options };
+  }
+  return undefined;
+}
+
+const named = (c: ConfigChoice): NamedChoice => ({ id: c.value, name: c.name });
+
+/** A conversation's models, as the host's `view` makes an agent's from its kept options: the model option's choices
+ * (named and described as the session gives them), each with its efforts from the agent's models, the current model
+ * taking the effort option's levels when the agent's list doesn't hold it; without a model option, the agent's
+ * models as they are. Every option but the model and the effort is left unread. */
+export function threadModels(
+  options: readonly ConfigOption[],
+  probed: AgentModels | undefined,
+): AgentModels | undefined {
+  const model = selectOf(options, "model");
+  if (model === undefined || model.choices.length === 0) return probed;
+  const effort = selectOf(options, "thought_level");
+  const levels = effort?.choices.map(named) ?? [];
+  const models = model.choices.map((c): ModelEntry => {
+    const known = probed?.models.find((m) => m.id === c.value);
+    const efforts = known?.efforts ?? (c.value === model.current ? levels : []);
+    const description = (c.description ?? known?.description)?.trim();
+    return {
+      id: c.value,
+      name: c.name,
+      ...(description === undefined || description === "" ? {} : { description }),
+      efforts,
+      ...(known?.default_effort === undefined ? {} : { default_effort: known.default_effort }),
+    };
+  });
+  const effortOption = effort?.id ?? probed?.effort_option;
+  return {
+    model_option: model.id,
+    ...(effortOption === undefined ? {} : { effort_option: effortOption }),
+    models,
+    current_model: model.current,
+    ...(effort === undefined ? {} : { current_effort: effort.current }),
+  };
+}
+
+/** What a conversation's line shows: its record, what the running (else the latest) turn runs with (the header's
+ * `model` and `effort`, set by each TurnStarted, which clears what it leaves out); before any record, the session's
+ * options. A value the record leaves out shows nothing, never a guess, and while a turn runs only the record shows. A
+ * model the turn ran with that the list no longer holds is listed by its turn's name, so the trigger never shows an
+ * id. The lawyer's pick for the next message is apart from it (nextPicks). */
+export function threadShown(
+  options: readonly ConfigOption[],
+  probed: AgentModels | undefined,
+  ran: {
+    model?: NamedChoice | undefined;
+    effort?: NamedChoice | undefined;
+    running?: boolean | undefined;
+  },
+): Shown | undefined {
+  const base = threadModels(options, probed);
+  if (base === undefined || base.models.length === 0) return undefined;
+  const ranModel = ran.model;
+  if (ranModel === undefined) {
+    if (ran.running === true || selectOf(options, "model") === undefined)
+      return { models: base, model: "", efforts: [], effort: "", record: true };
+    const model = base.current_model;
+    const effort = effortFor(base, model, base.current_effort);
+    return { models: base, model, efforts: effortsOf(base, model), effort };
+  }
+  const models = offers(base, ranModel.id)
+    ? base
+    : { ...base, models: [{ id: ranModel.id, name: ranModel.name }, ...base.models] };
+  const listed = effortsOf(models, ranModel.id);
+  // an effort the list doesn't hold for the model is still named as the turn ran with it
+  const ranEffort = ran.effort;
+  const efforts =
+    ranEffort === undefined || listed.some((e) => e.id === ranEffort.id)
+      ? listed
+      : [...listed, ranEffort];
+  return {
+    models,
+    model: ranModel.id,
+    efforts: ranEffort === undefined ? [] : efforts,
+    effort: ranEffort?.id ?? "",
+    record: true,
+  };
+}
+
+/** The lawyer's pick for the next message in a conversation: kept in the composer until a send carries it. */
+export type NextPick = { model?: string; effort?: string };
+
+/** What the next message goes with: the pick over what the line shows, a picked model with the effort it takes (the
+ * one shown when it takes it, else its default). "" for none. */
+export function nextPicks(shown: Shown, pick: NextPick | null): { model: string; effort: string } {
+  const model = pick?.model ?? shown.model;
+  const effort =
+    pick?.effort ??
+    (pick?.model === undefined ? shown.effort : effortFor(shown.models, model, shown.effort));
+  return { model, effort };
+}
+
+/** SendPrompt.config for the next message, under the agent's own keys; undefined with nothing to name. */
+export function configOf(
+  models: AgentModels,
+  next: { model: string; effort: string },
+): ConfigPicks | undefined {
+  const config: ConfigPicks = {};
+  if (next.model !== "") config[models.model_option] = next.model;
+  if (models.effort_option !== undefined && next.effort !== "")
+    config[models.effort_option] = next.effort;
+  return Object.keys(config).length === 0 ? undefined : config;
+}
+
+/** Whether a pick still stands: until a turn starts whose record matches it (the record then names it), or a
+ * pick_not_used notice comes after it (the agent couldn't use it, and the line shows what ran). A turn ending, or a
+ * steer joining the running answer, leaves it. */
+export function pickStands(
+  pick: NextPick & { notices: number },
+  ran: { model?: NamedChoice | undefined; effort?: NamedChoice | undefined },
+  notices: number,
+): boolean {
+  if (notices > pick.notices) return false;
+  const model = pick.model === undefined || ran.model?.id === pick.model;
+  const effort = pick.effort === undefined || ran.effort?.id === pick.effort;
+  return !(model && effort);
+}

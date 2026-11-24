@@ -1,25 +1,30 @@
-// The pickers' copy review entries (PK-01 to PK-05, UC-152's "(default)", UC-874's "{agent}'s default" and UC-884's
-// "Default effort"): the
-// agent's model and effort on the composer's status line, and the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
-// options as they last reported them, and the scene's steps taken in order (RoomDriven). The model and value names are
-// the agents' own, never Clauseo's words, so they are fake here. Apart from registry.tsx to keep that file under the
-// size limit.
+// The pickers' copy review entries (PK-01 to PK-05): the agent's model and effort on the composer's status line, and
+// the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
+// models as the host's probe filled them (pick-models.ts), and the scene's steps taken in order (RoomDriven). The
+// model and value names are the agents' own, never Clauseo's words, so they are fake here. Apart from registry.tsx to
+// keep that file under the size limit; registry-uc-composer-menus.tsx renders its scenes too.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { sx, type SigninExpiredKey } from "@clauseo/components/lib/words-signin-expired.ts";
 import { batch, event, header, reset } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
   AgentId,
+  AgentModels,
   ConfigOption,
+  HeaderEntry,
+  NamedChoice,
+  ProtectionView,
   SettingsView,
   SetupEvent,
   SignIn,
   ThreadId,
   ThreadSummary,
+  ViewEntry,
 } from "../transport/protocol.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
+import { CLAUDE_MODELS, CODEX_MODELS } from "./pick-models.ts";
 import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
 import { firstLaunchWords, threadWords, type WordsRef } from "./words.ts";
 
@@ -28,89 +33,44 @@ export const CODEX: AgentId = "codex-acp";
 const AT = new Date(2026, 10, 10, 10, 12).getTime();
 const MADE: ThreadId = "00000000-0000-7000-8000-0000000000c9";
 
-const select = (
-  id: string,
-  category: string,
-  current: string,
-  values: [string, string, string?][],
-): ConfigOption =>
-  ({
-    id,
-    name: id,
-    category,
-    kind: {
-      select: {
-        current_value: current,
-        options: values.map(([value, name, description]) => ({
-          value,
-          name,
-          ...(description === undefined ? {} : { description }),
-        })),
+/** The session's options as a conversation's header holds them, from the agent's models: the model at its current
+ * value, the current model's efforts, and a mode the pickers never offer. */
+export function optionsOf(models: AgentModels): ConfigOption[] {
+  const current = models.models.find((m) => m.id === models.current_model);
+  const select = (id: string, category: string, value: string, choices: NamedChoice[]) =>
+    ({
+      id,
+      name: id,
+      category,
+      kind: {
+        select: {
+          current_value: value,
+          options: choices.map((c) => ({ value: c.id, name: c.name })),
+        },
       },
-    },
-  }) as ConfigOption;
+    }) as ConfigOption;
+  const efforts = current?.efforts ?? [];
+  return [
+    select("model", "model", models.current_model, models.models),
+    ...(models.effort_option === undefined || efforts.length === 0
+      ? []
+      : [select(models.effort_option, "thought_level", models.current_effort ?? "", efforts)]),
+    select("mode", "mode", "default", [{ id: "default", name: "Default" }]),
+  ];
+}
 
-/** Each agent's options, as its last session reported them: the model, the effort, and a mode never offered. */
-export const OPTIONS: Record<AgentId, ConfigOption[]> = {
-  [CLAUDE]: [
-    select("model", "model", "sonnet", [
-      ["opus", "Opus", "For the hardest questions"],
-      ["sonnet", "Sonnet", "For everyday work"],
-      ["haiku", "Haiku", "For quick answers"],
-    ]),
-    select("effort", "thought_level", "high", [
-      ["low", "Low"],
-      ["medium", "Medium"],
-      ["high", "High"],
-    ]),
-    select("mode", "mode", "default", [["default", "Default"]]),
-  ],
-  [CODEX]: [
-    select("model", "model", "frontier", [
-      ["frontier", "Frontier", "For the hardest questions"],
-      ["mini", "Frontier mini", "For quick answers"],
-    ]),
-    select("reasoning_effort", "thought_level", "medium", [
-      ["low", "Low"],
-      ["medium", "Medium"],
-      ["high", "High"],
-    ]),
-  ],
+/** Each agent's models, as the host's probe filled them. */
+export const MODELS: Record<AgentId, AgentModels> = {
+  [CLAUDE]: CLAUDE_MODELS,
+  [CODEX]: CODEX_MODELS,
 };
 
-/** The options at the agents' own defaults, as each reports them: Claude's Default rows, the model's naming what it
- * stands for in its description (claude-agent-acp, session-model.js), the effort's naming nothing; ChatGPT's values all
- * concrete, its default among them. */
-export const DEFAULTS: Record<AgentId, ConfigOption[]> = {
-  [CLAUDE]: [
-    select("model", "model", "default", [
-      ["default", "Default (recommended)", "Sonnet"],
-      ["opus", "Opus", "For the hardest questions"],
-      ["sonnet", "Sonnet", "For everyday work"],
-      ["haiku", "Haiku", "For quick answers"],
-    ]),
-    select("effort", "thought_level", "default", [
-      ["default", "Default"],
-      ["low", "Low"],
-      ["medium", "Medium"],
-      ["high", "High"],
-    ]),
-  ],
-  [CODEX]: OPTIONS[CODEX]!,
-};
-
-/** The host's seed, on fresh data before either agent's first session: each option's one choice the sentinel, the
- * agent left to its own default (crates/host/src/actor/agent_options/seed.rs). */
-const SEED = "clauseo-agent-default";
-export const SEEDED: Record<AgentId, ConfigOption[]> = {
-  [CLAUDE]: [
-    select("model", "model", SEED, [[SEED, "Default"]]),
-    select("effort", "thought_level", SEED, [[SEED, "Default"]]),
-  ],
-  [CODEX]: [
-    select("model", "model", SEED, [[SEED, "Default"]]),
-    select("reasoning_effort", "thought_level", SEED, [[SEED, "Default"]]),
-  ],
+/** This computer protected at tier a, the firm requiring the sandbox. */
+const REQUIRED: ProtectionView = {
+  tier: "a",
+  computer: { protected: { tier: "a" } },
+  required: true,
+  unprotected_auto_allowed: true,
 };
 
 export const install = (agent: AgentId): SetupEvent => ({
@@ -135,8 +95,18 @@ export type PickScene = {
   /** The agents listed (R15), each with its options; both by default. */
   agents?: AgentId[];
   steps?: DrivenStep[];
-  /** Each agent's options; OPTIONS by default. */
-  options?: Record<AgentId, ConfigOption[]>;
+  /** Each agent's models; MODELS by default. An agent left out, or null, has none yet (the probe hasn't run). */
+  models?: Record<AgentId, AgentModels | null>;
+  /** The open thread's header, over the scene's: its status, what its turn ran with, code mode. */
+  head?: Partial<HeaderEntry>;
+  /** Whether the open thread's session reported its options; true by default. */
+  live?: boolean;
+  /** The open thread's entries; none by default. */
+  entries?: ViewEntry[];
+  /** The agents whose models the host's probe couldn't read (AgentSummary.models_unread). */
+  unread?: AgentId[];
+  /** The firm requires the sandbox (ProtectionView.required), this computer protected. */
+  required?: boolean;
 };
 
 const SETTINGS = {
@@ -172,14 +142,19 @@ export function pickHost(s: PickScene): () => FakeTransport {
         return "done";
       },
       setup: { first: () => [{ setup_info: { keys_available: true } }, ...s.events] },
+      ...(s.required === true ? { protection: { view: () => REQUIRED } } : {}),
       next: fakeNext({
         matters: () => [detailed(matter)],
         agents: () =>
-          (s.agents ?? [CLAUDE, CODEX]).map((id) => ({
-            id,
-            kind: id === CLAUDE ? ("claude" as const) : ("codex" as const),
-            config_options: (s.options ?? OPTIONS)[id]!,
-          })),
+          (s.agents ?? [CLAUDE, CODEX]).map((id) => {
+            const models = (s.models ?? MODELS)[id] ?? undefined;
+            return {
+              id,
+              kind: id === CLAUDE ? ("claude" as const) : ("codex" as const),
+              ...(models === undefined ? {} : { models, config_options: optionsOf(models) }),
+              ...(s.unread?.includes(id) === true ? { models_unread: true } : {}),
+            };
+          }),
         parts: ["agents"],
       }),
       subscribe: (stream) =>
@@ -190,8 +165,11 @@ export function pickHost(s: PickScene): () => FakeTransport {
           head.header!.thread = open.thread;
           head.header!.matter = MATTER.matter;
           head.header!.agent = open.agent;
-          head.header!.config_options = (s.options ?? OPTIONS)[open.agent]!;
-          transport.deliver(event(batch(1, [reset([], head)], undefined, stream)));
+          const models = (s.models ?? MODELS)[open.agent] ?? undefined;
+          head.header!.config_options =
+            models === undefined || s.live === false ? [] : optionsOf(models);
+          Object.assign(head.header!, s.head);
+          transport.deliver(event(batch(1, [reset(s.entries ?? [], head)], undefined, stream)));
         }),
     });
     return transport;
@@ -246,39 +224,9 @@ export const PK: Entry[] = [
       steps: [{ press: '[data-testid="pick-effort"]' }],
     }),
   },
-  // a new conversation at Claude's defaults: the model menu open, its Default row in the model's name, marked
-  {
-    id: "UC-152",
-    words: threadWords("(default)"),
-    screen,
-    render: renderPick({
-      events: BOTH,
-      options: DEFAULTS,
-      steps: [{ press: '[data-testid="pick-model"]' }],
-    }),
-  },
-  // a new conversation on fresh data, before Claude has said what it offers: the host's seed, the model menu open
-  {
-    id: "UC-874",
-    words: threadWords("{agent}'s default"),
-    screen,
-    render: renderPick({
-      events: BOTH,
-      options: SEEDED,
-      steps: [{ press: '[data-testid="pick-model"]' }],
-    }),
-  },
-  // the same seed, the effort menu open: its one row in words of its own, never the model's
-  {
-    id: "UC-884",
-    words: threadWords("Default effort"),
-    screen,
-    render: renderPick({
-      events: BOTH,
-      options: SEEDED,
-      steps: [{ press: '[data-testid="pick-effort"]' }],
-    }),
-  },
+  // UC-152 ("(default)"), UC-874 ("{agent}'s default") and UC-884 ("Default effort"), retired: the host sends real
+  // models with no seed and no Default row (stage B's B2), and the menus name each model as the agent does. Never
+  // reuse these ids
   // a new conversation, ChatGPT chosen but not set up on this computer
   {
     id: "PK-03",

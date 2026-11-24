@@ -8,6 +8,7 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
+  ConfigPicks,
   ElicitationId,
   ElicitationResponse,
   ErrorCode,
@@ -141,6 +142,8 @@ export type AskHow = {
   behind?: boolean;
   delivery?: "steer" | "send_now";
   files?: readonly FileRefId[];
+  /** The model and effort for this message (SendPrompt.config), under the agent's own keys, whatever its delivery. */
+  config?: ConfigPicks;
 };
 
 export type ThreadSession = {
@@ -239,6 +242,7 @@ export function useThreadSession(
             thread: id,
             content,
             ...(how.delivery === undefined ? {} : { delivery: how.delivery }),
+            ...(how.config === undefined ? {} : { config: how.config }),
           },
         });
         if (track && typeof sent !== "string" && sent.prompt_accepted !== undefined) {

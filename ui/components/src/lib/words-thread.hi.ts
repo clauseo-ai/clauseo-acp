@@ -251,12 +251,28 @@ export const HI = {
   // the agent's own model and effort on the status line (PK): each menu's title, and its trigger's name before the value
   Model: "मॉडल",
   Effort: "प्रयास",
-  // after the model's name in its menu, quietly, on the row that follows the agent's own default (UC-152)
-  "(default)": "(डिफ़ॉल्ट)",
-  // the model and effort of a new conversation before the plan's agent has said what it offers: its own default (UC-874)
-  "{agent}'s default": null,
-  // the effort's one row in the same state, so it never reads the same as the model beside it (UC-884)
-  "Default effort": null,
+  // in the model and effort's place until the agent's models are in (UC-1293)
+  "Loading models…": null,
+  // the same place once the host's probe of the models failed: asking still works, and the host tries again (UC-1370)
+  "Couldn't read the models yet. You can still ask.": null,
+  // the same place where the firm requires the sandbox: no probe runs, the models come with the first session (UC-1372)
+  "Models show after your first message.": null,
+  // after the menus in a conversation: the lawyer's pick, which goes with the next message, beside the running or latest
+  // answer's own model and effort the menus name; {settings} the model and effort by name, " · " between (UC-1376)
+  "Next message: {settings}": null,
+  // a quiet row at the top of an answer whose model or effort pick the agent couldn't use (pick_not_used), naming what
+  // the answer ran with: both, the model, the effort, or neither (UC-1371, UC-1373, UC-1374, UC-1375)
+  "{name} couldn't use the model or effort you picked for this answer, so it used {model} at {effort} effort.":
+    null,
+  "{name} couldn't use the model or effort you picked for this answer, so it used {model}.": null,
+  "{name} couldn't use the model or effort you picked for this answer, so it used {effort} effort.":
+    null,
+  "{name} couldn't use the model or effort you picked for this answer, so it kept the settings it had.":
+    null,
+  // a quiet tag on an answer that used Claude's code mode, at its foot, and after the effort while it runs; what
+  // assistive technology hears for it (UC-1294, UC-1295)
+  "Code mode": null,
+  "Claude used code mode for this answer.": null,
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":

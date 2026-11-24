@@ -18,6 +18,8 @@ export type RoomProtection = {
   composer: ComposerProtection;
   /** The note, mounted once the open matter is Not protected. */
   note: ReactNode;
+  /** The firm requires the sandbox (sandbox.required): the host then runs no probe of the agents' models. */
+  required: boolean;
 };
 
 export function useRoomProtection(
@@ -56,6 +58,7 @@ export function useRoomProtection(
   return {
     explain,
     composer,
+    required,
     note:
       cause === null || open === null ? null : (
         <LazyPart

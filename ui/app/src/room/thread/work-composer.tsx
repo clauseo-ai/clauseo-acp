@@ -39,6 +39,7 @@ import {
   type Mentions,
   type PlanChoice,
   type SlashCommand,
+  type StatusMark,
   type ToolsSegment,
 } from "@clauseo/components/clauseo/composer.tsx";
 import {
@@ -94,6 +95,7 @@ export function WorkComposer({
   draftKey,
   choice,
   menus,
+  mark: statusMark = null,
   plan = "",
   tools = null,
   commands,
@@ -127,6 +129,8 @@ export function WorkComposer({
   choice?: PlanChoice | undefined;
   /** The agent's model and effort menus, the draft's or the thread's (config-menus.ts); none without options. */
   menus?: readonly ConfigMenu[] | undefined;
+  /** Code mode's quiet mark after the menus, while the thread's turns run in it; null for none. */
+  mark?: StatusMark | null;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
   /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
@@ -474,6 +478,7 @@ export function WorkComposer({
       tools={tools}
       // under the gate the plan isn't ready: its model and effort wait with it
       menus={gated ? undefined : menus}
+      mark={gated ? null : statusMark}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}

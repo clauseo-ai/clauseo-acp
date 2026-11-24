@@ -1,5 +1,6 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, the agent's own
-// model and effort, and the prepared draft's hint while its Ready card is out of view.
+// model and effort, Claude's code mode while an answer that used it runs, and the prepared draft's hint while its
+// Ready card is out of view.
 import {
   lazy,
   Suspense,
@@ -17,7 +18,7 @@ import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { ui } from "../lib/words-ui.ts";
 import { useWide } from "./layout.ts";
-import { nextStatusFit, type StatusFit } from "./logic.ts";
+import { menuName, nextStatusFit, type StatusFit } from "./logic.ts";
 import { dur, ease } from "./motion.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
@@ -26,7 +27,7 @@ const NO_MENUS: readonly ConfigMenu[] = [];
 
 /** A menu's trigger as it stands at rest, before its chunk is in: the value's name and the chevron. */
 function MenuAtRest({ menu }: { menu: ConfigMenu }) {
-  const name = menu.options.find((o) => o.value === menu.value)?.name ?? menu.value;
+  const name = menuName(menu);
   return (
     <span className="room-plan room-pick">
       <bdi lang="en" className="as-en">
@@ -58,20 +59,19 @@ export type PlanChoice<V extends string = string> = {
 /** One of the agent's own settings, its model or its effort, on the status line after the plan: a quiet trigger in the
  * agent's own name for the value ("Opus"), which opens the agent's values as a menu. `label` is the room's name for it
  * ("Model"), the menu's title and part of the trigger's name. The values' names and descriptions are the agent's, as
- * it gives them, never translated. */
+ * it gives them, never translated. A menu with no values is no control: its label stands as quiet words, as
+ * "Loading models…" does while the agent's models aren't in. */
 export type ConfigMenu = {
   id: string;
   /** What the value belongs to, the open conversation or the draft: a value that changes with it is not announced. */
   scope?: string | undefined;
   label: string;
+  /** The value ticked in the open menu. */
   value: string;
-  /** `note`: a quiet mark after the name, in the open menu only: "(default)" on the row that is the agent's default. */
-  options: readonly {
-    value: string;
-    name: string;
-    description?: string | undefined;
-    note?: string | undefined;
-  }[];
+  /** The trigger's words when they are not the ticked value's name: the running answer's model while the lawyer's
+   * pick for the next message is ticked. */
+  atRest?: string | undefined;
+  options: readonly { value: string; name: string; description?: string | undefined }[];
   onValueChange: (value: string) => void;
 };
 
@@ -79,6 +79,10 @@ export type ConfigMenu = {
  * that opens where each tool stands. `summary` is the phrase it says, for the fit: the line measures again when it
  * changes. */
 export type ToolsSegment = { summary: string; node: ReactNode };
+
+/** A quiet tag after the menus, words and no control: "Code mode", which assistive technology hears as `said`
+ * ("Claude used code mode for this answer."). */
+export type StatusMark = { label: string; said: string };
 
 /** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
  * status line's own words, as the select's trigger does at rest. */
@@ -103,6 +107,7 @@ export function StatusLine<V extends string>({
   choice,
   tools = null,
   menus = NO_MENUS,
+  mark = null,
   hidden = false,
 }: {
   took: string | null;
@@ -113,6 +118,8 @@ export function StatusLine<V extends string>({
   tools?: ToolsSegment | null;
   /** The agent's model and effort, after the plan, each parted by a dot; none by default. */
   menus?: readonly ConfigMenu[] | undefined;
+  /** A quiet tag after the menus ("Code mode", while an answer that used it runs); null for none. */
+  mark?: StatusMark | null;
   /** While the working line stands in its place. It stays mounted, so the plan's select keeps its state. */
   hidden?: boolean;
 }) {
@@ -128,9 +135,7 @@ export function StatusLine<V extends string>({
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
   const toolsSaid = tools?.summary ?? null;
-  const menusSaid = menus
-    .map((m) => m.options.find((o) => o.value === m.value)?.name ?? m.value)
-    .join();
+  const menusSaid = [...menus.map(menuName), mark?.label].join();
 
   // the time it took arrives as the working line closes: it comes up 4 px into place over 200 ms
   useLayoutEffect(() => {
@@ -236,11 +241,24 @@ export function StatusLine<V extends string>({
             {(i > 0 || choice !== undefined || plan !== "" || took !== null) && (
               <i className="room-dot" aria-hidden="true" />
             )}
-            <Suspense fallback={<MenuAtRest menu={m} />}>
-              <ConfigMenuTrigger menu={m} />
-            </Suspense>
+            {m.options.length === 0 ? (
+              <span className="room-status-quiet deva-nudge">{m.label}</span>
+            ) : (
+              <Suspense fallback={<MenuAtRest menu={m} />}>
+                <ConfigMenuTrigger menu={m} />
+              </Suspense>
+            )}
           </span>
         ))}
+        {mark !== null && (
+          <span className="room-status-mark" data-dotted="">
+            <i className="room-dot" aria-hidden="true" />
+            <span className="room-tag deva-nudge" aria-hidden="true">
+              {mark.label}
+            </span>
+            <span className="sr-only">{mark.said}</span>
+          </span>
+        )}
         {tools !== null && (
           <span className="room-status-tools" data-dotted="">
             {(choice !== undefined || plan !== "" || took !== null || menus.length > 0) && (
