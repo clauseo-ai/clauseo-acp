@@ -98,7 +98,8 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::HelperInBackground { .. }
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
-            | AcpEvent::HelperEnded { .. } => false,
+            | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. } => false,
         }
     {
         agent.replayed.push(*event);
@@ -175,6 +176,12 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
                 super::helpers::set_background(actor, thread, &helper);
             }
         }
+        AcpEvent::HelperSettled {
+            session,
+            origin,
+            helper,
+            outcome,
+        } => super::helpers::on_settled(actor, thread, &session, origin, &helper, outcome),
         event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
             session,

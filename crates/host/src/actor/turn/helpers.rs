@@ -9,8 +9,9 @@
 //! tool-name compare per tool call, and nothing per text chunk.
 //!
 //! Ends: the agent's own (Claude's handback, or a foreground launch step's final status), here;
-//! the ends a cut-short run brings (a Stop, a turn's close, a detach, a failed write's retry, a
-//! past run's helpers left open in the log) in `ends.rs`.
+//! the engine's word that a helper's task settled, in `settle.rs`; the ends a cut-short run
+//! brings (a Stop, a turn's close, a detach, a failed write's retry, a past run's helpers left
+//! open in the log) in `ends.rs`.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -33,6 +34,7 @@ use crate::pipeline::Draft;
 
 pub(super) mod claude;
 mod ends;
+mod settle;
 mod words;
 
 #[cfg(test)]
@@ -40,6 +42,7 @@ mod tests;
 
 pub(crate) use ends::settle_loaded;
 pub(in crate::actor::turn) use ends::{on_cancel, on_close, on_detach, reopen_from_view};
+pub(in crate::actor::turn) use settle::on_settled;
 
 /// The helpers of one conversation, from its first helper on.
 #[derive(Debug, Default)]
@@ -63,6 +66,9 @@ pub(super) struct Helpers {
     /// stream shows it landed, once a turn's end is durable (every commit before it is then), or
     /// with the helpers at a detach.
     sent_ends: BTreeMap<HelperId, (HelperOutcome, Option<String>)>,
+    /// Each open helper's last words, the report it ends with on a settle (`settle.rs`): kept
+    /// from its words, emptied by its next step or message, gone at its end.
+    last_words: HashMap<HelperId, settle::LastWords>,
 }
 
 /// A helper the host started.
@@ -226,6 +232,8 @@ pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step
     match helpers.id_of(helper) {
         Some(id) => {
             helpers.steps.insert(step.clone(), id);
+            // Words before a step are not the helper's last.
+            helpers.last_words.remove(&id);
         }
         None => {
             tracing::info!(%thread, %helper, "a step of a helper not started; shown as the lead's");
@@ -253,15 +261,17 @@ pub(super) fn set_background(actor: &mut Actor, thread: ThreadId, helper: &str) 
     }
 }
 
-/// Holds `text`, the helper's own words in `turn`, for the next commit of the thread (the
-/// durable batch's timer at the latest). A helper whose launch input has not come yet takes
-/// them under the id its launch already took, as its steps do. Words of a helper the host does
-/// not know are dropped.
+/// Holds `text`, the helper's own words in `turn` (of the message ACP knows as `message`), for
+/// the next commit of the thread (the durable batch's timer at the latest), and keeps them as
+/// its last words while it is open. A helper whose launch input has not come yet takes them
+/// under the id its launch already took, as its steps do. Words of a helper the host does not
+/// know are dropped.
 pub(super) fn words(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     helper: &str,
+    message: Option<&CompactString>,
     text: &str,
 ) -> Result<(), Error> {
     let Some(helpers) = existing(actor, thread) else {
@@ -272,6 +282,9 @@ pub(super) fn words(
         tracing::debug!(%thread, %helper, "words of a helper not started were dropped");
         return Ok(());
     };
+    if helpers.known.get(helper).is_none_or(|known| known.open) {
+        settle::note_words(helpers, id, message, text);
+    }
     let pushed = helpers.words.push(id, turn, text);
     if pushed.first {
         let timer = TurnTimer {
@@ -345,6 +358,7 @@ pub(super) fn end(
     };
     known.open = false;
     let id = known.id;
+    helpers.last_words.remove(&id);
     helpers.sent_ends.insert(id, (outcome, summary.clone()));
     let built = build::helper_ended(id, outcome, summary.map(TextOrBlob::Inline));
     updates::commit(actor, thread, [built.value.into()], built.blobs)
@@ -393,7 +407,7 @@ pub(super) fn on_update(
             acp_message_id,
             content: ContentBlock::Text { text },
         } => match updates::live_turn(actor, thread, origin) {
-            Some(turn) => words(actor, thread, turn, helper, &text),
+            Some(turn) => words(actor, thread, turn, helper, acp_message_id.as_ref(), &text),
             // With no turn live the words wait for the agent's own turn, as its steps do.
             None if origin == Origin::Idle => {
                 let update = AgentUpdate::MessageChunk {
