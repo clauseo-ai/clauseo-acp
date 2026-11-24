@@ -17,7 +17,7 @@ fn linux() -> Platform {
 fn receipt(hash: &str) -> Receipt {
     Receipt::new(
         &agent(),
-        "0.89.1",
+        "0.110.1",
         hash,
         Path::new("/usr/bin/node"),
         "v24.22.0",
