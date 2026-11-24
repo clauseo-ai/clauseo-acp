@@ -105,8 +105,8 @@ pub(super) struct Step {
     /// `beside`), which the undo leaves as they are: R8's `Card`. `None` when no `FilesChanged`
     /// of the turn names a paper `beside` (the answer ran alone, or the log predates the card)
     /// or the log holds none for the turn (nothing changed, or the entry was lost): every change
-    /// between the two, as an undo always did. The step's `after` is always the turn's after-turn checkpoint, never an
-    /// `undo` one: a turn whose step was undone has none left.
+    /// between the two, as an undo always did. The step's `after` is always the turn's
+    /// after-turn checkpoint, never an `undo` one: a turn whose step was undone has none left.
     pub(super) only: Option<TurnCard>,
 }
 
