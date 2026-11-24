@@ -261,6 +261,14 @@ export const HI = {
     null,
   "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.":
     null,
+  // UC-1440, UC-1441 (provisional): an unreadable key, a signed-out Case Law or a tool's missing key, while the
+  // keychain row waits or was refused (keychain-pointer.tsx), with the row's own Allow
+  "Clauseo needs your Mac's permission to read its saved keys.":
+    "Clauseo को अपनी सहेजी गई कुंजियाँ पढ़ने के लिए आपके Mac की अनुमति चाहिए।",
+  "Needs your Mac's permission": "आपके Mac की अनुमति चाहिए",
+  // UC-1442 (provisional): the keychain row still would ask right after an Ask (macOS's plain Allow lets one read through)
+  "macOS allowed it once only. Press Allow again and choose Always Allow.":
+    "macOS ने इसे केवल एक बार अनुमति दी। फिर से Allow दबाएँ और Always Allow चुनें।",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

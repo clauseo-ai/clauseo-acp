@@ -1,0 +1,46 @@
+{
+  "UC-1440": {
+    "en": "Clauseo needs your Mac's permission to read its saved keys.",
+    "hi": "Clauseo को अपनी सहेजी गई कुंजियाँ पढ़ने के लिए आपके Mac की अनुमति चाहिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "stage E (Mac keychain prompting off): while the permissions band's keychain row reads would_ask or denied, in place of an unreadable agent key's line (first screen, composer gate, thread's expired card), Case Law's \"Sign in again in Settings, under Connectors.\" and a tool's \"Its saved key is missing…\" in Skills and connectors; with the row's Allow (UD1's \"Allow\"), which asks for the keychain row as the band's Allow does"
+  },
+  "UC-1441": {
+    "en": "Needs your Mac's permission",
+    "hi": "आपके Mac की अनुमति चाहिए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "Skills and connectors: the short tag in place of Case Law's \"Signed out\" and a tool's \"Key missing\" while the keychain row reads would_ask or denied"
+  },
+  "UC-1442": {
+    "en": "macOS allowed it once only. Press Allow again and choose Always Allow.",
+    "hi": "macOS ने इसे केवल एक बार अनुमति दी। फिर से Allow दबाएँ और Always Allow चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "the keychain row (band, first screen, Settings › Privacy) and every keychain pointer when an Ask resolved with the row still would_ask: macOS's plain Allow lets one read through, only Always Allow settles it (permissions-host.ts's allowedOnce; stage E will also mark it across starts)"
+  },
+  "UC-1443": {
+    "en": "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.",
+    "hi": "इस कंप्यूटर के कीचेन ने Clauseo को सहेजी गई API कुंजी का उपयोग नहीं करने दिया। Mac पर, Your keychain पर Allow दबाएँ, फिर Always Allow चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "agent.key_denied, now also a refused save or removal of a saved key another build wrote (stage E, dialogs off), on the start window, the gate, the thread's card and Plans; while the keychain row needs allowing the pointer (UC-1440) stands in its place. Replaces U3-err-agent.key_denied (\"Clauseo couldn't read the saved API key on this computer…\", read only), retired"
+  }
+}

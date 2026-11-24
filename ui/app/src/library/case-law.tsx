@@ -9,7 +9,10 @@
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import { KeychainAllow } from "../room/first-run/keychain-pointer.tsx";
+import type { Keychain } from "../room/first-run/keychain-state.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { CaseLawFacts, Recheck } from "./addons-source.ts";
@@ -26,6 +29,9 @@ export type CaseLawActs = {
   /** Add credits: the host's checked pay link through the app's link path when out of credit with one, else
    * `openConnectors`; null without either. */
   addCredits: (() => void) | null;
+  /** The keychain row's pointer while it needs allowing: a signed-out Case Law or a tool's missing key may be only
+   * unreadable, so they point at the row's Allow, never at a sign-in or the key typed again. */
+  keychain?: Keychain | null | undefined;
 };
 
 type Names = ReadonlyMap<MatterId, string>;
@@ -74,7 +80,12 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   if (shown === "unreachable") return <Tag text={lb(lang, "Can't reach it right now")} />;
   if (shown === "unavailable") return <Tag text={lb(lang, "Not available yet.")} />;
   if (shown === "off") return <Tag text={lb(lang, "Turned off")} />;
-  if (shown === "ended") return <Tag text={lb(lang, "Signed out")} />;
+  if (shown === "ended")
+    return (
+      <Tag
+        text={acts.keychain ? fl(lang, "Needs your Mac's permission") : lb(lang, "Signed out")}
+      />
+    );
   if (shown === "trouble")
     return <Tag text={troubleTag(lang, acts.facts.off === "firm" ? "blocked" : a.status) ?? ""} />;
   const credits = acts.facts.credits;
@@ -109,7 +120,9 @@ export function CaseLawCard({
   const shown = caseLawShown(a, acts.facts);
   const open = acts.openConnectors;
   const action =
-    shown === "offer" && open !== null ? (
+    shown === "ended" && acts.keychain ? (
+      <KeychainAllow k={acts.keychain} small={false} />
+    ) : shown === "offer" && open !== null ? (
       <Button kind="primary" className="lib-feature-add" onClick={open}>
         {cr(lang, "Add Clauseo Case Law")}
       </Button>
@@ -169,6 +182,13 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
             {lb(lang, "Open Settings")}
           </Button>
         )}
+      </div>
+    );
+  if (shown === "ended" && acts.keychain)
+    return (
+      <div className="lib-trouble" role="status">
+        <p>{acts.keychain.line}</p>
+        <KeychainAllow k={acts.keychain} />
       </div>
     );
   if (shown === "ended")

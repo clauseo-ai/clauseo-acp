@@ -19,7 +19,17 @@ import { Done } from "./parts.tsx";
 /** One row as the step draws it. "ask" is the row whose turn it is; "later" waits for the row before it. */
 export type PermissionStepRow = {
   id: "files_documents" | "keychain" | "controlled_folder_access";
-  shows: "ask" | "later" | "waiting" | "granted" | "denied" | "failed" | "blocking" | "unknown";
+  /** "once": an ask macOS let through once only (plain Allow), so the row would still ask. */
+  shows:
+    | "ask"
+    | "later"
+    | "waiting"
+    | "granted"
+    | "denied"
+    | "failed"
+    | "once"
+    | "blocking"
+    | "unknown";
   /** The folder the row is about, as it reads (Documents/Clauseo). */
   folder?: string | undefined;
   /** Where to change it, in the system's words, as the desktop gives it. */
@@ -149,6 +159,7 @@ function Row({ row, ...acts }: { row: PermissionStepRow } & PermissionStepActs) 
         {/* a refused keychain row keeps its Allow: it can be allowed here at any time */}
         {(shows === "ask" ||
           shows === "failed" ||
+          shows === "once" ||
           (shows === "denied" && row.id === "keychain")) && (
           <Button
             kind="tone"
@@ -180,6 +191,11 @@ function Row({ row, ...acts }: { row: PermissionStepRow } & PermissionStepActs) 
       {shows === "failed" && (
         <p className="fl-perm-said" role="status" data-testid="permission-failed">
           <Say>{w("Clauseo couldn't ask macOS. Try again.")}</Say>
+        </p>
+      )}
+      {shows === "once" && (
+        <p className="fl-perm-said" role="status" data-testid="permission-once">
+          <Say>{w("macOS allowed it once only. Press Allow again and choose Always Allow.")}</Say>
         </p>
       )}
       {shows === "denied" && <Refused row={row} {...acts} />}

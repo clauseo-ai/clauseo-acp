@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsPanel } from "@clauseo/components/ui/tabs.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { quietly } from "../room/open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
+import { useKeychain } from "../room/first-run/keychain-state.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
 import { useAssistant } from "./assistant.ts";
@@ -46,6 +47,7 @@ export function Library({
   const { items, caseLaw: facts } = useAddons(source);
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
+  const keychain = useKeychain(transport);
   const caseLaw = useMemo<CaseLawActs>(() => {
     const payUrl = facts.out?.payUrl ?? null;
     return {
@@ -56,8 +58,9 @@ export function Library({
         payUrl === null
           ? source.openConnectors
           : () => void quietly("open_pay_link", transport.openExternal(payUrl, undefined, true)),
+      keychain,
     };
-  }, [facts, source, transport]);
+  }, [facts, source, transport, keychain]);
   // the rail's row that opened the place may fold away under the focus: the chosen tab takes it
   const place = useRef<HTMLDivElement>(null);
   useEffect(() => {

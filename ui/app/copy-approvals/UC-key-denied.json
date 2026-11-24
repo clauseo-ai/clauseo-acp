@@ -1,13 +1,4 @@
 {
-  "U3-err-agent.key_denied": {
-    "en": "Clauseo couldn't read the saved API key on this computer. Try again, and if this computer asks for permission, choose Allow. If it keeps happening, show this to whoever looks after this computer.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-22",
-    "by": "Rohan (standing approval of all copy, 2026-11-22)",
-    "note": "agent.key_denied (decision record 0048): a saved API key whose read the keychain answered with its error (macOS's Deny or Cancel, keyring's PlatformFailure; a locked keychain), on the start window, the gate, the thread's card and Plans; the timeout keeps U3-err-agent.key_unreadable"
-  },
   "UC-910": {
     "en": "Uses your Anthropic API key.",
     "hi": null,

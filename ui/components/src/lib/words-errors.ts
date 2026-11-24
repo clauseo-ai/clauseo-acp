@@ -115,7 +115,7 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // a saved API key whose read the keychain answered with its error (a denied or cancelled prompt, a locked keychain;
   // decision record 0048): its own line, never "in time". Provisional (app track, 2026-11-17); hi: later
   "agent.key_denied":
-    "Clauseo couldn't read the saved API key on this computer. Try again, and if this computer asks for permission, choose Allow. If it keeps happening, show this to whoever looks after this computer.",
+    "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // provisional: the item's path joins it once PR6 carries it as a field

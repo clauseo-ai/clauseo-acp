@@ -4,6 +4,7 @@
 // its detail beside the list. Read-only (L1): no switch yet.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import type { ReactNode } from "react";
 import { CASE_LAW } from "../store/connectors.ts";
 import type { MatterId } from "../transport/protocol.ts";
@@ -23,7 +24,10 @@ export type ListProps = {
 
 function Row({ a, p }: { a: AddonView; p: ListProps }) {
   const { lang } = useDisplay();
-  const trouble = troubleTag(lang, a.status);
+  const trouble =
+    a.status === "needs_secret" && p.caseLaw.keychain
+      ? fl(lang, "Needs your Mac's permission")
+      : troubleTag(lang, a.status);
   return (
     <li className="lib-row" aria-current={p.selected === a.id ? "true" : undefined}>
       <button
