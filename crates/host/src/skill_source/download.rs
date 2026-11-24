@@ -169,8 +169,9 @@ fn check(net: &Net, url: &Url) -> Result<(), SourceError> {
 }
 
 /// Whether `url` names this computer or a private network (on every hop, the first link too):
-/// `localhost`, or a loopback, private, link-local, shared, unspecified or unique-local IP
-/// literal. A local source is a picked folder. Only the tests' fake server is let through.
+/// `localhost`, or a loopback, private, link-local, shared, unspecified, reserved, multicast or
+/// unique-local IP literal (see [`is_local_v4`] and [`is_local_v6`]). A local source is a
+/// picked folder. Only the tests' fake server is let through.
 fn is_local(net: &Net, url: &Url) -> bool {
     if net.local_origin.as_ref() == Some(&url.origin()) {
         return false;
@@ -187,29 +188,43 @@ fn is_local(net: &Net, url: &Url) -> bool {
 }
 
 /// Loopback 127/8, private 10/8, 172.16/12 and 192.168/16, link-local 169.254/16, shared
-/// 100.64/10, unspecified 0/8 and broadcast.
+/// 100.64/10, benchmarking 198.18/15, unspecified 0/8, multicast 224/4, and reserved 240/4
+/// (broadcast among them).
 fn is_local_v4(ip: Ipv4Addr) -> bool {
     let [a, b, ..] = ip.octets();
     ip.is_loopback()
         || ip.is_private()
         || ip.is_link_local()
-        || ip.is_broadcast()
+        || ip.is_multicast()
         || a == 0
+        || a >= 240
         || (a == 100 && (64..128).contains(&b))
+        || (a == 198 && (b & 0xfe) == 18)
 }
 
-/// Loopback `::1`, unspecified `::`, unique-local `fc00::/7`, link-local `fe80::/10`, and an
-/// IPv4-mapped or -compatible address that is local as IPv4.
+/// Loopback `::1`, unspecified `::`, unique-local `fc00::/7`, link-local `fe80::/10`,
+/// multicast `ff00::/8`, the whole NAT64 prefix `64:ff9b::/96` (it only ever wraps an IPv4
+/// address, and a public one is reachable as itself), and an IPv4-mapped, -compatible or 6to4
+/// (`2002::/16`) address whose IPv4 is local.
 fn is_local_v6(ip: Ipv6Addr) -> bool {
-    let [first, ..] = ip.segments();
+    let [first, second, third, fourth, fifth, sixth, ..] = ip.segments();
+    let nat64 = [first, second, third, fourth, fifth, sixth] == [0x64, 0xff9b, 0, 0, 0, 0];
+    let six_to_four = first == 0x2002 && {
+        let [a, b] = second.to_be_bytes();
+        let [c, d] = third.to_be_bytes();
+        is_local_v4(Ipv4Addr::new(a, b, c, d))
+    };
     let mapped = ip
         .to_ipv4_mapped()
         .or_else(|| ip.to_ipv4())
         .is_some_and(is_local_v4);
     ip.is_loopback()
         || ip.is_unspecified()
+        || ip.is_multicast()
         || (first & 0xfe00) == 0xfc00
         || (first & 0xffc0) == 0xfe80
+        || nat64
+        || six_to_four
         || mapped
 }
 

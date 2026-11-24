@@ -535,7 +535,9 @@ one case. A pack's `source_url` is still never fetched.
   `network.upstream_proxy` when it is set and otherwise the system's proxy. `https` only, with no
   port and no user info. Redirects are followed by hand, at most 5, and each hop is checked again.
   No hop, the first link included, may name this computer or a private network: `localhost`, or
-  a loopback, private, link-local, shared or unique-local IP literal (`command.invalid` for the
+  a loopback, private, link-local, shared, benchmarking (198.18/15), reserved (240/4), multicast
+  or unique-local IP literal, any NAT64 (`64:ff9b::/96`) address, or a mapped or 6to4 address
+  wrapping such an IPv4 (`command.invalid` for the
   first link, `skill.not_found` for a redirect); a local source is a picked folder. A download is
   at most 10 MiB and 90 s for every hop together; a search is at most 1 MiB and 15 s, cut to 30
   items, and each item's name is cleaned as a preview's is. A `.zip` link's query and fragment
