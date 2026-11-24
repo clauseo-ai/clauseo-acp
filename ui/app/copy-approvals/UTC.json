@@ -104,12 +104,13 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-14": {
-    "en": "Ran a task.",
-    "hi": "एक काम चलाया गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "Ran a command.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a command with no words of its own and no program named (Claude's Bash, ChatGPT's exec). Was \"Ran a task.\" (issue 13: steps name what ran)."
   },
   "UTC-15": {
     "en": "Thought it through.",
@@ -120,12 +121,13 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-16": {
-    "en": "Did one other thing.",
-    "hi": "एक अन्य काम किया गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "Used a tool.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a step nothing names, not even a tool's name (a tool with a name reads \"Used {tool}.\"). Was \"Did one other thing.\" (issue 13: steps name what ran)."
   },
   "UTC-17": {
     "en": "Waiting",
@@ -136,116 +138,121 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-19": {
-    "en": "1 paper read.",
-    "hi": "1 दस्तावेज़ पढ़ा गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "read 1 paper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, joined with commas, first letter a capital (\"Read 1 paper, searched the papers.\"). Was \"1 paper read.\" (issue 13: steps name what ran)."
   },
   "UTC-20": {
-    "en": "{n} papers read.",
-    "hi": "{n} दस्तावेज़ पढ़े गए।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "read {n} papers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence (\"Read 3 papers, used Indian Kanoon.\"). Was \"{n} papers read.\" (issue 13: steps name what ran)."
   },
   "UTC-21": {
-    "en": "1 paper changed.",
-    "hi": "1 दस्तावेज़ बदला गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "changed 1 paper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"1 paper changed.\" (issue 13: steps name what ran)."
   },
   "UTC-22": {
-    "en": "{n} papers changed.",
-    "hi": "{n} दस्तावेज़ बदले गए।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "changed {n} papers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"{n} papers changed.\" (issue 13: steps name what ran)."
   },
   "UTC-23": {
-    "en": "1 paper deleted.",
-    "hi": "1 दस्तावेज़ हटाया गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "deleted 1 paper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"1 paper deleted.\" (issue 13: steps name what ran)."
   },
   "UTC-24": {
-    "en": "{n} papers deleted.",
-    "hi": "{n} दस्तावेज़ हटाए गए।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "deleted {n} papers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"{n} papers deleted.\" (issue 13: steps name what ran)."
   },
   "UTC-25": {
-    "en": "1 paper moved.",
-    "hi": "1 दस्तावेज़ की जगह बदली गई।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "moved 1 paper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"1 paper moved.\" (issue 13: steps name what ran)."
   },
   "UTC-26": {
-    "en": "{n} papers moved.",
-    "hi": "{n} दस्तावेज़ों की जगह बदली गई।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "moved {n} papers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"{n} papers moved.\" (issue 13: steps name what ran)."
   },
   "UTC-27": {
-    "en": "Searched once.",
-    "hi": "एक बार खोजा गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
-  },
-  "UTC-28": {
-    "en": "Searched {n} times.",
-    "hi": "{n} बार खोजा गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "searched the papers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for any number of searches of the papers (\"Searched {n} times.\", UTC-28, is gone). Was \"Searched once.\" (issue 13: steps name what ran)."
   },
   "UTC-29": {
-    "en": "Looked online once.",
-    "hi": "एक बार ऑनलाइन देखा गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "looked online",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for looking online where no site is named. Was \"Looked online once.\" (issue 13: steps name what ran)."
   },
   "UTC-30": {
-    "en": "Looked online {n} times.",
-    "hi": "{n} बार ऑनलाइन देखा गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "looked at {sites} online",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: the sites looked at, listed (\"looked at indiankanoon.org and livelaw.in online\"). Was \"Looked online {n} times.\" (issue 13: steps name what ran)."
   },
   "UTC-31": {
-    "en": "Ran 1 task.",
-    "hi": "1 काम चलाया गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "ran 1 command",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence; each command's row says what it did. Was \"Ran 1 task.\" (issue 13: steps name what ran)."
   },
   "UTC-32": {
-    "en": "Ran {n} tasks.",
-    "hi": "{n} काम चलाए गए।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "ran {n} commands",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence; each command's row says what it did (its own words after \"Ran:\", or the program). Was \"Ran {n} tasks.\" (issue 13: steps name what ran); that row's words are now \"Ran {n} commands.\" (UC-1108)."
   },
   "UTC-33": {
     "en": "Planned the work.",
@@ -256,20 +263,22 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-34": {
-    "en": "Did 1 other thing.",
-    "hi": "1 अन्य काम किया गया।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "used {names}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: the MCP servers and other tools used, by readable name (\"used Indian Kanoon and SCC Online\"). Was \"Did 1 other thing.\" (issue 13: steps name what ran)."
   },
   "UTC-35": {
-    "en": "Did {n} other things.",
-    "hi": "{n} अन्य काम किए गए।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "used {n} skills",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: skills counted where more than one ran (Claude's Skill tool used to count as \"other things\"). Was \"Did {n} other things.\" (issue 13: steps name what ran)."
   },
   "UTC-36": {
     "en": "And 1 more.",
@@ -560,12 +569,13 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-78": {
-    "en": "Tried to run a task.",
-    "hi": "एक काम चलाने की कोशिश की गई।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "Tried to run a command.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a command that failed or was stopped. Was \"Tried to run a task.\" (issue 13: steps name what ran)."
   },
   "UTC-79": {
     "en": "Tried to think it through.",
@@ -576,12 +586,13 @@
     "note": "Rohan, via the orchestrator (UTC #261)"
   },
   "UTC-80": {
-    "en": "Tried one other thing.",
-    "hi": "एक अन्य काम करने की कोशिश की गई।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (UTC #261)"
+    "en": "Tried to use a tool.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a step that failed or was stopped. Was \"Tried one other thing.\" (issue 13: steps name what ran)."
   },
   "UTC-81": {
     "en": "Tried: {title}.",

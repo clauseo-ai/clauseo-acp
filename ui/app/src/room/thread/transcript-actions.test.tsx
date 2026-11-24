@@ -169,7 +169,7 @@ test("a chained command's row and prompt count its tasks, not name the first; th
   await h.settle();
   await h.click(h.one("step-group")?.querySelector("button"));
   const row = h.all("tool-call")[0]!;
-  expect(row.querySelector(".step-row-text bdi")?.textContent).toBe("Ran 2 tasks.");
+  expect(row.querySelector(".step-row-text bdi")?.textContent).toBe("Ran 2 commands.");
   await h.click(row.querySelector("[data-testid=task-command-press]"));
   expect(row.querySelector("[data-testid=task-command]")?.textContent).toBe(
     'New-Item -ItemType Directory "drafts"; Copy-Item notice.docx drafts',

@@ -88,25 +88,21 @@
     "note": "Step row, failed or stopped, for the same task"
   },
   "UC-248": {
-    "en": "Read a guide.",
-    "hi": "एक मार्गदर्शिका पढ़ी गई।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-12",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-16",
-    "by": "Rohan (review page, 2026-11-16)",
-    "note": "Step row, done: a skill Clauseo doesn't ship. Never the skill's internal name"
+    "en": "Used a skill.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a skill step that names no skill. Was \"Read a guide.\" (issue 13: steps name what ran)."
   },
   "UC-249": {
-    "en": "Tried to read a guide.",
-    "hi": "एक मार्गदर्शिका पढ़ने की कोशिश की गई।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-12",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-16",
-    "by": "Rohan (review page, 2026-11-16)",
-    "note": "Step row, failed or stopped, for the same skill"
+    "en": "Tried to use a skill.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a skill step that failed or was stopped. Was \"Tried to read a guide.\" (issue 13: steps name what ran)."
   }
 }

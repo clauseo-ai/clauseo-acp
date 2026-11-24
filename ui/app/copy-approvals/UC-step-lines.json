@@ -1,0 +1,137 @@
+{
+  "UC-1100": {
+    "en": "Used {tool}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a tool's step named by the tool: an MCP tool by its server's readable name and the tool's name made readable (\"Used Indian Kanoon: search judgments.\"), any other tool the room doesn't know by its own name made readable (\"Used todo write.\"). Replaces \"Did one other thing.\" for a step that has a tool's name."
+  },
+  "UC-1101": {
+    "en": "Tried to use {tool}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a step that failed or was stopped. Replaces \"Tried one other thing.\" for a step that has a tool's name."
+  },
+  "UC-1102": {
+    "en": "Used the {skill} skill.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a skill step, the skill's name made readable (\"Used the legal drafting skill.\"; Claude's Skill tool, ChatGPT's read of SKILL.md). Replaces \"Read Clauseo's drafting guide.\" and \"Read a guide.\"."
+  },
+  "UC-1103": {
+    "en": "Tried to use the {skill} skill.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a skill step that failed or was stopped. Replaces \"Tried to read Clauseo's drafting guide.\" and \"Tried to read a guide.\"."
+  },
+  "UC-1104": {
+    "en": "Ran: {description}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a command with the agent's own words for it (Claude's Bash description, ChatGPT's justification), first letter lower (\"Ran: count the pages of the plaint.\"). Replaces the bare words (\"Count the pages of the plaint.\")."
+  },
+  "UC-1105": {
+    "en": "Tried to run: {description}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a command that failed or was stopped. Replaces \"Tried: {title}.\" for a command."
+  },
+  "UC-1106": {
+    "en": "Asked a helper.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a helper step with no task given (Claude's Agent untitled, ChatGPT's spawn with no prompt). Replaces \"Did one other thing.\"."
+  },
+  "UC-1107": {
+    "en": "Tried to ask a helper.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a helper step that failed or was stopped. Replaces \"Tried one other thing.\"."
+  },
+  "UC-1108": {
+    "en": "Ran {n} commands.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a chained command (&&, ;, |), counted. Was \"Ran {n} tasks.\" (UTC-32, which is now the folded line's \"ran {n} commands\")."
+  },
+  "UC-1109": {
+    "en": "used the {skill} skill",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, joined with commas (\"Read 1 paper, used the legal drafting skill.\"): one skill, by its name. Replaces part of \"Did {n} other things.\"."
+  },
+  "UC-1110": {
+    "en": "used 1 skill",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: one skill that names none."
+  },
+  "UC-1111": {
+    "en": "asked a helper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: one helper asked. Replaces part of \"Did {n} other things.\"."
+  },
+  "UC-1112": {
+    "en": "asked {n} helpers",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence: helpers asked, counted."
+  },
+  "UC-1113": {
+    "en": "planned the work",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for a thinking step beside others; alone the line says \"Planned the work.\" (UTC-33)."
+  },
+  "UC-1114": {
+    "en": "used a tool",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for a step nothing names, said once beside any named tools. Replaces \"Did {n} other things.\" for such steps."
+  }
+}

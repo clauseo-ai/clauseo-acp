@@ -1,11 +1,11 @@
-// The stored 403 fixture (#fetch-403): a WebFetch the site refused reads as tried, tagged Failed, in the row and the
-// folded line alike, and the line and its tag agree beside a step that finished. Split from steps.test.ts for its size.
-import { th } from "@clauseo/components/lib/words-thread.ts";
+// The stored 403 fixture (#fetch-403): a WebFetch the site refused is a page that couldn't open (step-misses.ts), in the
+// row ("Couldn't open sci.gov.in: the site refused.") and the folded line ("Couldn't open 1 page."), never "failed"
+// (Windows tester item C). Split from steps.test.ts for its size.
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { describe, expect, test } from "vitest";
 import { toolCall } from "../../testing/stream-script.ts";
 import type { ToolCallEntry, ToolKind } from "../../transport/protocol.ts";
-import { doneOf, doneSoFar, markOf, restOf, troubleOf } from "./steps.ts";
+import { doneOf, doneSoFar, lineOf, markOf, restOf, troubleOf } from "./steps.ts";
 
 let n = 0;
 /** A tool call of `kind`, completed unless `over` says otherwise. */
@@ -14,7 +14,7 @@ function call(kind: ToolKind, over: Partial<ToolCallEntry> = {}): ToolCallEntry 
   return { ...toolCall(10 + n, 300 + n, "completed").tool_call!, kind, title: "", ...over };
 }
 
-describe("a web fetch the site refused reads as tried (httpRefused)", () => {
+describe("a web fetch the site refused is a page that couldn't open (httpRefused)", () => {
   // The stored entry of a real WebFetch of https://www.sci.gov.in/ (17 Nov, matter "1198b Sharma v State 2024"): its
   // title, kind, tool name, status and result text as Clauseo stored them; its input's url, the words it names the site by.
   const REFUSED =
@@ -34,23 +34,23 @@ describe("a web fetch the site refused reads as tried (httpRefused)", () => {
   });
   const sci = fetched(REFUSED);
 
-  test("the real 403 reads as the tried line, tagged Failed, and counts as failed in the folded line", () => {
-    expect(doneOf("en", sci)).toBe("Tried to read sci.gov.in online.");
-    expect(markOf("en", sci)).toBe("Failed");
-    expect(troubleOf("en", [sci])).toBe("1 failed.");
+  test("the real 403 says the site refused, untagged, and counts as a page that couldn't open, not failed", () => {
+    expect(doneOf("en", sci)).toBe("Couldn't open sci.gov.in: the site refused.");
+    expect(markOf("en", sci)).toBeNull();
+    expect(troubleOf("en", [sci])).toBe("");
     expect(restOf("en", [sci])).toEqual({
-      kinds: [],
-      line: "",
-      trouble: "Tried to read sci.gov.in online.",
+      kinds: ["fetch"],
+      line: "Couldn't open 1 page.",
+      trouble: "",
     });
   });
 
-  test("a 500 reads the same", () => {
+  test("a 500 says the site couldn't be reached", () => {
     const server = fetched(
       "The server returned HTTP 500 Internal Server Error.\n\nThe response body was not retrieved.",
     );
-    expect(doneOf("en", server)).toBe("Tried to read sci.gov.in online.");
-    expect(markOf("en", server)).toBe("Failed");
+    expect(doneOf("en", server)).toBe("Couldn't open sci.gov.in: couldn't reach the site.");
+    expect(markOf("en", server)).toBeNull();
   });
 
   test("a result that mentions HTTP 403 mid-text is no refusal: still Read, untagged", () => {
@@ -59,7 +59,7 @@ describe("a web fetch the site refused reads as tried (httpRefused)", () => {
     );
     expect(doneOf("en", quoted)).toBe("Read sci.gov.in online.");
     expect(markOf("en", quoted)).toBeNull();
-    expect(restOf("en", [quoted]).line).toBe("Looked online once.");
+    expect(restOf("en", [quoted]).line).toBe("Looked at sci.gov.in online.");
   });
 
   test("another tool with the same text is unchanged", () => {
@@ -68,19 +68,25 @@ describe("a web fetch the site refused reads as tried (httpRefused)", () => {
     expect(markOf("en", other)).toBeNull();
   });
 
-  test("in Hindi the refused fetch gives the existing tried line, tagged Failed", () => {
+  test("in Hindi (its words still to come) the same words, untagged", () => {
     expect(doneOf("hi", sci)).toBe(
-      steps("hi", "Tried to read {name} online.", { name: "sci.gov.in" }),
+      steps("hi", "Couldn't open {site}: {reason}.", {
+        site: "sci.gov.in",
+        reason: steps("hi", "the site refused"),
+      }),
     );
-    expect(markOf("hi", sci)).toBe(th("hi", "Failed"));
+    expect(markOf("hi", sci)).toBeNull();
   });
 
-  test("the line and its tag agree beside a step that finished: one done, one failed", () => {
+  test("beside a step that finished: the summary, no break, the page counted beside it", () => {
     expect(restOf("en", [call("read"), sci])).toEqual({
       kinds: ["read"],
-      line: "1 paper read.",
-      trouble: "1 failed.",
+      line: "Read 1 paper.",
+      trouble: "",
     });
+    expect(lineOf("en", [{ tool_call: call("read") }, { tool_call: sci }], false).more).toBe(
+      "Couldn't open 1 page.",
+    );
     expect(doneSoFar("en", [sci, call("read")])).toBe("1 done so far.");
   });
 });

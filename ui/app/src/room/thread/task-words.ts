@@ -324,10 +324,16 @@ function describedOf(entry: ToolCallEntry, titled: string, looks: boolean): stri
     .replace(/[.!?।…]+$/, "")
     .trim();
   if (words === "" || toolNameOf(words) !== undefined) return null;
-  // sentence case: the first word lower, unless it is a name or an acronym ("MSA", "McKinsey", "Word")
-  const first = words.split(/\s/)[0]!;
+  return short(afterRan(words));
+}
+
+/** Words in sentence case to follow "Ran" or "Ran:": the first word lower, unless it is a name or an acronym ("MSA",
+ * "McKinsey", "Word"), and the closing stop off. */
+export function afterRan(words: string): string {
+  const w = words.trim().replace(/[.!?।…]+$/, "");
+  const first = w.split(/\s/)[0]!;
   const lower = /^[A-Z][a-z]+$/.test(first) && !PROPER.has(first) ? first.toLowerCase() : first;
-  return short(lower + words.slice(first.length));
+  return lower + w.slice(first.length);
 }
 
 /** Names a task's words may start with that stay capitalised. */

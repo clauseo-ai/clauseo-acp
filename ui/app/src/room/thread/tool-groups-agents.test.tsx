@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // A group of Clauseo's own MCP tools' steps (the browser guard, the case-law connector), as each agent names them:
 // Claude `mcp__<server>__<tool>` with the kind other, ChatGPT (codex-acp 2.2.2) `mcp.<server>.<tool>` with the kind
-// execute. The folded line counts them by family, never as "Ran 1 task." or "Did 1 other thing.", and each row and
+// execute. The folded line counts them by family, never as "ran 1 command" or "used a tool", and each row and
 // the line draw the family's icon: the browser's the fetch globe, the case-law connector's the case-law glyph.
 import { act } from "react";
 import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
@@ -15,6 +15,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 import { drawnKindOf, groupKindOf, iconsOf, summaryOf } from "./steps.ts";
+import { partsLine } from "./step-summary.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -55,22 +56,8 @@ const FAMILIES: [
   one: StepKey,
   three: StepKey,
 ][] = [
-  [
-    "browser",
-    "agent_browser_open",
-    "fetch",
-    "fetch",
-    "Looked online once.",
-    "Looked online {n} times.",
-  ],
-  [
-    "browser",
-    "agent_browser_snapshot",
-    "fetch",
-    "fetch",
-    "Looked online once.",
-    "Looked online {n} times.",
-  ],
+  ["browser", "agent_browser_open", "fetch", "fetch", "looked online", "looked online"],
+  ["browser", "agent_browser_snapshot", "fetch", "fetch", "looked online", "looked online"],
   ...(["search_law", "read_document", "citator", "check_citations"] as const).map(
     (tool) =>
       [
@@ -78,8 +65,8 @@ const FAMILIES: [
         tool,
         "case_law_search",
         "case_law",
-        "Searched case law once.",
-        "Searched case law {n} times.",
+        "searched case law",
+        "searched case law {n} times",
       ] as [string, string, string, string, StepKey, StepKey],
   ),
   [
@@ -87,16 +74,16 @@ const FAMILIES: [
     "account",
     "case_law_credits",
     "case_law",
-    "Checked your case-law credits once.",
-    "Checked your case-law credits {n} times.",
+    "checked your case-law credits",
+    "checked your case-law credits {n} times",
   ],
   [
     "case-law",
     "recharge",
     "case_law_payment",
     "case_law",
-    "Got a payment link for case-law credits once.",
-    "Got {n} payment links for case-law credits.",
+    "got a payment link for case-law credits",
+    "got {n} payment links for case-law credits",
   ],
 ];
 
@@ -104,12 +91,10 @@ const CASES = FAMILIES.flatMap(([server, tool, counted, icon, one, three]) =>
   AGENTS.map((agent) => ({ agent, server, tool, counted, icon, one, three })),
 );
 
-const OFF = [
-  "Ran 1 task.",
-  "Ran {n} tasks.",
-  "Did 1 other thing.",
-  "Did {n} other things.",
-] as const;
+const OFF = ["ran 1 command", "ran {n} commands", "used a tool"] as const;
+
+/** A summary's one part as the line says it alone: a capital first, and the stop. */
+const alone = (part: string) => partsLine("en", [part]);
 
 test.each(CASES)(
   "$server's $tool under $agent counts as $counted and draws $icon",
@@ -118,10 +103,11 @@ test.each(CASES)(
     expect(groupKindOf(c)).toBe(counted);
     expect(drawnKindOf(c)).toBe(icon);
     expect(iconsOf([c])).toEqual([icon]);
-    expect(summaryOf("en", [c])).toBe(steps("en", one));
+    expect(summaryOf("en", [c])).toBe(alone(steps("en", one)));
     const group = [0, 1, 2].map((n) => named(agent, server, tool, n));
-    expect(summaryOf("en", group)).toBe(steps("en", three, { n: 3 }));
-    for (const off of OFF) expect(summaryOf("en", group)).not.toContain(steps("en", off, { n: 3 }));
+    expect(summaryOf("en", group)).toBe(alone(steps("en", three, { n: 3 })));
+    for (const off of OFF)
+      expect(summaryOf("en", group).toLowerCase()).not.toContain(steps("en", off, { n: 3 }));
   },
 );
 
@@ -136,21 +122,25 @@ test.each(AGENTS)(
       { ...toolCall(20, 400, "completed").tool_call!, kind: "execute" as const, title: "ls" },
     ];
     expect(summaryOf("en", calls)).toBe(
-      [
-        steps("en", "Looked online {n} times.", { n: 2 }),
-        steps("en", "Searched case law once."),
-        steps("en", "Checked your case-law credits once."),
-        steps("en", "And 1 more."),
-      ].join(" "),
+      partsLine("en", [
+        steps("en", "looked online"),
+        steps("en", "searched case law"),
+        steps("en", "checked your case-law credits"),
+        steps("en", "ran 1 command"),
+      ]),
     );
     expect(iconsOf(calls)).toEqual(["fetch", "case_law", "case_law", "execute"]);
   },
 );
 
-test("a third-party MCP tool keeps its agent's kind: ChatGPT's a task, Claude's another thing", () => {
+test("a third-party MCP tool keeps its agent's kind for its icon, and is named by its server in the line", () => {
   expect(groupKindOf(named("ChatGPT", "docs", "fetch"))).toBe("execute");
   expect(groupKindOf(named("Claude", "docs", "fetch"))).toBe("other");
   expect(drawnKindOf(named("Claude", "docs", "fetch"))).toBe("other");
+  for (const agent of AGENTS)
+    expect(summaryOf("en", [named(agent, "docs", "fetch"), named(agent, "docs", "list", 1)])).toBe(
+      "Used Docs.",
+    );
 });
 
 const ASKED = userMessage(5, 1, "Find the latest on the Delhi High Court's order.");
@@ -161,14 +151,14 @@ test.each(
       agent,
       server: "browser",
       tool: "agent_browser_open",
-      line: "Looked online {n} times." as StepKey,
+      line: "looked online" as StepKey,
       icon: "fetch",
     },
     {
       agent,
       server: "case-law",
       tool: "search_law",
-      line: "Searched case law {n} times." as StepKey,
+      line: "searched case law {n} times" as StepKey,
       icon: "case_law",
     },
   ]),
@@ -180,9 +170,9 @@ test.each(
     h.deliver([reset([ASKED, ...calls, agentText(20, 1, "The order is out.")])]);
     await h.settle();
     const group = h.one("step-group")!;
-    expect(group.textContent).toContain(steps("en", line, { n: 2 }));
-    expect(group.textContent).not.toContain(steps("en", "Ran {n} tasks.", { n: 2 }));
-    expect(group.textContent).not.toContain(steps("en", "Did {n} other things.", { n: 2 }));
+    expect(group.textContent).toContain(alone(steps("en", line, { n: 2 })));
+    expect(group.textContent).not.toContain("Ran 2 commands");
+    expect(group.textContent).not.toContain("Used a tool");
     await act(async () => group.querySelector<HTMLButtonElement>("button")!.click());
     await h.settle();
     const rows = [...h.one("step-group")!.querySelectorAll<HTMLElement>("[data-kind]")];

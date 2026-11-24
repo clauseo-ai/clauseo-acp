@@ -12,7 +12,7 @@ import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
-import { caseLawOf, toolNameOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
+import { caseLawOf, toolNameOf, yieldOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
 import { guideOf, skillOf } from "./skill-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
@@ -250,6 +250,8 @@ export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string 
 /** What a step is doing now, in a sentence: "Reading Lease.pdf.", "Searching for 'notice period'.", or the agent's
  * title with its paths cut, for a kind with no words of its own. */
 export function doingOf(lang: Lang, entry: ToolCallEntry): string {
+  // Claude's Yield waits for its own background work (tool-names.ts)
+  if (yieldOf(entry)) return stepLive(lang, "Waiting for the background work.");
   // a skill is a guide being read, never its internal name (skill-words.ts)
   const skill = skillOf(entry);
   if (skill !== null) {

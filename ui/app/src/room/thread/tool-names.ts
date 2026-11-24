@@ -1,11 +1,15 @@
 // A tool's or a permission's own name as an agent sometimes sends it for a title ("SandboxNetworkAccess", "write_file",
-// "mcp__browser__navigate", "mcp.browser.agent_browser_open", "fs.read", "ApplyPatch"): never shown. A name Clauseo
-// knows reads as what it does, in the room's words; any other title shaped like a name reads as the kind's own plain
-// line, or, on a permission prompt, as nothing beneath "Clauseo asks before going on.". A title in words ("Read Notice
-// to the bank.pdf") stays as it is.
+// "mcp__browser__navigate", "mcp.browser.agent_browser_open", "fs.read", "ApplyPatch"): never shown as it came. A name
+// Clauseo knows reads as what it does, in the room's words. Once a step is over, any other name is shown made readable
+// (readableTool: no mcp__ or mcp. prefix, underscores and capitals to spaces, an MCP tool led by its server's name, as
+// "Indian Kanoon: search judgments"), so a step never hides behind "other things" (issue 13; until 24 Nov such a name
+// read as the kind's plain line). A permission prompt still shows nothing beneath "Clauseo asks before going on.". A
+// title in words ("Read Notice to the bank.pdf") stays as it is.
 // Pure, and without words of its own: each place that tells a step or a prompt holds its words for each name
 // (step-names.ts while a step runs, tool-words.ts once it is over, permission-model.ts for a prompt), so the room's
 // first chunk takes none of the settled group's.
+
+import type { ToolCallEntry } from "../../transport/protocol.ts";
 
 /** What a known name does, as the room tells it. */
 export type ToolAs = "network" | "execute" | "read" | "edit" | "search" | "fetch";
@@ -42,6 +46,7 @@ const KNOWN: Readonly<Record<string, ToolAs>> = {
   execcommand: "execute",
   writestdin: "execute",
   runcommand: "execute",
+  exec: "execute",
   terminal: "execute",
   read: "read",
   readfile: "read",
@@ -105,4 +110,85 @@ export function toolNameOf(title: string): { as: ToolAs | null } | undefined {
   const as = KNOWN[t.toLowerCase().replace(/[_.:-]/g, "")];
   if (as !== undefined) return { as };
   return identifierLike(t) ? { as: null } : undefined;
+}
+
+/** Whether a step is Claude's Yield (Claude Code 2.1.330): its own wait for its background work (helpers, background
+ * commands, Monitor), read-only. Told as waiting, never as another thing or a tool used. */
+export const yieldOf = (call: Pick<ToolCallEntry, "title" | "tool_name">): boolean =>
+  call.tool_name?.toLowerCase() === "yield" || call.title.trim() === "Yield";
+
+/** An MCP server's name as the lawyer reads it, where its own spelling says less: by the name folded (lower case,
+ * no `_ . : -` or spaces). Any other server is named by its own name made readable (readableServer). */
+const SERVERS: Readonly<Record<string, string>> = {
+  indiankanoon: "Indian Kanoon",
+  ikapi: "Indian Kanoon",
+  scconline: "SCC Online",
+  manupatra: "Manupatra",
+  livelaw: "LiveLaw",
+};
+
+/** A name's words: its mcp prefix off, CamelCase, `_ . : -` and runs of space to one space. */
+const wordsOfName = (name: string): string[] =>
+  name
+    .replace(/^mcp(?:__|\.)/i, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[\s_.:-]+/)
+    .filter((w) => w !== "");
+
+/** An MCP server's readable name: a known one's (SERVERS), else its words, each lower-case one capitalised
+ * ("indian-kanoon" → "Indian Kanoon", "SCC" stays). */
+export function readableServer(server: string): string {
+  const known = SERVERS[server.toLowerCase().replace(/[\s_.:-]/g, "")];
+  if (known !== undefined) return known;
+  return wordsOfName(server)
+    .map((w) => (/^[a-z]/.test(w) ? w[0]!.toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+/** A tool's readable name: its words in lower case, an acronym kept ("write_file" → "write file", "TodoWrite" →
+ * "todo write", "get_PDF" → "get PDF"). */
+export const readableTool = (tool: string): string =>
+  wordsOfName(tool)
+    .map((w) => (/^[A-Z][a-z0-9]*$/.test(w) ? w.toLowerCase() : w))
+    .join(" ");
+
+/** Claude's MCP title, `mcp__<server>__<tool>`, and ChatGPT's, `mcp.<server>.<tool>`. */
+const MCP = /^mcp(?:__(.+?)__(.+)|\.([^.]+)\.(.+))$/;
+
+/** An MCP call of a server other than Clauseo's own (the browser's and the case-law connector's, which say what they
+ * do): its server and tool as they came, from the title, or from ChatGPT's input `{server, tool}`; null for any other
+ * call. */
+export function mcpOf(title: string, raw?: string): { server: string; tool: string } | null {
+  const t = title.trim().replace(/^`+|`+$/g, "");
+  const m = MCP.exec(t);
+  let server = m?.[1] ?? m?.[3] ?? null;
+  let tool = m?.[2] ?? m?.[4] ?? null;
+  if (server === null && raw !== undefined && raw.length < 16_384 && raw.startsWith("{")) {
+    try {
+      const v = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof v["server"] === "string" && typeof v["tool"] === "string" && /^mcp\b/i.test(t)) {
+        server = v["server"];
+        tool = v["tool"];
+      }
+    } catch {
+      // no input to read: no server
+    }
+  }
+  if (server === null || tool === null || server === "browser" || server === "case-law")
+    return null;
+  return { server, tool };
+}
+
+/** A step's tool as the lawyer reads it, for a step nothing else names: an MCP tool by its server and tool
+ * ("Indian Kanoon: search judgments"), a title shaped like a name made readable, else the call's tool name made
+ * readable; null with none of these. */
+export function toolLabelOf(
+  call: Pick<ToolCallEntry, "title" | "tool_name" | "raw_input">,
+): string | null {
+  const mcp = mcpOf(call.title, call.raw_input?.inline);
+  if (mcp !== null) return `${readableServer(mcp.server)}: ${readableTool(mcp.tool)}`;
+  const t = call.title.trim().replace(/^`+|`+$/g, "");
+  if (toolNameOf(t)?.as === null) return readableTool(t);
+  const name = call.tool_name?.trim() ?? "";
+  return name === "" ? null : readableTool(name);
 }

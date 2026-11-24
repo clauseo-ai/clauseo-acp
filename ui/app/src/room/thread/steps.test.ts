@@ -132,7 +132,7 @@ describe("segmentsPick", () => {
 });
 
 describe("the folded line", () => {
-  test("one sentence per kind, the most done first, ties in the order they came; one and many counted apart", () => {
+  test("one sentence naming each part, the most done first, ties in the order they came; one and many counted apart", () => {
     const calls = [
       call("search"),
       call("read"),
@@ -141,44 +141,49 @@ describe("the folded line", () => {
       call("search"),
       call("execute"),
     ];
-    expect(summaryOf("en", calls)).toBe("3 papers read. Searched 2 times. Ran 1 task.");
-    expect(summaryOf("hi", calls)).toBe("3 दस्तावेज़ पढ़े गए। 2 बार खोजा गया। 1 काम चलाया गया।");
-    expect(summaryOf("en", [call("read")])).toBe("1 paper read.");
-    expect(summaryOf("en", [call("search")])).toBe("Searched once.");
+    expect(summaryOf("en", calls)).toBe("Read 3 papers, searched the papers, ran 1 command.");
+    // the parts' Hindi is still to come (hi: later): their English, closed with the danda
+    expect(summaryOf("hi", calls)).toBe("read 3 papers, searched the papers, ran 1 command।");
+    expect(summaryOf("en", [call("read")])).toBe("Read 1 paper.");
+    expect(summaryOf("en", [call("search")])).toBe("Searched the papers.");
   });
 
   test("papers read counts each paper once, never a guide or a listing; their rows stay as they were", () => {
     const lease = () => call("read", "completed", raw({ path: "papers/Lease deed.pdf" }));
     // one paper read three times is one paper
-    expect(summaryOf("en", [lease(), lease(), lease()])).toBe("1 paper read.");
+    expect(summaryOf("en", [lease(), lease(), lease()])).toBe("Read 1 paper.");
     const guide = call("read", "completed", raw({ path: "/x/skills/legal-drafting/SKILL.md" }));
     const listing = call("read", "completed", { tool_name: "LS", ...raw({ path: "papers/" }) });
     const ls = call("read", "completed", { title: "ls papers" });
     const notice = call("read", "completed", raw({ path: "papers/2019/Notice.pdf" }));
     const calls = [lease(), guide, notice, listing, lease(), ls];
-    expect(summaryOf("en", calls)).toBe("2 papers read.");
-    // the rows themselves are unchanged
-    expect(doneOf("en", guide)).toBe("Read Clauseo's drafting guide.");
+    // the guide read is a skill used, named in its own part
+    expect(summaryOf("en", calls)).toBe("Read 2 papers, used the legal drafting skill.");
+    expect(doneOf("en", guide)).toBe("Used the legal drafting skill.");
     expect(kindsOf(calls)).toEqual([{ kind: "read", n: 6 }]);
     // a read that names no paper counts once, as before
-    expect(summaryOf("en", [lease(), call("read"), call("read")])).toBe("3 papers read.");
+    expect(summaryOf("en", [lease(), call("read"), call("read")])).toBe("Read 3 papers.");
   });
 
   test("every kind has its words", () => {
     const kinds: ToolKind[] = ["edit", "delete", "move", "fetch", "think", "other"];
     expect(kinds.map((k) => summaryOf("en", [call(k), call(k)]))).toEqual([
-      "2 papers changed.",
-      "2 papers deleted.",
-      "2 papers moved.",
-      "Looked online 2 times.",
+      "Changed 2 papers.",
+      "Deleted 2 papers.",
+      "Moved 2 papers.",
+      "Looked online.",
       "Planned the work.",
-      "Did 2 other things.",
+      "Used a tool.",
     ]);
-    // a kind from a newer agent, or switch_mode, counts as other
-    expect(summaryOf("en", [call("switch_mode"), call("unknown")])).toBe("Did 2 other things.");
+    // a kind from a newer agent, or switch_mode, with nothing to name it, is a tool used, never "other things"
+    expect(summaryOf("en", [call("switch_mode"), call("unknown")])).toBe("Used a tool.");
+    // a tool with a name is named by it
+    expect(summaryOf("en", [call("other", "completed", { tool_name: "TodoWrite" })])).toBe(
+      "Used todo write.",
+    );
   });
 
-  test("past three kinds, the rest are counted as more", () => {
+  test("every part is named, however many: nothing is left to a count of more", () => {
     const calls = [
       call("read"),
       call("read"),
@@ -188,7 +193,7 @@ describe("the folded line", () => {
       call("move"),
     ];
     expect(summaryOf("en", calls)).toBe(
-      "2 papers read. Searched once. 1 paper changed. And 2 more.",
+      "Read 2 papers, searched the papers, changed 1 paper, looked online, moved 1 paper.",
     );
     expect(kindsOf(calls).map((k) => k.kind)).toEqual(["read", "search", "edit", "fetch", "move"]);
     // switch_mode is counted as other but draws its own glyph, unless another kind shares other's count
@@ -204,14 +209,14 @@ describe("the folded line", () => {
     // UTC-17: one read done, one change still waiting on the lawyer: the words and the icons count the read alone
     expect(restOf("en", [call("read"), call("edit", "pending", lease)])).toEqual({
       kinds: ["read"],
-      line: "1 paper read.",
+      line: "Read 1 paper.",
       trouble: "",
     });
     expect(
       restOf("en", [call("read"), call("fetch", "failed"), call("search", "cancelled")]),
     ).toEqual({
       kinds: ["read"],
-      line: "1 paper read.",
+      line: "Read 1 paper.",
       trouble: "1 failed. 1 stopped.",
     });
     // none done: the step still to finish says what it is doing, with its own icon
@@ -254,10 +259,8 @@ describe("the folded line", () => {
 
   test("the same tried words are said once, the repeat counted in the more (D-077)", () => {
     const task = () => call("execute", "failed");
-    expect(restOf("en", [task(), task()]).trouble).toBe("Tried to run a task. And 1 more.");
-    expect(
-      restOf("hi", [task(), task()]).trouble.split("एक काम चलाने की कोशिश की गई।"),
-    ).toHaveLength(2);
+    expect(restOf("en", [task(), task()]).trouble).toBe("Tried to run a command. And 1 more.");
+    expect(restOf("hi", [task(), task()]).trouble.split("Tried to run a command.")).toHaveLength(2);
   });
 
   test("a failure stays on the line, one of many; a stop too", () => {
@@ -296,7 +299,7 @@ describe("the folded line", () => {
       const r = restOf(lang, calls);
       return `${r.line} ${r.trouble}`;
     };
-    expect(sentence("en")).toBe("1 paper read. 2 failed.");
+    expect(sentence("en")).toBe("Read 1 paper. 2 failed.");
     expect(sentence("hi")).toBe("1 दस्तावेज़ पढ़ा गया। 2 विफल रहे।");
     expect(sentence("en")).not.toContain("of them");
     expect(sentence("hi")).not.toContain("उनमें से");
@@ -351,8 +354,8 @@ describe("friendly names", () => {
         "en",
         call("execute", "completed", raw({ command: "ls", description: "List the papers" })),
       ),
-    ).toBe("List the papers.");
-    expect(doneOf("en", call("execute"))).toBe("Ran a task.");
+    ).toBe("Ran: list the papers.");
+    expect(doneOf("en", call("execute"))).toBe("Ran a command.");
     expect(doneOf("en", call("read"))).toBe("Read the papers.");
   });
 
@@ -364,7 +367,7 @@ describe("friendly names", () => {
     expect(doneOf("en", call("other", "completed", { title: "Ask the document service" }))).toBe(
       "Ask the document service.",
     );
-    expect(doneOf("en", call("other"))).toBe("Did one other thing.");
+    expect(doneOf("en", call("other"))).toBe("Used a tool.");
     expect(splitPath("papers/")).toEqual({ name: "papers", folder: "" });
   });
 
@@ -398,9 +401,9 @@ describe("friendly names", () => {
       "कोशिश की गई: Check the share register।",
     );
     const count = raw({ command: "x", description: "Count the pages" });
-    expect(doneOf("en", call("execute", "failed", count))).toBe("Tried: Count the pages.");
-    // done, the agent's own words as they are
-    expect(doneOf("en", call("execute", "completed", count))).toBe("Count the pages.");
+    expect(doneOf("en", call("execute", "failed", count))).toBe("Tried to run: count the pages.");
+    // done, the agent's own words after "Ran:"
+    expect(doneOf("en", call("execute", "completed", count))).toBe("Ran: count the pages.");
     expect(doneOf("en", call("other", "completed", { title: "Check the share register" }))).toBe(
       "Check the share register.",
     );
@@ -442,7 +445,7 @@ describe("friendly names", () => {
     const mixed = [call("read", "completed", lease), unknown, call("fetch", "failed")];
     expect(restOf("en", mixed)).toEqual({
       kinds: ["read"],
-      line: "1 paper read.",
+      line: "Read 1 paper.",
       trouble: "1 failed.",
     });
     // beside one failed and none done: the failure alone is what was tried
@@ -484,7 +487,7 @@ describe("friendly names", () => {
       doneOf("en", call("fetch", "failed", raw({ url: "https://indiankanoon.org/doc/1/" }))),
     ).toBe("Tried to read indiankanoon.org online.");
     expect(doneOf("en", call("edit", "cancelled"))).toBe("Tried to change a paper.");
-    expect(doneOf("en", call("other", "failed"))).toBe("Tried one other thing.");
+    expect(doneOf("en", call("other", "failed"))).toBe("Tried to use a tool.");
     expect(doneOf("hi", call("read", "failed", raw({ path: "a/Lease.pdf" })))).toBe(
       "Lease.pdf पढ़ने की कोशिश की गई।",
     );
@@ -546,7 +549,7 @@ describe("the agent's own notes (D-044)", () => {
       call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" })),
     ].map((c) => ({ tool_call: c }));
     const line = lineOf("en", rows, false);
-    expect(line.line).toBe("1 paper read.");
+    expect(line.line).toBe("Read 1 paper.");
     expect(line.trouble).toBe("");
     const running = { tool_call: call("search", "in_progress") };
     const live = lineOf("en", [...rows, running], true);

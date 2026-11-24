@@ -91,8 +91,8 @@ test("everything between two of the agent's texts folds into one group: one line
   const [first, second] = groups();
   expect(groups()).toHaveLength(2);
   // the thought folded with the tool calls; the answer's words stand outside
-  expect(first?.textContent).toBe("2 papers read. Searched once.");
-  expect(second?.textContent).toBe("1 paper read.");
+  expect(first?.textContent).toBe("Read 2 papers, searched the papers.");
+  expect(second?.textContent).toBe("Read 1 paper.");
   expect(h.all("message-agent")).toHaveLength(2);
   expect(h.all("tool-call")).toHaveLength(0);
   expect(h.all("thought")).toHaveLength(0);
@@ -118,7 +118,7 @@ test("a mode switch on the folded line draws its own glyph, not other's, though 
     renderToStaticMarkup(<ToolKindIcon kind={k} size={14} className="step-icon" />);
   expect(glyph("switch_mode")).not.toBe(glyph("other"));
   const [alone, mixed] = groups();
-  expect(lineOf(alone)?.textContent).toBe("Did 1 other thing.");
+  expect(lineOf(alone)?.textContent).toBe("Used a tool.");
   expect([...alone!.querySelectorAll(".step-group-icons svg")].map((e) => e.outerHTML)).toEqual([
     glyph("switch_mode"),
   ]);
@@ -150,7 +150,7 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
   expect(rows.map((r) => r.querySelector(".step-row-text")?.textContent)).toEqual([
     "Read Lease deed.pdf.",
     "Searched for 'notice period'.",
-    "Tried to run a task. · Failed",
+    "Tried to run a command. · Failed",
   ]);
   expect(rows.map((r) => r.dataset["kind"])).toEqual(["read", "search", "execute"]);
   expect(rows[0]?.dataset["toolCallId"]).toBe(uuid(201, 7));
@@ -200,7 +200,7 @@ test("a failed row's state follows a dot, Failed, with the break icon (DESIGN, t
   }
 });
 
-test("a web fetch the site refused reads as tried and tagged Failed, row and folded line alike", async () => {
+test("a web fetch the site refused is a page that couldn't open, never Failed, row and folded line alike", async () => {
   h = await mountRoom();
   h.deliver([
     reset([
@@ -225,12 +225,14 @@ test("a web fetch the site refused reads as tried and tagged Failed, row and fol
   ]);
   await h.click(lineOf(groups()[0])!);
   const [row] = h.all("tool-call");
+  // a page that couldn't open, not a failure (step-misses.ts): its reason in its words, no mark, no break
   expect(row?.querySelector(".step-row-text")?.textContent).toBe(
-    "Tried to read sci.gov.in online. · Failed",
+    "Couldn't open sci.gov.in: the site refused.",
   );
-  expect(row?.querySelector(".step-row-mark")?.textContent).toBe("Failed");
-  expect(row?.dataset["failed"]).toBe("true");
-  expect(h.one("step-group-trouble")?.textContent).toBe("Tried to read sci.gov.in online.");
+  expect(row?.querySelector(".step-row-mark")).toBeNull();
+  expect(row?.dataset["failed"]).toBeUndefined();
+  expect(h.one("step-group-trouble")).toBeNull();
+  expect(lineOf(groups()[0])?.textContent).toContain("Couldn't open 1 page.");
 });
 
 test("a failure stays visible on the folded line", async () => {
@@ -246,10 +248,10 @@ test("a failure stays visible on the folded line", async () => {
   const g = groups()[0]!;
   expect(g.dataset["trouble"]).toBe("true");
   expect(h.one("step-group-trouble")?.textContent).toBe("1 failed.");
-  expect(lineOf(g)?.textContent).toBe("1 paper read. 1 failed.");
+  expect(lineOf(g)?.textContent).toBe("Read 1 paper. 1 failed.");
 });
 
-test("two failed tasks with nothing to tell them apart say Tried to run a task. once (D-077)", async () => {
+test("two failed tasks with nothing to tell them apart say Tried to run a command. once (D-077)", async () => {
   h = await mountRoom();
   h.deliver([
     reset([
@@ -260,8 +262,8 @@ test("two failed tasks with nothing to tell them apart say Tried to run a task. 
     ]),
   ]);
   const said = h.one("step-group-trouble")?.textContent ?? "";
-  expect(said).toBe("Tried to run a task. And 1 more.");
-  expect(said.split("Tried to run a task.")).toHaveLength(2);
+  expect(said).toBe("Tried to run a command. And 1 more.");
+  expect(said.split("Tried to run a command.")).toHaveLength(2);
 });
 
 test("a step in a state this version can't read shows neither failed nor done: the folded line and its row agree", async () => {
@@ -339,7 +341,7 @@ test("while the agent works, the live group and the working line say what is bei
   // the answer starts after it: the group settles to its summary, the working line to "Answering."
   h.deliver([upsert(search(9, 203, "notice")), upsert(agentText(10, 3, "Clause nine"))]);
   expect(g().dataset["live"]).toBeUndefined();
-  expect(lineOf(g())?.textContent).toBe("2 papers read. Searched once.");
+  expect(lineOf(g())?.textContent).toBe("Read 2 papers, searched the papers.");
   expect(h.one("working")?.textContent).toContain(frame("en", "Answering."));
   expect(pen()).not.toBeNull();
   // the turn ends: the working line goes, and the pen with it
@@ -397,7 +399,7 @@ test("while a permission prompt or a question waits on the lawyer, the working l
   expect(lead()).toBe("question");
   expect(working().textContent).toContain(`${frame("en", "A question for you")}.`);
   // no step is in hand here, so the group says what finished
-  expect(groupLine()).toBe("1 paper read.");
+  expect(groupLine()).toBe("Read 1 paper.");
 });
 
 test("in Hindi, the line and the rows in Hindi, the paper's name as filed", async () => {
@@ -410,7 +412,8 @@ test("in Hindi, the line and the rows in Hindi, the paper's name as filed", asyn
       agentText(9, 3, "ठीक।"),
     ]),
   ]);
-  expect(lineOf(groups()[0])?.textContent).toBe("2 दस्तावेज़ पढ़े गए।");
+  // the summary's parts have no Hindi yet (hi: later): their English, closed with the danda
+  expect(lineOf(groups()[0])?.textContent).toBe("read 2 papers।");
   await h.click(lineOf(groups()[0]));
   expect(h.all("tool-call")[0]?.querySelector(".step-row-text")?.textContent).toBe(
     "Lease deed.pdf पढ़ा गया।",

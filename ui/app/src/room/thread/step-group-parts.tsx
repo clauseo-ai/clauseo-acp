@@ -12,7 +12,8 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { tr } from "@clauseo/components/lib/words-tool-result.ts";
 import type { EntryId, ToolCallEntry } from "../../transport/protocol.ts";
 import { isoOf, stamp } from "./clock.ts";
-import { doneOf, drawnKindOf, hoverOf, httpRefused, markOf, timeOf } from "./steps.ts";
+import { doneOf, drawnKindOf, hoverOf, markOf, timeOf } from "./steps.ts";
+import { missOf } from "./step-misses.ts";
 import { resultOf } from "./tool-result/eligible.ts";
 import { ResultBlock } from "./tool-result/result-load.ts";
 import { useMatterFolder } from "../folder-support.ts";
@@ -52,8 +53,9 @@ export const CallRow = memo(function CallRow({
       mark={failed ? th(lang, "Failed") : markOf(lang, call)}
       background={call.background !== undefined}
       time={at === null ? null : { text: stamp(lang, at, now), iso: isoOf(at) }}
-      failed={failed || httpRefused(call)}
-      why={refusalWhy(lang, call) ?? whyOf(call, folder)}
+      failed={failed}
+      // a page that couldn't open says why in its own words (step-misses.ts), not in the site's error
+      why={refusalWhy(lang, call) ?? (missOf(call) === null ? whyOf(call, folder) : null)}
       resultOpen={output === undefined ? undefined : open}
       result={
         output === undefined && command === null ? undefined : (

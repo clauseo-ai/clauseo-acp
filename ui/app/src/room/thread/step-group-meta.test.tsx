@@ -72,7 +72,7 @@ test("a group before the answer's first words stands on its meta line after the 
   expect(who?.classList.contains("who")).toBe(true);
   expect(who?.textContent).toMatch(/^Clauseo, /);
   expect(line?.tagName).toBe("BUTTON");
-  expect(line?.textContent).toBe("2 papers read.");
+  expect(line?.textContent).toBe("Read 2 papers.");
   // one control: the kind icon and the chevron are inside the button with the words
   expect(line?.querySelector(".step-group-icons svg")).not.toBeNull();
   expect(line?.querySelector(".step-group-chev svg")).not.toBeNull();
@@ -184,9 +184,10 @@ test("in Hindi with three kinds, and in English with a background note, the line
     expect(line.querySelector(".step-part-dropped, .step-part-cut")).toBeNull();
     if (language === "en")
       expect(line.textContent).toBe(
-        "2 papers read. Searched once. 2 of them went on in the background.",
+        "Read 2 papers, searched the papers. 2 of them went on in the background.",
       );
-    else expect(line.textContent).toContain("और 2 काम।");
+    // the summary's parts have no Hindi yet (hi: later): their English, closed with the danda
+    else expect(line.textContent).toContain("moved 1 paper।");
     // the chevron never stands alone at a line's start: it shares a no-wrap span with the last word
     const chev = line.querySelector(".step-group-chev")!;
     expect(chev.parentElement?.classList.contains("glued")).toBe(true);
@@ -237,7 +238,7 @@ test("live, the meta line shows when the answer started (its question's time, se
   // the same meta line and the same button, the summary in place of the live words
   expect(lastMeta()).toBe(meta);
   expect(meta.querySelector(":scope > button")).toBe(line);
-  expect(line.textContent).toBe("2 papers read.");
+  expect(line.textContent).toBe("Read 2 papers.");
   expect(meta.children).toHaveLength(2);
   // still the time it started: the answer's time never moves as the turn ends
   expect(timeOf(meta)).toEqual({ who: `Clauseo, ${asked}`, held: [] });

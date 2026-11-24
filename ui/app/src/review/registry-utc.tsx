@@ -123,9 +123,9 @@ export const UTC: Entry[] = [
   opened("UTC-11", "Searched online for '{query}'.", [call("fetch", "completed", ONLINE)]),
   opened("UTC-12", "Read {name} online.", [call("fetch", "completed", SITE)]),
   opened("UTC-13", "Looked online.", [call("fetch")]),
-  opened("UTC-14", "Ran a task.", [call("execute")]),
+  opened("UTC-14", "Ran a command.", [call("execute")]),
   opened("UTC-15", "Thought it through.", [call("think")]),
-  opened("UTC-16", "Did one other thing.", [call("other")]),
+  opened("UTC-16", "Used a tool.", [call("other")]),
   // a row's state
   opened("UTC-17", "Waiting", [
     call("read", "completed", COMPLAINT),
@@ -145,9 +145,9 @@ export const UTC: Entry[] = [
   opened("UTC-75", "Tried to search online for '{query}'.", [call("fetch", "failed", ONLINE)]),
   opened("UTC-76", "Tried to read {name} online.", [call("fetch", "failed", SITE)]),
   opened("UTC-77", "Tried to look online.", [call("fetch", "failed")]),
-  opened("UTC-78", "Tried to run a task.", [call("execute", "failed")]),
+  opened("UTC-78", "Tried to run a command.", [call("execute", "failed")]),
   opened("UTC-79", "Tried to think it through.", [call("think", "cancelled")]),
-  opened("UTC-80", "Tried one other thing.", [call("other", "failed")]),
+  opened("UTC-80", "Tried to use a tool.", [call("other", "failed")]),
   opened("UTC-81", "Tried: {title}.", [
     call("other", "cancelled", titled("Check the share register")),
   ]),
@@ -155,68 +155,67 @@ export const UTC: Entry[] = [
   opened("UTC-82", "State not known", [call("read", "unknown", COMPLAINT)]),
   folded("UTC-83", "State not known.", [call("read", "unknown", COMPLAINT)]),
   // UTC-18 was the row's "In the background": that word is U7-26's, one id for it
-  // the folded line, one and many for each kind
-  folded("UTC-19", "1 paper read.", [call("read", "completed", LEASE)]),
+  // the folded line's parts, one and many for each kind, joined into one sentence
+  folded("UTC-19", "read 1 paper", [call("read", "completed", LEASE)]),
   folded(
     "UTC-20",
-    "{n} papers read.",
+    "read {n} papers",
     [COMPLAINT, FORM, MANDATE, MINUTES].map((p) => call("read", "completed", p)),
   ),
-  folded("UTC-21", "1 paper changed.", [call("edit", "completed", REPLY)]),
-  folded("UTC-22", "{n} papers changed.", [
+  folded("UTC-21", "changed 1 paper", [call("edit", "completed", REPLY)]),
+  folded("UTC-22", "changed {n} papers", [
     call("edit", "completed", REPLY),
     call("edit", "completed", paper("List of dates.docx")),
   ]),
-  folded("UTC-23", "1 paper deleted.", [call("delete", "completed", paper("Draft notes.docx"))]),
-  folded("UTC-24", "{n} papers deleted.", [
+  folded("UTC-23", "deleted 1 paper", [call("delete", "completed", paper("Draft notes.docx"))]),
+  folded("UTC-24", "deleted {n} papers", [
     call("delete", "completed", paper("Draft notes.docx")),
     call("delete", "completed", paper("Old reply.docx")),
   ]),
-  folded("UTC-25", "1 paper moved.", [call("move", "completed", ANNEXURE)]),
-  folded("UTC-26", "{n} papers moved.", [
+  folded("UTC-25", "moved 1 paper", [call("move", "completed", ANNEXURE)]),
+  folded("UTC-26", "moved {n} papers", [
     call("move", "completed", ANNEXURE),
     call("move", "completed", paper("Annexure P-4.pdf")),
   ]),
-  folded("UTC-27", "Searched once.", [call("search", "completed", SEARCH)]),
-  folded(
-    "UTC-28",
-    "Searched {n} times.",
-    ["S.M.S. Pharmaceuticals", "Pooja Ravinder Devidasani", "Sunita Palita"].map((q) =>
-      call("search", "completed", sought(q)),
-    ),
-  ),
-  folded("UTC-29", "Looked online once.", [call("fetch", "completed", SITE)]),
-  folded("UTC-30", "Looked online {n} times.", [
+  folded("UTC-27", "searched the papers", [call("search", "completed", SEARCH)]),
+  // UTC-28 was "Searched {n} times.": the papers searched are said once, "searched the papers"
+  folded("UTC-29", "looked online", [call("fetch")]),
+  folded("UTC-30", "looked at {sites} online", [
     call("fetch", "completed", SITE),
     call("fetch", "completed", LIVELAW),
   ]),
-  folded("UTC-31", "Ran 1 task.", [call("execute", "completed", task("Count the pages"))]),
-  folded("UTC-32", "Ran {n} tasks.", [
+  folded("UTC-31", "ran 1 command", [call("execute", "completed", task("Count the pages"))]),
+  folded("UTC-32", "ran {n} commands", [
     call("execute", "completed", task("Count the pages")),
     call("execute", "completed", task("Number the paper book")),
   ]),
   folded("UTC-33", "Planned the work.", [call("think")]),
-  folded("UTC-34", "Did 1 other thing.", [
-    call("other", "completed", titled("Ask the court's records")),
+  folded("UTC-34", "used {names}", [
+    call("other", "completed", titled("mcp__indian-kanoon__search_judgments")),
   ]),
-  folded("UTC-35", "Did {n} other things.", [
-    call("other", "completed", titled("Ask the court's records")),
-    call("other", "completed", titled("Check the share register")),
+  folded("UTC-35", "used {n} skills", [
+    call("other", "completed", {
+      title: "Load skill: clauseo:legal-drafting",
+      raw: { skill: "clauseo:legal-drafting" },
+    }),
+    call("other", "completed", {
+      title: "Load skill: clauseo:legal-research",
+      raw: { skill: "clauseo:legal-research" },
+    }),
   ]),
+  // past three steps tried in a group where none finished (the summary itself names every part)
   folded("UTC-36", "And 1 more.", [
-    call("read", "completed", COMPLAINT),
-    call("read", "completed", FORM),
-    call("search", "completed", sought("S.M.S. Pharmaceuticals")),
-    call("edit", "completed", REPLY),
-    call("fetch", "completed", SITE),
+    call("read", "failed", COMPLAINT),
+    call("read", "failed", FORM),
+    call("search", "failed", sought("S.M.S. Pharmaceuticals")),
+    call("edit", "failed", REPLY),
   ]),
   folded("UTC-37", "And {n} more.", [
-    call("read", "completed", COMPLAINT),
-    call("read", "completed", FORM),
-    call("search", "completed", sought("S.M.S. Pharmaceuticals")),
-    call("edit", "completed", REPLY),
-    call("fetch", "completed", SITE),
-    call("move", "completed", ANNEXURE),
+    call("read", "failed", COMPLAINT),
+    call("read", "failed", FORM),
+    call("search", "failed", sought("S.M.S. Pharmaceuticals")),
+    call("edit", "failed", REPLY),
+    call("move", "failed", ANNEXURE),
   ]),
   // what failed or was stopped, kept on the folded line
   // UTC-38 and UTC-41 ("It failed.", "It was stopped.") are gone: a group of one that failed says what it tried, once.

@@ -11,6 +11,7 @@ import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { CallRow } from "../../room/thread/step-group-parts.tsx";
+import { partsLine, summaryOf } from "../../room/thread/step-summary.ts";
 import * as F from "../../room/thread/tool-result/fixtures.ts";
 import { Sample } from "./frame.tsx";
 import { PERMISSION_PAPER, nothing } from "./room-data.ts";
@@ -88,11 +89,11 @@ function Rows({ failed = false }: { failed?: boolean }) {
 
 /** The settled line over Rows: two papers read, a search, a paper changed. */
 const settledLine = (lang: Lang) =>
-  [
-    steps(lang, "{n} papers read.", { n: 2 }),
-    steps(lang, "Searched once."),
-    steps(lang, "1 paper changed."),
-  ].join(" ");
+  partsLine(lang, [
+    steps(lang, "read {n} papers", { n: 2 }),
+    steps(lang, "searched the papers"),
+    steps(lang, "changed 1 paper"),
+  ]);
 
 /** The line on the answer's meta line, after the name and the time, as the room puts an answer's first group. */
 function OnMeta({ open = false }: { open?: boolean }) {
@@ -151,7 +152,7 @@ function Failed() {
     <StepGroup
       id="tool_call:1"
       kinds={["read", "search"]}
-      line={`${steps(lang, "1 paper read.")} ${steps(lang, "Searched once.")}`}
+      line={partsLine(lang, [steps(lang, "read 1 paper"), steps(lang, "searched the papers")])}
       trouble={steps(lang, "1 failed.")}
       defaultOpen
     >
@@ -164,11 +165,19 @@ function AmongSteps() {
   const { lang } = useDisplay();
   return (
     <div className="grid">
-      <StepGroup id="tool_call:1" kinds={["read"]} line={steps(lang, "{n} papers read.", { n: 2 })}>
+      <StepGroup
+        id="tool_call:1"
+        kinds={["read"]}
+        line={partsLine(lang, [steps(lang, "read {n} papers", { n: 2 })])}
+      >
         <Rows />
       </StepGroup>
       <PermissionPrompt paper={PERMISSION_PAPER} state="pending" onAnswer={nothing} />
-      <StepGroup id="tool_call:4" kinds={["read"]} line={steps(lang, "1 paper read.")}>
+      <StepGroup
+        id="tool_call:4"
+        kinds={["read"]}
+        line={partsLine(lang, [steps(lang, "read 1 paper")])}
+      >
         <Rows />
       </StepGroup>
     </div>
@@ -186,12 +195,7 @@ const RESULTS = [
 function WithResults() {
   const { lang } = useDisplay();
   return (
-    <StepGroup
-      id="tool_call:1"
-      kinds={["other"]}
-      line={steps(lang, "Did {n} other things.", { n: RESULTS.length })}
-      defaultOpen
-    >
+    <StepGroup id="tool_call:1" kinds={["other"]} line={summaryOf(lang, RESULTS)} defaultOpen>
       {RESULTS.map((call) => (
         <CallRow key={call.tool_call} id={call.tool_call} call={call} lang={lang} />
       ))}

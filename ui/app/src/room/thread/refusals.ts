@@ -68,7 +68,7 @@ export function lookedOf(rule: string): Looked {
 
 /** The text Claude Code sent back: the raw output's string, or its text blocks', else the content's text with its
  * fence off. */
-function sentOf(entry: ToolCallEntry): string | null {
+export function sentOf(entry: ToolCallEntry): string | null {
   const raw = entry.raw_output?.inline;
   if (raw !== undefined && raw.length <= RAW_MAX) {
     let v: unknown;

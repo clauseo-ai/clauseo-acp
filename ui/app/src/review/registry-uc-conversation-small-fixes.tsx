@@ -1,6 +1,6 @@
 // UC's entries for a chained command (`&&`, `||`, `;` or `|`), counted rather than named by its first program
-// (UC-300 to UC-302): its activity row tried or running, and its permission prompt. Done, its row says the folded line's
-// "Ran {n} tasks." (UTC-32). The real room over FakeTransport.
+// (UC-300 to UC-302): its activity row tried or running, and its permission prompt. Done, its row says
+// "Ran {n} commands." (UC-1108). The real room over FakeTransport.
 import type { ToolCallEntry, ToolCallStatus, ViewEntry } from "../transport/protocol.ts";
 import { permission, step, toolCall, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
@@ -27,7 +27,7 @@ const host = (state: ThreadState) => () => threadHost(state);
 export const UC_CONVERSATION_SMALL_FIXES: Entry[] = [
   {
     id: "UC-300",
-    words: stepWords("Tried to run {n} tasks."),
+    words: stepWords("Tried to run {n} commands."),
     screen: "room/thread",
     render: () => (
       <RoomClicking

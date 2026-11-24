@@ -1,56 +1,56 @@
 {
   "UC-493": {
-    "en": "Searched case law once.",
+    "en": "searched case law",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, one case-law search done: search_law, read_document, citator and check_citations (mcp__case-law__<tool> under Claude, mcp.case-law.<tool> under ChatGPT)"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Searched case law once.\" (issue 13: steps name what ran)."
   },
   "UC-494": {
-    "en": "Searched case law {n} times.",
+    "en": "searched case law {n} times",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, {n} case-law searches done: search_law, read_document, citator and check_citations (mcp__case-law__<tool> under Claude, mcp.case-law.<tool> under ChatGPT)"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Searched case law {n} times.\" (issue 13: steps name what ran)."
   },
   "UC-495": {
-    "en": "Checked your case-law credits once.",
+    "en": "checked your case-law credits",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, one credits check done: account, which only reads the lawyer's credits, prices and spend"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Checked your case-law credits once.\" (issue 13: steps name what ran)."
   },
   "UC-496": {
-    "en": "Checked your case-law credits {n} times.",
+    "en": "checked your case-law credits {n} times",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, {n} credits checks done: account, which only reads the lawyer's credits, prices and spend"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Checked your case-law credits {n} times.\" (issue 13: steps name what ran)."
   },
   "UC-497": {
-    "en": "Got a payment link for case-law credits once.",
+    "en": "got a payment link for case-law credits",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, one payment link got: recharge, which creates a payment link the lawyer pays on Razorpay's page; never pays by itself"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Got a payment link for case-law credits once.\" (issue 13: steps name what ran)."
   },
   "UC-498": {
-    "en": "Got {n} payment links for case-law credits.",
+    "en": "got {n} payment links for case-law credits",
     "hi": null,
     "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "The folded step group's line, {n} payment links got: recharge, which creates a payment link the lawyer pays on Razorpay's page; never pays by itself"
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence. Was \"Got {n} payment links for case-law credits.\" (issue 13: steps name what ran)."
   }
 }

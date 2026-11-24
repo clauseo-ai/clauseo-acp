@@ -1,14 +1,12 @@
 {
   "UC-300": {
-    "en": "Tried to run {n} tasks.",
-    "hi": "{n} काम चलाने की कोशिश की गई।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-15",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-16",
-    "by": "Rohan (review page, 2026-11-16)",
-    "note": "Activity row of a chained command (&&, ||, ; or |) that failed or was stopped: its programs counted, where it once named only the first (\"Tried to run New-Item.\"). Done, the row says the folded line's \"Ran {n} tasks.\" (UTC-32). The command shows whole under Show the command."
+    "en": "Tried to run {n} commands.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a chained command that failed or was stopped, counted. Was \"Tried to run {n} tasks.\" (issue 13: steps name what ran)."
   },
   "UC-301": {
     "en": "Running {n} tasks.",
