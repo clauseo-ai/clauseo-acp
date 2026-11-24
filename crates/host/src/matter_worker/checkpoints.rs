@@ -2,8 +2,10 @@
 //! answers the host records late: `turn_checkpoint` answers an end, `repair` an interrupted
 //! turn at start-up, and `root_commit` gives a new matter's root checkpoint's commit.
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, CommitId, Matter, TimelineEntry, TurnMeta};
-use clauseo_protocol::{CheckpointId, CheckpointKind, FileChange, ThreadId};
+use clauseo_matters::{
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, Matter, Overlap, TimelineEntry, TurnMeta,
+};
+use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChange, ThreadId};
 
 use super::beside::{self, Beside, Logged};
 use super::{Reused, TurnCheckpoint, writes_in};
@@ -80,7 +82,9 @@ pub(crate) struct RepairJob {
 /// - Otherwise, when other turns of the matter were left open too, or every thread was read
 ///   and R8's last checkpoint is not `before` (another turn ran beside this one and ended, or
 ///   later turns ran after its end failed): a new after-turn checkpoint is taken, its changes
-///   measured from `before` without the others' papers.
+///   measured from `before` without the others' papers. Alone, it is taken only when the
+///   folder holds a change to a paper the turn named itself that its card would keep; else
+///   the step is empty, as below.
 /// - Otherwise, when a thread of the matter could not be read (`last` is false), alone with a
 ///   later checkpoint: the step is empty, `before` taken, never a later checkpoint or the
 ///   folder, which may hold that thread's open turn's changes; the next before-turn checkpoint
@@ -115,10 +119,13 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
     let others = measured.map(|since| {
         let at = |id: CheckpointId| timeline.iter().position(|entry| entry.id == id);
         let start = at(since);
+        // Repaired from its own after-turn checkpoint, what was logged after it is not its others'.
+        let end = own.and_then(|entry| at(entry.id));
         let mut later: Vec<(usize, &Logged)> = logged
             .iter()
             .filter_map(|record| Some((at(record.checkpoint)?, record)))
             .filter(|(position, _)| start.is_some_and(|start| *position > start))
+            .filter(|(position, _)| end.is_none_or(|end| *position <= end))
             .collect();
         later.sort_by_key(|(position, _)| *position);
         let later: Vec<&Logged> = later.into_iter().map(|(_, record)| record).collect();
@@ -154,22 +161,45 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
             .copied();
         return reused(matter, before, entry, Vec::new(), false);
     }
-    let checkpoint = matter.after_turn_named(&meta, &named, &commands, overlap.as_ref())?;
-    // Alone, nothing of its own since a later checkpoint it reuses: the empty step it always got.
-    let nothing = alone && overlap.is_some() && checkpoint.changes.is_empty();
-    if let (Some(before), CheckpointOutcome::Reused(_), true) =
-        (before, checkpoint.outcome, nothing)
+    // Alone, with no change to a paper it named itself since later checkpoints: the empty step
+    // it always got; what changed since is the next before-turn checkpoint's outside edits.
+    if let (Some(before), Some(overlap), true) = (before, &overlap, alone)
+        && !keeps_own(matter, before, overlap)?
     {
-        let entry = matter
-            .timeline()
+        let entry = timeline
             .iter()
             .rev()
             .find(|entry| entry.id == before)
             .copied();
         return reused(matter, before, entry, Vec::new(), false);
     }
+    let checkpoint = matter.after_turn_named(&meta, &named, &commands, overlap.as_ref())?;
     // Measured from its own start, a reused id's changes from `before` are not added.
     turn_checkpoint(matter, checkpoint, before.filter(|_| overlap.is_none()))
+}
+
+/// Whether the folder holds a change since `before` to a paper `overlap` names as the turn's own
+/// that its card would keep: one not logged since as an outside edit with the content it has.
+fn keeps_own(matter: &Matter, before: CheckpointId, overlap: &Overlap<'_>) -> Result<bool, Error> {
+    let changes = matter.compare(CompareSide::Checkpoint(before), CompareSide::Folder)?;
+    let changes = changes
+        .into_iter()
+        .map(FileChange::with_lawyer_edits)
+        .collect();
+    let (kept, _) = clauseo_matters::left_out(changes, overlap);
+    Ok(kept.iter().any(|change| {
+        let from = match change.change() {
+            ChangeKind::Renamed { from } => Some(from),
+            ChangeKind::Added
+            | ChangeKind::Modified
+            | ChangeKind::Deleted
+            | ChangeKind::Unknown { .. } => None,
+        };
+        [Some(change.path()), from]
+            .into_iter()
+            .flatten()
+            .any(|path| overlap.own.contains(path))
+    }))
 }
 
 /// A checkpoint the repair takes from the timeline, answered as R8 answers a reused id, with

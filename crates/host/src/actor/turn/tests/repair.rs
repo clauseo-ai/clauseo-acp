@@ -6,8 +6,8 @@
 
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
-    FileChange, FileChoice, FileDecision, HostCommand, MatterPath, StreamId, ThreadId, TurnEnded,
-    TurnId,
+    FileChange, FileChoice, FileDecision, HostCommand, MatterPath, StreamId, ThreadId,
+    ToolCallStarted, ToolCallStatus, ToolKind, ToolLocation, TurnEnded, TurnId,
 };
 
 use super::failures::{end_failing, until_ended};
@@ -285,10 +285,8 @@ fn a_reused_end_then_another_threads_turn_never_takes_its_checkpoint() {
     rig.finish();
 }
 
-/// Measured from its own start, the open turn leaves the other turn's notes.txt off its card;
-/// the lawyer's edit, which no checkpoint holds yet, is on it, flagged, so it is on a card.
 #[test]
-fn a_reused_end_then_another_turn_and_lawyer_edits_puts_the_edit_on_its_card() {
+fn a_reused_end_then_another_turn_and_lawyer_edits_gives_an_empty_step() {
     let mut rig = Rig::start("turn-repair-reused-edited", "");
     let (first, first_turn, before, _) = reused_end_then_another_turn(&mut rig);
     // The lawyer edits the folder before the restart; no checkpoint holds it yet.
@@ -298,8 +296,63 @@ fn a_reused_end_then_another_turn_and_lawyer_edits_puts_the_edit_on_its_card() {
     let mut rig = rig.restart(1);
     let log = rig.log(first);
     let end = ended(&log, first_turn).expect("the repair ended the turn");
+    assert_eq!(end.checkpoint_after, Some(before), "an empty step");
+    assert_eq!(changed(&log), []);
+    // The lawyer's edit is left for the next checkpoint to find as outside edits.
+    assert_eq!(rig.recorded().len(), checkpoints);
+    rig.finish();
+}
+
+/// An edit call of `turn` naming `path`, still pending.
+fn edit_call(rig: &mut Rig, turn: TurnId, path: &str) -> DomainEvent {
+    let now = rig.actor.now().wall;
+    DomainEvent::ToolCallStarted(Box::new(ToolCallStarted {
+        turn,
+        tool_call: rig.actor.ids.mint(now).unwrap(),
+        acp_id: "t-memo".into(),
+        title: format!("Write {path}").into(),
+        kind: ToolKind::Edit,
+        tool_name: None,
+        status: ToolCallStatus::Pending,
+        locations: vec![ToolLocation::Inside {
+            path: MatterPath::new(path).unwrap(),
+            line: None,
+        }],
+        raw_input: None,
+        raw_output: None,
+        content: Vec::new(),
+    }))
+}
+
+/// Alone with later checkpoints, a turn whose own call named the paper that changed since gets a
+/// step of its own: measured from its start, the paper is on its card and the later turn's
+/// notes.txt is left off it.
+#[test]
+fn a_reused_end_then_another_turn_and_its_own_paper_changed_puts_it_on_its_card() {
+    let mut rig = Rig::start("turn-repair-reused-own", "");
+    let first = rig.thread();
+    let first_turn = rig.running_turn(first);
+    let before = rig.last_recorded();
+    // Its edit call names memo.txt, which nothing writes before its end.
+    let call = edit_call(&mut rig, first_turn, "memo.txt");
+    rig.commit(first, vec![call]);
+    rig.settle_commits();
+    end_failing(&mut rig, first, 2);
+    assert!(
+        ended(&rig.log(first), first_turn).is_none(),
+        "the turn is open"
+    );
+    another_turn_writes(&mut rig, "notes.txt");
+    // Its write lands late, after the other turn ended.
+    rig.write_file("memo.txt", "Call the landlord.");
+    let checkpoints = rig.recorded().len();
+
+    let mut rig = rig.restart(1);
+    let log = rig.log(first);
+    let end = ended(&log, first_turn).expect("the repair ended the turn");
     assert_ne!(end.checkpoint_after, Some(before), "a step of its own");
-    assert_eq!(changed(&log), [("memo.txt".to_owned(), true)]);
+    let on_card: Vec<String> = changed(&log).into_iter().map(|(path, _)| path).collect();
+    assert_eq!(on_card, ["memo.txt"]);
     let beside: Vec<MatterPath> = log
         .iter()
         .filter_map(|event| {
@@ -311,7 +364,6 @@ fn a_reused_end_then_another_turn_and_lawyer_edits_puts_the_edit_on_its_card() {
         .flatten()
         .collect();
     assert_eq!(beside, [MatterPath::new("notes.txt").unwrap()]);
-    // The new checkpoint holds the lawyer's edit.
     assert_eq!(rig.recorded().len(), checkpoints + 1);
     rig.finish();
 }
