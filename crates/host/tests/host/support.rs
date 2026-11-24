@@ -387,6 +387,7 @@ impl Drop for Running {
 /// `SendPrompt` with a text prompt and the default delivery.
 pub(crate) fn send_prompt(thread: ThreadId, prompt: &str) -> HostCommand {
     HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: text(prompt),
         delivery: DeliveryRequest::Queue,

@@ -178,6 +178,7 @@ fn send_with(host: &Running, thread: ThreadId, prompt: &str, config: &[(&str, &s
         content: text(prompt),
         delivery: DeliveryRequest::Queue,
         config: Some(picks(config)),
+        agent: None,
     });
     let CommandOutcome::PromptAccepted { turn, .. } = outcome else {
         panic!("SendPrompt answered {outcome:?}");

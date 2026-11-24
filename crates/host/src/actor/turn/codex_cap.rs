@@ -11,7 +11,7 @@
 //! A steer carries no note. Any other agent's prompts pass; Claude's own refusal ends its turn
 //! `TooLong`.
 
-use clauseo_protocol::{AgentKind, ContentBlock, ErrorCode, ThreadId};
+use clauseo_protocol::{AgentId, AgentKind, ContentBlock, ErrorCode, ThreadId};
 
 use super::super::Actor;
 use crate::codex_input::{CODEX_MAX_INPUT_CHARS, codex_input_chars};
@@ -24,11 +24,15 @@ pub(super) fn refuse(
     thread: ThreadId,
     blocks: &[ContentBlock],
 ) -> Result<(), Error> {
-    let codex = actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
-    if !codex {
+    match actor.threads.get(&thread) {
+        Some(entry) => refuse_to(&entry.row.agent, blocks),
+        None => Ok(()),
+    }
+}
+
+/// [`refuse`] for a prompt to `agent`: the thread's, or the one a message switches it to.
+pub(super) fn refuse_to(agent: &AgentId, blocks: &[ContentBlock]) -> Result<(), Error> {
+    if AgentKind::of(agent) != Some(AgentKind::Codex) {
         return Ok(());
     }
     let chars = codex_input_chars(blocks);

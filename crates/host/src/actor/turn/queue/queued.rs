@@ -115,7 +115,7 @@ pub(super) fn wait_late(
     ctx: CommandCtx,
     thread: ThreadId,
     ahead: Option<TurnId>,
-    blocks: Vec<ContentBlock>,
+    (blocks, agent): super::Prompt,
     delivery: DeliveryRequest,
 ) -> Result<(), Error> {
     let forced = delivery != DeliveryRequest::Queue;
@@ -139,6 +139,7 @@ pub(super) fn wait_late(
                 content,
                 forced,
                 host_held: false,
+                agent,
             };
             if forced {
                 queue.turns.push_front(queued);

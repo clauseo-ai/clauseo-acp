@@ -29,6 +29,8 @@ pub(super) enum StopCause {
     /// Its connection was already gone when the stop came, which only ends a process that
     /// outlived its pipes: the exit report's reason, as if it had exited first.
     Closed,
+    /// The thread moves to another agent (`switch.rs`): `Switched`.
+    Switched,
 }
 
 /// Stops an agent whose connection is gone; `waiting` goes to the agent started after its
@@ -75,6 +77,18 @@ pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
         && agent.stage != Stage::Stopping
     {
         agent.stop_cause = StopCause::IdleStopped;
+    }
+    stop(actor, thread);
+}
+
+/// Stops `thread`'s agent for a switch to another agent (`switch.rs`) with the shutdown ladder:
+/// its `Ended` logs `AgentSessionDetached { reason: Switched }`, unless its connection was
+/// already gone. An idle stop under way becomes the switch's.
+pub(in super::super) fn switch_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && matches!(agent.stop_cause, StopCause::Asked | StopCause::IdleStopped)
+    {
+        agent.stop_cause = StopCause::Switched;
     }
     stop(actor, thread);
 }
@@ -161,6 +175,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
                 StopCause::Asked => DetachReason::Closed,
                 StopCause::Restarting => DetachReason::Restarting,
                 StopCause::IdleStopped => DetachReason::IdleStopped,
+                StopCause::Switched => DetachReason::Switched,
                 // It was gone before the stop: the exit is its own, not a close.
                 StopCause::Closed => report,
             }
@@ -220,11 +235,18 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         (_, Some(reason)) => log_detach(actor, thread, reason),
         (_, None) => {}
     }
+    start_after(actor, thread, after_stop);
+    super::super::sign_in::agent_ended(actor, thread, unresponsive);
+    actor.release(StreamId::Thread(thread));
+}
+
+/// After an agent's end: a new agent for the work that came while it stopped, or a switch that
+/// waited for the end goes on (`switch.rs`).
+fn start_after(actor: &mut Actor, thread: ThreadId, after_stop: Vec<Waiting>) {
     if !after_stop.is_empty() {
         start(actor, thread, after_stop);
     }
-    super::super::sign_in::agent_ended(actor, thread, unresponsive);
-    actor.release(StreamId::Thread(thread));
+    super::super::switch::agent_ended(actor, thread);
 }
 
 /// An agent-started turn of `thread` that had not started when its agent ended was opened for that
@@ -292,6 +314,7 @@ fn reason_kind(reason: &DetachReason) -> (&'static str, Option<i32>) {
         DetachReason::Closed => ("closed", None),
         DetachReason::Restarting => ("restarting", None),
         DetachReason::IdleStopped => ("idle_stopped", None),
+        DetachReason::Switched => ("switched", None),
         DetachReason::Unknown { .. } => ("unknown", None),
     }
 }

@@ -296,7 +296,9 @@ fn user(turn_id: TurnId, message_id: u64, content: Vec<ContentBlock>) -> DomainE
         message: message(message_id),
         acp_message_id: None,
         content,
+        copy_of: None,
         delivery: Delivery::Queue,
+        config: std::collections::BTreeMap::new(),
     })
 }
 
@@ -304,6 +306,8 @@ fn started(turn_id: TurnId) -> DomainEvent {
     DomainEvent::TurnStarted(TurnStarted {
         turn: turn_id,
         checkpoint_before: id::<CheckpointId>(30),
+        model: None,
+        effort: None,
     })
 }
 
@@ -358,6 +362,7 @@ fn files_changed(turn_id: TurnId, paths: &[&str]) -> DomainEvent {
         turn: turn_id,
         files: paths.iter().map(|path| file(path)).collect(),
         skipped: Vec::new(),
+        beside: Vec::new(),
     })
 }
 
@@ -367,6 +372,8 @@ fn ended(turn_id: TurnId, stop: StopReason) -> DomainEvent {
         stop,
         usage: None,
         checkpoint_after: None,
+        code_mode: false,
+        cause: None,
     })
 }
 

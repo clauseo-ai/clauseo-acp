@@ -209,6 +209,7 @@ fn a_retried_end_keeps_the_after_turn_checkpoint() {
 
 fn prompt(thread: ThreadId) -> HostCommand {
     HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::Text {
             text: "Summarise the lease.".to_owned(),

@@ -534,6 +534,8 @@ pub(super) fn after_events(
 /// turn ends here, whatever its stop, so the usage counts' `answer_ended` is counted here once,
 /// from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
+    // A handover whose prompt never went out ends with the turn (`switch.rs`).
+    super::switch::settle_failed(actor, thread);
     let now = actor.now().mono;
     let mut requeue = None;
     let matter = matter_of(actor, thread).ok();

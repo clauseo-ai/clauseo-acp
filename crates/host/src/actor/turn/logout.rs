@@ -15,7 +15,7 @@
 //! advertised either; a typed `/login` reaches the agent only when the guard allows it. The
 //! host never calls `login` itself, and calls `authenticate` only for a key (`key_retry.rs`).
 
-use clauseo_protocol::{AgentKind, AvailableCommand, ContentBlock, ErrorCode, ThreadId};
+use clauseo_protocol::{AgentId, AgentKind, AvailableCommand, ContentBlock, ErrorCode, ThreadId};
 
 use super::super::Actor;
 use crate::error::Error;
@@ -51,7 +51,19 @@ pub(super) fn refuse(
     thread: ThreadId,
     blocks: &[ContentBlock],
 ) -> Result<(), Error> {
-    if kind(actor, thread) != Some(AgentKind::Codex) {
+    match actor.threads.get(&thread) {
+        Some(entry) => refuse_to(actor, &entry.row.agent, blocks),
+        None => Ok(()),
+    }
+}
+
+/// [`refuse`] for a prompt to `agent`: the thread's, or the one a message switches it to.
+pub(super) fn refuse_to(
+    actor: &Actor,
+    agent: &AgentId,
+    blocks: &[ContentBlock],
+) -> Result<(), Error> {
+    if AgentKind::of(agent) != Some(AgentKind::Codex) {
         return Ok(());
     }
     let typed = |name: &str| {
@@ -64,10 +76,7 @@ pub(super) fn refuse(
             | ContentBlock::Unsupported { .. } => false,
         })
     };
-    let guarded = actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| actor.wiring.sign_in.guards(&entry.row.agent));
+    let guarded = actor.wiring.sign_in.guards(agent);
     if guarded && typed(LOGIN) {
         return Err(Error::refused(
             ErrorCode::SigninLoginShared,

@@ -54,7 +54,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     };
     current.phase = TurnPhase::Prompting;
-    let content = with_note(note, &current.prompt);
+    // After a switch, the handover goes before the lawyer's words (`switch.rs`).
+    let prompt = super::switch::prompt(current);
+    let content = with_note(note, &prompt);
     let cancelled = current.cancelled;
     // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
     if let Err(error) = super::codex_cap::refuse(actor, thread, &content) {
@@ -73,6 +75,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     super::note::sent(actor, thread, turn);
+    super::switch::delivered(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;

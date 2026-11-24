@@ -120,6 +120,8 @@ pub(crate) enum LogFor {
     },
     /// The undo note's restores: those of the thread's matter's log from here (`note.rs`).
     Restores(super::note::Bound),
+    /// The handover of a switch of the thread's agent for `turn` (`switch.rs`).
+    Switch(TurnId),
 }
 
 impl super::JobKind {

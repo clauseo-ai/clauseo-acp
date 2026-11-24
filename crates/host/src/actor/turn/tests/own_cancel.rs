@@ -343,6 +343,7 @@ fn stop_while_an_agent_started_turn_checkpoints_with_a_prompt_queued() {
 /// Sends a prompt to `thread` as command `n`, delivered as `delivery`.
 fn send(rig: &mut Rig, n: u128, thread: ThreadId, delivery: DeliveryRequest) -> TurnId {
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::Text {
             text: "Read clause 9.".to_owned(),

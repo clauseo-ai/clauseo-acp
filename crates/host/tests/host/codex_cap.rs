@@ -78,6 +78,7 @@ fn prompt_with(
     delivery: DeliveryRequest,
 ) -> HostCommand {
     HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: text(question),
         delivery,
@@ -193,6 +194,7 @@ fn a_chatgpt_question_with_a_file_at_codex_s_cap_is_sent_and_one_over_is_refused
     )
     .unwrap();
     let with_file = |question: &str| HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![
             PromptBlock::Text {

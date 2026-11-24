@@ -47,6 +47,7 @@ pub(super) mod sign_in;
 mod skipped;
 mod state;
 mod steps;
+mod switch;
 mod text;
 mod timer;
 mod together;
@@ -154,6 +155,10 @@ pub(crate) struct TurnState {
     prompt_picks: prompt_picks::PromptPicks,
     /// The conversation's helpers, from its first one on (`helpers.rs`).
     helpers: Option<Box<helpers::Helpers>>,
+    /// The agent the thread switched from, while the handover a switch logged has not reached
+    /// the new agent: the turn meant to carry it failed first, so the next one does
+    /// (`switch.rs`). In memory only.
+    handoff_owed: Option<clauseo_protocol::AgentId>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -277,6 +282,8 @@ struct Current {
     own: Option<own_turn::Own>,
     /// The other turns of the matter that ran beside it (`together.rs`).
     overlap: together::Overlap,
+    /// Its message named another agent: the thread switches to it at step 2 (`switch.rs`).
+    switch: Option<Box<switch::Switch>>,
 }
 
 /// Where a current turn is.
@@ -339,6 +346,8 @@ enum Then {
     LimitStop(TurnId),
     /// The commit logging an undo: update the note, let the matter go.
     Undone,
+    /// The commit switching the thread's agent for `turn` (`switch.rs`): launch the new one.
+    Switched(TurnId),
     /// A queue command's commit (`queue.rs`).
     Queue(queue::After),
     /// A permission answer: tell the agent.
@@ -422,6 +431,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
                 undo_preview::on_log(actor, thread, turn, reply, result);
             }
             LogFor::Restores(since) => note::on_restores(actor, thread, since, result),
+            LogFor::Switch(turn) => switch::on_log(actor, thread, turn, result),
         },
     }
 }
@@ -481,6 +491,7 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
             super::limits::stop_committed(actor, thread, turn, outcome.is_ok());
         }
         (Then::Queue(after), outcome) => queue::committed(actor, thread, after, outcome.is_ok()),
+        (Then::Switched(turn), outcome) => switch::committed(actor, thread, turn, outcome),
         (Then::Undone, Ok(())) => undo::on_logged(actor, thread),
         (Then::Undone, Err(_)) => undo::on_failed(actor, thread),
         (Then::Permission { agent, key, option }, Ok(())) => {

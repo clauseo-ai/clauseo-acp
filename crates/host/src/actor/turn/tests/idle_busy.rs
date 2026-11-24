@@ -63,6 +63,7 @@ fn send(rig: &mut Rig, n: u128, thread: ThreadId, text: &str, delivery: Delivery
         text: text.to_owned(),
     }];
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content,
         delivery,
