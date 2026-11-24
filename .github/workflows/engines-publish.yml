@@ -17,8 +17,12 @@
 # - Lanes: `engines` (the release `engines`, environment `release`, the app's updater key, apps =
 #   tauri.conf.json's version plus the latest v<X.Y.Z> release's) and `engines-test` (the release
 #   `engines-test`, environment `release-test`, the throwaway test key, apps = the apps input).
-# - Seq: max(engines.seq, the live list's seq + 1); the live list is <lane>/engines.json (none is
-#   0), and the new seq must be above it. rollback_to=<n> publishes the archived <lane>-<n>.json
+# - Seq: engines.seq when the lane has no live list (<lane>/engines.json and its .sig both absent),
+#   else max(engines.seq, live + 1), where live comes only from a live list that verifies in plan
+#   (the lane's key, the exact trusted comment, the self-check); one file alone, or a list that
+#   does not verify, fails the run. The new seq must be above live and at most 2^16 above it (the
+#   verifier's ceiling); plan prints the choice and why, and publish re-downloads the live list
+#   right before signing and refuses if it is not the one plan saw. rollback_to=<n> publishes the archived <lane>-<n>.json
 #   again (its signature checked under the lane's key; its apps, pins and sizes kept) with seq =
 #   live + 1 and generated = now.
 # - Two jobs. `plan` (no environment, no secret, contents: read) builds and self-checks
@@ -72,6 +76,7 @@ jobs:
     outputs:
       seq: ${{ steps.plan.outputs.seq }}
       live_seq: ${{ steps.plan.outputs.live_seq }}
+      live_sha256: ${{ steps.plan.outputs.live_sha256 }}
       sha256: ${{ steps.plan.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,6 +119,7 @@ jobs:
       LANE: ${{ inputs.lane }}
       SEQ: ${{ needs.plan.outputs.seq }}
       LIVE_SEQ: ${{ needs.plan.outputs.live_seq }}
+      PLANNED_LIVE_SHA256: ${{ needs.plan.outputs.live_sha256 }}
       PLANNED_SHA256: ${{ needs.plan.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,6 +178,12 @@ jobs:
             fail "the $LANE lane's signing key is not the key of its public key"
           rm -rf "$dir"
           echo "probe: the $LANE key signs, and the lane's public key verifies it" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Right before signing: the live list (downloaded and verified again) is the one plan saw, by
+      # sha256 or both none, and SEQ is still above it and at most 2^16 above it. The repository is
+      # public, so the download needs no token.
+      - name: The live list is still the one plan saw
+        run: node .github/scripts/engines-publish.mjs --live-check
 
       # Exactly the checked file, and nothing else, with no --app-version.
       - name: Sign engines.json

@@ -9,17 +9,24 @@
 //   node .github/scripts/engines-publish.mjs --pubkey <lane> <out-file> [--root <dir>]
 //   node .github/scripts/engines-publish.mjs --check-signature <file> <public-key-file>
 //   node .github/scripts/engines-publish.mjs --self-check <file>
+//   node .github/scripts/engines-publish.mjs --live-check [--root <dir>]
 //
 // --plan reads LANE (engines or engines-test), ROLLBACK_TO (empty or a seq), APPS (engines-test
 // only: comma-separated exact versions), GITHUB_REPOSITORY and GH_TOKEN (optional, for the GitHub
 // API) from the environment, and writes <out-dir>/engines.json, canonical JSON (as
-// crates/agents/src/pins.rs writes it). The live list is the release asset <lane>/engines.json
-// (a 404 is seq 0). Its seq is max(engines.seq, live + 1); a rollback (ROLLBACK_TO=<n>) takes the
-// archived <lane>-<n>.json, whose signature must hold under the lane's key, and publishes its
-// apps, pins and sizes again with seq live + 1 and generated now. The new seq must be above the
-// live one. On the engines lane apps are tauri.conf.json's version and the latest published v*
+// crates/agents/src/pins.rs writes it). The live list is the release assets <lane>/engines.json
+// and its .sig: both absent is none; one alone, or a pair whose signature (the lane's key, the
+// exact trusted comment) or self-check fails, stops the plan, so an unverified seq is never used.
+// The seq is engines.seq with no live list, else max(engines.seq, live + 1); a rollback
+// (ROLLBACK_TO=<n>) takes the archived <lane>-<n>.json, whose signature must hold under the lane's
+// key, and publishes its apps, pins and sizes again with seq live + 1 and generated now. The new
+// seq must be above the live one and at most 2^16 above it (the verifier's ceiling). On the engines lane apps are tauri.conf.json's version and the latest published v*
 // release's (a 404 or a tag that is not v<X.Y.Z> adds none). Under GitHub Actions it writes seq,
-// live_seq and sha256 to $GITHUB_OUTPUT and what will be signed to $GITHUB_STEP_SUMMARY.
+// live_seq and live_sha256 (each `none` with no live list) and sha256 to $GITHUB_OUTPUT, and what
+// will be signed, with the seq choice, to $GITHUB_STEP_SUMMARY.
+// --live-check, run by publish right before signing, downloads and verifies the live list again
+// and refuses unless it is the one plan saw (PLANNED_LIVE_SHA256, or none) and SEQ is still above it
+// and within the ceiling.
 // --pubkey writes the lane's updater public key (Tauri's base64 form): engines, tauri.conf.json's
 // plugins.updater.pubkey; engines-test, crates/desktop/release/updater-test.pub (as release.yml's
 // test mode reads it for CLAUSEO_UPDATER_PUBKEY).
@@ -38,6 +45,8 @@ import { signatureCheck } from "./latest-json.mjs";
 export const FORMAT = "clauseo-engines/1";
 export const LANES = { engines: "release", "engines-test": "release-test" };
 export const MAX_SEQ = 2 ** 32;
+/** How far above the floor a list's seq may be (crates/engines refuses seq > floor + 2^16). */
+export const MAX_STEP = 2 ** 16;
 export const REGISTRY = "https://registry.npmjs.org/";
 export const DEPENDENCIES = ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"];
 export const OVERRIDES = ["@openai/codex"];
@@ -135,10 +144,25 @@ export function testApps(text) {
   return [...new Set(apps)];
 }
 
-/** Refuses unless `next` is above the live seq. */
+/** Refuses unless `next` is above the live seq (0 when there is no live list) and at most 2^16
+ * above it. */
 export function seqGate(next, live) {
   if (!(next > live)) throw new Error(`seq ${next} is not above the live list's ${live}`);
+  if (next > live + MAX_STEP) throw new Error(`seq ${next} is more than 2^16 above the live list's ${live}`);
   if (next > MAX_SEQ) throw new Error(`seq ${next} is above 2^32`);
+}
+
+/** The seq to publish: engines.seq with no live list, else max(engines.seq, live + 1). */
+export function chooseSeq(fileSeq, live) {
+  return live === null ? fileSeq : Math.max(fileSeq, live.seq + 1);
+}
+
+/** Refuses unless the live list now is the one plan saw (by sha256, or both none), and `seq` still
+ * passes the gate against it. */
+export function liveUnchanged(plannedSha256, now, seq) {
+  const got = now === null ? "none" : now.sha256;
+  if (got !== plannedSha256) throw new Error(`the live list changed since plan: ${plannedSha256} then, ${got} now`);
+  seqGate(seq, now === null ? 0 : now.seq);
 }
 
 /** RFC 3339 UTC to the second. */
@@ -172,18 +196,22 @@ export async function getText(fetchImpl, url, headers = {}) {
 
 export const assetUrl = (repo, lane, name) => `https://github.com/${repo}/releases/download/${lane}/${name}`;
 
-/** The live list's seq: 0 when the lane has none. */
-export async function liveSeq(fetchImpl, repo, lane) {
-  const text = await getText(fetchImpl, assetUrl(repo, lane, "engines.json"));
-  if (text === null) return 0;
-  let seq;
+/** The live list, verified: null when neither engines.json nor its .sig is on the release, else
+ * { seq, sha256 }. One without the other, a signature that fails under `pubkey` or a list that fails
+ * the self-check throws: an unverified seq is never used. */
+export async function liveList(fetchImpl, repo, lane, pubkey) {
+  const [json, sig] = await Promise.all(["engines.json", "engines.json.sig"].map((name) => getText(fetchImpl, assetUrl(repo, lane, name))));
+  if (json === null && sig === null) return null;
+  if (json === null || sig === null) throw new Error(`the live ${lane} release has ${json === null ? "engines.json.sig but no engines.json" : "engines.json but no engines.json.sig"}`);
+  const problems = engineSignatureProblems(Buffer.from(json), sig, pubkey);
+  if (problems.length) throw new Error(`the live ${lane}/engines.json does not verify: ${problems.join("; ")}`);
+  let list;
   try {
-    seq = JSON.parse(text).seq;
-  } catch {
-    throw new Error(`the live ${lane}/engines.json is not JSON`);
+    list = selfCheck(JSON.parse(json));
+  } catch (err) {
+    throw new Error(`the live ${lane}/engines.json: ${err.message}`);
   }
-  if (!Number.isSafeInteger(seq) || seq < 0) throw new Error(`the live ${lane}/engines.json's seq is not a whole number`);
-  return seq;
+  return { seq: list.seq, sha256: createHash("sha256").update(json).digest("hex") };
 }
 
 /** The latest release's tag (GitHub's `releases/latest`), null when there is none. */
@@ -337,37 +365,46 @@ export async function plan(root, { env, fetchImpl = fetch, now = new Date() }) {
   const repo = env.GITHUB_REPOSITORY;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? "")) throw new Error("GITHUB_REPOSITORY is not owner/name");
   if (lane === "engines" && env.APPS) throw new Error("apps is for the engines-test lane only");
-  const live = await liveSeq(fetchImpl, repo, lane);
+  const pubkey = lanePubkey(root, lane);
+  const live = await liveList(fetchImpl, repo, lane, pubkey);
+  const liveSeq = live === null ? 0 : live.seq;
+  const fileSeq = parseSeq(readFileSync(join(root, LIVE, "engines.seq"), "utf8"));
   const generated = stamp(now);
   let list;
   if (n !== null) {
-    if (n >= live) throw new Error(`rollback_to ${n} is not below the live seq ${live}`);
+    if (n >= liveSeq) throw new Error(`rollback_to ${n} is not below the live seq ${live === null ? "(none)" : liveSeq}`);
     const [json, sig] = await Promise.all(
       [`${lane}-${n}.json`, `${lane}-${n}.json.sig`].map((name) => getText(fetchImpl, assetUrl(repo, lane, name))),
     );
-    list = rebuildRollback(json, sig, lanePubkey(root, lane), { n, seq: live + 1, generated });
+    list = rebuildRollback(json, sig, pubkey, { n, seq: liveSeq + 1, generated });
   } else {
-    const fileSeq = parseSeq(readFileSync(join(root, LIVE, "engines.seq"), "utf8"));
     const apps =
       lane === "engines"
         ? enginesApps(JSON.parse(readFileSync(join(root, "crates/desktop/tauri.conf.json"), "utf8")).version, await latestTag(fetchImpl, repo, env.GH_TOKEN))
         : testApps(env.APPS);
-    list = buildList(root, { seq: Math.max(fileSeq, live + 1), apps, generated });
+    list = buildList(root, { seq: chooseSeq(fileSeq, live), apps, generated });
   }
-  seqGate(list.seq, live);
+  seqGate(list.seq, liveSeq);
   selfCheck(list);
   const text = canonical(list);
   const sha256 = createHash("sha256").update(text).digest("hex");
-  return { list, text, sha256, live, summary: summary({ lane, list, text, sha256, live, n, sha: env.GITHUB_SHA }) };
+  return { list, text, sha256, live, fileSeq, n, summary: summary({ lane, list, text, sha256, live, fileSeq, n, sha: env.GITHUB_SHA }) };
+}
+
+/** `engines.seq N, live M (verified, sha256 …) or none, chosen K`, and why. */
+export function seqChoice({ fileSeq, live, seq, n = null }) {
+  const liveText = live === null ? "live none" : `live ${live.seq} (verified, sha256 ${live.sha256})`;
+  const why = n !== null ? `rollback to ${n}: live + 1` : live === null ? "no live list: engines.seq" : seq === fileSeq ? "engines.seq is above live" : "live + 1";
+  return `engines.seq ${fileSeq}, ${liveText}, chosen ${seq} (${why})`;
 }
 
 /** What will be signed, for the job summary. */
-export function summary({ lane, list, text, sha256, live, n, sha }) {
+export function summary({ lane, list, text, sha256, live, fileSeq, n, sha }) {
   const pins = { ...list.package_json.dependencies, ...list.package_json.overrides };
   return [
     `### ${lane}: engines.json to sign${n === null ? "" : ` (rollback to ${n})`}`,
     "",
-    `- seq: ${live} → ${list.seq}`,
+    `- seq: ${seqChoice({ fileSeq, live, seq: list.seq, n })}`,
     ...Object.entries(pins).map(([name, v]) => `- \`${name}\` ${v}`),
     `- apps: ${list.apps.join(", ")}`,
     `- commit: ${sha ?? "(local)"}`,
@@ -394,9 +431,18 @@ export async function main(argv, { env = process.env, fetchImpl = fetch, now = n
     const p = await plan(root, { env, fetchImpl, now });
     mkdirSync(args[1], { recursive: true });
     writeFileSync(join(args[1], "engines.json"), p.text);
-    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `seq=${p.list.seq}\nlive_seq=${p.live}\nsha256=${p.sha256}\n`);
+    const [liveSeq, liveSha] = p.live === null ? ["none", "none"] : [p.live.seq, p.live.sha256];
+    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `seq=${p.list.seq}\nlive_seq=${liveSeq}\nlive_sha256=${liveSha}\nsha256=${p.sha256}\n`);
     if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, p.summary);
-    log(`engines.json seq ${p.live} -> ${p.list.seq}, sha256 ${p.sha256}`);
+    log(`${seqChoice({ fileSeq: p.fileSeq, live: p.live, seq: p.list.seq, n: p.n })}; sha256 ${p.sha256}`);
+    return 0;
+  }
+  if (args[0] === "--live-check" && args.length === 1) {
+    const lane = parseLane(env.LANE);
+    if (!/^[1-9]\d*$/.test(env.SEQ ?? "") || !/^([0-9a-f]{64}|none)$/.test(env.PLANNED_LIVE_SHA256 ?? "")) throw new Error("SEQ or PLANNED_LIVE_SHA256 is not plan's output");
+    const now = await liveList(fetchImpl, env.GITHUB_REPOSITORY, lane, lanePubkey(root, lane));
+    liveUnchanged(env.PLANNED_LIVE_SHA256, now, Number(env.SEQ));
+    log(`live check: the live ${lane} list is still ${env.PLANNED_LIVE_SHA256}; seq ${env.SEQ} passes`);
     return 0;
   }
   if (args[0] === "--pubkey" && args.length === 3) {
@@ -415,7 +461,7 @@ export async function main(argv, { env = process.env, fetchImpl = fetch, now = n
     log(`self-check: ${args[1]} holds (seq ${list.seq})`);
     return 0;
   }
-  log("usage: engines-publish.mjs --plan <out-dir> | --pubkey <lane> <out-file> | --check-signature <file> <key-file> | --self-check <file>");
+  log("usage: engines-publish.mjs --plan <out-dir> | --live-check | --pubkey <lane> <out-file> | --check-signature <file> <key-file> | --self-check <file>");
   return 2;
 }
 

@@ -68,6 +68,12 @@ function fakeFetch(files) {
   return impl;
 }
 const live = (lane) => e.assetUrl(REPO, lane, "engines.json");
+const liveSig = (lane) => e.assetUrl(REPO, lane, "engines.json.sig");
+/** A live list at `seq` on `lane`, signed by `key`: the two release assets. */
+function liveFiles(key, lane, seq, { sign = (text) => key.sign(Buffer.from(text)), change = (l) => l } = {}) {
+  const text = e.canonical(change({ ...good(), seq }));
+  return { [live(lane)]: text, [liveSig(lane)]: sign(text) };
+}
 const API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 // A checkout with a test key standing in for both lanes' public keys.
@@ -107,7 +113,7 @@ test("the plan builds the live pair as canonical JSON with SIZES, seq and apps",
   const c = checkout(key);
   try {
     const p = await e.plan(c.root, { env: { LANE: "engines", GITHUB_REPOSITORY: REPO }, fetchImpl: fakeFetch({}), now: NOW });
-    assert.equal(p.live, 0);
+    assert.equal(p.live, null);
     assert.equal(p.list.seq, 2);
     assert.equal(p.list.generated, "2026-11-24T06:00:00Z");
     assert.deepEqual(p.list.apps, ["0.0.0"]);
@@ -121,7 +127,7 @@ test("the plan builds the live pair as canonical JSON with SIZES, seq and apps",
     assert.ok(p.text.endsWith("}\n") && !p.text.endsWith("\n\n"));
     assert.deepEqual(Object.keys(JSON.parse(p.text)), ["apps", "format", "generated", "package_json", "package_lock", "seq", "sizes"]);
     assert.equal(p.sha256, createHash("sha256").update(p.text).digest("hex"));
-    for (const want of ["seq: 0 → 2", "`@agentclientprotocol/codex-acp` 2.10.0", "apps: 0.0.0", p.sha256, "<details>", '"format": "clauseo-engines/1"']) {
+    for (const want of ["seq: engines.seq 2, live none, chosen 2 (no live list: engines.seq)", "`@agentclientprotocol/codex-acp` 2.10.0", "apps: 0.0.0", p.sha256, "<details>", '"format": "clauseo-engines/1"']) {
       assert.ok(p.summary.includes(want), want);
     }
   } finally {
@@ -171,7 +177,7 @@ test("apps through the plan: the API's latest release, an apps input refused on 
     const quiet = fakeFetch({});
     const t = await e.plan(c.root, { env: { LANE: "engines-test", APPS: "0.0.0-dev.abcdef0", GITHUB_REPOSITORY: REPO }, fetchImpl: quiet, now: NOW });
     assert.deepEqual(t.list.apps, ["0.0.0-dev.abcdef0"]);
-    assert.deepEqual(quiet.seen.map((s) => s.url), [live("engines-test")], "the test lane reads no API");
+    assert.deepEqual(quiet.seen.map((s) => s.url), [live("engines-test"), liveSig("engines-test")], "the test lane reads no API");
     await assert.rejects(e.plan(c.root, { env: { LANE: "beta", GITHUB_REPOSITORY: REPO }, fetchImpl: py, now: NOW }), /lane is engines or engines-test/);
     await assert.rejects(e.plan(c.root, { env: { GITHUB_REPOSITORY: REPO }, fetchImpl: fakeFetch({ [API]: 500 }), now: NOW }), /HTTP 500/);
   } finally {
@@ -181,17 +187,63 @@ test("apps through the plan: the API's latest release, an apps input refused on 
 
 // ---- the seq gate ----
 
-test("the seq gate: a 404 is 0, and only a seq above the live one passes", async () => {
-  assert.equal(await e.liveSeq(fakeFetch({}), REPO, "engines"), 0);
-  assert.equal(await e.liveSeq(fakeFetch({ [live("engines")]: '{"seq": 7}' }), REPO, "engines"), 7);
-  await assert.rejects(e.liveSeq(fakeFetch({ [live("engines")]: "<html>" }), REPO, "engines"), /not JSON/);
-  await assert.rejects(e.liveSeq(fakeFetch({ [live("engines")]: '{"seq": -1}' }), REPO, "engines"), /whole number/);
-  await assert.rejects(e.liveSeq(fakeFetch({ [live("engines")]: 403 }), REPO, "engines"), /HTTP 403/);
+test("the live list: none when both files are absent, else verified or the plan stops", async () => {
+  const key = makeKey();
+  const pub = key.pub;
+  assert.equal(await e.liveList(fakeFetch({}), REPO, "engines", pub), null);
+  const files = liveFiles(key, "engines", 7);
+  const got = await e.liveList(fakeFetch(files), REPO, "engines", pub);
+  assert.deepEqual(got, { seq: 7, sha256: createHash("sha256").update(files[live("engines")]).digest("hex") });
+  const bad = async (f, pattern) => assert.rejects(e.liveList(fakeFetch(f), REPO, "engines", pub), pattern);
+  await bad({ [live("engines")]: files[live("engines")] }, /engines\.json but no engines\.json\.sig/);
+  await bad({ [liveSig("engines")]: files[liveSig("engines")] }, /engines\.json\.sig but no engines\.json/);
+  await bad(liveFiles(key, "engines", 7, { sign: (text) => makeKey().sign(Buffer.from(text)) }), /does not verify: the signature is by another key/);
+  await bad(liveFiles(key, "engines", 7, { sign: (text) => key.sign(Buffer.from(text), "timestamp:1\tfile:engines.json\tversion:0.1.0") }), /does not verify: the trusted comment is not/);
+  await bad({ ...files, [live("engines")]: files[live("engines")].replace('"seq": 7', '"seq": 9') }, /does not verify: the signature does not match the file/);
+  await bad(liveFiles(key, "engines", 7, { change: (l) => ({ ...l, apps: [] }) }), /the live engines\/engines\.json: self-check: apps is empty/);
+  await bad({ ...files, [liveSig("engines")]: 403 }, /HTTP 403/);
+});
+
+test("the seq gate: above live, at most 2^16 above it, at most 2^32", () => {
   e.seqGate(1, 0);
   e.seqGate(3, 2);
+  e.seqGate(2 + e.MAX_STEP, 2);
   assert.throws(() => e.seqGate(2, 2), /not above the live list's 2/);
   assert.throws(() => e.seqGate(1, 2), /not above/);
-  assert.throws(() => e.seqGate(e.MAX_SEQ + 1, 2), /2\^32/);
+  assert.throws(() => e.seqGate(3 + e.MAX_STEP, 2), /more than 2\^16 above the live list's 2/);
+  assert.throws(() => e.seqGate(e.MAX_STEP + 1, 0), /more than 2\^16/);
+  assert.throws(() => e.seqGate(e.MAX_SEQ + 1, e.MAX_SEQ), /2\^32/);
+  assert.equal(e.chooseSeq(5, null), 5);
+  assert.equal(e.chooseSeq(5, { seq: 4 }), 5);
+  assert.equal(e.chooseSeq(5, { seq: 5 }), 6);
+  assert.equal(e.seqChoice({ fileSeq: 2, live: { seq: 6, sha256: "ab" }, seq: 7 }), "engines.seq 2, live 6 (verified, sha256 ab), chosen 7 (live + 1)");
+  assert.equal(e.seqChoice({ fileSeq: 8, live: { seq: 6, sha256: "ab" }, seq: 8 }), "engines.seq 8, live 6 (verified, sha256 ab), chosen 8 (engines.seq is above live)");
+});
+
+test("publish's live check: the live list must be the one plan saw, and the seq still pass", async () => {
+  const sha = "a".repeat(64);
+  e.liveUnchanged("none", null, 2);
+  e.liveUnchanged(sha, { seq: 6, sha256: sha }, 7);
+  assert.throws(() => e.liveUnchanged("none", { seq: 6, sha256: sha }, 7), /changed since plan: none then, a{64} now/);
+  assert.throws(() => e.liveUnchanged(sha, null, 7), /changed since plan: a{64} then, none now/);
+  assert.throws(() => e.liveUnchanged(sha, { seq: 6, sha256: "b".repeat(64) }, 7), /changed since plan/);
+  assert.throws(() => e.liveUnchanged(sha, { seq: 7, sha256: sha }, 7), /not above/);
+  assert.throws(() => e.liveUnchanged(sha, { seq: 6, sha256: sha }, 7 + e.MAX_STEP), /more than 2\^16/);
+  // From the command line, against the real download and verification.
+  const key = makeKey();
+  const c = checkout(key);
+  try {
+    const files = liveFiles(key, "engines", 6);
+    const liveSha = createHash("sha256").update(files[live("engines")]).digest("hex");
+    const run = (env, f) => e.main(["--root", c.root, "--live-check"], { env: { GITHUB_REPOSITORY: REPO, LANE: "engines", ...env }, fetchImpl: fakeFetch(f), log: () => {} });
+    assert.equal(await run({ SEQ: "7", PLANNED_LIVE_SHA256: liveSha }, files), 0);
+    assert.equal(await run({ SEQ: "2", PLANNED_LIVE_SHA256: "none" }, {}), 0);
+    await assert.rejects(run({ SEQ: "7", PLANNED_LIVE_SHA256: "none" }, files), /changed since plan/);
+    await assert.rejects(run({ SEQ: "7", PLANNED_LIVE_SHA256: liveSha }, { [live("engines")]: files[live("engines")] }), /no engines\.json\.sig/);
+    await assert.rejects(run({ SEQ: "", PLANNED_LIVE_SHA256: liveSha }, files), /not plan's output/);
+  } finally {
+    c.done();
+  }
 });
 
 test("the plan's seq: engines.seq when above the live list, else live + 1", async () => {
@@ -199,12 +251,15 @@ test("the plan's seq: engines.seq when above the live list, else live + 1", asyn
   const c = checkout(key, { seq: "5\n" });
   try {
     const env = { GITHUB_REPOSITORY: REPO };
-    const at = async (n) => (await e.plan(c.root, { env, fetchImpl: fakeFetch(n === null ? {} : { [live("engines")]: `{"seq": ${n}}` }), now: NOW })).list.seq;
+    const at = async (n) => (await e.plan(c.root, { env, fetchImpl: fakeFetch(n === null ? {} : liveFiles(key, "engines", n)), now: NOW })).list.seq;
     assert.equal(await at(null), 5);
     assert.equal(await at(4), 5);
     assert.equal(await at(5), 6);
     assert.equal(await at(9), 10);
     await assert.rejects(at(e.MAX_SEQ), /2\^32/);
+    writeFileSync(join(c.root, e.LIVE, "engines.seq"), `${9 + e.MAX_STEP + 1}\n`);
+    await assert.rejects(at(9), /more than 2\^16 above the live list's 9/);
+    assert.equal(await at(10), 10 + e.MAX_STEP);
     writeFileSync(join(c.root, e.LIVE, "engines.seq"), "5 \n");
     await assert.rejects(at(null), /engines.seq is not one decimal integer/);
   } finally {
@@ -221,17 +276,17 @@ test("rollback: the archived list, its signature checked, again with seq live + 
     const old = { ...good(), seq: 3, generated: "2026-10-01T00:00:00Z", apps: ["0.1.0"] };
     const oldText = e.canonical(old);
     const files = {
-      [live("engines")]: '{"seq": 6}',
+      ...liveFiles(key, "engines", 6),
       [e.assetUrl(REPO, "engines", "engines-3.json")]: oldText,
       [e.assetUrl(REPO, "engines", "engines-3.json.sig")]: key.sign(Buffer.from(oldText)),
     };
     const env = { GITHUB_REPOSITORY: REPO, ROLLBACK_TO: "3" };
     const p = await e.plan(c.root, { env, fetchImpl: fakeFetch(files), now: NOW });
     assert.deepEqual(p.list, { ...old, seq: 7, generated: "2026-11-24T06:00:00Z" });
-    assert.ok(p.summary.includes("(rollback to 3)") && p.summary.includes("seq: 6 → 7"));
+    assert.ok(p.summary.includes("(rollback to 3)") && /seq: engines\.seq 2, live 6 \(verified, sha256 [0-9a-f]{64}\), chosen 7 \(rollback to 3: live \+ 1\)/.test(p.summary));
     // The test lane reads its own release and its own key file.
     const testFiles = {
-      [live("engines-test")]: '{"seq": 6}',
+      ...liveFiles(key, "engines-test", 6),
       [e.assetUrl(REPO, "engines-test", "engines-test-3.json")]: oldText,
       [e.assetUrl(REPO, "engines-test", "engines-test-3.json.sig")]: key.sign(Buffer.from(oldText)),
     };
@@ -247,8 +302,11 @@ test("rollback: the archived list, its signature checked, again with seq live + 
     await refuse((f) => (f[e.assetUrl(REPO, "engines", "engines-3.json.sig")] = other.sign(Buffer.from(oldText))), /signature: the signature is by another key/);
     await refuse((f) => (f[e.assetUrl(REPO, "engines", "engines-3.json")] = oldText.replace('"0.1.0"', '"9.9.9"')), /does not match the file/);
     await refuse((f) => delete f[e.assetUrl(REPO, "engines", "engines-3.json.sig")], /no archived list 3/);
-    await refuse((f) => (f[live("engines")] = '{"seq": 3}'), /rollback_to 3 is not below the live seq 3/);
-    await refuse((f) => delete f[live("engines")], /not below the live seq 0/);
+    await refuse((f) => Object.assign(f, liveFiles(key, "engines", 3)), /rollback_to 3 is not below the live seq 3/);
+    await refuse((f) => {
+      delete f[live("engines")];
+      delete f[liveSig("engines")];
+    }, /not below the live seq \(none\)/);
     const lie = e.canonical({ ...old, seq: 4 });
     await refuse((f) => {
       f[e.assetUrl(REPO, "engines", "engines-3.json")] = lie;
@@ -312,7 +370,7 @@ test("--plan writes engines.json and the step outputs; --pubkey writes each lane
     assert.equal(await e.main(["--root", c.root, "--plan", join(dir, "list")], { env, fetchImpl: fakeFetch({}), now: NOW, log: () => {} }), 0);
     const text = readFileSync(join(dir, "list/engines.json"), "utf8");
     const sha = createHash("sha256").update(text).digest("hex");
-    assert.equal(readFileSync(join(dir, "out"), "utf8"), `seq=2\nlive_seq=0\nsha256=${sha}\n`);
+    assert.equal(readFileSync(join(dir, "out"), "utf8"), `seq=2\nlive_seq=none\nlive_sha256=none\nsha256=${sha}\n`);
     assert.match(readFileSync(join(dir, "summary"), "utf8"), /commit: abc123/);
     assert.equal(await e.main(["--root", c.root, "--pubkey", "engines-test", join(dir, "pub")], { log: () => {} }), 0);
     assert.equal(readFileSync(join(dir, "pub"), "utf8"), `${key.pub}\n`);
@@ -431,14 +489,17 @@ test("engines-publish.yml: dispatch only, plan without secrets, publish the only
   assert.match(publish, /needs: plan\n/);
   assert.match(publish, /environment: \$\{\{ inputs\.lane == 'engines-test' && 'release-test' \|\| 'release' \}\}/);
   assert.match(publish, /PLANNED_SHA256: \$\{\{ needs\.plan\.outputs\.sha256 \}\}/);
+  assert.match(plan, /live_sha256: \$\{\{ steps\.plan\.outputs\.live_sha256 \}\}/);
+  assert.match(publish, /PLANNED_LIVE_SHA256: \$\{\{ needs\.plan\.outputs\.live_sha256 \}\}/);
 
   const ps = steps(publish);
   const index = (pattern) => ps.findIndex((s) => pattern.test(s));
-  const [download, recheck, install, probe, signing, verify, upload] = [
+  const [download, recheck, install, probe, liveCheck, signing, verify, upload] = [
     /download-artifact@/, /\[ "\$got" = "\$PLANNED_SHA256" \] \|\| fail/, /pnpm -C ui install --frozen-lockfile/,
-    /name: The lane's key signs/, /name: Sign engines\.json/, /name: Verify the signature/, /gh release upload/,
+    /name: The lane's key signs/, /engines-publish\.mjs --live-check/, /name: Sign engines\.json/, /name: Verify the signature/, /gh release upload/,
   ].map(index);
-  assert.ok(download >= 0 && download < recheck && recheck < install && install < probe && probe < signing && signing < verify && verify < upload, "publish's order");
+  assert.ok(download >= 0 && download < recheck && recheck < install && install < probe && probe < liveCheck && liveCheck === signing - 1 && signing < verify && verify < upload, "publish's order: the live check right before signing");
+  assert.doesNotMatch(ps[liveCheck], /secrets\.|TAURI_SIGNING|continue-on-error|if:/);
   // The key: the probe and the sign step only, through env:, by lane.
   const withKey = ps.filter((s) => /secrets\.|TAURI_SIGNING_PRIVATE_KEY/.test(s)).map((s) => /name: (.*)/.exec(s)[1]);
   assert.deepEqual(withKey, ["The lane's key signs, and the lane's public key verifies it", "Sign engines.json"]);

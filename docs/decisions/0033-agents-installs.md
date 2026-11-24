@@ -97,8 +97,11 @@ it with its `.sig` to a pre-release that is never marked latest. It runs by hand
 (`workflow_dispatch`): after an engine bump merges, the CI thread or stage F dispatches it. Two
 lanes: `engines` (environment `release`, the app's key; apps are `tauri.conf.json`'s version and
 the latest `v<X.Y.Z>` release's) and `engines-test` (environment `release-test`, the test key; apps
-from the dispatch input). The seq is max(`engines.seq`, the live list's + 1) and must be above the
-live list's, which the app's rollback rule needs. Each list is also kept as `<lane>-<seq>.json`;
+from the dispatch input). The live list counts only when it verifies in `plan` (the lane's key, the
+exact trusted comment, the self-check); one that does not, or one of its two files alone, fails the
+run. The seq is `engines.seq` with no live list, else max(`engines.seq`, live + 1), above the live
+seq and at most 2^16 above it (the verifier's ceiling), and `publish` refuses if the live list
+changed since `plan`. Each list is also kept as `<lane>-<seq>.json`;
 `rollback_to=<n>` publishes that one again, its signature checked, with seq live + 1. A `plan` job
 with no environment and no secret builds and self-checks the file and prints it in its summary;
 `publish`, the only job with the environment, refuses anything but that file's sha256, checks the
