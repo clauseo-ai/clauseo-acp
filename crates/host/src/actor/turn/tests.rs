@@ -48,6 +48,7 @@ mod start_timeout;
 mod sweep;
 mod title_window;
 mod together;
+mod together_order;
 mod tools_live;
 mod tools_prompt;
 mod undo;

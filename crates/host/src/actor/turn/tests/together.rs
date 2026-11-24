@@ -1,6 +1,6 @@
 //! Turns of two threads of one matter against a restore holding the matter: both wait for it
 //! with `TurnQueued` behind their own threads, and both start, together, when it ends; a cancel
-//! of one while it waits ends it once; a stop of the host keeps a waiting turn queued.
+//! of one while it waits ends it once; an abort of the host keeps a waiting turn queued.
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DomainEvent, HostCommand, PromptBlock, RestoreRequest,
@@ -202,16 +202,34 @@ fn a_turn_waiting_for_a_restore_stays_queued_across_a_stop() {
     let turn = send_prompt(&mut rig, 10, thread);
     until_queued(&mut rig, &[thread]);
 
-    // The process ends here, with the restore's reply never read.
+    // The process ends here, as an abort ends it, with the restore's reply never read: the
+    // turn's `TurnQueued` is durable and it has no `TurnStarted`.
     rig.held.clear();
     let mut rig = rig.restart_unstopped(1);
     let log = rig.log(thread);
     let kinds = log.iter().map(kind).collect::<Vec<_>>();
+    // As before turns of a matter ran together: still queued behind its own thread, behind no
+    // turn, not started, not ended, and the thread idle.
     assert_eq!(queued_behind(&log, turn), [thread], "{kinds:?}");
+    let last = log.iter().rev().find_map(|event| {
+        if let DomainEvent::TurnQueued(queued) = event
+            && queued.turn() == turn
+        {
+            return Some(queued.behind_turn());
+        }
+        None
+    });
+    assert_eq!(last, Some(None), "{kinds:?}");
     assert!(!started(&log, turn), "{kinds:?}");
     assert!(
         ends(&log, turn).is_empty(),
         "a queued turn is never ended: {kinds:?}"
     );
+    assert_eq!(
+        super::idle::status(&rig.actor, thread),
+        Some(clauseo_protocol::ThreadStatus::Idle)
+    );
+    let turns = &rig.actor.matters[&rig.matter()].turns;
+    assert!(turns.holder.is_none() && turns.running.is_empty());
     rig.finish();
 }

@@ -198,6 +198,11 @@ pub struct FilesChanged {
     pub files: Vec<FileChange>,
     /// The files it changed that were not versioned.
     pub skipped: Vec<SkippedFile>,
+    /// The papers that changed while it ran, left off its card as the work of other
+    /// conversations' answers running at the same time, sorted. An undo of the turn leaves them
+    /// as they are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beside: Vec<MatterPath>,
 }
 
 /// Why a turn failed. Detail only: the turn's `TurnEnded` still follows.

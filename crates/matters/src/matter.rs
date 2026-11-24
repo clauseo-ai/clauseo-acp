@@ -372,8 +372,10 @@ impl Matter {
     /// changes are then those from the turn's own before-turn checkpoint (`since`), each flagged
     /// as it would be against the folder there, and a change to a paper another answer named
     /// (`others`) is left out when no tool call or shell command of this turn wrote it, and
-    /// kept with `also_changed_by` naming those threads when one did. The checkpoint itself,
-    /// created or reused, is the same either way. `None` measures from the last checkpoint.
+    /// kept with `also_changed_by` naming those threads when one did; a paper only answers that
+    /// have ended named (`left`) is left out only while it holds what their card left it with.
+    /// The papers left out are in `Checkpoint::beside`. The checkpoint itself, created or
+    /// reused, is the same either way. `None` measures from the last checkpoint.
     pub fn after_turn_named(
         &mut self,
         meta: &TurnMeta,

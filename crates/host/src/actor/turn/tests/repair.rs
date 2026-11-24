@@ -372,7 +372,8 @@ fn assert_c_takes_notes(rig: &mut Rig, c: ThreadId, c_turn: TurnId) {
     assert_eq!(changed(&log), [("notes.txt".to_owned(), true)]);
 }
 
-/// A's turn ended with an empty step.
+/// A's turn ended with an empty step: the only open turn read, it does not know what started
+/// after it.
 fn assert_a_empty(rig: &mut Rig, a: ThreadId, a_turn: TurnId, before: CheckpointId) {
     let log = rig.log(a);
     let end = ended(&log, a_turn).expect("A's turn ended");
@@ -380,7 +381,20 @@ fn assert_a_empty(rig: &mut Rig, a: ThreadId, a_turn: TurnId, before: Checkpoint
     assert_eq!(changed(&log), []);
 }
 
-/// A gets an empty step; C, the turn that started last, gets the new checkpoint with notes.txt.
+/// A's turn, left open beside C's, ended measured from its own start: the folder as C's repair
+/// found it, notes.txt flagged, since no tool call of either named it.
+fn assert_a_from_its_start(rig: &mut Rig, a: ThreadId, a_turn: TurnId, before: CheckpointId) {
+    let recorded = rig.recorded();
+    let after = recorded.last().map(CheckpointRecorded::checkpoint);
+    assert_ne!(after, Some(before));
+    let log = rig.log(a);
+    let end = ended(&log, a_turn).expect("A's turn ended");
+    assert_eq!(end.checkpoint_after, after, "A's step ends where C's does");
+    assert_eq!(changed(&log), [("notes.txt".to_owned(), true)]);
+}
+
+/// Both open turns are measured from their own start: C, the turn that started last, takes the
+/// new checkpoint with notes.txt, and A the same one, with notes.txt flagged on both cards.
 fn assert_two_open_turns_repaired(c_thread_first: bool) {
     let name = if c_thread_first {
         "turn-repair-two-open-c-first"
@@ -389,8 +403,8 @@ fn assert_two_open_turns_repaired(c_thread_first: bool) {
     };
     let (rig, [(a, a_turn), (c, c_turn)], before) = two_open_turns(name, c_thread_first);
     let mut rig = rig.restart(1);
-    assert_a_empty(&mut rig, a, a_turn, before);
     assert_c_takes_notes(&mut rig, c, c_turn);
+    assert_a_from_its_start(&mut rig, a, a_turn, before);
     assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }

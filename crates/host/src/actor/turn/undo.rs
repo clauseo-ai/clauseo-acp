@@ -54,13 +54,15 @@ pub(super) fn undo_step(
     let busy = actor
         .threads
         .get(&thread)
-        .is_some_and(|entry| entry.turn.current.is_some());
+        .is_some_and(|entry| entry.turn.current.is_some())
+        || super::writer::closing_in(actor, matter);
     let turns = &mut actor
         .matters
         .get_mut(&matter)
         .ok_or_else(|| lost("a matter"))?
         .turns;
-    // Turns of other threads change the matter while they run: the step's files may be theirs.
+    // Turns of other threads change the matter while they run, and one that ended is not done
+    // with it until its card is logged: the step's files may be theirs.
     if busy || turns.holder.is_some() || !turns.running.is_empty() {
         return Err(Error::refused(
             ErrorCode::MatterTurnRunning,

@@ -299,6 +299,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
             .matter_worker(matter)?
             .send(after, MatterTag::Turn(job))?;
         actor.work.matter_jobs += 1;
+        together::after_sent(actor, matter, thread);
         Ok(())
     })();
     if let Err(error) = sent {
@@ -362,7 +363,11 @@ pub(super) fn on_after_turn(
     }
     let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
-            Ok(done) => after_events(actor, &mut close, matter, thread, done)?,
+            Ok(done) => {
+                after_events(actor, &mut close, matter, thread, done)?;
+                // Its card: the turns beside it keep what it credits (`together.rs`).
+                together::carded(actor, thread, &close);
+            }
             Err(error) => {
                 close
                     .failure
@@ -463,6 +468,7 @@ pub(super) fn after_events(
     let unrecorded = known::unrecorded(actor, matter, &done)?;
     let TurnCheckpoint { checkpoint, reused } = done;
     let mut files = checkpoint.changes;
+    let beside = checkpoint.beside;
     let id = checkpoint.outcome.id();
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded =
@@ -479,34 +485,29 @@ pub(super) fn after_events(
         let changes = reused.map(|reused| reused.changes).unwrap_or_default();
         files.extend(changes.into_iter().map(FileChange::with_lawyer_edits));
     }
-    if !files.is_empty() || !checkpoint.skipped.is_empty() {
+    // A card with no files still names the papers left off it as other answers' for an undo.
+    if !files.is_empty() || !checkpoint.skipped.is_empty() || !beside.is_empty() {
         close.files = Some(FilesChanged {
             turn,
             files,
             skipped: checkpoint.skipped,
+            beside,
         });
     }
     close.checkpoint_after = Some(id);
     Ok(())
 }
 
-/// The turn is over: it leaves its matter's running turns, each of which keeps the papers its
-/// card credits (`together.rs`); during shutdown the agent stops now. Every turn ends here,
-/// whatever its stop, so the usage counts' `answer_ended` is counted here once, from the close
-/// `failure::closing_sent` just kept.
+/// The turn is over: it leaves its matter's running turns, each of which that ran beside it
+/// keeps the papers its card credits (`together.rs`); during shutdown the agent stops now. Every
+/// turn ends here, whatever its stop, so the usage counts' `answer_ended` is counted here once,
+/// from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
     let mut requeue = None;
     let matter = matter_of(actor, thread).ok();
-    let credited = state(actor, thread)
-        .and_then(|state| {
-            let turn = state.current.as_ref()?.turn;
-            let close = &state.closing.as_ref()?.close;
-            (close.turn == turn).then(|| together::credited(close))
-        })
-        .unwrap_or_default();
     if let Some(matter) = matter {
-        together::ended(actor, matter, thread, &credited);
+        together::ended(actor, matter, thread);
     }
     let ended = state(actor, thread).and_then(|state| {
         let mut current = state.current.take()?;

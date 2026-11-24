@@ -2255,6 +2255,12 @@ export type FilesChanged = {
 	files: FileChange[],
 	/**  The files it changed that were not versioned. */
 	skipped: SkippedFile[],
+	/**
+	 *  The papers that changed while it ran, left off its card as the work of other
+	 *  conversations' answers running at the same time, sorted. An undo of the turn leaves them
+	 *  as they are.
+	 */
+	beside?: MatterPath[],
 };
 
 /**

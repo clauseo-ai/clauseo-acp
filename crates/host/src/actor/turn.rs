@@ -167,6 +167,9 @@ pub(crate) struct MatterTurns {
     holder: Option<Holder>,
     /// Threads whose turns have passed step 3 and not ended (`together.rs`).
     running: BTreeSet<ThreadId>,
+    /// The before- and after-turn checkpoints sent to the matter's thread so far, which runs
+    /// them in that order: whether two turns ran beside each other (`together.rs`).
+    sent: u64,
     /// Threads whose turns wait for the holder; all of them start when it lets go.
     queue: VecDeque<ThreadId>,
     /// Start-up repairs held until every thread of the matter has been looked at.

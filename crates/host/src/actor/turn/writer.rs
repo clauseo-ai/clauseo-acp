@@ -28,6 +28,15 @@ pub(crate) fn writer_busy(actor: &Actor, matter: MatterId) -> bool {
         })
 }
 
+/// Whether a thread of `matter` has a turn whose end is not durable yet: it has left the running
+/// turns, but its card is not logged, so an undo or a restore waits for it as for a running turn.
+pub(super) fn closing_in(actor: &Actor, matter: MatterId) -> bool {
+    actor
+        .threads
+        .values()
+        .any(|entry| entry.row.matter == matter && entry.turn.closing.is_some())
+}
+
 /// Takes `matter` alone for a relocate when it is free (see [`writer_busy`]); `false` when
 /// it is not.
 pub(crate) fn hold_for_relocate(actor: &mut Actor, matter: MatterId) -> bool {

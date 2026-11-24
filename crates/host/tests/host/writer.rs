@@ -1,7 +1,8 @@
 //! Conversations in one matter answer at the same time: a second thread's turn runs while the
 //! first's waits on a permission, with no `TurnQueued`; undo, restore, relocate and forget are
 //! refused while any turn runs; a turn's before-turn checkpoint leaves the papers a running
-//! turn wrote out of its outside edits; a crash while two turns run ends both at the next start.
+//! turn wrote out of its outside edits; a crash while two turns run ends both at the next start,
+//! each with its own paper on its card.
 //! A turn waiting for a restore or an undo is tested in the unit rig (`turn/tests/together.rs`).
 
 use clauseo_protocol::{
@@ -17,6 +18,8 @@ use crate::write;
 
 /// An agent that writes `notes/a.txt` and then waits on `perm-1`.
 const WRITES: &str = "writes-agent";
+/// An agent that writes `notes/b.txt` and then waits on `perm-1`.
+const WRITES_B: &str = "writes-b-agent";
 
 /// Thread A (`permission-kinds`) waits at `perm-1`; thread B (`prompt-stream`) in the same
 /// matter is made, its prompt not sent.
@@ -37,6 +40,7 @@ fn dir(test: &str) -> Dir {
             (PERM, Scenario::Bundled("permission-kinds")),
             (FAKE, Scenario::Bundled("prompt-stream")),
             (WRITES, Scenario::Bundled("write-then-wait")),
+            (WRITES_B, Scenario::Bundled("write-b-then-wait")),
         ],
     )
 }
@@ -191,8 +195,8 @@ fn a_crash_while_two_turns_run_ends_both_at_the_next_start() {
     let folder = dir.folder("m", &[("brief.txt", "Clause 4 draft\n")]);
     let matter = host.create_matter("m", &folder);
     let threads = [
-        host.create_thread(matter, PERM),
-        host.create_thread(matter, PERM),
+        host.create_thread(matter, WRITES),
+        host.create_thread(matter, WRITES_B),
     ];
     let mut turns = Vec::new();
     for thread in threads {
@@ -204,14 +208,32 @@ fn a_crash_while_two_turns_run_ends_both_at_the_next_start() {
     }
     host.abort();
 
+    // Each repair is measured from its own turn's start, without the other's paper: A started
+    // first, and B's before-turn checkpoint already holds A's note.
     let host = dir.start(1);
-    for (thread, turn) in threads.into_iter().zip(turns) {
+    let papers = ["notes/a.txt", "notes/b.txt"];
+    for ((thread, turn), (own, other)) in threads
+        .into_iter()
+        .zip(turns)
+        .zip([(papers[0], papers[1]), (papers[1], papers[0])])
+    {
         let mut events = host.events(StreamId::Thread(thread));
         events.until_caught_up();
         let ended = events
             .turn_ended(turn)
             .unwrap_or_else(|| panic!("not ended: {}", events.dump()));
         assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+        let changed = events
+            .files_changed(turn)
+            .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
+        let card: Vec<(&str, bool)> = changed
+            .files
+            .iter()
+            .map(|file| (file.path().as_str(), file.may_include_lawyer_edits()))
+            .collect();
+        assert_eq!(card, [(own, false)], "{}", events.dump());
+        let beside: Vec<&str> = changed.beside.iter().map(MatterPath::as_str).collect();
+        assert!(beside.iter().all(|path| *path == other), "{changed:?}");
     }
     host.shutdown();
 }

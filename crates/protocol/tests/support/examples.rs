@@ -415,6 +415,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
                 path: path("big.zip"),
                 reason: SkippedFileReason::OverSizeCap,
             }],
+            beside: vec![],
         }
         .into(),
         TurnFailed {

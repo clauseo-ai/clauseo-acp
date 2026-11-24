@@ -157,11 +157,13 @@ fn files_changed_after_the_turn_ended_updates_its_step() {
             turn,
             files: vec![],
             skipped: skipped.clone(),
+            beside: vec![],
         },
         FilesChanged {
             turn,
             files: file_changes().unwrap(),
             skipped,
+            beside: vec![],
         },
     ];
     for update in updates {
@@ -201,6 +203,7 @@ fn a_logged_file_in_a_dot_folder_counts_no_paper() {
         turn,
         files: files.clone(),
         skipped: vec![skipped.clone()],
+        beside: vec![],
     })
     .unwrap();
     let checkpoint = log.fresh().unwrap();
@@ -226,6 +229,7 @@ fn a_logged_file_in_a_dot_folder_counts_no_paper() {
         turn,
         files,
         skipped: vec![skipped],
+        beside: vec![],
     };
     let out = apply(&mut state, &log.push(late).unwrap()).unwrap();
     assert_eq!(out.changes, Vec::<ViewChange>::new());

@@ -309,12 +309,11 @@ impl Core {
                 self.history.save_cache(&mut cache)?;
                 self.cache = cache;
             }
-            return Ok(Checkpoint {
-                outcome: CheckpointOutcome::Reused(last),
-                commit: CommitId::of(last_commit),
-                changes: Report::changes(report, changes),
-                skipped,
-            });
+            let outcome = CheckpointOutcome::Reused(last);
+            let commit = CommitId::of(last_commit);
+            return Ok(Report::checkpoint(
+                report, outcome, commit, changes, skipped,
+            ));
         }
         if self.timeline.contains(spec.entry.id) {
             return Err(Error::DuplicateCheckpoint { id: spec.entry.id });
@@ -369,12 +368,14 @@ impl Core {
         self.cache = cache;
         self.cache_tree = Some(tree);
         self.timeline.push(spec.entry, commit, tree, reads);
-        Ok(Checkpoint {
-            outcome: CheckpointOutcome::Created(spec.entry.id),
-            commit: CommitId::of(commit),
-            changes: Report::changes(report, changes),
+        let outcome = CheckpointOutcome::Created(spec.entry.id);
+        Ok(Report::checkpoint(
+            report,
+            outcome,
+            CommitId::of(commit),
+            changes,
             skipped,
-        })
+        ))
     }
 
     /// Walks and commits in one go; never cancelled; a held file fails it.

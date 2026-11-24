@@ -331,6 +331,7 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             MatterTag::Turn(job),
         )?;
         actor.work.matter_jobs += 1;
+        super::together::before_sent(actor, matter, thread);
         Ok(())
     })();
     if let Err(error) = sent {
