@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_MODE,
-    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, claude_mode, guard_entry,
+    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, claude_mode, guard_entries,
     launch_env, mcp_control, session_meta,
 };
 use crate::write;
@@ -157,7 +157,8 @@ fn claude_starts_in_auto_and_forced_ask_in_default() {
     }
 }
 
-/// The guard's entry: the exec form with `--matter <folder>`, the matcher and the timeout,
+/// The guard's entry: the exec form with `--matter <folder>`, the matcher, the timeout and
+/// `onFailure: block`,
 /// appended after the hook's own entries, with `disableAllHooks: false` beside them; a hook value
 /// of another type at `settings`, `hooks` or `PreToolUse` is replaced, and a hook's
 /// `disableAllHooks: true` is overridden.
@@ -178,14 +179,15 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
             "type": "command",
             "command": program.to_str().unwrap(),
             "args": ["--pre-write-guard", "--matter", matter.to_str().unwrap()],
-            "timeout": 10,
+            "timeout": 30,
+            "onFailure": "block",
         }],
     });
     assert_eq!(
         GUARD_MATCHER,
         "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
     );
-    assert_eq!(guard.and_then(guard_entry), Some(entry.clone()));
+    assert_eq!(guard.and_then(guard_entries), Some(vec![entry.clone()]));
     let firm = json!({"matcher": "Read", "hooks": [{"type": "command", "command": "firm"}]});
     let hook = object(&json!({"claudeCode": {"options": {"settings": {
         "syncClaudeAiPlugins": false,
@@ -222,6 +224,48 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
+/// A guard that cannot answer refuses a write or a shell command, never a read: the entry before
+/// the write tools and the shell carries `onFailure: block`, and in forced ask the entry before
+/// every other tool carries none, with `--ask-all` last in both. Its matcher leaves out exactly
+/// the write tools and the shell, so the guard runs once per call.
+#[test]
+fn only_the_write_and_shell_entry_blocks_when_the_guard_fails() {
+    let (program, matter) = (
+        std::path::Path::new("/app/clauseo"),
+        std::path::Path::new("/m"),
+    );
+    for ask_all in [false, true] {
+        let entries = guard_entries(GuardHook {
+            program,
+            matter,
+            ask_all,
+        })
+        .unwrap();
+        let mut args = json!(["--pre-write-guard", "--matter", "/m"]);
+        if ask_all {
+            args.as_array_mut().unwrap().push(json!("--ask-all"));
+        }
+        let hook =
+            json!({"type": "command", "command": "/app/clauseo", "args": args, "timeout": 30});
+        let mut blocking = hook.clone();
+        blocking["onFailure"] = json!("block");
+        let writes = json!({"matcher": GUARD_MATCHER, "hooks": [blocking]});
+        if ask_all {
+            let others = json!({
+                "matcher": "^(?!(?:Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell)$)",
+                "hooks": [hook],
+            });
+            // The blocking entry last: Claude Code keeps the last of a command it folds.
+            assert_eq!(entries, vec![others, writes]);
+        } else {
+            assert_eq!(entries, vec![writes]);
+        }
+    }
+    for read in crate::pre_write_guard::LOCAL_READS {
+        assert!(!GUARD_MATCHER.split('|').any(|tool| tool == read), "{read}");
+    }
+}
+
 /// A program or matter path that is not UTF-8 cannot go in JSON: no entry, rather than a lossy
 /// one.
 #[cfg(unix)]
@@ -235,8 +279,8 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         matter,
         ask_all: false,
     };
-    assert_eq!(guard_entry(hook(odd, plain)), None);
-    assert_eq!(guard_entry(hook(plain, odd)), None);
+    assert_eq!(guard_entries(hook(odd, plain)), None);
+    assert_eq!(guard_entries(hook(plain, odd)), None);
     let guard = Some(hook(odd, plain));
     let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard, None));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);

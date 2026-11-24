@@ -236,7 +236,9 @@ fn every_hook_clauseo_writes_is_exec_form() {
                 }
             }
         }
-        assert_eq!(seen, 1, "the guard's entry: {hooks:?}");
+        // Forced ask's guard has two entries: the write tools and the shell, and the rest.
+        let want = if forced_ask { 2 } else { 1 };
+        assert_eq!(seen, want, "the guard's entries: {hooks:?}");
         assert_eq!(
             meta["claudeCode"]["options"]["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["args"]
                 [2],

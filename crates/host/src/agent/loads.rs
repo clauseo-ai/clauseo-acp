@@ -307,7 +307,7 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   [`subagents::subagent_meta`], which settles `agents` and the append's last part, and
 ///   [`subagents::helper_model_env`], which puts every helper on Haiku on Anthropic's own login
 ///   (in `claudeCode.options.env` and the flag settings' `env`, over a hook's values).
-/// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
+/// - With a `guard` ([`GuardHook`]): [`guard_entries`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
 ///   cannot turn it off: `--settings` outranks user settings (Claude Code's settings
@@ -354,14 +354,14 @@ pub(crate) fn session_meta(
         subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
         subagents::helper_model_env(&mut options, keys.login);
     }
-    if let Some(entry) = guard.and_then(guard_entry) {
+    if let Some(entries) = guard.and_then(guard_entries) {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
         let mut pre_tool_use = match hooks.remove("PreToolUse") {
             Some(Value::Array(entries)) => entries,
             _ => Vec::new(),
         };
-        pre_tool_use.push(entry);
+        pre_tool_use.extend(entries);
         hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
         settings.insert("hooks".to_owned(), Value::Object(hooks));
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
@@ -444,18 +444,41 @@ pub(crate) struct GuardHook<'a> {
 /// by `|` is an exact list.
 pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell";
 
-/// The seconds Claude Code waits for the guard before going on without it (default 600).
-pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
+/// The seconds Claude Code gives the guard, from its start to its exit (default 600). With
+/// `onFailure: block` a guard that takes longer refuses the step, so this leaves room for what
+/// is slow only on a bad day: a first start after an update (the OS scans a new program), a
+/// loaded machine, a matter on a network drive whose folders the guard lists. The guard takes
+/// about 10 ms on a local matter and under 40 ms listing 20 000 entries; Codex's guard gets the
+/// same 30 s (`agent/loads/codex.rs`).
+pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 30;
 
-/// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
-/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
+/// The value of a hook's `onFailure` that makes Claude Code refuse the step when the hook
+/// crashes, times out, ends with a code other than 0 or 2, or prints JSON it cannot use (its
+/// default, `continue`, lets the step go ahead; Claude Code 2.1.330's hook schema).
+pub(crate) const BLOCK_ON_FAILURE: &str = "block";
+
+/// The matcher of forced ask's second entry: every tool but [`GUARD_MATCHER`]'s, as a regular
+/// expression (a matcher with other characters than names and `|` is one) that refuses
+/// exactly those names. A tool Claude Code also matches by another name of its family can match
+/// both entries; the guard then runs twice, and the blocking entry, last, is the one kept should
+/// Claude Code fold the two into one (it folds a command and its arguments run twice).
+pub(crate) fn other_tools_matcher() -> String {
+    format!("^(?!(?:{GUARD_MATCHER})$)")
+}
+
+/// The `PreToolUse` entries that run `program` with [`pre_write_guard::FLAG`]
+/// (`crate::pre_write_guard`) and `--matter <matter>`: one before each of [`GUARD_MATCHER`]'s
+/// tools, with `onFailure` [`BLOCK_ON_FAILURE`], so a guard that cannot answer refuses the
+/// write or the shell command. With `ask_all`, `--ask-all` goes last in both, and a first entry
+/// runs it before every other tool ([`other_tools_matcher`], MCP tools included) with no
+/// `onFailure`: a failure there lets the tool go on, as a read must, and forced ask's ask rules
+/// still ask before what changes something (`agent/forced_ask.rs`).
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
 ///
-/// It goes in Claude Code's flag settings (`options.settings`), which load whatever the
-/// `settingSources`. It uses the exec form (`command` plus `args`): Claude Code spawns
+/// They go in Claude Code's flag settings (`options.settings`), which load whatever the
+/// `settingSources`. They use the exec form (`command` plus `args`): Claude Code spawns
 /// `command` directly with `args`, with no shell on any OS, so the path needs no quoting for
 /// `/bin/sh`, Git Bash or PowerShell (CLI 2.1.293, the one bundled with claude-agent-acp
 /// 0.89.1: the command hook schema's `args`, "spawned directly with these arguments, no shell",
@@ -463,10 +486,11 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 /// research-claude.md's `cli-embedded.js.txt` at characters 972200 and 11214500). Its one
 /// risk: a CLI that predates the exec form would drop `args` and run `command` alone through
 /// its shell, which starts the app on every edit. The CLI comes bundled with the pinned
-/// adapter, so that needs an adapter downgrade.
+/// adapter, so that needs an adapter downgrade. A CLI before `onFailure` ignores it and lets a
+/// failed guard's step go ahead.
 ///
 /// [`pre_write_guard::FLAG`]: crate::pre_write_guard::FLAG
-pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
+pub(crate) fn guard_entries(guard: GuardHook<'_>) -> Option<Vec<Value>> {
     let GuardHook {
         program,
         matter,
@@ -484,24 +508,29 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         crate::pre_write_guard::MATTER_FLAG,
         matter,
     ];
-    let matcher = if ask_all {
+    if ask_all {
         args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
-        crate::agent::forced_ask::EVERY_TOOL
+    }
+    let hook = serde_json::json!({
+        "type": "command",
+        "command": command,
+        "args": args,
+        "timeout": GUARD_TIMEOUT_SECONDS,
+    });
+    let mut blocking = hook.clone();
+    if let Some(fields) = blocking.as_object_mut() {
+        fields.insert("onFailure".to_owned(), Value::from(BLOCK_ON_FAILURE));
+    }
+    let writes = serde_json::json!({"matcher": GUARD_MATCHER, "hooks": [blocking]});
+    Some(if ask_all {
+        let others = serde_json::json!({"matcher": other_tools_matcher(), "hooks": [hook]});
+        vec![others, writes]
     } else {
-        GUARD_MATCHER
-    };
-    Some(serde_json::json!({
-        "matcher": matcher,
-        "hooks": [{
-            "type": "command",
-            "command": command,
-            "args": args,
-            "timeout": GUARD_TIMEOUT_SECONDS,
-        }],
-    }))
+        vec![writes]
+    })
 }
 
-/// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`
+/// Why `guard` gives no [`guard_entries`], as a kind fit for a log line (no path): `no_program`
 /// when the host has no guard program (`HostConfig::with_pre_write_guard` unset, as when
 /// `current_exe` failed), `program_not_utf8` or `matter_not_utf8`. `None` when it gives one.
 pub(crate) fn guard_missing(guard: Option<GuardHook<'_>>) -> Option<&'static str> {

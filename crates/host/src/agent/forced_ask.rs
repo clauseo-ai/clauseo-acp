@@ -133,8 +133,5 @@ pub(crate) const NO_SANDBOX_AUTO_ALLOW: &str = "autoAllowBashIfSandboxed";
 /// agent's shell.
 pub(crate) const ASK_ALL_FLAG: &str = "--ask-all";
 
-/// The hook matcher for every tool, MCP tools included.
-pub(crate) const EVERY_TOOL: &str = "*";
-
 #[cfg(test)]
 mod tests;
