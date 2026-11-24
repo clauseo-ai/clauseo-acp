@@ -12,15 +12,15 @@ import {
   upsert,
   userMessage,
   uuid,
-} from "../testing/stream-script.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import type { FileChange, ThreadStatus, ViewEntry } from "../transport/protocol.ts";
-import type { Entry } from "./entry.ts";
-import { MATTER } from "./hosts.ts";
-import { heldHost, OTHER } from "./registry-u7.tsx";
-import { state } from "./registry-u8.tsx";
-import { RoomOver, RoomPressing } from "./states.tsx";
-import { matterWords, threadWords, versionWords } from "./words.ts";
+} from "../../testing/stream-script.ts";
+import { FakeTransport } from "../../transport/fake-transport.ts";
+import type { FileChange, ThreadStatus, ViewEntry } from "../../transport/protocol.ts";
+import type { Entry } from "../entry.ts";
+import { MATTER } from "../hosts.ts";
+import { heldHost, OTHER } from "../registry-u7.tsx";
+import { state } from "../registry-u8.tsx";
+import { RoomOver, RoomPressing } from "../states.tsx";
+import { matterWords, threadWords, versionWords } from "../words.ts";
 
 /** Queued behind its own thread: with the header's hold (heldHost's third), what the host gives for a hold. */
 const QUEUED: ThreadStatus = { queued: { behind: THREAD } };
@@ -104,7 +104,7 @@ const UNDOING = [
   '[data-testid="version-undo"]',
 ];
 
-export const UC_PARALLEL: Entry[] = [
+const UC_PARALLEL: Entry[] = [
   {
     id: "UC-1145",
     words: matterWords("Waiting to answer."),
@@ -175,3 +175,5 @@ export const UC_PARALLEL: Entry[] = [
     [],
   ),
 ];
+
+export default UC_PARALLEL;
