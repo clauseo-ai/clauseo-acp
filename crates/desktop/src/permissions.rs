@@ -40,6 +40,8 @@ use pick::Mount;
 use store::{Answer, Asked, Store};
 use system::SystemProbe;
 
+#[cfg(any(windows, test))]
+mod expand;
 #[cfg(target_os = "macos")]
 mod mac;
 mod pick;

@@ -17,11 +17,13 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Favorites, FOLDERID_Music, FOLDERID_Pictures,
+    FOLDERID_PublicDocuments, FOLDERID_PublicMusic, FOLDERID_PublicPictures, FOLDERID_PublicVideos,
     FOLDERID_Videos,
 };
 use windows::core::{HSTRING, PWSTR};
 
 use super::CfaLayer;
+use super::expand::expand_with;
 
 /// Group policy's place (Windows Components › Microsoft Defender Antivirus › Microsoft Defender
 /// Exploit Guard › Controlled folder access).
@@ -38,46 +40,67 @@ const ENABLE: &str = "EnableControlledFolderAccess";
 const FOLDERS: &str = "ProtectedFolders";
 /// MDM's added folders, one string, separated by U+F000.
 const MDM_FOLDERS: &str = "ControlledFolderAccessProtectedFolders";
+/// The target of this step's support lines: host.log keeps info only from `clauseo_*::lifecycle`
+/// targets (`clauseo_host::log_file`).
+const LIFECYCLE: &str = "clauseo_desktop::permissions::lifecycle";
 
 /// Each place's `EnableControlledFolderAccess`, most specific first, and the folders the places
-/// add to Windows' defaults (those that could be read).
+/// add to Windows' defaults (those that could be read), with their `%NAME%` variables expanded
+/// from this process's environment (`ExpandEnvironmentStringsW` reads the same block;
+/// `std::env::var` is the same lookup, case-insensitive on Windows). An unknown name stays as
+/// written.
 pub(super) fn cfa_layers() -> (Vec<CfaLayer>, Vec<PathBuf>) {
-    let layers: Vec<CfaLayer> = [POLICY, MDM, LOCAL]
-        .into_iter()
-        .map(|key| match dword(key, ENABLE) {
-            Ok(Some(enable)) => CfaLayer::Set(enable),
-            Ok(None) => CfaLayer::Unset,
-            Err(code) => {
-                tracing::info!(
-                    key,
-                    code = code.0,
-                    "permissions: a Defender key did not read"
-                );
-                CfaLayer::Unreadable
-            }
-        })
-        .collect();
-    let mut protected = Vec::new();
+    let [policy, mdm, local] = [POLICY, MDM, LOCAL].map(read_layer);
+    let mut written = Vec::new();
     for key in [POLICY, LOCAL] {
-        protected.extend(
-            value_names(&format!("{key}\\{FOLDERS}"))
-                .into_iter()
-                .map(PathBuf::from),
-        );
+        written.extend(value_names(&format!("{key}\\{FOLDERS}")));
     }
-    protected.extend(
+    written.extend(
         string(MDM, MDM_FOLDERS)
             .unwrap_or_default()
             .split('\u{F000}')
             .filter(|folder| !folder.is_empty())
-            .map(PathBuf::from),
+            .map(str::to_owned),
     );
+    let protected: Vec<PathBuf> = written
+        .iter()
+        .map(|folder| PathBuf::from(expand_with(folder, |name| std::env::var(name).ok())))
+        .collect();
     tracing::info!(
-        ?layers,
+        target: LIFECYCLE,
+        policy = %state(&policy),
+        mdm = %state(&mdm),
+        local = %state(&local),
         added = protected.len(),
         "permissions: Controlled folder access read"
     );
-    (layers, protected)
+    (vec![policy, mdm, local], protected)
+}
+
+/// One place's `EnableControlledFolderAccess`, as read; a key that does not read is logged.
+fn read_layer(key: &str) -> CfaLayer {
+    match dword(key, ENABLE) {
+        Ok(Some(enable)) => CfaLayer::Set(enable),
+        Ok(None) => CfaLayer::Unset,
+        Err(code) => {
+            tracing::info!(
+                target: LIFECYCLE,
+                key,
+                code = code.0,
+                "permissions: a Defender key did not read"
+            );
+            CfaLayer::Unreadable
+        }
+    }
+}
+
+/// A place's state for the log: `set(<value>)`, `unset` or `unreadable`.
+fn state(layer: &CfaLayer) -> String {
+    match layer {
+        CfaLayer::Set(enable) => format!("set({enable})"),
+        CfaLayer::Unset => "unset".to_owned(),
+        CfaLayer::Unreadable => "unreadable".to_owned(),
+    }
 }
 
 /// Whether `code` says the key or the value is not there.
@@ -238,7 +261,8 @@ fn value_names(key: &str) -> Vec<String> {
 }
 
 /// The folders Controlled folder access protects whatever its list says: the user's Documents,
-/// Desktop, Pictures, Videos, Music and Favorites, those Windows gives.
+/// Desktop, Pictures, Videos, Music and Favorites, and the Public folders' Documents, Pictures,
+/// Music and Videos, those Windows gives (each by its known folder, not a typed path).
 pub(super) fn protected_defaults() -> Vec<PathBuf> {
     [
         &FOLDERID_Documents,
@@ -247,6 +271,10 @@ pub(super) fn protected_defaults() -> Vec<PathBuf> {
         &FOLDERID_Videos,
         &FOLDERID_Music,
         &FOLDERID_Favorites,
+        &FOLDERID_PublicDocuments,
+        &FOLDERID_PublicPictures,
+        &FOLDERID_PublicMusic,
+        &FOLDERID_PublicVideos,
     ]
     .into_iter()
     .filter_map(crate::chooser::known_folder)
