@@ -1,0 +1,19 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"helper_started\")"
+---
+{
+  "helper_started": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "helper": "01900000-0000-7000-8000-000000000005",
+    "acp_id": "toolu_02",
+    "parent": "01900000-0000-7000-8000-000000000006",
+    "call": "01900000-0000-7000-8000-000000000004",
+    "name": "paper-reader",
+    "label": "Read the lease",
+    "task": {
+      "inline": "Read lease.docx and list the break clauses."
+    },
+    "model": "haiku"
+  }
+}
