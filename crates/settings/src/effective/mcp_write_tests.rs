@@ -34,6 +34,7 @@ fn remote(url: &str, header: &str) -> McpServerLaunch {
             headers: BTreeMap::from([(header.to_owned(), saved())]),
         },
         enabled: false,
+        scope: None,
     }
 }
 

@@ -354,6 +354,7 @@ crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::di
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
 crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
 crates/settings/src/effective/mcp_write.rs Effective clippy::multiple_inherent_impl
+crates/settings/src/effective/skills_scope.rs Effective clippy::multiple_inherent_impl
 # Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
 # follows the real user id.
 crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods

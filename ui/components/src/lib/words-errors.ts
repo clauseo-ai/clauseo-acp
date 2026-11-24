@@ -193,6 +193,8 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // window's failure line
   "skill.no_skill_md": "Clauseo couldn't save that setting. Your settings are as they were.",
   "skill.invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "addon.unknown": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "addon.built_in": "Clauseo couldn't save that setting. Your settings are as they were.",
   // the lawyer's MCP servers (Settings › Tools): the Tools form says each in its own words; anywhere else,
   // the settings window's failure line
   "mcp.name_empty": "Clauseo couldn't save that setting. Your settings are as they were.",

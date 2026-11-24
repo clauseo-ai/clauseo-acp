@@ -22,11 +22,13 @@ use std::sync::Arc;
 use clauseo_profile::packs::{PACKS_PER_LAUNCH, PackEntry, PackHash, Refusal, Skip, is_pack_id};
 use clauseo_profile::{PackWrite, PacksWritten};
 use clauseo_protocol::{
-    AgentId, AgentKind, Notice, NoticeKind, NoticeLevel, PackId, PackList, PackSkipReason, ThreadId,
+    AgentId, AgentKind, MatterId, Notice, NoticeKind, NoticeLevel, PackId, PackList,
+    PackSkipReason, ThreadId,
 };
 use clauseo_settings::{SkillsExtra, SkillsSettings};
 
 use super::super::super::Actor;
+use super::super::super::addon_rules::Placed;
 use super::super::super::settings::packs::Admission;
 use super::super::state;
 use crate::log_file::Cause;
@@ -190,14 +192,23 @@ pub(super) struct PackPrep {
 }
 
 /// What the launch prep does for `agent`'s skill packs, from the actor's state: the thread's
-/// matter list `matter` and the effective `skills` settings ([`PackRequest`]). Nothing for an
-/// agent with no kind: packs are Clauseo's, for Claude and Codex. No file is read.
-pub(super) fn pack_prep(actor: &Actor, agent: &AgentId, matter: Option<&PackList>) -> PackPrep {
+/// matter `matter`, its list `list` and the effective `skills` settings ([`PackRequest`]).
+/// A pack the matter leaves out (its switch, or the pack's scope `matter`; `addon_rules.rs`)
+/// is not asked for, and no line names it. Nothing for an agent with no kind: packs are
+/// Clauseo's, for Claude and Codex. No file is read.
+pub(super) fn pack_prep(
+    actor: &Actor,
+    agent: &AgentId,
+    (matter, list): (MatterId, Option<&PackList>),
+) -> PackPrep {
     if AgentKind::of(agent).is_none() {
         return PackPrep::default();
     }
     let lawyer_decides = !Admission::of(&actor.effective).firm_decides();
-    let request = PackRequest::new(&actor.effective.settings().skills, matter, lawyer_decides);
+    let placed = Placed::of(actor, matter);
+    let mut skills = actor.effective.settings().skills.clone();
+    skills.enabled.retain(|id, _| placed.skill_on(id));
+    let request = PackRequest::new(&skills, list, lawyer_decides);
     PackPrep {
         write: actor.profile.pack_write(agent, &request),
         skipped: request.skipped,

@@ -442,6 +442,38 @@ This settles the code question above: **no new error code.** It supersedes the f
   id (folders and `skills.enabled` ids together); the rest are left out of the answer and logged
   by count alone, never by name or path (`MAX_LISTED`, `crates/host/src/actor/query/skill_packs.rs`).
 
+### Scope and per-matter switches (D2a, 2026-11-24)
+
+Every skill and tool now has a **scope** and each matter may have its own **switch** for it
+(the Skills and Connectors place; the app's contract, draft 4). This replaces the narrowing list
+of [Per matter](#per-matter) for the app: `matters.skill_packs` still narrows, but no UI sets it.
+
+- **Where it is kept.** A pack's scope is `skills.scope.<id>` (`"matter"`; left out is `all`), a
+  lawyer's MCP server's is `mcp.servers.<name>.scope`. A policy `skills.scope` replaces the
+  lawyer's map and locks it. A matter's switches are the store's `matters.addon_switches`
+  (schema 8, decision record 0006): `{"skill": {id: bool}, "tool": {name: bool}}`, NULL when
+  none. A switch equal to the scope's default is stored as none, so `ListAddons`' `switched`
+  is exactly what is stored.
+- **The rule.** An item is on in a matter when it is on at all (a pack turned on with its hash,
+  a server `enabled`, `tools.connectors` or `tools.browser`) **and** the matter's switch says
+  on, or with no switch its scope is `all`. Deviation from the contract's wording: a matter's
+  switch on does not turn on an item that is off everywhere; `SetAddonOn` with `on: true` for
+  such an item turns it on first with scope `matter` and clears every other switch, so it is on
+  in that matter only. A built-in tool off everywhere stays off: its switch only turns it off.
+- **The commands.** `SetAddonScope` (to `all` clears every matter's switch; to `{"matter": X}`
+  clears them and switches X on), `SetAddonOn` and `RemoveAddon` (a pack as `RemoveSkill`, a
+  server as `remove_server` with its keychain items; then every switch goes). A pack not turned on
+  is read twice off the actor and refused as `SetSkillPack` refuses; turning one on while
+  `skills.enabled` is locked, or scoping while `skills.scope` is, is `settings.locked`. New codes
+  `addon.unknown` and `addon.built_in` (0003). Clauseo's own skills refuse every change with
+  `addon.built_in` in this version (their files are shared by every launch); its tools take a
+  matter's switch only. The switches of all matters go in one commit (`Commit::more_matters`).
+- **At launch.** `pack_prep` asks only for the packs on in the thread's matter (Claude's pack
+  plugin and Codex's index follow); the lawyer's servers the matter leaves out are neither read
+  from the keychain nor sent in ACP `mcpServers`; a matter that switches `browser` or
+  `case-law` off gets no entry for it. The relaunch key (`ToolsKey`) is per matter and holds the
+  packs too, so an idle conversation whose set changed restarts on its next message.
+
 ### Tier C: the source folder
 
 With no sandbox (tier C) the pack's source under `<data>/skill-packs` is fenced off by

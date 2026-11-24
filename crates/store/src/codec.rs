@@ -1,8 +1,8 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    AgentPrefs, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList, RenameSource,
-    SCHEMA_VERSION, Seq, StreamId, Timestamp,
+    AddonSwitches, AgentPrefs, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList,
+    RenameSource, SCHEMA_VERSION, Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -166,4 +166,20 @@ pub(crate) fn agent_prefs(text: &str) -> Result<AgentPrefs, Error> {
 pub(crate) fn skill_packs(text: &str) -> Result<PackList, Error> {
     serde_json::from_str(text)
         .map_err(|error| Error::corrupt(format!("a matter's skill packs do not parse: {error}")))
+}
+
+/// The `matters.addon_switches` text: the switches as a JSON object.
+pub(crate) fn addon_switches_text(switches: &AddonSwitches) -> Result<String, Error> {
+    serde_json::to_string(switches).map_err(|error| Error::Encode {
+        detail: format!("a matter's add-on switches: {error}"),
+    })
+}
+
+/// A `matters.addon_switches` read back: text that is not such an object (an unknown key, a
+/// switch that is not a boolean) is corrupt. The error leaves the text out; the decoder's message
+/// may quote a part of it, so no caller logs it.
+pub(crate) fn addon_switches(text: &str) -> Result<AddonSwitches, Error> {
+    serde_json::from_str(text).map_err(|error| {
+        Error::corrupt(format!("a matter's add-on switches do not parse: {error}"))
+    })
 }

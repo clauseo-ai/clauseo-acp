@@ -23,25 +23,34 @@
 //!   when it reports, as an agent-started turn, so it cannot know one is running; a prompt in
 //!   that window relaunches the agent, the command ends with it, and its result never comes.
 
-use clauseo_protocol::ThreadId;
+use std::collections::BTreeMap;
+
+use clauseo_protocol::{MatterId, ThreadId};
 
 use super::super::super::Actor;
 use super::Relaunch;
+use crate::actor::addon_rules::Placed;
 use crate::agent::loads::lawyer::ToolsKey;
 
 /// Compares each live agent's servers if the list changed since it was last compared.
 pub(super) fn compare(actor: &mut Actor) {
     let rev = actor.mcp.tools_rev;
     let live: Vec<ThreadId> = actor.turn_path.idle.live.iter().copied().collect();
-    let mut now: Option<ToolsKey> = None;
+    let mut now: BTreeMap<MatterId, ToolsKey> = BTreeMap::new();
     for thread in live {
         compare_one(actor, thread, rev, &mut now);
     }
 }
 
 /// Marks `thread`'s agent or clears its Tools mark at revision `rev`, unless it was compared at
-/// it already or has not answered `initialize`; `now` is the key a launch takes now, made once.
-fn compare_one(actor: &mut Actor, thread: ThreadId, rev: u64, now: &mut Option<ToolsKey>) {
+/// it already or has not answered `initialize`; `now` holds the key a launch in each matter
+/// takes now, made once per matter (its switches and the items' scopes make it differ).
+fn compare_one(
+    actor: &mut Actor,
+    thread: ThreadId,
+    rev: u64,
+    now: &mut BTreeMap<MatterId, ToolsKey>,
+) {
     let Some(state) = actor.threads.get(&thread).map(|entry| &entry.turn) else {
         return;
     };
@@ -55,9 +64,10 @@ fn compare_one(actor: &mut Actor, thread: ThreadId, rev: u64, now: &mut Option<T
     let Some(http) = agent.info.as_ref().map(|info| info.mcp_http) else {
         return;
     };
-    let now = now.get_or_insert_with(|| {
+    let matter = run.key.matter;
+    let now = now.entry(matter).or_insert_with(|| {
         ToolsKey::of(
-            &actor.effective,
+            &Placed::of(actor, matter),
             actor.protection.safe_workspace(),
             &actor.mcp.secret_revs,
             rev,

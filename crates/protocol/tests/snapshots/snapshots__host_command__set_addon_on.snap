@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::SetAddonOn(clauseo_protocol::SetAddonOn\n{\n    kind: clauseo_protocol::AddonKind::Tool, id: \"linear\".to_owned(), matter:\n    matter_id(1), on: false,\n})"
+---
+{
+  "set_addon_on": {
+    "kind": "tool",
+    "id": "linear",
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "on": false
+  }
+}

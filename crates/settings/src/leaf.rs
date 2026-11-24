@@ -46,8 +46,8 @@ pub(crate) use misnamed::{Places, typed_policy};
 use crate::plans::{self, plan_id};
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings,
-    SkillsExtra, Theme, UpdateMode,
+    AgentLaunch, Density, FontSize, ItemScope, Language, Lite, McpServerLaunch, Motion, Plan,
+    Settings, SkillsExtra, Theme, UpdateMode,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use crate::{network, skills};
@@ -63,7 +63,7 @@ pub(crate) use reset::{locked_word, refuse};
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 28] = [
+pub(crate) const KEYS: [(&str, Kind); 29] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -84,6 +84,7 @@ pub(crate) const KEYS: [(&str, Kind); 28] = [
     ("skills.curated", Kind::StringArray),
     ("skills.allow_scripts", Kind::Boolean),
     ("skills.enabled", Kind::Object),
+    ("skills.scope", Kind::Object),
     ("sandbox.required", Kind::Boolean),
     ("sandbox.allow_unprotected_auto", Kind::Boolean),
     ("network.upstream_proxy", Kind::String),
@@ -213,6 +214,8 @@ pub(crate) enum Leaf {
     AllowScripts(bool),
     /// The whole `skills.enabled` map: a policy value replaces the user's map, never merges.
     SkillsEnabled(BTreeMap<String, String>),
+    /// The whole `skills.scope` map: a policy value replaces the user's map, never merges.
+    SkillsScope(BTreeMap<String, ItemScope>),
     SandboxRequired(bool),
     AllowUnprotectedAuto(bool),
     UpstreamProxy(Option<String>),
@@ -343,6 +346,7 @@ impl Leaf {
             "skills.curated" => skills::curated(key, value).map(Leaf::Curated),
             "skills.allow_scripts" => typed_value(key, value).map(Leaf::AllowScripts),
             "skills.enabled" => skills::enabled(key, value, unknown).map(Leaf::SkillsEnabled),
+            "skills.scope" => skills::scope(key, value, unknown).map(Leaf::SkillsScope),
             "sandbox.required" => typed_value(key, value).map(Leaf::SandboxRequired),
             "sandbox.allow_unprotected_auto" => {
                 typed_value(key, value).map(Leaf::AllowUnprotectedAuto)
@@ -394,6 +398,7 @@ impl Leaf {
             Leaf::Curated(_) => "skills.curated".to_owned(),
             Leaf::AllowScripts(_) => "skills.allow_scripts".to_owned(),
             Leaf::SkillsEnabled(_) => "skills.enabled".to_owned(),
+            Leaf::SkillsScope(_) => "skills.scope".to_owned(),
             Leaf::SandboxRequired(_) => "sandbox.required".to_owned(),
             Leaf::AllowUnprotectedAuto(_) => "sandbox.allow_unprotected_auto".to_owned(),
             Leaf::UpstreamProxy(_) => "network.upstream_proxy".to_owned(),
@@ -449,6 +454,7 @@ impl Leaf {
             Leaf::Curated(ids) => settings.skills.curated = ids,
             Leaf::AllowScripts(on) => settings.skills.allow_scripts = on,
             Leaf::SkillsEnabled(packs) => settings.skills.enabled = packs,
+            Leaf::SkillsScope(scopes) => settings.skills.scope = scopes,
             Leaf::SandboxRequired(on) => settings.sandbox.required = on,
             Leaf::AllowUnprotectedAuto(on) => settings.sandbox.allow_unprotected_auto = on,
             Leaf::UpstreamProxy(url) => settings.network.upstream_proxy = url,

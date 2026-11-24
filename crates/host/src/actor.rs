@@ -32,6 +32,8 @@ use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
 use crate::snapshot::SnapshotWorker;
 
+mod addon_change;
+pub(crate) mod addon_rules;
 mod agent_options;
 mod allowed;
 mod app;
@@ -532,6 +534,7 @@ impl Actor {
             Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::SkillDone(done) => settings::add_skill::on_done(self, *done),
+            Input::Addon(back) => addon_change::on_back(self, *back),
             Input::Update(input) => update::on_input(self, input),
             Input::Recorded(recorded) => last_exit::on_recorded(self, *recorded),
             Input::Connector(input) => connectors::on_input(self, *input),

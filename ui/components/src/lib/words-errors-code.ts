@@ -96,6 +96,8 @@ export type ErrorCode =
   | "prompt.too_long"
   | "skill.no_skill_md"
   | "skill.invalid"
+  | "addon.unknown"
+  | "addon.built_in"
   | "mcp.name_empty"
   | "mcp.name_taken"
   | "mcp.name_reserved"

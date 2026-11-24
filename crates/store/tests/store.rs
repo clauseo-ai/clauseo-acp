@@ -11,6 +11,9 @@ mod common;
 mod write;
 
 #[cfg(test)]
+#[path = "store/addon_switches.rs"]
+mod addon_switches;
+#[cfg(test)]
 #[path = "store/agent_prefs.rs"]
 mod agent_prefs;
 #[cfg(test)]

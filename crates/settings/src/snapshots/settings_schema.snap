@@ -87,6 +87,21 @@ source: crates/settings/src/schema/tests.rs
       },
       "type": "object"
     },
+    "ItemScope": {
+      "description": "Where a skill pack or an MCP server is on, once it is turned on (decision record 0040).",
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Every matter, but one that switches it off.",
+          "type": "string"
+        },
+        {
+          "const": "matter",
+          "description": "Only the matters that switch it on.",
+          "type": "string"
+        }
+      ]
+    },
     "KeychainRef": {
       "additionalProperties": false,
       "description": "A reference to a keychain item: `{\"keychain\": true}`. The item's account comes from the\nserver's name and the variable's or header's, so the reference names neither.",
@@ -206,6 +221,17 @@ source: crates/settings/src/schema/tests.rs
           "default": false,
           "description": "Whether the agent gets it. Off unless set.",
           "type": "boolean"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where it is on when `enabled`: `matter` only in the matters switched on for it (the\nstore's `matters.addon_switches`); left out, every matter but one switched off."
         }
       },
       "type": "object"
@@ -431,6 +457,14 @@ source: crates/settings/src/schema/tests.rs
           "$ref": "#/$defs/SkillsExtra",
           "default": "off",
           "description": "Which packs beyond Clauseo's own may load. `off` by default."
+        },
+        "scope": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ItemScope"
+          },
+          "default": {},
+          "description": "Each pack's scope, by id: `matter` is on only in the matters switched on for it (the\nstore's `matters.addon_switches`); a pack not here is on in every matter but one switched\noff. Empty by default.",
+          "type": "object"
         }
       },
       "type": "object"
@@ -625,7 +659,8 @@ source: crates/settings/src/schema/tests.rs
         "allow_scripts": false,
         "curated": [],
         "enabled": {},
-        "extra": "off"
+        "extra": "off",
+        "scope": {}
       },
       "description": "The extra skill packs Clauseo may load (decision record 0040)."
     },

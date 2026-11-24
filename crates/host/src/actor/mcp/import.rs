@@ -286,6 +286,7 @@ fn prepare(candidate: ImportCandidate) -> Result<Ready, McpSkipped> {
     let server = McpServerLaunch {
         transport,
         enabled: false,
+        scope: None,
     };
     if let Err(refusal) = clauseo_settings::check_server(&name, &server) {
         return Err(refused(name, refusal, &server));

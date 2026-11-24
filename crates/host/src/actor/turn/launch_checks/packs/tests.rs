@@ -29,6 +29,7 @@ fn skills(extra: SkillsExtra, curated: &[&str], enabled: &[(&str, char)]) -> Ski
             .iter()
             .map(|(id, digit)| ((*id).to_owned(), hash(*digit)))
             .collect::<BTreeMap<_, _>>(),
+        scope: BTreeMap::new(),
     }
 }
 

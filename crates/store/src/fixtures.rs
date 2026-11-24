@@ -105,6 +105,7 @@ pub fn matter_row() -> MatterRow {
         forgotten: None,
         skill_packs: None,
         agent_prefs: None,
+        addon_switches: None,
     }
 }
 

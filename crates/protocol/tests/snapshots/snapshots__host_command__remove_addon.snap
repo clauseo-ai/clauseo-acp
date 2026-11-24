@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::RemoveAddon(clauseo_protocol::RemoveAddon\n{ kind: clauseo_protocol::AddonKind::Skill, id: \"pdf\".to_owned(), })"
+---
+{
+  "remove_addon": {
+    "kind": "skill",
+    "id": "pdf"
+  }
+}

@@ -230,6 +230,21 @@ pub struct SkillsSettings {
     /// The packs turned on, by id, each with the hash it had then (`sha256:<64 lowercase hex>`):
     /// a pack whose files no longer hash to it is not loaded. Empty by default.
     pub enabled: BTreeMap<String, String>,
+    /// Each pack's scope, by id: `matter` is on only in the matters switched on for it (the
+    /// store's `matters.addon_switches`); a pack not here is on in every matter but one switched
+    /// off. Empty by default.
+    pub scope: BTreeMap<String, ItemScope>,
+}
+
+/// Where a skill pack or an MCP server is on, once it is turned on (decision record 0040).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemScope {
+    /// Every matter, but one that switches it off.
+    #[default]
+    All,
+    /// Only the matters that switch it on.
+    Matter,
 }
 
 /// Which packs beyond Clauseo's own may load.

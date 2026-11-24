@@ -23,6 +23,7 @@ fn launch(enabled: bool) -> McpServerLaunch {
             env: BTreeMap::new(),
         },
         enabled,
+        scope: None,
     }
 }
 

@@ -60,7 +60,7 @@ pub(crate) struct McpOnActor {
     /// Whether a command's keychain work runs.
     running: bool,
     /// The commands that came while it runs, in order.
-    queue: VecDeque<(CommandCtx, McpCommand)>,
+    queue: VecDeque<Queued>,
     /// The variables (server, name) a launch found missing or unreadable in the keychain, until
     /// the server is saved again; the view shows them unsaved.
     pub(crate) missing: BTreeSet<(String, String)>,
@@ -87,6 +87,14 @@ pub(crate) struct McpOnActor {
     pub(crate) tools_rev: u64,
     /// By server, bumped by each save that wrote one of its keychain values.
     pub(crate) secret_revs: BTreeMap<String, u64>,
+}
+
+/// A command waiting behind keychain work.
+enum Queued {
+    /// An MCP command.
+    Mcp(CommandCtx, McpCommand),
+    /// A tool's scope, switch or removal (`addon_change/tools.rs`).
+    Addon(CommandCtx, String, super::addon_change::Change),
 }
 
 /// A save whose keychain steps ran, and what its settings write takes.
@@ -143,10 +151,40 @@ pub(super) fn start(actor: &mut Actor) {
 /// One command: run now, or queued behind the keychain work running.
 pub(super) fn run(actor: &mut Actor, ctx: &CommandCtx, command: McpCommand) {
     if actor.mcp.running {
-        actor.mcp.queue.push_back((*ctx, command));
+        actor.mcp.queue.push_back(Queued::Mcp(*ctx, command));
         return;
     }
     begin(actor, *ctx, command);
+}
+
+/// Queues a tool's scope, switch or removal while keychain work runs: `true` when queued.
+pub(super) fn queue_addon(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    id: &str,
+    change: super::addon_change::Change,
+) -> bool {
+    if actor.mcp.running {
+        actor
+            .mcp
+            .queue
+            .push_back(Queued::Addon(*ctx, id.to_owned(), change));
+    }
+    actor.mcp.running
+}
+
+/// `RemoveAddon` of a server: as `RemoveServer`, without the receipt, which the caller sends
+/// with the matters' rows. A server not there is refused by the caller first.
+pub(super) fn remove_server(actor: &mut Actor, name: &str) -> Result<(), Error> {
+    let Some(removed) = actor.effective.remove_mcp_server(&SystemFiles, name)? else {
+        return Ok(());
+    };
+    // As `RemoveServer`: a value whose last read the keychain refused is kept (#1348).
+    let accounts = not_refused(actor, keychain::accounts(name, &removed));
+    forget_missing(actor, |server| server == name);
+    scan::scan(actor);
+    tidy(actor, accounts, None);
+    Ok(())
 }
 
 /// A session's launch left these servers out for a missing value: the view shows it. Those
@@ -452,10 +490,13 @@ pub(super) fn on_input(actor: &mut Actor, input: McpInput) {
 /// Runs the queued commands until one starts keychain work.
 fn next(actor: &mut Actor) {
     while !actor.mcp.running {
-        let Some((ctx, command)) = actor.mcp.queue.pop_front() else {
-            return;
-        };
-        begin(actor, ctx, command);
+        match actor.mcp.queue.pop_front() {
+            None => return,
+            Some(Queued::Mcp(ctx, command)) => begin(actor, ctx, command),
+            Some(Queued::Addon(ctx, id, change)) => {
+                super::addon_change::tools::dequeued(actor, &ctx, &id, change);
+            }
+        }
     }
 }
 

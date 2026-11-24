@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
-    CommandOutcome, Count, Date, Envelope, InterruptedKind, MatterId, MatterKind, PackList,
-    RenameSource, Seq, StreamId, ThreadId, Timestamp,
+    AddonSwitches, AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId,
+    ClientName, CommandId, CommandOutcome, Count, Date, Envelope, InterruptedKind, MatterId,
+    MatterKind, PackList, RenameSource, Seq, StreamId, ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -58,9 +58,10 @@ impl Default for RawFrameRetention {
 /// Everything one commit writes, all of it or none of it, in one savepoint.
 ///
 /// Per stream, `events` must run on from the stream's last `seq` without a gap. `blobs` holds
-/// the bytes of every blob an event names; `receipt` is the command's outcome; `thread` and
-/// `matter` replace those rows; `checkpoints` are new rows; `snapshot` replaces all but the two
-/// newest snapshots of its stream. A commit may carry a snapshot and no events.
+/// the bytes of every blob an event names; `receipt` is the command's outcome; `thread`,
+/// `matter` and `more_matters` replace those rows; `checkpoints` are new rows; `snapshot`
+/// replaces all but the two newest snapshots of its stream. A commit may carry a snapshot and no
+/// events.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Commit {
     /// The events, in order.
@@ -73,6 +74,9 @@ pub struct Commit {
     pub thread: Option<ThreadRow>,
     /// The matter's row, inserted or replaced.
     pub matter: Option<MatterRow>,
+    /// Other matters' rows, inserted or replaced after `matter`: a change that reaches several
+    /// matters at once (clearing a skill's or tool's switches in each).
+    pub more_matters: Vec<MatterRow>,
     /// New checkpoint rows.
     pub checkpoints: Vec<CheckpointRow>,
     /// A snapshot, already compressed by [`SnapshotIn::compress`].
@@ -181,6 +185,9 @@ pub struct MatterRow {
     /// The model and effort a new conversation starts with, per agent kind, once set; `None`
     /// leaves each agent at its own defaults (schema 6; `NULL` before). Stored as JSON.
     pub agent_prefs: Option<AgentPrefs>,
+    /// Its own switches for skills and tools, once any is set; `None` leaves each item to its
+    /// scope (schema 8; `NULL` before). Stored as JSON; an empty set is stored as `NULL`.
+    pub addon_switches: Option<AddonSwitches>,
 }
 
 /// A thread's summary row.

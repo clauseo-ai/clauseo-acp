@@ -10,10 +10,10 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 /// The fields a local [`McpServerLaunch`] reads; any other is an unknown key.
-const LOCAL_FIELDS: [&str; 4] = ["command", "args", "env", "enabled"];
+const LOCAL_FIELDS: [&str; 5] = ["command", "args", "env", "enabled", "scope"];
 
 /// The fields a remote [`McpServerLaunch`] reads; any other is an unknown key.
-const REMOTE_FIELDS: [&str; 3] = ["url", "headers", "enabled"];
+const REMOTE_FIELDS: [&str; 4] = ["url", "headers", "enabled", "scope"];
 
 /// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
 /// list empty). Inside it, an entry with a bad name, a name holding `__` or ending in `_`, a

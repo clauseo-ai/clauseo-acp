@@ -205,6 +205,9 @@ macro_rules! wire_types {
     };
 }
 
+// Not wire types: a matter's stored switches, and the add-on commands' id bound.
+pub use addons::{AddonSwitches, MAX_ADDON_ID_BYTES};
+
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
     allowed_sites::{AllowScope, AllowedSite},
@@ -303,7 +306,7 @@ wire_types! {
     skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
     addons::{
         Addon, AddonFrom, AddonFromKind, AddonKind, AddonList, AddonScope, AddonSource,
-        AddonStatus,
+        AddonStatus, RemoveAddon, SetAddonOn, SetAddonScope,
     },
     setup::{
         FoundLogin, InstallLog, InstallProgress, LoginFrom, PythonBlockedBy, PythonFailureCause,

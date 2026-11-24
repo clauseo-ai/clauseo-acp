@@ -438,6 +438,11 @@ error_codes! {
         delete when nothing was revoked, often until Clauseo is allowed to use it), so the action \
         changed nothing and the saved sign-in was left as it is. Trying again once Clauseo may \
         use it can succeed.";
+    AddonUnknown = "addon.unknown", retryable: false, meaning: "No skill or tool has that id: \
+        it was removed, or never added; nothing changed.";
+    AddonBuiltIn = "addon.built_in", retryable: false, meaning: "The skill or tool is one of \
+        Clauseo's own: it cannot be removed or given another scope (a built-in tool can be \
+        switched off in one matter); nothing changed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

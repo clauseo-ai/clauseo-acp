@@ -243,7 +243,7 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, name, kind, folder_path, folder_locator, shadow_repo_path, created_ms, \
          client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs, \
-         agent_prefs FROM matters ORDER BY created_ms, id",
+         agent_prefs, addon_switches FROM matters ORDER BY created_ms, id",
     )?;
     let mut rows = statement.query([])?;
     let mut out = Vec::new();
@@ -282,16 +282,22 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
                 row.get_ref(13)?.as_str_or_null()?,
                 codec::agent_prefs,
             ),
+            addon_switches: saved_or_default(
+                id,
+                "addon_switches",
+                row.get_ref(14)?.as_str_or_null()?,
+                codec::addon_switches,
+            ),
         });
     }
     Ok(out)
 }
 
-/// A matter's saved `agent_prefs` or `skill_packs` text, read back. Text that does not decode
-/// (a value a newer build wrote, or garbage) reads as `None`, the default: no saved picks, no
-/// packs. It logs one WARN naming the matter and the column, and the row is left as it is, as
-/// `codec::matter_kind` leaves an unknown kind. The decoder's message is not logged: it can
-/// quote the stored value. A later normal write of the matter's prefs replaces the value.
+/// A matter's saved `agent_prefs`, `skill_packs` or `addon_switches` text, read back. Text that
+/// does not decode (a value a newer build wrote, or garbage) reads as `None`, the default: no
+/// saved picks, no packs. It logs one WARN naming the matter and the column, and the row is left
+/// as it is, as `codec::matter_kind` leaves an unknown kind. The decoder's message is not logged:
+/// it can quote the stored value. A later normal write of the matter's prefs replaces the value.
 fn saved_or_default<T>(
     matter: MatterId,
     column: &'static str,

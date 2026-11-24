@@ -278,6 +278,8 @@ pub(crate) enum Input {
     SkillPack(Box<super::settings::packs::PackRead>),
     /// An `AddSkill` or `RemoveSkill` back from its thread (`settings/add_skill.rs`).
     SkillDone(Box<super::settings::add_skill::SkillDone>),
+    /// A skill's read or removal for an add-on command, from its thread (`addon_change`).
+    Addon(Box<super::addon_change::SkillBack>),
     /// A file action's record was put or cleared (`last_exit.rs`).
     Recorded(Box<super::last_exit::Recorded>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
@@ -343,6 +345,7 @@ impl std::fmt::Debug for Input {
             Self::BrowserPolicy(_) => "BrowserPolicy",
             Self::SkillPack(_) => "SkillPack",
             Self::SkillDone(_) => "SkillDone",
+            Self::Addon(_) => "Addon",
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",
             Self::Mcp(_) => "Mcp",

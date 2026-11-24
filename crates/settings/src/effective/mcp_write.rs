@@ -11,7 +11,7 @@ use super::Effective;
 use crate::error::Error;
 use crate::files::Files;
 use crate::mcp::{self, McpRefusal};
-use crate::schema::McpServerLaunch;
+use crate::schema::{ItemScope, McpServerLaunch};
 use crate::user;
 
 /// The key policy sets to replace the lawyer's list.
@@ -168,6 +168,35 @@ impl Effective {
             let entry = self.mcp_entry(&server)?;
             user::write_mcp_server(&self.locations, files, None, name, Some(entry))?;
         }
+        self.settings.mcp.servers.insert(name.to_owned(), server);
+        Ok(())
+    }
+
+    /// Sets the server `name`'s `enabled` and `scope` (`None` for every matter), in one write
+    /// of its entry. Refused as [`Self::set_mcp_server_enabled`] is; one already as asked writes
+    /// nothing.
+    pub fn set_mcp_server_scope(
+        &mut self,
+        files: &dyn Files,
+        name: &str,
+        enabled: bool,
+        scope: Option<ItemScope>,
+    ) -> Result<(), Error> {
+        if self.mcp_locked() {
+            return Err(locked());
+        }
+        let Some(held) = self.settings.mcp.servers.get(name) else {
+            return Err(refused(name, McpRefusal::Unknown));
+        };
+        let scope = scope.filter(|scope| *scope == ItemScope::Matter);
+        if held.enabled == enabled && held.scope == scope {
+            return Ok(());
+        }
+        let mut server = held.clone();
+        server.enabled = enabled;
+        server.scope = scope;
+        let entry = self.mcp_entry(&server)?;
+        user::write_mcp_server(&self.locations, files, None, name, Some(entry))?;
         self.settings.mcp.servers.insert(name.to_owned(), server);
         Ok(())
     }
