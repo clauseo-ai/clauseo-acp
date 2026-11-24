@@ -8,7 +8,7 @@ use clauseo_reducer::ThreadState;
 use super::super::super::Actor;
 use super::super::close::{Expiries, TurnClose};
 use super::super::out::Out;
-use super::super::{Then, TurnPhase, current, state};
+use super::super::{Then, state};
 use super::existing;
 use crate::build;
 use crate::error::Error;
@@ -68,9 +68,14 @@ fn open_in_view(state: &ThreadState) -> Vec<HelperId> {
     state
         .entries()
         .values()
-        .filter_map(|entry| match entry {
-            ViewEntry::Helper(helper) if helper.outcome.is_none() => Some(helper.helper),
-            _ => None,
+        .filter_map(|entry| {
+            if let ViewEntry::Helper(helper) = entry
+                && helper.outcome.is_none()
+            {
+                Some(helper.helper)
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -94,7 +99,8 @@ const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
 /// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
 /// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
 /// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
-/// turn whose prompt never went out leaves them open.
+/// turn that is not the one the log has running (removed from the queue, never started) leaves
+/// them open.
 /// Start-up's repair of a turn a crash or a quit left open (its expiries listed from the log)
 /// ends `Stopped` every helper the log leaves open, so no card of the last run stays running.
 pub(in crate::actor::turn) fn on_close(
@@ -107,15 +113,13 @@ pub(in crate::actor::turn) fn on_close(
         return end_logged_open(actor, thread, out);
     }
     let turn = close.turn;
-    // Only a turn whose prompt went out closes helpers: a queued turn removed, or one that
-    // failed before its prompt, leaves them as they are.
-    let prompted = current(actor, thread).is_some_and(|current| {
-        current.turn == turn
-            && matches!(
-                current.phase,
-                TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending
-            )
-    });
+    // Only the close of the turn the log has running closes helpers: a queued turn removed, or
+    // one that never started, leaves another turn's helpers as they are. Read from the view, so
+    // a close retried after a failed write (its turn no longer current) closes them too.
+    let prompted = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .is_some_and(|state| state.running() == Some(turn));
     if existing(actor, thread).is_none() {
         return Ok(());
     }
