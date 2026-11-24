@@ -186,8 +186,9 @@ pub(crate) const CLAUDE_HELPERS_AT_ONCE: &str = "6";
 /// ([`CLAUDE_BUILTIN_AGENTS_OFF_VAR`]) leaves it on: a live run on Claude Code 2.1.330 offered
 /// "paper-reader, fork". Claude Code 2.1.x binary, search text
 /// `if(s.CLAUDE_CODE_FORK_SUBAGENT===!1)return"disabled"` (2.1.330; `a.` in 2.1.293): read as a
-/// yes/no/unset, `0` turns it off before Anthropic's flag is read. The same switch decides
-/// whether helpers are forced to start in the background (search text `function bZt()`).
+/// yes/no/unset, `0` turns it off before Anthropic's flag is read. The engine's code ties the
+/// same switch to forcing helpers into the background (search text `function bZt()`), but a
+/// live run on 2.1.330 with it at `0` still launched a helper in the background unasked.
 pub(crate) const CLAUDE_FORK_OFF_VAR: &str = "CLAUDE_CODE_FORK_SUBAGENT";
 
 // A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
