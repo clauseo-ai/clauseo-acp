@@ -72,7 +72,7 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
         TurnPhase::Prompting | TurnPhase::FallbackStop if cancelled => {
             // Logs nothing when the cancel commit was durable: the view no longer holds
             // anything for it to close.
-            if let Err(error) = cancel::log_cancel(actor, thread, turn, None, false) {
+            if let Err(error) = cancel::log_cancel(actor, thread, turn, None) {
                 tracing::warn!(%thread, error = %Cause(&error), "a cancel was not logged");
             }
         }

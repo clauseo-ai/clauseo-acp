@@ -55,8 +55,6 @@ pub(super) struct Helpers {
     handbacks: HashMap<CompactString, claude::Handback>,
     /// Words not logged yet, in first-word order.
     words: words::Held,
-    /// The turn a send-now cut short: its end leaves the helpers open.
-    kept: Option<TurnId>,
 }
 
 /// A helper the host started.

@@ -1,13 +1,14 @@
 //! Helpers across a run's end and a reopen (`turn/helpers.rs`): the same view after a reopen;
 //! a helper a crash left open in an open turn, or past its turn, ends `Stopped` at the next
-//! start, once; a helper whose engine dies mid-turn ends `Stopped` with the turn.
+//! start, once; a helper whose engine dies mid-turn, a send-now, a failed write's retry and a
+//! detach end it `Stopped`.
 
 use futures::channel::oneshot;
 
 use clauseo_acp::Origin;
 use clauseo_protocol::{
-    DetachReason, DomainEvent, HelperOutcome, HostCommand, HostQuery, PageLimit, Principal,
-    QueryResult, StreamId, ThreadId, ViewEntry,
+    DeliveryRequest, DetachReason, DomainEvent, HelperOutcome, HostCommand, HostQuery, PageLimit,
+    Principal, PromptBlock, QueryResult, StreamId, ThreadId, ViewEntry,
 };
 
 use super::agents::send_prompt;
@@ -188,6 +189,55 @@ fn a_stop_whose_write_fails_ends_its_helper_on_the_retry() {
         .filter(|line| line.starts_with("end "))
         .collect();
     assert_eq!(ends, ["end paper-reader Stopped -"], "{story:?}");
+    rig.finish();
+}
+
+/// A message sent now while a helper runs cancels the turn, and Claude's engine stops its helpers
+/// on a cancel: the helper ends `Stopped` with the cancel, and the next turn starts with none
+/// open.
+#[test]
+fn a_send_now_stops_the_running_helper() {
+    let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
+    let second =
+        r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}"#;
+    let answer = r#"{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}"#;
+    let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n{second}\n{answer}\n");
+    let mut rig = Rig::start("helpers-send-now", &steps);
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
+    let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(input)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    let now = HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "Stop and read the notice instead.".to_owned(),
+        }],
+        delivery: DeliveryRequest::SendNow,
+        config: None,
+    };
+    rig.dispatch(11, now).unwrap();
+    rig.run_until("both turns' ends", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none() && state.queue.is_empty() && actor.work.commits == 0
+    });
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=- task=true",
+            "end paper-reader Stopped -",
+            "turn_ended Cancelled",
+            "turn_ended EndTurn",
+        ]
+    );
     rig.finish();
 }
 
