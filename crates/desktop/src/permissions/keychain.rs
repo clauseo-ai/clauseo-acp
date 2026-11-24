@@ -149,7 +149,18 @@ pub(super) fn keychain_row(
     check: &KeychainCheck,
     recorded: Option<Answer>,
 ) -> Option<PermissionRow> {
-    keychain_state(check, recorded).map(|state| row(state, check, recorded.is_some()))
+    let state = keychain_state(check, recorded);
+    // Once per listing, on the lifecycle target (host.log keeps it): what the row says and how
+    // many items it rests on, never an account or a value.
+    tracing::info!(
+        target: "clauseo_desktop::permissions::lifecycle",
+        ?state,
+        would_ask = check.would_ask.len(),
+        unknown = check.unknown.len(),
+        recorded = ?recorded,
+        "permissions: keychain row"
+    );
+    state.map(|state| row(state, check, recorded.is_some()))
 }
 
 /// The keychain row's state:
