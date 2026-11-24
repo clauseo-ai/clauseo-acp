@@ -1,7 +1,6 @@
 //! A turn that ends before it starts says why (`TurnEnded.cause`), and its message settles by
-//! that cause: `Removed` for a Stop, a removal, a sign-in or an install (whose copy is queued
-//! again) and for a log with no cause; `NotSent` for a send now and for a held steer whose
-//! answer stopped. The view keeps the cause on the message, written only when it is set.
+//! `Removed`, whatever the cause (no new status). The view keeps the cause on the message,
+//! written only when it is set.
 
 use clauseo_protocol::{
     CopyOf, DomainEvent, MessageId, StopReason, ThreadStatus, TurnId, UnsentCause,
@@ -64,8 +63,8 @@ fn each_cause_settles_the_unstarted_prompt_by_its_status() {
         (Some(UnsentCause::SignIn), UserMessageStatus::Removed),
         (Some(UnsentCause::Update), UserMessageStatus::Removed),
         (Some(UnsentCause::Unknown), UserMessageStatus::Removed),
-        (Some(UnsentCause::SentNow), UserMessageStatus::NotSent),
-        (Some(UnsentCause::NotSent), UserMessageStatus::NotSent),
+        (Some(UnsentCause::SentNow), UserMessageStatus::Removed),
+        (Some(UnsentCause::NotSent), UserMessageStatus::Removed),
     ];
     for (cause, status) in cases {
         let (mut log, turn, message) = queued_prompt();
@@ -101,7 +100,7 @@ fn an_unset_cause_is_not_written_on_the_message() {
 }
 
 #[test]
-fn a_prompt_sent_now_over_a_running_turn_is_not_sent_and_the_turn_keeps_running() {
+fn a_prompt_sent_now_over_a_running_turn_is_removed_and_the_turn_keeps_running() {
     let mut log = Log::thread(42).unwrap();
     log.push(thread_created().unwrap()).unwrap();
     let running = start_turn(&mut log, "Check clause 2.").unwrap();
@@ -114,7 +113,11 @@ fn a_prompt_sent_now_over_a_running_turn_is_not_sent_and_the_turn_keeps_running(
     assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Running);
     assert_eq!(
         prompt_status(&state, message),
-        Some(UserMessageStatus::NotSent)
+        Some(UserMessageStatus::Removed)
+    );
+    assert_eq!(
+        prompt_entry(&state, message).unsent,
+        Some(UnsentCause::SentNow)
     );
     assert_eq!(state.as_thread().unwrap().running(), Some(running));
     assert_eq!(state, fold(log.events()));

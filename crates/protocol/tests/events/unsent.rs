@@ -1,10 +1,9 @@
 //! Why a turn that never started ended (`TurnEnded.cause`): a cause and no cause both
 //! round-trip, a `TurnEnded` written before the field reads as no cause, and a cause a newer
-//! host adds reads as `Unknown`. The message's status `not_sent` is written as that word.
+//! host adds reads as `Unknown`.
 
 use clauseo_protocol::{
     CopyOf, Delivery, DomainEvent, StopReason, TurnEnded, UnsentCause, UserMessage,
-    UserMessageStatus,
 };
 use serde_json::json;
 
@@ -66,15 +65,6 @@ fn a_cause_from_a_newer_host_reads_as_unknown() {
     });
     let read: DomainEvent = serde_json::from_value(newer).unwrap();
     assert_eq!(read, ended(Some(UnsentCause::Unknown)));
-}
-
-#[test]
-fn the_not_sent_status_round_trips_as_not_sent() {
-    round_trips(&UserMessageStatus::NotSent);
-    assert_eq!(
-        serde_json::to_value(UserMessageStatus::NotSent).unwrap(),
-        json!("not_sent")
-    );
 }
 
 /// A `UserMessage` of `turn` with `copy_of`.

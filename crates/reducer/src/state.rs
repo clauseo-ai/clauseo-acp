@@ -353,10 +353,7 @@ impl Index {
     ) {
         for (order, entry) in entries {
             if let ViewEntry::UserMessage(user) = entry
-                && !matches!(
-                    user.status,
-                    UserMessageStatus::Removed | UserMessageStatus::NotSent
-                )
+                && user.status != UserMessageStatus::Removed
                 && running != Some(user.turn)
                 && !self.steps.contains_key(&user.turn)
             {

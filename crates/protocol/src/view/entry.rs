@@ -149,11 +149,9 @@ pub enum UserMessageStatus {
     Sent,
     /// Waiting in the thread's queue.
     Queued,
-    /// Removed from the queue before its turn started (its turn ended cancelled).
+    /// Removed from the queue before its turn started (its turn ended cancelled); `unsent` says
+    /// why.
     Removed,
-    /// Not sent: its turn ended before it started, and another message took its place or the
-    /// answer it was held for stopped (`unsent` says which).
-    NotSent,
 }
 
 /// A prompt the lawyer sent. Entry id `user_message:<message>`.
@@ -191,7 +189,7 @@ pub struct UserMessageEntry {
     pub at_head: bool,
     /// When it was sent (display only; the `UserMessage` envelope's `ts`).
     pub ts: Timestamp,
-    /// Why its turn ended before it started, once it did (`Removed`, `NotSent`); `None` while
+    /// Why its turn ended before it started, once it did (`Removed`); `None` while
     /// it is sent or queued, and in views written before the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unsent: Option<UnsentCause>,
