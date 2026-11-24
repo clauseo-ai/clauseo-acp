@@ -35,6 +35,9 @@ fn with_no_hook_the_meta_is_the_switches() {
                 "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
                 "CLAUDE_CODE_HARBOR_KITE": "0",
                 "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
+                "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+                "CLAUDE_CODE_WEB_FETCH_AGENT": "0",
+                "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "6",
             },
         }}})
     );
@@ -77,6 +80,9 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                         "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
                         "CLAUDE_CODE_HARBOR_KITE": "0",
                         "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
+                        "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+                        "CLAUDE_CODE_WEB_FETCH_AGENT": "0",
+                        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "6",
                     },
                 },
             },

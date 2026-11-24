@@ -318,7 +318,81 @@ fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off()
             Some(&OsString::from(value))
         );
     }
-    assert_eq!(launch.len(), 4);
+    assert_eq!(launch.len(), 7);
+}
+
+/// The variables that keep helpers off the lead's model: Claude Code's own agent types and its
+/// web-fetch agent off and at most six helpers at once on every login, and every helper on
+/// Haiku on Anthropic's own login only. Each wins over a hook's own value; a cloud login gets
+/// neither helper-model variable, and the adapter's own environment never has them.
+#[test]
+fn helpers_stay_off_the_lead_model_and_only_anthropics_login_forces_haiku() {
+    let every_login = [
+        ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"),
+        ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
+        ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
+    ];
+    let first_party = [
+        ("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"),
+        ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1"),
+    ];
+    let against = json!({"claudeCode": {"options": {
+        "env": {
+            "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0",
+            "CLAUDE_CODE_WEB_FETCH_AGENT": "1",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "opus",
+        },
+        "settings": {"env": {
+            "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "20",
+            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "0",
+        }},
+    }}});
+    for control in [McpControl::Clauseo, McpControl::Managed] {
+        for hook in [json!({}), against.clone()] {
+            let keys = ClaudeKeys {
+                login: Login::FirstParty,
+                ..keys(ON)
+            };
+            let meta = Value::Object(session_meta(
+                hook.as_object().cloned(),
+                control,
+                None,
+                Some(&keys),
+            ));
+            let options = &meta["claudeCode"]["options"];
+            for (name, value) in every_login.iter().chain(&first_party) {
+                assert_eq!(options["env"][name], *value, "{hook} {name}");
+                assert_eq!(options["settings"]["env"][name], *value, "{hook} {name}");
+            }
+        }
+        for login in [Login::Bedrock, Login::OtherCloud] {
+            let keys = ClaudeKeys { login, ..keys(ON) };
+            let meta = Value::Object(session_meta(None, control, None, Some(&keys)));
+            let options = &meta["claudeCode"]["options"];
+            for (name, value) in every_login {
+                assert_eq!(options["env"][name], value, "{login:?} {name}");
+                assert_eq!(options["settings"]["env"][name], value, "{login:?} {name}");
+            }
+            for (name, _) in first_party {
+                assert_eq!(options["env"].get(name), None, "{login:?} {name}");
+                assert_eq!(
+                    options["settings"]["env"].get(name),
+                    None,
+                    "{login:?} {name}"
+                );
+            }
+        }
+    }
+    let launch = claude_launch_vars();
+    for (name, value) in every_login {
+        assert_eq!(
+            launch.get(&OsString::from(name)),
+            Some(&OsString::from(value))
+        );
+    }
+    for (name, _) in first_party {
+        assert_eq!(launch.get(&OsString::from(name)), None, "{name}");
+    }
 }
 
 /// `SendMessage` stays offered (it continues a helper); `ListAgents` is neither offered nor

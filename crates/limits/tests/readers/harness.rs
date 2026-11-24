@@ -36,11 +36,14 @@ pub(crate) const CODEX_JS: &str = "@openai/codex/bin/codex.js";
 pub(crate) const INHERITED: &str = "CARGO_MANIFEST_DIR";
 /// What every Claude read sets in the helper's env, over the inherited and settings values
 /// (`readers/claude.rs`'s `CLAUDE_FORCED_VARS`).
-pub(crate) const CLAUDE_FORCED: [(&str, &str); 4] = [
+pub(crate) const CLAUDE_FORCED: [(&str, &str); 7] = [
     ("CLAUDE_CODE_DISABLE_CRON", "1"),
     ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
     ("CLAUDE_CODE_HARBOR_KITE", "0"),
     ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"),
+    ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
+    ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
 ];
 
 /// `rel` (`/`-separated) under `base`, joined one component at a time, so it is spelled with
