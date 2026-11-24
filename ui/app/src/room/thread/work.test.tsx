@@ -276,7 +276,9 @@ test("with no matter the composer is disabled and nothing asks for threads", asy
   h = await mountRoom({ matters: [] });
   expect(field().disabled).toBe(true);
   expect((h.one("send") as HTMLButtonElement).disabled).toBe(true);
-  expect(h.transport.only("query").some((c) => typeof c.query === "object")).toBe(false);
+  // list_addons is the library's, asked with or without a matter; no other query with a body (a matter's threads)
+  const asked = h.transport.only("query").filter((c) => typeof c.query === "object");
+  expect(asked.filter((c) => !("list_addons" in (c.query as object)))).toEqual([]);
   expect(h.host.querySelector(".room-line")).toBeNull();
 });
 
