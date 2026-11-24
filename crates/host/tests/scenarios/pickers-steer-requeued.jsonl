@@ -1,0 +1,15 @@
+{"scenario":"pickers-steer-requeued","description":"A joining steer moved to a new turn keeps its picks (prompt_picks.rs): the steer with a sonnet pick goes into prompt 1, which ends first, so the agent answers promptRequired; the steer's new turn must set sonnet before its prompt (a prompt before the set is a mismatch)","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"respond":{"to":"steer","result":{"outcome":"promptRequired","reason":"noRunningTurn"},"raw":true}}
+{"expect":{"method":"session/set_config_option","as":"to-sonnet","params":{"sessionId":"sess-1","configId":"model","value":"sonnet"}}}
+{"respond":{"to":"to-sonnet","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"sonnet","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Focusing on clause 4."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

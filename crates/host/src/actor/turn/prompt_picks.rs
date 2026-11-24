@@ -7,9 +7,12 @@
 //!   across a restart gets them back from its `UserMessage` (`queue/restore.rs`, [`restored`]),
 //!   and so does a turn put back for the sign-in, whose new `UserMessage` logs them again
 //!   (`queue/sign_in.rs`, from [`finished`]). The turn keeps them until it ends.
-//! - A steer that joins the running answer cannot change its model: its picks go (`queue.rs`,
-//!   [`drop_next`]), and never reach a starting session's `CreateThread` config either. A steer
-//!   that becomes its own turn (it waits as the next turn, is sent now, or is held) keeps them.
+//! - A steer that joins the running answer cannot change its model: the steer holds its picks
+//!   ([`take_next`], `queue/steer.rs`'s `Ask`), and they go once the agent takes it in. A steer
+//!   moved to a new turn (the agent answered `promptRequired` or `failed`, or no answer came in
+//!   time) hands them to that turn ([`carry`]). A steer that becomes its own turn at once (it
+//!   waits as the next turn, is sent now, or is held) keeps them as any prompt does. A joining
+//!   steer's picks never reach a starting session's `CreateThread` config.
 //! - While the thread has no session yet, the picks a turn takes also become its `CreateThread`
 //!   config, so its first session starts with them (`picks.rs`).
 //! - At step 4, once the session is attached and before the checkpoint and `TurnStarted`, the
@@ -60,7 +63,7 @@ struct Ran {
 }
 
 /// Routes a `SendPrompt` with `config` held for the turn it makes; a steer that joins the
-/// running answer drops them first ([`drop_next`]).
+/// running answer takes them first ([`take_next`]).
 pub(super) fn send_prompt<T>(
     actor: &mut Actor,
     thread: ThreadId,
@@ -79,10 +82,15 @@ pub(super) fn send_prompt<T>(
 }
 
 /// The `SendPrompt` being routed is a steer that joins the running answer, which keeps its
-/// model: its picks go.
-pub(super) fn drop_next(actor: &mut Actor, thread: ThreadId) {
-    if let Some(state) = state(actor, thread) {
-        state.prompt_picks.next = None;
+/// model: the steer holds its picks, for a new turn should it move to one ([`carry`]).
+pub(super) fn take_next(actor: &mut Actor, thread: ThreadId) -> Option<ConfigPicks> {
+    state(actor, thread).and_then(|state| state.prompt_picks.next.take())
+}
+
+/// A steer that joined no answer moved to `turn`: the turn takes the steer's `picks`.
+pub(super) fn carry(actor: &mut Actor, thread: ThreadId, turn: TurnId, picks: Option<ConfigPicks>) {
+    if let (Some(picks), Some(state)) = (picks, state(actor, thread)) {
+        state.prompt_picks.by_turn.insert(turn, picks);
     }
 }
 

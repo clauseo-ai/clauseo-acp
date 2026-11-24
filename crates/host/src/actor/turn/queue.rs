@@ -247,9 +247,10 @@ fn route(
     if delivery == DeliveryRequest::Steer && !holds.update_now() {
         match steer::target(actor, thread) {
             steer::Target::Join(turn) => {
-                // It joins the running answer, which keeps its model: its picks go.
-                super::prompt_picks::drop_next(actor, thread);
-                return steer::steer(actor, ctx, thread, turn, blocks);
+                // It joins the running answer, which keeps its model: the steer holds its
+                // picks for a new turn, should it move to one.
+                let picks = super::prompt_picks::take_next(actor, thread);
+                return steer::steer(actor, ctx, thread, turn, (blocks, picks));
             }
             steer::Target::Next(running) => {
                 return steer::next(actor, ctx, thread, running, blocks);
