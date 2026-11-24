@@ -359,9 +359,10 @@ fn input_it_cannot_read_lets_claudes_tool_go_and_refuses_codexs() {
     );
 }
 
-/// Stdin that fails to read: Claude's hook lets the tool go with the line, Codex's refuses.
+/// Stdin that fails to read is the guard's own error: Claude's hook refuses with the plain line
+/// (one retry, then the lawyer), Codex's with the shared line.
 #[test]
-fn stdin_that_fails_to_read_lets_claudes_tool_go_and_refuses_codexs() {
+fn stdin_that_fails_to_read_refuses_with_the_plain_line() {
     struct Broken;
     impl std::io::Read for Broken {
         fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
@@ -372,11 +373,11 @@ fn stdin_that_fails_to_read_lets_claudes_tool_go_and_refuses_codexs() {
     let mut errors = Vec::new();
     assert_eq!(
         run_timed(&matter, Broken, (Vec::new(), &mut errors), false),
-        0
+        DENY
     );
     assert_eq!(
         String::from_utf8(errors).unwrap(),
-        ignored("stdin could not be read")
+        format!("{}\n", super::COULD_NOT_CHECK_AGENT)
     );
     // As Codex's hook (no `--matter`), the same stdin refuses with the shared line.
     let mut errors = Vec::new();
@@ -555,6 +556,7 @@ mod devanagari;
 mod fixtures;
 mod gaps;
 mod nesting;
+mod panics;
 mod powershell;
 mod record;
 mod timings;
