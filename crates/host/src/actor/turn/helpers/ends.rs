@@ -2,9 +2,7 @@
 //! itself, a failure, the agent gone), a detach, a failed write's retry, and a past run's
 //! helpers left open in the log (`helpers.rs` for the rest).
 
-use clauseo_protocol::{
-    HelperId, HelperOutcome, StopReason, StreamId, ThreadId, TurnId, ViewEntry,
-};
+use clauseo_protocol::{HelperId, HelperOutcome, StopReason, StreamId, ThreadId, ViewEntry};
 use clauseo_reducer::ThreadState;
 
 use super::super::super::Actor;
@@ -77,22 +75,15 @@ fn open_in_view(state: &ThreadState) -> Vec<HelperId> {
         .collect()
 }
 
-/// A cancel of `turn` (the lawyer's Stop, a failure, the host stopping): every open helper ends
-/// `Stopped`, unless `send_now` (the lawyer's next message cut the turn short), which leaves
-/// them open and keeps them open at the turn's end.
+/// A cancel (the lawyer's Stop, a send-now, a failure, the host stopping): every open helper
+/// of the conversation ends `Stopped`. Claude's engine stops its helpers on a cancel, foreground
+/// and background alike (recorded: no model or tool call of a helper after a cancel), so none
+/// outlives it.
 pub(in crate::actor::turn) fn on_cancel(
     actor: &mut Actor,
     thread: ThreadId,
-    turn: TurnId,
-    send_now: bool,
     out: &mut Out,
 ) -> Result<(), Error> {
-    if send_now {
-        if let Some(helpers) = existing(actor, thread) {
-            helpers.kept = Some(turn);
-        }
-        return Ok(());
-    }
     end_open(actor, thread, HelperOutcome::Stopped, out)
 }
 
@@ -103,7 +94,7 @@ const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
 /// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
 /// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
 /// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
-/// turn a send-now cut short, and a turn whose prompt never went out, leave them open.
+/// turn whose prompt never went out leaves them open.
 /// Start-up's repair of a turn a crash or a quit left open (its expiries listed from the log)
 /// ends `Stopped` every helper the log leaves open, so no card of the last run stays running.
 pub(in crate::actor::turn) fn on_close(
@@ -125,17 +116,16 @@ pub(in crate::actor::turn) fn on_close(
                 TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending
             )
     });
-    let Some(helpers) = existing(actor, thread) else {
+    if existing(actor, thread).is_none() {
         return Ok(());
-    };
-    let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
+    }
     // The engine gone (its detach, or a failure: the agent exited, the connection was lost)
     // and a cancel stop every open helper, whoever cut the turn short.
     let stopped =
         close.detach.is_some() || close.failure.is_some() || close.stop == StopReason::Cancelled;
     let outcome = if close.detach.is_some() {
         HelperOutcome::Stopped
-    } else if kept || !prompted {
+    } else if !prompted {
         return Ok(());
     } else if stopped {
         HelperOutcome::Stopped
