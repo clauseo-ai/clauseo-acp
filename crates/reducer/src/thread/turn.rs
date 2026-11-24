@@ -208,17 +208,15 @@ pub(super) fn turn_started(state: &mut ThreadState, event: &TurnStarted, out: &m
     state.after_turn = None;
     let status = running_status(state);
     set_status(state, "turn_started", out, status);
-    // The model and effort the turn runs with; an event logged before them changes neither. A
-    // new turn is not in code mode until its first script call.
-    let named = event.model.is_some() || event.effort.is_some();
+    // The model and effort the turn runs with, as the host read them from the session: one it
+    // left out is cleared, not kept from the previous turn, which may have run another agent or
+    // pick (the session names no model, or the event was logged before these fields, when the
+    // header had none either). A new turn is not in code mode until its first script call.
     let (model, effort) = (event.model.clone(), event.effort.clone());
     super::update_header(state, "turn_started", out, |header| {
-        let changed =
-            header.code_mode || (named && (header.model != model || header.effort != effort));
-        if named {
-            header.model = model;
-            header.effort = effort;
-        }
+        let changed = header.code_mode || header.model != model || header.effort != effort;
+        header.model = model;
+        header.effort = effort;
         header.code_mode = false;
         changed
     });
