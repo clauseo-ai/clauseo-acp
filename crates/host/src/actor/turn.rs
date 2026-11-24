@@ -117,6 +117,9 @@ pub(crate) struct TurnState {
     auto_told: bool,
     /// The thread's notice that Claude's sandbox did not start, once for the host's run.
     sandbox_off: profile_loads::claude::SandboxOffNotice,
+    /// The thread was told its agent's Case Law call met an out-of-credit refusal
+    /// (`case_law.rs`): once a turn and the time after it, cleared when a turn starts.
+    credit_told: bool,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// The thread's sources in progress: the browser's opens and the agents' web calls that have

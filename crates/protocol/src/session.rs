@@ -376,6 +376,11 @@ open_data_enum! {
         /// (without the sandbox Claude's shell could reach the browser's debugging port). Once a
         /// thread.
         SandboxOff = "sandbox_off",
+        /// A Case Law call of this thread's agent (or of a helper it ran, through the same
+        /// session) was refused for lack of credit. Once a turn. It carries no pay link: the app
+        /// reads that, and whether credits came, from the connectors' state, so it can say
+        /// "ask again" once they do.
+        CaseLawOutOfCredit = "case_law_out_of_credit",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -407,6 +412,7 @@ open_data_enum! {
         NoticeKind::AutoModeUnavailableForModel {
             model: "Haiku 4.5".to_owned(),
         },
+        NoticeKind::CaseLawOutOfCredit,
     ];
 }
 

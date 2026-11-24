@@ -276,9 +276,9 @@ fn open(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
         last: now.mono,
     });
     current.phase = TurnPhase::Launching;
-    state(actor, thread)
-        .ok_or_else(|| super::lost("a thread"))?
-        .current = Some(Box::new(current));
+    let held = state(actor, thread).ok_or_else(|| super::lost("a thread"))?;
+    held.credit_told = false;
+    held.current = Some(Box::new(current));
     tracing::info!(target: LIFECYCLE, %thread, %turn, "an agent-started turn opens");
     let stream = StreamId::Thread(thread);
     actor.with_loaded(

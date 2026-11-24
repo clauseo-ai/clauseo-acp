@@ -522,7 +522,13 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             actor.connectors.state.set_credential(credential);
             end_recharges(actor);
         }
-        RelayEvent::OutOfCredit { payment, .. } => out_of_credit(actor, payment),
+        RelayEvent::OutOfCredit { session, payment } => {
+            // The out-of-credit state goes out first: an app that saw the thread's notice with
+            // the state still in credit would read "credits added" in between.
+            out_of_credit(actor, payment);
+            publish(actor);
+            super::turn::case_law::out_of_credit(actor, session);
+        }
         RelayEvent::RechargePaid {
             recharge_id,
             balance_credits,
@@ -580,4 +586,21 @@ pub(super) fn switch_changed(actor: &mut Actor) {
 pub(super) fn shutdown(actor: &mut Actor) {
     cancel_sign_in(actor);
     end_recharges(actor);
+}
+
+/// Tests: the credential reads signed in with an API key, and the state goes out.
+#[cfg(test)]
+pub(crate) fn signed_in_for_test(actor: &mut Actor) {
+    let kind = clauseo_connectors::CredentialKind::ApiKey;
+    actor
+        .connectors
+        .state
+        .set_credential(CredentialStatus::SignedIn(kind));
+    publish(actor);
+}
+
+/// Tests: the connectors' state last sent to the app's subscribers.
+#[cfg(test)]
+pub(crate) fn published(actor: &Actor) -> Option<&ConnectorsState> {
+    actor.connectors.published.as_ref()
 }

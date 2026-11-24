@@ -13,6 +13,19 @@ use crate::fixtures::{decode_both, decodes_in_both, entry, envelope, packed_raw,
 use crate::json_copies::ID_KEY;
 use crate::unknown_variants::unit_enum;
 
+/// The Case Law out-of-credit notice is a plain string with no fields: the pay link is the
+/// connectors' state, never the log's.
+#[test]
+fn notice_kind_case_law_out_of_credit() {
+    let kind = NoticeKind::CaseLawOutOfCredit;
+    decodes_in_both(r#""case_law_out_of_credit""#, &kind);
+    round_trips(&kind);
+    assert_eq!(
+        serde_json::to_string(&kind).unwrap(),
+        r#""case_law_out_of_credit""#
+    );
+}
+
 /// The model's auto notice is a new kind, a one-key map (a variant never changes shape): the
 /// account's stays the plain string an older host wrote, and an older reader, which knows no
 /// `auto_mode_unavailable_for_model` key, reads the new one as `Unknown` like any later kind.
