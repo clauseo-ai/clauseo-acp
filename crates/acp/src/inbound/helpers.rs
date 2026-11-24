@@ -41,6 +41,16 @@ pub(super) fn route(
     })
 }
 
+/// `session`, or its root when it is an announced helper's; without helper sessions,
+/// `session` at once, with no look at the state.
+pub(super) fn root_of(shared: &Shared, session: AgentSessionId) -> AgentSessionId {
+    if shared.helper_sessions {
+        shared.state().root_of(session)
+    } else {
+        session
+    }
+}
+
 /// Maps helper session `helper`'s update as the same update on its root session would map,
 /// with the root's origin and folder, then makes the events the helper's
 /// (`map::helpers::helper_events`). It reads no other state of the root and changes none: a
@@ -67,8 +77,10 @@ pub(super) fn helper_update(
 /// A `subagent_spawned` or `subagent_state_update` (`name`) on `session`, read from the raw
 /// `update`. The root is `session`'s own root when `session` is an announced helper's (the
 /// helper is then the parent), else `session` itself, known to this connection or not; the
-/// events carry the root's origin. A `subagent_spawned` records its helper under that root,
-/// unless it names `session` or a session this connection started, which only warns.
+/// events carry the root's origin. A `subagent_spawned` records its helper under that root; it
+/// only warns when the root is not a session this connection started, when it names `session`
+/// or such a session, and when the helper was already announced under another root, which it
+/// keeps.
 pub(super) fn subagent(
     shared: &Shared,
     session: Option<AgentSessionId>,
@@ -100,8 +112,17 @@ pub(super) fn subagent(
                 name: label,
                 task,
             } => {
-                if helper == session || state.sessions.contains_key(helper.as_str()) {
-                    let error = "a subagentSessionId that names a session of this connection";
+                let known = state.helpers.root_of(helper.as_str());
+                let refused = if !state.sessions.contains_key(root.as_str()) {
+                    Some("a subagent_spawned on a session this connection did not start")
+                } else if helper == session || state.sessions.contains_key(helper.as_str()) {
+                    Some("a subagentSessionId that names a session of this connection")
+                } else if known.is_some_and(|known| *known != root) {
+                    Some("a subagentSessionId already announced under another session")
+                } else {
+                    None
+                };
+                if let Some(error) = refused {
                     let warning = map::invalid(Some(session), Some(name), error.to_owned());
                     events.push(warning);
                 } else {

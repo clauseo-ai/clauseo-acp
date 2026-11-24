@@ -2,10 +2,13 @@
 //! their own frames carry, each with its root: the session the lawyer talks to. Empty unless
 //! `ConnectOptions::helper_sessions` is on, since only then is a `subagent_spawned` read.
 //!
-//! An entry stays after the helper ends, so its late frames still find the root. It is
-//! forgotten with its root's entry in `State::sessions`: when the root is started again
-//! (`session/new`, `session/load`, `session/resume`; a load's replay announces its helpers
-//! again) or dropped (a failed load or resume), and with the connection.
+//! Only a session this connection started is a root, and a helper keeps the root it was first
+//! announced under, so the agent cannot grow the map with sessions nobody forgets, nor move a
+//! helper's requests to another root's cancel. An entry stays after the helper ends, so its late
+//! frames still find the root. It is forgotten with its root's entry in `State::sessions`: when
+//! the root is started again (`session/new`, `session/load`, `session/resume`; a load's replay
+//! announces its helpers again) or dropped (a failed load or resume), and with the connection.
+//! A session started under an id once announced as a helper stops being one.
 
 use std::collections::BTreeMap;
 
@@ -24,6 +27,11 @@ impl HelperSessions {
     /// Records helper session `helper` under `root`, replacing what it had.
     pub(crate) fn insert(&mut self, helper: CompactString, root: AgentSessionId) {
         self.0.insert(helper, root);
+    }
+
+    /// Forgets helper session `id`, if it was one.
+    pub(crate) fn forget(&mut self, id: &str) {
+        self.0.remove(id);
     }
 
     /// Forgets every helper whose root is `root`.
