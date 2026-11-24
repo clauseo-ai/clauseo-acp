@@ -39,7 +39,7 @@ const OFFLINE: [&str; 27] = [
     "Internal error: API Error: Connection error.",
     "Unable to connect to API (ECONNREFUSED)",
     "API Error: getaddrinfo ENOTFOUND api.anthropic.com",
-    // claude-agent-sdk 0.3.293's own lines
+    // claude-agent-sdk 0.3.293's own lines, still 0.3.330's
     "API Error: Unable to connect to API. Check your internet connection",
     "API Error: No internet route \u{2014} check your connection or VPN (ENETDOWN)",
     "API Error: Request timed out. Check your internet connection and proxy settings",
@@ -144,6 +144,8 @@ fn only_claude_s_exact_connection_lines_are_notes() {
         "API Error: No internet route \u{2014} check your connection or VPN (EHOSTUNREACH)",
         "API Error: Request timed out. Check your internet connection and proxy settings",
         "\n\nAPI Error: Request timed out.",
+        // claude-agent-sdk 0.3.330's line for an idle connection
+        "API Error: Request timed out",
     ] {
         assert_eq!(transport_note(line), CLAUDE, "{line}");
     }
