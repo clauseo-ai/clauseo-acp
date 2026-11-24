@@ -208,6 +208,17 @@ export const commands = {
 	 *  nothing.
 	 */
 	setLayoutMenu: (sidebar: boolean, papers: boolean) => typedError<null, HostError>(__TAURI_INVOKE("set_layout_menu", { sidebar, papers })),
+	/**
+	 *  Lists the permissions this build needs on this computer, each with its state: macOS's
+	 *  Documents and keychain, Windows' Controlled folder access, each only when it matters. Granted
+	 *  to `main`.
+	 */
+	permissions: () => typedError<PermissionRow[], HostError>(__TAURI_INVOKE("permissions")),
+	/**
+	 *  Asks for `id`, off the UI thread and as long as the OS's dialog stays up, and answers its
+	 *  row after. `command.invalid` for one `permissions` would not list now.
+	 */
+	askPermission: (id: PermissionId) => typedError<PermissionRow, HostError>(__TAURI_INVOKE("ask_permission", { id })),
 };
 
 /* Constants */
@@ -4648,6 +4659,24 @@ export type OpenedFile = {
 };
 
 /**
+ *  Where a permission stands. Not `PermissionState`: protocol's (an agent's permission request)
+ *  already has that name in the TypeScript bindings.
+ */
+export type OsPermissionState = 
+/**  Clauseo has not asked on this build; the OS's answer cannot be read before it does. */
+"not_asked" | 
+/**  Granted when Clauseo asked on this build. */
+"granted" | 
+/**  Refused or cancelled when Clauseo asked on this build. */
+"denied" | 
+/**  The OS would show its dialog at the next read. */
+"would_ask" | 
+/**  It blocks Clauseo, and only an administrator can change that. */
+"blocking" | 
+/**  Could not tell: a silent check failed in a way that says neither. */
+"unknown";
+
+/**
  *  Files changed outside Clauseo between turns (the lawyer, Word, a sync client), captured in
  *  `checkpoint`.
  */
@@ -4978,6 +5007,15 @@ export type PermissionExpired = {
 	reason: ExpiryReason,
 };
 
+/**  A permission the step may list. */
+export type PermissionId = 
+/**  macOS: Clauseo's access to the Documents folder, where the matters folder is. */
+"files_documents" | 
+/**  macOS: reading Clauseo's own stored keys without a keychain dialog. */
+"keychain" | 
+/**  Windows: Defender's Controlled folder access, which blocks writes under Documents. */
+"controlled_folder_access";
+
 /**  What a permission option does, as ACP v1 names it. */
 export type PermissionKind = 
 /**  Allow this once. */
@@ -5039,6 +5077,20 @@ export type PermissionResolved = {
 	 *  request's reject-once option, or `Cancelled` when it offered none.
 	 */
 	held_open?: MatterPath,
+};
+
+/**  One row of the step. */
+export type PermissionRow = {
+	/**  Which permission. */
+	id: PermissionId,
+	/**  Where it stands. */
+	state: OsPermissionState,
+	/**  The folder it is about (`files_documents`: Documents). */
+	folder: string | null,
+	/**  Where in the OS's settings the lawyer changes it, when Clauseo cannot. */
+	settings_path: string | null,
+	/**  More words: the keychain items concerned (service and account), or what else helps. */
+	note: string | null,
 };
 
 /**  Where a permission request or an elicitation stands. */

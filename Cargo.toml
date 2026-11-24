@@ -191,6 +191,9 @@ plist = { version = "1.10", default-features = false }
 ureq = { version = "3.4", default-features = false }
 rustls = { version = "0.23", default-features = false }
 keyring = { version = "4", default-features = false }
+# clauseo-desktop on macOS: the permissions step's silent check of Clauseo's keychain items
+# (src/permissions/mac.rs), at the version keyring's macOS store already locks.
+security-framework = { version = "3.7", default-features = false }
 base64 = "0.22.1"
 rand = "0.9"
 zeroize = "1.9"

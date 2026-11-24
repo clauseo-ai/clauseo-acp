@@ -127,6 +127,7 @@ mod menu;
 mod native_mark;
 mod navigation;
 mod open;
+mod permissions;
 mod picked;
 mod pre_write_guard;
 mod profile;
@@ -209,6 +210,17 @@ fn context<R: Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
+/// The window-state plugin. Not decorations: the frame is the room's (`window_frame.rs`), never a
+/// saved one. The state lives in the local data folder, not Roaming `AppData`, so a share that is
+/// down cannot stall start or quit (`app.appDirectoriesOverride` in tauri.conf.json). The Roaming
+/// state is not migrated: a saved window size is lost once.
+fn window_state<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_window_state::Builder::new()
+        .with_state_flags(window_size::state_flags())
+        .with_denylist(window_size::state_denylist())
+        .build()
+}
+
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
     // The clock of the timing lines in host.log (chooser/trace.rs).
@@ -243,16 +255,7 @@ pub fn run() -> tauri::Result<()> {
     #[cfg(not(target_os = "linux"))]
     let builder = builder.plugin_rust_only(tauri_plugin_updater::Builder::new().build());
     let app = builder
-        // Not decorations: the frame is the room's (window_frame.rs), never a saved one.
-        // The state lives in the local data folder, not Roaming AppData, so a share that is
-        // down cannot stall start or quit (`app.appDirectoriesOverride` in tauri.conf.json). The
-        // Roaming state is not migrated: a saved window size is lost once.
-        .plugin_rust_only(
-            tauri_plugin_window_state::Builder::new()
-                .with_state_flags(window_size::state_flags())
-                .with_denylist(window_size::state_denylist())
-                .build(),
-        )
+        .plugin_rust_only(window_state())
         // dialog and opener are called from Rust only; the webview gets no permission for them.
         .plugin_rust_only(tauri_plugin_dialog::init())
         .plugin_rust_only(tauri_plugin_opener::init())
@@ -288,6 +291,8 @@ pub fn run() -> tauri::Result<()> {
             commands::open_privacy_settings,
             commands::page_marks,
             commands::set_layout_menu,
+            commands::permissions,
+            commands::ask_permission,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

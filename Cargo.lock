@@ -1050,6 +1050,7 @@ dependencies = [
  "rfd",
  "ring",
  "rustls",
+ "security-framework",
  "semver",
  "serde",
  "serde_json",
