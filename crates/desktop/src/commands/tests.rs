@@ -430,7 +430,7 @@ fn every_list_of_commands_agrees() {
         allowed(&marks),
         "capabilities/marks.json"
     );
-    // The settings window gets its nine, all among the release commands.
+    // The settings window gets its eleven, all among the release commands.
     assert_eq!(
         granted(dir, "settings.json", "settings")
             .into_iter()
@@ -487,9 +487,10 @@ fn every_list_of_commands_agrees() {
     assert_eq!(invoked, ours, "bindings.ts");
 }
 
-/// The commands `capabilities/settings.json` grants the settings window (0028, and 0048's
-/// `setup`).
-const SETTINGS_COMMANDS: [&str; 9] = [
+/// The commands `capabilities/settings.json` grants the settings window (0028, 0048's `setup`,
+/// and the first-start permissions step's `permissions` and `ask_permission`, which Settings
+/// shows too).
+const SETTINGS_COMMANDS: [&str; 11] = [
     "dispatch",
     "query",
     "open_stream",
@@ -499,6 +500,8 @@ const SETTINGS_COMMANDS: [&str; 9] = [
     "setup",
     "quit_app",
     "pick_skill",
+    "permissions",
+    "ask_permission",
 ];
 
 /// Whether Tauri refused `answer` before any command ran.
@@ -510,7 +513,7 @@ fn denied(answer: &Result<Value, Value>) -> bool {
         .is_some_and(|text| text.contains("not allowed"))
 }
 
-/// Through Tauri's own access check: the settings window reaches exactly its nine commands and is
+/// Through Tauri's own access check: the settings window reaches exactly its eleven commands and is
 /// refused every other one, `open_settings` and `subscribe` among them, and the e2e and marks
 /// commands in their builds too. `main`'s `open_settings` opens it, once however often it is
 /// called.

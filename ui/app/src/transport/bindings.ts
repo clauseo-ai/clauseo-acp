@@ -212,12 +212,14 @@ export const commands = {
 	/**
 	 *  Lists the permissions this build needs on this computer, each with its state: macOS's
 	 *  Documents and keychain, Windows' Controlled folder access, each only when it matters. Granted
-	 *  to `main`.
+	 *  to `main` and to `settings` (`capabilities/settings.json`): Settings shows the same block for a
+	 *  lawyer who already has matters and never sees the first screen.
 	 */
 	permissions: () => typedError<PermissionRow[], HostError>(__TAURI_INVOKE("permissions")),
 	/**
 	 *  Asks for `id`, off the UI thread and as long as the OS's dialog stays up, and answers its
-	 *  row after. `command.invalid` for one `permissions` would not list now.
+	 *  row after. `command.invalid` for one `permissions` would not list now. Granted to `main` and
+	 *  `settings` alike: the OS prompt rises only when the lawyer presses Allow there.
 	 */
 	askPermission: (id: PermissionId) => typedError<PermissionRow, HostError>(__TAURI_INVOKE("ask_permission", { id })),
 };
