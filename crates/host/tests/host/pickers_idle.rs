@@ -121,10 +121,36 @@ fn codex_relaunch(test: &str, scenario: &'static str) -> Relaunched {
 /// prompt to its end, with no mismatch against `scenario`; played with `--pace-ms` `pace`
 /// when given, a pause between consecutive updates.
 pub(crate) fn relaunch(
-    (agent, config, pace): (&str, &[(&str, &str)], Option<&str>),
+    spec: (&str, &[(&str, &str)], Option<&str>),
     test: &str,
     scenario: &'static str,
 ) -> Relaunched {
+    let Stopped {
+        dir,
+        host,
+        thread,
+        mut events,
+        ..
+    } = stopped(spec, test, scenario);
+    let (second, _) = host.prompt(thread, "And clause 5?");
+    let ended = events.until_turn_ended(second);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    Relaunched {
+        _dir: dir,
+        host,
+        thread,
+        events,
+        second,
+    }
+}
+
+/// A thread of `agent` with `config` that ran one prompt against `scenario` and stopped idle.
+pub(crate) fn stopped(
+    (agent, config, pace): (&str, &[(&str, &str)], Option<&str>),
+    test: &str,
+    scenario: &'static str,
+) -> Stopped {
     let dir = Dir::new(test, &[(agent, Scenario::Local(scenario))]);
     if let Some(pace) = pace {
         let bin = clauseo_fake_agent::bin_path().expect("run cargo build -p clauseo-fake_agent");
@@ -168,17 +194,23 @@ pub(crate) fn relaunch(
     });
     host.settle();
     assert_eq!(host.status(matter, thread), ThreadStatus::IdleStopped);
-    let (second, _) = host.prompt(thread, "And clause 5?");
-    let ended = events.until_turn_ended(second);
-    events.assert_no_mismatch();
-    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
-    Relaunched {
-        _dir: dir,
+    Stopped {
+        dir,
         host,
+        folder,
         thread,
         events,
-        second,
     }
+}
+
+/// What [`stopped`] leaves: the folder (kept while the host runs), the host, the matter's
+/// folder, the thread and its events.
+pub(crate) struct Stopped {
+    pub(crate) dir: Dir,
+    pub(crate) host: Running,
+    pub(crate) folder: std::path::PathBuf,
+    pub(crate) thread: ThreadId,
+    pub(crate) events: crate::observe::Events,
 }
 
 /// What [`codex_relaunch`] leaves: the folder (kept while the host runs), the host, the

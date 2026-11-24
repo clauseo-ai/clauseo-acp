@@ -185,6 +185,7 @@ fn verdict(option: &AgentChoiceId, picked: Option<bool>, value: &ConfigValue) ->
 /// else the matter's prefs for its agent's kind; each with the value of a `SetConfigOption` of
 /// its option waiting for the session instead, the last one waiting.
 pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
+    super::prompt_picks::session_starting(actor, thread);
     candidates(actor, thread, options)
         .into_iter()
         .filter(|pick| offer(options, pick) != Offer::Held)

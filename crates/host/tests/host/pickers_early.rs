@@ -167,7 +167,7 @@ impl Launcher for Gate {
 }
 
 /// Polls `command`'s dispatch once, which sends it to the host, and returns it to await later.
-fn sent(
+pub(crate) fn sent(
     host: &Running,
     command: HostCommand,
 ) -> Pin<Box<impl Future<Output = Result<CommandOutcome, HostError>> + '_>> {

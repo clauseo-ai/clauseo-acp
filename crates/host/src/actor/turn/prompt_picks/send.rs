@@ -86,17 +86,28 @@ pub(in crate::actor::turn) fn send_first(
     thread: ThreadId,
     turn: TurnId,
 ) -> bool {
+    send_with(actor, thread, turn, None)
+}
+
+/// [`send_first`], with the `deadline` of a step 4 that waited for the session's list
+/// (`prompt_picks::resume`) kept instead of a new [`PICKS_WAIT`].
+pub(super) fn send_with(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    deadline: Option<futures::future::AbortHandle>,
+) -> bool {
     let Some((own, due, start)) = state(actor, thread).and_then(|state| {
         let picks = &state.prompt_picks;
         let fresh = !picks.ran.contains_key(&turn);
         let own = picks.by_turn.get(&turn).cloned();
         let due = picks.kept_due.clone();
-        let start = (picks.start.clone(), picks.kept_waited);
+        let start = (picks.start.clone(), picks.kept_waited, picks.kept_told);
         (fresh && (own.is_some() || !due.is_empty())).then_some((own, due, start))
     }) else {
         return false;
     };
-    let (start, waited) = start;
+    let (start, waited, told) = start;
     let kept = super::super::picks::thread_options(actor, thread);
     // With own values due, the header holds the last session's options, not this one's.
     let options = match start {
@@ -106,7 +117,16 @@ pub(in crate::actor::turn) fn send_first(
     };
     // The thread's own values due since the session started, under the turn's own picks; each
     // in the form the session lists (`picks/alias.rs`).
-    let mut wanted: BTreeMap<AgentChoiceId, AgentChoiceId> = due.iter().cloned().collect();
+    // Once the session start's notice was given, a due value the session does not offer goes
+    // without another.
+    let offered = |(id, value): &Pick| {
+        select(&options, id.as_str())
+            .is_none_or(|(_, _, offered)| offered.iter().any(|(v, _)| v == value.as_str()))
+    };
+    let mut wanted: BTreeMap<AgentChoiceId, AgentChoiceId> = (due.iter().cloned())
+        .map(|pick| super::super::picks::alias::listed(&options, &kept, pick))
+        .filter(|pick| !told || offered(pick))
+        .collect();
     wanted.extend(own.iter().flat_map(|own| own.as_map().clone()));
     let wanted: BTreeMap<_, _> = (wanted.into_iter())
         .map(|pick| super::super::picks::alias::listed(&options, &kept, pick))
@@ -144,17 +164,19 @@ pub(in crate::actor::turn) fn send_first(
         timed_out: true,
         ..Picked::default()
     };
-    let wait = actor.post_after(
-        PICKS_WAIT,
-        Input::Turn(TurnInput::Agent {
-            thread,
-            agent: id,
-            reply: AgentReply::PromptPicked {
-                turn,
-                picked: timed_out,
-            },
-        }),
-    );
+    let wait = deadline.unwrap_or_else(|| {
+        actor.post_after(
+            PICKS_WAIT,
+            Input::Turn(TurnInput::Agent {
+                thread,
+                agent: id,
+                reply: AgentReply::PromptPicked {
+                    turn,
+                    picked: timed_out,
+                },
+            }),
+        )
+    });
     if let Some(state) = state(actor, thread) {
         let ran = Ran {
             waiting: Some(wait),
