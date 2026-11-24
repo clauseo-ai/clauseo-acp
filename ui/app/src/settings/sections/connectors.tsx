@@ -265,28 +265,29 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
     const signed =
       typeof c.status === "object" && "signed_in" in c.status ? c.status.signed_in : undefined;
     const low = out === null && signed?.low === true;
-    const left = out?.credits ?? null;
+    // out of credit with no packs to choose: the status's pay link when it has one, else no "Add credits to…"
+    const statusPay =
+      typeof c.status === "object" && "out_of_credit" in c.status
+        ? (c.status.out_of_credit.pay_url ?? null)
+        : null;
+    const canAdd = c.packs.length > 0 || statusPay !== null;
+    const outLine =
+      out === null
+        ? null
+        : out.credits === 0
+          ? cr(lang, canAdd ? "No credits. Add credits to search." : "No credits.")
+          : cr(
+              lang,
+              canAdd
+                ? "Not enough credits for a search. Add credits to keep searching."
+                : "Not enough credits for a search.",
+            );
     body = (
       <>
-        {out !== null ? (
-          <>
-            <p className="text-ui text-primary font-chip" data-testid="connectors-out">
-              {say(
-                left === 0
-                  ? cr(lang, "No credits. Add credits to search.")
-                  : cr(lang, "Not enough credits for a search. Add credits to keep searching."),
-              )}
-            </p>
-            {left !== null &&
-              left > 0 &&
-              (signed?.balance !== undefined ? (
-                <BalanceTile lang={lang} balance={signed.balance} low />
-              ) : (
-                <p className="set-note" data-testid="connectors-out-left">
-                  {w("{credits} credits left", { credits: count(left) })}
-                </p>
-              ))}
-          </>
+        {outLine !== null ? (
+          <p className="text-ui text-primary font-chip" data-testid="connectors-out">
+            {say(outLine)}
+          </p>
         ) : signed === undefined ? null : (
           <>
             <p className="text-ui text-primary">{signedInWords(signed.method)}</p>
@@ -359,6 +360,18 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
             {c.packs.length > 0 && (
               <Button kind={out !== null ? "primary" : "tone"} size="small" onClick={openPacks}>
                 {cw(lang, "Add credits")}
+              </Button>
+            )}
+            {c.packs.length === 0 && out !== null && statusPay !== null && (
+              <Button
+                kind="primary"
+                size="small"
+                data-testid="connectors-out-pay"
+                onClick={() =>
+                  void ctx.transport.openExternal(statusPay, undefined, true).catch(() => {})
+                }
+              >
+                {cw(lang, "Open the payment page")}
               </Button>
             )}
             {accountRow}

@@ -6,7 +6,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law out of credit (the host's out_of_credit status), the same words in Settings › Connectors, the library's Case Law card and by the composer, with the figure left beside it when one was read (\"7 credits left\"). Replaces, by the composer, U15-64 \"Out of case-law credits.\" and U15-65 \"Searches of Indian Kanoon stop until you add more.\"; in Settings, U15-28 \"No credits left. Case-law searches stop until you add more.\". Those three are retired."
+    "note": "Clauseo Case Law out of credit (the host's out_of_credit status), the same words in Settings › Connectors, the library's Case Law card and by the composer, and in the row of the host's case_law_out_of_credit notice; no figure (the out-of-credit status carries none). Replaces, by the composer, U15-64 \"Out of case-law credits.\" and U15-65 \"Searches of Indian Kanoon stop until you add more.\"; in Settings, U15-28 \"No credits left. Case-law searches stop until you add more.\". Those three are retired."
   },
   "UC-1291": {
     "en": "No credits. Add credits to search.",
@@ -24,6 +24,33 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "By the composer of a conversation whose turn ran as Clauseo Case Law went out of credit, once credits arrive (the status leaves out_of_credit); it goes when the next message is sent. Nothing resends the question. New."
+    "note": "By the composer of a conversation that holds the host's case_law_out_of_credit notice after the lawyer's last message, once credit is back (not out); read from the conversation's own entries, so it holds after a reload, in a second window and for a conversation opened later. The next message ends it. Nothing resends."
+  },
+  "UC-1462": {
+    "en": "Clauseo Case Law had no credits for this search.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The row of the host's case_law_out_of_credit notice, at the point in the conversation where a search was refused, once credit is back; while out, the row says UC-1249 or UC-1291 from the current status. New."
+  },
+  "UC-1463": {
+    "en": "Not enough credits for a search.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Settings › Connectors out of credit when no packs are listed and the status has no pay link: UC-1249 without its \"Add credits to keep searching.\". New."
+  },
+  "UC-1464": {
+    "en": "No credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Settings › Connectors at 0 credits when no packs are listed and the status has no pay link: UC-1291 without its \"Add credits to search.\". New."
   }
 }

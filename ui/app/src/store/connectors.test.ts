@@ -203,25 +203,3 @@ test("two threads running when low turns true both keep the line; a thread whose
     undefined,
   ]);
 });
-
-test("two conversations refused for credits both hear them arrive; each clears with its own next message", () => {
-  const transport = withFeed();
-  const store = createConnectorsStore(transport);
-  const paid = (credits: number): ConnectorStatus => ({
-    signed_in: { low: false, balance: { credits } },
-  });
-  transport.appEvent({ connectors_changed: state(paid(400)) });
-  // t1's turn runs as the credit goes out; t3 sits idle
-  store.turnStarted("t1", "a");
-  transport.appEvent({ connectors_changed: state({ out_of_credit: {} }) });
-  store.turnEnded("t1", "a");
-  // the lawyer switches to t2 and asks there while still out
-  store.turnStarted("t2", "b");
-  store.turnEnded("t2", "b");
-  expect(["t1", "t2", "t3"].map(store.creditsAdded)).toEqual([false, false, false]);
-  transport.appEvent({ connectors_changed: state(paid(2_400)) });
-  expect(["t1", "t2", "t3"].map(store.creditsAdded)).toEqual([true, true, false]);
-  // a message sent in t2: only t2's line goes
-  store.turnStarted("t2", "c");
-  expect(["t1", "t2", "t3"].map(store.creditsAdded)).toEqual([true, false, false]);
-});

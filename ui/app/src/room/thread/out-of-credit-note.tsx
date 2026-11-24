@@ -1,5 +1,5 @@
 // The out-of-credit note as it shows (room/connectors/out-of-credit.tsx decides when): U12's FieldNotice under the
-// composer's field. Its first line names the connector, "Clauseo Case Law", with the figure left when one was read
+// composer's field. Its first line names the connector, "Clauseo Case Law", with a figure only when the status reads one
 // ("Clauseo Case Law · 7 credits left"); its second says what to do, the same words Settings and the library use:
 // "Not enough credits for a search. Add credits to keep searching.", or at 0 "No credits. Add credits to search.".
 // Then "Add credits", which opens the host's pay link or else Settings at Connectors, and a quiet icon button at its

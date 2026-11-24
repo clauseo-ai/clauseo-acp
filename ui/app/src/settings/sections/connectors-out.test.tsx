@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// Settings › Connectors out of credit by the one rule (store/case-law-credit.ts, r7363): the host's out_of_credit with
-// 7 credits last read and with 0, and a balance of 0, all say what the library and the composer say, never "Ready to
-// search." or "Running low"; Add credits leads as the primary button. Not out of credit with 7 left keeps today's
-// running-low words.
+// Settings › Connectors out of credit by the one rule (store/case-law-credit.ts, r7363, r7458): the host's
+// out_of_credit, whatever balance was read before it, and a balance of 0 say what the library and the composer say,
+// with no figure (out_of_credit carries none), never "Ready to search." or "Running low"; Add credits leads as the
+// primary button. With no packs listed, the status's pay link when it has one, else the sentence without "Add credits
+// to…". Not out of credit with 7 left keeps today's running-low words.
 import { afterEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
 import type { ConnectorView } from "../../transport/protocol.ts";
@@ -50,19 +51,34 @@ const saysOut = (r: Rig) => {
   expect(addCredits(r)).toBeDefined();
 };
 
-test("out of credit with 7 credits last read: the line and the figure beside it", async () => {
+test("out of credit after 7 credits were read: the line, and no figure, which the status doesn't carry", async () => {
   const r = await open(OUT, 7);
   expect(line(r, "connectors-out")).toBe(NOT_ENOUGH);
-  expect(line(r, "connectors-out-left")).toBe("7 credits left");
+  expect(r.text()).not.toContain("7 credits left");
+  expect(r.el.querySelector('[data-testid="connectors-balance"]')).toBeNull();
   saysOut(r);
 });
 
-test("out of credit with 0 last read: No credits, and no figure", async () => {
-  const r = await open(OUT, 0);
-  expect(line(r, "connectors-out")).toBe(NONE);
-  expect(line(r, "connectors-out-left")).toBeNull();
-  expect(r.el.querySelector('[data-testid="connectors-balance"]')).toBeNull();
-  saysOut(r);
+test("out of credit with no packs listed: its pay link, or the sentence without Add credits", async () => {
+  const pay = await mountSettings({
+    state: stateOf({ status: OUT, packs: [] }),
+    hash: "#connectors",
+  });
+  rig = pay;
+  expect(line(pay, "connectors-out")).toBe(NOT_ENOUGH);
+  await pay.press("Open the payment page");
+  expect(pay.transport.only("open_external")).toEqual([
+    { call: "open_external", url: "https://data.clauseo.chat/pay/x", alwaysAsk: true },
+  ]);
+  await pay.unmount();
+  const bare = await mountSettings({
+    state: stateOf({ status: { out_of_credit: {} }, packs: [] }),
+    hash: "#connectors",
+  });
+  rig = bare;
+  expect(line(bare, "connectors-out")).toBe("Not enough credits for a search.");
+  expect(bare.buttons()).not.toContain("Open the payment page");
+  expect(bare.buttons()).not.toContain("Add credits");
 });
 
 test("a never-funded account at 0 says No credits, never Ready to search or Running low", async () => {

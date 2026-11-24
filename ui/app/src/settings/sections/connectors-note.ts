@@ -34,8 +34,7 @@ export function connectorsNote(state: ConnectorsState, lang: Lang): string | und
     const balance = status.signed_in.balance;
     if (balance === undefined) return undefined;
     // at 0, out of credit, as every place says (case-law-credit.ts)
-    if (c.id === CASE_LAW && caseLawCredit(state, null)?.kind === "out")
-      return cw(lang, "Out of credit");
+    if (c.id === CASE_LAW && caseLawCredit(state)?.kind === "out") return cw(lang, "Out of credit");
     return cw(lang, "{credits} credits left", { credits: count(balance.credits) });
   }
   if ("out_of_credit" in status && status.out_of_credit !== undefined)

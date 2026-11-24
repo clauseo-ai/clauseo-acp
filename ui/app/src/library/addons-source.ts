@@ -69,7 +69,7 @@ const NO_FACTS: CaseLawFacts = {
 export function caseLawFacts(
   state: ConnectorsState,
   heard: boolean,
-  credit: CaseLawCredit | null = caseLawCredit(state, null),
+  credit: CaseLawCredit | null = caseLawCredit(state),
 ): CaseLawFacts {
   if (!heard) return NO_FACTS;
   const c = state.connectors.find((v) => v.id === CASE_LAW);

@@ -1,27 +1,25 @@
 // @vitest-environment happy-dom
-// "Credits added. Ask again to search case law." (UC-1460, r7381) over FakeTransport: a turn runs as Clauseo Case Law
-// goes out of credit (the refusal), the turn ends, credits arrive (the status leaves out_of_credit, or the figure
-// rises from 0), and the line takes the out-of-credit note's place by the composer; it goes once the next message's
-// turn starts, and nothing is resent. A conversation whose turn wasn't running as the credit went out shows nothing.
+// "Credits added. Ask again to search case law." (UC-1460, r7458, r7462) over FakeTransport: the conversation's own
+// entries hold the host's case_law_out_of_credit notice after the lawyer's last message (met-refusal.ts), and the
+// credit is back. The notice arrives after the refused step, as the host logs it; the next message clears the line by
+// itself; it holds for a conversation opened later and after a reload; it never shows while out, 0 → some → 0 included.
+// The notice's own row says the rule's words while out and what happened once credit is back.
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   agentText,
-  header,
   reset,
   step,
+  toolCall,
   upsert,
   userMessage,
   uuid,
 } from "../../testing/stream-script.ts";
-import type {
-  ConnectorStatus,
-  ConnectorsState,
-  TurnId,
-  ViewEntry,
-} from "../../transport/protocol.ts";
+import type { ConnectorStatus, ConnectorsState, ViewEntry } from "../../transport/protocol.ts";
+import { CASE_LAW_OUT_OF_CREDIT } from "../thread/case-law-notice.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
 import { stubFonts } from "../thread/testing.ts";
+import { metRefusal } from "./met-refusal.ts";
 
 stubFonts();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,10 +31,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-const T2 = uuid(2, 4);
-const T3 = uuid(3, 4);
 const LINE = "Credits added. Ask again to search case law.";
-const OK: ConnectorStatus = { signed_in: { low: false, balance: { credits: 400 } } };
 const PAID: ConnectorStatus = { signed_in: { low: false, balance: { credits: 2_400 } } };
 const OUT: ConnectorStatus = { out_of_credit: {} };
 
@@ -54,32 +49,33 @@ const stateOf = (status: ConnectorStatus): ConnectorsState => ({
   ],
 });
 
-const head = (status: "running" | "idle"): ViewEntry => ({
-  header: { ...header().header!, status },
+/** The host's mark, logged after the refused step (stand-in kind until the binding lands). */
+const marked = (order: number): ViewEntry => ({
+  notice: {
+    order,
+    event: uuid(order, 10),
+    level: "warning",
+    text: "Clauseo Case Law is out of credit.",
+    kind: CASE_LAW_OUT_OF_CREDIT as never,
+    ts: order * 1000,
+  },
 });
-const asked = (order: number, n: number, turn: TurnId, question: string, answer: string) => [
-  { user_message: { ...userMessage(order, n, question).user_message!, turn } },
-  { agent_text: { ...agentText(order + 1, n, answer).agent_text!, turn } },
+
+/** The question, the refused Case Law step, then the mark: the real order. */
+const REFUSED: ViewEntry[] = [
+  userMessage(1, 1, "Find the leading Supreme Court cases on section 138."),
+  toolCall(2, 1, "failed"),
+  marked(3),
+  agentText(4, 1, "The search was refused: no credits."),
+  step(5),
 ];
 
-/** The thread with one ended exchange and T2's, running when `running`, else ended too. */
-const mount = async (running = true) => {
+const mount = async (entries: ViewEntry[]) => {
   h = await mountRoom({
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     openSettings: () => {},
   });
-  h.deliver([
-    reset(
-      [
-        userMessage(1, 1, "Find Supreme Court judgments on section 138 NI Act."),
-        agentText(2, 1, "Here they are."),
-        step(3),
-        ...asked(4, 2, T2, "And the High Courts?", "The search was refused."),
-        ...(running ? [] : [step(6, { turn: T2 })]),
-      ],
-      head(running ? "running" : "idle"),
-    ),
-  ]);
+  h.deliver([reset(entries)]);
   await h.settle();
   return h;
 };
@@ -94,45 +90,60 @@ const status = async (s: ConnectorStatus) => {
 
 const line = () => h!.one("credits-added")?.textContent ?? null;
 
-test("refused mid-turn, then credits arrive: the line, until the next message's turn starts", async () => {
-  await mount();
-  await status(OK);
+test("metRefusal: the mark after the last message holds; a later message ends it; none before any mark", () => {
+  expect(metRefusal(REFUSED)).toBe(true);
+  expect(metRefusal([...REFUSED, userMessage(6, 2, "Search again.")])).toBe(false);
+  expect(metRefusal([userMessage(1, 1, "Hello."), agentText(2, 1, "Hi."), step(3)])).toBe(false);
+  expect(metRefusal([marked(1), userMessage(2, 1, "Later.")])).toBe(false);
+});
+
+test("the mark after the refused step, then credit back: the line; the next message clears it", async () => {
+  await mount([REFUSED[0]!, REFUSED[1]!]);
   await status(OUT);
-  expect(h!.all("out-of-credit")).toHaveLength(1);
-  expect(line()).toBeNull();
-  // the refused turn ends
-  h!.deliver([upsert(step(6, { turn: T2 })), upsert(head("idle"))]);
+  // the mark arrives after the step, as the host logs it
+  h!.deliver([upsert(marked(3))]);
   await h!.settle();
+  expect(line()).toBeNull();
+  expect(h!.one("case-law-notice")?.textContent).toBe(
+    "Not enough credits for a search. Add credits to keep searching.",
+  );
   await status(PAID);
-  expect(h!.all("out-of-credit")).toHaveLength(0);
   expect(line()).toBe(LINE);
-  // a balance read that changes nothing keeps it; nothing was resent
-  await status({ signed_in: { low: false, balance: { credits: 2_380 } } });
-  expect(line()).toBe(LINE);
+  expect(h!.one("case-law-notice")?.textContent).toBe(
+    "Clauseo Case Law had no credits for this search.",
+  );
   expect(h!.sent("send_prompt")).toEqual([]);
-  // the next message: its turn starts and the line goes
-  h!.deliver([
-    ...asked(7, 3, T3, "Search again.", "Searching.").map(upsert),
-    upsert(head("running")),
-  ]);
+  h!.deliver([upsert(userMessage(6, 2, "Search again."))]);
   await h!.settle();
   expect(line()).toBeNull();
 });
 
-test("credits rising from 0 count as arriving too", async () => {
-  await mount();
-  await status(OK);
-  await status({ signed_in: { low: true, balance: { credits: 0 } } });
-  expect(h!.all("out-of-credit")).toHaveLength(1);
+test("a conversation opened after the credits came back, or reloaded, still shows the line", async () => {
+  // credits already back when the refused conversation is opened (a closed one, or after a reload)
+  await mount(REFUSED);
   await status(PAID);
+  expect(line()).toBe(LINE);
+  // the view arrives again, as after a reload: the line still holds from the entries
+  h!.deliver([reset(REFUSED)]);
+  await h!.settle();
   expect(line()).toBe(LINE);
 });
 
-test("a conversation whose turn wasn't running as the credit went out shows nothing", async () => {
-  await mount(false);
-  await status(OK);
+test("0 → some → 0: never the line while out", async () => {
+  await mount(REFUSED);
+  await status({ signed_in: { low: true, balance: { credits: 0 } } });
+  expect(line()).toBeNull();
+  expect(h!.all("out-of-credit")).toHaveLength(1);
+  await status(PAID);
+  expect(line()).toBe(LINE);
+  await status({ signed_in: { low: true, balance: { credits: 0 } } });
+  expect(line()).toBeNull();
+  expect(h!.all("out-of-credit")).toHaveLength(1);
+});
+
+test("a conversation without the mark shows nothing when credit comes back", async () => {
+  await mount([userMessage(1, 1, "Hello."), agentText(2, 1, "Hi."), step(3)]);
   await status(OUT);
   await status(PAID);
-  expect(h!.all("out-of-credit")).toHaveLength(0);
   expect(line()).toBeNull();
 });

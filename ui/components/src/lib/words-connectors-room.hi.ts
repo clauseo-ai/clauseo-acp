@@ -36,4 +36,9 @@ export const HI = {
   "No credits. Add credits to search.": null,
   // by the composer of a conversation refused for credits, once they arrive, until its next message
   "Credits added. Ask again to search case law.": null,
+  // the case_law_out_of_credit notice's row once credit is back, at the point in the conversation it was refused
+  "Clauseo Case Law had no credits for this search.": null,
+  // Settings out of credit with no packs listed and no pay link: the sentences without "Add credits to…"
+  "Not enough credits for a search.": null,
+  "No credits.": null,
 } as const;
