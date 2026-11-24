@@ -59,7 +59,7 @@ fn start(dir: &Dir, answers: Vec<Option<AgentModels>>) -> (Running, async_channe
 }
 
 /// Asks `ListAgents` until `done` holds of Claude's summary, again after each settings change.
-fn summary_when(host: &Running, done: impl Fn(&AgentSummary) -> bool) -> AgentSummary {
+pub(crate) fn summary_when(host: &Running, done: impl Fn(&AgentSummary) -> bool) -> AgentSummary {
     use futures::StreamExt as _;
     let subscribed = host.handle.subscribe_app(Principal::LocalDesktop);
     let mut sub = wait("subscribe_app", subscribed).unwrap();

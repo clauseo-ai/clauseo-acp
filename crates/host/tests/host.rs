@@ -409,6 +409,9 @@ mod pickers_log;
 #[path = "host/pickers_probe.rs"]
 mod pickers_probe;
 #[cfg(test)]
+#[path = "host/pickers_probe_login.rs"]
+mod pickers_probe_login;
+#[cfg(test)]
 #[path = "host/pickers_probe_retry.rs"]
 mod pickers_probe_retry;
 #[cfg(test)]

@@ -18,6 +18,10 @@
 //! probe or a session that fills its models clears it, and so does a sign-in, which starts the
 //! tries over. Before a first probe has failed it is false, whether a probe is running or none
 //! has started yet (no read has found the agent signed in).
+//!
+//! Each probe carries its agent's generation, which a login change bumps ([`login_changed`]):
+//! the answer or failure of a probe started under the old login is ignored and uses no try.
+//! The login change's hold also ends a probe that runs (`clauseo_limits`' `readers/hold.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,12 +42,20 @@ pub(crate) struct Probes {
     started: BTreeSet<AgentKind>,
     /// Failed probes per kind since the start or its last sign-in.
     failed: BTreeMap<AgentKind, u8>,
+    /// Each kind's login changes since the start: a probe's answer counts only under the
+    /// generation it started in.
+    generation: BTreeMap<AgentKind, u64>,
 }
 
 impl Probes {
     /// Whether `agent`'s last probe failed (none has answered since).
     fn failed(&self, agent: AgentKind) -> bool {
         self.failed.get(&agent).is_some_and(|count| *count > 0)
+    }
+
+    /// `agent`'s generation now.
+    fn generation(&self, agent: AgentKind) -> u64 {
+        self.generation.get(&agent).copied().unwrap_or(0)
     }
 }
 
@@ -71,25 +83,46 @@ pub(crate) fn after_read(actor: &mut Actor, agent: AgentKind, outcome: &ReadOutc
         return;
     }
     tracing::info!(?agent, "model probe started");
+    let generation = actor.agent_options.probes.generation(agent);
     let probe = super::super::limits::reader(actor).probe_models(agent);
     actor.spawn_post(async move {
         let models = probe.await;
-        Input::Limits(LimitsInput::Probed { agent, models })
+        Input::Limits(LimitsInput::Probed {
+            agent,
+            generation,
+            models,
+        })
     });
 }
 
-/// `agent`'s login changed: its next good read probes it again, with all its tries.
+/// `agent`'s login changed: its next good read probes it again, with all its tries, and the
+/// answer of a probe started before is ignored.
 pub(crate) fn login_changed(actor: &mut Actor, agent: AgentKind) {
     let probes = &mut actor.agent_options.probes;
     probes.started.remove(&agent);
     probes.failed.remove(&agent);
+    let generation = probes.generation.entry(agent).or_insert(0);
+    *generation = generation.wrapping_add(1);
 }
 
 /// `agent`'s probe answered: its models are kept, and every app subscriber told when that
 /// changed them. A failed probe (`None`) keeps what was kept, and leaves the next good read to
 /// probe again while tries are left; subscribers are told when that makes the models unread.
-pub(crate) fn on_probed(actor: &mut Actor, agent: AgentKind, models: Option<AgentModels>) {
+/// A probe of an older `generation` (started before a login change) is ignored.
+pub(crate) fn on_probed(
+    actor: &mut Actor,
+    agent: AgentKind,
+    generation: u64,
+    models: Option<AgentModels>,
+) {
     let probes = &mut actor.agent_options.probes;
+    if generation != probes.generation(agent) {
+        tracing::info!(
+            ?agent,
+            "a model probe from before a login change is ignored"
+        );
+        return;
+    }
     let Some(models) = models else {
         let was = probes.failed(agent);
         let count = probes.failed.entry(agent).or_insert(0);
