@@ -21,6 +21,7 @@ mod codex_reviewer;
 mod end;
 mod failure;
 mod forced_mode;
+mod helpers;
 pub(crate) mod idle;
 mod inputs;
 mod key_retry;
@@ -150,6 +151,8 @@ pub(crate) struct TurnState {
     own_held: own_turn::Held,
     /// The prompts' own model and effort picks (`prompt_picks.rs`).
     prompt_picks: prompt_picks::PromptPicks,
+    /// The conversation's helpers, from its first one on (`helpers.rs`).
+    helpers: Option<Box<helpers::Helpers>>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
