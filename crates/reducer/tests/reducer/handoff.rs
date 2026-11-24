@@ -5,11 +5,11 @@ use clauseo_protocol::{
     AgentNamed, AgentSwitched, AvailableCommand, CommandsAvailable, ConfigCategory, ConfigOption,
     ConfigOptionKind, ConfigOptionsReplaced, ContextHandoff, Count, DomainEvent, Endpoint, EntryId,
     HandoffEntry, HandoffEntryStatus, HandoffId, HandoffSettled, HandoffStatus, HeaderEntry,
-    MessageId, ModeChanged, NamedChoice, Seq, Timestamp, ViewEntry,
+    MessageId, ModeChanged, NamedChoice, Seq, Timestamp, TurnId, TurnStarted, ViewEntry,
 };
 use clauseo_reducer::{Anomaly, Applied, StreamState, ViewChange, apply};
 
-use crate::fixtures::{Log, short, start_turn, thread_created, usage};
+use crate::fixtures::{Log, short, start_turn, thread_created, usage, user_message};
 use crate::helpers::{fold, round_trip};
 
 /// A handover of `handoff` from claude-acp (Opus, High) to codex-acp, with `message`.
@@ -154,6 +154,40 @@ fn a_switch_moves_the_header_to_the_new_agent_and_clears_what_the_old_session_re
     // A second switch to the same agent changes nothing.
     let again = push(&mut log, &mut state, switched);
     assert!(again.changes.is_empty(), "{:?}", again.changes);
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn a_switch_clears_the_model_and_effort_the_old_agents_turn_ran_with() {
+    let (mut log, _) = created(87);
+    let turn: TurnId = log.fresh().unwrap();
+    let message: MessageId = log.fresh().unwrap();
+    log.push(user_message(turn, message, "Review it.")).unwrap();
+    let checkpoint_before = log.fresh().unwrap();
+    log.push(TurnStarted {
+        turn,
+        checkpoint_before,
+        model: Some(NamedChoice {
+            id: "opus".into(),
+            name: "Opus".into(),
+        }),
+        effort: Some(NamedChoice {
+            id: "high".into(),
+            name: "High".into(),
+        }),
+    })
+    .unwrap();
+    let mut state = fold(log.events());
+    assert!(header(&state).model.is_some() && header(&state).effort.is_some());
+    let switched = AgentSwitched {
+        from: "claude-acp".parse().unwrap(),
+        to: "codex-acp".parse().unwrap(),
+    };
+    let out = push(&mut log, &mut state, switched);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    let after = header(&state);
+    assert_eq!((after.model.clone(), after.effort.clone()), (None, None));
+    assert_eq!(upserts(&out), [&ViewEntry::Header(Box::new(after.clone()))]);
     assert_eq!(state, fold(log.events()));
 }
 
