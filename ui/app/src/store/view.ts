@@ -93,6 +93,8 @@ const ID_FIELD = {
   marker: "event",
   matter_header: "matter",
   version: "checkpoint",
+  // C2's helper kinds (room/thread/helper-entries.ts), a spread until the bindings carry them
+  ...({ helper: "helper", helper_text: "event" } as const),
 } as const satisfies { readonly [K in Kind]-?: keyof NonNullable<ViewEntry[K]> };
 
 /** The stream of a thread's view, in protocol's text form. */

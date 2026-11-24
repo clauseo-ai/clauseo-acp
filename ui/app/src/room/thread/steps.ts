@@ -38,6 +38,7 @@ import {
 import { caseLawDone, skillDone, toolDone, usedDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
 import { helperOf, helperTaskOf } from "./helper-words.ts";
+import { leadRows } from "./helper-view.ts";
 import { groupKindOf, type GroupKind } from "./group-kind.ts";
 import { summaryOf } from "./step-summary.ts";
 import {
@@ -141,7 +142,9 @@ export function segmentsPick(
     seen = ids;
     // a row not in yet reads as alone; it comes in with the ids, so this is only a window still filling
     const entry = (id: EntryId) => paged.get(id) ?? v?.entries.get(id);
-    const grouped = segmentsOf(ids, (id) =>
+    // a helper's steps and words leave the lead's rows, its card in its launching step's place
+    // (helper-view.ts)
+    const grouped = segmentsOf(leadRows(ids, entry), (id) =>
       id.startsWith(TOOL) ? "tool" : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
     );
     last = promptsAtTheirCalls(grouped, (row) => {

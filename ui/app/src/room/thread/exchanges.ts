@@ -12,6 +12,7 @@
 // those, so it renders no exchange and no row.
 import { askedAs, injectedTurn, outcomeOf, shapeOf } from "./steer.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
+import { helperTurnOf } from "./helper-entries.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 
 /** One exchange: its ids in order, the question first when it has one. */
@@ -44,7 +45,8 @@ const turnOf = (e: ViewEntry): TurnId | undefined =>
   e.tool_call?.turn ??
   e.agent_content?.turn ??
   e.step?.turn ??
-  e.limit_stop?.turn;
+  e.limit_stop?.turn ??
+  helperTurnOf(e);
 
 const STEP = "step:";
 

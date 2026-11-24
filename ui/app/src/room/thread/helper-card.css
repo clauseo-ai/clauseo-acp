@@ -1,0 +1,128 @@
+/* A helper's card in the answer (helper-card.tsx): the one bordered thing in the work, a hairline
+   box in the answer's measure, quiet at rest, the well's tone under the pointer. Failure in the
+   primary ink with the break, never red. Nothing moves but the pen, as on the working line.
+   Helpers started together stand together: cards parted by s2. */
+.helper-card {
+  max-width: var(--measure);
+  border: 1px solid var(--divide);
+  border-radius: var(--r-control);
+  overflow: hidden;
+}
+.helper-card:not(:first-child) {
+  margin-top: var(--s4);
+}
+.helper-card + .helper-card {
+  margin-top: var(--s2);
+}
+.helper-open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--s2);
+  row-gap: var(--s0-5);
+  width: 100%;
+  padding: var(--s2-5) var(--s3);
+  background: transparent;
+  text-align: start;
+  color: var(--muted);
+  transition: background-color var(--dur-quick) var(--ease-arrive);
+}
+.helper-open:disabled {
+  cursor: default;
+}
+@media (hover: hover) {
+  .helper-open:not(:disabled):hover {
+    background: var(--well);
+  }
+}
+.helper-open[aria-expanded="true"] {
+  background: var(--well);
+}
+.helper-head {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--s2);
+}
+.helper-glyph {
+  flex: none;
+  color: var(--quiet);
+}
+.helper-card[data-state="failed"] .helper-glyph,
+.helper-card[data-state="failed"] .helper-state {
+  color: var(--primary);
+}
+.helper-who {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--s1-5);
+}
+.helper-name {
+  color: var(--primary);
+  font-weight: var(--w-chip);
+}
+.helper-model {
+  color: var(--quiet);
+}
+.helper-state {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+/* what it was asked, as the agent wrote it */
+.helper-task {
+  grid-column: 2;
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.helper-now,
+.helper-found {
+  grid-column: 2;
+  display: block;
+  margin-top: var(--s1);
+}
+.helper-now {
+  display: flex;
+  gap: var(--s1-5);
+  align-items: baseline;
+  color: var(--muted);
+}
+.helper-now .step-icon {
+  align-self: center;
+  flex: none;
+}
+.helper-more {
+  color: var(--quiet);
+}
+.helper-pen {
+  display: inline-block;
+  margin-inline-start: var(--s1-5);
+  vertical-align: top;
+}
+.helper-summary {
+  display: block;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+.helper-break {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-inline-end: var(--s1);
+  color: var(--primary);
+}
+.helper-did {
+  display: block;
+  margin-top: var(--s0-5);
+  color: var(--quiet);
+}
+/* opened in place: the step group's rows, inside the card's border */
+.helper-rows {
+  margin: 0 var(--s2) var(--s2);
+}
+.helper-words {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
