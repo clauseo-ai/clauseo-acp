@@ -220,6 +220,7 @@ fuzz_target!(|data: &[u8]| {
     let undone = matter.undo(&UndoRequest {
         before,
         after: after.outcome.id(),
+        only: None,
         decisions: &decisions,
         thread: Some(id(100)),
         turn: Some(id(205)),

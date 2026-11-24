@@ -54,7 +54,7 @@ fn rename_and_undo(fx: &Fixture, old: &str, new: &str, bytes: &[u8]) -> Matter {
     assert_eq!(names(&fx.folder), [new]);
     let changes = created(matter.after_turn(&meta(3), &tools(&[new])).unwrap(), 3);
     assert_eq!(changes, [renamed(old, new, bytes)]);
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     let undone = undo(&mut matter, (1, 3), &[new], (4, 5)).unwrap();
     assert_eq!(undone.restored, [path(new)]);
@@ -93,7 +93,7 @@ fn undo_of_delete_and_recreate_in_another_case_restores_the_old_file() {
         changes,
         [added("Memo.txt", b"new"), deleted("memo.txt", b"old")]
     );
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     let undone = undo(&mut matter, (1, 3), &step, (4, 5)).unwrap();
     assert_eq!(undone.restored, [path("Memo.txt"), path("memo.txt")]);

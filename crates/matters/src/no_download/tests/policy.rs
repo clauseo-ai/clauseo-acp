@@ -141,7 +141,7 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
             .unwrap();
         check("after_turn");
         write::append(&fx.file("a.txt"), b" lawyer").unwrap();
-        matter.edited_since(cid(2), cid(3)).unwrap();
+        matter.edited_since(cid(2), cid(3), None).unwrap();
         check("edited_since");
         matter
             .preview_restore(cid(1), RestoreFiles::All, None)
@@ -160,6 +160,7 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
             .undo(&UndoRequest {
                 before: cid(2),
                 after: cid(3),
+                only: None,
                 decisions: &decisions,
                 thread: Some(thread()),
                 turn: Some(turn(3)),

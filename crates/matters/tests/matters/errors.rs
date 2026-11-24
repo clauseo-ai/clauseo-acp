@@ -215,7 +215,7 @@ fn undo_errors(fx: &Fixture) -> Matter {
     fx.write("a.txt", "two");
     matter.after_turn(&meta(3), &tools(&["a.txt"])).unwrap();
 
-    let err = matter.edited_since(cid(99), cid(3)).unwrap_err();
+    let err = matter.edited_since(cid(99), cid(3), None).unwrap_err();
     assert_code(&err, ErrorCode::CommandInvalid, "UnknownCheckpoint");
     let err = undo(&mut matter, (1, 99), &["a.txt"], (4, 5)).unwrap_err();
     assert_code(&err, ErrorCode::CommandInvalid, "UnknownCheckpoint");

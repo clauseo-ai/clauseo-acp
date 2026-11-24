@@ -202,6 +202,8 @@ pub(crate) enum MatterJob {
     EditedSince {
         before: CheckpointId,
         after: CheckpointId,
+        /// The paths on the turn's card, when the log holds it.
+        only: Option<BTreeSet<MatterPath>>,
     },
     /// `Matter::still_gone`: which of `paths`, files an undo deleted, are in the folder again.
     /// Stats only; writes nothing.
@@ -466,6 +468,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             let request = UndoRequest {
                 before: job.before,
                 after: job.after,
+                only: job.only.as_ref(),
                 decisions: &job.decisions,
                 thread: job.thread,
                 turn: job.turn,
@@ -503,8 +506,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
                 Ok((papers, clauseo_matters::place(matter.folder())))
             }))
         }
-        MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
-            open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
+        MatterJob::EditedSince {
+            before,
+            after,
+            only,
+        } => MatterReply::EditedSince(
+            open(settings, slot)
+                .and_then(|matter| Ok(matter.edited_since(before, after, only.as_ref())?)),
         ),
         MatterJob::StillGone { paths } => {
             MatterReply::StillGone(open(settings, slot).map(|matter| matter.still_gone(&paths)))

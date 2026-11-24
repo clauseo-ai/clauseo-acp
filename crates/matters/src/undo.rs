@@ -36,15 +36,15 @@ struct Step {
 /// Undo deletes a file only when it is known to have been absent when the step began, and never
 /// writes over one the step read for the first time: see [`kept_because`]. A step it may not
 /// undo gets no operation and is kept ([`Step::unversioned`]). Modified and deleted files have
-/// earlier blobs and are put back as ever.
+/// earlier blobs and are put back as ever. With `only`, the step is its changes to those paths.
 fn step(
     core: &Core,
     folder: &Path,
     settings: &Settings,
-    before: CheckpointId,
-    after: CheckpointId,
+    (before, after): (CheckpointId, CheckpointId),
+    only: Option<&BTreeSet<MatterPath>>,
 ) -> Result<Vec<Step>, Error> {
-    let mut changes = core.changes_between(before, after)?;
+    let mut changes = changes_of(core, before, after, only)?;
     let mut kept = Vec::with_capacity(changes.len());
     let mut names = Names::default();
     for change in changes.drain(..) {
@@ -105,6 +105,21 @@ fn step(
         }
     }
     Ok(steps)
+}
+
+/// The changes from `before` to `after`, only those whose path (a rename's new path) is in
+/// `only` when it is given: the papers on the answer's card, not another answer's made meanwhile.
+fn changes_of(
+    core: &Core,
+    before: CheckpointId,
+    after: CheckpointId,
+    only: Option<&BTreeSet<MatterPath>>,
+) -> Result<Vec<clauseo_protocol::FileChange>, Error> {
+    let mut changes = core.changes_between(before, after)?;
+    if let Some(only) = only {
+        changes.retain(|change| only.contains(change.path()));
+    }
+    Ok(changes)
 }
 
 /// The paths the step added that hold the content of a file it took out of a folder the
@@ -191,12 +206,12 @@ pub(crate) fn edited_since(
     core: &mut Core,
     folder: &Path,
     settings: &Settings,
-    before: CheckpointId,
-    after: CheckpointId,
+    (before, after): (CheckpointId, CheckpointId),
+    only: Option<&BTreeSet<MatterPath>>,
 ) -> Result<Vec<MatterPath>, Error> {
-    let changes = core.changes_between(before, after)?;
+    let changes = changes_of(core, before, after, only)?;
     // The files `step` keeps are never undone, so never edited since for this.
-    let kept: BTreeSet<MatterPath> = step(core, folder, settings, before, after)?
+    let kept: BTreeSet<MatterPath> = step(core, folder, settings, (before, after), only)?
         .into_iter()
         .filter(|step| step.unversioned.is_some())
         .map(|step| step.path)
@@ -291,7 +306,13 @@ pub(crate) fn undo(
     settings: &Settings,
     request: &UndoRequest<'_>,
 ) -> Result<Undone, Error> {
-    let steps = step(core, folder, settings, request.before, request.after)?;
+    let steps = step(
+        core,
+        folder,
+        settings,
+        (request.before, request.after),
+        request.only,
+    )?;
     let choices = choices(&steps, request)?;
     let mut acting: Vec<&Step> = Vec::new();
     let mut kept: Vec<MatterPath> = Vec::new();

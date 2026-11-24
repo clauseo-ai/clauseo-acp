@@ -176,7 +176,7 @@ fn changed_cloud_only_file_never_read() {
     );
 
     // The step's tree holds the old document: undo sees only other.txt and leaves doc alone.
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
     let undone = undo(&mut matter, (1, 3), &["other.txt"], (4, 5)).unwrap();
     assert_eq!(undone.restored, [path("other.txt")]);
     assert_eq!(

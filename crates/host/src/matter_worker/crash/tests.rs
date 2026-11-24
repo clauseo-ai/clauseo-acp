@@ -216,6 +216,7 @@ fn an_undo_a_restore_and_a_revisions_job_that_panic_are_answered() {
     let undo = worker.ask(MatterJob::Undo(UndoJob {
         before: id(1),
         after: id(1),
+        only: None,
         decisions: Vec::new(),
         thread: None,
         turn: None,

@@ -91,10 +91,18 @@ pub(super) fn undo_step(
 }
 
 /// The step as the log has it.
+#[derive(Debug)]
 pub(super) struct Step {
     pub(super) before: CheckpointId,
     pub(super) after: CheckpointId,
     paths: Vec<MatterPath>,
+    /// The paths of the turn's `FilesChanged` (the after-turn checkpoint's changes: the
+    /// answer's card), which R8 undoes and nothing else between `before` and `after`, such as
+    /// another answer's change made meanwhile. `None` when the log holds no `FilesChanged` for
+    /// the turn (nothing changed, or the entry was lost): every change between the two. The
+    /// step's `after` is always the turn's after-turn checkpoint, never an `undo` one: a turn
+    /// whose step was undone has none left.
+    pub(super) only: Option<BTreeSet<MatterPath>>,
 }
 
 /// The step of `turn`: started, ended with a checkpoint, not undone; else `command.invalid`.
@@ -102,6 +110,7 @@ pub(super) struct Step {
 pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
     let (mut before, mut after, mut undone) = (None, None, false);
     let mut paths = Vec::new();
+    let mut only: Option<BTreeSet<MatterPath>> = None;
     for envelope in log {
         let event = &envelope.event;
         if let DomainEvent::TurnStarted(started) = event
@@ -116,6 +125,8 @@ pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
             && changed.turn == turn
         {
             paths.extend(changed.files.iter().map(|file| file.path().clone()));
+            only.get_or_insert_default()
+                .extend(changed.files.iter().map(|file| file.path().clone()));
         } else if let DomainEvent::StepUndone(step) = event
             && step.turn == turn
         {
@@ -127,6 +138,7 @@ pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
             before,
             after,
             paths,
+            only,
         }),
         _ => Err(Error::refused(
             ErrorCode::CommandInvalid,
@@ -146,7 +158,7 @@ pub(super) fn on_log(
     let sent = result
         .map_err(Error::Store)
         .and_then(|log| step_of(&log, ask.turn))
-        .and_then(|step| {
+        .and_then(|mut step| {
             let named: BTreeSet<&str> = ask.files.iter().map(|file| file.path.as_str()).collect();
             if let Some(stray) = ask
                 .files
@@ -172,6 +184,7 @@ pub(super) fn on_log(
             ask.job = Some(UndoJob {
                 before: step.before,
                 after: step.after,
+                only: step.only.take(),
                 decisions,
                 thread: Some(thread),
                 turn: Some(ask.turn),
@@ -485,3 +498,6 @@ fn release(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
     queue::move_on(actor, thread);
     queue::sync_held(actor, thread);
 }
+
+#[cfg(test)]
+mod tests;

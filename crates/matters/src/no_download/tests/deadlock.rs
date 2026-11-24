@@ -149,6 +149,7 @@ fn undo_keeps_a_target_not_downloaded_when_its_outside_edits_walk_reads_it() {
     let request = UndoRequest {
         before: cid(1),
         after: cid(3),
+        only: None,
         decisions: &decisions,
         thread: Some(thread()),
         turn: Some(turn(3)),
@@ -229,13 +230,13 @@ fn edited_since_does_not_list_a_file_not_downloaded() {
     write::append(&fx.file("a.txt"), b" lawyer").unwrap();
     fault::fail(&fx.file("a.txt"), 0, ErrorKind::Deadlock);
 
-    assert_eq!(matter.edited_since(cid(1), cid(2)).unwrap(), []);
+    assert_eq!(matter.edited_since(cid(1), cid(2), None).unwrap(), []);
     assert_eq!(fault::failed(&fx.file("a.txt")), 1);
 
     // Downloaded again, it reads as edited.
     fault::clear();
     assert_eq!(
-        matter.edited_since(cid(1), cid(2)).unwrap(),
+        matter.edited_since(cid(1), cid(2), None).unwrap(),
         [path("a.txt")]
     );
 }
@@ -276,12 +277,12 @@ fn edited_since_reads_a_file_behind_a_folder_not_downloaded_as_unread() {
     // Listing `sub` to match the name byte for byte fails: the folder is not downloaded.
     fault::fail(&fx.file("sub"), 0, ErrorKind::Deadlock);
 
-    assert_eq!(matter.edited_since(cid(1), cid(2)).unwrap(), []);
+    assert_eq!(matter.edited_since(cid(1), cid(2), None).unwrap(), []);
     assert_eq!(fault::failed(&fx.file("sub")), 1);
 
     fault::clear();
     assert_eq!(
-        matter.edited_since(cid(1), cid(2)).unwrap(),
+        matter.edited_since(cid(1), cid(2), None).unwrap(),
         [path("sub/b.txt")]
     );
 }
@@ -331,6 +332,7 @@ fn undo_keeps_a_write_whose_respelled_delete_was_kept_for_not_downloaded() {
         .undo(&UndoRequest {
             before: cid(1),
             after: cid(2),
+            only: None,
             decisions: &decisions,
             thread: Some(thread()),
             turn: Some(turn(2)),

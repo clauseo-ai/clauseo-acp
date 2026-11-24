@@ -69,7 +69,7 @@ fn a_file_a_pandoc_command_named_is_the_agents_and_undo_deletes_it() {
     assert_eq!(changes, [added("reply.docx", b"the agent's reply")]);
     assert!(!changes[0].may_include_lawyer_edits());
     // The preview has nothing to ask about it.
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     let undone = undo(&mut matter, (1, 3), &["reply.docx"], (4, 5)).unwrap();
     assert_eq!(undone.deleted, [path("reply.docx")]);
@@ -140,7 +140,7 @@ fn the_agents_own_file_edited_after_the_turn_is_edited_since() {
     fx.write("reply.docx", "the lawyer's reply");
     support::set_mtime(fx.file("reply.docx"), around_end(60));
     assert_eq!(
-        matter.edited_since(cid(1), cid(3)).unwrap(),
+        matter.edited_since(cid(1), cid(3), None).unwrap(),
         [path("reply.docx")]
     );
 }

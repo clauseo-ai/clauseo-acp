@@ -98,6 +98,7 @@ impl Setup {
         let request = UndoRequest {
             before: cid(1),
             after: cid(2),
+            only: None,
             decisions: &decisions,
             thread: None,
             turn: None,

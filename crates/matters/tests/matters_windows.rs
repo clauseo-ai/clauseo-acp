@@ -386,7 +386,7 @@ mod windows {
         // Edited since, so the stat cache cannot vouch for it and it must be read.
         case.write("a.txt", "three, by the lawyer");
         let held = hold(&case.file("a.txt"));
-        let err = matter.edited_since(cid(1), cid(3)).unwrap_err();
+        let err = matter.edited_since(cid(1), cid(3), None).unwrap_err();
         let (_, source) = io_error(&err);
         assert_eq!(
             source.raw_os_error(),
@@ -395,7 +395,7 @@ mod windows {
         );
         drop(held);
         assert_eq!(
-            matter.edited_since(cid(1), cid(3)).unwrap(),
+            matter.edited_since(cid(1), cid(3), None).unwrap(),
             [path("a.txt")]
         );
     }
@@ -414,7 +414,7 @@ mod windows {
             .unwrap();
 
         let held = hold(&case.file("sub"));
-        let err = matter.edited_since(cid(1), cid(3)).unwrap_err();
+        let err = matter.edited_since(cid(1), cid(3), None).unwrap_err();
         let (_, source) = io_error(&err);
         assert_eq!(
             source.raw_os_error(),
@@ -422,7 +422,7 @@ mod windows {
             "{err:?}"
         );
         drop(held);
-        let edited = matter.edited_since(cid(1), cid(3)).unwrap();
+        let edited = matter.edited_since(cid(1), cid(3), None).unwrap();
         assert!(edited.is_empty(), "{edited:?}");
     }
     /// The stale owner-file rule on Windows (this binary never calls `test_support`'s pretend

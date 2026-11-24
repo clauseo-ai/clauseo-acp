@@ -100,7 +100,7 @@ fn a_cloud_only_file_the_agent_only_read_is_a_baseline_and_undo_leaves_it() {
         matter.changes_between(cid(1), cid(3)).unwrap(),
         [modified("brief.txt", b"draft", b"final")]
     );
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     // A decision for the baseline is refused: it is not part of the step.
     let decisions = undo_all(&["brief.txt", "notes.txt"]);
@@ -221,7 +221,7 @@ fn a_skipped_file_the_agent_changed_is_listed_and_undo_keeps_it() {
         ]
     );
     // Undo would leave them as they are: none counts as edited since.
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     let undone = undo(&mut matter, (1, 3), &all, (4, 5)).unwrap();
     assert_eq!(undone.restored, [path("new.txt")]);

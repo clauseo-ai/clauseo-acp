@@ -422,14 +422,22 @@ impl Matter {
     }
 
     /// The files the step from `before` to `after` changed whose content now differs from
-    /// `after` (edited since), sorted: the list for "Undo anyway" or "Keep current".
+    /// `after` (edited since), sorted: the list for "Undo anyway" or "Keep current". With
+    /// `only`, as for [`UndoRequest::only`], the step's files are those of `only`.
     pub fn edited_since(
         &mut self,
         before: CheckpointId,
         after: CheckpointId,
+        only: Option<&BTreeSet<MatterPath>>,
     ) -> Result<Vec<MatterPath>, Error> {
         json::check(&self.folder, self.id)?;
-        undo::edited_since(&mut self.core, &self.folder, &self.settings, before, after)
+        undo::edited_since(
+            &mut self.core,
+            &self.folder,
+            &self.settings,
+            (before, after),
+            only,
+        )
     }
 
     /// Undoes the step `request` names, file by file. Checks every decision and every lock
