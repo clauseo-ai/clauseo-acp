@@ -6,7 +6,9 @@ use clauseo_protocol::{
     DomainEvent, MatterHold, MessageId, ThreadId, ThreadStatus, TurnId, TurnQueued, TurnStarted,
     UserMessageStatus,
 };
-use clauseo_reducer::{Applied, StreamState, apply};
+use clauseo_reducer::{
+    Applied, Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply,
+};
 
 use crate::fixtures::{Log, thread_created, user_message};
 use crate::helpers::{cancel, fold, prompt_status};
@@ -98,4 +100,34 @@ fn a_turn_cancelled_while_it_waits_for_a_hold_clears_it() {
     let (turn, _) = held(&mut log, &mut state, thread, MatterHold::Relocate);
     cancel(&mut log, &mut state, turn);
     assert_eq!(header(&state), (ThreadStatus::Idle, None));
+}
+
+/// Schema 14 folds a wait for a hold on the matter to `Queued` with the hold, and its prompt to
+/// `Sent`: a snapshot schema 13 wrote (a build that folded a restore's or a relocate's wait as one
+/// behind the thread's own turn) is refused, so the stream is refolded from its log and shows it.
+#[test]
+fn a_schema_13_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 14);
+    let (mut log, mut state, thread) = created();
+    held(&mut log, &mut state, thread, MatterHold::Relocate);
+    let old = SnapshotRef {
+        reducer_schema: 13,
+        state: &state,
+    };
+    let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
+    assert!(
+        matches!(
+            read,
+            Err(Error::SchemaMismatch {
+                found: 13,
+                expected: 14
+            })
+        ),
+        "{read:?}"
+    );
+    let queued = ThreadStatus::Queued { behind: thread };
+    assert_eq!(
+        header(&fold(log.events())),
+        (queued, Some(MatterHold::Relocate))
+    );
 }
