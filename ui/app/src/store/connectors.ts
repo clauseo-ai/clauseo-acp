@@ -23,6 +23,7 @@
 //   store.dropHints(matter), store.hide(key)     "Don't show again" (after its command), "Hide in this conversation"
 //   store.turnStarted(thread, turn), turnEnded   the turn of a thread that runs, while it runs
 //   useLowCredit(store, thread, turn)            whether the running-low line shows under that turn
+//   useLowBeforeSend(store, thread)              whether the same line shows by the composer, before sending
 import { useCallback, useSyncExternalStore } from "react";
 import { nextHostOf, type AppEvent, type CaseLawHint } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -222,6 +223,17 @@ export function useLowCredit(store: ConnectorsStore, thread: string, turn: strin
   const get = useCallback(
     () => turn !== null && lowShows(store.state()) && store.lowTurn(thread) === turn,
     [store, thread, turn],
+  );
+  return useSyncExternalStore(store.subscribe, get, get);
+}
+
+/** Whether the running-low line shows by the composer, before a question is sent (24 Nov ruling): the case-law
+ * connector low by the host's flag, connectors on and no out-of-credit note, unless the line already shows under a
+ * turn of `thread` (null for a draft, which has none). */
+export function useLowBeforeSend(store: ConnectorsStore, thread: string | null): boolean {
+  const get = useCallback(
+    () => lowShows(store.state()) && (thread === null || store.lowTurn(thread) === undefined),
+    [store, thread],
   );
   return useSyncExternalStore(store.subscribe, get, get);
 }

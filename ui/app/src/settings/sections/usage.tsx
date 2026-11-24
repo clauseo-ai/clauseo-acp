@@ -40,6 +40,7 @@ function WindowTile({ figures, stale }: { figures: WindowFigures; stale: boolean
     <div
       className="set-window-tile"
       data-state={figures.close ? "close" : "plenty"}
+      data-level={figures.level}
       data-stale={stale ? "" : undefined}
       data-passed={figures.passed ? "" : undefined}
     >

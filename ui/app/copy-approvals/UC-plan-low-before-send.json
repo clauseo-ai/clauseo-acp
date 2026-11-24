@@ -1,0 +1,11 @@
+{
+  "UC-1170": {
+    "en": "You've used {n}% of your weekly {name} limit.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: composer note above the field, before sending, from 90% of the weekly window (and less left than the 5-hour window); {name} is Claude or ChatGPT. Followed by U12-25/U12-26. Before, the weekly window never warned in the composer."
+  }
+}

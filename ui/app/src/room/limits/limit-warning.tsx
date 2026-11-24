@@ -1,6 +1,7 @@
-// The composer's warning (U12): a quiet note under the field, never blocking, when a session window reaches 95% used or
-// the agent itself warns (tone `near` under 75%). "Close to your 5-hour limit. Long tasks may pause until 6:10 pm.",
-// the reset the host's `resets_at` in a <time>. A part of its own, which reads the store itself, so a view renders the
+// The composer's warning (U12): a quiet note under the field, never blocking, before a question is sent, when the
+// 5-hour window reaches 75% used or the weekly 90% (plan-model.ts's warningKey), or the agent itself warns (tone `near`
+// under 75%). "You've used 78% of your 5-hour Claude limit. It resets at 3:40 pm. If it runs out mid-answer, the answer
+// pauses until then.", the reset sentence in a <time> with the host's `resets_at`. A part of its own, which reads the store itself, so a view renders the
 // note alone and only when the warning's window or reset changes. The composer passes it as its notice, and leaves it
 // out while the thread is paused at the limit, when the status line says so (work-composer.tsx).
 // The note itself is in the thread's chunk (thread/limit-warning-note.tsx, re-exported by list.tsx), where
@@ -10,7 +11,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { useAgentSelect, useNow } from "../../store/limits.ts";
 import { useAgentPlan } from "../thread/agent-plan.ts";
-import { warningKey } from "./plan-model.ts";
+import { PLAN_NAME, warningKey } from "./plan-model.ts";
 
 /** From the thread's chunk, which the open thread has loaded already. */
 const WarningNote = lazy(() =>
@@ -24,10 +25,11 @@ export function LimitWarning({ fallback = null }: { fallback?: ReactNode }) {
   const key = useAgentSelect(plan?.kind, warningKey);
   // its time against this render's clock: the host sends a new view at each shown reset, nothing ticks here
   const now = useNow();
-  if (key === "") return fallback;
+  const kind = plan?.kind;
+  if (key === "" || kind === undefined) return fallback;
   return (
     <Suspense fallback={null}>
-      <WarningNote warning={key} now={now} />
+      <WarningNote warning={key} name={PLAN_NAME[kind]} now={now} />
     </Suspense>
   );
 }

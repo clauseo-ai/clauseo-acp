@@ -1,5 +1,5 @@
 // The composer's warning as it shows (limits/limit-warning.tsx decides when): FieldNotice's quiet note, its first
-// sentence the window, its second the reset, the host's `resets_at` in a <time>. In the thread's chunk (list.tsx
+// sentence the share used of the window, then the reset and what a pause means, the host's `resets_at` in a <time>. In the thread's chunk (list.tsx
 // re-exports it), where limit-note.tsx already is for the stop's note, with its words (warning-words.ts), so the first
 // load carries none of them.
 import { FieldNotice } from "@clauseo/components/clauseo/limit-note.tsx";
@@ -8,10 +8,19 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { isoOf } from "./clock.ts";
 import { warningWords } from "./warning-words.ts";
 
-/** The note for a warning's key (plan-model.ts's warningKey), its time said against `now`, the render's clock. */
-export function WarningNote({ warning, now }: { warning: string; now: number }) {
+/** The note for a warning's key (plan-model.ts's warningKey), `name` the plan's (Claude, ChatGPT), its time said
+ * against `now`, the render's clock. */
+export function WarningNote({
+  warning,
+  name,
+  now,
+}: {
+  warning: string;
+  name: string;
+  now: number;
+}) {
   const { lang } = useDisplay();
-  const words = warningWords(lang, warning, now);
+  const words = warningWords(lang, warning, name, now);
   if (words === null) return null;
   const until = words.until;
   return (

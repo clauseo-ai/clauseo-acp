@@ -230,19 +230,53 @@ test("fake-agent has no plan line, whatever the view holds", async () => {
   expect(sendEnabled()).toBe(true);
 });
 
-test("the warning at 95%, none at 94.9%, with the host's reset in a <time>; Ask stays", async () => {
+test("the warning before sending from 75%, none at 74%, with the host's reset in a <time>; Ask stays", async () => {
   await room();
-  await view({ claude: entry(94.9) });
+  await view({ claude: entry(74) });
   expect(h!.one("limit-warning")).toBeNull();
-  await view({ claude: entry(95) });
+  await view({ claude: entry(78) });
   const warning = h!.one("limit-warning");
-  expect(warning?.textContent).toBe(
-    "Close to your 5-hour limit. Long tasks may pause until 6:10 pm.",
-  );
+  const pause = "It resets at 6:10 pm. If it runs out mid-answer, the answer pauses until then.";
+  expect(warning?.textContent).toBe(`You've used 78% of your 5-hour Claude limit. ${pause}`);
   const time = warning?.querySelector("time");
   expect(time?.getAttribute("datetime")).toBe(new Date(RESET).toISOString());
-  expect(time?.textContent).toBe("Long tasks may pause until 6:10 pm.");
+  expect(time?.textContent).toBe(pause);
   expect(sendEnabled()).toBe(true);
+});
+
+test("the weekly window warns before sending from 90%, none at 89%", async () => {
+  await room();
+  const weekly = (used: number) =>
+    entry(20, {
+      windows: [row(20), row(used, { id: "seven_day", kind: "weekly", label: "Weekly limit" })],
+    });
+  await view({ claude: weekly(89) });
+  expect(h!.one("limit-warning")).toBeNull();
+  await view({ claude: weekly(92) });
+  expect(h!.one("limit-warning")?.textContent).toContain(
+    "You've used 92% of your weekly Claude limit.",
+  );
+});
+
+test("the meter's fill: amber from 75% used, red from 95%, in the toolbar and the card", async () => {
+  await room();
+  const fill = () => plan()?.querySelector(".rounded-meter > .rounded-meter");
+  const levels: [number, string | undefined, string][] = [
+    [74, undefined, "bg-muted"],
+    [75, "amber", "bg-yellow-line"],
+    [94, "amber", "bg-yellow-line"],
+    [95, "red", "bg-red"],
+  ];
+  for (const [used, level, cls] of levels) {
+    await view({ claude: entry(used) });
+    expect(plan()?.querySelector("[data-state]")?.getAttribute("data-level") ?? undefined).toBe(
+      level,
+    );
+    expect(fill()?.className).toContain(cls);
+  }
+  const card = await openCard();
+  const tiles = [...card!.querySelectorAll<HTMLElement>(".plan-window")];
+  expect(tiles.map((t) => t.dataset["level"])).toEqual(["red", undefined]);
 });
 
 test("the agent's warning, tone near under 75%, warns too", async () => {
