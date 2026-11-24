@@ -1,8 +1,8 @@
 // Settings, Privacy: the Permissions group (issue 5, #1303), at the pane's head, above what leaves this computer. A
 // lawyer who already has matters never sees the first screen, so the first-start step's rows stand here too: the same
 // rows, words and acts (room/first-run/permissions.tsx), Allow, Open System Settings, Check again, and on Windows the
-// matters-folder choice where the host can set it. The group shows only while the desktop lists a row that needs the
-// lawyer; with none, nothing. #1279 grants permissions() and ask_permission to the main window only: until the
+// matters-folder choice where the host can set it. The group shows while the desktop lists a row, allowed or not;
+// with none, nothing. #1279 grants permissions() and ask_permission to the main window only: until the
 // settings window is granted them too, the list fails here, reads as no rows, and the group never shows.
 import { useState } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";

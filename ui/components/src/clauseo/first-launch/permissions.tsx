@@ -40,30 +40,33 @@ export type PermissionStepActs = {
   onChooseFolder?: (() => Promise<FolderChoice | null>) | undefined;
 };
 
-/** The step, at the head of the first screen's question. */
+/** The step's heading: the first screen's, or the band's over the room for a lawyer who has matters. */
+export type StepHeading = "Before your first matter" | "Before you go on";
+
+/** The step, at the head of the first screen's question, in the band over the room, or in Settings' group. */
 export function PermissionsStep({
   rows,
   platform,
-  titled = true,
+  heading = "Before your first matter",
   ...acts
 }: {
   rows: readonly PermissionStepRow[];
   platform: "mac" | "windows";
-  /** false where the place around it names it (Settings' Permissions group): no heading of its own. */
-  titled?: boolean;
+  /** null where the place around it names it (Settings' Permissions group): no heading of its own. */
+  heading?: StepHeading | null;
 } & PermissionStepActs) {
   const w = useFirstLaunchWords();
-  const heading = useId();
+  const id = useId();
   return (
     <section
       className="fl-perms"
-      aria-labelledby={titled ? heading : undefined}
+      aria-labelledby={heading === null ? undefined : id}
       data-testid="permissions-step"
       data-platform={platform}
     >
-      {titled && (
-        <h2 id={heading} className="fl-perms-head">
-          <Say>{w("Before your first matter")}</Say>
+      {heading !== null && (
+        <h2 id={id} className="fl-perms-head">
+          <Say>{w(heading)}</Say>
         </h2>
       )}
       {platform === "mac" && (
@@ -141,7 +144,10 @@ function Row({ row, ...acts }: { row: PermissionStepRow } & PermissionStepActs) 
             </p>
           )}
         </div>
-        {(shows === "ask" || shows === "failed") && (
+        {/* a refused keychain row keeps its Allow: it can be allowed here at any time */}
+        {(shows === "ask" ||
+          shows === "failed" ||
+          (shows === "denied" && row.id === "keychain")) && (
           <Button
             kind="tone"
             className="fl-perm-act"
@@ -177,9 +183,13 @@ function Row({ row, ...acts }: { row: PermissionStepRow } & PermissionStepActs) 
       {shows === "denied" && <Refused row={row} {...acts} />}
       {(shows === "blocking" || shows === "unknown") && (
         <>
-          {/* the desktop's detail, as given: where the setting lives, and its note */}
-          <Note note={row.path} testId="permission-path" />
-          <Note note={row.note} />
+          {/* the desktop's detail: where the setting lives, introduced, and its note unless it repeats the reason */}
+          {row.path !== undefined && (
+            <p className="fl-perm-note" data-testid="permission-path">
+              <Say>{w("In Windows Security: {path}", { path: underSecurity(row.path) })}</Say>
+            </p>
+          )}
+          <Note note={row.note === WINDOWS.why ? undefined : row.note} />
           {/* the action after the words: it is the advice they end on */}
           <div className="fl-perm-ways fl-perm-ways-act">
             <WindowsAct {...acts} />
@@ -212,16 +222,44 @@ function Refused({ row, onSettings, onCheck }: { row: PermissionStepRow } & Perm
       <p className="fl-perm-said" role="status" data-testid="permission-denied">
         <Say>{w("Not allowed.")}</Say>{" "}
         {row.id === "keychain" ? (
-          <Say>{w("macOS asks again the next time Clauseo opens. Choose Always Allow then.")}</Say>
+          <Say>{w("You can allow it here at any time.")}</Say>
         ) : (
           row.path !== undefined && (
             <Say>{w("You can allow it in {path}.", { path: row.path })}</Say>
           )
         )}
       </p>
-      <Note note={row.note} />
+      {/* the keychain's note names its items by service and account: never shown, only what they are for */}
+      {row.id === "keychain" ? <KeychainItems note={row.note} /> : <Note note={row.note} />}
       {row.id === "files_documents" && <Ways onSettings={onSettings} onCheck={onCheck} />}
     </>
+  );
+}
+
+/** Windows Security's path without its own first step, which the words before it name. */
+const underSecurity = (path: string) => path.replace(/^Windows Security\s*›\s*/, "");
+
+/** What the keychain's refused items are for, from the desktop's note ("service (account), …"): connectors' items
+ * have "connectors" in their service; the rest are Claude's and ChatGPT's sign-ins. The note itself never shows. */
+function KeychainItems({ note }: { note: string | undefined }) {
+  const w = useFirstLaunchWords();
+  if (note === undefined) return null;
+  const services = note.split(/,\s*/).map((item) => item.replace(/\s*\(.*\)\s*$/, ""));
+  const connectors = services.some((s) => s.includes("connectors"));
+  const plans = services.some((s) => s !== "" && !s.includes("connectors"));
+  const key: FirstLaunchKey | null =
+    connectors && plans
+      ? "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors."
+      : connectors
+        ? "Without it, Clauseo can't read your saved sign-ins for connectors."
+        : plans
+          ? "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT."
+          : null;
+  if (key === null) return null;
+  return (
+    <p className="fl-perm-note" data-testid="permission-note">
+      <Say>{w(key)}</Say>
+    </p>
   );
 }
 

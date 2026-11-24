@@ -79,6 +79,7 @@ import { useRoomCommands } from "./room-commands.ts";
 import { useQuitKey } from "./quit-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import { MatterBlockedLine } from "./matter-blocked.tsx";
+import { PermissionsBand } from "./permissions-band.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
@@ -488,6 +489,8 @@ function RoomFrame({
           {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
               300 ms reveal throttle (FALLBACK_THROTTLE_MS), however soon its chunk landed */}
           {place === "work" && <div className="room-notices">{notice}</div>}
+          {/* what the desktop needs answered, for a lawyer with matters (issue 5): the band over the work */}
+          {!welcome && <PermissionsBand transport={transport} />}
           {setup && (
             <FirstRun
               transport={transport}

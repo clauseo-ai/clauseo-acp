@@ -1,7 +1,8 @@
 // The open matter's standing line where Windows' Controlled folder access protects its folder (issue 5, after the
 // first-start step): the block falls on Claude's and ChatGPT's tools (PowerShell), no file is made, and the lawyer
 // hears only "file not found" from the assistant, with nothing saying Windows did it. The line says so, in stage E's
-// words, and the way that works today: move the folder out of Documents in File Explorer (Show in File Explorer), then
+// words, and the way that works today: move the folder out of the protected folder it is in (Documents, Desktop or
+// Pictures) in File Explorer (Show in File Explorer), then
 // choose it here (Locate folder's flow, matters.locate, relocate_matter). Where the host can set where new matters go
 // (permissions-host.ts's chooseMattersFolder, set_default_location, still to come), its choice joins; hidden until
 // then. It moves nothing: this matter stays until the lawyer moves its folder. The rows are read
@@ -19,7 +20,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import {
-  blockingRow,
+  blockedIn,
   permissionsHostOf,
   type PermissionRow,
   type PermissionsHost,
@@ -35,7 +36,7 @@ function rowsOf(transport: HostTransport) {
   let known = read.get(transport);
   if (known === undefined) {
     const host = permissionsHostOf(transport);
-    known = { host, rows: host.list() };
+    known = { host, rows: host.list().catch(() => []) };
     read.set(transport, known);
   }
   return known;
@@ -70,7 +71,9 @@ export function MatterBlockedLine({
       live = false;
     };
   }, [rows]);
-  if (blockingRow(listed, folder) === null) return null;
+  // the protected folder it is in, as the computer names it: Documents, Desktop or Pictures
+  const place = blockedIn(listed, folder);
+  if (place === null) return null;
   const choose = host.chooseMattersFolder;
   return (
     <div
@@ -90,7 +93,10 @@ export function MatterBlockedLine({
               fl(lang, WINDOWS.why),
               mt(
                 lang,
-                "Move this matter's folder out of Documents in File Explorer, then choose it here.",
+                "Move this matter's folder out of {folder} in File Explorer, then choose it here.",
+                {
+                  folder: place,
+                },
               ),
             ].join(" ")}
           </Say>

@@ -90,13 +90,13 @@
     "note": "New. Under the refused Documents row: opens System Settings at Files and Folders"
   },
   "UC-1160": {
-    "en": "macOS asks again the next time Clauseo opens. Choose Always Allow then.",
+    "en": "You can allow it here at any time.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New. The keychain row refused, after \"Not allowed.\"; the desktop's note naming the items follows as given"
+    "note": "Changed (#1303 review). The refused keychain row, after \"Not allowed.\"; its Allow stays. Was \"macOS asks again the next time Clauseo opens. Choose Always Allow then.\""
   },
   "UC-1161": {
     "en": "Clauseo couldn't ask macOS. Try again.",
@@ -162,13 +162,13 @@
     "note": "New, the orchestrator's words. Heading of the open matter's standing line on Windows when Controlled folder access protects its folder; stage E's sentence (UC-1162) follows"
   },
   "UC-1168": {
-    "en": "Move this matter's folder out of Documents in File Explorer, then choose it here.",
+    "en": "Move this matter's folder out of {folder} in File Explorer, then choose it here.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New, the orchestrator's words. The open matter's line, after stage E's sentence; Show in File Explorer and Choose the moved folder follow. Nothing in Clauseo moves files today"
+    "note": "Changed (#1303 review). The open matter's line, after stage E's sentence; {folder} is the protected folder the matter is in (Documents, Desktop or Pictures). Was \"…out of Documents in File Explorer…\". Nothing in Clauseo moves files today"
   },
   "UC-1169": {
     "en": "New matters now go in {folder}. Matters you already have stay where they are. / Your firm sets where new matters go, so it can't be changed here. / Clauseo couldn't use that folder. Choose it again. / Clauseo couldn't save the change. Try again.",
@@ -187,5 +187,50 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "New (#1303). Heading of Settings › Privacy's Permissions group, first in the pane, shown only while the desktop lists a row: the first-start step's rows (UC-1151 to UC-1166) for a lawyer who already has matters"
+  },
+  "UC-1275": {
+    "en": "Before you go on",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). Heading of the permissions band over the room for a lawyer who already has matters, shown while the desktop lists a row not asked yet; the first screen keeps \"Before your first matter\""
+  },
+  "UC-1276": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). The refused keychain row, in place of the desktop's raw note (service and account), when its items are connectors'"
+  },
+  "UC-1277": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). The refused keychain row, in place of the desktop's raw note, when its items are the plans' sign-ins"
+  },
+  "UC-1278": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). The refused keychain row, in place of the desktop's raw note, when its items are both"
+  },
+  "UC-1279": {
+    "en": "In Windows Security: {path}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303). The Windows row's settings path, introduced; {path} is the desktop's settings_path without its leading \"Windows Security ›\""
   }
 }

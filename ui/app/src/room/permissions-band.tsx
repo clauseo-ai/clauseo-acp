@@ -1,0 +1,35 @@
+// The permissions step where a lawyer who already has matters lands (issue 5, #1303): a band at the head of the room's
+// work, over the open matter or the room with none open, whenever the desktop lists a row not asked yet (a new build's
+// keychain read, the Documents folder). The same rows, words and acts as the first screen's step
+// (first-run/permissions.tsx), headed "Before you go on". Never a wall: the room under it stays usable, and the band
+// stays where it is as the lawyer moves between matters. Once it stands it keeps its rows' outcomes; a row refused can
+// be allowed from it, or from Settings › Privacy, at any time.
+import { useState } from "react";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
+import type { HostTransport } from "../transport/host-transport.ts";
+import { unasked } from "./first-run/permission-rows.ts";
+import { permissionsHostOf } from "./first-run/permissions-host.ts";
+import { Permissions } from "./first-run/permissions.tsx";
+
+export function PermissionsBand({ transport }: { transport: HostTransport }) {
+  const { platform } = useDisplay();
+  const [host] = useState(() => permissionsHostOf(transport));
+  return (
+    <Permissions
+      host={host}
+      platform={platform}
+      heading="Before you go on"
+      opens={(listed) => listed.some(unasked)}
+      onSettings={() => void transport.openPrivacySettings().catch(() => {})}
+      wrap={(step) => (
+        // in the reading column, as the thread's lines stand: the measure, centred, the thread's side padding
+        <div
+          className="mx-auto box-content max-w-measure px-thread-pad pt-s4 max-mid:mx-0 max-mid:max-w-none max-mid:px-s4"
+          data-testid="permissions-band"
+        >
+          {step}
+        </div>
+      )}
+    />
+  );
+}
