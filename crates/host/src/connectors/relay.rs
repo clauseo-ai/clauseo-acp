@@ -2,18 +2,21 @@
 //! token and the session's lifetime. The handshake is in `handshake.rs`, the pump of one
 //! connection in `conn.rs`, and what happens to one message in `forward.rs`.
 //!
-//! Threads: one accept thread per listener; one thread per connection, which reads the hello
-//! and then the lines; one per message in flight; one watchdog per pending handshake. Locks: the
-//! gate before the connections; the turn caps before the day count; the day writer's before the
-//! day count. Two are held across I/O: the line writer's, which makes each line whole, and the
-//! day writer's across the `day.json` write and its fsyncs. The day count's lock is not: a paid
-//! call is counted in memory under it, then waits (lock released) until `day.json` holds that
+//! Threads: one accept thread per listener; one thread per connection, which reads the hello and
+//! then the lines; one per message in flight; one watchdog per pending handshake; one warm-up per
+//! connection, after its first `initialize` was answered locally. Locks: the gate before the
+//! connections; the turn caps before the day count; the day writer's before the day count. Three
+//! are held across I/O: the line writer's, which makes each line whole; the day writer's across the
+//! `day.json` write and its fsyncs; and a connection's warm-up lock across the upstream
+//! `initialize` (`forward/warm.rs`), so forwarded calls wait for it. The day count's lock is not: a
+//! paid call is counted in memory under it, then waits (lock released) until `day.json` holds that
 //! count or a newer one, before it goes out.
 
 mod accept;
 mod conn;
 mod forward;
 mod handshake;
+mod timeline;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -142,7 +145,9 @@ impl Relays {
             bytes: Mutex::new(Bytes::default()),
             bytes_freed: Condvar::new(),
             dispatch: tracing::dispatcher::get_default(Dispatch::clone),
+            timeline: timeline::Timeline::new(self.hub.clock.now().mono),
         });
+        timeline::opened(&inner);
         #[cfg(feature = "test-support")]
         lock(&self.hub.opened).push((session, addr));
         let accepting = Arc::clone(&inner);
@@ -221,6 +226,8 @@ pub(crate) struct Session {
     bytes_freed: Condvar,
     /// The log dispatcher of the thread that opened the relay, for every thread it starts.
     pub(crate) dispatch: Dispatch,
+    /// When it opened, and which of its lifecycle lines are written (`timeline.rs`).
+    timeline: timeline::Timeline,
 }
 
 /// A poisoned lock is still usable: each guarded value is whole between statements.

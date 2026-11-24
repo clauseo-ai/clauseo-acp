@@ -30,6 +30,7 @@ use serde_json::{Value, json};
 use super::super::super::limits::{MAX_REPLY_BYTES, Spend};
 use super::super::super::{RelayEvent, ResumedBalance, texts};
 use super::super::conn::Conn;
+use super::super::timeline::CallClass;
 use super::super::{Session, lock};
 use super::{Call, log_name};
 
@@ -43,13 +44,13 @@ const MAX_NAME_BYTES: usize = 256;
 
 /// A JSON-RPC message's top level, borrowed from its raw text.
 #[derive(Deserialize)]
-struct Envelope<'a> {
+pub(super) struct Envelope<'a> {
     #[serde(borrow, default, deserialize_with = "present")]
     id: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
     method: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
-    result: Option<&'a RawValue>,
+    pub(super) result: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
     error: Option<&'a RawValue>,
 }
@@ -133,49 +134,59 @@ fn small_string(raw: &RawValue) -> Option<String> {
     serde_json::from_str(raw.get()).ok()
 }
 
-/// Step 5 for a reply that came back.
-pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
-    let session = &conn.session;
-    if let Some(sid) = reply.session_id.as_deref() {
+/// Keeps a reply's `Mcp-Session-Id` for the connection's next requests, once checked.
+pub(super) fn keep_session_id(conn: &Conn, sid: Option<&str>) {
+    if let Some(sid) = sid {
         match checked_session_id(sid) {
             Some(sid) => lock(&conn.upstream).session_id = Some(sid.to_owned()),
             None => {
-                tracing::warn!(session = %session.key.id(), "case-law relay: an Mcp-Session-Id was not usable");
+                tracing::warn!(session = %conn.session.key.id(), "case-law relay: an Mcp-Session-Id was not usable");
             }
         }
     }
-    let Some(id) = call.id.as_ref() else {
-        // A notification or the agent's response: nothing goes back.
-        return Vec::new();
-    };
-    if reply.status == 401 && call.tools_call() {
-        return vec![texts::tool_error(id, texts::SIGNED_OUT)];
-    }
-    if reply.status >= 400 {
-        return vec![texts::failure(
-            id,
-            call.tools_call(),
-            &texts::http_status(reply.status),
-        )];
-    }
-    let raws = match reply.body {
+}
+
+/// A reply body's values.
+pub(super) fn values(body: McpBody) -> Vec<Box<RawValue>> {
+    match body {
         McpBody::Json(raw) => vec![raw],
         McpBody::Events(raws) => raws,
         McpBody::Empty => Vec::new(),
-    };
-    let Some((raw, envelope)) = answer_to(session, id, &raws) else {
-        return vec![texts::failure(id, call.tools_call(), texts::NO_ANSWER)];
-    };
-    if let Some(result) = envelope.result {
-        read_result(conn, call, result);
     }
+}
+
+/// Step 5 for a reply that came back: the lines for the agent, and how a `tools/call` ended.
+pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> (Vec<Vec<u8>>, CallClass) {
+    let session = &conn.session;
+    keep_session_id(conn, reply.session_id.as_deref());
+    let Some(id) = call.id.as_ref() else {
+        // A notification or the agent's response: nothing goes back.
+        return (Vec::new(), CallClass::Ok);
+    };
+    if reply.status == 401 && call.tools_call() {
+        let line = texts::tool_error(id, texts::SIGNED_OUT);
+        return (vec![line], CallClass::CredentialEnded);
+    }
+    if reply.status >= 400 {
+        let text = texts::http_status(reply.status);
+        return (
+            vec![texts::failure(id, call.tools_call(), &text)],
+            CallClass::Error,
+        );
+    }
+    let raws = values(reply.body);
+    let Some((raw, envelope)) = answer_to(session, id, &raws) else {
+        let line = texts::failure(id, call.tools_call(), texts::NO_ANSWER);
+        return (vec![line], CallClass::Error);
+    };
+    let class = match envelope.result {
+        Some(result) => read_result(conn, call, result),
+        None => CallClass::Error,
+    };
     if raw.get().len() > MAX_REPLY_BYTES {
         tracing::info!(session = %session.key.id(), method = call.log_method(), "case-law relay: the reply was too large");
-        return vec![texts::failure(
-            id,
-            call.tools_call(),
-            texts::REPLY_TOO_LARGE,
-        )];
+        let line = texts::failure(id, call.tools_call(), texts::REPLY_TOO_LARGE);
+        return (vec![line], CallClass::Error);
     }
     if let (Some(join), Some(result)) = (&call.join, envelope.result)
         && let Some(found) = super::found::found(join, result)
@@ -185,7 +196,7 @@ pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
             found,
         });
     }
-    vec![one_line(raw)]
+    (vec![one_line(raw)], class)
 }
 
 /// The answer's raw bytes as one line: a raw `\n` or `\r` (whitespace between tokens, the only
@@ -204,7 +215,7 @@ pub(super) fn one_line(raw: &RawValue) -> Vec<u8> {
 /// with that very `id`. Everything else is dropped and logged by kind: a request from the
 /// connector by its method, a notification, an answer to another id, or a value that does not
 /// read as a message. The agent gets only what the relay vetted, and exactly one answer.
-fn answer_to<'a>(
+pub(super) fn answer_to<'a>(
     session: &Session,
     id: &Value,
     raws: &'a [Box<RawValue>],
@@ -243,26 +254,38 @@ pub(super) fn same_id(theirs: &RawValue, id: &Value) -> bool {
         && serde_json::from_str::<Value>(theirs.get()).is_ok_and(|theirs| theirs == *id)
 }
 
+/// Keeps `initialize`'s raw `result.protocolVersion`, checked, for the next requests' headers;
+/// returns it.
+pub(super) fn keep_protocol_version(conn: &Conn, result: &RawValue) -> Option<String> {
+    let version = object::<InitializeResult<'_>>(result)
+        .and_then(|result| result.protocol_version)
+        .and_then(small_string);
+    let Some(version) = version.as_deref().and_then(checked_protocol_version) else {
+        tracing::warn!(session = %conn.session.key.id(), "case-law relay: initialize gave no usable protocolVersion");
+        return None;
+    };
+    lock(&conn.upstream).protocol_version = Some(version.to_owned());
+    Some(version.to_owned())
+}
+
 /// Reads a response's raw `result`: `initialize`'s protocol version, and a `tools/call`
-/// result's meaning.
-fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
+/// result's meaning, which it returns (`Ok` for any other method).
+fn read_result(conn: &Conn, call: &Call, result: &RawValue) -> CallClass {
     let session = &conn.session;
     if call.method.as_deref() == Some("initialize") {
-        let version = object::<InitializeResult<'_>>(result)
-            .and_then(|result| result.protocol_version)
-            .and_then(small_string);
-        match version.as_deref().and_then(checked_protocol_version) {
-            Some(version) => lock(&conn.upstream).protocol_version = Some(version.to_owned()),
-            None => {
-                tracing::warn!(session = %session.key.id(), "case-law relay: initialize gave no usable protocolVersion");
-            }
-        }
+        keep_protocol_version(conn, result);
     }
     let Some(spend) = call.spend else {
-        return;
+        return CallClass::Ok;
     };
     let hub = &session.hub;
-    match tool_outcome(session, result) {
+    let outcome = tool_outcome(session, result);
+    let class = match outcome {
+        ToolOutcome::Ok => CallClass::Ok,
+        ToolOutcome::OutOfCredit(_) => CallClass::OutOfCredit,
+        ToolOutcome::OtherError => CallClass::Error,
+    };
+    match outcome {
         ToolOutcome::OutOfCredit(payment) => hub.events.event(RelayEvent::OutOfCredit {
             session: session.key,
             payment,
@@ -291,6 +314,7 @@ fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
         }
         ToolOutcome::Ok | ToolOutcome::OtherError => {}
     }
+    class
 }
 
 /// What a raw `tools/call` result means. A result that is not an object is not an error, as

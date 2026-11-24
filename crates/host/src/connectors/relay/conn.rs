@@ -13,6 +13,7 @@ use serde_json::Value;
 use super::super::limits::MAX_CONNECTIONS_PER_TOKEN;
 use super::super::limits::{MAX_HELLO_BYTES, MAX_IN_FLIGHT, MAX_LINE_BYTES};
 use super::super::texts;
+use super::forward::Warm;
 use super::handshake::{self, Line, Refusal, Watchdog};
 use super::{Session, hang_up, lock};
 
@@ -80,6 +81,7 @@ fn run(session: &Arc<Session>, id: u64, stream: TcpStream, watchdog: Watchdog) {
         session: Arc::clone(session),
         writer,
         upstream: Mutex::new(Upstream::default()),
+        warm: Warm::default(),
         flight,
     });
     pump(&conn, &mut reader);
@@ -99,6 +101,8 @@ pub(crate) struct Conn {
     pub(crate) session: Arc<Session>,
     pub(crate) writer: Writer,
     pub(crate) upstream: Mutex<Upstream>,
+    /// The upstream `initialize` still owed for the one answered locally (`forward/warm.rs`).
+    pub(crate) warm: Warm,
     pub(crate) flight: Arc<Flight>,
 }
 
@@ -110,6 +114,7 @@ impl Conn {
             session,
             writer: Writer(Mutex::new(stream)),
             upstream: Mutex::new(Upstream::default()),
+            warm: Warm::default(),
             flight: Arc::new(Flight::default()),
         }
     }
@@ -121,9 +126,13 @@ pub(crate) struct Writer(Mutex<TcpStream>);
 impl Writer {
     /// Writes `line` and a newline under the lock.
     pub(crate) fn line(&self, line: &[u8]) -> io::Result<()> {
+        // One write for the line and its newline: two small writes would wait on the peer's
+        // delayed ACK (Nagle), about 40 ms a line on Linux.
+        let mut whole = Vec::with_capacity(line.len().saturating_add(1));
+        whole.extend_from_slice(line);
+        whole.push(b'\n');
         let mut stream = lock(&self.0);
-        stream.write_all(line)?;
-        stream.write_all(b"\n")?;
+        stream.write_all(&whole)?;
         stream.flush()
     }
 

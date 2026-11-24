@@ -178,7 +178,7 @@ fn a_handshake_not_done_in_5_s_is_closed_unanswered() {
     rig.clock.advance(HANDSHAKE_TIMEOUT);
     assert_eq!(slow.recv_line(), None);
     // The finished handshake's deadline was disarmed: that connection still works.
-    quick.send_value(&request(1, "tools/list"));
+    quick.send_value(&request(1, "ping"));
     assert_eq!(quick.recv()["id"], 1);
 }
 

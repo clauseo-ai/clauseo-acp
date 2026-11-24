@@ -341,6 +341,38 @@ fn with_no_relay_each_request_gets_not_reachable_and_notifications_nothing() {
     assert_no_token(&capture);
 }
 
+/// A relay that starts listening 300 ms after the mode starts is still reached: the connect
+/// is tried again, and the agent's `tools/list` gets the relay's answer.
+#[test]
+fn a_relay_that_comes_up_late_is_still_reached() {
+    let scratch = Scratch::new("late-relay");
+    let file = token_file(&scratch, TOKEN);
+    let port = closed_port();
+    let server = thread::spawn(move || {
+        pause(Duration::from_millis(300));
+        let listener = TcpListener::bind(("127.0.0.1", port)).unwrap();
+        relay(listener, Some(OK), |reader, writer| {
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let mut writer = writer;
+            writer
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n")
+                .unwrap();
+            request
+        })
+        .join()
+        .unwrap()
+    });
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n";
+    let (result, capture) = run_mode(&good_env(port, &file), &["case-law"], input.as_bytes());
+    assert_eq!(result.unwrap(), 0);
+    let (_hello, request) = server.join().unwrap();
+    assert_eq!(request, input);
+    let replies = capture.replies();
+    assert_eq!(replies.len(), 1, "{replies:?}");
+    assert_eq!(replies[0]["result"]["tools"], Value::Array(Vec::new()));
+}
+
 #[test]
 fn a_refused_handshake_gives_the_hosts_code_as_the_reason() {
     // A plain code is passed on; anything else, or no answer at all, is `connect_failed`.

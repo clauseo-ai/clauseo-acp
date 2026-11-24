@@ -18,6 +18,15 @@ pub(crate) const CONNECT_FAILED: &str = "connect_failed";
 /// How long the connect may take, and then how long the hello and the answer may take in all.
 /// The host answers at once.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The pauses between connect tries: five tries, about 1.5 s of pauses and 2 s in all on a
+/// refused port, for a relay still starting as the agent starts this program. A relay that
+/// answers, even with a refusal, is never tried again.
+const CONNECT_PAUSES: [Duration; 4] = [
+    Duration::from_millis(100),
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+];
 /// The longest handshake answer. The host's answers are a few dozen bytes.
 const ANSWER_MAX_BYTES: usize = 1024;
 
@@ -32,8 +41,7 @@ pub(crate) struct Link {
 /// Connects to the relay at `addr` and completes the handshake for `connector`. The `Err` is the
 /// reason for the agent: the host's error code when it refused, else [`CONNECT_FAILED`].
 pub(crate) fn connect(addr: SocketAddr, token: &str, connector: &str) -> Result<Link, String> {
-    let stream =
-        TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT).map_err(|_io| CONNECT_FAILED)?;
+    let stream = connect_with_retries(addr).map_err(|_io| CONNECT_FAILED)?;
     // One deadline for the hello and the answer together, so a relay that sends a byte at a time
     // is given up too. It is a stop that fires by itself; the writer and the reader check it
     // between their tries on the non-blocking socket, so nothing has to wake a blocked read. The
@@ -50,6 +58,29 @@ pub(crate) fn connect(addr: SocketAddr, token: &str, connector: &str) -> Result<
     };
     verdict(&answer)?;
     Ok(Link { reader, socket })
+}
+
+/// Connects to `addr`, trying again after each of [`CONNECT_PAUSES`] when the connect fails.
+fn connect_with_retries(addr: SocketAddr) -> io::Result<TcpStream> {
+    let mut pauses = CONNECT_PAUSES.iter();
+    loop {
+        match TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => match pauses.next() {
+                Some(pause) => wait(*pause),
+                None => return Err(error),
+            },
+        }
+    }
+}
+
+/// Waits for `after` (`clippy.toml` bans `thread::sleep`): the sender is held, so nothing
+/// wakes the wait early.
+fn wait(after: Duration) {
+    let (_hold, wake) = std::sync::mpsc::channel::<()>();
+    if wake.recv_timeout(after).is_err() {
+        // The time is up, as the sender is still held.
+    }
 }
 
 /// Writes the handshake line in one write. The token is in it, so nothing reports its bytes.

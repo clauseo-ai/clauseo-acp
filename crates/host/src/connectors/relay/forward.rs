@@ -16,10 +16,20 @@
 //!    becomes the reply-too-large answer. A notification or the agent's own response gets
 //!    nothing back; a request always gets exactly one answer.
 //!
+//! Between steps 3 and 4, `initialize` and `tools/list` are answered here at once, with no
+//! network (`local.rs`); the server gets its `initialize` from the warm-up (`warm.rs`), which
+//! every forwarded message waits for.
+//!
 //! [`MAX_REPLY_BYTES`]: super::super::limits::MAX_REPLY_BYTES
 
 mod found;
+mod local;
 mod reply;
+mod warm;
+
+pub(crate) use warm::Warm;
+
+use std::sync::Arc;
 
 use clauseo_connectors::{AuthError, Error, McpReply, McpRequestHeaders};
 use serde_json::{Map, Value, json};
@@ -27,6 +37,7 @@ use serde_json::{Map, Value, json};
 use super::super::limits::{Cap, Spend, Taken, local_date};
 use super::super::{CredentialEnd, RelayCall, RelayEvent, texts};
 use super::conn::Conn;
+use super::timeline::{self, CallClass};
 use super::{Phase, Session, lock};
 
 /// What the relay knows of a message once it is vetted.
@@ -55,7 +66,7 @@ impl Call {
 }
 
 /// Handles one line from the agent.
-pub(super) fn message(conn: &Conn, line: &[u8]) {
+pub(super) fn message(conn: &Arc<Conn>, line: &[u8]) {
     let hub = &conn.session.hub;
     let started = hub.clock.now().mono;
     let mut value = match serde_json::from_slice::<Value>(line) {
@@ -81,10 +92,23 @@ pub(super) fn message(conn: &Conn, line: &[u8]) {
         refund(&conn.session, &call);
         return;
     }
+    if local::answered(conn, &call, &mut value) {
+        return;
+    }
     // From here to the last answer the agent is at work: the idle stop counts it (R20b).
     let _busy = Busy::start(&conn.session);
     let body = texts::line(&value);
     drop(value);
+    let before = hub.clock.now().mono.saturating_sub(started);
+    if let Err(err) = warm::ensure(conn) {
+        // The call never went out: the server has no `initialize` yet.
+        refund(&conn.session, &call);
+        if let Some(line) = failed(&conn.session, &call, &err) {
+            answer(conn, &line);
+        }
+        log_call(&conn.session, &call, CallClass::of_error(&err));
+        return;
+    }
     let headers = {
         let upstream = lock(&conn.upstream);
         McpRequestHeaders {
@@ -94,21 +118,31 @@ pub(super) fn message(conn: &Conn, line: &[u8]) {
             session_id: upstream.session_id.clone(),
         }
     };
-    let before = hub.clock.now().mono.saturating_sub(started);
     let reply = hub.connector.mcp_post(&body, &headers);
     let received = hub.clock.now().mono;
     if uncharged(&reply) {
         refund(&conn.session, &call);
     }
-    let lines = match reply {
+    let (lines, class) = match reply {
         Ok(reply) => reply::lines(conn, &call, reply),
-        Err(err) => failed(&conn.session, &call, &err).into_iter().collect(),
+        Err(err) => (
+            failed(&conn.session, &call, &err).into_iter().collect(),
+            CallClass::of_error(&err),
+        ),
     };
     for line in &lines {
         answer(conn, line);
     }
+    log_call(&conn.session, &call, class);
     let after = hub.clock.now().mono.saturating_sub(received);
     hub.events.overhead(before.saturating_add(after));
+}
+
+/// The session's first `tools/call` goes to the lifecycle log as it ends.
+fn log_call(session: &Session, call: &Call, class: CallClass) {
+    if call.tools_call() {
+        timeline::first_call(session, class);
+    }
 }
 
 /// A forwarded message in flight, for the idle stop: `Started` when made, `Ended` when dropped,
@@ -243,7 +277,9 @@ fn vet_tools_call(
     call.join = found::Join::of(name, map.get("params"));
     // Only a call that can go out is counted: a credential first, then an open session.
     if let Err(err) = session.hub.connector.bearer() {
-        return Err(failed(session, call, &Error::Auth(err)));
+        let err = Error::Auth(err);
+        timeline::first_call(session, CallClass::of_error(&err));
+        return Err(failed(session, call, &err));
     }
     if session.phase() != Phase::Open {
         return Err(None);
@@ -257,6 +293,7 @@ fn vet_tools_call(
                 Cap::Recharge => ("recharge_cap", texts::RECHARGE_CAP),
             };
             session.log_refusal(reason);
+            timeline::first_call(session, CallClass::Error);
             return Err(Some(texts::tool_error(id, text)));
         }
     }
