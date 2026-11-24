@@ -1,0 +1,27 @@
+[package]
+name = "clauseo-engines"
+version = "0.1.0"
+description = "Clauseo's signed list of newer tested AI engine versions (engines.json): the Tauri updater signature check against the compiled-in key and the accept rules. No I/O."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Every test is under tests/ (one binary) and the docs hold no examples.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+# The list's signature: Tauri's updater signature, minisign (prehashed ed25519) wrapped in base64.
+minisign-verify = { workspace = true }
+# Tauri writes its public key and its .sig files as base64 of the minisign files.
+base64 = { workspace = true }
+# engines.json itself, and the package.json and package-lock.json it carries.
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# The "never older than the bundled pins" rule compares by semver precedence.
+semver = { workspace = true }
+
+[lints]
+workspace = true
