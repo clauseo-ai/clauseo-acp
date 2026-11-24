@@ -17,6 +17,7 @@ import type {
 } from "../transport/protocol.ts";
 import { mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
 import { forgetSteerRestores } from "./thread/steer-restore.ts";
+import { forgetUnsent } from "./thread/unsent-restore.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (stream-commits.test.tsx's way)
 const rowCommits = new Map<string, number>();
@@ -42,6 +43,7 @@ afterEach(async () => {
   h = null;
   rowCommits.clear();
   forgetSteerRestores();
+  forgetUnsent();
 });
 
 /** The other conversation: its id sorts below THREAD, so with no activity times THREAD is the newest and opens. */
@@ -86,8 +88,18 @@ async function ask(text = QUESTION) {
   await h!.type(text);
   await h!.key({ key: "Enter", keyCode: 13 });
 }
-const HOLD =
-  "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.";
+/** The card's words for each hold the host names (#1286's TurnQueued.hold, read as an optional field until then). */
+const CARDS = {
+  undo: "An undo is changing this matter's papers. Your message is queued and sends once it's done.",
+  restore:
+    "A restore is changing this matter's papers. Your message is queued and sends once it's done.",
+  relocate:
+    "This matter's folder is being moved. Your message is queued and sends once that's done.",
+} as const;
+const OTHER_ANSWER = "Waiting for another answer in this matter.";
+/** A queued status with the host's hold, as the bindings don't carry it yet. */
+const heldBy = (hold: keyof typeof CARDS, behind = THREAD) =>
+  ({ queued: { behind, hold } }) as unknown as ThreadStatus;
 /** What the composer's one status region says of its working line. */
 const composerSaid = () =>
   h!.host.querySelector('[data-composer] .room-entry > [role="status"]')?.textContent ?? "";
@@ -137,24 +149,46 @@ test("two conversations answering at once: the open one's working line says Answ
   expect(rowSays("Lease notice")).toBe("Answering.");
 });
 
-test("queued by the host for the matter: the working line says Waiting to answer., the card says why, nothing to press, no name and no time", async () => {
-  for (const behind of [THREAD, OTHER]) {
+test("queued with the host's hold: the card names that hold; the working line says Waiting to answer.; nothing to press", async () => {
+  for (const hold of ["undo", "restore", "relocate"] as const) {
     h = await mountWith("idle");
-    h.deliver([reset([], headerOf(THREAD, { queued: { behind } }))]);
+    h.deliver([reset([], headerOf(THREAD, heldBy(hold)))]);
+    await h.settle();
+    expect(working(), hold).toBe("Waiting to answer.");
+    expect(wait()?.textContent, hold).toBe(CARDS[hold]);
+    expect(wait()?.querySelector("button"), hold).toBeNull();
+    // the composer's own region says the wait; the card holds none of its own
+    expect(composerSaid(), hold).toContain("Waiting to answer.");
+    expect(wait()?.querySelector('[role="status"]'), hold).toBeNull();
+    // the waiting mark is on the waiting (open) row, and the other row's says nothing of a wait
+    expect(rowTitled("Lease notice")?.dataset["state"], hold).toBe("waiting");
+    expect(rowSays("Lease notice"), hold).toBe("Waiting to answer.");
+    expect(rowSays(TITLE), hold).not.toContain("Waiting");
+    await h.unmount();
+    h = null;
+  }
+});
+
+test("today's host: queued behind another conversation with no hold says another answer, never an undo, restore or move", async () => {
+  h = await mountWith("running");
+  h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  expect(working()).toBe("Waiting to answer.");
+  expect(wait()?.textContent).toBe(OTHER_ANSWER);
+  expect(h.host.textContent).not.toMatch(/undo|restore|moved/i);
+  expect(h.host.textContent).not.toContain(`'${TITLE}'`);
+});
+
+test("a missing or unknown hold behind its own thread: the working line alone, no card that names a reason", async () => {
+  for (const status of [
+    { queued: { behind: THREAD } },
+    { queued: { behind: THREAD, hold: "something_new" } } as unknown as ThreadStatus,
+  ]) {
+    h = await mountWith("idle");
+    h.deliver([reset([], headerOf(THREAD, status))]);
     await h.settle();
     expect(working()).toBe("Waiting to answer.");
-    expect(working()).not.toContain("Answering.");
-    expect(wait()?.textContent).toBe(HOLD);
-    expect(wait()?.querySelector("button")).toBeNull();
-    expect(h.host.textContent).not.toContain(TITLE + "'");
-    expect(wait()?.textContent).not.toMatch(/\d/);
-    // the composer's own region says the wait; the card holds none of its own
-    expect(composerSaid()).toContain("Waiting to answer.");
-    expect(wait()?.querySelector('[role="status"]')).toBeNull();
-    // the waiting mark is on the waiting (open) row, and the other row's says nothing of a wait
-    expect(rowTitled("Lease notice")?.dataset["state"]).toBe("waiting");
-    expect(rowSays("Lease notice")).toBe("Waiting to answer.");
-    expect(rowSays(TITLE)).not.toContain("Waiting");
+    expect(wait()).toBeNull();
     await h.unmount();
     h = null;
   }
@@ -168,7 +202,7 @@ test("a row queued for the matter says Waiting to answer. on the rail, naming no
 
 test("the wait goes once the turn starts", async () => {
   h = await mountWith("idle");
-  h.deliver([reset([], headerOf(THREAD, { queued: { behind: THREAD } }))]);
+  h.deliver([reset([], headerOf(THREAD, heldBy("restore")))]);
   await h.settle();
   expect(wait()).not.toBeNull();
   h.deliver([upsert(headerOf(THREAD, "running"))]);
@@ -203,101 +237,31 @@ test("the other conversation's status changing renders no row of the open transc
   act(() => release());
 });
 
-// Stop on a message that waits (Windows test, 24 Nov): the host ends its turn cancelled before it started, and the
-// reducer marks the message removed. Its words never vanish.
-const UNSENT =
+// Stop on a message that waits (Windows test, 24 Nov; #1302 review): the host ends its turn cancelled before it
+// started, and the reducer marks the message removed. Its words never vanish, and the line says only what is true.
+const STOPPED =
   "Not sent, because you stopped it before it started. Your message is back in the box below.";
-const asked = (order: number, n: number, text: string, status: "sent" | "removed"): ViewEntry => {
+const NEUTRAL = "This message wasn't sent. It's back in the box below.";
+type Status = "sent" | "removed" | "queued";
+const asked = (order: number, n: number, text: string, status: Status): ViewEntry => {
   const e = userMessage(order, n, text);
   return { user_message: { ...e.user_message!, status, turn: uuid(n, 4) } };
 };
 const LATER = "And the sublet clause in the renewal?";
-
-test("Stop on a later message that waits: its words come back into the same conversation's field, with a line that it wasn't sent", async () => {
-  h = await mountWith("idle");
-  h.deliver([
-    reset(
-      [
-        userMessage(1, 1, "Read clause nine."),
-        agentText(2, 1, "Clause nine says notice."),
-        asked(3, 2, LATER, "sent"),
-      ],
-      headerOf(THREAD, { queued: { behind: THREAD } }),
-    ),
-  ]);
-  await h.settle();
-  h.deliver([upsert(asked(3, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
-  await h.settle();
-  expect(field().value).toBe(LATER);
-  expect(
-    h
-      .one("unsent")
-      ?.textContent?.replace(/\u00a0/g, " ")
-      .trim(),
-  ).toBe(UNSENT);
-  // the same conversation, its earlier answer still there
-  expect(rowTitled("Lease notice")?.getAttribute("aria-current")).toBe("true");
-  expect(h.host.textContent).toContain("Clause nine says notice.");
-  // the next send clears the line
-  await h.key({ key: "Enter", keyCode: 13 });
-  expect(h.sent("send_prompt")).toHaveLength(1);
-  expect(h.one("unsent")).toBeNull();
-});
-
-test("words typed meanwhile keep their place: the stopped message comes after them", async () => {
-  h = await mountWith("idle");
-  h.deliver([
-    reset(
-      [userMessage(1, 1, "Read clause nine."), asked(3, 2, LATER, "sent")],
-      headerOf(THREAD, { queued: { behind: THREAD } }),
-    ),
-  ]);
-  await h.settle();
-  await h.type("Also the deposit.");
-  h.deliver([upsert(asked(3, 2, LATER, "removed"))]);
-  await h.settle();
-  expect(field().value).toBe(`Also the deposit.\n\n${LATER}`);
-});
-
-test("Stop on the conversation's only message: a new draft in the matter holds its words, with the focus, and the line", async () => {
-  h = await mountWith("idle");
-  h.deliver([
-    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
-  ]);
-  await h.settle();
-  h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
-  await h.settle();
-  // the draft is open, not the emptied conversation
-  const open = h.all("conversation").find((b) => b.getAttribute("aria-current") === "true");
-  expect(open?.querySelector(".room-conv-title")?.textContent).toBe("New conversation");
-  expect(field().value).toBe(QUESTION);
-  expect(document.activeElement).toBe(field());
-  expect(
-    h
-      .one("unsent")
-      ?.textContent?.replace(/\u00a0/g, " ")
-      .trim(),
-  ).toBe(UNSENT);
-});
-
-test("a message already removed when the conversation opens stays as it is: nothing comes back", async () => {
-  h = await mountWith("idle");
-  h.deliver([
-    reset(
-      [userMessage(1, 1, "Read clause nine."), asked(3, 2, LATER, "removed")],
-      headerOf(THREAD, "idle"),
-    ),
-  ]);
-  await h.settle();
-  expect(field().value).toBe("");
-  expect(h.one("unsent")).toBeNull();
-});
-
-/** The host's ThreadsChanged after it (#1282): the emptied conversation is no longer listed. */
-const leaves = () =>
+const ANSWERED = [
+  userMessage(1, 1, "Read clause nine."),
+  agentText(2, 1, "Clause nine says notice."),
+];
+const line = () =>
+  h!
+    .one("unsent")
+    ?.textContent?.replace(/\u00a0/g, " ")
+    .trim();
+/** The host's ThreadsChanged after it (#1282): the emptied conversations are no longer listed. */
+const leaves = (...removed: string[]) =>
   act(async () =>
     h!.transport.appEvent({
-      threads_changed: { matter: THE_MATTER.matter, threads: [], removed: [THREAD], all: false },
+      threads_changed: { matter: THE_MATTER.matter, threads: [], removed, all: false },
     }),
   );
 const openTitle = () =>
@@ -306,43 +270,143 @@ const openTitle = () =>
     .find((b) => b.getAttribute("aria-current") === "true")
     ?.querySelector(".room-conv-title")?.textContent;
 
-test("the only message stopped, then the host drops the conversation: the new draft keeps the words, and its row goes", async () => {
+test("Stop on a later message that waits: its words come back into the same conversation's field, because you stopped it", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  expect(h.sent("cancel")).toEqual([{ thread: THREAD }]);
+  h.deliver([upsert(asked(3, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  expect(field().value).toBe(LATER);
+  expect(line()).toBe(STOPPED);
+  expect(rowTitled("Lease notice")?.getAttribute("aria-current")).toBe("true");
+  expect(h.host.textContent).toContain("Clause nine says notice.");
+  // the next send clears the line
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(h.one("unsent")).toBeNull();
+});
+
+test("a message ended before it started with no Stop in this window: the words come back, with neutral words", async () => {
   h = await mountWith("idle");
   h.deliver([
-    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
+    reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("restore"))),
   ]);
+  await h.settle();
+  h.deliver([upsert(asked(3, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  expect(field().value).toBe(LATER);
+  expect(line()).toBe(NEUTRAL);
+});
+
+test("words typed meanwhile keep their place: the stopped message comes after them", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h.settle();
+  await h.type("Also the deposit.");
+  h.deliver([upsert(asked(3, 2, LATER, "removed"))]);
+  await h.settle();
+  expect(field().value).toBe(`Also the deposit.\n\n${LATER}`);
+});
+
+test("Stop on one of two waiting messages: only the stopped one comes back; the other stays queued", async () => {
+  const NEXT = "Then list the annexures.";
+  h = await mountWith("idle");
+  h.deliver([
+    reset(
+      [...ANSWERED, asked(3, 2, LATER, "sent"), asked(4, 3, NEXT, "queued")],
+      headerOf(THREAD, heldBy("undo")),
+    ),
+  ]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  h.deliver([upsert(asked(3, 2, LATER, "removed"))]);
+  await h.settle();
+  expect(field().value).toBe(LATER);
+  expect(field().value).not.toContain(NEXT);
+  expect(line()).toBe(STOPPED);
+});
+
+test("the only message removed, with no removal from the host: no new draft opens, the conversation stays open", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
   await h.settle();
   h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
-  await leaves();
-  await h.settle();
-  expect(openTitle()).toBe("New conversation");
-  expect(field().value).toBe(QUESTION);
-  expect(rowTitled("Lease notice")).toBeUndefined();
-  expect(rowTitled(TITLE)).not.toBeUndefined();
-  expect(
-    h
-      .one("unsent")
-      ?.textContent?.replace(/\u00a0/g, " ")
-      .trim(),
-  ).toBe(UNSENT);
+  expect(openTitle()).toBe("Lease notice");
+  expect(h.all("conversation").some((b) => b.textContent?.includes("New conversation"))).toBe(
+    false,
+  );
 });
 
-test("the host drops the conversation before its stream says the message was removed: the words still go to a new draft, once", async () => {
+test("the only message stopped, then the host's removal: a new draft holds its words, with the focus and the line, and its row goes", async () => {
   h = await mountWith("idle");
-  h.deliver([
-    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
-  ]);
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
   await h.settle();
-  await leaves();
+  await h.click(h.one("cancel"));
+  h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  await leaves(THREAD);
   await h.settle();
   expect(openTitle()).toBe("New conversation");
   expect(field().value).toBe(QUESTION);
   expect(document.activeElement).toBe(field());
-  expect(
-    h
-      .one("unsent")
-      ?.textContent?.replace(/\u00a0/g, " ")
-      .trim(),
-  ).toBe(UNSENT);
+  expect(line()).toBe(STOPPED);
+  expect(rowTitled("Lease notice")).toBeUndefined();
+  expect(rowTitled(TITLE)).not.toBeUndefined();
+});
+
+test("the host's removal before the stream says the message was removed: the words go to a new draft, once", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  await leaves(THREAD);
+  await h.settle();
+  expect(openTitle()).toBe("New conversation");
+  expect(field().value).toBe(QUESTION);
+  expect(line()).toBe(STOPPED);
+});
+
+test("Stop, then switching to another conversation before the host's removal: the words wait in the matter's draft", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  await h.click(rowTitled(TITLE));
+  expect(openTitle()).toBe(TITLE);
+  await leaves(THREAD);
+  await h.settle();
+  // the lawyer stays where they went; the draft row holds the words
+  expect(openTitle()).toBe(TITLE);
+  const draft = h.all("conversation").find((b) => b.textContent?.includes("New conversation"));
+  expect(draft).not.toBeUndefined();
+  await h.click(draft);
+  expect(field().value).toBe(QUESTION);
+  expect(line()).toBe(STOPPED);
+});
+
+test("two conversations answering, stopped one after the other: each Stop cancels its own turn only", async () => {
+  h = await mountWith("running", "running");
+  h.deliver([reset([userMessage(1, 1, "Read clause nine.")], headerOf(THREAD, "running"))]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  expect(h.sent("cancel")).toEqual([{ thread: THREAD }]);
+  expect(rowSays(TITLE)).toBe("Answering.");
+  await h.click(rowTitled(TITLE));
+  h.deliverOn(`thread:${OTHER}` as StreamId, [
+    reset([userMessage(1, 2, "Draft it.")], headerOf(OTHER, "running")),
+  ]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  expect(h.sent("cancel")).toEqual([{ thread: THREAD }, { thread: OTHER }]);
+});
+
+test("a message already removed when the conversation opens stays as it is: nothing comes back", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([...ANSWERED, asked(3, 2, LATER, "removed")], headerOf(THREAD, "idle"))]);
+  await h.settle();
+  expect(field().value).toBe("");
+  expect(h.one("unsent")).toBeNull();
 });

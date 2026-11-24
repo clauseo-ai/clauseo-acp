@@ -215,12 +215,19 @@ export const HI = {
   /* ---------- an undo, restore or move holds the matter (parallel answers, 24 Nov) ---------- */
   // a conversation whose message waits for the hold: the rail's row and the composer's working line. hi: later
   "Waiting to answer.": null,
-  // the card over the composer while the message waits. hi: later
-  // the composer's working line once a message stopped before its turn started is back in the field. hi: later
+  // the composer's working line once a message stopped before its turn started is back in the field, after a Stop
+  // pressed in this window; and the same with no Stop of this window's. hi: later
   "Not sent, because you stopped it before it started. Your message is back in the box below.":
     null,
-  "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.":
+  "This message wasn't sent. It's back in the box below.": null,
+  // the card over the composer while the message waits: the hold the host names. hi: later
+  "An undo is changing this matter's papers. Your message is queued and sends once it's done.":
     null,
+  "A restore is changing this matter's papers. Your message is queued and sends once it's done.":
+    null,
+  "This matter's folder is being moved. Your message is queued and sends once that's done.": null,
+  // today's host (no hold named) queues behind another conversation's answer. hi: later
+  "Waiting for another answer in this matter.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */

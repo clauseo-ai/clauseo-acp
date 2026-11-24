@@ -1,26 +1,39 @@
 // The waits over the composer, of the messages-while-Clauseo-works parts (queue.tsx, which re-exports them): apart
 // from the queue's other parts so the room's first load carries only these. MatterHoldWait is the app's: a message
-// waits while an undo, a restore or a move holds the matter. OtherConversationWait was the wait for another
+// the host queued, saying what it waits for (an undo, a restore or a move, or another answer in the matter). OtherConversationWait was the wait for another
 // conversation; since conversations of a matter answer at once (24 Nov) only the gallery shows it.
 import type { Ref } from "react";
 import { Button } from "../ui/button.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { Say } from "./say.tsx";
 
-/** A message that waits while an undo, a restore or a move holds the matter's papers: the line says why, and that it
- * goes once that is done. Nothing to press: none of the three can be stopped from here, and each is short. Like
- * OtherConversationWait it holds no status region; the composer's working line says the wait. */
-export function MatterHoldWait({ testId }: { testId?: string }) {
+/** What a queued message waits for, as the card says it: the hold the host names, or another answer in the matter. */
+export type HoldReason = "undo" | "restore" | "relocate" | "other";
+
+/** A message the host queued: the line says what it waits for and, for a hold, that it sends once that is done.
+ * Nothing to press: none of these can be stopped from here. Like OtherConversationWait it holds no status region; the
+ * composer's working line says the wait. */
+export function MatterHoldWait({ reason, testId }: { reason: HoldReason; testId?: string }) {
   const w = useMatterWords();
+  const words =
+    reason === "undo"
+      ? w.m(
+          "An undo is changing this matter's papers. Your message is queued and sends once it's done.",
+        )
+      : reason === "restore"
+        ? w.m(
+            "A restore is changing this matter's papers. Your message is queued and sends once it's done.",
+          )
+        : reason === "relocate"
+          ? w.m(
+              "This matter's folder is being moved. Your message is queued and sends once that's done.",
+            )
+          : w.m("Waiting for another answer in this matter.");
   return (
-    <section className="queue queue-wait" data-testid={testId}>
+    <section className="queue queue-wait" data-testid={testId} data-reason={reason}>
       <div className="queue-wait-text">
         <p className="queue-say">
-          <Say>
-            {w.m(
-              "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.",
-            )}
-          </Say>
+          <Say>{words}</Say>
         </p>
       </div>
     </section>
