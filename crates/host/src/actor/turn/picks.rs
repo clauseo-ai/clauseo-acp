@@ -73,6 +73,9 @@ pub(crate) struct Picked {
     stale: Vec<Pick>,
     /// Those of [`Self::stale`] the agent refused (-32602); the rest it did not list.
     refused: Vec<Pick>,
+    /// The picks sent that failed otherwise (another error, a call that could not be made),
+    /// and those left unsent after it: kept for a later session, and told when kept values.
+    failed: Vec<Pick>,
 }
 
 /// Whether the pickers set options of `category`.
@@ -346,7 +349,8 @@ pub(super) async fn apply(
         asked: picks.clone(),
         ..Picked::default()
     };
-    for pick in picks {
+    let mut picks = picks.into_iter();
+    while let Some(pick) = picks.next() {
         match offer(&start.config_options, &pick) {
             Offer::Held | Offer::Absent => continue,
             Offer::Not => {
@@ -375,9 +379,12 @@ pub(super) async fn apply(
             Err(clauseo_acp::Error::Rpc { code, .. }) => {
                 let value = pick_value(&start.config_options, &pick);
                 tracing::warn!(option = %pick.0, value, code, "a config pick failed; kept");
+                picked.failed.push(pick);
             }
             Err(error) => {
                 tracing::warn!(option = %pick.0, error = %Cause(&error), "a config pick was not set");
+                picked.failed.push(pick);
+                picked.failed.extend(picks);
                 break;
             }
         }
@@ -419,8 +426,13 @@ pub(super) fn after(
         .filter(|pick| offer(options, pick) == Offer::Absent)
         .cloned()
         .collect();
+    // A kept value the start failed to set back, whatever the reason, is told once.
+    let lost: Vec<AgentChoiceId> = (picked.stale.iter().chain(&picked.failed))
+        .filter(|pick| own.contains(pick) && offer(options, pick) != Offer::Held)
+        .map(|(option, _)| option.clone())
+        .collect();
     if picked.stale.is_empty() {
-        super::prompt_picks::session_started(actor, thread, options, (Vec::new(), due));
+        super::prompt_picks::session_started(actor, thread, options, (lost, due));
         return;
     }
     // Which option went and why: its id and "not listed" or "refused" (no value).
@@ -437,10 +449,6 @@ pub(super) fn after(
         .join(", ");
     let (model, effort) = model_and_effort(options, &picked.stale, &[]);
     tracing::info!(target: LIFECYCLE, %agent, %model, %effort, %why, "the agent does not take a config pick; dropped");
-    let lost: Vec<AgentChoiceId> = (picked.stale.iter())
-        .filter(|pick| own.contains(pick))
-        .map(|(option, _)| option.clone())
-        .collect();
     super::prompt_picks::session_started(actor, thread, options, (lost, due));
     // A kept value stays, in the prefs and `CreateThread`'s config too: later starts try it.
     let drop_stale = |picks: &mut ConfigPicks| {
