@@ -369,7 +369,11 @@ pub(super) fn on_before_turn(
         }
     };
     let checkpoint = match result {
-        Ok(checkpoint) => checkpoint,
+        Ok(mut checkpoint) => {
+            // Its papers left out as running turns' are theirs to log (`together.rs`).
+            super::together::before_answered(actor, matter, thread, &mut checkpoint.checkpoint);
+            checkpoint
+        }
         Err(error) => {
             let failed = TurnFailed {
                 turn,

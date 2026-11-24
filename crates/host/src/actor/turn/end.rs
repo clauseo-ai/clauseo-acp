@@ -232,9 +232,10 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     let hint =
         std::mem::take(&mut current.case_law_hint) == crate::connectors::hint::TurnLooks::CaseLaw;
     let expiry = end.expiry;
-    let paths = std::mem::take(&mut current.tool_paths);
+    let shared = std::mem::take(&mut current.tool_paths);
+    let paths = shared.snapshot();
     // A turn running beside it reads them until it leaves the matter (`together.rs`).
-    current.overlap.ending = Some(paths.clone());
+    current.overlap.ending = Some(shared);
     current.end = Some(end);
     let expired = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
@@ -363,15 +364,18 @@ pub(super) fn on_after_turn(
     }
     let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
-            Ok(done) => {
+            Ok(mut done) => {
+                let left_out = std::mem::take(&mut done.checkpoint.left_out);
                 after_events(actor, &mut close, matter, thread, done)?;
                 // Its card: the turns beside it keep what it credits (`together.rs`).
-                together::carded(actor, thread, &close);
+                together::carded(actor, (matter, thread), &mut close, left_out);
             }
             Err(error) => {
                 close
                     .failure
                     .get_or_insert((error.code(), Some(error.to_string())));
+                // Its papers other checkpoints took stay logged (`together.rs`).
+                together::log_absorbed(actor, matter, thread, &mut close);
             }
         }
         close.send(actor, thread, Then::Closing(turn))

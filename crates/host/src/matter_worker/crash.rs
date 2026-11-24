@@ -319,7 +319,52 @@ impl Crashes {
 #[cfg(test)]
 pub(crate) mod hook {
     use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, PoisonError};
+    use std::sync::{Arc, Condvar, Mutex, PoisonError};
+
+    /// A job a test holds at its start until it opens the gate ([`gate_next`]).
+    #[derive(Debug, Default)]
+    pub(crate) struct Gate {
+        /// Whether the job has reached the gate, and whether the gate is open.
+        state: Mutex<(bool, bool)>,
+        changed: Condvar,
+    }
+
+    impl Gate {
+        /// Whether the job waits at the gate (or has passed it).
+        pub(crate) fn reached(&self) -> bool {
+            self.state.lock().unwrap_or_else(PoisonError::into_inner).0
+        }
+
+        /// Lets the job go on.
+        pub(crate) fn open(&self) {
+            self.state.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
+            self.changed.notify_all();
+        }
+
+        /// Marks the job there and waits until the gate opens.
+        fn pass(&self) {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.0 = true;
+            while !state.1 {
+                state = self
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        }
+    }
+
+    /// The gates armed: a matters root, a job kind's name, and the gate.
+    static GATES: Mutex<Vec<(PathBuf, &'static str, Arc<Gate>)>> = Mutex::new(Vec::new());
+
+    /// The next job of kind `job` of a worker whose matters live under `root` waits at its start
+    /// until the gate this returns opens.
+    pub(crate) fn gate_next(root: &Path, job: &'static str) -> Arc<Gate> {
+        let gate = Arc::new(Gate::default());
+        let mut gates = GATES.lock().unwrap_or_else(PoisonError::into_inner);
+        gates.push((root.to_path_buf(), job, Arc::clone(&gate)));
+        gate
+    }
 
     /// The panics armed: a matters root, a job kind's name or a point's, and how many of the
     /// next ones panic.
@@ -343,6 +388,16 @@ pub(crate) mod hook {
             found.map(|(_, _, left)| *left -= 1).is_some()
         };
         assert!(!hit, "a test's panic in a matter job");
+        let gate = {
+            let mut gates = GATES.lock().unwrap_or_else(PoisonError::into_inner);
+            let found = gates
+                .iter()
+                .position(|(at, name, _)| at == root && *name == job);
+            found.map(|at| gates.remove(at).2)
+        };
+        if let Some(gate) = gate {
+            gate.pass();
+        }
     }
 }
 

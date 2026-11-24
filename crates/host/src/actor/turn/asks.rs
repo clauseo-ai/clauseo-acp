@@ -142,8 +142,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     // The tool the request's tool call runs (Claude Code's `Bash`, `PowerShell`, `Read`, …),
     // as its start or updates named it; unknown when none did.
     let tool_name = current(actor, thread)
-        .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
-        .map(str::to_owned);
+        .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id));
     let own_read = own_read_to_allow(
         actor,
         thread,

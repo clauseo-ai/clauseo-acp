@@ -82,7 +82,7 @@ impl Current {
             told: Told::default(),
             limit: None,
             too_long: None,
-            tool_paths: crate::sent::TurnPaths::default(),
+            tool_paths: crate::sent::SharedPaths::default(),
             skipped: super::skipped::Skipped::None,
             checkpoint_before: None,
             prompt_call: None,

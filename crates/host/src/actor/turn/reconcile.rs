@@ -17,15 +17,18 @@
 //! Turns of different threads in a matter run at the same time, and a turn whose end ran but
 //! was never logged (it failed twice) left the matter too, so several turns of a matter may be
 //! open, and others may have run since one of them started. The started turns of a matter are
-//! repaired once every thread of the matter that is not archived has been looked at. Each takes
-//! its own after-turn checkpoint from R8's timeline when there is one. Several open turns ran
-//! beside each other: each takes a new one measured from its own before-turn checkpoint, without
-//! the papers only the others' tool calls named (`MatterJob::Repair`'s `open`), so no repair
-//! takes another turn's changes, in whatever order the threads load. A turn left open alone
-//! takes a new one only when nothing was checkpointed since it started, else an empty step.
+//! repaired once every thread of the matter that is not archived has been looked at, with the
+//! cards every one of those threads holds and the outside edits the matter's log holds. Each
+//! takes its own after-turn checkpoint from R8's timeline when there is one, else a new one when
+//! other turns were left open or something was checkpointed since it started, each measured from
+//! its own before-turn checkpoint without the papers the other open turns' tool calls wrote or
+//! name unfinished, those on the cards logged since while they hold what the card left, and
+//! those logged as outside edits since (`matter_worker/checkpoints.rs`). So no repair takes
+//! another turn's changes, in whatever order the threads load, and none is on no card. A turn
+//! left open alone with nothing checkpointed since it started takes a new one as at step 7.
 //! When a thread of the matter could not be loaded or its log read, which turn started last is
-//! not known, so a lone crashed turn there gets an empty step, and its changes are logged as
-//! outside edits by the next turn's before-turn checkpoint.
+//! not known, so a lone crashed turn there with a checkpoint since gets an empty step, and its
+//! changes are logged as outside edits by the next turn's before-turn checkpoint.
 //!
 //! This holds within one start, not across starts: if a thread fails to load and other turns
 //! then run in the matter, a later start that repairs that thread's turn as the only open one
@@ -51,7 +54,7 @@ use super::out::Out;
 use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, queue, state};
 use crate::error::Error;
 use crate::log_file::Cause;
-use crate::matter_worker::{MatterJob, TurnCheckpoint};
+use crate::matter_worker::{Logged, MatterJob, RepairJob, TurnCheckpoint};
 use crate::sent::{CallFields, SentView, TurnPaths};
 
 /// A started turn's repair, while its after-turn checkpoint runs.
@@ -72,6 +75,8 @@ pub(crate) struct Repairs {
     incomplete: bool,
     /// The started turns found so far.
     waiting: Vec<Waiting>,
+    /// The cards of the threads looked at so far (`Logged`).
+    cards: Vec<Logged>,
 }
 
 /// A started turn's repair, waiting for the rest of its matter.
@@ -103,6 +108,15 @@ struct Pending {
 /// read (a snapshot keeps neither its session nor its queue events).
 pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     let stream = StreamId::Thread(thread);
+    // Its cards, for a repair of an open turn of its matter (`looked_at`).
+    let cards = actor
+        .loaded(stream)
+        .and_then(|loaded| loaded.state.as_thread())
+        .map(|state| logged::cards(thread, state))
+        .unwrap_or_default();
+    if let Some(repairs) = repairs(actor, thread) {
+        repairs.cards.extend(cards);
+    }
     let unstopped = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
@@ -326,9 +340,36 @@ pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
     }
     let complete = !repairs.incomplete;
     let mut waiting = std::mem::take(&mut repairs.waiting);
+    let cards = std::mem::take(&mut repairs.cards);
+    if waiting.is_empty() {
+        return;
+    }
     // The turn that started last first.
     waiting.sort_by_key(|repair| Reverse(repair.started));
-    // Each open turn ran beside the others: its card leaves out the papers they named.
+    let Ok(matter) = matter_of(actor, thread) else {
+        return;
+    };
+    // The matter's outside edits are in its log.
+    let stream = StreamId::Matter(matter);
+    actor.with_loaded(
+        stream,
+        Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+            if let Err(error) = &loaded {
+                let message = "repairs go on without the matter's outside edits";
+                tracing::warn!(%stream, error = %Cause(error), "{message}");
+            }
+            let mut logged = cards;
+            logged.extend(logged::outside_edits(actor, matter));
+            send_repairs(actor, waiting, complete, &logged);
+            actor.release(stream);
+        }),
+    );
+}
+
+/// Sends the repairs `waiting` of a matter, the turn that started last first, with the cards
+/// and outside edits its logs hold.
+fn send_repairs(actor: &mut Actor, waiting: Vec<Waiting>, complete: bool, logged: &[Logged]) {
+    // Each open turn ran beside the others: its card leaves out the papers they wrote.
     let open: Vec<(ThreadId, TurnPaths)> = waiting
         .iter()
         .map(|repair| (repair.thread, repair.tool_paths.clone()))
@@ -339,7 +380,7 @@ pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
             .filter(|(thread, _)| *thread != repair.thread)
             .cloned()
             .collect();
-        after_turn(actor, repair, complete && n == 0, others);
+        after_turn(actor, repair, (complete && n == 0, others), logged.to_vec());
     }
 }
 
@@ -369,7 +410,7 @@ fn hold(actor: &mut Actor, thread: ThreadId, turn: TurnId, log: &[Envelope], pen
     };
     match repairs(actor, thread) {
         Some(repairs) => repairs.waiting.push(repair),
-        None => after_turn(actor, repair, true, Vec::new()),
+        None => after_turn(actor, repair, (true, Vec::new()), Vec::new()),
     }
 }
 
@@ -449,8 +490,14 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> TurnPaths {
 }
 
 /// Sends the repair's checkpoint job; `last` when no other open turn of the matter started after
-/// this one, `open` the other open turns of the matter with their tool calls' places.
-fn after_turn(actor: &mut Actor, repair: Waiting, last: bool, open: Vec<(ThreadId, TurnPaths)>) {
+/// this one, `open` the other open turns of the matter with their tool calls' places, `logged`
+/// the cards and outside edits of the matter's logs.
+fn after_turn(
+    actor: &mut Actor,
+    repair: Waiting,
+    (last, open): (bool, Vec<(ThreadId, TurnPaths)>),
+    logged: Vec<Logged>,
+) {
     let Waiting {
         thread,
         turn,
@@ -476,13 +523,14 @@ fn after_turn(actor: &mut Actor, repair: Waiting, last: bool, open: Vec<(ThreadI
             thread,
             kind: JobKind::Reconcile(Box::new(Repair { turn, pending })),
         };
-        let after = MatterJob::Repair {
+        let after = MatterJob::Repair(Box::new(RepairJob {
             meta,
             tool_paths,
             before,
             last,
             open,
-        };
+            logged,
+        }));
         actor
             .matter_worker(matter)?
             .send(after, MatterTag::Turn(job))?;
@@ -557,5 +605,6 @@ fn done(actor: &mut Actor, thread: ThreadId) {
     actor.release(StreamId::Thread(thread));
 }
 
+mod logged;
 #[cfg(test)]
 mod paths_tests;

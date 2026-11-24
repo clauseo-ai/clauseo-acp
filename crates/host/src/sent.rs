@@ -20,6 +20,7 @@ use clauseo_protocol::{
 use crate::build::ToolFields;
 use paths::diffs;
 pub(crate) use paths::{CallFields, Places, ShellStart, TurnPaths};
+pub(crate) use shared::SharedPaths;
 
 /// One tool call as last sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -361,6 +362,7 @@ impl SentView {
 }
 
 mod paths;
+mod shared;
 
 #[cfg(test)]
 mod tests;

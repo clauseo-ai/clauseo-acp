@@ -46,7 +46,7 @@ impl Kind {
             MatterJob::Locate { .. } => Self::Locate,
             MatterJob::BeforeTurn { .. } => Self::BeforeTurn,
             MatterJob::AfterTurn { .. } => Self::AfterTurn,
-            MatterJob::Repair { .. } => Self::Repair,
+            MatterJob::Repair(_) => Self::Repair,
             MatterJob::Undo(_) => Self::Undo,
             MatterJob::Restore(_) => Self::Restore,
             MatterJob::RestoreRecord(_) => Self::RestoreRecord,
