@@ -8,7 +8,8 @@
 //!   no `SKILL.md`, `skill.invalid` for anything else that stops it (a read, a cap, a pack rule:
 //!   the log line holds the rule's code), `settings.locked` when the firm decides.
 //! - `RemoveSkill`: off the actor the folder is deleted when it was added here
-//!   (`settings.refused` otherwise), then its `skills.enabled` entry goes.
+//!   (`settings.refused` otherwise), then its `skills.enabled` and `skills.scope` entries go,
+//!   and every matter's switch for it.
 //!
 //! Both bump the id's generation (`Actor::pack_generations`), so a `SetSkillPack` read still
 //! running for it writes nothing. A running agent keeps its skills; the next launch takes the
@@ -19,7 +20,8 @@ use std::sync::Arc;
 
 use clauseo_profile::packs::added::{self, AddError};
 use clauseo_profile::packs::{self, Refusal};
-use clauseo_protocol::{Date, ErrorCode, HostEvent, PackId};
+use clauseo_protocol::{AddonKind, Date, ErrorCode, HostEvent, PackId};
+use clauseo_settings::{ItemScope, SystemFiles};
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
@@ -145,15 +147,7 @@ pub(in crate::actor) fn on_done(actor: &mut Actor, done: SkillDone) {
                 pack = id.as_str(),
                 "a skill added on this computer was removed"
             );
-            let skills = &actor.effective.settings().skills;
-            if skills.enabled.contains_key(id.as_str()) {
-                write(actor, &ctx, &id, None, true)
-            } else {
-                let changed = HostEvent::SettingsChanged(super::view(actor));
-                super::super::app::publish(actor, &changed);
-                super::super::query::addons::changed(actor);
-                super::receipt(actor, &ctx)
-            }
+            removed(actor, &ctx, &id)
         }
         Done::Removed(id, Ok(Ok(false))) => Err(Error::refused(
             ErrorCode::SettingsRefused,
@@ -174,6 +168,30 @@ pub(in crate::actor) fn on_done(actor: &mut Actor, done: SkillDone) {
         );
         actor.finish_command(ctx.id, Err(error));
     }
+}
+
+/// A pack deleted: its `skills.enabled` and `skills.scope` entries go, every window is told,
+/// and the receipt's commit clears every matter's switch for it (`addon_change::receipt_moving`).
+fn removed(actor: &mut Actor, ctx: &CommandCtx, id: &PackId) -> Result<(), Error> {
+    let effective = &mut actor.effective;
+    if effective
+        .settings()
+        .skills
+        .enabled
+        .contains_key(id.as_str())
+    {
+        effective.set_skill_pack(&SystemFiles, id.as_str(), None)?;
+    }
+    if effective.skill_scope(id.as_str()) != ItemScope::All && !effective.is_locked("skills.scope")
+    {
+        effective.set_skill_scope(&SystemFiles, id.as_str(), ItemScope::All)?;
+    }
+    let changed = HostEvent::SettingsChanged(super::view(actor));
+    super::super::app::publish(actor, &changed);
+    super::super::query::addons::changed(actor);
+    actor.mcp.tools_rev += 1;
+    let names = (id.as_str(), None);
+    super::super::addon_change::receipt_moving(actor, ctx, AddonKind::Skill, names)
 }
 
 /// Bumps `id`'s generation, so a `SetSkillPack` read running for it writes nothing.

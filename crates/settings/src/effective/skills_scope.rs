@@ -14,7 +14,7 @@ const KEY: &str = "skills.scope";
 
 #[expect(
     clippy::multiple_inherent_impl,
-    reason = "effective.rs is at its 600-line limit; the skills' scopes live in their own file"
+    reason = "the skills' scopes live in their own file, as the MCP writes do (mcp_write.rs)"
 )]
 impl Effective {
     /// The pack `id`'s scope: `all` unless `skills.scope` says `matter`.

@@ -144,7 +144,8 @@ pub(crate) fn plan(
     let server = McpServerLaunch {
         transport,
         enabled: edit.enabled,
-        scope: None,
+        // An edit or a rename keeps where the server is on (decision record 0040).
+        scope: previous.and_then(|(_, old)| old.scope),
     };
     if let Some((old_name, old)) = previous {
         let kept = accounts(&edit.name, &server);

@@ -468,10 +468,23 @@ of [Per matter](#per-matter) for the app: `matters.skill_packs` still narrows, b
   `addon.unknown` and `addon.built_in` (0003). Clauseo's own skills refuse every change with
   `addon.built_in` in this version (their files are shared by every launch); its tools take a
   matter's switch only. The switches of all matters go in one commit (`Commit::more_matters`).
+- **Under a firm's lock** (orchestrator's ruling, 2026-11-24). While policy sets
+  `skills.enabled`, or `mcp.servers`, the firm decides the set and each item's scope. An item the
+  policy gives scope `matter` takes a lawyer's switch per matter, on and off. An item with scope
+  `all` stays on in every matter, and its switch is `settings.locked`. An item the policy does
+  not turn on cannot be turned on. `SetAddonScope` and `RemoveAddon` stay `settings.locked`.
+  Under `managed-mcp.json` no lawyer's server is switched at all. For the app: a `ListAddons` row
+  that is `locked` with scope `matter` is switchable per matter; `locked` with scope `all` is not.
+- **The older commands keep the switches whole.** Settings › Tools' edit keeps a server's scope.
+  A rename carries its scope and every matter's switch to the new name. `remove_server` and
+  `RemoveSkill` clear every matter's switch for the item, as `RemoveAddon` does, so an item
+  added again under the same name is not off somewhere unseen. A forgotten matter's switches are
+  cleared.
 - **At launch.** `pack_prep` asks only for the packs on in the thread's matter (Claude's pack
   plugin and Codex's index follow); the lawyer's servers the matter leaves out are neither read
   from the keychain nor sent in ACP `mcpServers`; a matter that switches `browser` or
-  `case-law` off gets no entry for it. The relaunch key (`ToolsKey`) is per matter and holds the
+  `case-law` off gets no entry for it; its launch prep looks for no Chrome, opens no browser
+  proxy and opens no case-law relay. The relaunch key (`ToolsKey`) is per matter and holds the
   packs too, so an idle conversation whose set changed restarts on its next message.
 
 ### Tier C: the source folder

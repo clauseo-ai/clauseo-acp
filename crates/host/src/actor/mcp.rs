@@ -32,7 +32,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use clauseo_connectors::StoreError;
-use clauseo_protocol::{ErrorCode, McpCommand, McpServerEdit};
+use clauseo_protocol::{AddonKind, ErrorCode, McpCommand, McpServerEdit};
 use clauseo_settings::{McpServerLaunch, McpValueKind, SystemFiles, keychain_account};
 
 use super::Actor;
@@ -260,7 +260,7 @@ fn remove(actor: &mut Actor, ctx: CommandCtx, name: &str) -> Result<(), Error> {
     };
     let accounts = not_refused(actor, keychain::accounts(name, &removed));
     forget_missing(actor, |server| server == name);
-    changed(actor, ctx);
+    changed_moving(actor, ctx, (name, None));
     // A server the last scan found already added may import again.
     scan::scan(actor);
     tidy(actor, accounts, None);
@@ -387,9 +387,13 @@ fn write_settings(
     });
     if !undo.is_empty() {
         // Its entry still reads `{"keychain": true}`: only this tells a live agent apart.
-        *actor.mcp.secret_revs.entry(name).or_default() += 1;
+        *actor.mcp.secret_revs.entry(name.clone()).or_default() += 1;
     }
-    changed(actor, ctx);
+    match previous.as_deref().filter(|previous| *previous != name) {
+        // A rename carries the matters' switches (its scope came with its entry).
+        Some(previous) => changed_moving(actor, ctx, (previous, Some(&name))),
+        None => changed(actor, ctx),
+    }
     tidy(actor, after, None);
     Ok(())
 }
@@ -415,6 +419,17 @@ fn not_refused(actor: &Actor, mut accounts: Vec<String>) -> Vec<String> {
         );
     }
     accounts
+}
+
+/// [`changed`], with every matter's switch for the server cleared or moved in the receipt's
+/// commit (`addon_change::receipt_moving`).
+fn changed_moving(actor: &mut Actor, ctx: CommandCtx, names: (&str, Option<&str>)) {
+    actor.mcp.tools_rev += 1;
+    view::publish(actor);
+    let sent = super::addon_change::receipt_moving(actor, &ctx, AddonKind::Tool, names);
+    if let Err(error) = sent {
+        actor.finish_command(ctx.id, Err(error));
+    }
 }
 
 /// Deletes `accounts` off the actor; with none (or no keychain) nothing runs.

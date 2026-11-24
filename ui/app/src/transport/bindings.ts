@@ -345,7 +345,11 @@ export type Addon = {
 	status: AddonStatus,
 	/**  Whether the lawyer can remove it: added items the lawyer controls. */
 	can_remove: boolean,
-	/**  Whether the firm decides its switches: a change answers `settings.locked`. */
+	/**
+	 *  Whether the firm decides it: its scope and its removal answer `settings.locked`. A row
+	 *  that is `locked` with scope `matter` still takes a matter's switch; with scope `all` it
+	 *  takes none.
+	 */
 	locked: boolean,
 };
 

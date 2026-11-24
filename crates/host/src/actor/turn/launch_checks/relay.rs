@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_connectors::{CredentialStatus, Secret};
-use clauseo_protocol::{AgentId, ThreadId, ToolsUnavailableReason};
+use clauseo_protocol::{AgentId, MatterId, ThreadId, ToolsUnavailableReason};
 
 use super::super::super::Actor;
 use super::super::state;
@@ -118,13 +118,16 @@ pub(super) struct CaseLawPrep {
     managed_mcp: PathBuf,
 }
 
-/// The case-law part of `agent`'s launch prep, from the actor's state.
-pub(super) fn case_law_prep(actor: &Actor, agent: &AgentId) -> CaseLawPrep {
+/// The case-law part of `agent`'s launch prep in `matter`, from the actor's state. A matter
+/// that switches case law off (`addon_rules.rs`) opens no relay.
+pub(super) fn case_law_prep(actor: &Actor, agent: &AgentId, matter: MatterId) -> CaseLawPrep {
     let offered = actor
         .profile
         .mcp_servers(agent)
         .iter()
-        .any(|server| server.name() == clauseo_profile::servers::CASE_LAW);
+        .any(|server| server.name() == clauseo_profile::servers::CASE_LAW)
+        && crate::actor::addon_rules::Placed::of(actor, matter)
+            .builtin_on(crate::actor::addon_rules::CASE_LAW);
     CaseLawPrep {
         relays: actor.wiring.relays.clone().filter(|_| offered),
         switch: Switch {

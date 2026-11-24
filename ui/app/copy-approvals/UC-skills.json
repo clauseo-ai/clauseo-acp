@@ -101,5 +101,27 @@
     "at": "2026-11-18",
     "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "skill.invalid: the settings window's failure line, as for the mcp.* codes; Settings › Skills says its own words"
+  },
+  "U3-err-addon.unknown": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-24",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D2a, the same failure line as the skill.* codes)",
+    "note": "addon.unknown: the settings window's failure line, as for skill.invalid; the Skills and Connectors place may say its own words"
+  },
+  "U3-err-addon.built_in": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-24",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D2a, the same failure line as the skill.* codes)",
+    "note": "addon.built_in: the settings window's failure line, as for skill.invalid; the Skills and Connectors place may say its own words"
   }
 }

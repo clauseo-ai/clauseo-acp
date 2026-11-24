@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use clauseo_profile::packs::{self, ReadError, Refusal, added};
 use clauseo_protocol::{AddonKind, ErrorCode, PackId};
-use clauseo_settings::{ItemScope, SystemFiles};
+use clauseo_settings::{Effective, ItemScope, SystemFiles};
 
 use super::{Change, Want, built_in, finish, locked, refused, unknown};
 use crate::actor::Actor;
@@ -49,13 +49,13 @@ pub(super) fn start(
     }
     let pack = PackId::new(id).map_err(|_bad| unknown(AddonKind::Skill, id))?;
     let effective = &actor.effective;
-    if effective.is_locked(ENABLED) {
-        return Err(locked(ENABLED));
-    }
     if let Some(matter) = change.matter() {
         actor.check_matter(matter)?;
     }
     let enabled = effective.settings().skills.enabled.contains_key(id);
+    if effective.is_locked(ENABLED) {
+        firm_set(effective, id, change, enabled)?;
+    }
     // Turning it on in a matter while it is on nowhere makes its scope `matter`.
     let turns_on = matches!(change, Change::Scope(_))
         || (matches!(change, Change::On { on: true, .. }) && !enabled);
@@ -101,6 +101,18 @@ pub(super) fn start(
         back(ctx, pack, change, done)
     });
     Ok(())
+}
+
+/// The rule while policy sets `skills.enabled` (decision record 0040): the firm decides the set
+/// and each pack's scope. A pack it turns on with scope `matter` takes a matter's switch either
+/// way; any other change is `settings.locked` (a scope, a removal, a pack with scope `all`, or
+/// one the policy does not turn on).
+fn firm_set(effective: &Effective, id: &str, change: Change, enabled: bool) -> Result<(), Error> {
+    let switch = matches!(change, Change::On { .. });
+    if switch && enabled && effective.skill_scope(id) == ItemScope::Matter {
+        return Ok(());
+    }
+    Err(locked(ENABLED))
 }
 
 fn back(ctx: CommandCtx, id: PackId, change: Change, done: Result<Done, Error>) -> Input {

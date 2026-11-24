@@ -235,6 +235,43 @@ pub(in crate::actor) fn rows_failed(actor: &mut Actor, before: Vec<MatterRow>) {
     for row in before {
         super::matter_details::row_failed(actor, row);
     }
+    // Live agents are compared again against the rows put back.
+    actor.mcp.tools_rev += 1;
+}
+
+/// Sends the receipt of a Settings command that removed (`to` none) or renamed an item, with
+/// every matter's switch for `from` cleared, or moved to `to`, in the same commit: a server
+/// added again under its old name is not off somewhere unseen, and a renamed one keeps its
+/// matters.
+pub(in crate::actor) fn receipt_moving(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    kind: AddonKind,
+    (from, to): (&str, Option<&str>),
+) -> Result<(), Error> {
+    let rows: Vec<(MatterRow, MatterRow)> = actor
+        .matters
+        .values()
+        .filter_map(|entry| {
+            let before = &entry.row;
+            let mut switches = before.addon_switches.clone()?;
+            let on = switches.get(kind, from)?;
+            switches.set(kind, from, None);
+            if let Some(to) = to {
+                switches.set(kind, to, Some(on));
+            }
+            let after = MatterRow {
+                addon_switches: (!switches.is_empty()).then_some(switches),
+                ..before.clone()
+            };
+            Some((before.clone(), after))
+        })
+        .collect();
+    if rows.is_empty() {
+        super::settings::receipt(actor, ctx)
+    } else {
+        commit_rows(actor, ctx, rows)
+    }
 }
 
 /// Answers the command with `error`, and logs the kind and the code.
