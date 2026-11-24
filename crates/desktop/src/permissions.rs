@@ -12,8 +12,10 @@
 //!   (an item a build signed otherwise wrote): found out silently (`permissions/mac.rs`).
 //!   Asking reads each such item with the dialog allowed. Account names only, never a value.
 //! - Windows `controlled_folder_access`, when Defender's Controlled folder access is on and
-//!   the matters folder is under a protected folder, unless Clauseo is allowed through. Only an
-//!   administrator can allow it, so asking grants nothing: the row says where to.
+//!   the matters folder is under a protected folder. What it blocks is the assistants' own tools
+//!   (the Windows VM's block, event 1123, named `powershell.exe`), not `Clauseo.exe`, so
+//!   whether Clauseo itself is allowed changes nothing. Only an administrator can allow a tool,
+//!   so asking grants nothing: the row says to move the matters folder or ask IT.
 //!
 //! Linux lists none. The OS reads sit behind [`Probe`], so the rules are tested anywhere.
 
@@ -94,9 +96,11 @@ pub(crate) const FILES_SETTINGS: &str =
 pub(crate) const CFA_SETTINGS: &str = "Windows Security › Virus & threat protection › \
                                        Ransomware protection › Allow an app through Controlled \
                                        folder access";
-/// What else the lawyer should know about Controlled folder access.
-pub(crate) const CFA_NOTE: &str = "Clauseo's helper programs need allowing too; or choose a \
-                                   matters folder outside Documents.";
+/// What the lawyer can do about Controlled folder access: the block falls on the assistants'
+/// tools, which Clauseo cannot allow, so the way out is another folder or IT.
+pub(crate) const CFA_NOTE: &str = "Windows blocks the assistants' tools, such as PowerShell, from \
+                                   saving in protected folders. Choose a matters folder outside \
+                                   Documents, Desktop and Pictures, or ask your IT team.";
 
 /// The OS a listing follows: a test plays any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,8 +133,6 @@ pub(crate) struct Cfa {
     pub(crate) on: bool,
     /// `ControlledFolderAccessProtectedFolders`: those beside Windows' defaults.
     pub(crate) protected: Vec<PathBuf>,
-    /// `ControlledFolderAccessAllowedApplications`.
-    pub(crate) allowed: Vec<PathBuf>,
 }
 
 /// The OS reads behind a listing and an ask. Every method may block.
@@ -147,8 +149,6 @@ pub(crate) trait Probe: Send + Sync {
     fn controlled_folder_access(&self) -> Option<Cfa>;
     /// Windows: the folders Controlled folder access protects by default.
     fn protected_defaults(&self) -> Vec<PathBuf>;
-    /// This program's path.
-    fn exe(&self) -> Option<PathBuf>;
     /// macOS: lists `folder` from a child process, as long as it takes; whether that worked.
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError>;
     /// macOS: reads `item` with the dialog allowed; whether it read (or has gone).
@@ -364,8 +364,10 @@ fn items_note(items: &[KeychainItem]) -> Option<String> {
     })
 }
 
-/// Whether Controlled folder access blocks Clauseo's writes to the matters folder: it reads,
-/// it is on, the matters folder is under a protected folder, and Clauseo is not allowed.
+/// Whether Controlled folder access blocks writes to the matters folder: it reads, it is on,
+/// and the matters folder is under a protected folder. Its allowed apps are not consulted: the
+/// writes it blocks are the assistants' tools' (`powershell.exe` on the VM), never
+/// `Clauseo.exe`'s, so Clauseo being allowed does not lift the block.
 fn cfa_blocks(probe: &dyn Probe) -> bool {
     let Some(cfa) = probe.controlled_folder_access() else {
         return false;
@@ -377,21 +379,16 @@ fn cfa_blocks(probe: &dyn Probe) -> bool {
         return false;
     }
     let matters = canonical(&matters);
-    let protected = probe
+    probe
         .protected_defaults()
         .into_iter()
         .chain(cfa.protected)
-        .any(|folder| is_inside(&matters, &canonical(&folder)));
-    let allowed = probe.exe().is_some_and(|exe| {
-        let exe = canonical(&exe);
-        cfa.allowed
-            .iter()
-            .any(|app| same_path(&canonical(app), &exe))
-    });
-    protected && !allowed
+        .any(|folder| is_inside(&matters, &canonical(&folder)))
 }
 
-/// `controlled_folder_access`' row: always blocking, with where to allow Clauseo.
+/// `controlled_folder_access`' row: always blocking, since what is blocked is the assistants'
+/// tools (such as `powershell.exe`), which only an administrator can allow; the settings path
+/// is for IT, the note tells the lawyer to move the matters folder or ask IT.
 fn cfa_row() -> PermissionRow {
     PermissionRow {
         id: PermissionId::ControlledFolderAccess,
@@ -431,11 +428,6 @@ pub(crate) fn is_inside(child: &Path, parent: &Path) -> bool {
         .all(|part| child.next().is_some_and(|other| same_part(part, other)))
 }
 
-/// Whether two paths name the same file, by component, ignoring case.
-fn same_path(a: &Path, b: &Path) -> bool {
-    a.components().count() == b.components().count() && is_inside(a, b)
-}
-
 fn same_part(a: std::path::Component<'_>, b: std::path::Component<'_>) -> bool {
     a.as_os_str().to_string_lossy().to_lowercase() == b.as_os_str().to_string_lossy().to_lowercase()
 }
@@ -447,8 +439,6 @@ struct Preference {
     enable: Option<i64>,
     #[serde(rename = "ControlledFolderAccessProtectedFolders", default)]
     protected: Option<OneOrMany>,
-    #[serde(rename = "ControlledFolderAccessAllowedApplications", default)]
-    allowed: Option<OneOrMany>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -475,6 +465,5 @@ pub(crate) fn parse_preference(text: &str) -> Option<Cfa> {
     Some(Cfa {
         on: preference.enable? == 1,
         protected: OneOrMany::paths(preference.protected),
-        allowed: OneOrMany::paths(preference.allowed),
     })
 }

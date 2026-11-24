@@ -20,7 +20,6 @@ struct Fake {
     keychain: KeychainCheck,
     cfa: Option<Cfa>,
     protected: Vec<PathBuf>,
-    exe: Option<PathBuf>,
     /// What listing Documents answers.
     listed: bool,
     /// The accounts whose read is refused.
@@ -38,7 +37,6 @@ impl Fake {
             keychain: KeychainCheck::default(),
             cfa: None,
             protected: Vec::new(),
-            exe: Some(PathBuf::from("C:/Program Files/Clauseo/Clauseo.exe")),
             listed: true,
             refused: Vec::new(),
             asked: Mutex::new(Vec::new()),
@@ -80,9 +78,6 @@ impl Probe for Fake {
     }
     fn protected_defaults(&self) -> Vec<PathBuf> {
         self.protected.clone()
-    }
-    fn exe(&self) -> Option<PathBuf> {
-        self.exe.clone()
     }
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
         self.asked
@@ -301,13 +296,6 @@ fn controlled_folder_access_is_listed_only_when_it_blocks_the_matters_folder() {
     }
     assert_eq!(rows(&outside, &store), std::slice::from_ref(&blocking));
 
-    let mut allowed = Fake::windows(true);
-    if let Some(cfa) = allowed.cfa.as_mut() {
-        cfa.allowed
-            .push(PathBuf::from("c:/program files/clauseo/CLAUSEO.EXE"));
-    }
-    assert_eq!(rows(&allowed, &store), NONE);
-
     let row = ask(
         &Fake::windows(true),
         &store,
@@ -410,20 +398,23 @@ fn the_running_executable_has_an_identity() {
 fn defender_s_preference_parses() {
     let text = r#"{
         "EnableControlledFolderAccess": 1,
-        "ControlledFolderAccessProtectedFolders": ["D:\\Matters", "E:\\Firm"],
-        "ControlledFolderAccessAllowedApplications": "C:\\Tools\\a.exe"
+        "ControlledFolderAccessProtectedFolders": ["D:\\Matters", "E:\\Firm"]
     }"#;
     assert_eq!(
         parse_preference(text),
         Some(Cfa {
             on: true,
             protected: vec![PathBuf::from(r"D:\Matters"), PathBuf::from(r"E:\Firm")],
-            allowed: vec![PathBuf::from(r"C:\Tools\a.exe")],
         })
     );
+    let one = r#"{"EnableControlledFolderAccess": 1,
+        "ControlledFolderAccessProtectedFolders": "D:\\Matters"}"#;
+    assert_eq!(
+        parse_preference(one).map(|cfa| cfa.protected),
+        Some(vec![PathBuf::from(r"D:\Matters")])
+    );
     let off = r#"{"EnableControlledFolderAccess": 2,
-        "ControlledFolderAccessProtectedFolders": null,
-        "ControlledFolderAccessAllowedApplications": null}"#;
+        "ControlledFolderAccessProtectedFolders": null}"#;
     assert_eq!(parse_preference(off), Some(Cfa::default()));
     assert_eq!(
         parse_preference(r#"{"EnableControlledFolderAccess": null}"#),

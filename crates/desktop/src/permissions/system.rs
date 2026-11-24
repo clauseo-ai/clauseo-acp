@@ -172,10 +172,6 @@ impl Probe for SystemProbe {
         protected_defaults()
     }
 
-    fn exe(&self) -> Option<PathBuf> {
-        std::env::current_exe().ok()
-    }
-
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
         let ran = run(Path::new("/bin/ls"), &[folder.as_os_str()], None).map_err(|error| {
             HostError::new(
