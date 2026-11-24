@@ -33,11 +33,11 @@ pub(crate) mod trace;
 mod windows;
 mod wire;
 
-#[cfg(windows)]
-pub(crate) use windows::long_path_name;
 /// The picked folder's short names spelt out (`picked/long_name.rs`), from the chooser's FFI.
 #[cfg(all(windows, test))]
 pub(crate) use windows::short_path_name;
+#[cfg(windows)]
+pub(crate) use windows::{known_folder, long_path_name};
 
 use std::hash::{BuildHasher as _, RandomState};
 use std::path::{Path, PathBuf};

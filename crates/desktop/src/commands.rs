@@ -30,7 +30,7 @@ use crate::smart_app_control::SmartAppControl;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 27] = [
+pub(crate) const COMMANDS: [&str; 29] = [
     "dispatch",
     "query",
     "open_stream",
@@ -58,6 +58,8 @@ pub(crate) const COMMANDS: [&str; 27] = [
     "open_privacy_settings",
     "page_marks",
     "set_layout_menu",
+    "permissions",
+    "ask_permission",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -491,6 +493,9 @@ pub(crate) async fn setup<R: Runtime>(
 mod page;
 mod pick;
 
+/// The first-start permissions step's `permissions` and `ask_permission` (`permissions.rs`).
+/// A glob, as `pick`'s, so the macros the command attributes make come along.
+pub(crate) use crate::permissions::*;
 pub(crate) use page::*;
 pub(crate) use pick::*;
 

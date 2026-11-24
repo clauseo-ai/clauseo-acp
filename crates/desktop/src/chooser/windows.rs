@@ -218,7 +218,8 @@ fn drive_type(letter: char) -> u32 {
 }
 
 /// A known folder's path, read without a check (`KF_FLAG_DONT_VERIFY`: no disk or network).
-fn known_folder(id: &GUID) -> Option<String> {
+/// Also the permissions step's Controlled folder access defaults (`permissions/windows.rs`).
+pub(crate) fn known_folder(id: &GUID) -> Option<String> {
     // SAFETY: `id` points to a valid GUID for the whole call, and no access token is passed, so
     // the call reads the current user's folder.
     let path = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DONT_VERIFY, None) }.ok()?;
