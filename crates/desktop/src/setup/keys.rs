@@ -182,6 +182,16 @@ impl KeyCache {
         reads::read_again(self, agent)
     }
 
+    /// Reads again every agent's key whose last read failed ([`KeyCache::read_again`]), not
+    /// waited for: after the permissions step's keychain Ask was granted, so a key the start's
+    /// quiet read could not take (`permissions/quiet.rs`) reaches its agent without a restart.
+    /// Each answer goes out as a [`KeyNote::Read`] when the mark changes.
+    pub(crate) fn read_again_all(&self) {
+        for agent in self.marks.not_read() {
+            drop(self.read_again(&agent));
+        }
+    }
+
     /// Whether this computer's keychain can hold a key: `SetupInfo`'s `keys_available`.
     pub(crate) fn available(&self) -> bool {
         self.available

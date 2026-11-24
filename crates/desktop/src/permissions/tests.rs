@@ -17,15 +17,15 @@ use super::*;
 /// What the fake OS answers, and what it was asked.
 pub(super) struct Fake {
     pub(super) platform: Platform,
-    matters: Option<PathBuf>,
+    pub(super) matters: Option<PathBuf>,
     documents: Option<PathBuf>,
-    keychain: KeychainCheck,
+    pub(super) keychain: KeychainCheck,
     cfa: Option<Cfa>,
     protected: Vec<PathBuf>,
     /// What listing a folder answers.
     pub(super) listed: bool,
     /// The accounts whose read is refused.
-    refused: Vec<&'static str>,
+    pub(super) refused: Vec<&'static str>,
     /// The mount table.
     pub(super) mounts: Vec<Mount>,
     /// Every folder listed and keychain account read, in order.
@@ -112,7 +112,7 @@ impl Probe for Fake {
     }
 }
 
-fn item(service: &str, account: &str) -> KeychainItem {
+pub(super) fn item(service: &str, account: &str) -> KeychainItem {
     KeychainItem {
         service: service.to_owned(),
         account: account.to_owned(),
@@ -124,12 +124,12 @@ pub(super) fn store(dir: &tempfile::TempDir, build: &str) -> Store {
     Store::new(Arc::new(SystemFiles), dir.path(), build.to_owned())
 }
 
-fn rows(probe: &dyn Probe, store: &Store) -> Vec<PermissionRow> {
+pub(super) fn rows(probe: &dyn Probe, store: &Store) -> Vec<PermissionRow> {
     list(probe, &store.asked()).rows
 }
 
 /// No row.
-const NONE: [PermissionRow; 0] = [];
+pub(super) const NONE: [PermissionRow; 0] = [];
 
 pub(super) fn ids(rows: &[PermissionRow]) -> Vec<PermissionId> {
     rows.iter().map(|row| row.id).collect()
@@ -201,14 +201,26 @@ fn asking_for_documents_records_the_answer_for_this_build() {
     let dir = tempfile::tempdir().unwrap();
     let mut probe = Fake::new(Platform::Mac);
     probe.listed = false;
-    let row = ask(&probe, &store(&dir, "1"), PermissionId::FilesDocuments).unwrap();
+    let row = ask(
+        &probe,
+        &store(&dir, "1"),
+        PermissionId::FilesDocuments,
+        &|| {},
+    )
+    .unwrap();
     assert_eq!(row.state, OsPermissionState::Denied);
     assert_eq!(row.settings_path.as_deref(), Some(FILES_SETTINGS));
     assert_eq!(probe.asked(), [row.folder.clone().unwrap()]);
     assert_eq!(rows(&probe, &store(&dir, "1")), [row]);
 
     probe.listed = true;
-    let row = ask(&probe, &store(&dir, "1"), PermissionId::FilesDocuments).unwrap();
+    let row = ask(
+        &probe,
+        &store(&dir, "1"),
+        PermissionId::FilesDocuments,
+        &|| {},
+    )
+    .unwrap();
     assert_eq!(
         (row.state, row.settings_path),
         (OsPermissionState::Granted, None)
@@ -218,72 +230,6 @@ fn asking_for_documents_records_the_answer_for_this_build() {
     // Another build asked nothing.
     let shown = rows(&probe, &store(&dir, "2"));
     assert_eq!(shown[0].state, OsPermissionState::NotAsked);
-}
-
-#[test]
-fn keychain_is_listed_only_when_an_item_would_ask() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store(&dir, "1");
-    let mut probe = Fake::new(Platform::Mac);
-    probe.matters = Some(PathBuf::from("/Users/ada/Clauseo"));
-    assert_eq!(rows(&probe, &store), NONE);
-
-    probe.keychain.would_ask = vec![
-        item("ai.clauseo.desktop", "claude-acp"),
-        item("ai.clauseo.desktop.mcp", "files"),
-    ];
-    assert_eq!(
-        rows(&probe, &store),
-        [PermissionRow {
-            id: PermissionId::Keychain,
-            state: OsPermissionState::WouldAsk,
-            folder: None,
-            settings_path: None,
-            note: Some("ai.clauseo.desktop (claude-acp), ai.clauseo.desktop.mcp (files)".into()),
-        }]
-    );
-
-    probe.keychain.would_ask.clear();
-    probe.keychain.unknown = vec![item("ai.clauseo.desktop.connectors", "caselaw")];
-    assert_eq!(rows(&probe, &store)[0].state, OsPermissionState::Unknown);
-}
-
-#[test]
-fn asking_the_keychain_reads_each_item_and_names_the_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut probe = Fake::new(Platform::Mac);
-    probe.matters = Some(PathBuf::from("/Users/ada/Clauseo"));
-    probe.keychain.would_ask = vec![
-        item("ai.clauseo.desktop", "claude-acp"),
-        item("ai.clauseo.desktop", "codex-acp"),
-    ];
-    probe.keychain.unknown = vec![item("ai.clauseo.desktop.mcp", "files")];
-    probe.refused = vec!["codex-acp"];
-    let row = ask(&probe, &store(&dir, "1"), PermissionId::Keychain).unwrap();
-    assert_eq!(probe.asked(), ["claude-acp", "codex-acp", "files"]);
-    assert_eq!(row.state, OsPermissionState::Denied);
-    assert_eq!(row.note.as_deref(), Some("ai.clauseo.desktop (codex-acp)"));
-    assert_eq!(
-        rows(&probe, &store(&dir, "1"))[0].state,
-        OsPermissionState::Denied
-    );
-
-    probe.refused.clear();
-    let row = ask(&probe, &store(&dir, "1"), PermissionId::Keychain).unwrap();
-    assert_eq!((row.state, row.note), (OsPermissionState::Granted, None));
-    // Granted on this build: still shown once nothing would ask, so it is not asked again.
-    probe.keychain = KeychainCheck::default();
-    assert_eq!(
-        rows(&probe, &store(&dir, "1")),
-        [PermissionRow {
-            id: PermissionId::Keychain,
-            state: OsPermissionState::Granted,
-            folder: None,
-            settings_path: None,
-            note: None,
-        }]
-    );
-    assert_eq!(rows(&probe, &store(&dir, "2")), NONE);
 }
 
 #[test]
@@ -320,6 +266,7 @@ fn controlled_folder_access_is_listed_only_when_it_blocks_the_matters_folder() {
         &Fake::windows(true),
         &store,
         PermissionId::ControlledFolderAccess,
+        &|| {},
     )
     .unwrap();
     assert_eq!(row, blocking);
@@ -340,7 +287,7 @@ fn asking_for_what_is_not_listed_is_refused() {
         (&Fake::windows(true), PermissionId::FilesDocuments),
         (&Fake::windows(false), PermissionId::ControlledFolderAccess),
     ] {
-        let error = ask(probe, &store, id).unwrap_err();
+        let error = ask(probe, &store, id, &|| {}).unwrap_err();
         assert_eq!(error.code(), ErrorCode::CommandInvalid, "{id:?}");
     }
     assert_eq!(mac.asked(), Vec::<String>::new());
@@ -441,7 +388,7 @@ fn controlled_folder_access_is_read_once_per_process_and_shared_while_under_way(
         ids(&rows(&probe, &store)),
         [PermissionId::ControlledFolderAccess]
     );
-    ask(&probe, &store, PermissionId::ControlledFolderAccess).unwrap();
+    ask(&probe, &store, PermissionId::ControlledFolderAccess, &|| {}).unwrap();
     assert_eq!(probe.probe.cfa_reads.load(Ordering::SeqCst), 1);
     // A read that could not tell is kept too: it is not tried again on every call.
     let mut unreadable = Fake::windows(true);

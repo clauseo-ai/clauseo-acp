@@ -302,6 +302,10 @@ pub fn run() -> tauri::Result<()> {
         ]))
         .on_window_event(on_any_window_event)
         .setup(|app| {
+            // Keychain dialogs off before any keychain read (the agents' keys, the host's): none
+            // may show unless the lawyer pressed Allow in the permissions step. Another build's
+            // item reads errSecInteractionNotAllowed instead; the step's row explains (quiet.rs).
+            permissions::quiet_start();
             // A quit signal from here on stops the agents as the normal quit does.
             #[cfg(unix)]
             quit_signals::quit_on_signals(app.handle().clone());
@@ -335,10 +339,12 @@ pub fn run() -> tauri::Result<()> {
             app.manage(counts::CountsState::default());
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
+            let keys = setup::KeySlot::default(); // a granted keychain Ask reads them again
+            app.manage(permissions::KeychainGranted::reading(Arc::clone(&keys)));
             open_main_window(app)?;
             #[cfg(any(target_os = "macos", windows))]
             menu::follow_language(app.handle().clone());
-            start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
+            start_host(app.handle().clone(), start, locations, parts, keys, egress::manage(app))?;
             Ok(())
         })
         .build(context::<tauri::Wry>())?;
@@ -381,6 +387,7 @@ fn start_host<R: Runtime>(
     start: HostStart,
     locations: Locations,
     setup_parts: setup::SetupParts,
+    keys: setup::KeySlot,
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
     // Tauri's resource folder, where a Windows or Linux release bundles stetdoc (profile.rs).
@@ -402,7 +409,6 @@ fn start_host<R: Runtime>(
         let setup_read = setup::SetupStart::read(&effective, &locations);
         // The host starts refusing launches until the keys load, and those policy blocks.
         let refusals = setup_read.launch_refusals();
-        let keys = setup::KeySlot::default();
         let key_notes = Arc::new(setup::KeyNotes::new());
         let key_retry = key_notes.retry_hook();
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
