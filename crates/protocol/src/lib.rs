@@ -233,7 +233,8 @@ wire_types! {
     error_code::{ErrorCode},
     host_error::{FileRefusal, HostError, RefusedBecause, WriteFailure},
     event::{
-        AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
+        AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
+        CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
         ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterHold,
         MatterRelocated,
@@ -315,8 +316,8 @@ wire_types! {
     },
     update::{FailedStage, InstallWhen, ManagedBy, UpdateMode, UpdateState, UpdateView},
     view::{
-        AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, ElicitationEntry,
-        ElicitationState,
+        AgentContentEntry, AgentRetry, AgentTextEntry, BackgroundMark, ContextUsage,
+        ElicitationEntry, ElicitationState,
         EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
         ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,

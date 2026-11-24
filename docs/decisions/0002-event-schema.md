@@ -99,6 +99,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
+| `agent_retrying` | turn, title?, details? (the agent's own words as it waits mid-turn to retry its service, each at most 300 characters; no delay is read from them) | host, from acp | yes | T |
+| `agent_retry_ended` | turn (the agent sent something else; the turn's end ends a wait with no event) | host | yes | T |
 | `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |

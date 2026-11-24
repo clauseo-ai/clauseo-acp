@@ -37,6 +37,8 @@ mod queued_hold;
 mod queued_order;
 #[path = "reducer/resuming.rs"]
 mod resuming;
+#[path = "reducer/retry.rs"]
+mod retry;
 #[path = "reducer/snapshot.rs"]
 mod snapshot;
 #[path = "reducer/steer.rs"]

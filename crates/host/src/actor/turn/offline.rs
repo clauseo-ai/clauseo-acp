@@ -230,6 +230,8 @@ pub(super) fn on_live(
     let note = note_text(&update)
         .and_then(|text| classify::transport_note(text).map(|note| (note, text.to_owned())));
     let Some((note, text)) = note else {
+        // Any frame but a note about the connection ends a wait to retry (`quiet.rs`).
+        quiet::retry_over(actor, thread, turn);
         let idle = matches!(
             update,
             AgentUpdate::Usage { .. }
@@ -314,6 +316,7 @@ fn arm_note(
 /// The agent of `turn` is at work (an answer, a tool call, a permission request, a limit): the
 /// watch goes, and the lines it held go back into the answer, in order.
 pub(super) fn agent_active(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    quiet::retry_over(actor, thread, turn);
     quiet::output(actor, thread, turn);
     let watch = current(actor, thread)
         .filter(|current| current.turn == turn && current.live())

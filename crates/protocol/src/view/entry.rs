@@ -15,6 +15,21 @@ use crate::{
     ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
+/// The agent's wait to retry its service, as the header shows it ([`HeaderEntry::retrying`]).
+/// The texts are the agent's own, each at most 300 characters; nothing in them is read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentRetry {
+    /// The `ts` of the first `AgentRetrying` of this wait.
+    pub since: Timestamp,
+    /// The agent's headline, from the last `AgentRetrying`, when it sent one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
+    /// The agent's cause, from the last `AgentRetrying`, when it sent one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub details: Option<String>,
+}
+
 /// A thread's header. Entry id `header:<thread>`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -45,6 +60,13 @@ pub struct HeaderEntry {
     /// Missing reads as `None`, so a header written before the field still decodes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub resuming_since: Option<Timestamp>,
+    /// While the agent of the running turn waits to retry its service: since when, and what it
+    /// says. Set by `AgentRetrying` (`since` from the first of an unbroken wait, the words from
+    /// the last), cleared by `AgentRetryEnded`, the turn's end, a new turn's start and a detach,
+    /// so the app tells a retry apart from a lost connection or plain silence. Missing reads as
+    /// `None`, so a header written before the field still decodes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub retrying: Option<AgentRetry>,
     /// Whether the thread's queue is held: its queued turns wait for `ResumeQueue`. Filled by
     /// the host; also true after a restart, when every turn that never started comes back held.
     /// Missing reads as `false`, so a header written before the field still decodes.

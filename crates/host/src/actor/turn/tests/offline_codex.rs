@@ -4,7 +4,8 @@
 //! with a `connection` failure of severity `error`. A failure arms the offline watch; 30 s of
 //! silence and a probe that cannot get through end the turn `Failed { agent.offline }` with the
 //! answer so far kept; a probe that gets through lets the answer go on. None of Codex's text
-//! reaches the log. The probe is a fixed answer: no test here touches the network.
+//! reaches the transcript; a retry's words reach only the header's wait (`offline_retry.rs`).
+//! The probe is a fixed answer: no test here touches the network.
 
 use clauseo_protocol::{DomainEvent, ErrorCode, StopReason, ThreadId};
 use serde_json::{Value, json};
@@ -97,11 +98,15 @@ fn note(rig: &Rig, thread: ThreadId) -> Option<String> {
 }
 
 /// No event of `log` the window shows holds any of Codex's own text: only the failure's detail
-/// may, which stays in the event log (`offline.rs`).
+/// may, which stays in the event log (`offline.rs`), and a retry's title and details, which the
+/// header shows as the wait's own words, cut (`offline/quiet.rs`), never in the transcript.
 fn assert_nothing_raw(log: &[DomainEvent]) {
-    let shown = log
-        .iter()
-        .filter(|event| !matches!(event, DomainEvent::TurnFailed(_)));
+    let shown = log.iter().filter(|event| {
+        !matches!(
+            event,
+            DomainEvent::TurnFailed(_) | DomainEvent::AgentRetrying(_)
+        )
+    });
     for event in shown {
         let shown = format!("{event:?}");
         for raw in [

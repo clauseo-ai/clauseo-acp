@@ -31,6 +31,7 @@ mod privacy;
 use clauseo_protocol::{
     AgentKind,
     AgentPrefs,
+    AgentRetry,
     AllowScope,
     AppendTarget,
     BrowserInstallFailure,
@@ -230,6 +231,8 @@ mod domain_event {
         ThreadDone => thread_done: event("thread_done");
         AgentSessionAttached => agent_session_attached: event("agent_session_attached");
         AgentNamed => agent_named: event("agent_named");
+        AgentRetrying => agent_retrying: event("agent_retrying");
+        AgentRetryEnded => agent_retry_ended: event("agent_retry_ended");
         AgentSessionDetached => agent_session_detached: event("agent_session_detached");
         UserMessage => user_message: event("user_message");
         TurnQueued => turn_queued: event("turn_queued");
@@ -382,6 +385,24 @@ mod view_entry {
         };
         let entry = ViewEntry::Header(Box::new(header));
         insta::assert_json_snapshot!("header_with_agent_name", entry);
+        round_trips(&entry);
+    }
+
+    /// A header whose agent waits to retry its service, as `AgentRetrying` sets it. Its own
+    /// snapshot.
+    #[test]
+    fn header_retrying() {
+        let header = HeaderEntry {
+            status: ThreadStatus::Running,
+            retrying: Some(AgentRetry {
+                since: Timestamp::new(1_760_000_000_000).unwrap(),
+                title: Some("Reconnecting... 1/5".to_owned()),
+                details: Some("Selected model is at capacity.".to_owned()),
+            }),
+            ..entries::header_entry()
+        };
+        let entry = ViewEntry::Header(Box::new(header));
+        insta::assert_json_snapshot!("header_retrying", entry);
         round_trips(&entry);
     }
 
