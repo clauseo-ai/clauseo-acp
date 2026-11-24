@@ -35,6 +35,7 @@ fn send(
         content: text(prompt),
         delivery,
         config: Some(picks(config)),
+        agent: None,
     });
     let CommandOutcome::PromptAccepted { turn, .. } = outcome else {
         panic!("SendPrompt answered {outcome:?}");

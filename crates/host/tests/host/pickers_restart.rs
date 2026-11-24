@@ -40,6 +40,7 @@ fn a_queued_prompts_pick_survives_a_restart() {
         content: text("Two"),
         delivery: DeliveryRequest::Queue,
         config: Some(picks(&[("effort", "high")])),
+        agent: None,
     });
     let CommandOutcome::PromptAccepted { turn: queued, .. } = outcome else {
         panic!("SendPrompt answered {outcome:?}");

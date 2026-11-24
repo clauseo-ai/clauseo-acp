@@ -31,6 +31,7 @@ fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     let accepted = rig.dispatch(n, command).unwrap();
     let CommandOutcome::PromptAccepted { turn, .. } = accepted else {

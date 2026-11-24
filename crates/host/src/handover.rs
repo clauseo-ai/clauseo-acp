@@ -10,9 +10,7 @@
 //! T3 also lists the omitted items' IDs for a recovery tool. This app has no such tool, so the
 //! header gives only the counts.
 //!
-//! Nothing calls this module yet: the agent switch wires it into the turn path.
-
-#![cfg_attr(not(test), expect(dead_code, reason = "wired by the agent switch"))]
+//! The agent switch (`actor/turn/switch.rs`) is its one caller.
 
 use std::collections::BTreeMap;
 

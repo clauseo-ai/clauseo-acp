@@ -73,6 +73,7 @@ fn log_requeue(
             content: ask.content,
             forced: true,
             host_held,
+            agent: None,
         });
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {

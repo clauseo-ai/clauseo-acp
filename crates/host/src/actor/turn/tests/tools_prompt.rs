@@ -129,6 +129,7 @@ fn an_edit_while_the_agent_launches_relaunches_it_before_the_prompt_goes() {
     let prepared =
         |_: &Actor, input: &Input| matches!(input, Input::Turn(TurnInput::Prepared { .. }));
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![clauseo_protocol::PromptBlock::Text {
             text: "Read the brief.".to_owned(),

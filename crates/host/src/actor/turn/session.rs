@@ -406,7 +406,10 @@ fn attach_commit(
         .and_then(|state| state.agent.as_deref())
         .and_then(|agent| agent.info.clone())
         .ok_or_else(|| lost("the agent's info"))?;
-    let notice = !loaded && has_earlier_turns(actor, thread);
+    // A switch's new session has the handover instead (`switch.rs`).
+    let notice = !loaded
+        && has_earlier_turns(actor, thread)
+        && !super::switch::started_by_switch(actor, thread);
     let mut out = Out::new(actor, thread, None)?;
     out.push(
         actor,
@@ -492,7 +495,8 @@ fn has_earlier_turns(actor: &Actor, thread: ThreadId) -> bool {
                 | ViewEntry::Notice(_)
                 | ViewEntry::Marker(_)
                 | ViewEntry::MatterHeader(_)
-                | ViewEntry::Version(_) => false,
+                | ViewEntry::Version(_)
+                | ViewEntry::Handoff(_) => false,
             })
         })
 }

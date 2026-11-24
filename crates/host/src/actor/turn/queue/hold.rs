@@ -16,7 +16,7 @@
 //! held while any hold applies, and runs once the last one is lifted.
 
 use clauseo_counts::schema::Delivery;
-use clauseo_protocol::{ContentBlock, DeliveryRequest, ThreadId};
+use clauseo_protocol::{DeliveryRequest, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::commands::CommandCtx;
@@ -102,7 +102,7 @@ pub(super) fn hold_prompt(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
-    blocks: Vec<ContentBlock>,
+    (blocks, agent): super::Prompt,
     delivery: DeliveryRequest,
     holds: Holds,
 ) -> Result<(), Error> {
@@ -133,6 +133,7 @@ pub(super) fn hold_prompt(
                 content,
                 forced: sent_now,
                 host_held: false,
+                agent,
             };
             if holds.sign_ins() {
                 queue.turns.push_back(queued);
