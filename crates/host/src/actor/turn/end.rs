@@ -325,6 +325,29 @@ pub(super) fn on_after_turn(
         read.held = Some(result);
         return;
     }
+    // The end commits now, whichever way it came here (the checkpoint's answer, a limits read
+    // that held it, a job never sent): it may log outside edits on another answer's checkpoint,
+    // merged with those already logged there, or record an id R8 reused, so the matter's log is
+    // read first when it needs to be, decided here and nowhere else. Nothing else runs between
+    // the decision and the commit unless the log is loading, and then it is read.
+    let edits = together::logs_edits(actor, thread, &result);
+    known::when_loaded(actor, thread, result, edits, move |actor, result| {
+        commit_end(actor, thread, turn, result);
+    });
+}
+
+/// Step 7's commit and step 8, once the matter's log is read when [`on_after_turn`] needs it.
+fn commit_end(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    result: Result<TurnCheckpoint, Error>,
+) {
+    let Some(current) = current(actor, thread)
+        .filter(|current| current.turn == turn && current.phase == TurnPhase::Ending)
+    else {
+        return;
+    };
     let fallback = current.limit_read.take().is_some();
     let mut end = current
         .end
