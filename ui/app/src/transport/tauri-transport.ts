@@ -411,7 +411,7 @@ export class TauriTransport
    * folder picked, or null. */
   async pickFolder(): Promise<PickedFolder | null> {
     const clicked = performance.now();
-    const answer = await call(commands.pickFolderOrChoose());
+    const answer = await call(commands.pickFolderOrChoose(null));
     if (answer.kind === "picked") return answer.folder;
     if (answer.kind === "cancelled") return null;
     const answered = performance.now();
