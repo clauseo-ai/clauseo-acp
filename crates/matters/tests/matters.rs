@@ -48,6 +48,10 @@ mod undo;
 mod undo_card;
 
 #[cfg(test)]
+#[path = "matters/undo_card_same.rs"]
+mod undo_card_same;
+
+#[cfg(test)]
 #[path = "matters/own_file.rs"]
 mod own_file;
 
