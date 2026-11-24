@@ -180,7 +180,8 @@ pub(crate) fn own_reads(data: &Path, folders: &[&Path]) -> Vec<String> {
 /// `<project>/<any name>/tool-results`), each real folder that fits one of its `open` places
 /// ([`READ_ONLY`]; a link that fits is denied), and the folders above them,
 /// which are walked into instead: a folder is `<name>/**`, a link both `<name>` and
-/// `<name>/**`, anything else `<name>`, names glob-escaped. A link is never walked into. A
+/// `<name>/**`, anything else `<name>`, names glob-escaped; in a Claude project folder, none that
+/// a [`DENIED`] pattern already covers ([`covered`]). A link is never walked into. A
 /// name that is not UTF-8 gets no pattern (no rule could name it); the auto-deny still covers
 /// it.
 fn existing_targets(data: &Path, places: &Places) -> Vec<String> {
@@ -303,10 +304,12 @@ fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>
             let pattern = at.iter().map(|name| escape(name)).collect::<Vec<_>>();
             let pattern = pattern.join("/");
             let link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
-            if real_dir || link {
+            // In a project folder, nothing a [`DENIED`] pattern covers is named (`covered`).
+            let covered_here = |dir_glob| in_projects(at) && covered(at, dir_glob);
+            if (real_dir || link) && !covered_here(true) {
                 out.push(format!("{pattern}/**"));
             }
-            if !real_dir {
+            if !real_dir && !covered_here(false) {
                 out.push(pattern);
             }
         }
@@ -369,4 +372,60 @@ fn fits(folder: &[String], at: &[String]) -> bool {
                     .strip_prefix(ANY_NAME)
                     .is_some_and(|start| name.starts_with(start) && name.len() > start.len())
         })
+}
+
+/// Whether `at` is inside a Claude project folder (`agents/claude-acp/home/projects/<key>/…`),
+/// where [`covered`] leaves out the entries the fixed transcript, subagent and memory patterns
+/// already cover. Elsewhere nothing is left out: a name a fixed pattern covers is still named, as
+/// the Windows shell rules are built from the names a launch names (`shell_deny.rs`), and a
+/// name dropped there would lose its shell rule.
+fn in_projects(at: &[String]) -> bool {
+    at.len() > 4
+        && ["agents", "claude-acp", "home", "projects"]
+            .iter()
+            .zip(at)
+            .all(|(part, name)| *part == name.as_str())
+}
+
+/// Whether a [`DENIED`] pattern already covers the entry `at` (its names under `<data>`) named
+/// whole: as `<at>/**` when `dir_glob`, else as `<at>`. A pattern ending in `/**` covers
+/// `<its folder>/**` and anything below its folder, never the plain name of its folder (a link or
+/// a file there). Any other pattern covers only an entry as long as it, named plain. Names are
+/// compared as [`fits`] compares them (exactly, in case), so an entry a rule might not cover is
+/// still named.
+fn covered(at: &[String], dir_glob: bool) -> bool {
+    DENIED.iter().any(|pattern| {
+        let (segments, below) = match pattern.strip_suffix("/**") {
+            Some(segments) => (segments, true),
+            None => (*pattern, false),
+        };
+        let segments: Vec<&str> = segments.split('/').collect();
+        let length = if below {
+            at.len() > segments.len() || (dir_glob && at.len() == segments.len())
+        } else {
+            !dir_glob && at.len() == segments.len()
+        };
+        length
+            && segments
+                .iter()
+                .zip(at)
+                .all(|(segment, name)| segment_covers(segment, name))
+    })
+}
+
+/// Whether one segment of a [`DENIED`] pattern matches the name `name`: `*` any name, a segment
+/// with one `*` a name with its start and its end (`*.jsonl`, `node-v*`), any other a name equal
+/// to it. A segment with more than one `*` matches nothing, and a leading `*` no name starting
+/// with a dot (a glob may skip those), so no entry a rule might miss is covered.
+fn segment_covers(segment: &str, name: &str) -> bool {
+    match segment.split('*').collect::<Vec<&str>>()[..] {
+        [whole] => whole == name,
+        [start, end] => {
+            !(start.is_empty() && name.starts_with('.'))
+                && name.len() >= start.len() + end.len()
+                && name.starts_with(start)
+                && name.ends_with(end)
+        }
+        _ => false,
+    }
 }
