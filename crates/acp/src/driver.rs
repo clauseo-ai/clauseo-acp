@@ -172,7 +172,7 @@ fn new_session(
         )?;
         let session = CompactString::from(start.session.as_str());
         let entry = SessionState::new(cwd, Origin::Idle);
-        state.state().sessions.insert(session, entry);
+        state.state().start_session(session, entry);
         Ok(start)
     });
 }
@@ -206,7 +206,7 @@ fn set_config_option(
 
 fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate::AgentInfo>) {
     let request = acp::InitializeRequest::new(agent_client_protocol::schema::ProtocolVersion::V1)
-        .client_capabilities(client_capabilities())
+        .client_capabilities(client_capabilities(shared.helper_sessions))
         .client_info(acp::Implementation::new(
             "clauseo",
             env!("CARGO_PKG_VERSION"),
@@ -232,11 +232,19 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 
 /// What Clauseo advertises: no `fs`, no `terminal`, no `subagents`; terminal sign-in, form and
 /// URL elicitation, notices, compaction, boolean config options, `plan`, and the AIR
-/// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`.
+/// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`; with
+/// `helper_sessions` (`ConnectOptions::helper_sessions`) also the AIR
+/// `nativeSubagentSessions`, last in that list.
 ///
 /// No `subagents` (and never the SDK's `unstable_subagents`): claude-agent-acp then sends a
 /// helper's steps as ordinary updates on the lead's session, stamped with
 /// `_meta.claudeCode.parentToolUseId`, which `map::helper` reads.
+///
+/// `nativeSubagentSessions` (codex-acp 2.10.0, recorded): codex-acp announces each helper with
+/// `subagent_spawned` on its parent's session, sends the helper's updates on the helper's own
+/// session id, and its end with `subagent_state_update` (`map/helpers.rs`). Without it, a
+/// recorded run sent none of the helper's own updates: only the lead's "Start subagent" and
+/// "Complete subagent" tool calls stood for it.
 ///
 /// `recommendedValue` (claude-agent-acp 0.89.1, `clientSupportsRecommendedConfigValue`,
 /// `acp-agent.js:8203`): the model and effort options lose their "Default" rows and show real
@@ -246,14 +254,15 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 /// model, which then becomes the `currentValue` (`session-model.js:163-190`). codex-acp 2.2.2
 /// only adds `_meta.jetbrains.air.recommendedValue` to its options, whose values were already
 /// concrete (`dist/index.js:44000-44020`).
-pub(crate) fn client_capabilities() -> acp::ClientCapabilities {
+pub(crate) fn client_capabilities(helper_sessions: bool) -> acp::ClientCapabilities {
+    let mut capabilities = vec!["sessionFailure", "recommendedValue"];
+    if helper_sessions {
+        capabilities.push("nativeSubagentSessions");
+    }
     let mut air = serde_json::Map::new();
     air.insert(
         "jetbrains".to_owned(),
-        serde_json::json!({"air": {
-            "version": 1,
-            "capabilities": ["sessionFailure", "recommendedValue"],
-        }}),
+        serde_json::json!({"air": {"version": 1, "capabilities": capabilities}}),
     );
     acp::ClientCapabilities::new()
         .auth(acp::AuthCapabilities::new().terminal(true))
@@ -283,7 +292,7 @@ fn load_session(
 ) {
     let key = CompactString::from(request.session.as_str());
     let entry = SessionState::new(request.cwd.clone(), Origin::Replay);
-    shared.state().sessions.insert(key.clone(), entry);
+    shared.state().start_session(key.clone(), entry);
     let mut sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
         .mcp_servers(mcp_servers(shared, request.mcp_servers));
@@ -300,7 +309,7 @@ fn load_session(
                 entry.origin = Origin::Idle;
             }
         } else {
-            locked.sessions.remove(&key);
+            locked.drop_session(&key);
         }
         start
     };
@@ -318,7 +327,7 @@ fn resume_session(
 ) {
     let key = CompactString::from(request.session.as_str());
     let entry = SessionState::new(request.cwd.clone(), Origin::Idle);
-    shared.state().sessions.insert(key.clone(), entry);
+    shared.state().start_session(key.clone(), entry);
     let mut sent = acp::ResumeSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
         .mcp_servers(mcp_servers(shared, request.mcp_servers));
@@ -330,7 +339,7 @@ fn resume_session(
             session_start(session.as_str(), response.modes, response.config_options)
         });
         if start.is_err() {
-            state.state().sessions.remove(&key);
+            state.state().drop_session(&key);
         }
         start
     };

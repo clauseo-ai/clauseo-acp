@@ -370,7 +370,10 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }
             | AcpEvent::UpdateSkipped { .. }
-            | AcpEvent::HelperInBackground { .. }) => updates::handle(actor, thread, event),
+            | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::HelperSpawned { .. }
+            | AcpEvent::HelperAnswer { .. }
+            | AcpEvent::HelperEnded { .. }) => updates::handle(actor, thread, event),
         }
     }
 }

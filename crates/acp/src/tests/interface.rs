@@ -172,6 +172,9 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
             other @ (AcpEvent::Update { .. }
             | AcpEvent::HelperUpdate { .. }
             | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::HelperSpawned { .. }
+            | AcpEvent::HelperAnswer { .. }
+            | AcpEvent::HelperEnded { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
@@ -238,6 +241,7 @@ fn frame_tap_keeps_what_fits_and_counts_the_rest() {
     let (tap, frames) = async_channel::bounded(2);
     let options = ConnectOptions {
         frame_tap: Some(tap),
+        ..ConnectOptions::default()
     };
     let (client, _events, driver, mut agent) = pipes_with(options);
     let calls = async move {
@@ -367,6 +371,7 @@ fn lines_in_flight_are_bounded_while_the_host_drains_nothing() {
     let (tap, frames) = async_channel::unbounded();
     let options = ConnectOptions {
         frame_tap: Some(tap),
+        ..ConnectOptions::default()
     };
     let (client, events, driver, mut agent) = pipes_with(options);
     let mut pool = LocalPool::new();

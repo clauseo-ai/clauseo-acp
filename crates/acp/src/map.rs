@@ -1,6 +1,7 @@
 //! Agent traffic into `protocol`'s types: one function per thing, no I/O and no state.
 
 mod content;
+pub(crate) mod helpers;
 mod limit;
 mod session;
 mod too_long;
@@ -26,9 +27,12 @@ pub(crate) use too_long::rpc_says_too_long;
 /// The `sessionUpdate` names this crate maps: every stable variant of schema 1.11.0, and the
 /// unstable `plan_update` and `plan_removed` codex-acp sends. Anything else (the AIR
 /// `subagent_*` and `async_task_*` updates, a newer variant) is skipped with
-/// [`ProtocolWarning::UnknownUpdate`] before the update is decoded. Clauseo advertises no
-/// subagents, so no `subagent_*` update comes; a helper's steps come as these kinds on the
-/// lead's session, stamped, and [`helper`] reads the stamp.
+/// [`ProtocolWarning::UnknownUpdate`] before the update is decoded, with one exception: on a
+/// connection with `ConnectOptions::helper_sessions`, `subagent_spawned` and
+/// `subagent_state_update` are read from the raw JSON instead (`map/helpers.rs`). Clauseo
+/// advertises no ACP `subagents`: claude-agent-acp sends a helper's steps as these kinds on the
+/// lead's session, stamped, and [`helper`] reads the stamp; codex-acp, asked for helper
+/// sessions, sends them as these kinds on the helper's own session id.
 pub(crate) const KNOWN_UPDATES: [&str; 16] = [
     "user_message_chunk",
     "agent_message_chunk",
@@ -294,6 +298,9 @@ pub(crate) fn helper_updates(helper: &CompactString, events: &mut Vec<AcpEvent>)
             },
             other @ (AcpEvent::HelperUpdate { .. }
             | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::HelperSpawned { .. }
+            | AcpEvent::HelperAnswer { .. }
+            | AcpEvent::HelperEnded { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

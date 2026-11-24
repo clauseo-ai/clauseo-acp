@@ -60,6 +60,9 @@ fn helpers_and_updates(events: Vec<AcpEvent>) -> Vec<(Option<CompactString>, Age
             AcpEvent::Update { update, .. } => (None, update),
             AcpEvent::HelperUpdate { helper, update, .. } => (Some(helper), update),
             other @ (AcpEvent::HelperInBackground { .. }
+            | AcpEvent::HelperSpawned { .. }
+            | AcpEvent::HelperAnswer { .. }
+            | AcpEvent::HelperEnded { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
@@ -236,7 +239,10 @@ fn shape(event: &AcpEvent) -> (&'static str, Option<&str>, Option<&str>) {
         AcpEvent::HelperInBackground { helper, .. } => {
             ("in background", Some(helper.as_str()), None)
         }
-        other @ (AcpEvent::PermissionRequested { .. }
+        other @ (AcpEvent::HelperSpawned { .. }
+        | AcpEvent::HelperAnswer { .. }
+        | AcpEvent::HelperEnded { .. }
+        | AcpEvent::PermissionRequested { .. }
         | AcpEvent::ElicitationRequested { .. }
         | AcpEvent::ElicitationCompleted { .. }
         | AcpEvent::Limit { .. }

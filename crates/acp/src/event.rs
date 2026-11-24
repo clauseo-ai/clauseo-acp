@@ -33,12 +33,20 @@ pub enum AcpEvent {
     /// when it is a non-empty string, is `helper`. A recorded 0.110.1 run stamped each of the
     /// helper's `tool_call`s but none of their `tool_call_update`s, which therefore come as
     /// `Update`: the host names a step's helper from its `tool_call`.
+    ///
+    /// codex-acp, on a connection with
+    /// [`ConnectOptions::helper_sessions`](crate::ConnectOptions::helper_sessions), sends a
+    /// helper's updates on the helper's own session id: each update of a helper announced by
+    /// [`AcpEvent::HelperSpawned`] maps as it would on the root session and comes as this, on
+    /// the root session; a `final_answer` chunk comes as [`AcpEvent::HelperAnswer`] instead.
     HelperUpdate {
-        /// The agent's session: the lead's, which carries the helper's updates.
+        /// The agent's session: the lead's, which carries the helper's updates; for codex-acp,
+        /// the root session.
         session: AgentSessionId,
-        /// When it came, relative to the session's turns.
+        /// When it came, relative to the session's turns (for codex-acp, the root's).
         origin: Origin,
-        /// The helper: for Claude, the `toolCallId` of the lead's `Agent` call that launched it.
+        /// The helper: for Claude, the `toolCallId` of the lead's `Agent` call that launched it;
+        /// for Codex, the helper's session id.
         helper: CompactString,
         /// What it says.
         update: AgentUpdate,
@@ -56,9 +64,56 @@ pub enum AcpEvent {
         /// The helper: the update's `toolCallId`, the launching call's.
         helper: CompactString,
     },
+    /// codex-acp launched helper `helper` (its `subagent_spawned`). Only on a connection with
+    /// [`ConnectOptions::helper_sessions`](crate::ConnectOptions::helper_sessions). The helper's
+    /// own updates then come on its own session id, and reach the host as
+    /// [`AcpEvent::HelperUpdate`] and [`AcpEvent::HelperAnswer`] on `session`.
+    HelperSpawned {
+        /// The session the lawyer talks to (the root), whichever session the frame came on.
+        session: AgentSessionId,
+        /// When it came: the root session's origin.
+        origin: Origin,
+        /// The helper: its `subagentSessionId`, the session id its own updates carry.
+        helper: CompactString,
+        /// The helper that launched it, when the frame came on a helper's session; `None` when
+        /// the lead launched it.
+        parent: Option<CompactString>,
+        /// Its `name`: codex-acp turns the model's task name into words (`nameFromAgentPath`,
+        /// `dist/index.js:37928`).
+        name: CompactString,
+        /// Its `task`; `None` when empty or the filler `Delegated task for <name>` codex-acp
+        /// sends when it has no text (`dist/index.js:37932`), as under Codex's multi-agent v2.
+        task: Option<CompactString>,
+    },
+    /// A piece of helper `helper`'s report: an `agent_message_chunk` on the helper's session
+    /// with `_meta.jetbrains.air.phase` `final_answer`. Its other chunks (`commentary`, or no
+    /// phase) come as [`AcpEvent::HelperUpdate`]. A text over 1 MiB comes as several.
+    HelperAnswer {
+        /// The root session.
+        session: AgentSessionId,
+        /// When it came: the root session's origin.
+        origin: Origin,
+        /// The helper's session id.
+        helper: CompactString,
+        /// The block.
+        content: ContentBlock,
+    },
+    /// codex-acp says helper `helper` ended (`subagent_state_update`).
+    HelperEnded {
+        /// The root session.
+        session: AgentSessionId,
+        /// When it came: the root session's origin.
+        origin: Origin,
+        /// The helper's session id.
+        helper: CompactString,
+        /// How it ended.
+        state: HelperState,
+    },
     /// The agent asks for permission. Answer with `AcpClient::answer_permission`.
     PermissionRequested {
-        /// The agent's session.
+        /// The agent's session; for a request under the session id of a helper announced by
+        /// [`AcpEvent::HelperSpawned`], the root session, and `AcpClient::cancel` of the root
+        /// answers it too.
         session: AgentSessionId,
         /// When it came, relative to the session's turns: `Idle` for a turn the agent started
         /// by itself, with no prompt in flight.
@@ -80,7 +135,7 @@ pub enum AcpEvent {
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
-        /// The agent's session.
+        /// The agent's session; the root session for a helper's, as for `PermissionRequested`.
         session: AgentSessionId,
         /// When it came, as for `PermissionRequested`.
         origin: Origin,
@@ -166,6 +221,22 @@ pub enum Origin {
     Replay,
     /// Any other time, such as between turns.
     Idle,
+}
+
+/// How a helper ended: the `state` of codex-acp's `subagent_state_update`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HelperState {
+    /// `completed`.
+    Completed,
+    /// `failed`: codex-acp sends it when its wait for open helpers times out, or the turn fails.
+    Failed,
+    /// `cancelled`: after `session/cancel` on the root. codex-acp then forwards nothing more of
+    /// the helper.
+    Cancelled,
+    /// `disconnected`: replayed by `session/load` for a helper of an earlier process.
+    Disconnected,
+    /// Any other state, or none: a [`ProtocolWarning::InvalidUpdate`] naming it comes first.
+    Other,
 }
 
 /// A per-connection key for a request the agent sent (a permission or an elicitation). The host
