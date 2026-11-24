@@ -26,14 +26,14 @@
     "by": "app track (provisional, 24 Nov round)",
     "note": "The card's title and its landmark name: the connector's own name (crates/connectors/src/known.rs). Shared with the library's Case Law card (library-design.md). In the home card at the top of a new conversation before its first question, and of the room with no matter open, while the case-law connector is not added (room/connectors/case-law-card.tsx). New; replaces nothing; goes once it is added. Words are provisional"
   },
-  "UC-1093": {
-    "en": "From {price}, about {n} searches",
+  "UC-1300": {
+    "en": "From {price}.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The price, on the line under the sentence, only when the host lists a price: {price} is the smallest pack's gross price from the live price list (₹236 on 24 Nov), {n} that pack's credits over 20 credits a search page (SEARCH_PAGE_CREDITS in case-law-card.tsx). Shared with the library's not-yet-added Case Law card (library-design.md). In the home card at the top of a new conversation before its first question, and of the room with no matter open, while the case-law connector is not added (room/connectors/case-law-card.tsx). New; replaces nothing; goes once it is added. Words are provisional"
+    "note": "The price, on its own line above \"Prepaid, including GST. No subscription.\" (UC-1095), only when the host lists a price: {price} is the smallest pack's gross price from the live price list (₹236 on 24 Nov). Shared by the library's not-yet-added Case Law card and the home card. Replaces UC-1093 \"From {price}, about {n} searches\", retired: the app no longer works out what a pack buys, since one real question took 393 credits (orchestrator r7384). Words are provisional"
   },
   "UC-1094": {
     "en": "Powered by Indian Kanoon",
@@ -51,6 +51,15 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The terms, after the price and a middle dot (\"From ₹236, about 100 searches · Prepaid, including GST. No subscription.\"). Shared with the library's not-yet-added Case Law card (library-design.md). In the home card at the top of a new conversation before its first question, and of the room with no matter open, while the case-law connector is not added (room/connectors/case-law-card.tsx). New; replaces nothing; goes once it is added. Words are provisional"
+    "note": "The terms, on their own line under the price (\"From ₹236.\" over \"Prepaid, including GST. No subscription.\"); shown only with a price. Shared with the library's not-yet-added Case Law card (library-design.md). In the home card at the top of a new conversation before its first question, and of the room with no matter open, while the case-law connector is not added (room/connectors/case-law-card.tsx). New; replaces nothing; goes once it is added. Words are provisional"
+  },
+  "UC-1096": {
+    "en": "Prepaid credits. No subscription.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The terms in place of the price and terms lines while the host lists no price (Case Law not listed, as when its liveness check failed): no figure shown. In the home card at the top of a new conversation before its first question, and of the room with no matter open, while the case-law connector is not added (room/connectors/case-law-card.tsx); and on the library's not-yet-added Case Law card. New; replaces nothing; goes once it is added. Words are provisional"
   }
 }

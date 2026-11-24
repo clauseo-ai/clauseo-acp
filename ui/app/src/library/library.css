@@ -216,6 +216,11 @@
   gap: var(--s1) var(--s4);
   margin-top: var(--s2);
 }
+/* the offer's price over its terms: two lines */
+.lib-feature-price {
+  flex-direction: column;
+  gap: var(--s0-5);
+}
 .lib-credits {
   @apply font-chip text-primary;
   font-family: var(--font-num);

@@ -501,16 +501,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
-  },
-  "UC-1231": {
-    "en": "About {n} searches",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's card and detail once added: the credits left, from the connectors' state (library/case-law.tsx), with no count of searches (\"About {n} searches\", UC-1231, is retired: orchestrator r7384). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1232": {
     "en": "No credits left",
@@ -528,7 +519,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price lines themselves are UC-1300 and UC-1095 (UC-1096 without a price). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1234": {
     "en": "Judgments of the Supreme Court, the High Courts and tribunals, and central Acts. For any judgment, {who} can see which later judgments cite it, and how.",
@@ -537,7 +528,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price lines themselves are UC-1300 and UC-1095 (UC-1096 without a price). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1235": {
     "en": "What it costs",
@@ -546,7 +537,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price lines themselves are UC-1300 and UC-1095 (UC-1096 without a price). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1236": {
     "en": "A page of search results is 20 credits. Opening a judgment is 3 credits, plus 1 for each 4,000 tokens {who} reads (about 3,000 words).",
@@ -555,7 +546,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price line itself is UC-1093 and UC-1095. Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's detail before it is added (library/case-law.tsx); the price lines themselves are UC-1300 and UC-1095 (UC-1096 without a price). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1237": {
     "en": "You haven't added a skill yet.",

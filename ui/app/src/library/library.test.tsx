@@ -224,7 +224,7 @@ test("Clauseo Case Law not added: the agreed words, and its button opens Setting
   expect(card.querySelector(".lib-powered")?.textContent).toBe("Powered by Indian Kanoon");
   expect(card.querySelector(".lib-feature-line")?.textContent).toBe(GIVES);
   expect(card.querySelector(".lib-feature-meta")?.textContent).toBe(
-    "From ₹236, about 100 searchesPrepaid, including GST. No subscription.",
+    "From ₹236.Prepaid, including GST. No subscription.",
   );
   expect(card.querySelector("img")).toBeNull();
   const add = card.querySelector(".lib-feature-add")!;
@@ -250,11 +250,13 @@ test("Clauseo Case Law added: its credits and where it is on", async () => {
   const card = h!.one("case-law-card")!;
   expect(card.getAttribute("data-shown")).toBe("added");
   expect(card.querySelector(".lib-feature-meta")?.textContent).toBe(
-    "1,240 credits leftAbout 62 searchesEvery matter",
+    "1,240 credits leftEvery matter",
   );
   expect(card.querySelector("button.lib-feature-add")).toBeNull();
   await h!.click(card.querySelector(".lib-feature-hit"));
-  expect(text("library-detail")).toContain("1,240 credits left · About 62 searches");
+  expect(text("library-detail")).toContain("1,240 credits left");
+  // no count of searches anywhere: what credits buy depends on the question
+  expect(h!.one("library")?.textContent).not.toMatch(/searches/);
 });
 
 test("the host lists no connector (its liveness check failed): Case Law is unreachable, and its button opens Settings to check", async () => {
@@ -400,4 +402,23 @@ test("Case Law whose last sign-in failed: Can't reach it right now", async () =>
   expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Open Settings to check");
   await h!.click(card.querySelector(".lib-feature-hit"));
   expect(text("library-detail")).not.toContain("Add Clauseo Case Law");
+});
+
+test("Clauseo Case Law not added, with no price listed: the terms alone, no count", async () => {
+  await mount();
+  await play({
+    connectors_changed: {
+      available: true,
+      locked: false,
+      connectors: [{ id: "case-law", name: "Indian Kanoon", packs: [], status: "not_added" }],
+    },
+  });
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("offer");
+  expect(card.querySelector(".lib-feature-meta")?.textContent).toBe(
+    "Prepaid credits. No subscription.",
+  );
+  expect(card.textContent).not.toMatch(/searches/);
 });
