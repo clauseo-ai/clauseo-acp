@@ -648,6 +648,13 @@ export type AgentSummary = {
 	 *  across restarts. `None`, and left out of the JSON, until either has run.
 	 */
 	models?: AgentModels,
+	/**
+	 *  True when the host's last probe of the agent's models failed or timed out and neither a
+	 *  kept list nor a session has filled `models`: the list could not be read (the host tries
+	 *  again, a few times), as against a probe still running. Cleared once a probe or a session
+	 *  fills `models`. Left out of the JSON when false.
+	 */
+	models_unread?: boolean,
 };
 
 /**  An answer or a thought, as one text. Entry id `agent_text:<message>`. */

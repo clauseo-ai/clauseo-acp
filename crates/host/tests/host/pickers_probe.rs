@@ -51,7 +51,7 @@ fn named(id: &str, name: &str) -> NamedChoice {
 }
 
 /// Claude's models as the probe finds them: Opus 5.5 at Medium by default, Fable 5.2, Haiku 5.5.
-fn probed() -> AgentModels {
+pub(crate) fn probed() -> AgentModels {
     let levels = |list: &[(&str, &str)]| list.iter().map(|(id, name)| named(id, name)).collect();
     let model = |id: &str, name: &str, efforts: Vec<NamedChoice>| ModelEntry {
         id: id.into(),
