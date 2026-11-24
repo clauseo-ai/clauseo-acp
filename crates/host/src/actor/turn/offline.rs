@@ -230,8 +230,6 @@ pub(super) fn on_live(
     let note = note_text(&update)
         .and_then(|text| classify::transport_note(text).map(|note| (note, text.to_owned())));
     let Some((note, text)) = note else {
-        // Any frame but a note about the connection ends a wait to retry (`quiet.rs`).
-        quiet::retry_over(actor, thread, turn);
         let idle = matches!(
             update,
             AgentUpdate::Usage { .. }
