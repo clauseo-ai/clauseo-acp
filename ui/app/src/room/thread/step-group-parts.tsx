@@ -9,6 +9,8 @@ import { StepRow } from "@clauseo/components/clauseo/step-group.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { steps } from "@clauseo/components/lib/words-steps.ts";
+import { ToolKindIcon } from "@clauseo/components/clauseo/tool-kind-icons.tsx";
 import { tr } from "@clauseo/components/lib/words-tool-result.ts";
 import type { EntryId, ToolCallEntry } from "../../transport/protocol.ts";
 import { isoOf, stamp } from "./clock.ts";
@@ -20,6 +22,19 @@ import { useMatterFolder } from "../folder-support.ts";
 import { CommandFold } from "./command-fold.tsx";
 import { refusalWhy } from "./refusals.ts";
 import { taskOf, whyOf } from "./task-words.ts";
+
+/** A code mode script's failure inside an open group (script-failed.ts): one quiet line in the app's own words, with
+ * the command's icon, never a mark or a count. */
+export function ScriptFailedRow({ lang }: { lang: Lang }) {
+  return (
+    <li className="step-row" data-testid="script-failed">
+      <ToolKindIcon kind="execute" size={14} className="step-icon" />
+      <span className="step-row-text">
+        <Say>{steps(lang, "A script didn't run; Claude tried another way.")}</Say>
+      </span>
+    </li>
+  );
+}
 
 /** One tool call's row in an open group: its time in the thread's clock words, today's as the row first showed.
  * Memoized on its call, so another call's change doesn't render it, nor its open result. */

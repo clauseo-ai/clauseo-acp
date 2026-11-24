@@ -216,6 +216,9 @@ export const HI = {
   "Paper reader": null,
   Researcher: null,
   "Helper {n}": null,
+  // a code mode script that failed (stage B's B4 notice "script_failed"): one quiet line inside the step group, never
+  // counted (script-failed.ts; UC-1246; provisional; hi: later)
+  "A script didn't run; Claude tried another way.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */
