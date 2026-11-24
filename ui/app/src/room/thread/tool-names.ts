@@ -151,6 +151,20 @@ export const helperToolOf = (entry: ToolCallEntry): boolean =>
   !helperStartOf(entry) &&
   (CHATGPT_HELPER_TOOLS.has(entry.title.trim()) || SUBAGENT.test(entry.title.trim()));
 
+/** Claude's code mode tools (stage B): the model's only direct tools. Stage B's live captures show they never arrive
+ * over ACP (each inner call of a script does, with its real kind and title); should one ever come, it shows nothing:
+ * no row, no live words, no count, never its name. */
+const CODE_MODE: ReadonlySet<string> = new Set(["REPL", "Poll", "StructuredOutput"]);
+
+/** Whether a step is one of the code mode tools: kind other or think, its tool name that tool's, or no tool name and
+ * that exact title. A step with any other tool name, or of another kind (a command titled "Poll"), is not. */
+export function codeModeOf(call: Pick<ToolCallEntry, "title" | "tool_name" | "kind">): boolean {
+  if (call.kind !== "other" && call.kind !== "think") return false;
+  const name =
+    call.tool_name !== undefined && call.tool_name !== "" ? call.tool_name : call.title.trim();
+  return CODE_MODE.has(name);
+}
+
 /** What one of Claude's own tools does, as the lawyer reads it: plans the work, works with a helper already asked
  * (SendMessage), stops background work, or asks the lawyer. */
 export type OwnAs = "plan" | "worked" | "stop" | "ask";

@@ -14,6 +14,7 @@ import {
   readableTool,
   toolLabelOf,
   helpersWaitOf,
+  codeModeOf,
   helperStartOf,
   helperToolOf,
   ownToolOf,
@@ -203,7 +204,8 @@ function phraseOf(lang: Lang, sort: Sort, { n, names, unnamed }: Gathered): stri
  * words are left out, unless they are all the line has, when they count the steps as before. */
 export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const by = new Map<Sort, Gathered>();
-  for (const c of calls) {
+  // a code mode tool is never told nor counted (tool-names.ts)
+  for (const c of calls.filter((x) => !codeModeOf(x))) {
     const { sort, name } = sortOf(c);
     const g = by.get(sort) ?? { n: 0, names: [], unnamed: 0 };
     g.n += 1;
