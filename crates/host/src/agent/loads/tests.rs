@@ -42,7 +42,14 @@ fn with_no_hook_the_meta_is_the_switches() {
                 "CLAUDE_CODE_FORK_SUBAGENT": "0",
                 "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
             },
-        }}})
+        },
+        "emitRawSDKMessages": [
+            {"type": "system", "subtype": "init"},
+            {"type": "system", "subtype": "task_started"},
+            {"type": "system", "subtype": "task_notification"},
+            {"type": "system", "subtype": "task_updated"},
+        ],
+        }})
     );
     assert_eq!(CLAUDE_SETTING_SOURCES, ["user"]);
 }
@@ -69,6 +76,12 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
             "clauseo_test": true,
             "claudeCode": {
                 "other": 1,
+                "emitRawSDKMessages": [
+                    {"type": "system", "subtype": "init"},
+                    {"type": "system", "subtype": "task_started"},
+                    {"type": "system", "subtype": "task_notification"},
+                    {"type": "system", "subtype": "task_updated"},
+                ],
                 "options": {
                     "strictMcpConfig": true,
                     "settingSources": ["user"],
