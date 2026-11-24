@@ -12,8 +12,9 @@
 //! - The helper's end: its own stamped call `SubagentHandback`, whose `rawInput.message` is its
 //!   report. Its unstamped update says `success` true ("Report delivered to your caller.") or
 //!   false (nothing sent; the helper works on). Neither is a step.
-//! - A foreground helper ends with its `Agent` call: completed is done with the call's text,
-//!   failed is failed, cancelled is stopped.
+//! - A foreground helper hands back too, and its `Agent` call's text then only points at the
+//!   handback. One that does not (cut at its turn limit) ends with its `Agent` call: completed is
+//!   done with the call's text (the limit's note), failed is failed, cancelled is stopped.
 
 use clauseo_acp::ToolCall;
 use clauseo_protocol::{
@@ -235,10 +236,33 @@ pub(in crate::actor::turn) fn after_launch_update(
     let outcome = match status {
         ToolCallStatus::Failed => HelperOutcome::Failed,
         _ if known.background => return Ok(()),
+        // A foreground helper that hands back: the call's text only points at the handback,
+        // which ends the helper with its report, before or after this.
+        ToolCallStatus::Completed if hands_back(actor, thread, acp_id, patch.text.as_deref()) => {
+            return Ok(());
+        }
         ToolCallStatus::Completed => HelperOutcome::Done,
         _ => HelperOutcome::Stopped,
     };
     end(actor, thread, acp_id, outcome, patch.text)
+}
+
+/// The words of a launch call's result that point at the helper's handback instead of holding
+/// its report, as Claude Code 2.1.330 writes them ("This agent's report was delivered to you as
+/// a message from … (its SubagentHandback call). Read it there; it is not repeated here.";
+/// recorded for two foreground helpers at once).
+const HANDBACK_POINTER: &str = "(its SubagentHandback call)";
+
+/// Whether the helper the agent knows as `helper` ends by its handback rather than by its launch
+/// call's `text`: a handback of it is waiting for its update, or the text points at one.
+fn hands_back(actor: &mut Actor, thread: ThreadId, helper: &str, text: Option<&str>) -> bool {
+    let waiting = existing(actor, thread).is_some_and(|helpers| {
+        helpers
+            .handbacks
+            .values()
+            .any(|handback| handback.helper == helper)
+    });
+    waiting || text.is_some_and(|text| text.contains(HANDBACK_POINTER))
 }
 
 /// A helper's start from its launch step and the step's input (`None`: it never came).

@@ -1,10 +1,10 @@
 //! Helpers through the turn path (`turn/helpers.rs`), with Claude's frames put in as the ACP
 //! reader hands them over (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`), shaped as
 //! the recorded run has them (fake_agent's `claude-helper-background` scenario): one background
-//! helper with two steps and words that hands back; the recorded frames themselves through the
-//! ACP reader; two foreground helpers interleaved, one failing; a Stop with two open; a turn
-//! that ends with one still open; a step stamped with a helper never started; a replayed frame.
-//! The ends a run's stop or a reopen brings are in `helpers_ends.rs`.
+//! helper with two steps and words that hands back; a refused handback, then one that lands; two
+//! foreground helpers interleaved, one failing; a Stop with two open; a turn that ends with one
+//! still open; a step stamped with a helper never started; a replayed frame. The ends a run's
+//! stop or a reopen brings are in `helpers_ends.rs`, the recorded runs in `helpers_recorded.rs`.
 
 use std::collections::HashMap;
 
@@ -313,39 +313,6 @@ fn a_background_helper_shows_its_steps_and_words_and_ends_on_its_handback() {
             "words paper-reader: The lease runs to 2031.",
             "step toolu_R2 paper-reader",
             "end paper-reader Done Digest.",
-            "turn_ended EndTurn",
-        ]
-    );
-    rig.finish();
-}
-
-/// The recorded frames themselves (fake_agent's `claude-helper-background` scenario) through
-/// the ACP reader: the helper starts from the `Agent` call's input, takes both stamped `Read`
-/// steps and ends `Done` with its handback's digest; the handback is no step.
-#[test]
-fn the_recorded_background_helper_ends_on_its_handback() {
-    let scenario =
-        include_str!("../../../../../fake_agent/scenarios/claude-helper-background.jsonl");
-    // The scenario's own header and handshake: the rig plays its own handshake.
-    let steps: String = scenario
-        .lines()
-        .skip(2)
-        .map(|line| format!("{line}\n"))
-        .collect();
-    let mut rig = Rig::start("helpers-recorded", &steps);
-    let thread = rig.thread();
-    send_prompt(&mut rig, 10, thread);
-    until_ended(&mut rig, thread);
-    assert_eq!(
-        story(&rig.log(thread)),
-        [
-            "step toolu_01Gr3CDaJEng8pyzihUmv3Cq -",
-            "start paper-reader call=toolu_01Gr3CDaJEng8pyzihUmv3Cq model=haiku \
-             label=Digest lease and notice task=true",
-            "step toolu_01WesqZa8jMTM4WMn2ELQNTp paper-reader",
-            "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
-            // The digest is past half the inline limit, so it is logged as a blob.
-            "end paper-reader Done <blob>",
             "turn_ended EndTurn",
         ]
     );

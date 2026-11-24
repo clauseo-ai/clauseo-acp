@@ -12,6 +12,7 @@ mod guard_blocks;
 mod helper_updates;
 mod helpers;
 mod helpers_ends;
+mod helpers_recorded;
 mod idle;
 mod idle_busy;
 mod idle_cap;
