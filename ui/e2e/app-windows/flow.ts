@@ -33,12 +33,14 @@ export async function offRail(w: Window): Promise<void> {
 }
 
 /**
- * Makes a matter through the rail's New matter form and waits until it is open. `existing`
- * presses Choose folder… (pick_folder returns E2E_MATTER_DIR, which becomes the matter); without
- * it, Use a new folder chooses a new folder named after the matter in the host's default location
- * (the scratch matters folder, settings.json's `matters.default_location`; the desktop reads it with
- * get_default_location), which the host makes. A folder can be one matter only, and a matter may not
- * sit inside another, so a test that makes several matters makes them all without `existing`.
+ * Makes a matter through the rail's New matter and waits until it is open. New matter asks first.
+ * `existing` answers Existing folder, which opens the picker at once (pick_folder returns
+ * E2E_MATTER_DIR, which becomes the matter); the form opens with that folder, named after it, and
+ * the name is typed over. Without it, New folder: a new folder named after the matter in the host's
+ * default location (the scratch matters folder, settings.json's `matters.default_location`; the
+ * desktop reads it with get_default_location), which the host makes. A folder can be one matter
+ * only, and a matter may not sit inside another, so a test that makes several matters makes them
+ * all without `existing`.
  */
 export async function createRoomMatter(
   w: Window,
@@ -47,18 +49,14 @@ export async function createRoomMatter(
 ): Promise<void> {
   await showRail(w);
   await w.newMatter.click();
-  await w.matterName.fill(name);
-  if (!existing) await w.matterMade.click();
   if (existing) {
-    // Create waits until the form names the picked folder: pressed while the picker still runs,
-    // it would make a new folder instead (autoplay.ts waits the same way).
-    const folder = async () =>
-      (await w.folderLine.count()) === 0 ? null : await w.folderLine.textContent();
-    const before = await folder();
+    // the form opens only once the picker has given the folder (autoplay.ts waits the same way)
     await w.matterExisting.click();
-    await expect.poll(folder).not.toBe(before);
-    await expect(w.matterExisting).toBeEnabled();
+    await expect(w.folderLine).toBeVisible();
+  } else {
+    await w.matterMade.click();
   }
+  await w.matterName.fill(name);
   await w.createMatter.click();
   await expect(w.matter).toHaveText(name);
   await expect(w.createMatter).toBeHidden();
@@ -66,7 +64,7 @@ export async function createRoomMatter(
 
 /**
  * Opens the matter folder E2E_MATTER_DIR (the e2e build's pick_folder returns it) as the matter
- * `name`: New matter, the name, Choose folder…, Create matter; the toolbar title then names the
+ * `name`: New matter, Existing folder, the name, Create matter; the toolbar title then names the
  * matter, and the composer is visible and enabled, so a spec can type at once; a hidden composer
  * (the first-run sign-in gate replaces it) fails here at once, since a hidden textarea still reads
  * as enabled. A spec whose plan starts signed out by design opens it with {@link openGatedMatter}.

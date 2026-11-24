@@ -15,7 +15,7 @@ test("a refusal says why in the form's words, never the host's message", () => {
   );
   // a path is isolated between FSI and PDI
   expect(createErrorLine("en", "matter.folder_unreadable", "a\u202Efdp.exe")).toBe(
-    "Clauseo can't read \u2068~/a\u202Efdp.exe\u2069. It may be locked, or on a drive that's no longer connected.",
+    "Clauseo can't read \u2068a\u202Efdp.exe\u2069. It may be locked, or on a drive that's no longer connected.",
   );
   expect(createErrorLine("en", "matter.folder_unreadable")).toBe(
     "Clauseo can't read that folder. It may be locked, or on a drive that's no longer connected.",
@@ -98,7 +98,7 @@ test("a folder nested with a matter names it when the list has it; with no name,
 
 test("a folder in Clauseo's matters folder is a choose-another refusal, with its path when the form has it", () => {
   expect(createErrorLine("en", "matter.folder_in_matters_root", "Documents/Clauseo/Matters")).toBe(
-    "\u2068~/Documents/Clauseo/Matters\u2069 is the folder Clauseo keeps matters in. Choose the folder for one matter.",
+    "\u2068Documents › Clauseo › Matters\u2069 is the folder Clauseo keeps matters in. Choose the folder for one matter.",
   );
   expect(createErrorLine("en", "matter.folder_in_matters_root")).toBe(
     "That folder is where Clauseo keeps matters. Choose the folder for one matter.",

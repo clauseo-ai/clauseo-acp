@@ -1,27 +1,33 @@
 // The new matter form's Folder row. Its label, then one set-in field like the name's: a folder icon, the chosen path
-// with home as "~" (folder-path.ts), cut short in its middle where it's long (the parent gives way, the folder's own
-// name stays) with the whole path under the pointer and to a screen reader, and Choose folder… at its end, which opens
+// (a folder under home as its folders in order, "Documents › Acme", folder-path.ts), cut short in its middle where
+// it's long (the parent gives way, the folder's own name stays) with the whole path under the pointer and to a screen reader, and Choose folder… at its end, which opens
 // the computer's own folder picker at once. With nothing chosen the field reads "No folder chosen" and Choose folder…
 // is the main button. Under the field: where the host has a place for new matters, a quiet "Use a new folder in
-// ~/Documents/Clauseo" on one line, its path cut short in its middle as the field's is and whole under the pointer,
+// Documents › Clauseo" on one line, its path cut short in its middle as the field's is and whole under the pointer,
 // always offered until it's the choice; once chosen, a line says Clauseo makes that folder. The
-// paths are the computer's own, in English in both languages.
+// paths are the computer's own, in English in both languages. New matter's two forms (matter-form.tsx's branch) give
+// their own note, the words for no folder, and Change… once one is there.
 import { useId } from "react";
 import { Button } from "../ui/button.tsx";
 import { fieldLabel } from "../ui/recipes-controls.ts";
 import { IconFolder, IconNewMatter } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
-import { splitPath } from "./folder-path.ts";
+import { splitPath, STEP } from "./folder-path.ts";
 import { Say } from "./say.tsx";
 
 /** A path on one line: its parent cut short first, its last part kept. Isolated, so a name with right-to-left marks
  * can't reorder the line around it. */
 export function PathLine({ path, className }: { path: string; className?: string }) {
   const { head, tail } = splitPath(path);
+  // a shown path's " › " before the folder's own name stays whole while the parent is cut short before it
+  const step = head.endsWith(STEP) && tail !== "";
   return (
     <bdi lang="en" dir="ltr" className={cn("folder-path", className)}>
-      {head !== "" && <span className="folder-path-head">{head}</span>}
+      {head !== "" && (
+        <span className="folder-path-head">{step ? head.slice(0, -STEP.length) : head}</span>
+      )}
+      {step && <span className="folder-path-step">{STEP}</span>}
       {tail !== "" && <span className="folder-path-tail">{tail}</span>}
     </bdi>
   );
@@ -66,6 +72,9 @@ export function FolderRow({
   onChoose,
   onOffer,
   testIds,
+  note,
+  none,
+  chooseLabel,
 }: {
   /** The chosen folder as the row shows it, home as "~"; null: none chosen yet. */
   shown: string | null;
@@ -80,11 +89,19 @@ export function FolderRow({
   onChoose: () => void;
   onOffer: () => void;
   testIds?: { choose?: string | undefined; offer?: string | undefined } | undefined;
+  /** Optional: the line under the field in place of the new folder's, or none (null). */
+  note?: string | null | undefined;
+  /** Optional: what the field reads with nothing chosen, in place of "No folder chosen". */
+  none?: string | undefined;
+  /** Optional: the button's words in place of "Choose folder…". */
+  chooseLabel?: string | undefined;
 }) {
   const w = useMatterFormWords();
   const labelId = useId();
   const pathId = useId();
   const madeId = useId();
+  const madeNote = made ? w("Clauseo creates this folder. Add papers to it any time.") : null;
+  const below = note === undefined ? madeNote : note;
   return (
     <div
       role="group"
@@ -100,7 +117,7 @@ export function FolderRow({
         <p id={pathId} className="matter-form-folder-path" data-testid="matter-folder-path">
           {shown === null ? (
             <span className="matter-form-folder-none">
-              <Say>{w("No folder chosen")}</Say>
+              <Say>{none ?? w("No folder chosen")}</Say>
             </span>
           ) : (
             // matter-form-path: the class the e2e flow and the perf autoplay read the chosen folder by
@@ -112,18 +129,18 @@ export function FolderRow({
           size="small"
           className="matter-form-choose"
           disabled={picking}
-          aria-describedby={[pathId, made ? madeId : null, wrong ?? null]
+          aria-describedby={[pathId, below !== null ? madeId : null, wrong ?? null]
             .filter((id) => id !== null)
             .join(" ")}
           data-testid={testIds?.choose}
           onClick={onChoose}
         >
-          <span className="deva-nudge">{w("Choose folder…")}</span>
+          <span className="deva-nudge">{chooseLabel ?? w("Choose folder…")}</span>
         </Button>
       </div>
-      {made && (
+      {below !== null && (
         <p id={madeId} className="matter-form-folder-note">
-          <Say>{w("Clauseo creates this folder. Add papers to it any time.")}</Say>
+          <Say>{below}</Say>
         </p>
       )}
       {offer !== null && (

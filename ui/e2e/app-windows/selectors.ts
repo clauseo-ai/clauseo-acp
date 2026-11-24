@@ -11,16 +11,19 @@ export const ids = {
   matterName: "matter-name",
   /** The rail's New matter, which opens the form. */
   newMatter: "new-matter",
-  /** In the form: Choose folder…, pick_folder for an existing folder (`existing_folder`). */
+  /**
+   * New matter's question: Existing folder, which opens pick_folder at once (`existing_folder`);
+   * the form opens once a folder is picked.
+   */
   matterExisting: "matter-existing",
   /**
-   * In the form: Use a new folder in the host's default location (`default_location`), shown
-   * where the host has one; the host makes `<location>/<name>`.
+   * New matter's question: New folder, in the host's default location (`default_location`); the
+   * host makes `<location>/<name>`.
    */
   matterMade: "matter-made",
   /**
-   * In the form: Create matter, enabled once there is a name and a folder: the one Choose folder…
-   * picked, or the new one Use a new folder chose.
+   * In the form: Create matter, enabled once there is a name and a folder: the one Existing folder
+   * picked, or the new one New folder makes.
    */
   createMatter: "create-matter",
   /**

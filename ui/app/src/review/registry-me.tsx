@@ -6,25 +6,17 @@
 // with a matter the list doesn't have, and matter.folder_is_matter, say U2-31's line.
 import type { Entry } from "./entry.ts";
 import { RoomAfter } from "./states.tsx";
-import { MATTER, NEW_MATTER, refusingHost, type Step } from "./hosts.ts";
+import { EXISTING_PICKED, MATTER, NEW_MATTER, refusingHost, type Step } from "./hosts.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
 import { render } from "./registry-ud1-scene.tsx";
 import { matterWords, type WordsRef } from "./words.ts";
 
 /** Choose folder…, then Create matter: the picked folder refused. */
-const CHANGE_CREATE: readonly Step[] = [
-  ...NEW_MATTER,
-  { press: "matter-existing" },
-  { press: "create-matter" },
-];
+const CHANGE_CREATE: readonly Step[] = [...EXISTING_PICKED, { press: "create-matter" }];
 
-/** Use a new folder, then Create matter, in the default location: the folder is in the form's own words, so the line
+/** New folder, then Create matter, in the default location: the folder is in the form's own words, so the line
  * names none. */
-const CREATE: readonly Step[] = [
-  ...NEW_MATTER,
-  { press: "matter-made" },
-  { press: "create-matter" },
-];
+const CREATE: readonly Step[] = [...NEW_MATTER, { press: "create-matter" }];
 
 /** matter-exists' entries: "ME-01" and so on, each id written as it is. */
 /** Choose folder…, then Create matter, the picked folder refused with `code`. */
@@ -35,7 +27,7 @@ const refused = (id: string, words: WordsRef, code: NextErrorCode, display: stri
   render: () => <RoomAfter host={() => refusingHost(code, display)} steps={CHANGE_CREATE} />,
 });
 
-/** Use a new folder, then Create matter: refused as nested with matter A, on the list. */
+/** New folder, then Create matter: refused as nested with matter A, on the list. */
 const nested = (id: string, words: WordsRef, code: NextErrorCode): Entry => ({
   id,
   words,

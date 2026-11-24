@@ -56,6 +56,7 @@ import { ownEntries, ownEntry } from "./registry-offline.tsx";
 import { PK } from "./registry-pk.tsx";
 import {
   MATTER,
+  EXISTING_PICKED,
   NEW_MATTER,
   railHost,
   refusingHost,
@@ -341,14 +342,10 @@ const railState = (id: string, words: WordsRef): Entry => ({
 });
 
 /** Choose folder…, then Create matter: the picked folder refused with `code`. */
-const CHANGE_CREATE: readonly Step[] = [
-  ...NEW_MATTER,
-  { press: "matter-existing" },
-  { press: "create-matter" },
-];
+const CHANGE_CREATE: readonly Step[] = [...EXISTING_PICKED, { press: "create-matter" }];
 
 /** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Choose folder… and Create,
- * or with `next` after Use a new folder and Create, in the default location, where the line names no folder. */
+ * or with `next` after New folder and Create, in the default location, where the line names no folder. */
 const refusal = (
   id: string,
   words: WordsRef,
@@ -362,9 +359,7 @@ const refusal = (
   render: () => (
     <RoomAfter
       host={() => refusingHost(code, display, next)}
-      steps={
-        next ? [...NEW_MATTER, { press: "matter-made" }, { press: "create-matter" }] : CHANGE_CREATE
-      }
+      steps={next ? [...NEW_MATTER, { press: "create-matter" }] : CHANGE_CREATE}
     />
   ),
 });

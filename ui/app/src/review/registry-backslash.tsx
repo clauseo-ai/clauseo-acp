@@ -11,7 +11,7 @@ import { step, userMessage } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { AgentId } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { MATTER, NEW_MATTER, threadHost, type Step } from "./hosts.ts";
+import { EXISTING_PICKED, MATTER, threadHost, type Step } from "./hosts.ts";
 import { render as scene } from "./registry-ud1-scene.tsx";
 import { RoomAfter, RoomOver } from "./states.tsx";
 import { errorWords, folderWords as w, type WordsRef } from "./words.ts";
@@ -87,7 +87,7 @@ const picked = (platform: Platform, display: string) => () => (
         pickFolder: () => ({ folder: "review-folder", display }),
       })
     }
-    steps={[...NEW_MATTER, { press: "matter-existing" }] satisfies readonly Step[]}
+    steps={[...EXISTING_PICKED] satisfies readonly Step[]}
   />
 );
 

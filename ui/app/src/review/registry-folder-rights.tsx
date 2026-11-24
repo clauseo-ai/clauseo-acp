@@ -14,7 +14,7 @@ import { FakeTransport } from "../transport/fake-transport.ts";
 import { LocateWarning } from "../room/locate-warning.tsx";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
+import { EXISTING_PICKED, MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
 import { RoomAfter, RoomFocusing, RoomOver } from "./states.tsx";
 import {
   errorWords,
@@ -60,7 +60,7 @@ const picking = (kind: FolderSupportKind) => () =>
     }),
   });
 /** New matter, the name typed, and Change: the folder picked, its warning under the folder line. */
-const PICKED: readonly Step[] = [...NEW_MATTER, { press: "matter-existing" }];
+const PICKED: readonly Step[] = [...EXISTING_PICKED];
 /** New matter, the name typed, and Change over a picker that holds: its line shows after 300 ms. */
 const holding = () =>
   new FakeTransport({

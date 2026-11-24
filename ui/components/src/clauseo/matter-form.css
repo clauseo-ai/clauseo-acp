@@ -110,6 +110,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* the " › " before the folder's own name, its spaces kept */
+  .folder-path-step {
+    flex: none;
+    white-space: pre;
+  }
   .folder-path-head:only-child,
   .folder-path-tail:only-child {
     min-width: 0;
@@ -136,5 +141,36 @@
   .matter-form-actions-end {
     flex-direction: row-reverse;
     justify-content: flex-start;
+  }
+
+  /* ---------- New matter's first question: two choices, each a name and its line ---------- */
+  .matter-choice {
+    display: grid;
+    gap: var(--s3);
+  }
+  .matter-choice-card {
+    @apply bg-well set-in-control rounded-control is-hover:bg-well-strong is-active:press;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: var(--s1);
+    align-items: start;
+    padding: var(--s4);
+    text-align: start;
+    cursor: default;
+  }
+  .matter-choice-card:disabled {
+    opacity: 0.6;
+  }
+  .matter-choice-icon {
+    grid-row: span 2;
+    color: var(--primary);
+  }
+  .matter-choice-name {
+    @apply text-ui text-primary;
+    font-weight: var(--w-chrome);
+  }
+  .matter-choice-line {
+    @apply text-small text-muted;
   }
 }

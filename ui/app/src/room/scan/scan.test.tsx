@@ -1,5 +1,5 @@
 // The scan of a folder picked in New matter (UD2, room/scan/), over FakeTransport: one scan_folder per pick, the counts
-// and the file reached from folder_scanned for that folder alone, Stop, the synced notice Create waits for, the
+// and the file reached from folder_scanned for that folder alone, Stop, the synced notice Create reads as Got it, the
 // cloud-only lines, Create during a scan, a refused scan, and the services' names.
 // @vitest-environment happy-dom
 import { act } from "react";
@@ -94,16 +94,16 @@ async function press(id: string) {
   await settle();
 }
 
-/** New matter, its name typed, and Change: REF picked. */
+/** New matter, then Existing folder: REF picked at once, and the name typed over the folder's. */
 async function pick(transport: FakeTransport) {
   await act(async () => byId("new-matter")?.click());
   await act(async () => settled());
+  await press("matter-existing");
   const input = byId<HTMLInputElement>("matter-name")!;
   await act(async () => {
     Reflect.set(HTMLInputElement.prototype, "value", NAME, input);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await press("matter-existing");
   return transport;
 }
 
@@ -164,7 +164,7 @@ test("Stop sends cancel_scan and drops the pick: the lines go, the folder line i
   ).toEqual([]);
 });
 
-test("a synced folder: the notice, and Create waits for Got it, once per adding", async () => {
+test("a synced folder: the notice above Create, and Create counts as having read it", async () => {
   const transport = await pick(
     await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
   );
@@ -172,10 +172,7 @@ test("a synced folder: the notice, and Create waits for Got it, once per adding"
   expect(text("place-notice")).toContain(
     "This folder syncs with OneDrive, so changes to its papers sync too, including Clauseo's. Versions are kept on this computer, outside the folder.",
   );
-  await press("create-matter");
-  expect(named(transport, "create_matter")).toEqual([]);
-  await press("synced-got-it");
-  expect(byId("place-notice")).toBeNull();
+  expect(byId<HTMLButtonElement>("create-matter")?.disabled).toBe(false);
   await press("create-matter");
   expect(named(transport, "create_matter")).toEqual([
     { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
@@ -291,28 +288,22 @@ async function enter(id: string) {
   await settle();
 }
 
-test("Create while a synced folder's notice waits: focus moves to Got it, and nothing is created", async () => {
+test("Create while a synced folder's notice shows: the press reads it, and the matter is made once", async () => {
   const transport = await pick(
     await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
   );
-  await press("create-matter");
-  expect(named(transport, "create_matter")).toEqual([]);
-  expect(document.activeElement).toBe(byId("synced-got-it"));
-  // the ring: a focus a press moved draws it as a key's does (base.css)
-  expect(byId("synced-got-it")?.hasAttribute("data-focus-moved")).toBe(true);
   expect(byId("place-notice")).not.toBeNull();
-  // the notice still waits: a second press moves focus there again, and creates nothing
   await press("create-matter");
-  expect(named(transport, "create_matter")).toEqual([]);
-  expect(document.activeElement).toBe(byId("synced-got-it"));
+  expect(named(transport, "create_matter")).toEqual([
+    { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
+  ]);
+  expect(byId("synced-got-it")?.hasAttribute("data-focus-moved")).toBe(false);
 });
 
-test("Create after Got it creates, once; a press on Create before it only moved focus", async () => {
+test("Create after Got it creates, once", async () => {
   const transport = await pick(
     await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
   );
-  await press("create-matter");
-  expect(named(transport, "create_matter")).toEqual([]);
   await press("synced-got-it");
   expect(byId("place-notice")).toBeNull();
   await press("create-matter");
@@ -321,15 +312,10 @@ test("Create after Got it creates, once; a press on Create before it only moved 
   ]);
 });
 
-test("keyboard Enter on Create while the notice waits: focus moves to Got it and nothing is created; after Got it, Enter creates", async () => {
+test("keyboard Enter on Create while the notice shows creates, as a press does", async () => {
   const transport = await pick(
     await mount(scanning([scanned({ place: { synced: { service: "one_drive" } }, done: true })])),
   );
-  await enter("create-matter");
-  expect(named(transport, "create_matter")).toEqual([]);
-  expect(document.activeElement).toBe(byId("synced-got-it"));
-  await press("synced-got-it");
-  expect(byId("place-notice")).toBeNull();
   byId("create-matter")?.focus();
   await enter("create-matter");
   expect(named(transport, "create_matter")).toEqual([

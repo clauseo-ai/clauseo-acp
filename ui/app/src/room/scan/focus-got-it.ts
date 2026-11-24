@@ -1,4 +1,4 @@
-// Create's press while a synced folder's notice waits (use-scan.ts awaitingGotIt): focus goes to the notice's Got it
+// Create's press when a synced folder's notice only shows on it (use-scan.ts awaitingGotIt): focus goes to its Got it
 // (place-notice.tsx), which then draws the app's focus ring. Part of New matter's chunk (folder-check.tsx).
 /** Create was pressed while the notice waits: focus goes to Got it, which draws the app's focus ring. After a pointer's
  * press the browser often draws no :focus-visible ring on a script's focus, so the ring is marked here too

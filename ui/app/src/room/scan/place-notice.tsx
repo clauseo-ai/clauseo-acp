@@ -1,7 +1,7 @@
 // A synced folder's notice under New matter's folder line (UD2): "This folder syncs with OneDrive, so changes to its
-// papers sync too, including Clauseo's. Versions are kept on this computer, outside the folder." with "Got it". Create
-// waits for "Got it", once per adding (use-scan.ts). A notice, not an error: a status, so New matter's error line
-// stays its one alert. Part of New matter's chunk, with the scan's lines.
+// papers sync too, including Clauseo's. Versions are kept on this computer, outside the folder." with "Got it". It sits
+// above Create, and Create's press reads it as Got it does (folder-check.tsx). A notice, not an error: a status, so
+// New matter's error line stays its one alert. Part of New matter's chunk, with the scan's lines.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconAbout } from "@clauseo/components/icons/icons.tsx";
 import { sc } from "@clauseo/components/lib/words-scan.ts";
@@ -15,7 +15,7 @@ export function PlaceNotice({
   onGotIt,
 }: {
   service: string;
-  /** Where Create's press moves focus: the Got it button (focusGotIt). */
+  /** Where focus goes when the notice only shows on Create's press: the Got it button (focusGotIt). */
   gotItRef?: RefObject<HTMLButtonElement | null> | undefined;
   onGotIt: () => void;
 }) {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The new matter form and its dialog: Create matter waits for a name and a folder; the Folder row with no folder, a
-// folder the picker gave (home as "~", the whole path in the text and its title, the last part kept), and the new folder
+// folder the picker gave (its folders in order, the whole path in the text and its title, the last part kept), and the new folder
 // in Clauseo's place; Choose folder… opening the picker at once; Enter before the form is ready saying what's missing;
 // the refusal's one way on; and the dialog opening with focus on the name, Tab going name, client, Choose folder…,
 // Create, and closing on Cancel.
@@ -61,15 +61,17 @@ function held<T>() {
   return { promise, resolve, reject };
 }
 
-test("paths: home as ~, a full path as it is, and the last part apart from its parent", () => {
-  expect(homeShown("Documents/Clients/Acme")).toBe("~/Documents/Clients/Acme");
-  expect(homeShown("Documents\\Clients\\Acme")).toBe("~\\Documents\\Clients\\Acme");
+test("paths: under home its folders in order on every system, a full path as it is, the last part apart", () => {
+  expect(homeShown("Documents/Clients/Acme")).toBe("Documents › Clients › Acme");
+  expect(homeShown("Documents\\Clients\\Acme")).toBe("Documents › Clients › Acme");
+  expect(homeShown("Documents › Acme")).toBe("Documents › Acme");
   expect(homeShown("/Volumes/Work/Acme")).toBe("/Volumes/Work/Acme");
   expect(homeShown("D:\\Cases")).toBe("D:\\Cases");
   expect(homeShown("\\\\server\\share")).toBe("\\\\server\\share");
-  expect(under("~/Documents/Clauseo/", "Acme")).toBe("~/Documents/Clauseo/Acme");
-  expect(splitPath("~/Documents/Clients/Acme")).toEqual({
-    head: "~/Documents/Clients/",
+  expect(under("Documents › Clauseo", "Acme")).toBe("Documents › Clauseo › Acme");
+  expect(under("D:\\Matters\\", "Acme")).toBe("D:\\Matters\\Acme");
+  expect(splitPath("Documents › Clients › Acme")).toEqual({
+    head: "Documents › Clients › ",
     tail: "Acme",
   });
   expect(splitPath("D:\\Cases\\Acme")).toEqual({ head: "D:\\Cases\\", tail: "Acme" });
@@ -110,11 +112,11 @@ test("no folder: the row says so, Choose folder… is the main button, and no ti
   expect(create()?.disabled).toBe(true);
 });
 
-test("a folder chosen: home as ~, the whole path in the text and the title, the last part kept apart", async () => {
+test("a folder chosen: its folders in order, the whole path in the text and the title, the last part kept apart", async () => {
   const long =
     "Documents/Clients/Acme Holdings Private Limited/Corporate/2026 Share purchase and disclosure schedules/Working papers";
   await mount(<NewMatterForm name="Acme" folder={long} onCreate={() => {}} />);
-  const full = `~/${long}`;
+  const full = long.split("/").join(" › ");
   // the whole path is in the text, for a screen reader, and under the pointer
   expect(path()?.textContent).toBe(full);
   expect(document.querySelector(".matter-form-folder-field")?.getAttribute("title")).toBe(full);
@@ -123,8 +125,9 @@ test("a folder chosen: home as ~, the whole path in the text and the title, the 
   expect(bdi?.getAttribute("dir")).toBe("ltr");
   expect(bdi?.getAttribute("lang")).toBe("en");
   expect(bdi?.querySelector(".folder-path-head")?.textContent).toBe(
-    "~/Documents/Clients/Acme Holdings Private Limited/Corporate/2026 Share purchase and disclosure schedules/",
+    "Documents › Clients › Acme Holdings Private Limited › Corporate › 2026 Share purchase and disclosure schedules",
   );
+  expect(bdi?.querySelector(".folder-path-step")?.textContent).toBe(" › ");
   expect(bdi?.querySelector(".folder-path-tail")?.textContent).toBe("Working papers");
   // Choose folder… steps down to a raised button, and is described by the path
   expect(choose()?.className).not.toContain("bg-primary");
@@ -150,7 +153,7 @@ test("Choose folder… opens the picker at once, waits for it, and a cancel keep
   expect(asked).toBe(1);
   expect(button?.disabled).toBe(true);
   await act(async () => pick.resolve("Documents/Acme"));
-  expect(path()?.textContent).toBe("~/Documents/Acme");
+  expect(path()?.textContent).toBe("Documents › Acme");
   expect(button?.disabled).toBe(false);
   await act(async () => button?.click());
   expect(asked).toBe(2);
@@ -171,21 +174,21 @@ test("Use a new folder: offered under the row, it shows the folder Clauseo makes
     />,
   );
   const offer = byTestId("matter-made");
-  expect(offer?.textContent).toBe("Use a new folder in \u2068~/Documents/Clauseo\u2069");
+  expect(offer?.textContent).toBe("Use a new folder in \u2068Documents › Clauseo\u2069");
   await act(async () => offer?.click());
   expect(told).toBe(1);
   expect(byTestId("matter-made")).toBeUndefined();
-  expect(path()?.textContent).toBe("~/Documents/Clauseo/…");
+  expect(path()?.textContent).toBe("Documents › Clauseo › …");
   expect(document.querySelector(".matter-form-folder-note")?.textContent).toBe(
     "Clauseo creates this folder. Add papers to it any time.",
   );
   await type(inputs()[0], "Acme lease");
-  expect(path()?.textContent).toBe("~/Documents/Clauseo/Acme lease");
+  expect(path()?.textContent).toBe("Documents › Clauseo › Acme lease");
   await act(async () => create()?.click());
   expect(made).toEqual([["Acme lease", "", true]]);
   // a folder picked afterwards replaces it, and the offer comes back
   await act(async () => choose()?.click());
-  expect(path()?.textContent).toBe("~/Documents/Acme");
+  expect(path()?.textContent).toBe("Documents › Acme");
   expect(byTestId("matter-made")).toBeDefined();
 });
 
@@ -307,7 +310,7 @@ test("a refusal's one way on: Open {name} for a matter on the list, else Choose 
   expect(byTestId("open-matter")).toBeUndefined();
   await act(async () => button("Choose another folder")?.click());
   expect(picks).toBe(1);
-  expect(path()?.textContent).toBe("~/Documents/Other");
+  expect(path()?.textContent).toBe("Documents › Other");
   // a line that isn't about the folder: no button under it
   await act(async () => root?.unmount());
   host?.remove();

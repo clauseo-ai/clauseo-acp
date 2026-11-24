@@ -1,7 +1,8 @@
 // Scripted hosts for the review's room states: a FakeTransport that answers list_matters, and, where a state needs the
 // wall, H8's list_papers (room/host-next.ts), as room.test.tsx and the probe script them; the rail in every state;
 // hosts that refuse a new matter with a code, for the form's lines, with the steps a state takes once rendered
-// (states.tsx's RoomAfter): New matter pressed, a name typed, Change and Create pressed; and for the thread's states,
+// (states.tsx's RoomAfter): New matter pressed, New folder or Existing folder, a name typed, Create pressed; and for
+// the thread's states,
 // one thread whose view the host sends as the room subscribes (testing/stream-script.ts's entries), and whose answers to
 // a permission request may never come back.
 import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/stream-script.ts";
@@ -349,8 +350,15 @@ export type Step =
   | { enter: number }
   | { find: string };
 
-/** New matter pressed and the name typed. */
+/** New matter pressed: its one question, New folder or Existing folder. */
+export const NEW_MATTER_ASKED: readonly Step[] = [{ press: "new-matter" }];
+
+/** New matter pressed, New folder chosen and the name typed. */
 export const NEW_MATTER: readonly Step[] = [
-  { press: "new-matter" },
+  ...NEW_MATTER_ASKED,
+  { press: "matter-made" },
   { type: { field: 0, text: "Mehta family trust" } },
 ];
+
+/** New matter pressed and Existing folder chosen: the picker's folder in the form, the matter named after it. */
+export const EXISTING_PICKED: readonly Step[] = [...NEW_MATTER_ASKED, { press: "matter-existing" }];

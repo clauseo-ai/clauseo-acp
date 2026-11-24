@@ -6,9 +6,10 @@
 // goes ahead and the host checks again. Create waits for the answer, at most the 5 s the host allows; a new pick drops
 // the old answer. Part of New matter's chunk, with the warning (folder-warning.tsx) and its words (words-folder.ts).
 // An existing folder picked is scanned too (UD2, room/scan/): its lines show under the folder line, Stop drops the pick,
-// a refused scan is said as the check's refusal is, and Create waits for the scan's first event and a synced folder's
-// "Got it". On macOS and Linux a folder whose name has a backslash warns the same way, at once from the picked folder's
-// display (folder-backslash.ts), ahead of the check's warning: Claude can't start there.
+// a refused scan is said as the check's refusal is, and Create waits for the scan's first event; a synced folder's
+// notice, once shown, is read by Create's press as by its "Got it". On macOS and Linux a folder whose name has a
+// backslash warns the same way, at once from the picked folder's display (folder-backslash.ts), ahead of the check's
+// warning: Claude can't start there.
 import { useRef, useState } from "react";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { fr } from "@clauseo/components/lib/words-folder.ts";
@@ -107,6 +108,9 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     scan.start(picked.folder);
     return picked.display;
   };
+  /** Change… in New matter's new folder: the folder to make the matter's folder in, or null when the lawyer
+   * cancelled. No check and no scan: create_matter says any refusal. */
+  const pickParent = (): Promise<Picked | null> => wait.track(() => matters.pickFolder());
   const backslash = existing === null ? null : backslashAt(existing.display, platform);
   /** Where Create goes, once the check has answered: the existing folder picked, else the default location when
    * `useDefault`. Null stops the create: no folder chosen, a refused existing folder (its line shows), a warning that
@@ -128,9 +132,11 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
       return null;
     }
     if (said !== null && "warn" in said && !(shown != null && "warn" in shown)) return null;
-    // the scan's first event says where the folder lives: a synced one waits for "Got it"
+    // a synced folder's notice already above Create: pressing Create counts as having read it, as Got it does
+    if (scan.awaitingGotIt()) scan.gotIt();
+    // the scan's first event says where the folder lives: a synced one that only says so now shows its notice, focus
+    // on its Got it, and the next press of Create goes ahead
     if (!(await scan.settle())) {
-      // a synced folder's notice waits for "Got it": Create says so by focus, and goes ahead after it
       if (scan.awaitingGotIt()) focusGotIt(gotIt.current);
       return null;
     }
@@ -164,6 +170,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
             anyway: fr(lang, "Create anyway"),
           },
     pickExisting,
+    pickParent,
     where,
     reset,
   };

@@ -64,34 +64,36 @@ function fakeWindow(
   });
   q("new-matter").addEventListener("click", () => {
     log.push("click new-matter");
-    document.body.append(
-      el(`<form>
-        <input data-testid="matter-name" value="">
-        <p><bdi class="matter-form-path">/home/Clauseo/Matter</bdi></p>
-        <button type="button" data-testid="matter-existing">Change</button>
-        <button type="submit" data-testid="create-matter">Create the matter</button>
-      </form>`),
+    const ask = el(
+      `<div><button type="button" data-testid="matter-existing">Existing folder</button></div>`,
     );
-    const change = q("matter-existing") as HTMLButtonElement;
-    change.addEventListener("click", () => {
+    document.body.append(ask);
+    const existing = q("matter-existing") as HTMLButtonElement;
+    existing.addEventListener("click", () => {
       log.push("click matter-existing");
-      change.disabled = true;
+      existing.disabled = true;
       const answer = (left: number) =>
         setTimeout(() => {
           if (left > 0) return answer(left - 1);
-          document.querySelector(".matter-form-path")!.textContent = "/e2e/matter";
-          change.disabled = false;
+          ask.remove();
+          document.body.append(
+            el(`<form>
+              <input data-testid="matter-name" value="matter">
+              <p><bdi class="matter-form-path">/e2e/matter</bdi></p>
+              <button type="submit" data-testid="create-matter">Create matter</button>
+            </form>`),
+          );
+          q("create-matter").addEventListener("click", (e) => {
+            e.preventDefault();
+            const name = (q("matter-name") as HTMLInputElement).value;
+            const folder = document.querySelector(".matter-form-path")!.textContent;
+            log.push(`click create-matter as ${name} in ${folder}`);
+            q("create-matter").closest("form")!.remove();
+            q("matter").textContent = name;
+            (q("composer") as HTMLTextAreaElement).disabled = false;
+          });
         }, 0);
       answer(pickPolls);
-    });
-    q("create-matter").addEventListener("click", (e) => {
-      e.preventDefault();
-      const name = (q("matter-name") as HTMLInputElement).value;
-      const folder = document.querySelector(".matter-form-path")!.textContent;
-      log.push(`click create-matter as ${name} in ${folder}`);
-      q("create-matter").closest("form")!.remove();
-      q("matter").textContent = name;
-      (q("composer") as HTMLTextAreaElement).disabled = false;
     });
   });
   q("composer").addEventListener("input", (e) => {

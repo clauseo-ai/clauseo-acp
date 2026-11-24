@@ -266,16 +266,15 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
     toggle.click();
   await until("New matter", () => shown(doc, need(doc, "new-matter")));
   need(doc, "new-matter").click();
-  await until("the new matter form", () => byId(doc, "matter-name") !== null);
-  setValue(need(doc, "matter-name"), MATTER);
-  // Choose folder… picks E2E_MATTER_DIR: the matter is that folder itself, as on Windows. Create matter waits until the
-  // form names it: it stays held back until there is a folder.
-  const before = formFolder(doc);
+  // New matter asks first. Existing folder opens the picker at once, which picks E2E_MATTER_DIR: the matter is that
+  // folder itself, as on Windows. The form opens once there is a folder, named after it; the name is typed over.
+  await until("the new matter question", () => enabled(byId(doc, "matter-existing")));
   need(doc, "matter-existing").click();
   await until(
     "the picked folder",
-    () => formFolder(doc) !== before && enabled(byId(doc, "matter-existing")),
+    () => byId(doc, "matter-name") !== null && formFolder(doc) !== null,
   );
+  setValue(need(doc, "matter-name"), MATTER);
   need(doc, "create-matter").click();
   await until(
     "the matter",
