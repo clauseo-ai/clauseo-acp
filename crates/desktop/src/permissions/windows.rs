@@ -59,7 +59,11 @@ pub(super) fn cfa_layers() -> (Vec<CfaLayer>, Vec<PathBuf>) {
         .collect();
     let mut protected = Vec::new();
     for key in [POLICY, LOCAL] {
-        protected.extend(value_names(&format!("{key}\\{FOLDERS}")).map(PathBuf::from));
+        protected.extend(
+            value_names(&format!("{key}\\{FOLDERS}"))
+                .into_iter()
+                .map(PathBuf::from),
+        );
     }
     protected.extend(
         string(MDM, MDM_FOLDERS)
