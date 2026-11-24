@@ -16,7 +16,7 @@ export function KeychainAllow({ k, small = true }: { k: Keychain; small?: boolea
   return (
     <Button
       kind="tone"
-      {...(small ? { size: "small" as const } : { className: "lib-feature-add" })}
+      {...(small ? { size: "small" as const } : {})}
       disabled={k.asking}
       onClick={k.allow}
       data-testid="keychain-allow"
