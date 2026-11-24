@@ -20,7 +20,7 @@ import { useStreamPart, useViewStore } from "../store/hooks.ts";
 import { toHostError } from "../transport/host-transport.ts";
 import type { HostCommand, TurnId } from "../transport/protocol.ts";
 import type { Queued } from "./queue-entries.ts";
-import { heldPick, queuedPick } from "./queue-picks.ts";
+import { heldPick, queuedPick, updatedPick } from "./queue-picks.ts";
 import type { QueueStripProps } from "./queue-slot.tsx";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { stamp } from "./thread/clock.ts";
@@ -73,6 +73,7 @@ export function LiveQueueStrip({
   const [pickHeld] = useState(heldPick);
   const queue = useStreamPart(store, stream, pickQueued);
   const held = useStreamPart(store, stream, pickHeld);
+  const updated = useStreamPart(store, stream, updatedPick);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // whether a refusal is held: a press makes no set to the null already there, which React would keep queued at the
   // click's lane and replay as a second commit in the reply's frame (#253, session.ts's useRefused)
@@ -181,6 +182,7 @@ export function LiveQueueStrip({
     <QueueStrip
       items={queue}
       held={hold}
+      updated={updated}
       resume={resume}
       note={note}
       when={mt(lang, "Sends when {name} finishes", { name: planNameOf(plan) })}

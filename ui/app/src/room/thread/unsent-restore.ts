@@ -14,12 +14,13 @@ import { entryId, type StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId } from "../../transport/protocol.ts";
 import { questionText } from "./live.ts";
 import { useUserMessages } from "./steer-restore.ts";
+import { causeOf, endedUnsent, givesBack, type Cause } from "./unsent-cause.ts";
 
 const USER = "user_message:";
 
 /** Why the words came back: a Stop pressed in this window, or no Stop of this window's (another reason, as far as
  * this window knows). */
-export type Why = "stopped" | "neutral";
+export type Why = "stopped" | "neutral" | "cause_stopped" | "sent_now" | "not_sent";
 
 /** Messages seen sent and not answered (no step for their turn), each with its conversation's stream and its words:
  * kept until given back or answered, so a removal that comes once the store has dropped the view still has the words.
@@ -95,6 +96,13 @@ export function markStopped(stream: StreamId | null, v: StreamView | undefined):
 
 const whyOf = (stream: StreamId): Why => (stoppedHere.has(stream) ? "stopped" : "neutral");
 
+/** The wording for a message given back: the host's cause where it gives one (#1314), else this window's Stop. */
+function whyFor(cause: Cause | null, stream: StreamId): Why {
+  if (cause === "stopped") return "cause_stopped";
+  if (cause === "sent_now" || cause === "not_sent") return cause;
+  return whyOf(stream);
+}
+
 /** Whether the view shows nothing but messages stopped before their turn (every message removed, no answer). */
 const onlyRemoved = (v: StreamView): boolean =>
   v.ids.every((id) => id.startsWith(USER) && v.entries.get(id)?.user_message?.status === "removed");
@@ -102,35 +110,54 @@ const onlyRemoved = (v: StreamView): boolean =>
 /** A later message given back: its words and why. */
 export type Unsent = { text: string; why: Why };
 
-/** Marks `ids` given back, with their words, and the conversation's Stop as heard. */
-function give(stream: StreamId, ids: readonly EntryId[]): { text: string; why: Why } | null {
+/** Marks `ids` given back, with their words and the first cause's wording (`causes`, by id), and the conversation's Stop as
+ * heard. One whose cause gives nothing back (removed from the queue, or a copy waiting) is marked and left out. */
+function give(
+  stream: StreamId,
+  ids: readonly EntryId[],
+  causes: ReadonlyMap<EntryId, Cause | null> = new Map(),
+): { text: string; why: Why } | null {
   const words: string[] = [];
+  let why: Why | null = null;
   for (const id of ids) {
     const seen = seenSent.get(id);
     if (seen === undefined || given.has(id)) continue;
     given.add(id);
     seenSent.delete(id);
+    const cause = causes.get(id) ?? null;
+    if (!givesBack(cause)) continue;
+    why ??= whyFor(cause, stream);
     words.push(seen.text);
   }
-  if (words.length === 0) return null;
-  const why = whyOf(stream);
   stoppedHere.delete(stream);
-  return { text: words.join("\n\n"), why };
+  return words.length === 0 || why === null ? null : { text: words.join("\n\n"), why };
 }
+
+/** The causes of the view's messages `ids`. */
+const causesIn = (v: StreamView, ids: readonly EntryId[]) =>
+  new Map(
+    ids.map((id) => {
+      const m = v.entries.get(id)?.user_message;
+      return [id, m === undefined ? null : causeOf(m)] as const;
+    }),
+  );
 
 /** Each message of `stream`'s view that has just gone from sent to removed, in order, each once; and notes every
  * message still sent. When the view then shows nothing else, none: the host's removal of the conversation takes them
  * (takeStopped), so they aren't given back here into a conversation about to go. */
 export function newlyUnsent(v: StreamView, stream: StreamId): Unsent[] {
   noteSent(v, stream);
-  const ids = v.ids.filter(
-    (id) =>
-      v.entries.get(id)?.user_message?.status === "removed" && seenSent.has(id) && !given.has(id),
-  );
+  const ids = v.ids.filter((id) => {
+    const m = v.entries.get(id)?.user_message;
+    return m !== undefined && endedUnsent(m) && seenSent.has(id) && !given.has(id);
+  });
   if (ids.length === 0 || onlyRemoved(v)) return [];
-  const why = whyOf(stream);
-  const out = ids.map((id) => ({ text: seenSent.get(id)!.text, why }));
-  give(stream, ids);
+  const out: Unsent[] = [];
+  for (const id of ids) {
+    // each on its own: two messages ended for different causes say each its own words
+    const got = give(stream, [id], causesIn(v, [id]));
+    if (got !== null) out.push(got);
+  }
   return out;
 }
 
@@ -150,11 +177,11 @@ export function takeStopped(
   for (const id of v.ids) {
     const m = v.entries.get(id)?.user_message;
     if (m === undefined || m.delivery === "steer" || given.has(id)) continue;
-    if (m.status !== "sent" && m.status !== "removed") continue;
+    if (m.status !== "sent" && !endedUnsent(m)) continue;
     if (!seenSent.has(id)) seenSent.set(id, { stream, text: questionText(id, m, v.texts) });
     ids.push(id);
   }
-  return give(stream, ids);
+  return give(stream, ids, causesIn(v, ids));
 }
 
 /** Watches the open thread's stream and hands each later message stopped before its turn started to `restore`. */

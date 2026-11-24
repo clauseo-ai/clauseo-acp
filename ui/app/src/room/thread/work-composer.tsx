@@ -54,7 +54,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -414,13 +414,7 @@ export function WorkComposer({
         ? {
             state: {
               kind: "wait",
-              words:
-                unsent === "stopped"
-                  ? mt(
-                      w.lang,
-                      "Not sent, because you stopped it before it started. Your message is back in the box below.",
-                    )
-                  : mt(w.lang, "This message wasn't sent. It's back in the box below."),
+              words: unsentLine(w.lang, unsent),
               pill: null,
             },
             testId: "unsent",
@@ -530,6 +524,26 @@ function inHint(at: Element | null): boolean {
 }
 
 const noop = () => () => {};
+
+/** The working line for words given back (unsent-restore.ts's Why): the host's cause where it says one (#1314), else
+ * this window's Stop, else plainly that the message wasn't sent. */
+function unsentLine(lang: Lang, why: Why): string {
+  switch (why) {
+    case "cause_stopped":
+      return mt(lang, "Not sent, because you stopped it.");
+    case "sent_now":
+      return mt(lang, "Not sent: you sent a newer message first.");
+    case "not_sent":
+      return mt(lang, "Not sent, because the answer it was for stopped.");
+    case "stopped":
+      return mt(
+        lang,
+        "Not sent, because you stopped it before it started. Your message is back in the box below.",
+      );
+    case "neutral":
+      return mt(lang, "This message wasn't sent. It's back in the box below.");
+  }
+}
 
 /** Where the thread stands, as one string: its status and the agent's latest output. A change means it has moved on
  * from where it stood as an edit was lost. Null with no view. */

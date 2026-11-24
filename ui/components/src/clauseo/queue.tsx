@@ -168,6 +168,7 @@ const SHOWN = 2;
 export function QueueStrip({
   items,
   held: heldProp = null,
+  updated = false,
   resume = null,
   note = null,
   when = null,
@@ -181,6 +182,9 @@ export function QueueStrip({
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
+  /** A queued message is the copy of one that ended because Clauseo was updating (#1314): a line says why it waits,
+   * while no update is installing (whose own line says it). */
+  updated?: boolean;
   /** The resume cue's line (R20b): it takes the head, over a held line, and alone it is the strip with no queued
    * message; null for none. */
   resume?: string | null;
@@ -262,7 +266,9 @@ export function QueueStrip({
   const why =
     reason === "update"
       ? w.m("Clauseo is installing an update. Your queued questions go once it's done.")
-      : null;
+      : updated
+        ? w.m("This waits because Clauseo was updating. It goes once Clauseo is ready.")
+        : null;
   // held with no stop to name, nothing goes until the lawyer sends: the count alone
   const count = [
     held !== null && (held.kind === "held" || !nextable)
