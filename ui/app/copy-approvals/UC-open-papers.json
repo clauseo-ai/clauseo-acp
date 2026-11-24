@@ -1,0 +1,22 @@
+{
+  "UC-1205": {
+    "en": "Open in Excel",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The change note (Clauseo changed N papers) lists each paper on its own row; a spreadsheet it changed (.xlsx, .xls) that the wall lists has this press beside it, which opens it with the computer's default app through open_file. Before, the note offered only Open in Word, for exactly one Word document, so a spreadsheet the answer made had no way to open (Windows tester, Westlake)."
+  },
+  "UC-1206": {
+    "en": "Open",
+    "hi": "खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-24",
+    "hi_by": "app track (provisional; the Hindi lib/words.ts already has for Open)",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The shared Open (lib/words.ts, already on the excerpt card), now also beside any other paper the change note lists that Clauseo opens with the default app (a .pdf, .csv, .txt, .pptx, a picture). The host does not name the default app, so the press says Open. A kind Clauseo does not open gets the existing Show in Finder / Show in File Explorer / Show in folder instead."
+  }
+}

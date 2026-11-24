@@ -1,9 +1,9 @@
 // How a turn ended, in the thread: the step (its stop line, and the change note with Undo when it changed papers) and
 // the stop at the usage limit, its mark and its note with the reset (U12). An Undo refused because a program holds a
-// file shows the lock's lines under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one
-// Word document the wall lists offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in
-// its error line when the open fails, with Show in folder beside it for a path too long for Word, or in a quiet line
-// under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
+// file shows the lock's lines under the note, with Try again in Undo's place (word/word-lock.tsx); each paper the note
+// names has its own way to open it while its changes stand (paper-opens.ts: Open in Word, Open in Excel, Open, or Show
+// in folder), and the note says why in its error line when an open fails, with Show in folder beside it for a path
+// too long for Word, or in a quiet line under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go. A stop macOS kept out of the matter's folder offers Open Privacy settings on the Mac
 // (privacy-settings.tsx). A folder Claude can't start in (matter.folder_backslash) is said by the matter's folder.
 import { lazy, Suspense, use, useCallback, useLayoutEffect, useRef, useState } from "react";
@@ -44,6 +44,7 @@ import { planNameOf, stopTimeOf } from "./limit-words.ts";
 import { windowLine } from "./stop-words.ts";
 import { useBusy } from "./live.ts";
 import { PrivacySettings } from "./privacy-settings.tsx";
+import { cardOpens } from "./paper-opens.ts";
 import { SentNowLine } from "./steer-rows.tsx";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
@@ -88,8 +89,8 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [refused, setRefused] = useState<HostError | null>(null);
   // one undo at a time: Undo waits while the host answers the first
   const [pending, setPending] = useState(false);
-  const { openerFor } = useWordOpen();
-  // a failed Open in Word, by its code, for the note's error line
+  const word = useWordOpen();
+  // a failed open, or Show in folder, by its code, for the note's error line
   const [openFailed, setOpenFailed] = useState<string | null>(null);
   // the last open went through in Protected View: a quiet line says so until the next open or Undo
   const [protectedView, setProtectedView] = useState(false);
@@ -116,25 +117,29 @@ function Changed({ entry }: { entry: StepEntry }) {
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
   const locked = refused?.code === LOCKED && !entry.undone;
-  // the one Word document the note names that the wall lists, while the changes stand
-  const openers = entry.undone
-    ? []
-    : papers.map(openerFor).filter((o): o is WordOpener => o !== null);
-  const opener = openers.length === 1 ? openers[0] : undefined;
-  const open =
-    opener === undefined
-      ? undefined
-      : {
-          label: opener.label,
-          onOpen: () => {
-            setOpenFailed(null);
-            setProtectedView(false);
-            void opener.onOpen().then((opened) => {
-              setOpenFailed(opened.refused);
-              setProtectedView(opened.protectedView);
-            });
+  // the opener last pressed on the note: its Protected View line, and Show in folder for a path too long for Word
+  const [opener, setOpener] = useState<WordOpener | undefined>(undefined);
+  // each paper's own press, while the changes stand
+  const opens = entry.undone
+    ? undefined
+    : cardOpens(back, entry.files, word, w.lang, platform).map(
+        (o) =>
+          o && {
+            label: o.label,
+            testId: o.testId,
+            reveal: o.reveal,
+            onOpen: () => {
+              setOpener(o.opener);
+              setOpenFailed(null);
+              setProtectedView(false);
+              if (o.reveal) return void o.opener.onReveal().then(setOpenFailed);
+              void o.opener.onOpen().then((opened) => {
+                setOpenFailed(opened.refused);
+                setProtectedView(opened.protectedView);
+              });
+            },
           },
-        };
+      );
   // Versions' undo dialog, open for a step with a file that may hold the lawyer's own edits: the files the host said
   // changed since, as it answered the press
   const [asking, setAsking] = useState<ReadonlySet<string> | null>(null);
@@ -211,7 +216,7 @@ function Changed({ entry }: { entry: StepEntry }) {
           askUndo={askUndo}
           state={entry.undone ? "undone" : "changed"}
           {...(undoable && !locked ? { onUndo } : {})}
-          {...(open === undefined ? {} : { open })}
+          opens={opens}
           undoDisabled={busy || pending}
           error={
             shown === null

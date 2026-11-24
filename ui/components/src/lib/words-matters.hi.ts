@@ -134,6 +134,9 @@ export const HI = {
   "Retried from your question at {time}. The first answer stays in '{title}'.":
     "{time} बजे के आपके प्रश्न से फिर पूछा गया। पहला उत्तर '{title}' में बना रहता है।",
   "Open it": "खोलें",
+  // R24: a change note's press beside a spreadsheet it changed (.xlsx, .xls), as Open in Word is beside a Word document.
+  // hi: later
+  "Open in Excel": null,
   /* ---------- messages while Clauseo works: the queue ---------- */
   Queue: "कतार में रखें",
   "Queued messages": "कतार के संदेश",

@@ -10,8 +10,8 @@
 // room's first load carries none of them. A .docx's opener also carries the way to its tracked changes, which its tile
 // offers as a second press (paper-wall.tsx), only when the host found tracked changes or comments in it. Every other
 // file of a type the desktop opens (crates/desktop/src/open.rs, DOCUMENT_TYPES) opens the same way from its tile, with
-// the computer's default app for its type, under the wall's words for it, Open it: wallOpenerFor gives those, while a
-// change note offers Word's alone (openerFor).
+// the computer's default app for its type, under the wall's words for it, Open it: wallOpenerFor gives those, which a
+// change note also presses, under its own words for each (thread/paper-opens.ts).
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
@@ -51,9 +51,12 @@ export type WordOpen = {
   /** The opener its tile offers: a Word document's, as openerFor's, or any other file's the desktop opens; else
    * null. */
   wallOpenerFor: (path: string) => WordOpener | null;
+  /** Shows the matter's folder, for a paper of a kind no program opens (a change note's Show in folder); null with no
+   * list. */
+  reveal: (() => Promise<string | null>) | null;
 };
 
-const NONE: WordOpen = { openerFor: () => null, wallOpenerFor: () => null };
+const NONE: WordOpen = { openerFor: () => null, wallOpenerFor: () => null, reveal: null };
 
 /** The types open_file opens, as crates/desktop/src/open.rs's DOCUMENT_TYPES lists them: keep the two in step. */
 const OPENABLE =
@@ -135,6 +138,7 @@ export function useWordOpeners(
     return {
       openerFor: (path) => word.get(path) ?? null,
       wallOpenerFor: (path) => word.get(path) ?? others.get(path) ?? null,
+      reveal: onReveal,
     };
   }, [transport, listed, rdt, lang, opening]);
 }
