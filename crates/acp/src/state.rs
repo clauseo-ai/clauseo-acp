@@ -18,7 +18,7 @@ use crate::types::AuthMethod;
 
 mod helper_sessions;
 
-pub(crate) use helper_sessions::HelperSessions;
+pub(crate) use helper_sessions::{End as HelperEnd, HelperSessions};
 
 /// Shared by the line reader, the inbound handler, the command loop and every `AcpClient`.
 pub(crate) struct Shared {

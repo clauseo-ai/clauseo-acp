@@ -52,7 +52,8 @@
 //! - Origins: `Turn(t)` while turn `t`'s prompt is in flight; `Late(t)` from `cancel()` until the
 //!   next prompt starts; `Replay` between sending `session/load` and its response; else `Idle`
 //!   (`session/resume` replays nothing, so it never tags `Replay`). An announced helper's
-//!   events carry its root session's origin.
+//!   events carry its root session's origin; once it ended cancelled, failed or disconnected,
+//!   `Late` of the turn it ended in ([`AcpEvent::HelperEnded`]).
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`),
 //!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response, and on
