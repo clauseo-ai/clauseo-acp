@@ -1,8 +1,8 @@
 //! The steps of a turn: the prompt's commit (step 1, once `queue.rs` decides the prompt starts
-//! now), the writer queue (step 3), the
-//! before-turn checkpoint and the `TurnStarted` commit (step 4), and the end of a turn that
-//! never started (a failed launch or checkpoint). The prompt itself (step 5) is in
-//! `prompt.rs`; steps 6 to 8 are in `end.rs`.
+//! now), the matter (step 3: the turn runs beside the matter's other turns, or waits for an
+//! undo, a restore or a relocate holding it, `together.rs`), the before-turn checkpoint and the
+//! `TurnStarted` commit (step 4), and the end of a turn that never started (a failed launch or
+//! checkpoint). The prompt itself (step 5) is in `prompt.rs`; steps 6 to 8 are in `end.rs`.
 
 use std::path::Path;
 
@@ -32,7 +32,7 @@ use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
 /// `command.invalid` for an archived thread; `thread.turn_running` while the thread's own undo
-/// holds the writer (a turn queued behind its own thread would wait on nothing it can see, and
+/// holds the matter (a turn queued behind its own thread would wait on nothing it can see, and
 /// the undo's note must be durable before the next prompt).
 pub(super) fn refuse_unsendable(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
     let entry = actor.check_thread(thread)?;
@@ -42,8 +42,7 @@ pub(super) fn refuse_unsendable(actor: &Actor, thread: ThreadId) -> Result<(), E
             "the thread is archived",
         ));
     }
-    // The thread holds its matter's writer for its own turn or its undo: with no current turn,
-    // it is the undo.
+    // The thread holds its matter for its undo, with no current turn.
     let own_undo = entry.turn.current.is_none()
         && actor
             .matters
@@ -184,15 +183,15 @@ fn forget(actor: &mut Actor, thread: ThreadId) {
     if let Some(reason) = dropped.and_then(|current| current.detach) {
         agents::log_detach(actor, thread, reason);
     }
-    if let Ok(matter) = matter_of(actor, thread)
-        && let Some(entry) = actor.matters.get_mut(&matter)
-    {
-        entry.turns.queue.retain(|queued| *queued != thread);
+    if let Ok(matter) = matter_of(actor, thread) {
+        end::release_writer(actor, matter, thread);
     }
     actor.release(StreamId::Thread(thread));
 }
 
-/// The agent's session is attached: step 3, the writer.
+/// The agent's session is attached: step 3, the matter. The turn runs at once beside the
+/// matter's other turns, or waits with `TurnQueued` while an undo, a restore or a relocate
+/// holds the matter; never because of another thread's turn.
 pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let launching = current(actor, thread)
         .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Launching);
@@ -206,16 +205,16 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             .get_mut(&matter)
             .ok_or_else(|| lost("a matter"))?
             .turns;
+        // Its agent was started again at step 4 (the matter moved): it kept its place.
+        if turns.running.contains(&thread) {
+            before_turn(actor, thread, turn);
+            return Ok(());
+        }
         let holder = match turns.holder {
             None => {
-                turns.holder = Some(Holder::Thread(thread));
+                super::together::join(actor, matter, thread);
                 // An agent-started turn shows from now: it has no prompt that would.
                 super::own_turn::log_opened(actor, thread, turn);
-                before_turn(actor, thread, turn);
-                return Ok(());
-            }
-            // Its agent was started again at step 4 (the matter moved): it kept the writer.
-            Some(Holder::Thread(holder)) if holder == thread => {
                 before_turn(actor, thread, turn);
                 return Ok(());
             }
@@ -325,9 +324,12 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             thread,
             kind: JobKind::Before(turn),
         };
-        actor
-            .matter_worker(matter)?
-            .send(MatterJob::BeforeTurn(meta), MatterTag::Turn(job))?;
+        // The papers the turns running beside it named are not outside edits.
+        let running = super::together::named_by_others(actor, matter, thread);
+        actor.matter_worker(matter)?.send(
+            MatterJob::BeforeTurn { meta, running },
+            MatterTag::Turn(job),
+        )?;
         actor.work.matter_jobs += 1;
         Ok(())
     })();

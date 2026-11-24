@@ -103,6 +103,7 @@ impl Current {
             first_update: None,
             withheld: super::withheld::Withheld::default(),
             own: None,
+            overlap: super::together::Overlap::default(),
         }
     }
 
@@ -285,13 +286,13 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 /// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
-/// a reload.
+/// turn runs in it or an undo or a restore holds it, so the turn's next checkpoint reads it
+/// without a reload.
 pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
     actor
         .matters
         .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some())
+        .is_some_and(|entry| entry.turns.holder.is_some() || !entry.turns.running.is_empty())
 }
 
 /// The once-a-turn notes a turn has given, each at most once.

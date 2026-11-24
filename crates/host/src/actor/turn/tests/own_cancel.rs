@@ -4,9 +4,10 @@
 //! no turn of its own until it has been quiet for the late window's [`LATE_QUIET`].
 //!
 //! An agent-started turn never waits in `Launching` itself: its agent being attached keeps the
-//! thread's stream loaded, so step 3 follows at once. Before its checkpoint it waits only for the
-//! matter's writer (`Queued`), which takes the same cancel path as `Launching`. In each phase the
-//! view shows the turn as on its way (`assert_shown`), so the app's Stop is there to press.
+//! thread's stream loaded, so step 3 follows at once. Before its checkpoint it waits only for an
+//! undo, a restore or a relocate holding the matter (`Queued`), which takes the same cancel path as
+//! `Launching`. In each phase the view shows the turn as on its way (`assert_shown`), so the app's
+//! Stop is there to press.
 
 use clauseo_acp::{AcpEvent, Origin};
 use clauseo_protocol::{
@@ -54,7 +55,7 @@ const OWN_LATE_THEN_TWO: &str = r#"{"expect":{"method":"session/prompt","as":"p1
 /// Where the agent-started turn is when the lawyer presses Stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum At {
-    /// Waiting for the matter's writer, before its checkpoint.
+    /// Waiting for another thread's undo to let go of the matter, before its checkpoint.
     Writer,
     /// Its before-turn checkpoint is being made.
     Checkpointing,
@@ -224,7 +225,7 @@ pub(super) fn view_status(rig: &Rig, thread: ThreadId) -> ThreadStatus {
 }
 
 /// The view shows the agent-started turn as on its way in every phase (so the app shows Stop):
-/// `Queued` behind the writer's holder, `Starting` from its open (its `TurnQueued` behind its own
+/// `Queued` behind the undo's thread, `Starting` from its open (its `TurnQueued` behind its own
 /// thread, logged before its checkpoint) and `Running` once live.
 fn assert_shown(rig: &mut Rig, thread: ThreadId, at: At) {
     if at == At::Checkpointing {

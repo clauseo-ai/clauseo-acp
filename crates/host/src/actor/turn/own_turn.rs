@@ -3,7 +3,7 @@
 //! Code background the command and end the prompt). Its updates come with no prompt in flight
 //! (`Origin::Idle`), and agent output outside a turn is never dropped: text and tool calls name a
 //! turn, so the host opens one for them on the same thread. It has no `UserMessage`; otherwise it
-//! is a turn like any other: the matter's writer (taken at once, it logs a `TurnQueued` behind
+//! is a turn like any other: step 3 (passed at once, it logs a `TurnQueued` behind
 //! its own thread, which the view folds to `Starting`: Stop shows from its open, as a prompt's
 //! `UserMessage` does for a prompted turn), the before checkpoint (with the outside edits
 //! since the last turn, as for a prompt), `TurnStarted`, live updates, and steps 6 to 8 with the
@@ -239,7 +239,7 @@ fn hold_event(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> bool {
 
 /// Opens an agent-started turn for the waiting updates when the thread has no turn (none
 /// current, none closing), no late window is open and its agent is attached: step 3 (the
-/// writer) at once, as its agent runs. Nothing opens while the host stops; the updates then go
+/// matter) at once, as its agent runs. Nothing opens while the host stops; the updates then go
 /// with the agent.
 pub(super) fn open_if_idle(actor: &mut Actor, thread: ThreadId) {
     if host_stopping(actor) || late::is_open(actor, thread) {
@@ -304,9 +304,9 @@ pub(super) fn is_own(actor: &mut Actor, thread: ThreadId) -> bool {
     current(actor, thread).is_some_and(|current| current.own.is_some())
 }
 
-/// Step 3 gave the agent-started turn `turn` its writer at once: its `TurnQueued` behind its own
+/// The agent-started turn `turn` passed step 3 at once: its `TurnQueued` behind its own
 /// thread is logged now, before its checkpoint, so the view has it from its open (`Starting`,
-/// and Stop) rather than from its `TurnStarted`. A turn that waits for another thread's writer
+/// and Stop) rather than from its `TurnStarted`. A turn that waits for another thread's undo
 /// logs `TurnQueued` behind that thread instead (`steps.rs`). A prompted turn is left alone: its
 /// `UserMessage` did this.
 pub(super) fn log_opened(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
@@ -467,7 +467,7 @@ pub(super) fn cancelled(actor: &mut Actor, thread: ThreadId) -> bool {
     true
 }
 
-/// A cancel of an agent-started current turn not live yet (launching, waiting for the writer,
+/// A cancel of an agent-started current turn not live yet (launching, waiting at step 3,
 /// checkpointing or starting; the agent runs it already): its late window opens, dropping the
 /// output waiting for it, and the agent gets `session/cancel`. Any other turn is left to the
 /// caller.

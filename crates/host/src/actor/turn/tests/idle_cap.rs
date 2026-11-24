@@ -79,8 +79,8 @@ fn a_third_agent_idle_stops_the_one_idle_longest() {
 fn a_third_agent_starts_past_the_cap_when_both_are_busy() {
     let mut rig = capped("idle-cap-busy", CAP_MIN_IDLE);
     let [first, second, third] = threads(&mut rig);
-    // The first turn is held at its prompt's answer; the second waits for the matter's writer
-    // behind it: two busy agents.
+    // The first turn is held at its prompt's answer; the second runs beside it in the matter:
+    // two busy agents.
     send_prompt(&mut rig, 10, first);
     let answer = |_: &Actor, input: &Input| {
         matches!(

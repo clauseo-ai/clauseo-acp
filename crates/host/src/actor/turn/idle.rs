@@ -251,7 +251,7 @@ pub(super) fn pending(state: &TurnState) -> Option<Pending> {
     if launching {
         return Some(Pending::Launch);
     }
-    // An undo holds the matter's writer; output held for an agent-started turn opens one.
+    // An undo holds the matter; output held for an agent-started turn opens one.
     let turn = state.current.is_some() || state.closing.is_some() || state.undo.is_some();
     if turn || super::own_turn::output_waits(&state.own_held) {
         return Some(Pending::Turn);

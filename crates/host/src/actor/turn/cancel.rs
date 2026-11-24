@@ -348,7 +348,7 @@ pub(super) fn on_cancel_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId)
 /// the agent new since its prompt's listing that started before now, but the session's MCP
 /// servers) is ended off the actor (`agent/leftovers.rs`), if the agent is still attached and
 /// the listing was taken. The cutoff is read here, on the actor, as the turn ends and before it
-/// lets go of the writer, so nothing a later turn starts (a sent-now or requeued prompt starts
+/// leaves its matter, so nothing a later turn starts (a sent-now or requeued prompt starts
 /// right after) is ever ended. The listing is taken once, so a second end of the same turn
 /// sweeps nothing. No sweep while the host stops, nor for an agent being stopped: the stop
 /// kills the agent's group and every descendant listed before it.

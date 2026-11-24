@@ -5,7 +5,7 @@
 //! An undo, a restore and a tracked-changes decision each hold their matter's writer and write
 //! files one by one, so a crash part way leaves some old and some new. Before one is sent to the
 //! matter's thread, [`record`] puts its row in the store's `pending_actions` and waits until it
-//! is durable; when the writer passes on (`end::pass_writer`), [`finished`] deletes it. A put for
+//! is durable; when the matter is let go (`end::pass_writer`), [`finished`] deletes it. A put for
 //! a matter whose delete is still on its way waits for that delete, so the two never cross.
 //! Start-up reads what is left ([`at_start`]), which are the actions the last run did not finish,
 //! keeps them for this run's answer, and deletes them: many clean quits never stop the host (an

@@ -1,20 +1,21 @@
 //! `RelocateMatter` ("Locate folder"): a matter whose folder moved is pointed at the folder the
 //! lawyer picked, once that folder's `.clauseo/matter.json` names the matter.
 //!
-//! Order: the matter must be known and the folder ref registered; the matter's writer must be
-//! free (`matter.turn_running`); then, on the matter's worker, the registry check (the folder is
-//! not, does not hold and is not inside another registered or claimed matter folder:
-//! `matter.folder_is_matter`, `matter.folder_holds_matter`, `matter.folder_inside_matter`, as a
-//! new matter gets them) and `Matter::locate`, which refuses what import refuses for the
-//! place and a folder whose marker is missing, unreadable or names another matter. Only after
-//! `Ok` does one commit carry `MatterRelocated`, the matter's row with the new path and the
-//! receipt. The host's row moves when that commit is durable; a failed commit sends the worker
-//! back to the recorded folder. A refusal stores nothing, so the matter stays as it was.
+//! Order: the matter must be known and the folder ref registered; the matter must be free, no turn
+//! running in it and nothing holding it (`matter.turn_running`); then, on the matter's worker, the
+//! registry check (the folder is not, does not hold and is not inside another registered or claimed
+//! matter folder: `matter.folder_is_matter`, `matter.folder_holds_matter`,
+//! `matter.folder_inside_matter`, as a new matter gets them) and `Matter::locate`, which refuses
+//! what import refuses for the place and a folder whose marker is missing, unreadable or names
+//! another matter. Only after `Ok` does one commit carry `MatterRelocated`, the matter's row with
+//! the new path and the receipt. The host's row moves when that commit is durable; a failed commit
+//! sends the worker back to the recorded folder. A refusal stores nothing, so the matter stays as
+//! it was.
 //!
-//! The relocate holds the matter's writer from its checks until its commit returns or it is
+//! The relocate holds the matter alone from its checks until its commit returns or it is
 //! refused: a turn sent meanwhile queues behind it, and an undo or another relocate is refused
 //! (`matter.turn_running`). A turn whose agent was started in the old folder starts it again in
-//! the new one when it takes the writer (step 4). The picked folder is claimed on the actor
+//! the new one once the relocate lets go (step 4). The picked folder is claimed on the actor
 //! (`Actor::claims`) until the command is answered, so other locates and relinks count it.
 //!
 //! An import of a listed matter's folder that moved (its recorded folder is gone, the picked
@@ -229,8 +230,8 @@ fn commit(
 }
 
 /// The relocate's commit returned: on `Ok` the host's row names the new folder; on a failure
-/// the worker goes back to the recorded folder. Then the writer passes to the next queued turn,
-/// whose agent, if it was started in the old folder, starts again at step 4.
+/// the worker goes back to the recorded folder. Then the turns waiting for it start, each whose
+/// agent was started in the old folder starting it again at step 4.
 pub(super) fn committed(actor: &mut Actor, matter: MatterId, folder: String, durable: bool) {
     if durable {
         if let Some(entry) = actor.matters.get_mut(&matter) {

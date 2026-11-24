@@ -67,15 +67,20 @@ fn changed(log: &[DomainEvent]) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// A turn of a new thread (made by command 2) that takes the free writer at step 4 and writes
+/// A turn of a new thread (made by command 2) that passes step 3 and writes
 /// `name` while its `TurnStarted` commit is in flight; with no agent the prompt then fails at
 /// once and the turn ends with its own after-turn checkpoint.
 fn another_turn_writes(rig: &mut Rig, name: &str) -> (ThreadId, TurnId) {
     let second = rig.thread_by(2);
     let turn = rig.current_turn(second, TurnPhase::Queued);
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
-        Some(crate::actor::turn::Holder::Thread(second));
+    rig.actor
+        .matters
+        .get_mut(&matter)
+        .unwrap()
+        .turns
+        .running
+        .insert(second);
     steps::before_turn(&mut rig.actor, second, turn);
     let started = |actor: &Actor, input: &Input| {
         matches!(input, Input::Committed { ticket, .. }
@@ -159,12 +164,17 @@ fn a_reused_checkpoint_the_log_lost_is_recorded_before_turn_started() {
     let mut rig = Rig::start("turn-reused-unknown", "");
     let (first, first_turn) = lost_after_turn(&mut rig);
 
-    // Another thread's turn takes the free writer; R8 reuses the lost checkpoint at step 4.
+    // Another thread's turn runs; R8 reuses the lost checkpoint at step 4.
     let second = rig.thread_by(2);
     let turn = rig.current_turn(second, TurnPhase::Queued);
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
-        Some(crate::actor::turn::Holder::Thread(second));
+    rig.actor
+        .matters
+        .get_mut(&matter)
+        .unwrap()
+        .turns
+        .running
+        .insert(second);
     steps::before_turn(&mut rig.actor, second, turn);
     // With no agent the prompt fails at once and the turn ends.
     until_ended(&mut rig, second);
@@ -202,7 +212,7 @@ fn a_reused_checkpoint_the_log_lost_is_recorded_before_turn_started() {
 fn the_repair_takes_the_turns_own_checkpoint_after_another_threads_turn() {
     let mut rig = Rig::start("turn-repair-own-after", "");
     let (first, first_turn) = lost_after_turn(&mut rig);
-    // The writer is free: another thread's turn in the matter changes notes.txt.
+    // Another thread's turn in the matter changes notes.txt.
     let (second, second_turn) = another_turn_writes(&mut rig, "notes.txt");
     let recorded = rig.recorded();
     let own = recorded

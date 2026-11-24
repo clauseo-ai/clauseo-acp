@@ -1,5 +1,5 @@
 //! Start-up repair of an agent-started turn the host stopped before it started: its
-//! `TurnQueued` (behind its own thread as it opened, or behind another thread's writer) is
+//! `TurnQueued` (behind its own thread as it opened, or behind another thread's undo) is
 //! durable, but no `TurnStarted` or `TurnEnded` is, so the view would show it `Starting` (or
 //! `Queued`) forever. It has no prompt to queue again, and the agent that ran it is gone, so
 //! start-up reconciliation (`reconcile.rs`) ends it `Cancelled` before it started: no step, and

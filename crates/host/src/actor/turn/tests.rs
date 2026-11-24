@@ -47,6 +47,7 @@ mod start_races;
 mod start_timeout;
 mod sweep;
 mod title_window;
+mod together;
 mod tools_live;
 mod tools_prompt;
 mod undo;

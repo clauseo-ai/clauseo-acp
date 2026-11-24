@@ -44,7 +44,7 @@ impl Kind {
             MatterJob::Import { .. } => Self::Import,
             MatterJob::Open { .. } => Self::Open,
             MatterJob::Locate { .. } => Self::Locate,
-            MatterJob::BeforeTurn(_) => Self::BeforeTurn,
+            MatterJob::BeforeTurn { .. } => Self::BeforeTurn,
             MatterJob::AfterTurn { .. } => Self::AfterTurn,
             MatterJob::Repair { .. } => Self::Repair,
             MatterJob::Undo(_) => Self::Undo,

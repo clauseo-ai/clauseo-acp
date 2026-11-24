@@ -132,6 +132,7 @@ bundled! {
         "tool-calls",
         "unknown-update",
         "usage",
+        "write-then-wait",
     ],
     common: ["claude-handshake", "codex-handshake", "handshake"],
 }
