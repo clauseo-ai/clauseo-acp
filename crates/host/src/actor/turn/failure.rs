@@ -113,6 +113,13 @@ pub(super) fn closing_sent(
         retried: false,
     });
     if failed.is_some() && !blocked(actor, thread) {
+        // A helper end the refused send held is open again for the retry. Only with no commit
+        // of the thread in flight: the view may then lack an end still on its way, which a
+        // reopen would write twice; such a helper is left to the load-time ending
+        // (`helpers::settle_loaded`).
+        if !actor.pipeline.in_flight(StreamId::Thread(thread)) {
+            super::helpers::reopen_from_view(actor, thread);
+        }
         retry_closing(actor, thread);
     }
 }
@@ -129,6 +136,7 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         .map(|closing| closing.close);
     if let Some(close) = closed {
         close.log_end(thread);
+        super::helpers::ends_durable(actor, thread);
         let stop = close.stop;
         // A stop at the limit decided while this end was not durable is logged now.
         limits::retry_stops(actor, thread, false);

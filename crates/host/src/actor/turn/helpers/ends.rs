@@ -2,7 +2,9 @@
 //! itself, a failure, the agent gone), a detach, a failed write's retry, and a past run's
 //! helpers left open in the log (`helpers.rs` for the rest).
 
-use clauseo_protocol::{HelperId, HelperOutcome, StopReason, StreamId, ThreadId, ViewEntry};
+use clauseo_protocol::{
+    HelperId, HelperOutcome, StopReason, StreamId, TextOrBlob, ThreadId, ViewEntry,
+};
 use clauseo_reducer::ThreadState;
 
 use super::super::super::Actor;
@@ -15,7 +17,8 @@ use crate::error::Error;
 use crate::log_file::Cause;
 
 /// Pushes `HelperEnded { outcome }` for every open helper of the thread into `out`, and closes
-/// them.
+/// them. A helper whose own end (its handback, with its report) a failed write lost gets that
+/// end again instead.
 fn end_open(
     actor: &mut Actor,
     thread: ThreadId,
@@ -25,22 +28,31 @@ fn end_open(
     let Some(helpers) = existing(actor, thread) else {
         return Ok(());
     };
-    let mut ended: Vec<HelperId> = Vec::new();
+    let mut ended: Vec<(HelperId, HelperOutcome, Option<String>)> = Vec::new();
     for known in helpers.known.values_mut().filter(|known| known.open) {
         known.open = false;
-        ended.push(known.id);
+        let (outcome, summary) = helpers
+            .sent_ends
+            .remove(&known.id)
+            .unwrap_or((outcome, None));
+        ended.push((known.id, outcome, summary));
     }
     // In start order, so the log reads as the helpers ran.
-    ended.sort_unstable();
-    for helper in ended {
-        out.push(actor, build::helper_ended(helper, outcome, None).value)?;
+    ended.sort_unstable_by_key(|(helper, _, _)| *helper);
+    for (helper, outcome, summary) in ended {
+        let summary = summary.map(TextOrBlob::Inline);
+        let built = build::helper_ended(helper, outcome, summary);
+        out.push(actor, built.value)?;
+        out.draft.blobs(built.blobs);
     }
     Ok(())
 }
 
 /// The thread's stream drained after a failed write (`failure.rs`): a helper this run marked
 /// ended is open again when the log does not hold its end, so the retried cancel or close ends
-/// it. Reads the view only for a thread that has helpers.
+/// it (with the end it had sent, when it was its own). An own end the log holds is forgotten.
+/// Reads the view only for a thread that has helpers. The caller makes sure no commit of the
+/// thread is in flight, so the view is the log.
 pub(in crate::actor::turn) fn reopen_from_view(actor: &mut Actor, thread: ThreadId) {
     if existing(actor, thread).is_none() {
         return;
@@ -58,6 +70,7 @@ pub(in crate::actor::turn) fn reopen_from_view(actor: &mut Actor, thread: Thread
             known.open = true;
         }
     }
+    helpers.sent_ends.retain(|helper, _| open.contains(helper));
 }
 
 /// The helpers `state` holds started and not ended.
@@ -112,6 +125,9 @@ pub(in crate::actor::turn) fn on_close(
     if matches!(close.expiries, Expiries::Listed { .. }) {
         return end_logged_open(actor, thread, out);
     }
+    if existing(actor, thread).is_none() {
+        return Ok(());
+    }
     let turn = close.turn;
     // Only the close of the turn the log has running closes helpers: a queued turn removed, or
     // one that never started, leaves another turn's helpers as they are. Read from the view, so
@@ -120,9 +136,6 @@ pub(in crate::actor::turn) fn on_close(
         .loaded(StreamId::Thread(thread))
         .and_then(|loaded| loaded.state.as_thread())
         .is_some_and(|state| state.running() == Some(turn));
-    if existing(actor, thread).is_none() {
-        return Ok(());
-    }
     // The engine gone (its detach, or a failure: the agent exited, the connection was lost)
     // and a cancel stop every open helper, whoever cut the turn short.
     let stopped =
@@ -182,7 +195,7 @@ pub(crate) fn settle_loaded(actor: &mut Actor, thread: ThreadId) {
         out.send(actor, Then::Nothing)
     });
     if let Err(error) = sent {
-        tracing::warn!(%thread, error = %Cause(&error), "open helpers of a past run were not ended");
+        tracing::warn!(%thread, error = %Cause(&error), "a past run's helpers were not ended");
     }
 }
 
