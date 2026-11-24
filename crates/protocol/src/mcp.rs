@@ -54,8 +54,8 @@ impl McpControl {
 pub enum McpServerKind {
     /// A program on this computer, started with its arguments, speaking MCP on stdio.
     Local,
-    /// A server at an `https` URL (or `http` on this computer only), with headers. Stored and
-    /// shown; not sent to a session in this version.
+    /// A server at an `https` URL (or `http` on this computer only), with headers. Sent to a
+    /// session whose agent advertises `mcpCapabilities.http`; left out, logged, for any other.
     Remote,
 }
 

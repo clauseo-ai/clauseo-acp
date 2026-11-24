@@ -28,9 +28,13 @@ pub(super) mod hint;
 mod jobs;
 mod limits;
 mod pay_link;
+mod publish;
 mod recharged;
 pub(super) mod recheck;
 mod watch;
+
+pub(super) use publish::current;
+use publish::publish;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,7 +43,7 @@ use std::time::Duration;
 use clauseo_connectors::{CASE_LAW, CancelFlag, ConnectorHandle, CredentialStatus, PayUrl};
 use clauseo_protocol::{
     CommandId, CommandOutcome, ConnectorCommand, ConnectorsState, ErrorCode, HostCommand,
-    HostEvent, RechargeOutcome,
+    RechargeOutcome,
 };
 
 use super::Actor;
@@ -337,7 +341,7 @@ fn wired(actor: &Actor) -> Result<&Wired, Error> {
 
 /// Starts `job` off the actor; a failed start gives the read slot back.
 fn spawn(actor: &mut Actor, command: Option<CommandId>, job: Job) -> Result<(), Error> {
-    let slot = matches!(job, Job::Check { slot: true } | Job::Read);
+    let slot = job.holds_slot();
     let recharged = matches!(job, Job::Recharged);
     let wired = wired(actor)?;
     let reach = Reach {
@@ -426,8 +430,8 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
             tracing::warn!(error = %crate::log_file::Cause(&error), "the connector's state was not read");
         }
     }
-    if finished.recheck || matches!(finished.change, Change::NoLiveness) {
-        recheck::ended(actor);
+    if let Some(kind) = finished.recheck {
+        recheck::ended(actor, kind);
     }
     let connectors = &mut actor.connectors;
     if finished.slot {
@@ -558,26 +562,6 @@ fn note_persist(actor: &mut Actor) {
     }
 }
 
-/// The state as the app sees it now, if connectors are wired.
-fn view(actor: &Actor) -> Option<ConnectorsState> {
-    actor.connectors.wired.as_ref()?;
-    let available = actor.effective.settings().tools.connectors;
-    let locked = actor.effective.is_locked("tools.connectors");
-    Some(actor.connectors.state.view(&CASE_LAW, available, locked))
-}
-
-/// Sends the state to every app subscriber when it changed since the last one sent, and
-/// `AddonsChanged` when case law's status in the skills and tools list moved.
-fn publish(actor: &mut Actor) {
-    if let Some(state) = view(actor)
-        && actor.connectors.published.as_ref() != Some(&state)
-    {
-        actor.connectors.published = Some(state.clone());
-        super::app::publish(actor, &HostEvent::ConnectorsChanged(state));
-    }
-    recheck::changed(actor);
-}
-
 /// `tools.connectors` changed: off ends the credential for the work in flight (a key being
 /// checked stores nothing), cancels a sign-in in flight and ends the recharge watch (no more
 /// polling) with its pay link and the last recharge's outcome; either way the state goes out.
@@ -590,11 +574,6 @@ pub(super) fn switch_changed(actor: &mut Actor) {
         actor.connectors.state.last_recharge = None;
     }
     publish(actor);
-}
-
-/// The app catch-up's part: the whole state, when connectors are wired.
-pub(super) fn current(actor: &Actor) -> Option<HostEvent> {
-    view(actor).map(HostEvent::ConnectorsChanged)
 }
 
 /// Shutdown: the sign-in and the recharge watch are cancelled; their threads post to nobody.

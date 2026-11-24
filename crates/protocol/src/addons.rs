@@ -137,9 +137,19 @@ pub enum AddonStatus {
     Blocked,
     /// A tool's saved key or header value is missing.
     NeedsSecret,
-    /// It needs setting up first: case law is reachable but not connected yet.
+    /// It needs setting up first: case law is offered (or not checked yet) but not connected,
+    /// or its last sign-in failed.
     NeedsSetup,
-    /// Case law is not set up, and Clauseo could not reach it (offline, a proxy, or no check
-    /// has succeeded yet). Reading the list again starts a new check, at most every 30 s.
+    /// Case law is not set up, and Clauseo had no answer from it (offline, a proxy, a timeout or
+    /// a server error). Reading the list again starts a new check, at most every 30 s.
     Unreachable,
+    /// Case law's sign-in is under way in the browser.
+    SigningIn,
+    /// Case law was signed out, or its key was revoked: it needs signing in again.
+    SignedOut,
+    /// Case law is signed in but out of credit (the figures are on `connectors_changed`).
+    NeedsCredit,
+    /// Case law answered but is not offered yet (a preview price list), or this install has no
+    /// data connectors. Reading the list again checks again, at most every 30 s.
+    NotOffered,
 }

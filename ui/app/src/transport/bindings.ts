@@ -408,13 +408,27 @@ export type AddonStatus =
 "blocked" | 
 /**  A tool's saved key or header value is missing. */
 "needs_secret" | 
-/**  It needs setting up first: case law is reachable but not connected yet. */
+/**
+ *  It needs setting up first: case law is offered (or not checked yet) but not connected,
+ *  or its last sign-in failed.
+ */
 "needs_setup" | 
 /**
- *  Case law is not set up, and Clauseo could not reach it (offline, a proxy, or no check
- *  has succeeded yet). Reading the list again starts a new check, at most every 30 s.
+ *  Case law is not set up, and Clauseo had no answer from it (offline, a proxy, a timeout or
+ *  a server error). Reading the list again starts a new check, at most every 30 s.
  */
-"unreachable";
+"unreachable" | 
+/**  Case law's sign-in is under way in the browser. */
+"signing_in" | 
+/**  Case law was signed out, or its key was revoked: it needs signing in again. */
+"signed_out" | 
+/**  Case law is signed in but out of credit (the figures are on `connectors_changed`). */
+"needs_credit" | 
+/**
+ *  Case law answered but is not offered yet (a preview price list), or this install has no
+ *  data connectors. Reading the list again checks again, at most every 30 s.
+ */
+"not_offered";
 
 /**  The agent's stable ACP v1 capabilities, plus Clauseo's steering capability. */
 export type AgentCapabilities = {
@@ -4499,8 +4513,8 @@ export type McpServerKind =
 /**  A program on this computer, started with its arguments, speaking MCP on stdio. */
 "local" | 
 /**
- *  A server at an `https` URL (or `http` on this computer only), with headers. Stored and
- *  shown; not sent to a session in this version.
+ *  A server at an `https` URL (or `http` on this computer only), with headers. Sent to a
+ *  session whose agent advertises `mcpCapabilities.http`; left out, logged, for any other.
  */
 "remote";
 

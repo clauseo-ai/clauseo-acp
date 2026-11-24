@@ -113,16 +113,32 @@ impl CaseLaw {
     }
 
     /// Case law's status in the skills and tools list (`ListAddons`), which lists it whatever
-    /// the liveness check says: signed in (added and usable) is `ready`; else live, so it can
-    /// be added, is `needs_setup`; else (the check failed, found it not offered, or has not
-    /// answered yet) `unreachable`.
+    /// the liveness check says. In order: signing in; signed out or revoked (before liveness);
+    /// signed in, out of credit or usable; a last sign-in that failed is `needs_setup`; then by
+    /// the check: not made yet or offered is `needs_setup`, answered but not offered (a preview
+    /// price list) `not_offered`, no answer (`Liveness::failed`) `unreachable`.
     pub(crate) fn addon_status(&self) -> AddonStatus {
-        if self.signed_in() {
-            AddonStatus::Ready
-        } else if self.live() {
-            AddonStatus::NeedsSetup
-        } else {
-            AddonStatus::Unreachable
+        if self.signing_in {
+            return AddonStatus::SigningIn;
+        }
+        match self.credential {
+            Some(CredentialStatus::SignedOut | CredentialStatus::KeyRevoked) => {
+                return AddonStatus::SignedOut;
+            }
+            Some(CredentialStatus::SignedIn(_)) if self.out_of_credit.is_some() => {
+                return AddonStatus::NeedsCredit;
+            }
+            Some(CredentialStatus::SignedIn(_)) => return AddonStatus::Ready,
+            None | Some(CredentialStatus::NotAdded) => {}
+        }
+        if self.error.is_some() {
+            return AddonStatus::NeedsSetup;
+        }
+        match &self.liveness {
+            None => AddonStatus::NeedsSetup,
+            Some(liveness) if liveness.live => AddonStatus::NeedsSetup,
+            Some(liveness) if liveness.pricing.is_some() => AddonStatus::NotOffered,
+            Some(_) => AddonStatus::Unreachable,
         }
     }
 

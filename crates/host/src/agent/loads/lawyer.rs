@@ -6,8 +6,8 @@
 //!   cover it). The built-ins (`browser`, `case-law`) are not decided here.
 //! - The enabled servers go in name order: a local one as a stdio server, a remote one as ACP's
 //!   http server (`McpServer::Http`) with its headers. `clauseo-acp` sends a remote one only to
-//!   an agent whose `initialize` said `mcpCapabilities.http` (claude-agent-acp 0.89.1 and
-//!   codex-acp 2.2.2 both do) and leaves it out, logged by name, for any other.
+//!   an agent whose `initialize` said `mcpCapabilities.http` (claude-agent-acp and codex-acp
+//!   both advertise it) and leaves it out, logged by name, for any other.
 //! - A server's `command` is what the lawyer typed, a bare name (`npx`) or an absolute path; the
 //!   launch-prep thread resolves it ([`Resolve`], the same search a save makes) and the session
 //!   gets the resolved path. A command not found leaves its server out, with its name logged.
