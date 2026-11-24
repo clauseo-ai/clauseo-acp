@@ -56,7 +56,7 @@ fn notified(task: &str, launch: &str, status: &str) -> Value {
         "uuid": "u-3", "session_id": "s-1"})
 }
 
-/// Claude Code's `init` frame, which the same filter lets through.
+/// Claude Code's `init` frame, which Clauseo does not ask for; should it come, it gives nothing.
 fn init() -> Value {
     json!({"type": "system", "subtype": "init", "cwd": "/matters/lease", "session_id": "s-1",
         "tools": ["Read"], "model": "claude-sonnet", "uuid": "u-0"})
