@@ -2,12 +2,12 @@
 // stand-ins until that binding): the working line for a stop, a newer message sent first, and the answer it was for
 // stopping, each with the words back in the box; and the queue's line for a copy the host marks as waiting for an
 // update or a sign-in (copy_of). The real room over the parallel answers' host (registry-uc-parallel.tsx).
-import { userMessage, uuid } from "../testing/stream-script.ts";
-import type { ViewEntry } from "../transport/protocol.ts";
-import type { Entry } from "./entry.ts";
-import { later, stoppedHost } from "./registry-uc-parallel.tsx";
-import { RoomOver } from "./states.tsx";
-import { matterWords } from "./words.ts";
+import { userMessage, uuid } from "../../testing/stream-script.ts";
+import type { ViewEntry } from "../../transport/protocol.ts";
+import type { Entry } from "../entry.ts";
+import { later, stoppedHost } from "../parallel-hosts.ts";
+import { RoomOver } from "../states.tsx";
+import { matterWords } from "../words.ts";
 
 const ended = (status: string, cause: string) => () => (
   <RoomOver host={() => stoppedHost(later(status, cause))} />
@@ -30,7 +30,7 @@ const held = (cause: "update" | "sign_in") => () => (
   <RoomOver host={() => stoppedHost(later("removed", cause), [copy(cause)])} />
 );
 
-export const UC_UNSENT_CAUSE: Entry[] = [
+const UC_UNSENT_CAUSE: Entry[] = [
   {
     id: "UC-1296",
     words: matterWords("Not sent, because you stopped it."),
@@ -64,3 +64,5 @@ export const UC_UNSENT_CAUSE: Entry[] = [
     render: held("sign_in"),
   },
 ];
+
+export default UC_UNSENT_CAUSE;
