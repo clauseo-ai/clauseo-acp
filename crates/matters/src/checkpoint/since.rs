@@ -30,6 +30,14 @@ pub struct Overlap<'a> {
     /// only while it still holds that content: changed since, the lawyer may have edited it, and
     /// it is kept, flagged unless this turn wrote it.
     pub left: &'a BTreeMap<MatterPath, Option<ContentId>>,
+    /// Each paper answers that ended with no card named (their after-turn checkpoint failed),
+    /// with their threads. A change to one is never left out: their work is on no other card, so
+    /// it stays here, flagged unless this turn wrote it, naming them in `also_changed_by`.
+    pub failed: &'a BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    /// Every paper this turn's own tool calls named, whatever their status, and its shell
+    /// commands wrote. A change to one is never left out, even flagged (a call that did not
+    /// complete, or still runs): kept with `also_changed_by` when another answer named it too.
+    pub own: &'a BTreeSet<MatterPath>,
 }
 
 /// The folder as an after-turn checkpoint's walk found it.
@@ -50,8 +58,7 @@ pub(super) struct Report<'a> {
     /// The changes since the turn's own start; `None` when that is the last checkpoint, so they
     /// are the diff from it.
     since: Option<Vec<FileChange>>,
-    others: &'a BTreeMap<MatterPath, BTreeSet<ThreadId>>,
-    left: &'a BTreeMap<MatterPath, Option<ContentId>>,
+    overlap: Overlap<'a>,
 }
 
 impl Report<'_> {
@@ -82,10 +89,7 @@ impl Report<'_> {
         from_last: Vec<FileChange>,
     ) -> (Vec<FileChange>, Vec<MatterPath>) {
         match report {
-            Some(report) => {
-                let changes = report.since.unwrap_or(from_last);
-                left_out(changes, report.others, report.left)
-            }
+            Some(report) => left_out(report.since.unwrap_or(from_last), &report.overlap),
             None => (from_last, Vec::new()),
         }
     }
@@ -112,8 +116,7 @@ pub(super) fn report<'a>(
     };
     Ok(Some(Report {
         since,
-        others: overlap.others,
-        left: overlap.left,
+        overlap: *overlap,
     }))
 }
 
@@ -213,14 +216,15 @@ fn changes_since(
 }
 
 /// `changes` (flagged) without the ones another overlapping answer made, and the papers left
-/// out (both paths of a rename), sorted. A change to a paper (for a rename: either path) in
-/// `others` is kept with those threads in `also_changed_by` when this turn wrote it. When it did
-/// not (it is flagged), it is left out, unless a paper only answers that have ended named
-/// (`left`) no longer holds what their card left it with: then it is kept, flagged, as well.
+/// out (both paths of a rename), sorted. A change to a paper (for a rename: either path) another
+/// answer named (`others`, `failed`) is kept with those threads in `also_changed_by` when this
+/// turn wrote it. When it did not (it is flagged), it is left out, unless this turn's tool calls
+/// named it after all (`own`), an answer with no card named it (`failed`), or a paper only
+/// answers that have ended named (`left`) no longer holds what their card left it with: then it
+/// is kept, flagged, as well.
 pub(super) fn left_out(
     changes: Vec<FileChange>,
-    others: &BTreeMap<MatterPath, BTreeSet<ThreadId>>,
-    left: &BTreeMap<MatterPath, Option<ContentId>>,
+    overlap: &Overlap<'_>,
 ) -> (Vec<FileChange>, Vec<MatterPath>) {
     let mut dropped = BTreeSet::new();
     let kept = changes
@@ -234,24 +238,31 @@ pub(super) fn left_out(
                 | ChangeKind::Unknown { .. } => None,
             };
             // Each path with what the folder holds there now: a rename's old path holds nothing.
-            let now = [(change.path(), change.after())]
+            let now: Vec<(&MatterPath, Option<&ContentId>)> = [(change.path(), change.after())]
                 .into_iter()
-                .chain(from.map(|from| (from, None)));
-            let named: Vec<(&MatterPath, Option<&ContentId>)> =
-                now.filter(|(path, _)| others.contains_key(*path)).collect();
-            let threads: BTreeSet<ThreadId> = named
+                .chain(from.map(|from| (from, None)))
+                .collect();
+            let threads: BTreeSet<ThreadId> = now
                 .iter()
-                .filter_map(|(path, _)| others.get(*path))
+                .flat_map(|(path, _)| [overlap.others.get(*path), overlap.failed.get(*path)])
+                .flatten()
                 .flatten()
                 .copied()
                 .collect();
             if threads.is_empty() {
                 return Some(change);
             }
-            let unchanged = named
+            let kept = now
                 .iter()
-                .all(|(path, now)| left.get(*path).is_none_or(|was| was.as_ref() == *now));
-            if change.may_include_lawyer_edits() && unchanged {
+                .any(|(path, _)| overlap.own.contains(*path) || overlap.failed.contains_key(*path));
+            let unchanged = now
+                .iter()
+                .filter(|(path, _)| overlap.others.contains_key(*path))
+                .all(|(path, now)| {
+                    let left = overlap.left.get(*path);
+                    left.is_none_or(|was| was.as_ref() == *now)
+                });
+            if change.may_include_lawyer_edits() && !kept && unchanged {
                 dropped.insert(change.path().clone());
                 dropped.extend(from.cloned());
                 return None;

@@ -107,7 +107,8 @@ pub(super) fn repair(
         return reused(matter, before, entry, Vec::new(), false);
     }
     let checkpoint = matter.after_turn_named(meta, tool_paths, commands, overlap)?;
-    turn_checkpoint(matter, checkpoint, before)
+    // Measured from its own start, a reused id's changes from `before` are not added.
+    turn_checkpoint(matter, checkpoint, before.filter(|_| overlap.is_none()))
 }
 
 /// A checkpoint the repair takes from the timeline, answered as R8 answers a reused id, with

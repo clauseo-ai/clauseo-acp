@@ -145,7 +145,8 @@ pub(super) fn carded(actor: &mut Actor, thread: ThreadId, close: &TurnClose) {
 
 /// `thread`'s turn ends: each turn running beside it in `matter` keeps the papers its card
 /// credits, or, when it has no card (its after-turn checkpoint or that checkpoint's events
-/// failed), its tool calls' places, so they land on neither turn's card.
+/// failed), its tool calls' places: those papers stay on that turn's card, naming it, since
+/// they are on no other.
 pub(super) fn ended(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
     let Some(own) = current(actor, thread) else {
         return;
@@ -187,15 +188,15 @@ pub(super) fn overlap_of(
     matter: MatterId,
     thread: ThreadId,
 ) -> Option<Box<TurnOverlap>> {
-    let mut running = running_beside(actor, matter, thread);
+    let running = running_beside(actor, matter, thread);
     let own = current(actor, thread)?;
     if own.overlap.beside.is_empty() {
         return None;
     }
-    running.extend(own.overlap.failed.iter().cloned());
     Some(Box::new(TurnOverlap {
         since: own.checkpoint_before?,
         running,
+        failed: own.overlap.failed.clone(),
         ended: own.overlap.ended.clone(),
     }))
 }
@@ -238,7 +239,10 @@ pub(super) fn named_by_others(actor: &Actor, matter: MatterId, thread: ThreadId)
         .filter(|other| **other != thread)
         .filter_map(|other| actor.threads.get(other)?.turn.current.as_deref())
         .filter(|current| current.overlap.after.is_none())
-        .map(|current| current.tool_paths.clone())
+        .map(|current| {
+            let paths = current.overlap.ending.as_ref();
+            paths.unwrap_or(&current.tool_paths).clone()
+        })
         .collect()
 }
 
@@ -247,6 +251,7 @@ pub(super) fn named_by_others(actor: &Actor, matter: MatterId, thread: ThreadId)
 pub(super) fn log_overlap(thread: ThreadId, overlap: &Overlap) {
     if !overlap.beside.is_empty() {
         let (beside, credited) = (overlap.beside.len(), overlap.ended.len());
-        tracing::info!(target: LIFECYCLE, %thread, beside, credited, "a turn ran beside others of its matter");
+        let message = "a turn ran beside others of its matter";
+        tracing::info!(target: LIFECYCLE, %thread, beside, credited, "{message}");
     }
 }

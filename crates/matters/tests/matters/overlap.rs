@@ -44,6 +44,13 @@ fn after_a(
     after_a_left(matter, n, named, since, others, &BTreeMap::new())
 }
 
+/// The sets of an [`Overlap`] past `others` and `left`, empty unless a test sets them.
+#[derive(Default)]
+struct Kept {
+    failed: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    own: BTreeSet<MatterPath>,
+}
+
 /// [`after_a`], with the papers of `others` only answers that have ended named, and what their
 /// cards left them with.
 fn after_a_left(
@@ -54,10 +61,24 @@ fn after_a_left(
     others: &BTreeMap<MatterPath, BTreeSet<ThreadId>>,
     left: &BTreeMap<MatterPath, Option<ContentId>>,
 ) -> clauseo_matters::Checkpoint {
+    after_a_kept(matter, (n, since), named, others, left, &Kept::default())
+}
+
+/// [`after_a_left`] (`n` and `since` together), with `kept`'s sets.
+fn after_a_kept(
+    matter: &mut Matter,
+    (n, since): (u64, u64),
+    named: &[&str],
+    others: &BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    left: &BTreeMap<MatterPath, Option<ContentId>>,
+    kept: &Kept,
+) -> clauseo_matters::Checkpoint {
     let overlap = Overlap {
         since: cid(since),
         others,
         left,
+        failed: &kept.failed,
+        own: &kept.own,
     };
     matter
         .after_turn_named(&meta(n), &tools(named), &BTreeSet::new(), Some(&overlap))
@@ -81,10 +102,13 @@ fn from_the_last_checkpoint_with_no_others_is_as_without() {
         let named = tools(&["a.docx", "new.docx"]);
         let empty = BTreeMap::new();
         let left = BTreeMap::new();
+        let kept = Kept::default();
         let overlap = Overlap {
             since: cid(2),
             others: &empty,
             left: &left,
+            failed: &kept.failed,
+            own: &kept.own,
         };
         matter
             .after_turn_named(
@@ -250,4 +274,54 @@ fn a_reused_checkpoint_reports_changes_since_the_turns_start() {
     // Without the overlap, the same reused checkpoint reports nothing.
     let without = matter.after_turn(&meta(5), &tools(&["a.docx"])).unwrap();
     assert_eq!(without.changes, Vec::<FileChange>::new());
+}
+
+/// B ended with no card (its after-turn checkpoint failed) having written b.docx: the change is
+/// never left out of A's card, flagged since A did not write it, naming B; `beside` is empty.
+#[test]
+fn a_paper_of_an_answer_with_no_card_is_kept_flagged() {
+    let fx = Fixture::new("overlap-failed");
+    fx.write("keep.docx", "kept");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    matter.before_turn(&meta_b(3)).unwrap();
+    fx.write("b.docx", "B's");
+    let kept = Kept {
+        failed: by_b(&["b.docx"]),
+        own: BTreeSet::new(),
+    };
+    let none = BTreeMap::new();
+    let checkpoint = after_a_kept(&mut matter, (4, 1), &[], &none, &BTreeMap::new(), &kept);
+    assert_eq!(checkpoint.beside, Vec::<MatterPath>::new());
+    assert_eq!(
+        created(checkpoint, 4),
+        [added("b.docx", b"B's")
+            .with_lawyer_edits()
+            .with_also_changed_by(vec![other()])]
+    );
+}
+
+/// A's own tool call named x.docx but did not complete, so the change is flagged; B named it
+/// too. It is A's still: kept, flagged, naming B, not left out.
+#[test]
+fn a_paper_this_answer_named_without_completing_is_kept() {
+    let fx = Fixture::new("overlap-own-named");
+    fx.write("x.docx", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    matter.before_turn(&meta_b(3)).unwrap();
+    fx.write("x.docx", "two");
+    let kept = Kept {
+        failed: BTreeMap::new(),
+        own: BTreeSet::from([path("x.docx")]),
+    };
+    let others = by_b(&["x.docx"]);
+    let checkpoint = after_a_kept(&mut matter, (4, 1), &[], &others, &BTreeMap::new(), &kept);
+    assert_eq!(checkpoint.beside, Vec::<MatterPath>::new());
+    assert_eq!(
+        created(checkpoint, 4),
+        [modified("x.docx", b"one", b"two")
+            .with_lawyer_edits()
+            .with_also_changed_by(vec![other()])]
+    );
 }

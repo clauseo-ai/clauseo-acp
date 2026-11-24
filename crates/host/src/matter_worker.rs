@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe, Overlap,
+    Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe,
     PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta, UndoRequest,
     Undone, matter_path_of_resolved,
 };
@@ -476,19 +476,15 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             overlap,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
-            let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
             let others = overlap
                 .as_deref()
-                .map(|o| beside::others(matter.folder(), o));
-            let overlap = overlap.as_deref().zip(others.as_ref());
-            let overlap = overlap.map(|(o, others)| Overlap {
-                since: o.since,
-                others: &others.others,
-                left: &others.left,
-            });
+                .map(|o| beside::others(matter.folder(), o, &tool_paths));
+            let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
+            let overlap = others.as_ref().map(beside::Beside::overlap);
             let checkpoint =
                 matter.after_turn_named(&meta, &tool_paths, &commands, overlap.as_ref())?;
-            turn_checkpoint(matter, checkpoint, before)
+            // Measured from its own start, a reused id's changes from `before` are not added.
+            turn_checkpoint(matter, checkpoint, before.filter(|_| overlap.is_none()))
         })),
         MatterJob::Repair {
             meta,
@@ -500,12 +496,8 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             tool_paths.resolve_start();
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
             let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
-            let others = beside::of_open(matter.folder(), before, others);
-            let overlap = others.as_ref().map(|(since, others)| Overlap {
-                since: *since,
-                others: &others.others,
-                left: &others.left,
-            });
+            let others = beside::of_open(matter.folder(), before, others, &tool_paths);
+            let overlap = others.as_ref().map(beside::Beside::overlap);
             repair(matter, &meta, &named, before, last, overlap.as_ref())
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
