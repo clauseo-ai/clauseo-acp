@@ -3,8 +3,14 @@
 import type { PermissionStepRow } from "@clauseo/components/clauseo/first-launch/permissions.tsx";
 import type { PermissionId, PermissionRow } from "./permissions-host.ts";
 
+type Listed = PermissionStepRow["id"];
+
 /** The Mac's order: the Documents folder, then the keychain; Windows' one row after. */
-const ORDER: readonly PermissionId[] = ["files_documents", "keychain", "controlled_folder_access"];
+const ORDER: readonly Listed[] = ["files_documents", "keychain", "controlled_folder_access"];
+
+/** A row `permissions` lists; the pick-time ids (files_desktop and the rest) never are. */
+const listed = (row: PermissionRow): row is PermissionRow & { id: Listed } =>
+  (ORDER as readonly PermissionId[]).includes(row.id);
 
 /** Not asked yet: a Mac row before its ask, and a keychain row whose silent check couldn't tell ("unknown"), which an
  * Allow settles. Windows' "unknown" is a block that can't be read, not a question. */
@@ -19,7 +25,7 @@ export function stepRows(
   waiting: PermissionId | null,
   failed: PermissionId | null,
 ): PermissionStepRow[] {
-  const sorted = [...rows].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+  const sorted = rows.filter(listed).sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
   let turn = false;
   return sorted.map((row) => {
     const given = {
