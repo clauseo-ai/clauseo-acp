@@ -92,6 +92,7 @@ pub(in super::super) fn launch_now(
         auto: session::Auto::default(),
         claude_home,
         mcp_sent: (!unprotected).then(Vec::new),
+        mcp_told: std::collections::BTreeSet::new(),
         plan_notes,
         fence_vars,
         denied_data_folder: 0,

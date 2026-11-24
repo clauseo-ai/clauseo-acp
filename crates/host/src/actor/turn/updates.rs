@@ -26,6 +26,7 @@ use crate::rate::{Admitted, RatedUpdate};
 pub(super) mod gave_up;
 pub(super) mod guard_blocks;
 mod guard_failed;
+mod mcp_notice;
 mod script_failed;
 mod title;
 mod tools;
@@ -48,7 +49,7 @@ pub(super) fn agent(actor: &mut Actor, thread: ThreadId) -> Option<&mut Agent> {
 }
 
 /// One event from `thread`'s agent, through the session's rate cap.
-pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>) {
+pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEvent>) {
     // A Codex helper's launch, report and end come only on a connection with
     // `ConnectOptions::helper_sessions`, which no launch sets yet; the host's helper cards take
     // them. Until then they are dropped here.
@@ -57,6 +58,19 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
     | AcpEvent::HelperEnded { .. } = *event
     {
         return;
+    }
+    // A server that did not start: the host.log line, then the lawyer's notice once per server.
+    if let AcpEvent::Warning {
+        session: Some(session),
+        warning: warning @ ProtocolWarning::McpServerNotStarted { server, .. },
+    } = &*event
+    {
+        warning::log(thread, Some(session), warning);
+        let (session, server) = (session.clone(), server.clone());
+        match mcp_notice::notice_once(actor, thread, &server) {
+            Some(update) => *event = mcp_notice::event(session, update),
+            None => return,
+        }
     }
     let now = actor.now().mono;
     let Some(agent) = agent(actor, thread) else {
