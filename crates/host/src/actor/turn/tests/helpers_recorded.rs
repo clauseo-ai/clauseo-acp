@@ -2,8 +2,9 @@
 //! `recorded/`, taken from live runs of claude-agent-acp 0.110.1 on Claude Code 2.1.330, the
 //! matter folder put as `{{cwd}}`): a background helper that hands back; two foreground helpers
 //! at once, each handing back while its launch call only points at the handback; a helper cut at
-//! its turn limit, then resumed, whose later steps stay under its ended card. And, by hand, a
-//! launch call whose pointer comes before the handback lands.
+//! its turn limit, then resumed, whose later steps stay under its ended card; a background
+//! helper between the lead's two answers (no `Yield`). And, by hand, a launch call whose pointer
+//! comes before the handback lands, and a background helper with a `Yield` and one answer.
 
 use std::collections::HashMap;
 
@@ -13,7 +14,8 @@ use clauseo_protocol::{CompactString, DomainEvent, HelperId, TextOrBlob};
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::helpers::{
-    COMPLETED, DELIVERED, PROMPT, call, lead, live_turn, one_turn, patch, stamped, story,
+    COMPLETED, DELIVERED, PROMPT, answer, call, in_background, lead, live_turn, one_turn, patch,
+    stamped, story,
 };
 use super::rig::Rig;
 
@@ -91,6 +93,144 @@ fn the_recorded_background_helper_ends_on_its_handback() {
             "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
             // The digest is past half the inline limit, so it is logged as a blob.
             "end paper-reader Done <blob>",
+            "turn_ended EndTurn",
+        ]
+    );
+    rig.finish();
+}
+
+/// The log in short, in order: steps by ACP id and the helper they name (`-` for the lead's),
+/// a helper's start and end, each lead answer once (its first words), and the turn's end.
+fn order(log: &[DomainEvent]) -> Vec<String> {
+    let mut seen = Vec::new();
+    let mut lines = Vec::new();
+    for event in log {
+        match event {
+            DomainEvent::ToolCallStarted(started) => {
+                let mark = if started.helper.is_some() {
+                    "helper"
+                } else {
+                    "-"
+                };
+                lines.push(format!("step {} {mark}", started.acp_id));
+            }
+            DomainEvent::HelperStarted(started) => lines.push(format!("start {}", started.name)),
+            DomainEvent::HelperEnded(ended) => lines.push(format!("end {:?}", ended.outcome)),
+            DomainEvent::TextAppended(text) if !seen.contains(&text.message) => {
+                seen.push(text.message);
+                let first: String = text.text.chars().take(14).collect();
+                lines.push(format!("text {first}"));
+            }
+            DomainEvent::TurnEnded(ended) => lines.push(format!("turn_ended {:?}", ended.stop)),
+            _ => {}
+        }
+    }
+    lines
+}
+
+/// A background helper with no `Yield` (live run L1, the shape most accounts get today): the
+/// lead launches it, fetches a page and writes a first answer while the helper reads; the helper
+/// hands back, and the lead writes a second answer with the digest, all in one turn. The helper
+/// ends `Done` on its handback, between the two answers, and the turn ends once.
+#[test]
+fn a_background_helper_between_two_answers_without_yield() {
+    let frames = include_str!("recorded/claude-background-two-answers.jsonl");
+    let mut rig = Rig::start("helpers-recorded-two-answers", &played(frames));
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        order(&rig.log(thread)),
+        [
+            "step toolu_01799By7Ms7UXvFtjXz8qmS3 -",
+            "start paper-reader",
+            "step toolu_013mH4XnuoT3LDpMpheeGdWE helper",
+            "step toolu_01AbUYAv28g2YXkPrrnHe82u helper",
+            "step toolu_01Ub7GhC6oxKVrcTieeNyRwK -",
+            "text The page title",
+            "end Done",
+            "text **Page title:*",
+            "turn_ended EndTurn",
+        ]
+    );
+    rig.finish();
+}
+
+/// A background helper with `Yield` (Claude Code 2.1.330's wait for background work; no live run
+/// called it, so these frames are made by hand, not recorded): the lead launches the helper,
+/// calls `Yield` (a plain lead step, no stamp) while it works, and answers once after the
+/// handback. The `Yield` is logged as the lead's step, the helper ends `Done` on its handback,
+/// and the one answer comes after.
+#[test]
+fn a_background_helper_with_a_yield_then_one_answer() {
+    let mut rig = Rig::start("helpers-yield", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(input)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_A", None, COMPLETED, Some("Launched.")),
+    );
+    lead(&mut rig, thread, turn, call("toolu_Y", "Yield", None));
+    stamped(
+        &mut rig,
+        thread,
+        at,
+        "toolu_A",
+        call("toolu_R1", "Read", None),
+    );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_R1", None, COMPLETED, None),
+    );
+    let handback = call(
+        "toolu_H",
+        "SubagentHandback",
+        Some(r#"{"message":"Digest."}"#),
+    );
+    stamped(&mut rig, thread, at, "toolu_A", handback);
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H", None, COMPLETED, Some(DELIVERED)),
+    );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_Y", None, COMPLETED, None),
+    );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        answer("The digest: two break clauses."),
+    );
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        order(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "step toolu_A -",
+            "start paper-reader",
+            "step toolu_Y -",
+            "step toolu_R1 helper",
+            "end Done",
+            "text The digest: tw",
             "turn_ended EndTurn",
         ]
     );
