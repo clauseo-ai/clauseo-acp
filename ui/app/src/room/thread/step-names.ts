@@ -12,7 +12,15 @@ import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
-import { caseLawOf, toolNameOf, yieldOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
+import {
+  caseLawOf,
+  helpersWaitOf,
+  helperToolOf,
+  toolNameOf,
+  yieldOf,
+  type CaseLaw,
+  type ToolAs,
+} from "./tool-names.ts";
 import { guideOf, skillOf } from "./skill-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
@@ -252,6 +260,9 @@ export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string 
 export function doingOf(lang: Lang, entry: ToolCallEntry): string {
   // Claude's Yield waits for its own background work (tool-names.ts)
   if (yieldOf(entry)) return stepLive(lang, "Waiting for the background work.");
+  // ChatGPT's wait for its helpers, and its other helper tools, never their names (helper-words.ts)
+  if (helpersWaitOf(entry)) return stepLive(lang, "Waiting for helpers.");
+  if (helperToolOf(entry)) return stepLive(lang, "Working on it.");
   // a skill is a guide being read, never its internal name (skill-words.ts)
   const skill = skillOf(entry);
   if (skill !== null) {

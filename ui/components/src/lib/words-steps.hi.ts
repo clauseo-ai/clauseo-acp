@@ -165,6 +165,22 @@ export const HI = {
   "Waited for the background work.": null,
   "Tried to wait for the background work.": null,
   "waited for the background work": null,
+  // Claude's own tools by what they did, never their names (tool-names.ts, ownToolOf); a read Clauseo's off-limits
+  // rule held back (step-misses.ts). UC-1261, UC-1265 to UC-1273; provisional; hi: later
+  "Tried to plan the work.": null,
+  "Stopped background work.": null,
+  "Tried to stop background work.": null,
+  "Asked you.": null,
+  "Tried to ask you.": null,
+  "stopped background work": null,
+  "asked you": null,
+  "Clauseo keeps this off limits": null,
+  "1 kept off limits by Clauseo.": null,
+  "{n} kept off limits by Clauseo.": null,
+  // ChatGPT's wait for its helpers, and its other helper tools (helper-words.ts; UC-1274, UC-1282; provisional; hi:
+  // later)
+  "Waited for helpers.": null,
+  "Worked with a helper.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

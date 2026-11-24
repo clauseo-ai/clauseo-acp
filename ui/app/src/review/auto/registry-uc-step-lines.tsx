@@ -14,6 +14,9 @@ import {
   stepCall,
   unknownOf,
   yieldStep,
+  claudeOwn,
+  heldOf,
+  RULED,
   type Agent,
 } from "../../testing/step-lines.ts";
 import type { StepKey } from "@clauseo/components/lib/words-steps.ts";
@@ -109,6 +112,43 @@ export const UC_STEP_LINES: Entry[] = [
       />
     ),
   },
+  // Claude's own tools by what they did; Clauseo's off-limits rule; ChatGPT's helper steps
+  opened("UC-1261", "Tried to plan the work.", [claudeOwn("TodoWrite", "failed")]),
+  opened("UC-1265", "Stopped background work.", [claudeOwn("TaskStop")]),
+  opened("UC-1266", "Tried to stop background work.", [claudeOwn("TaskStop", "failed")]),
+  opened("UC-1267", "Asked you.", [claudeOwn("AskUserQuestion")]),
+  opened("UC-1268", "Tried to ask you.", [claudeOwn("AskUserQuestion", "cancelled")]),
+  folded("UC-1269", "stopped background work", [readOf(C, "Plaint.docx"), claudeOwn("TaskStop")]),
+  folded("UC-1270", "asked you", [readOf(C, "Plaint.docx"), claudeOwn("AskUserQuestion")]),
+  opened("UC-1271", "Clauseo keeps this off limits", [heldOf("failed", RULED)]),
+  folded("UC-1272", "1 kept off limits by Clauseo.", [
+    readOf(C, "Plaint.docx"),
+    heldOf("failed", RULED),
+  ]),
+  folded("UC-1273", "{n} kept off limits by Clauseo.", [
+    readOf(C, "Plaint.docx"),
+    heldOf("failed", RULED),
+    heldOf("failed", RULED),
+  ]),
+  opened("UC-1274", "Waited for helpers.", [stepCall("other", "wait", "completed", { raw: {} })]),
+  {
+    id: "UC-1281",
+    words: stepLiveWords("Waiting for helpers."),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [QUESTION, ...rows([stepCall("other", "wait", "in_progress", { raw: {} })])],
+            status: "running",
+          })
+        }
+      />
+    ),
+  },
+  opened("UC-1282", "Worked with a helper.", [
+    stepCall("other", "Start subagent extract", "completed", { raw: {} }),
+  ]),
 ];
 
 export default UC_STEP_LINES;

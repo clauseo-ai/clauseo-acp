@@ -3,7 +3,15 @@
 import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { kindOf } from "./step-names.ts";
-import { caseLawOf, toolNameOf, yieldOf, type CaseLaw } from "./tool-names.ts";
+import {
+  caseLawOf,
+  helpersWaitOf,
+  helperToolOf,
+  ownToolOf,
+  toolNameOf,
+  yieldOf,
+  type CaseLaw,
+} from "./tool-names.ts";
 import { helperOf } from "./helper-words.ts";
 
 /** What a step is counted and drawn as: its kind, or, for one of Clauseo's own MCP tools, its family whatever kind
@@ -16,9 +24,10 @@ export type GroupKind = StepKind | `case_law_${CaseLaw}`;
 export function groupKindOf(call: ToolCallEntry): GroupKind {
   const law = caseLawOf(call.title);
   if (law !== null) return `case_law_${law}`;
-  if (helperOf(call)) return "other";
+  if (helperOf(call) || helperToolOf(call)) return "other";
+  if (helpersWaitOf(call)) return "think";
   // Claude's Yield, a wait, draws the thinking glyph, never other's
-  if (yieldOf(call)) return "think";
+  if (yieldOf(call) || ownToolOf(call) === "plan") return "think";
   if (toolNameOf(call.title)?.as === "fetch") return "fetch";
   return stepKindOf(kindOf(call));
 }

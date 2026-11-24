@@ -41,6 +41,8 @@ export const HI = {
   "Getting a payment link for case-law credits.": null,
   // Claude's Yield, its wait for its own background work (UC-1204; provisional; hi: later)
   "Waiting for the background work.": null,
+  // ChatGPT's wait for its helpers (UC-1281; provisional; hi: later)
+  "Waiting for helpers.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

@@ -1,0 +1,119 @@
+{
+  "UC-1261": {
+    "en": "Tried to plan the work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of one of Claude's own planning tools (TodoWrite, TaskCreate/Get/List/Update, ToolSearch, Enter/ExitPlanMode) that failed or was stopped. Done, it reads \"Planned the work.\" (UTC-33). Was \"Used todo write.\" and the like (#1299 review)."
+  },
+  "UC-1265": {
+    "en": "Stopped background work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of Claude's TaskStop. Was \"Used task stop.\" (#1299 review)."
+  },
+  "UC-1266": {
+    "en": "Tried to stop background work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of Claude's TaskStop that failed or was stopped."
+  },
+  "UC-1267": {
+    "en": "Asked you.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of Claude's AskUserQuestion. Was \"Used ask user question.\" (#1299 review)."
+  },
+  "UC-1268": {
+    "en": "Tried to ask you.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of Claude's AskUserQuestion that failed or was stopped."
+  },
+  "UC-1269": {
+    "en": "stopped background work",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for Claude's TaskStop."
+  },
+  "UC-1270": {
+    "en": "asked you",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for Claude's AskUserQuestion."
+  },
+  "UC-1271": {
+    "en": "Clauseo keeps this off limits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row mark for a step Clauseo's own off-limits rule refused (Claude Code's deny rule match), agreeing with the reason under it (\"This tried to reach somewhere Clauseo keeps off limits here …\"). Was \"Held back by Claude's safety check\" (#1299 review)."
+  },
+  "UC-1272": {
+    "en": "1 kept off limits by Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line, muted: a read or listing Clauseo's off-limits rule refused. Not a failure."
+  },
+  "UC-1273": {
+    "en": "{n} kept off limits by Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line, muted: such reads counted."
+  },
+  "UC-1274": {
+    "en": "Waited for helpers.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of ChatGPT's \"wait\" step (codex-acp 2.10.0, kind other, no tool name): waiting for its helpers. Would have read \"wait.\"."
+  },
+  "UC-1281": {
+    "en": "Waiting for helpers.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Live group line and working line while ChatGPT's \"wait\" step runs."
+  },
+  "UC-1282": {
+    "en": "Worked with a helper.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of ChatGPT's other helper steps (\"Start subagent <name>\" and the like, sendInput, resumeAgent, closeAgent, sendMessage, followupTask, interruptAgent, listAgents, and spawnAgent with no prompt). Would have read the title or \"Used send input.\"."
+  }
+}

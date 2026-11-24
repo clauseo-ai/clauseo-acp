@@ -5,11 +5,22 @@
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, userMessage } from "../../testing/stream-script.ts";
-import { AGENTS, commandOf, fetchOf, heldOf, readOf, stepCall } from "../../testing/step-lines.ts";
+import {
+  AGENTS,
+  claudeOwn,
+  commandOf,
+  fetchOf,
+  heldOf,
+  readOf,
+  RULED,
+  stepCall,
+  yieldStep,
+} from "../../testing/step-lines.ts";
+import { summaryOf } from "./step-summary.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 import { missOf } from "./step-misses.ts";
-import { doneOf, lineOf, markOf, troubleOf } from "./steps.ts";
+import { doneOf, drawnKindOf, lineOf, markOf, troubleOf } from "./steps.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -41,7 +52,8 @@ const ERRORS: [said: string, miss: string, row: string][] = [
     "Couldn't open livelaw.in: too large.",
   ],
   ["timeout of 60000ms exceeded", "slow", "Couldn't open livelaw.in: the site took too long."],
-  ["Something else went wrong", "unknown", "Couldn't open livelaw.in."],
+  // no reason at all: the page couldn't open, said without one
+  ["", "unknown", "Couldn't open livelaw.in."],
 ];
 
 test.each(AGENTS.flatMap((agent) => ERRORS.map((e) => [agent, ...e] as const)))(
@@ -141,4 +153,110 @@ test("in the room, the card counts the pages that couldn't open and lists each w
   expect(text).toContain("Couldn't open livelaw.in: the site refused.");
   expect(text).toContain("Couldn't open sci.gov.in: too large.");
   expect(text).not.toMatch(/Failed|maxContentLength|HTTP 403/);
+});
+
+test.each(AGENTS)(
+  "under %s, a page whose result says something else (the lawyer's refusal, a blocked site) stays failed, its reason shown",
+  (agent) => {
+    for (const said of [
+      "The user doesn't want to proceed with this tool use.",
+      "Clauseo blocked this site: it is on the list of unsafe sites.",
+      "Something else went wrong",
+    ]) {
+      const c = fetchOf(agent, URL, "failed", said);
+      expect(missOf(c)).toBeNull();
+      expect(doneOf("en", c)).toBe("Tried to read livelaw.in online.");
+      expect(markOf("en", c)).toBe("Failed");
+      expect(troubleOf("en", [c])).toBe("1 failed.");
+    }
+  },
+);
+
+test("Clauseo's own off-limits rule: its own mark, agreeing with the reason, and its own count", () => {
+  const ruled = heldOf("failed", RULED);
+  expect(markOf("en", ruled)).toBe("Clauseo keeps this off limits");
+  expect(troubleOf("en", [ruled])).toBe("");
+  const line = lineOf(
+    "en",
+    [{ tool_call: readOf("Claude", "Plaint.docx") }, { tool_call: ruled }],
+    false,
+  );
+  expect(line.more).toBe("1 kept off limits by Clauseo.");
+  expect(line.trouble).toBe("");
+  // two rules, and a check beside them
+  const more = lineOf(
+    "en",
+    [readOf("Claude", "a.pdf"), ruled, heldOf("failed", RULED), heldOf()].map((tool_call) => ({
+      tool_call,
+    })),
+    false,
+  ).more;
+  expect(more).toBe("1 held back by Claude's safety check. 2 kept off limits by Clauseo.");
+});
+
+test("a held-back edit or command stays in the trouble line, with the break, its mark naming who held it", () => {
+  const edit = heldOf("failed", undefined, "edit", "Edit");
+  const command = heldOf("failed", undefined, "execute", "Bash");
+  const ruledEdit = heldOf("failed", RULED, "edit", "Write");
+  for (const c of [edit, command])
+    expect(markOf("en", c)).toBe("Held back by Claude's safety check");
+  expect(markOf("en", ruledEdit)).toBe("Clauseo keeps this off limits");
+  const line = lineOf(
+    "en",
+    [readOf("Claude", "a.pdf"), edit, command, ruledEdit].map((tool_call) => ({ tool_call })),
+    false,
+  );
+  expect(line.trouble).toBe("3 failed.");
+  expect(line.more).toBe("");
+});
+
+test("Claude's own tools say what they did, never their names", () => {
+  const rows: [name: string, done: string, tried: string][] = [
+    ["TodoWrite", "Planned the work.", "Tried to plan the work."],
+    ["TaskCreate", "Planned the work.", "Tried to plan the work."],
+    ["TaskGet", "Planned the work.", "Tried to plan the work."],
+    ["TaskList", "Planned the work.", "Tried to plan the work."],
+    ["TaskUpdate", "Planned the work.", "Tried to plan the work."],
+    ["ToolSearch", "Planned the work.", "Tried to plan the work."],
+    ["EnterPlanMode", "Planned the work.", "Tried to plan the work."],
+    ["ExitPlanMode", "Planned the work.", "Tried to plan the work."],
+    ["SendMessage", "Asked a helper.", "Tried to ask a helper."],
+    ["TaskStop", "Stopped background work.", "Tried to stop background work."],
+    ["AskUserQuestion", "Asked you.", "Tried to ask you."],
+  ];
+  for (const [name, done, tried] of rows) {
+    expect(doneOf("en", claudeOwn(name))).toBe(done);
+    expect(doneOf("en", claudeOwn(name, "failed"))).toBe(tried);
+    expect(summaryOf("en", [claudeOwn(name)]).toLowerCase()).not.toMatch(
+      /used|todo|task|ask user|plan mode|tool search|send message/,
+    );
+  }
+  // switch_mode as claude-agent-acp sends ExitPlanMode: its own words title it, its tool name says what it did
+  const plan = stepCall("switch_mode", "Ready to code?", "completed", {
+    tool_name: "ExitPlanMode",
+  });
+  expect(doneOf("en", plan)).toBe("Planned the work.");
+  expect(
+    summaryOf("en", [
+      readOf("Claude", "a.pdf"),
+      claudeOwn("TodoWrite"),
+      claudeOwn("SendMessage"),
+      claudeOwn("TaskStop"),
+      claudeOwn("AskUserQuestion"),
+    ]),
+  ).toBe("Read 1 paper, planned the work, asked a helper, stopped background work, asked you.");
+  expect(drawnKindOf(claudeOwn("TodoWrite"))).toBe("think");
+});
+
+test("a failed Yield says it tried to wait, in the trouble line as any failure", () => {
+  const y = yieldStep("failed");
+  expect(doneOf("en", y)).toBe("Tried to wait for the background work.");
+  expect(markOf("en", y)).toBe("Failed");
+  expect(troubleOf("en", [readOf("Claude", "a.pdf"), y])).toBe("1 failed.");
+});
+
+test("in Hindi, a line whose parts fall back to English reads as English: a capital and a full stop", () => {
+  expect(summaryOf("hi", [readOf("Claude", "a.pdf"), claudeOwn("AskUserQuestion")])).toBe(
+    "Read 1 paper, asked you.",
+  );
 });

@@ -186,8 +186,8 @@ test("in Hindi with three kinds, and in English with a background note, the line
       expect(line.textContent).toBe(
         "Read 2 papers, searched the papers. 2 of them went on in the background.",
       );
-    // the summary's parts have no Hindi yet (hi: later): their English, closed with the danda
-    else expect(line.textContent).toContain("moved 1 paper।");
+    // the summary's parts have no Hindi yet (hi: later): read as English, a capital and a full stop
+    else expect(line.textContent).toContain("moved 1 paper.");
     // the chevron never stands alone at a line's start: it shares a no-wrap span with the last word
     const chev = line.querySelector(".step-group-chev")!;
     expect(chev.parentElement?.classList.contains("glued")).toBe(true);

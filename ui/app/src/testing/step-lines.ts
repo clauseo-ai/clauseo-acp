@@ -140,17 +140,34 @@ export function fetchOf(
       });
 }
 
-/** A step Claude's auto mode safety check refused before it ran: a folder listing, as on Windows. */
-export function heldOf(status: ToolCallStatus = "failed") {
-  const said =
-    "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access] " +
-    "Listing a folder outside the matter.";
-  return stepCall("read", "List C:\\Users\\asha\\Documents", status, {
-    tool_name: "LS",
+/** Claude's auto mode safety check's refusal, as Claude Code 0.3.293 words it. */
+export const CHECKED =
+  "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access] " +
+  "Listing a folder outside the matter.";
+/** Clauseo's own off-limits rule's refusal, as Claude Code words a deny rule's match. */
+export const RULED =
+  "Permission to read /Users/asha/Library/Clauseo/agents/notes.md has been denied.";
+
+/** A step refused before it ran, `said` its refusal: by default a folder listing the safety check refused, as on
+ * Windows; `kind` and `tool` for an edit or a command refused the same way. */
+export function heldOf(
+  status: ToolCallStatus = "failed",
+  said: string = CHECKED,
+  kind: ToolKind = "read",
+  tool = "LS",
+) {
+  return stepCall(kind, "List C:\\Users\\asha\\Documents", status, {
+    tool_name: tool,
     raw: { path: "C:\\Users\\asha\\Documents" },
     content: [{ text: { text: { inline: said } } }],
     raw_output: { inline: JSON.stringify(said) },
   });
+}
+
+/** One of Claude's own tools by its name (TodoWrite, AskUserQuestion …), as claude-agent-acp sends a tool it shows
+ * by name: kind other, titled with the name. */
+export function claudeOwn(name: string, status: ToolCallStatus = "completed") {
+  return stepCall("other", name, status, { tool_name: name, raw: {} });
 }
 
 /** Claude's Yield (Claude Code 2.1.330), its wait for its own background work, as claude-agent-acp sends a tool it

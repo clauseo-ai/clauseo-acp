@@ -24,13 +24,22 @@ import {
   webSearchOf,
 } from "./step-names.ts";
 import { afterRan, taskOf } from "./task-words.ts";
-import { mcpOf, toolLabelOf, toolNameOf, yieldOf } from "./tool-names.ts";
+import {
+  helpersWaitOf,
+  helperToolOf,
+  mcpOf,
+  ownToolOf,
+  toolLabelOf,
+  toolNameOf,
+  yieldOf,
+  type OwnAs,
+} from "./tool-names.ts";
 import { caseLawDone, skillDone, toolDone, usedDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
-import { helperOf, helperTaskOf } from "./helper-words.ts";
+import { helperOf, helperTaskOf, spawnOf } from "./helper-words.ts";
 import { groupKindOf, type GroupKind } from "./group-kind.ts";
 import { summaryOf } from "./step-summary.ts";
-import { heldBack, httpRefused, missOf, missWords, setbackLine } from "./step-misses.ts";
+import { heldMark, httpRefused, missOf, missWords, setbackLine, softHeld } from "./step-misses.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -142,8 +151,8 @@ const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 /** A step that finished: completed, and not a fetch the site refused (httpRefused). */
 const finishedOf = (c: ToolCallEntry) => c.status === "completed" && !httpRefused(c);
 
-/** A page that couldn't open, or a step Claude's safety check held back (step-misses.ts): told as such, never failed. */
-const setbackOf = (c: ToolCallEntry) => missOf(c) !== null || heldBack(c);
+/** A page that couldn't open, or a read held back (step-misses.ts: softHeld): told as such, never failed. */
+const setbackOf = (c: ToolCallEntry) => missOf(c) !== null || softHeld(c);
 
 /** A step that failed: failed, or a fetch the site refused (httpRefused), but no setback (setbackOf). The Failed tag
  * and the trouble count it. */
@@ -275,6 +284,14 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
   return n === 0 ? "" : counted(lang, ["1 done so far.", "{n} done so far."], n);
 }
 
+/** The rows of Claude's own tools (tool-names.ts, ownToolOf): done, and tried. */
+const OWN_DONE: Record<OwnAs, [done: StepKey, tried: StepKey]> = {
+  plan: ["Planned the work.", "Tried to plan the work."],
+  helper: ["Asked a helper.", "Tried to ask a helper."],
+  stop: ["Stopped background work.", "Tried to stop background work."],
+  ask: ["Asked you.", "Tried to ask you."],
+};
+
 /** A row's words: what it did once done ("Read Lease.pdf."), what it set out to do once it failed or was stopped
  * ("Tried to read Lease.pdf.", its mark saying how it ended), and what it is doing while it waits or runs. */
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
@@ -288,8 +305,15 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
     steps(lang, tried ? attempt : done, vars);
   // a helper's call (helper-words.ts) says the task it was given; cut, the "…" ends the line without the full stop. With
   // no task it says a helper was asked
+  // ChatGPT's wait for its helpers, and its other helper tools (helper-words.ts)
+  if (helpersWaitOf(entry))
+    return say("Waited for helpers.", "Tried to wait for the background work.");
+  if (helperToolOf(entry)) return say("Worked with a helper.", "Tried to ask a helper.");
   if (helperOf(entry)) {
     const task = helperTaskOf(entry);
+    // ChatGPT's spawn with no prompt worked with a helper; Claude's untitled Agent asked one
+    if (task === "" && spawnOf(entry))
+      return say("Worked with a helper.", "Tried to ask a helper.");
     if (task === "") return say("Asked a helper.", "Tried to ask a helper.");
     return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task }).replace(
       /…\.$/,
@@ -299,6 +323,9 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   // Claude's Yield is a wait for its own background work, quietly said (tool-names.ts)
   if (yieldOf(entry))
     return say("Waited for the background work.", "Tried to wait for the background work.");
+  // Claude's own tools say what they did, never their names (tool-names.ts)
+  const own = ownToolOf(entry);
+  if (own !== null) return say(...OWN_DONE[own]);
   // a skill by its name made readable, never its internal one (skill-words.ts)
   const guide = skillDone(lang, entry, tried);
   if (guide !== null) return guide;
@@ -411,7 +438,8 @@ export function hoverOf(entry: ToolCallEntry): string | null {
 
 /** A row's state where it didn't simply finish. */
 export function markOf(lang: Lang, call: ToolCallEntry): string | null {
-  if (heldBack(call)) return steps(lang, "Held back by Claude's safety check");
+  const held = heldMark(lang, call);
+  if (held !== null) return held;
   if (missOf(call) !== null) return null;
   if (failedOf(call)) return th(lang, "Failed");
   if (call.status === "cancelled") return th(lang, "Stopped");
