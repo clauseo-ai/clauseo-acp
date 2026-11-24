@@ -1,0 +1,137 @@
+{
+  "UC-1480": {
+    "en": "Read a judgment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of the case-law connector's read_document step. Was \"Searched case law.\", the same as a search (Windows tester, ChatGPT). The tool takes only a doc_id, so no case name is on the step."
+  },
+  "UC-1481": {
+    "en": "Tried to read a judgment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The same row, failed or stopped. Was \"Tried to search case law.\"."
+  },
+  "UC-1482": {
+    "en": "Checked who cites it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of the citator step: the judgments that cite, or are cited by, the one it read. Was \"Searched case law.\"."
+  },
+  "UC-1483": {
+    "en": "Tried to check who cites it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The same row, failed or stopped. Was \"Tried to search case law.\"."
+  },
+  "UC-1484": {
+    "en": "Checked the citations.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of the check_citations step: that each citation in a text resolves to a real judgment. Was \"Searched case law.\"."
+  },
+  "UC-1485": {
+    "en": "Tried to check the citations.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The same row, failed or stopped. Was \"Tried to search case law.\"."
+  },
+  "UC-1486": {
+    "en": "Reading a judgment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Live line while read_document runs. Was \"Searching case law.\"."
+  },
+  "UC-1487": {
+    "en": "Checking who cites it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Live line while the citator runs. Was \"Searching case law.\"."
+  },
+  "UC-1488": {
+    "en": "Checking the citations.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Live line while check_citations runs. Was \"Searching case law.\"."
+  },
+  "UC-1489": {
+    "en": "read 1 judgment",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's judgment reads. Was counted in \"searched case law\"."
+  },
+  "UC-1490": {
+    "en": "read {n} judgments",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's judgment reads. Was counted in \"searched case law\"."
+  },
+  "UC-1491": {
+    "en": "checked who cites a judgment",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's citator steps. Was counted in \"searched case law\"."
+  },
+  "UC-1492": {
+    "en": "checked who cites {n} judgments",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's citator steps. Was counted in \"searched case law\"."
+  },
+  "UC-1493": {
+    "en": "checked the citations",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's citation checks. Was counted in \"searched case law\"."
+  },
+  "UC-1494": {
+    "en": "checked the citations {n} times",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence, for the case-law connector's citation checks. Was counted in \"searched case law\"."
+  }
+}

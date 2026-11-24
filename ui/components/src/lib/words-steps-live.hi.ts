@@ -37,6 +37,10 @@ export const HI = {
   // a step of Clauseo's case-law connector (tool-names.ts, caseLawOf): a search, a judgment read or a citation checked
   // (UC-475); the lawyer's credits read (UC-478); a payment link got, never a payment (UC-479). Provisional; hi: later
   "Searching case law.": null,
+  // a judgment read, a citator call, citations checked (UC-1486..1488; provisional; hi: later)
+  "Reading a judgment.": null,
+  "Checking who cites it.": null,
+  "Checking the citations.": null,
   "Checking your case-law credits.": null,
   "Getting a payment link for case-law credits.": null,
   // Claude's Yield, its wait for its own background work (UC-1204; provisional; hi: later)

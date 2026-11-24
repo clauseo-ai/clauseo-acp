@@ -58,17 +58,38 @@ const FAMILIES: [
 ][] = [
   ["browser", "agent_browser_open", "fetch", "fetch", "looked online", "looked online"],
   ["browser", "agent_browser_snapshot", "fetch", "fetch", "looked online", "looked online"],
-  ...(["search_law", "read_document", "citator", "check_citations"] as const).map(
-    (tool) =>
-      [
-        "case-law",
-        tool,
-        "case_law_search",
-        "case_law",
-        "searched case law",
-        "searched case law {n} times",
-      ] as [string, string, string, string, StepKey, StepKey],
-  ),
+  [
+    "case-law",
+    "search_law",
+    "case_law_search",
+    "case_law",
+    "searched case law",
+    "searched case law {n} times",
+  ],
+  [
+    "case-law",
+    "read_document",
+    "case_law_read",
+    "case_law",
+    "read 1 judgment",
+    "read {n} judgments",
+  ],
+  [
+    "case-law",
+    "citator",
+    "case_law_cite",
+    "case_law",
+    "checked who cites a judgment",
+    "checked who cites {n} judgments",
+  ],
+  [
+    "case-law",
+    "check_citations",
+    "case_law_check",
+    "case_law",
+    "checked the citations",
+    "checked the citations {n} times",
+  ],
   [
     "case-law",
     "account",

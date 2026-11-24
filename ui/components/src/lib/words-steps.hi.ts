@@ -112,6 +112,13 @@ export const HI = {
   // Provisional; hi: later
   "Searched case law.": null,
   "Tried to search case law.": null,
+  // a judgment read, a citator call, citations checked: each named apart (UC-1480..1485; provisional; hi: later)
+  "Read a judgment.": null,
+  "Tried to read a judgment.": null,
+  "Checked who cites it.": null,
+  "Tried to check who cites it.": null,
+  "Checked the citations.": null,
+  "Tried to check the citations.": null,
   "Checked your case-law credits.": null,
   "Tried to check your case-law credits.": null,
   "Got a payment link for case-law credits.": null,
@@ -121,6 +128,13 @@ export const HI = {
   // Provisional; hi: later
   "searched case law": null,
   "searched case law {n} times": null,
+  // judgments read, citators run, citations checked (UC-1489..1494; provisional; hi: later)
+  "read 1 judgment": null,
+  "read {n} judgments": null,
+  "checked who cites a judgment": null,
+  "checked who cites {n} judgments": null,
+  "checked the citations": null,
+  "checked the citations {n} times": null,
   "checked your case-law credits": null,
   "checked your case-law credits {n} times": null,
   "got a payment link for case-law credits": null,
