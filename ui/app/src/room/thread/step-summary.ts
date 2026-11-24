@@ -89,6 +89,9 @@ type Sort =
   | "search"
   | "fetch"
   | "case_law_search"
+  | "case_law_read"
+  | "case_law_cite"
+  | "case_law_check"
   | "case_law_credits"
   | "case_law_payment"
   | "execute"
@@ -142,6 +145,9 @@ const COUNTED: Partial<Record<Sort, [one: StepKey, many: StepKey]>> = {
   execute: ["ran 1 command", "ran {n} commands"],
   helper: ["asked a helper", "asked {n} helpers"],
   case_law_search: ["searched case law", "searched case law {n} times"],
+  case_law_read: ["read 1 judgment", "read {n} judgments"],
+  case_law_cite: ["checked who cites a judgment", "checked who cites {n} judgments"],
+  case_law_check: ["checked the citations", "checked the citations {n} times"],
   case_law_credits: ["checked your case-law credits", "checked your case-law credits {n} times"],
   case_law_payment: [
     "got a payment link for case-law credits",

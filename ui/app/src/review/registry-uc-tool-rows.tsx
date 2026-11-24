@@ -32,6 +32,8 @@ const law = (agent: "chatgpt" | "claude", tool: string, status: ToolCallStatus, 
     ? call(`mcp.case-law.${tool}`, "execute", status, { server: "case-law", tool, arguments: args })
     : call(`mcp__case-law__${tool}`, "other", status, args);
 const SOUGHT = { query: "Section 138 NI Act dishonour of cheque" };
+const DOC = { doc_id: "1939993" };
+const CITED = { text: "Minerva Mills Ltd. v. Union of India, AIR 1980 SC 1789" };
 
 const host = (state: ThreadState) => () => threadHost(state);
 const opened = (c: ViewEntry) => () => (
@@ -132,7 +134,7 @@ export const UC_TOOL_ROWS: Entry[] = [
     id: "UC-477",
     words: stepWords("Tried to search case law."),
     screen: "room/thread",
-    render: opened(law("chatgpt", "citator", "failed", { docid: 1 })),
+    render: opened(law("chatgpt", "search_law", "failed", SOUGHT)),
   },
   {
     id: "UC-478",
@@ -206,5 +208,96 @@ export const UC_TOOL_ROWS: Entry[] = [
     words: stepWords("got {n} payment links for case-law credits"),
     screen: "room/thread",
     render: folded(laws(2, (s) => law("claude", "recharge", s, {}))),
+  },
+  // the case-law connector's judgment read, citator and citation check, each named apart, under either agent
+  {
+    id: "UC-1480",
+    words: stepWords("Read a judgment."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "read_document", "completed", DOC)),
+  },
+  {
+    id: "UC-1481",
+    words: stepWords("Tried to read a judgment."),
+    screen: "room/thread",
+    render: opened(law("claude", "read_document", "failed", DOC)),
+  },
+  {
+    id: "UC-1482",
+    words: stepWords("Checked who cites it."),
+    screen: "room/thread",
+    render: opened(law("claude", "citator", "completed", DOC)),
+  },
+  {
+    id: "UC-1483",
+    words: stepWords("Tried to check who cites it."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "citator", "failed", DOC)),
+  },
+  {
+    id: "UC-1484",
+    words: stepWords("Checked the citations."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "check_citations", "completed", CITED)),
+  },
+  {
+    id: "UC-1485",
+    words: stepWords("Tried to check the citations."),
+    screen: "room/thread",
+    render: opened(law("claude", "check_citations", "failed", CITED)),
+  },
+  {
+    id: "UC-1486",
+    words: stepLiveWords("Reading a judgment."),
+    screen: "room/thread",
+    render: running(law("chatgpt", "read_document", "in_progress", DOC)),
+  },
+  {
+    id: "UC-1487",
+    words: stepLiveWords("Checking who cites it."),
+    screen: "room/thread",
+    render: running(law("claude", "citator", "in_progress", DOC)),
+  },
+  {
+    id: "UC-1488",
+    words: stepLiveWords("Checking the citations."),
+    screen: "room/thread",
+    render: running(law("chatgpt", "check_citations", "in_progress", CITED)),
+  },
+  {
+    id: "UC-1489",
+    words: stepWords("read 1 judgment"),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("chatgpt", "read_document", s, DOC))),
+  },
+  {
+    id: "UC-1490",
+    words: stepWords("read {n} judgments"),
+    screen: "room/thread",
+    render: folded(laws(3, (s) => law("claude", "read_document", s, DOC))),
+  },
+  {
+    id: "UC-1491",
+    words: stepWords("checked who cites a judgment"),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("claude", "citator", s, DOC))),
+  },
+  {
+    id: "UC-1492",
+    words: stepWords("checked who cites {n} judgments"),
+    screen: "room/thread",
+    render: folded(laws(2, (s) => law("chatgpt", "citator", s, DOC))),
+  },
+  {
+    id: "UC-1493",
+    words: stepWords("checked the citations"),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("chatgpt", "check_citations", s, CITED))),
+  },
+  {
+    id: "UC-1494",
+    words: stepWords("checked the citations {n} times"),
+    screen: "room/thread",
+    render: folded(laws(2, (s) => law("claude", "check_citations", s, CITED))),
   },
 ];

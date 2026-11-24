@@ -243,6 +243,9 @@ const TOOL_LIVE: Record<ToolAs, StepLiveKey> = {
 /** What a step of Clauseo's case-law connector (tool-names.ts, caseLawOf) is doing. */
 const CASE_LAW_LIVE: Record<CaseLaw, StepLiveKey> = {
   search: "Searching case law.",
+  read: "Reading a judgment.",
+  cite: "Checking who cites it.",
+  check: "Checking the citations.",
   credits: "Checking your case-law credits.",
   payment: "Getting a payment link for case-law credits.",
 };

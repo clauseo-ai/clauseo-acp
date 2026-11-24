@@ -75,18 +75,19 @@ const KNOWN: Readonly<Record<string, ToolAs>> = {
  * `mcp.<server>.<tool>` ("mcp.browser.agent_browser_open"). */
 const BROWSER = /^(?:mcp__browser__|mcp\.browser\.)/i;
 
-/** What a tool of Clauseo's case-law connector does, as the room tells it: searching case law (a search, a judgment
- * read, a citation checked), checking the lawyer's case-law credits (it only reads them), or getting a payment link for
- * more (it never pays: the lawyer pays on the payment page). */
-export type CaseLaw = "search" | "credits" | "payment";
+/** What a tool of Clauseo's case-law connector does, as the room tells it: searching case law, reading a judgment,
+ * checking who cites a judgment (the citator), checking the citations in a text, checking the lawyer's case-law
+ * credits (it only reads them), or getting a payment link for more (it never pays: the lawyer pays on the payment
+ * page). */
+export type CaseLaw = "search" | "read" | "cite" | "check" | "credits" | "payment";
 
 /** The case-law connector's tools, by their exact names (crates/host/src/agent/loads/case_law.rs). A tool of it not
  * named here reads as any other tool's name does. */
 const CASE_LAW_TOOLS: Readonly<Record<string, CaseLaw>> = {
   search_law: "search",
-  read_document: "search",
-  citator: "search",
-  check_citations: "search",
+  read_document: "read",
+  citator: "cite",
+  check_citations: "check",
   account: "credits",
   recharge: "payment",
 };

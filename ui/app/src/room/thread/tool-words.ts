@@ -34,6 +34,9 @@ const TRIED: Record<ToolAs, StepKey> = {
 /** A case-law tool's words (tool-names.ts, caseLawOf) once its step is over: done, and tried. */
 const CASE_LAW_DONE: Record<CaseLaw, [done: StepKey, tried: StepKey]> = {
   search: ["Searched case law.", "Tried to search case law."],
+  read: ["Read a judgment.", "Tried to read a judgment."],
+  cite: ["Checked who cites it.", "Tried to check who cites it."],
+  check: ["Checked the citations.", "Tried to check the citations."],
   credits: ["Checked your case-law credits.", "Tried to check your case-law credits."],
   payment: [
     "Got a payment link for case-law credits.",
