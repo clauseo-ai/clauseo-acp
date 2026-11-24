@@ -197,6 +197,64 @@ fn changed_rows(
         .collect()
 }
 
+/// Puts each of `ids`, skills `AddSkills` just recorded (`settings/add_skills.rs`), in
+/// `scope` as `SetAddonScope` would: its `skills.scope`, then every matter's switch cleared and,
+/// for a matter scope, that matter's set on. The host's rows change now; the rows to commit
+/// come back, one per matter with its first `before`. With `switches` false (an add that
+/// stopped, with no commit to carry rows) only the scopes are set: under a matter scope the
+/// skill is then on in no matter until it is switched on.
+pub(in crate::actor) fn place_added(
+    actor: &mut Actor,
+    ids: &[&str],
+    scope: AddonScope,
+    switches: bool,
+) -> Result<Vec<(MatterRow, MatterRow)>, Error> {
+    let (only, item) = match scope {
+        AddonScope::All => (None, clauseo_settings::ItemScope::All),
+        AddonScope::Matter(matter) => (Some(matter), clauseo_settings::ItemScope::Matter),
+    };
+    let mut merged: Vec<(MatterRow, MatterRow)> = Vec::new();
+    // A matter scope under the firm's lock was refused before the add (`scope_ok`); `all` leaves
+    // a scope the firm sets as it is.
+    let firm_scopes = actor.effective.is_locked("skills.scope");
+    for id in ids {
+        if actor.effective.skill_scope(id) != item && !firm_scopes {
+            actor
+                .effective
+                .set_skill_scope(&clauseo_settings::SystemFiles, id, item)?;
+        }
+        if !switches {
+            continue;
+        }
+        let all = only.is_none();
+        for (before, after) in changed_rows(actor, AddonKind::Skill, id, Want::Only(only), all) {
+            if let Some(entry) = actor.matters.get_mut(&after.id) {
+                entry.row = after.clone();
+            }
+            match merged.iter_mut().find(|(_, last)| last.id == after.id) {
+                Some((_, last)) => *last = after,
+                None => merged.push((before, after)),
+            }
+        }
+    }
+    // Live agents are compared again against the switches and scopes.
+    actor.mcp.tools_rev += 1;
+    Ok(merged)
+}
+
+/// The receipt for `ctx`, with `rows` (from [`place_added`], already the host's) in its commit.
+pub(in crate::actor) fn receipt_with_rows(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    rows: Vec<(MatterRow, MatterRow)>,
+) -> Result<(), Error> {
+    if rows.is_empty() {
+        super::settings::receipt(actor, ctx)
+    } else {
+        commit_rows(actor, ctx, rows)
+    }
+}
+
 /// Sends the rows and the receipt in one commit, with the host's rows changed now and put
 /// back if it fails.
 fn commit_rows(

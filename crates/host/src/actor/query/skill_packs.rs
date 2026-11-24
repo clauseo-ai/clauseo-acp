@@ -32,7 +32,9 @@ use futures::task::LocalSpawnExt;
 
 use crate::actor::Actor;
 use crate::actor::input::Reply;
-use crate::actor::settings::packs::{Admission, PackReadHook, READ_JOB, read_listed_pack};
+use crate::actor::settings::packs::{
+    Admission, PackReadHook, READ_JOB, added_scripts, read_listed_pack,
+};
 use crate::agent::codex::prepare::off_actor;
 use crate::error::Error;
 
@@ -45,6 +47,7 @@ pub(super) struct Listing {
     root: PathBuf,
     admission: Admission,
     allow_scripts: bool,
+    added_scripts: bool,
     enabled: BTreeMap<String, String>,
     hook: Option<PackReadHook>,
 }
@@ -57,6 +60,7 @@ impl Listing {
             root: actor.effective.data_dir().join(packs::PACKS_DIR),
             admission: Admission::of(&actor.effective),
             allow_scripts: skills.allow_scripts,
+            added_scripts: added_scripts(&actor.effective),
             enabled: skills.enabled.clone(),
             hook: actor.wiring.pack_read_hook.clone(),
         }
@@ -133,9 +137,16 @@ fn status(listing: &Listing, folders: &PackFolders, id: PackId) -> (PackStatus, 
     let read = read_listed_pack(
         folders,
         id.as_str(),
-        listing.allow_scripts,
+        listing.allow_scripts || listing.added_scripts,
         listing.hook.as_ref(),
-    );
+    )
+    .and_then(|pack| {
+        if packs::scripts_allowed(&pack, listing.allow_scripts, listing.added_scripts) {
+            Ok(pack)
+        } else {
+            Err(ReadError::Refused(packs::Refusal::Script))
+        }
+    });
     let recorded = listing.enabled.get(id.as_str());
     let added_here = match &read {
         Ok(pack) => pack.manifest().added_here,

@@ -396,6 +396,9 @@ mod too_long_log;
 // Every test here waits for a live folder watch, which Windows does not have (decision record
 // 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
 #[cfg(test)]
+#[path = "host/add_skills.rs"]
+mod add_skills;
+#[cfg(test)]
 #[path = "host/addons/mod.rs"]
 mod addons;
 #[cfg(test)]
@@ -546,6 +549,9 @@ mod sign_in_hold;
 #[cfg(test)]
 #[path = "host/site_blocked.rs"]
 mod site_blocked;
+#[cfg(test)]
+#[path = "host/skill_server.rs"]
+mod skill_server;
 #[cfg(test)]
 #[path = "host/skill_wait.rs"]
 mod skill_wait;

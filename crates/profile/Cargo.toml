@@ -21,6 +21,13 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# A skill added from a link or a skills.sh name (src/packs/source/remote.rs): the link parsed.
+url = { workspace = true }
+# A skill added from a .zip (src/packs/source/unzip.rs), unpacked under caps, deflate only, at
+# clauseo-host's version; flate2's zlib-rs backend (already in the lock) does the inflating.
+zip = { version = "9.2.2", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }
 
 # The skill packs' read (src/packs/read.rs): open with O_NOFOLLOW, through rustix's safe call.
 [target.'cfg(unix)'.dependencies]

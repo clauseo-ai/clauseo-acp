@@ -36,17 +36,19 @@ pub(crate) async fn pick_folder<R: Runtime>(
     .await
 }
 
-/// Opens the native folder dialog for "Add a skill" (Settings › Skills) and answers the folder's
-/// path, which the page then sends as `AddSkill { path }`; `None` when cancelled. Folders only
-/// (`dialogs::SkillPicker`). Only a path returned here is admitted in an `AddSkill`.
+/// Opens the native dialog for "Add a skill" and answers the path picked, which the page then
+/// sends as `AddSkill { path }` or `PreviewSkill {"from": {"path": …}}`; `None` when
+/// cancelled. A folder dialog, or with `files` a file dialog for a `.zip` or a `SKILL.md`
+/// (`dialogs::SkillPicker`). Only a path returned here is admitted in either.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_skill<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
+    files: bool,
 ) -> Result<Option<String>, HostError> {
     crate::ipc::timed("pick_skill", async {
-        let picker = crate::dialogs::SkillPicker::new(app);
+        let picker = crate::dialogs::SkillPicker::new(app, files);
         Ok(bridge.pick_skill(&picker).await)
     })
     .await

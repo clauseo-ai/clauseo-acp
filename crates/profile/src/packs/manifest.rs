@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use clauseo_protocol::Date;
 use serde_json::{Map, Value};
 
+use super::source::FromKind;
 use super::{SEPARATOR, SKILLS_MAX, is_pack_id, is_pack_skill_name};
 
 /// The `format` this Clauseo reads.
@@ -28,7 +29,7 @@ pub const URL_MAX: usize = 2048;
 const RENDERED_MAX: usize = 64;
 
 /// Every key the manifest has.
-const KEYS: [&str; 11] = [
+const KEYS: [&str; 12] = [
     "format",
     "id",
     "name",
@@ -40,11 +41,12 @@ const KEYS: [&str; 11] = [
     "instruction_only",
     "skills",
     "added_here",
+    "added_from",
 ];
 
-/// The keys a pack added on this computer (`added_here`) leaves out: it has no source, version,
-/// author or licence of its own.
-const NOT_ADDED: [&str; 4] = ["source_url", "version", "author", "licence"];
+/// The keys a pack added on this computer (`added_here`) leaves out: it has no version, author
+/// or licence of its own. Its `source_url` is where it was downloaded from, when it was.
+const NOT_ADDED: [&str; 3] = ["version", "author", "licence"];
 
 /// A pack's manifest, checked. The display fields never go into an agent's instructions or a
 /// log line; only `id` and the skill names do.
@@ -58,7 +60,8 @@ pub struct PackManifest {
     pub version: String,
     /// Its author, for display.
     pub author: String,
-    /// Where it came from: an `https` URL, never fetched.
+    /// Where it came from: an `https` URL, never fetched for a pack; for a skill added here,
+    /// where the lawyer downloaded it from (empty for one from this computer).
     pub source_url: String,
     /// Its licence, for display.
     pub licence: String,
@@ -69,8 +72,11 @@ pub struct PackManifest {
     /// Its skills' names, in the order listed.
     pub skills: Vec<String>,
     /// Whether the lawyer added it on this computer (`added_here: true`, written by
-    /// `added::build`); then `source_url`, `version`, `author` and `licence` are empty.
+    /// `added::build`); then `version`, `author` and `licence` are empty.
     pub added_here: bool,
+    /// How a pack added here reached this computer (`added_from`; a folder when the key is
+    /// left out, as in every pack added before it); `None` for any other pack.
+    pub added_from: Option<FromKind>,
 }
 
 /// The manifest in `bytes`, or why it is refused (for the tests; the pack's refusal is
@@ -99,27 +105,35 @@ pub fn parse(bytes: &[u8]) -> Result<PackManifest, ManifestError> {
         if let Some(key) = NOT_ADDED.iter().find(|key| top.contains_key(**key)) {
             return Err(BadField(key));
         }
+        let added_from = match top.get("added_from") {
+            None => FromKind::Folder,
+            Some(value) => value
+                .as_str()
+                .and_then(FromKind::parse)
+                .ok_or(BadField("added_from"))?,
+        };
+        let source_url = match top.get("source_url") {
+            None => String::new(),
+            Some(_) => checked_url(string(&top, "source_url")?)?,
+        };
         return Ok(PackManifest {
             name: display(&top, "name")?,
             version: String::new(),
             author: String::new(),
             licence: String::new(),
-            source_url: String::new(),
+            source_url,
             last_reviewed: last_reviewed(&top)?,
             instruction_only: instruction_only(&top)?,
             skills: skills(&top, &id)?,
             id,
             added_here,
+            added_from: Some(added_from),
         });
     }
-    let source_url = string(&top, "source_url")?;
-    let url_ok = source_url.len() <= URL_MAX
-        && source_url.strip_prefix("https://").is_some_and(|rest| {
-            !rest.is_empty() && !rest.chars().any(|c| c.is_whitespace() || c.is_control())
-        });
-    if !url_ok {
-        return Err(BadField("source_url"));
+    if top.contains_key("added_from") {
+        return Err(BadField("added_from"));
     }
+    let source_url = checked_url(string(&top, "source_url")?)?;
     let last_reviewed = last_reviewed(&top)?;
     let instruction_only = instruction_only(&top)?;
     let skills = skills(&top, &id)?;
@@ -134,7 +148,22 @@ pub fn parse(bytes: &[u8]) -> Result<PackManifest, ManifestError> {
         instruction_only,
         skills,
         added_here,
+        added_from: None,
     })
+}
+
+/// `source_url` when it is an `https` URL of at most [`URL_MAX`] bytes with no space or
+/// control character.
+fn checked_url(source_url: String) -> Result<String, ManifestError> {
+    let url_ok = source_url.len() <= URL_MAX
+        && source_url.strip_prefix("https://").is_some_and(|rest| {
+            !rest.is_empty() && !rest.chars().any(|c| c.is_whitespace() || c.is_control())
+        });
+    if url_ok {
+        Ok(source_url)
+    } else {
+        Err(ManifestError::BadField("source_url"))
+    }
 }
 
 /// `last_reviewed`, a date.

@@ -22,6 +22,10 @@ mod index;
 #[path = "packs/timing.rs"]
 mod timing;
 
+#[cfg(test)]
+#[path = "packs/source.rs"]
+mod source;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_profile::packs::manifest::{self, ManifestError};
@@ -137,6 +141,7 @@ pub(crate) fn entry(pack: &Pack) -> PackEntry {
         id: pack.id().to_owned(),
         hash: pack.hash().clone(),
         added_only: false,
+        scripts_if_added: false,
     }
 }
 
@@ -539,8 +544,16 @@ fn the_pack_id_rule_refuses_every_builtin_stetdoc_and_clauseo_name() {
 fn nothing_in_packs_starts_a_process() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = vec![src.join("packs.rs")];
-    for entry in std::fs::read_dir(src.join("packs")).unwrap() {
-        files.push(entry.unwrap().path());
+    let mut folders = vec![src.join("packs")];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                folders.push(path);
+            } else {
+                files.push(path);
+            }
+        }
     }
     assert!(files.len() >= 9, "{files:?}");
     for file in files {

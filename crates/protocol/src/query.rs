@@ -12,8 +12,9 @@ use crate::{
     ClientName, CompactString, ConfigOption, Count, Date, Error, FileChange, FileRefId,
     FolderPlace, LastExit, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
     NamedChoice, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason, RestoreRequest,
-    RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId,
-    ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry, WordBlackline,
+    RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView, SkillFrom, SkillPreview,
+    SkillSearch, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView,
+    ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -204,6 +205,21 @@ pub enum HostQuery {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         matter: Option<MatterId>,
     },
+    /// Search the skills.sh catalogue (`skill_add.rs`), off the host thread, on the lawyer's own
+    /// action. Answered `QueryResult::SkillSearch`; `skill.download_failed` when it cannot be
+    /// reached. JSON: `{"search_skills": {"q": "contract review"}}`.
+    SearchSkills {
+        /// The words; every one must match (none matching, the last is dropped once).
+        q: String,
+    },
+    /// Read a skill source and stage it (`skill_add.rs`): downloads or reads only now, off the
+    /// host thread. Answered `QueryResult::SkillPreview`; refused with `skill.download_failed`,
+    /// `skill.not_found`, `skill.too_big`, `skill.invalid` or `command.invalid`.
+    /// JSON: `{"preview_skill": {"from": {"skills_sh": "anthropics/skills"}}}`.
+    PreviewSkill {
+        /// Where to read.
+        from: SkillFrom,
+    },
     /// This computer's sandbox and the firm's protection settings (decision record 0051).
     /// Answered `QueryResult::Protection`, from the host's cache, at once.
     /// JSON: `"protection"`.
@@ -304,6 +320,10 @@ pub enum QueryResult {
     SkillPacks(Vec<PackStatus>),
     /// For `ListAddons`.
     Addons(AddonList),
+    /// For `SearchSkills`.
+    SkillSearch(SkillSearch),
+    /// For `PreviewSkill`.
+    SkillPreview(SkillPreview),
     /// For `Protection`.
     Protection(ProtectionView),
     /// For `AllowedSites`.

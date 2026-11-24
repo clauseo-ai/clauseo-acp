@@ -214,6 +214,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::ConnectorKeychainRefused,
             "the saved sign-in could not be read from the keychain",
         ),
+        failed(ErrorCode::SkillDownloadFailed, "a skill download failed"),
+        failed(ErrorCode::SkillNotFound, "the source holds no skill"),
+        failed(ErrorCode::SkillTooBig, "the skill source is over its cap"),
+        failed(ErrorCode::SkillPreviewExpired, "the preview expired"),
     ]
 }
 

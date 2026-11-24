@@ -197,6 +197,11 @@ export const HI = {
   "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.":
     "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
   // prompt.too_long: a question over the host's cap on a prompt's text, kept in the field (provisional Hindi)
+  // adding a skill from a link (D3): not translated yet, as Settings › Skills' words are not
+  "Clauseo couldn't download that skill. Check your connection and try again.": null,
+  "There's no skill at that link or name.": null,
+  "That skill is too big to add.": null,
+  "That list of skills is out of date. Look the skill up again.": null,
   "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.":
     "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
   // Cancel in the native confirm before an MCP server is saved (provisional Hindi)

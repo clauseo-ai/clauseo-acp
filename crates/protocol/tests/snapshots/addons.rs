@@ -26,6 +26,7 @@ fn addon_list() -> AddonList {
         locked: false,
         switched: Vec::new(),
         server: None,
+        icon: None,
     };
     AddonList {
         items: vec![

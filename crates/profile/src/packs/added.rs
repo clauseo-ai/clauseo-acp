@@ -1,17 +1,19 @@
 //! A skill added on this computer (`AddSkill`, decision record 0040): a folder
 //! holding `SKILL.md`, or a `SKILL.md` alone, made into a skill pack of one skill.
 //!
-//! - [`read_source`] reads it into memory: symlinks (and on Windows every reparse point) and
-//!   hidden names (`.DS_Store`, `.git`) are skipped, never followed, and so is anything that is
+//! - [`read_source`] reads it into memory: symlinks (and on Windows every reparse point), hidden
+//!   names (`.DS_Store`, `.git`) and the names skills.sh leaves out ([`is_left_out`]) are
+//!   skipped, never followed, and so is anything that is
 //!   neither a file nor a folder; the caps ([`ADD_BYTES_MAX`], [`ADD_FILES_MAX`],
 //!   [`FOLDERS_MAX`], [`FILE_MAX`] a file) stop the read early. Its `SKILL.md`'s frontmatter
 //!   gives the display name, the id (the name slugged to the pack id rules, [`slug`]) and the
 //!   description, and is cut to `name` and `description` alone, so a vendor's `SKILL.md` with
 //!   other keys is taken.
 //! - [`build`] makes the pack's files in memory with its own `clauseo-pack.json`, marked
-//!   `added_here` (no `source_url`, `version`, `author` or `licence`; `last_reviewed` the day it
-//!   was added), and checks them as a launch checks a pack (`render::check_and_render`), so what
-//!   is written is a pack that loads.
+//!   `added_here` (no `version`, `author` or `licence`; `last_reviewed` the day it was added;
+//!   [`build_from`] records where it came from in `added_from` and `source_url`), and checks
+//!   them as a launch checks a pack (`render::check_and_render`), so what is written is a pack
+//!   that loads.
 //! - [`free_id`] picks the folder: the slug, or when a pack not added here holds it, the slug
 //!   with `-2`, `-3`, … So a skill added again replaces the one added before it.
 //! - [`install`] writes the pack into a staging folder, then renames it over the old one.
@@ -29,6 +31,7 @@ use serde_json::{Value, json};
 
 use super::read::{PackFile, PackRead, is_reparse};
 use super::render::{DESCRIPTION_MAX, Pack, front_name};
+use super::source::{FromKind, Origin};
 use super::{
     DEPTH_MAX, FILE_MAX, FOLDERS_MAX, MANIFEST_MAX, PACK_MANIFEST, PATH_MAX, Refusal, SKILLS_DIR,
     is_pack_id, is_pack_skill_name, render,
@@ -46,11 +49,53 @@ pub const ADD_FILES_MAX: usize = 200;
 /// The manifest key that marks a pack added on this computer.
 pub const MARKER: &str = "added_here";
 
+/// The manifest key that says how a pack added on this computer reached it
+/// ([`FromKind::as_str`]); none for a folder.
+pub const FROM_KEY: &str = "added_from";
+
 /// The most bytes of a display name (`name` in the manifest) is the manifest's own cap.
 const NAME_MAX: usize = super::manifest::DISPLAY_MAX;
 
 /// The longest id the slug gives, leaving room for a `-<n>` when the slug is taken.
 const SLUG_MAX: usize = 27;
+
+/// The names a skill's copy leaves out, as the skills.sh installer does, besides every hidden
+/// name (`.git`, `.DS_Store`).
+const LEFT_OUT: [&str; 3] = ["metadata.json", "__pycache__", "__pypackages__"];
+
+/// Whether a file or folder named `name` is left out of a skill's copy: hidden, or on
+/// [`LEFT_OUT`].
+pub fn is_left_out(name: &str) -> bool {
+    name.starts_with('.') || LEFT_OUT.contains(&name)
+}
+
+/// Where an added skill came from, recorded in its manifest: `added_from` (left out for a
+/// folder, so every pack added before it reads as one) and `source_url` (`https` only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    /// How it reached this computer.
+    pub from: FromKind,
+    /// The skills.sh page, the GitHub link or the `.zip` link.
+    pub source_url: Option<String>,
+}
+
+impl Record {
+    /// A folder or `SKILL.md` on this computer: nothing more recorded.
+    pub fn folder() -> Self {
+        Self {
+            from: FromKind::Folder,
+            source_url: None,
+        }
+    }
+
+    /// What `origin` says.
+    pub fn of(origin: &Origin) -> Self {
+        Self {
+            from: origin.kind,
+            source_url: origin.source_url.clone(),
+        }
+    }
+}
 
 /// Why a skill cannot be added.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +188,7 @@ impl Walk {
             let Some(text) = name.to_str() else {
                 return Err(AddError::Invalid(Refusal::BadPath));
             };
-            if text.starts_with('.') {
+            if is_left_out(text) {
                 continue;
             }
             let full = dir.join(&name);
@@ -265,6 +310,17 @@ pub fn build(
     today: Date,
     allow_scripts: bool,
 ) -> Result<(Vec<PackFile>, Pack), AddError> {
+    build_from(source, id, today, allow_scripts, &Record::folder())
+}
+
+/// [`build`], recording `record` in the manifest.
+pub fn build_from(
+    source: &Source,
+    id: &str,
+    today: Date,
+    allow_scripts: bool,
+    record: &Record,
+) -> Result<(Vec<PackFile>, Pack), AddError> {
     let invalid = AddError::Invalid;
     if !is_pack_id(id) {
         return Err(invalid(Refusal::BadId));
@@ -280,7 +336,7 @@ pub fn build(
         })
         .collect();
     let instruction_only = !files.iter().any(super::scripts::is_script);
-    let manifest = json!({
+    let mut manifest = json!({
         "format": super::manifest::FORMAT,
         "id": id,
         "name": source.name,
@@ -289,6 +345,14 @@ pub fn build(
         "skills": [{"name": source.slug}],
         MARKER: true,
     });
+    if let Some(top) = manifest.as_object_mut() {
+        if record.from != FromKind::Folder {
+            top.insert(FROM_KEY.to_owned(), json!(record.from.as_str()));
+        }
+        if let Some(url) = &record.source_url {
+            top.insert("source_url".to_owned(), json!(url));
+        }
+    }
     let manifest = serde_json::to_vec_pretty(&manifest).map_err(failed(Refusal::Manifest))?;
     files.push(PackFile {
         path: PACK_MANIFEST.to_owned(),

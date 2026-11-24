@@ -21,7 +21,7 @@ use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
 mod needed;
-mod server;
+pub(crate) mod server;
 use server::{Reply, Server};
 
 /// The list's time, and the newer and older lists'.

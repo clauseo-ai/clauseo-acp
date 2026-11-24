@@ -313,6 +313,10 @@ mod mcp;
 #[path = "snapshots/addons.rs"]
 mod addons;
 
+#[cfg(test)]
+#[path = "snapshots/skill_add.rs"]
+mod skill_add;
+
 mod view_patch {
     use super::*;
 

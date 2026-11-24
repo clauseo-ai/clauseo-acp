@@ -51,7 +51,7 @@ impl Clients {
 
     /// The client for `url` under `upstream`: its route asked now (blocking: the OS may run
     /// PAC; no lock is held), and the last client reused when the route is the same.
-    pub(super) fn for_url(&self, upstream: &Upstream, url: &Url) -> Result<HttpsClient, Failure> {
+    pub(crate) fn for_url(&self, upstream: &Upstream, url: &Url) -> Result<HttpsClient, Failure> {
         // The error is not logged: it can quote the proxy setting, password and all.
         let route = upstream_for(upstream, url)
             .map_err(|_unsaid| refused("the proxy setting is refused"))?;

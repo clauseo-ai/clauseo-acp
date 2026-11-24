@@ -18,6 +18,7 @@
 pub(crate) mod tools;
 
 use clauseo_profile::packs::index::use_text;
+use clauseo_profile::packs::source::{FromKind, parse_link};
 use clauseo_profile::packs::{Pack, PackSkill};
 use clauseo_profile::skills::builtin::{AGENT_BROWSER, BUILTIN, use_of};
 use clauseo_profile::skills::stetdoc::STETDOC;
@@ -34,9 +35,11 @@ use futures::task::LocalSpawnExt;
 use super::skill_packs::{Listing, read_all};
 use crate::actor::Actor;
 use crate::actor::input::Reply;
+use crate::actor::settings::add_skills::from_kind;
 use crate::actor::settings::packs::READ_JOB;
 use crate::agent::codex::prepare::off_actor;
 use crate::error::Error;
+use crate::skill_source::icon::{ICONS_DIR, data_url};
 
 /// The policy key that locks every pack's switch.
 const ENABLED: &str = "skills.enabled";
@@ -51,18 +54,28 @@ pub(super) fn list(actor: &mut Actor, matter: Option<MatterId>, reply: Reply<Que
     let locked = actor.effective.is_locked(ENABLED);
     let listing = Listing::of(actor);
     let places = Places::of(actor, matter);
+    let icons = actor.effective.data_dir().join(ICONS_DIR);
     let clock = std::sync::Arc::clone(&actor.clock);
     let spawned = actor.spawner.spawn_local(async move {
-        let packs = off_actor(clock, READ_JOB, move || Ok(read_all(&listing))).await;
+        let packs = off_actor(clock, READ_JOB, move || {
+            let packs = read_all(&listing);
+            let rows: Vec<Addon> = packs
+                .iter()
+                .map(|(status, pack)| Addon {
+                    icon: status
+                        .added_here
+                        .then(|| data_url(&icons, status.id.as_str()))
+                        .flatten(),
+                    ..added_skill(status, pack.as_ref(), locked)
+                })
+                .collect();
+            Ok(rows)
+        })
+        .await;
         let answer = packs
-            .map(|packs| {
+            .map(|rows| {
                 let mut items = builtin;
-                items.extend(
-                    packs
-                        .iter()
-                        .map(|(status, pack)| added_skill(status, pack.as_ref(), locked))
-                        .map(|row| places.placed(row)),
-                );
+                items.extend(rows.into_iter().map(|row| places.placed(row)));
                 items.extend(tools);
                 QueryResult::Addons(AddonList { items })
             })
@@ -183,6 +196,7 @@ fn row(kind: AddonKind, id: &str, name: &str, source: AddonSource) -> Addon {
         locked: false,
         switched: Vec::new(),
         server: None,
+        icon: None,
     }
 }
 
@@ -236,6 +250,29 @@ fn builtin_description(id: &str) -> String {
     })
 }
 
+/// Where a skill added here came from: its manifest's `added_from` and `source_url`, shown as
+/// the preview showed it (`owner/repo[/skill]` for skills.sh, `owner/repo[/path]` for GitHub,
+/// the link for a `.zip` link); a folder, a zip on this computer or a pack that did not read
+/// shows its id.
+fn added_from(id: &str, pack: Option<&Pack>) -> AddonFrom {
+    let manifest = pack.map(Pack::manifest);
+    let kind = manifest
+        .and_then(|manifest| manifest.added_from)
+        .unwrap_or(FromKind::Folder);
+    let link = manifest
+        .map(|manifest| manifest.source_url.as_str())
+        .unwrap_or_default();
+    let text = match kind {
+        FromKind::SkillsSh | FromKind::GitHub => parse_link(link).ok().map(|r| r.origin().text),
+        FromKind::Url => (!link.is_empty()).then(|| link.to_owned()),
+        FromKind::Zip | FromKind::Folder => None,
+    };
+    AddonFrom {
+        kind: from_kind(kind),
+        text: text.unwrap_or_else(|| id.to_owned()),
+    }
+}
+
 /// A pack's row, from its status and the pack when it read. `locked`: policy locks
 /// `skills.enabled`.
 fn added_skill(status: &PackStatus, pack: Option<&Pack>, locked: bool) -> Addon {
@@ -247,10 +284,7 @@ fn added_skill(status: &PackStatus, pack: Option<&Pack>, locked: bool) -> Addon 
         .and_then(use_text)
         .unwrap_or_default();
     let from = if status.added_here {
-        Some(AddonFrom {
-            kind: AddonFromKind::Folder,
-            text: id.to_owned(),
-        })
+        Some(added_from(id, pack))
     } else {
         status.source_url.as_ref().map(|url| AddonFrom {
             kind: AddonFromKind::Url,
