@@ -4012,14 +4012,19 @@ export type MatterHeaderEntry = {
 	import?: ImportSummary,
 };
 
-/**  What holds a matter while a turn waits for it ([`TurnQueued::hold`]). */
+/**
+ *  What holds a matter while a turn waits for it ([`TurnQueued::hold`]). A hold a newer
+ *  Clauseo names that this version does not know reads as `Unknown`, still a hold.
+ */
 export type MatterHold = 
 /**  Another conversation's undo puts the matter's papers back. */
 "undo" | 
 /**  A version of a paper is being restored. */
 "restore" | 
 /**  The matter's folder is moving. */
-"relocate";
+"relocate" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**
  *  A matter: a folder or a scratch space the lawyer works in.

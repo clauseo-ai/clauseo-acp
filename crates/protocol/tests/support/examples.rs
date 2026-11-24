@@ -100,8 +100,9 @@ pub fn file_changes() -> Vec<FileChange> {
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
 /// corpus writer finds a holder for it: error codes no example turn fails with, the page vias
-/// no example opens a page with, the stop reasons no example turn ends with, and the steer
-/// outcomes no example steer resolves with.
+/// no example opens a page with, the stop reasons no example turn ends with, the steer
+/// outcomes no example steer resolves with, and the matter holds no example queued turn waits
+/// for.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
         ThreadRenamed {
@@ -218,6 +219,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::notices())
     .chain(later::stops())
     .chain(later::steers())
+    .chain(later::holds())
     .collect()
 }
 

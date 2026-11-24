@@ -1,16 +1,17 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
 //! host notices with a kind, which it chains on next, the skill pack notices among them, and the
-//! later stop reasons (`NotAllowed`'s moved here from it), which it chains on next, and the later
-//! steer outcomes, which it chains on last.
+//! later stop reasons (`NotAllowed`'s moved here from it), which it chains on next, the later
+//! steer outcomes, which it chains on next, and a turn queued behind each matter hold, which it
+//! chains on last.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
-    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, ErrorCode, MatterHold, MatterPath, Notice, NoticeKind, NoticeLevel,
+    PackId, PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved,
+    StopReason, TurnEnded, TurnFailed, TurnQueued, WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, message_id, thread_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -526,4 +527,17 @@ pub(super) fn steers() -> Vec<DomainEvent> {
         }
         .into(),
     ]
+}
+
+/// Turn 3 of thread 2, queued behind thread 1 while each matter hold (#1286) holds the matter.
+pub(super) fn holds() -> Vec<DomainEvent> {
+    [MatterHold::Undo, MatterHold::Restore, MatterHold::Relocate]
+        .into_iter()
+        .map(|hold| {
+            TurnQueued::new(thread_id(2), turn_id(3), thread_id(1), None)
+                .unwrap()
+                .held_by(hold)
+                .into()
+        })
+        .collect()
 }
