@@ -232,7 +232,8 @@ pub(crate) const CLAUDE_RAW_FRAMES_KEY: &str = "emitRawSDKMessages";
 
 /// The engine frames every Claude session asks for ([`CLAUDE_RAW_FRAMES_KEY`]), each a `type`
 /// and a `subtype`, and nothing else: the task frames say when a helper's task settled
-/// (`clauseo_acp`'s `map/task.rs`); `init` is asked for here and read by nothing yet.
+/// (`clauseo_acp`'s `map/task.rs`); `init` is asked for here and read by nothing yet. Only a
+/// Claude session's meta gets the list; another agent's adapter ignores the key, so it stays off.
 pub(crate) const CLAUDE_RAW_FRAMES: [(&str, &str); 4] = [
     ("system", "init"),
     ("system", "task_started"),
@@ -328,7 +329,6 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   out, in both forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - `claudeCode.options.forwardSubagentText: true` ([`FORWARD_SUBAGENT_TEXT_OPTION`]).
-/// - `claudeCode.emitRawSDKMessages`: [`CLAUDE_RAW_FRAMES`], over a hook's own value.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
@@ -339,7 +339,9 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
 ///   [`subagents::subagent_meta`], which settles `agents` and the append's last part, and
 ///   [`subagents::helper_model_env`], which puts every helper on Haiku on Anthropic's own login
-///   (in `claudeCode.options.env` and the flag settings' `env`, over a hook's values).
+///   (in `claudeCode.options.env` and the flag settings' `env`, over a hook's values). Also
+///   `claudeCode.emitRawSDKMessages`: [`CLAUDE_RAW_FRAMES`], over a hook's own value. Without
+///   `keys` the key is left as the hook set it, or absent.
 /// - With a `guard` ([`GuardHook`]): [`guard_entries`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
@@ -419,11 +421,13 @@ pub(crate) fn session_meta(
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
-    let frames = CLAUDE_RAW_FRAMES
-        .iter()
-        .map(|(kind, subtype)| serde_json::json!({"type": kind, "subtype": subtype}))
-        .collect();
-    claude.insert(CLAUDE_RAW_FRAMES_KEY.to_owned(), Value::Array(frames));
+    if keys.is_some() {
+        let frames = CLAUDE_RAW_FRAMES
+            .iter()
+            .map(|(kind, subtype)| serde_json::json!({"type": kind, "subtype": subtype}))
+            .collect();
+        claude.insert(CLAUDE_RAW_FRAMES_KEY.to_owned(), Value::Array(frames));
+    }
     meta.insert("claudeCode".to_owned(), Value::Object(claude));
     meta
 }

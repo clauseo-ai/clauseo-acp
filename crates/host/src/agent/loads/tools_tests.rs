@@ -532,8 +532,7 @@ fn extra_flags_cannot_set_the_tools_or_the_settings() {
 
 /// Every session start and load asks for exactly the decided engine frames, in
 /// `claudeCode.emitRawSDKMessages`, for every login and under the firm's managed MCP too, over a
-/// hook's own list (a hook asking for every frame, `true`, gets the list too); with no Claude
-/// keys (another agent, which ignores `claudeCode`) the list goes all the same.
+/// hook's own list (a hook asking for every frame, `true`, gets the list too).
 #[test]
 fn every_claude_session_asks_for_exactly_the_decided_engine_frames() {
     let decided = json!([
@@ -556,7 +555,20 @@ fn every_claude_session_asks_for_exactly_the_decided_engine_frames() {
                 assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], decided, "{hook}");
             }
         }
-        let meta = session_meta(hook.as_object().cloned(), McpControl::Clauseo, None, None);
-        assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], decided, "{hook}");
+    }
+}
+
+/// With no Claude keys (another agent, whose adapter ignores the key) the meta asks for no
+/// engine frames, and a hook's own `emitRawSDKMessages` passes through unchanged, as before.
+#[test]
+fn a_session_that_is_not_claudes_gets_no_raw_frames_list() {
+    for control in [McpControl::Clauseo, McpControl::Managed] {
+        let meta = session_meta(None, control, None, None);
+        assert_eq!(meta["claudeCode"].get(CLAUDE_RAW_FRAMES_KEY), None);
+        for own in [json!(true), json!([{"type": "assistant"}])] {
+            let hook = json!({"claudeCode": {"emitRawSDKMessages": own.clone()}});
+            let meta = session_meta(hook.as_object().cloned(), control, None, None);
+            assert_eq!(meta["claudeCode"][CLAUDE_RAW_FRAMES_KEY], own);
+        }
     }
 }
