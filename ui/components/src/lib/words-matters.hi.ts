@@ -202,6 +202,16 @@ export const HI = {
   "One conversation changes a matter's papers at a time. Your message is ready to go.":
     "किसी मामले के दस्तावेज़ एक समय में एक ही बातचीत बदलती है। आपका संदेश भेजने के लिए तैयार है।",
   "Stop the other": "दूसरी रोकें",
+  // the open matter's line where Windows' Controlled folder access protects its folder (issue 5; the app track's
+  // words, provisional, hi: later): UC-1167, UC-1168, UC-1164
+  "Windows' Controlled folder access blocks saving in this folder": null,
+  "Move this matter's folder out of Documents in File Explorer, then choose it here.": null,
+  "Choose the moved folder": null,
+  // set_default_location's outcome, under "Choose a matters folder outside Documents" (UC-1169)
+  "New matters now go in {folder}. Matters you already have stay where they are.": null,
+  "Your firm sets where new matters go, so it can't be changed here.": null,
+  "Clauseo couldn't use that folder. Choose it again.": null,
+  "Clauseo couldn't save the change. Try again.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */

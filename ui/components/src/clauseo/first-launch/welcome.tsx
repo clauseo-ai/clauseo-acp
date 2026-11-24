@@ -48,6 +48,7 @@ export function Welcome({
   plans,
   papersPlan,
   tools = null,
+  ahead = null,
   counts,
   onOpenFolder,
   onNewMatter,
@@ -67,6 +68,9 @@ export function Welcome({
   papersPlan?: string | null | undefined;
   /** The document tools' line under the plans (tools.tsx); null with none. */
   tools?: ReactNode;
+  /** What macOS or Windows needs answered before the first matter, between the lede and the question's buttons
+   * (permissions.tsx); null with none. */
+  ahead?: ReactNode;
   counts: CountsSwitch;
   onOpenFolder: () => void;
   onNewMatter: () => void;
@@ -110,6 +114,7 @@ export function Welcome({
                   )}
                 </Say>
               </p>
+              {ahead}
               <div className="fl-open">
                 <Button
                   kind="tone"

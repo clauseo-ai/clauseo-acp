@@ -219,6 +219,32 @@ export const HI = {
   "Clauseo couldn't download its document tools.": "Clauseo अपने दस्तावेज़ टूल डाउनलोड नहीं कर सका।",
   "Windows blocked Clauseo's document tools on this computer.":
     "Windows ने इस कंप्यूटर पर Clauseo के दस्तावेज़ टूल रोक दिए।",
+
+  // the permissions step at the head of the first screen (issue 5, UC-1150 to UC-1166; the app track's words,
+  // provisional, hi: later): what macOS asks for, asked here first, and Windows' Controlled folder access
+  "Before your first matter": null,
+  "Answer here first, so macOS doesn't stop you in the middle of a matter.": null,
+  "Your Documents folder": null,
+  "Your matters' papers live here. Clauseo, Claude and ChatGPT read them and save their work beside them.":
+    null,
+  "Your keychain": null,
+  "Clauseo keeps your sign-ins and connector passwords in your Mac's keychain. macOS asks once for each and wants your Mac's login password. Choose Always Allow. Plain Allow means macOS asks again next time.":
+    null,
+  Allow: null,
+  "macOS is asking. Choose Allow in its window.": null,
+  "macOS is asking. Type your Mac's login password, then choose Always Allow.": null,
+  Allowed: null,
+  "Not allowed.": null,
+  "You can allow it in {path}.": null,
+  "Open System Settings": null,
+  "macOS asks again the next time Clauseo opens. Choose Always Allow then.": null,
+  "Clauseo couldn't ask macOS. Try again.": null,
+  "Windows is blocking your matters folder": null,
+  "Windows blocks the assistants' tools, such as PowerShell, from saving in protected folders. Choose a matters folder outside Documents, Desktop and Pictures, or ask your IT team.":
+    null,
+  "Windows may be blocking your matters folder": null,
+  "Choose a matters folder outside Documents": null,
+  "Check again": null,
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

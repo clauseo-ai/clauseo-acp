@@ -27,6 +27,7 @@ import type {
 import { fakeNext } from "../fake-next.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
+import { providePermissions, type PermissionsHost } from "./permissions-host.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -141,6 +142,8 @@ export type RigOptions = {
   /** What the window says of the network (navigator.onLine); offline unless a test says so, so a waiting install says
    * the offline words. setOnline changes it after. */
   online?: boolean;
+  /** The first screen's permissions step's host (permissions-host.ts); none lists no rows. */
+  permissions?: PermissionsHost;
 };
 
 /** The room over a fake host with the setup wire. */
@@ -211,6 +214,7 @@ async function mountRoom(o: RigOptions) {
     }),
   };
   const transport = new FakeTransport(fake);
+  if (o.permissions !== undefined) providePermissions(transport, o.permissions);
   connectRoom(transport, { language: o.language ?? "en" });
   host = document.createElement("div");
   document.body.append(host);

@@ -37,6 +37,8 @@ import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, planOf } from "./acts.ts";
 import { readyPlan, toolsView } from "./views.ts";
 import { browserNote, footActs, welcomeFoot } from "./welcome-foot.tsx";
+import { Permissions } from "./permissions.tsx";
+import { permissionsHostOf } from "./permissions-host.ts";
 
 /** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
  * first screen needs them. */
@@ -152,6 +154,8 @@ export function FirstScreen({
   const [warned, setWarned] = useState<HeldFolder | null>(null);
   const makingNow = useRef(false);
   const wait = usePickWait();
+  // what macOS or Windows needs answered before the first matter (issue 5), read once as the screen opens
+  const [permissions] = useState(() => permissionsHostOf(transport));
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
   // the start-up's marks (start-marks.ts): the welcome's first commit, then its button, which sends them all once
   useLayoutEffect(markWelcome, []);
@@ -239,6 +243,14 @@ export function FirstScreen({
               }
             />
           )
+        }
+        ahead={
+          <Permissions
+            host={permissions}
+            platform={platform}
+            onOtherFolder={() => void openFolder()}
+            onSettings={() => void transport.openPrivacySettings().catch(() => {})}
+          />
         }
         counts={{ ...state.counts, onChange: store.setCounts }}
         onOpenFolder={() => void openFolder()}
