@@ -489,8 +489,9 @@ function RoomFrame({
           {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
               300 ms reveal throttle (FALLBACK_THROTTLE_MS), however soon its chunk landed */}
           {place === "work" && <div className="room-notices">{notice}</div>}
-          {/* what the desktop needs answered, for a lawyer with matters (issue 5): the band over the work */}
-          {!welcome && <PermissionsBand transport={transport} />}
+          {/* what the desktop needs answered, for a lawyer with matters (issue 5): the band over the work, once
+              the list says room (while it loads, welcome is still false, and the band would read and go) */}
+          {view.phase === "ready" && !welcome && <PermissionsBand transport={transport} />}
           {setup && (
             <FirstRun
               transport={transport}

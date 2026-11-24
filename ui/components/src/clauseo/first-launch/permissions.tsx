@@ -256,6 +256,9 @@ const ITEMS: Record<string, FirstLaunchKey> = {
     "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.",
 };
 
+/** The kinds in the order the ITEMS keys name them. */
+const KIND_ORDER = ["plans", "connectors", "own"] as const;
+
 /** The kind of item a keychain service holds. */
 const kindOf = (service: string) =>
   service.endsWith(".mcp") ? "own" : service.includes("connectors") ? "connectors" : "plans";
@@ -269,7 +272,7 @@ function KeychainItems({ note }: { note: string | undefined }) {
     .map((item) => item.replace(/\s*\(.*\)\s*$/, "").trim())
     .filter((service) => service !== "");
   const kinds = new Set(services.map(kindOf));
-  const key = ITEMS[["plans", "connectors", "own"].filter((k) => kinds.has(k)).join(" ")];
+  const key = ITEMS[KIND_ORDER.filter((k) => kinds.has(k)).join(" ")];
   if (key === undefined) return null;
   return (
     <p className="fl-perm-note" data-testid="permission-note">
