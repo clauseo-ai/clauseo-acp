@@ -107,3 +107,76 @@ fn not_a_zip_is_refused() {
         Err(SourceError::Unsafe)
     );
 }
+
+/// Names Windows reads as a device or as another file's 8.3 short name are refused: `COM¹`,
+/// `CON .txt` (Windows drops the spaces), `PROGRA~1`. A `~` not followed by digits is a name.
+#[test]
+fn windows_device_names_and_short_aliases_are_refused() {
+    let dir = Scratch::new("zip-device");
+    for name in [
+        "COM¹.txt",
+        "lpt³",
+        "CON .txt",
+        "skills/aux  .md",
+        "PROGRA~1/x.md",
+        "file~2.md",
+        "a/b~12",
+    ] {
+        let bytes = zip_of(&[(name, b"x")]);
+        assert_eq!(try_unzip(&dir, &bytes), Err(SourceError::Unsafe), "{name}");
+    }
+    let fine = zip_of(&[("a~b.md", b"x"), ("console.md", b"y"), ("com10.md", b"z")]);
+    assert_eq!(try_unzip(&dir, &fine).unwrap().files, 3);
+}
+
+/// A file and a folder of the same name, in either order, are refused, leaving nothing.
+#[test]
+fn a_file_versus_folder_clash_is_refused() {
+    let dir = Scratch::new("zip-clash");
+    let file_first = zip_of(&[("a", b"file"), ("a/b.md", b"inside")]);
+    assert_eq!(try_unzip(&dir, &file_first), Err(SourceError::Unsafe));
+    let folder_first = zip_of(&[("a/b.md", b"inside"), ("a", b"file")]);
+    assert_eq!(try_unzip(&dir, &folder_first), Err(SourceError::Unsafe));
+}
+
+/// An encrypted entry is refused (`ZipCrypto` here; AES the same).
+#[test]
+fn an_encrypted_entry_is_refused() {
+    use zip::unstable::write::FileOptionsExt as _;
+    let dir = Scratch::new("zip-encrypted");
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .with_deprecated_encryption(b"secret")
+        .unwrap();
+    zip.start_file("SKILL.md", options).unwrap();
+    zip.write_all(b"---\nname: x\n---\n").unwrap();
+    let bytes = zip.finish().unwrap().into_inner();
+    assert_eq!(try_unzip(&dir, &bytes), Err(SourceError::Unsafe));
+}
+
+/// A name of at most 400 bytes and 32 parts unpacks; one byte or one part more is refused.
+#[test]
+fn the_name_and_depth_caps_hold() {
+    let dir = Scratch::new("zip-caps");
+    let part = "x".repeat(99);
+    let at_cap = format!("{part}/{part}/{part}/{part}y");
+    assert_eq!(at_cap.len(), 400);
+    let over = format!("{at_cap}z");
+    let deep = vec!["d"; 32].join("/");
+    let deeper = vec!["d"; 33].join("/");
+    assert_eq!(
+        try_unzip(&dir, &zip_of(&[(&at_cap, b"x")])).unwrap().files,
+        1
+    );
+    let dir = Scratch::new("zip-caps-deep");
+    assert_eq!(try_unzip(&dir, &zip_of(&[(&deep, b"x")])).unwrap().files, 1);
+    for name in [&over, &deeper] {
+        let dir = Scratch::new("zip-caps-over");
+        assert_eq!(
+            try_unzip(&dir, &zip_of(&[(name, b"x")])),
+            Err(SourceError::Unsafe),
+            "{} bytes",
+            name.len()
+        );
+    }
+}

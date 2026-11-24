@@ -1,8 +1,11 @@
 //! A preview's staging folder, `<data>/skill-packs.adding/<token>/`, from the preview until the
 //! lawyer picks (or [`STAGE_TTL_MS`] passes, or Clauseo starts again):
 //!
-//! - `stage.json`: when it was made, where it came from ([`Origin`]) and where its tree's top
-//!   is: `tree/...` inside the folder for an archive, or the lawyer's own folder, read in place.
+//! - `made`: when it was made, written first, so a sweep by another preview leaves a folder
+//!   still unpacking alone.
+//! - `stage.json`: when it was made, where it came from ([`Origin`]), where its tree's top is
+//!   (`tree/...` inside the folder for an archive, or the lawyer's own folder, read in place),
+//!   and the skills the preview showed ([`Shown`]): the only ones `install_picked` installs.
 //! - `tree/`: the archive, unpacked ([`super::unzip`]).
 //!
 //! A token is 32 lowercase hex characters, so it is never a pack id (at most 30 bytes) and
@@ -20,8 +23,8 @@ use clauseo_protocol::{Date, PackId};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-use super::super::{MANIFEST_MAX, Pack, Refusal, added};
-use super::discover::{Found, discover, narrow};
+use super::super::{Pack, Refusal, added};
+use super::discover::{Found, discover, inside};
 use super::{FromKind, Origin, SourceError, unzip};
 use crate::write;
 
@@ -33,6 +36,13 @@ pub const STAGE_TTL_MS: i64 = 30 * 60 * 1000;
 
 /// The file in a preview's folder that describes it.
 const STAGE_FILE: &str = "stage.json";
+
+/// The most bytes of a `stage.json` read back: room for the names and folders of every skill a
+/// large repository shows.
+const STAGE_MAX: u64 = 1024 * 1024;
+
+/// The file in a preview's folder written first, holding when it was made.
+const MADE_FILE: &str = "made";
 
 /// The folder in a preview's folder an archive is unpacked into.
 const TREE_DIR: &str = "tree";
@@ -80,7 +90,10 @@ pub fn stage_tree(
     let token = new_token(now_ms);
     let folder = adding.join(&token);
     write::create_dir(&folder).map_err(|_io| SourceError::Io)?;
-    let result = fill(&folder, tree, &origin, asked, now_ms);
+    let made = now_ms.to_string();
+    let result = write::write_new(&folder.join(MADE_FILE), made.as_bytes())
+        .map_err(|_io| SourceError::Io)
+        .and_then(|()| fill(&folder, tree, &origin, asked, now_ms));
     match result {
         Ok(skills) => Ok(Preview {
             token,
@@ -132,12 +145,18 @@ fn fill(
         return Err(SourceError::NotFound);
     }
     let skills = discover(&top, asked)?;
+    let shown: Vec<Value> = skills
+        .iter()
+        .filter(|skill| skill.problem.is_none())
+        .map(|skill| json!({"name": skill.name, "folder": skill.folder}))
+        .collect();
     let stage = json!({
         "made_ms": now_ms,
         "kind": origin.kind.as_str(),
         "text": origin.text,
         "source_url": origin.source_url,
         "top": top.to_string_lossy(),
+        "shown": shown,
     });
     let bytes = serde_json::to_vec(&stage).map_err(|_bad| SourceError::Io)?;
     write::write_new(&folder.join(STAGE_FILE), &bytes).map_err(|_io| SourceError::Io)?;
@@ -166,6 +185,24 @@ pub struct Staged {
     pub origin: Origin,
     /// When it was made.
     pub made_ms: i64,
+    /// The skills the preview showed, the only ones that can be installed from it.
+    pub shown: Vec<Shown>,
+}
+
+/// One skill a preview showed: a [`Found`] that could be added.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shown {
+    /// Its listed name ([`Found::name`]).
+    pub name: String,
+    /// Its folder, relative to the tree's top, `/`-separated; empty for the top itself.
+    pub folder: String,
+}
+
+impl Staged {
+    /// The skill the preview showed as `name`, if it did.
+    pub fn shown(&self, name: &str) -> Option<&Shown> {
+        self.shown.iter().find(|skill| skill.name == name)
+    }
 }
 
 /// The preview `token` under `adding`: `Expired` when there is none, or it is past
@@ -193,11 +230,26 @@ fn read_stage(folder: &Path) -> Option<Staged> {
     let mut bytes = Vec::new();
     std::fs::File::open(&path)
         .ok()?
-        .take(MANIFEST_MAX)
+        .take(STAGE_MAX)
         .read_to_end(&mut bytes)
         .ok()?;
     let stage: Value = serde_json::from_slice(&bytes).ok()?;
     let text = |key: &str| stage.get(key).and_then(Value::as_str).map(str::to_owned);
+    let shown = stage
+        .get("shown")
+        .and_then(Value::as_array)
+        .map(|shown| {
+            shown
+                .iter()
+                .filter_map(|skill| {
+                    Some(Shown {
+                        name: skill.get("name")?.as_str()?.to_owned(),
+                        folder: skill.get("folder")?.as_str()?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Some(Staged {
         folder: folder.to_path_buf(),
         top: PathBuf::from(text("top")?),
@@ -207,7 +259,22 @@ fn read_stage(folder: &Path) -> Option<Staged> {
             source_url: text("source_url"),
         },
         made_ms: stage.get("made_ms")?.as_i64()?,
+        shown,
     })
+}
+
+/// When the preview folder `folder` was made: its `stage.json`, else its `made` file (a
+/// preview still being filled).
+fn made_ms(folder: &Path) -> Option<i64> {
+    if let Some(staged) = read_stage(folder) {
+        return Some(staged.made_ms);
+    }
+    let path = folder.join(MADE_FILE);
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > 32 {
+        return None;
+    }
+    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
 }
 
 /// Ends the preview `token` (after its install, or when the lawyer cancels): its folder goes.
@@ -218,7 +285,8 @@ pub fn close_preview(adding: &Path, token: &str) {
 }
 
 /// Removes the previews under `adding`: every one when `now_ms` is `None` (Clauseo starting),
-/// else those past [`STAGE_TTL_MS`] or unreadable. Anything not named as a token is left.
+/// else those past [`STAGE_TTL_MS`] or unreadable (one still being filled is read by its
+/// `made` file). Anything not named as a token is left.
 pub fn sweep(adding: &Path, now_ms: Option<i64>) {
     let Ok(entries) = std::fs::read_dir(adding) else {
         return;
@@ -231,8 +299,7 @@ pub fn sweep(adding: &Path, now_ms: Option<i64>) {
             continue;
         }
         let keep = now_ms.is_some_and(|now| {
-            read_stage(&entry.path())
-                .is_some_and(|staged| staged.made_ms <= now && now - staged.made_ms <= STAGE_TTL_MS)
+            made_ms(&entry.path()).is_some_and(|made| made <= now && now - made <= STAGE_TTL_MS)
         });
         if !keep {
             write::remove_dir_all(&entry.path());
@@ -249,10 +316,12 @@ pub struct Installed {
     pub pack: Pack,
 }
 
-/// Installs the skill named `pick` (a [`Found::name`]) from `staged` as a pack under
-/// `packs_root`, through `adding`, recording where it came from; `admit` says whether the firm
-/// admits the pack id it would take (`Ok(None)` when it does not, nothing written). Scripts
-/// come along when `allow_scripts`. Adding a name added before replaces it.
+/// Installs the skill the preview showed as `pick` (a [`Shown::name`]) from `staged` as a pack
+/// under `packs_root`, through `adding`, recording where it came from; a name it did not show
+/// (hidden, narrowed away, refused, or not there) is `NoSkillMd`, nothing written. `admit`
+/// says whether the firm admits the pack id it would take (`Ok(None)` when it does not,
+/// nothing written). Scripts come along when `allow_scripts`. Adding a name added before
+/// replaces it.
 pub fn install_picked(
     staged: &Staged,
     pick: &str,
@@ -261,17 +330,11 @@ pub fn install_picked(
     admit: &dyn Fn(&str) -> bool,
 ) -> Result<Option<Installed>, added::AddError> {
     let invalid = added::AddError::Invalid;
-    let found = discover(&staged.top, Some(pick)).map_err(|_none| added::AddError::NoSkillMd)?;
-    let found = narrow(found, pick);
-    let skill = found
-        .iter()
-        .find(|skill| skill.name == pick)
-        .or(found.first())
-        .ok_or(added::AddError::NoSkillMd)?;
+    let skill = staged.shown(pick).ok_or(added::AddError::NoSkillMd)?;
     let folder = if skill.folder.is_empty() {
         staged.top.clone()
     } else {
-        staged.top.join(&skill.folder)
+        inside(&staged.top, &skill.folder).ok_or(added::AddError::NoSkillMd)?
     };
     let source = added::read_source(&folder)?;
     let id = added::free_id(packs_root, &source.slug)?;

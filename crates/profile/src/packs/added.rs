@@ -56,6 +56,9 @@ pub const FROM_KEY: &str = "added_from";
 /// The most bytes of a display name (`name` in the manifest) is the manifest's own cap.
 const NAME_MAX: usize = super::manifest::DISPLAY_MAX;
 
+/// The most bytes of a listed name: what `add_skills` takes as a picked name.
+const NAME_BYTES_MAX: usize = 200;
+
 /// The longest id the slug gives, leaving room for a `-<n>` when the slug is taken.
 const SLUG_MAX: usize = 27;
 
@@ -266,15 +269,11 @@ impl Walk {
         if description.is_empty() || description.chars().count() > DESCRIPTION_MAX {
             return Err(invalid);
         }
-        let display: String = name
-            .chars()
-            .filter(|c| !c.is_control() && !is_unlisted_char(*c))
-            .take(NAME_MAX)
-            .collect();
-        let display = if display.trim().is_empty() {
+        let display = display_name(name);
+        let display = if display.is_empty() {
             slug.clone()
         } else {
-            display.trim().to_owned()
+            display
         };
         skill_md.1 = format!("{}{body}", frontmatter::render(&slug, &description)).into_bytes();
         Ok(Source {
@@ -290,9 +289,28 @@ fn failed<E>(refusal: Refusal) -> impl FnOnce(E) -> AddError {
     move |_| AddError::Invalid(refusal)
 }
 
+/// The name a skill named `name` is listed by, as the preview shows it and the pack keeps it:
+/// control and unlisted characters (bidi overrides, zero-width marks) gone, trimmed, at most
+/// [`NAME_MAX`] characters and [`NAME_BYTES_MAX`] bytes, so a name shown can be picked. May be
+/// empty (the slug stands in then).
+pub fn display_name(name: &str) -> String {
+    let mut out = String::new();
+    let kept = name
+        .chars()
+        .filter(|c| !c.is_control() && !is_unlisted_char(*c))
+        .take(NAME_MAX);
+    for c in kept {
+        if out.len() + c.len_utf8() > NAME_BYTES_MAX {
+            break;
+        }
+        out.push(c);
+    }
+    out.trim().to_owned()
+}
+
 /// `text` on one line: whitespace of any kind one space, other unlisted characters gone, as a
 /// pack's render does.
-fn one_line(text: &str) -> String {
+pub fn one_line(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
         .filter(|c| !is_unlisted_char(*c))

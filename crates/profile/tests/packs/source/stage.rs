@@ -243,3 +243,64 @@ fn a_pack_added_here_loads_with_its_scripts_only_when_the_entry_allows_it() {
     );
     assert_eq!(load(&packs, &[entry(false)], true).packs.len(), 1);
 }
+
+/// Only a skill the preview showed is installed: one hidden (`metadata.internal`), one the
+/// skills.sh name narrowed away, and one not there at all are each `NoSkillMd`, nothing written.
+#[test]
+fn a_name_the_preview_did_not_show_is_not_installed() {
+    let data = Scratch::new("stage-unshown");
+    let adding = data.path().join(ADDING_DIR);
+    let packs = data.path().join(PACKS_DIR);
+    let secret = "---\nname: secret\ndescription: Hidden.\nmetadata:\n  internal: true\n---\nB\n";
+    let mut entries: Vec<(&str, &[u8])> =
+        vec![("r-HEAD/skills/secret/SKILL.md", secret.as_bytes())];
+    let (pdf, docx) = (skill_md("pdf"), skill_md("docx"));
+    entries.push(("r-HEAD/skills/pdf/SKILL.md", pdf.as_bytes()));
+    entries.push(("r-HEAD/skills/docx/SKILL.md", docx.as_bytes()));
+    let bytes = zip_of(&entries);
+    let tree = || Tree::Zip {
+        bytes: &bytes,
+        strip_top: true,
+        path: None,
+    };
+    let install = |token: &str, pick: &str| {
+        let staged = open_preview(&adding, token, NOW).unwrap();
+        install_picked(&staged, pick, (&packs, &adding), (today(), true), &|_| true).map(|_| ())
+    };
+    let all = stage_tree(&adding, tree(), skills_sh_origin(), None, NOW).unwrap();
+    assert!(all.skills.iter().all(|skill| skill.name != "secret"));
+    assert!(matches!(
+        install(&all.token, "secret"),
+        Err(added::AddError::NoSkillMd)
+    ));
+    assert!(matches!(
+        install(&all.token, "xlsx"),
+        Err(added::AddError::NoSkillMd)
+    ));
+    let narrowed = stage_tree(&adding, tree(), skills_sh_origin(), Some("pdf"), NOW).unwrap();
+    assert_eq!(narrowed.skills.len(), 1);
+    assert!(matches!(
+        install(&narrowed.token, "docx"),
+        Err(added::AddError::NoSkillMd)
+    ));
+    assert!(!packs.exists() || std::fs::read_dir(&packs).unwrap().next().is_none());
+    install(&narrowed.token, "pdf").unwrap();
+    assert!(packs.join("pdf").is_dir());
+}
+
+/// A preview folder still being filled (its `made` file only, no `stage.json` yet) is left by
+/// another preview's sweep until it is past its 30 minutes.
+#[test]
+fn a_preview_still_being_filled_is_not_swept() {
+    let data = Scratch::new("stage-filling");
+    let adding = data.path().join(ADDING_DIR);
+    // A folder named as a preview is: 32 lowercase hex characters.
+    let folder = "0123456789abcdef".repeat(2);
+    let made = NOW.to_string();
+    put(&adding, &format!("{folder}/made"), made.as_bytes());
+    put(&adding, &format!("{folder}/tree/half.md"), b"unpacking");
+    sweep(&adding, Some(NOW + 1));
+    assert!(adding.join(&folder).join("tree/half.md").is_file());
+    sweep(&adding, Some(NOW + STAGE_TTL_MS + 1));
+    assert!(!adding.join(&folder).exists());
+}

@@ -534,26 +534,38 @@ one case. A pack's `source_url` is still never fetched.
   OS trust store (which holds a firm CA installed in the OS), routed through
   `network.upstream_proxy` when it is set and otherwise the system's proxy. `https` only, with no
   port and no user info. Redirects are followed by hand, at most 5, and each hop is checked again.
-  A download is at most 10 MiB and 90 s; a search is at most 1 MiB and 15 s, cut to 30 items.
+  No hop, the first link included, may name this computer or a private network: `localhost`, or
+  a loopback, private, link-local, shared or unique-local IP literal (`command.invalid` for the
+  first link, `skill.not_found` for a redirect); a local source is a picked folder. A download is
+  at most 10 MiB and 90 s for every hop together; a search is at most 1 MiB and 15 s, cut to 30
+  items, and each item's name is cleaned as a preview's is. A `.zip` link's query and fragment
+  (a signed URL's token, say) are dropped from what is shown and recorded.
 - **The archive** is unpacked into `<data>/skill-packs.adding/<token>/tree`, under the skills.sh
   CLI's caps: 25 MiB unpacked and 1,000 entries, counted as the bytes come out. It refuses
   any entry outside the folder (`..`, an absolute path, a drive letter, `\\`), a symlink, an
   entry that is neither a file nor a folder, an encrypted entry, two names equal but for case, and
-  a name no OS can hold. A refusal leaves nothing behind.
+  a name no OS can hold (Windows device names, `COM¹` and `CON .txt` among them, and 8.3 short
+  names such as `PROGRA~1`). A refusal leaves nothing behind.
 - **Discovery** follows the skills.sh CLI. A top-level `SKILL.md` is a skill on its own;
   otherwise Clauseo looks in the top's folders, `skills/` (with `.curated`, `.experimental` and
   `.system`), `.agents/skills/`, `.claude/skills/` and the folders `skills.sh.json` lists in
-  `paths`, up to 3 levels down. A shallower skill shadows deeper ones. When none of these holds a
+  `paths` (each part a plain name, so no drive letter, root or `..` leaves the stage), up to 3
+  levels down. A shallower skill shadows deeper ones. When none of these holds a
   skill, it searches every folder down to 5 levels. `.git`, `node_modules`, `dist`, `build`
   and `__pycache__` are skipped, and links are never followed. A skill needs `name` and
   `description` in its frontmatter; `metadata.internal: true` hides it unless it is asked for
   by name. Each skill is read and built as a pack in memory at preview time. A skill too big or
   breaking a pack rule is listed with its refusal and is never dropped silently. A skill's copy
-  leaves out hidden names, `metadata.json`, `__pycache__` and `__pypackages__`.
+  leaves out hidden names, `metadata.json`, `__pycache__` and `__pypackages__`. A skill's name
+  is listed as the pack keeps it: control, bidi and zero-width characters gone, at most 200
+  characters and 200 bytes; its description is on one line, cleaned the same way.
 - **Caps.** The per-skill caps of a skill added here stay as they are: 5,000,000 bytes and 200
   files.
 - **The token** is 32 hex characters, so it never names a pack. A preview's folder goes after its
-  install, after 30 minutes, and on every start.
+  install, after 30 minutes, and on every start; its `made` file is written first, so another
+  preview's sweep leaves one still unpacking alone. Its `stage.json` records the skills the
+  preview showed, and `add_skills` installs only those (a hidden, narrowed-away or refused name
+  is `command.invalid`).
 - **Install** goes through the same path as a folder's (`added::read_source`, `free_id`, the
   firm's admission, `build`, `install`). The manifest records where the skill came from:
   `source_url` (`https`: the skills.sh page, the GitHub link or the `.zip` link), now allowed in
@@ -567,9 +579,10 @@ one case. A pack's `source_url` is still never fetched.
   `skill.invalid`); `add_skills {token, pick, scope}` installs each picked skill as its own pack and
   answers `done`, then `addons_changed`. A scope `{matter: X}` puts each in X only, as
   `set_addon_scope` does (`command.unknown_matter` for a matter the host does not know,
-  `settings.locked` while the firm locks `skills.scope`). Both windows send all three; a `path` preview needs a path this run's
-  `pick_skill` returned (it now picks a `.zip` or a `SKILL.md` as well as a folder). New codes:
-  `skill.download_failed` (retryable), `skill.not_found`, `skill.too_big`, `skill.preview_expired`.
+  `settings.locked` while the firm locks `skills.scope`). Both windows send all three; a `path`
+  preview needs a path this run's `pick_skill` returned (it now picks a `.zip` or a `SKILL.md`
+  as well as a folder). New codes: `skill.download_failed` (retryable), `skill.not_found`,
+  `skill.too_big`, `skill.preview_expired`.
 - **The search sends only `q`:** no cookie (the client keeps none), no header beyond the client's
   own `User-Agent: Clauseo`, nothing from the matters, no telemetry.
 - **Icon.** For a skill from skills.sh or GitHub, at add time only, the host fetches the owner's

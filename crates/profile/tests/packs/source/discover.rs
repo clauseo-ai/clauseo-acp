@@ -106,6 +106,57 @@ fn skills_sh_json_paths_are_searched() {
     );
 }
 
+/// Windows: a drive letter in `skills.sh.json`'s `paths` (`./C:/x`, `./c:x`, or this
+/// computer's own absolute path written with `/`) would make `top.join` drop the stage and walk
+/// that folder; each is refused, and no skill outside the stage is read. On Unix the same
+/// entries name folders with a `:` inside the stage, refused too.
+#[test]
+fn a_drive_letter_in_skills_sh_json_paths_is_refused() {
+    let dir = Scratch::new("config-drive");
+    let top = dir.path().join("stage");
+    let outside = dir.path().join("outside");
+    put_skill(&outside, "sub", "secret");
+    let outside_entry = outside.to_string_lossy().replace('\\', "/");
+    let outside_entry = format!("./{}", outside_entry.trim_start_matches('/'));
+    let config = serde_json::json!({"paths": ["./C:/x", "./c:x", "./D:x", outside_entry]});
+    put(&top, "skills.sh.json", config.to_string().as_bytes());
+    put_skill(&top, "skills/pdf", "pdf");
+    #[cfg(unix)]
+    {
+        put_skill(&top, "C:/x/inner", "drive-c");
+        put_skill(&top, "c:x/inner", "drive-c-relative");
+    }
+    let got = names(&top, None);
+    assert_eq!(got, [("skills/pdf".to_owned(), "pdf".to_owned())]);
+    assert!(discover(&top, Some("secret")).is_err());
+}
+
+/// The preview lists a skill's name as the pack keeps it: bidi overrides, zero-width and
+/// control characters gone, at most 200 bytes, so a name shown can be picked; the description
+/// is on one line with those characters gone too.
+#[test]
+fn the_previews_names_are_cleaned_and_capped() {
+    let dir = Scratch::new("names-clean");
+    let tricky =
+        "---\nname: \u{202e}fdp\u{200b}\u{1b}x memo\ndescription: Reads\u{200b}   memos.\n---\nB\n";
+    put(dir.path(), "skills/a/SKILL.md", tricky.as_bytes());
+    let long = format!(
+        "---\nname: {}\ndescription: Long.\n---\nB\n",
+        "é".repeat(5000)
+    );
+    put(dir.path(), "skills/b/SKILL.md", long.as_bytes());
+    let found = discover(dir.path(), None).unwrap();
+    let a = found.iter().find(|f| f.folder == "skills/a").unwrap();
+    assert_eq!(a.name, "fdpx memo");
+    assert_eq!(a.description, "Reads memos.");
+    let b = found.iter().find(|f| f.folder == "skills/b").unwrap();
+    assert!(
+        b.name.len() <= 200 && !b.name.is_empty(),
+        "{}",
+        b.name.len()
+    );
+}
+
 #[test]
 fn internal_skills_are_hidden_unless_asked_for_and_names_narrow() {
     let dir = Scratch::new("internal");

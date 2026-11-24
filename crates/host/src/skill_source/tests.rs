@@ -83,6 +83,47 @@ fn a_redirect_off_https_is_refused_by_the_release_client() {
     );
 }
 
+/// A redirect to this computer or a private network is refused on every hop, before any
+/// connection: `skill.not_found`. A first link there is `command.invalid` (a local source is a
+/// picked folder). Only the fake server itself is let through.
+#[test]
+fn a_redirect_to_a_private_address_is_refused() {
+    let server = Server::start();
+    let net = net(&server);
+    let hops = [
+        "https://127.0.0.1/x.zip",
+        "https://192.168.1.1/x.zip",
+        "https://10.0.0.8/x.zip",
+        "https://172.16.4.4/x.zip",
+        "https://169.254.169.254/latest",
+        "https://[::1]/x.zip",
+        "https://[fd00::1]/x.zip",
+        "https://[::ffff:127.0.0.1]/x.zip",
+        "https://localhost/x.zip",
+    ];
+    for (n, hop) in hops.iter().enumerate() {
+        let path = format!("/hop{n}.zip");
+        server.set(&path, Reply::Redirect((*hop).to_owned()));
+        assert_eq!(
+            download(&net, &server.url(&path), 1024, SECOND),
+            Err(SourceError::NotFound),
+            "{hop}"
+        );
+    }
+    let release = Net::new(None, &clauseo_sandbox::Upstream::Direct).unwrap();
+    for first in [
+        "https://127.0.0.1/x.zip",
+        "https://localhost/x.zip",
+        "https://[::1]/x",
+    ] {
+        assert_eq!(
+            download(&release, first, 1024, SECOND),
+            Err(SourceError::BadSource),
+            "{first}"
+        );
+    }
+}
+
 #[test]
 fn a_zip_link_previews_its_skills() {
     let server = Server::start();
@@ -171,4 +212,28 @@ fn the_search_cuts_to_thirty_and_retries_without_the_last_term() {
     assert_eq!(search(&net, "   ").unwrap(), []);
     server.set("/api/search?q=bad", Reply::Body(b"<html>".to_vec()));
     assert_eq!(search(&net, "bad"), Err(SourceError::DownloadFailed));
+}
+
+/// A catalogue item's name is listed as a preview lists a skill's: bidi overrides and
+/// zero-width characters gone, at most 200 bytes. An item whose `id` or `source` is not a
+/// skills.sh name is left out.
+#[test]
+fn the_catalogues_names_are_cleaned_and_odd_ids_left_out() {
+    let server = Server::start();
+    let net = net(&server);
+    let long = "n".repeat(300);
+    let body = format!(
+        r#"{{"skills":[
+        {{"id":"o/r/a","source":"o/r","name":"\u202epdf\u200b tools","installs":1}},
+        {{"id":"o/r/b","source":"o/r","name":"{long}","installs":1}},
+        {{"id":"../x/y","source":"o/r","name":"bad","installs":1}},
+        {{"id":"o/r/c","source":"o/r@main","name":"bad","installs":1}},
+        {{"id":"o/r/d","source":"o/r","name":"\u200b","installs":1}}]}}"#
+    );
+    server.set("/api/search?q=pdf", Reply::Body(body.into_bytes()));
+    let found = search(&net, "pdf").unwrap();
+    let names: Vec<&str> = found.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert_eq!(names[0], "pdf tools");
+    assert_eq!(names[1].len(), 200);
 }

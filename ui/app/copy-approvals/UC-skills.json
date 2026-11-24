@@ -123,5 +123,41 @@
     "at": "2026-11-24",
     "by": "app track (provisional; D2a, the same failure line as the skill.* codes)",
     "note": "addon.built_in: the settings window's failure line, as for skill.invalid; the Skills and Connectors place may say its own words"
+  },
+  "U3-err-skill.download_failed": {
+    "en": "Clauseo couldn't download that skill. Check your connection and try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
+    "note": "skill.download_failed: retryable: the add-a-skill dialog's line for a failed download (offline, a proxy, the site); it offers Try again"
+  },
+  "U3-err-skill.not_found": {
+    "en": "There's no skill at that link or name.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
+    "note": "skill.not_found: the add-a-skill dialog's line when a skills.sh name or link holds no skill"
+  },
+  "U3-err-skill.too_big": {
+    "en": "That skill is too big to add.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
+    "note": "skill.too_big: the add-a-skill dialog's line when a download, an archive or a skill in it is over its cap"
+  },
+  "U3-err-skill.preview_expired": {
+    "en": "That list of skills is out of date. Look the skill up again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
+    "note": "skill.preview_expired: the add-a-skill dialog's line when its preview is over 30 minutes old or Clauseo restarted"
   }
 }
