@@ -5,7 +5,8 @@ use std::thread;
 
 use clauseo_connectors::fake::{FakeConnector, FakeHandle, FakeOptions, RawResponse, ScratchDir};
 use clauseo_connectors::{
-    Config, ConnectorHandle, Connectors, ManualClock, MemoryStore, PendingSignIn, SignInError,
+    Config, ConnectorHandle, Connectors, KeychainOs, ManualClock, MemoryStore, PendingSignIn,
+    SignInError,
 };
 
 pub(crate) struct Rig {
@@ -24,7 +25,13 @@ impl Rig {
 
     /// A new `Connectors` on the same fake, store and state file: an app restart.
     pub(crate) fn restart(&self) -> (Connectors, ConnectorHandle) {
-        let config = self.fake.config(self.scratch.state_file());
+        self.restart_as(KeychainOs::Mac)
+    }
+
+    /// As [`restart`](Self::restart), under `os`'s keychain rules.
+    pub(crate) fn restart_as(&self, os: KeychainOs) -> (Connectors, ConnectorHandle) {
+        let mut config = self.fake.config(self.scratch.state_file());
+        config.keychain_os = os;
         let connectors = Connectors::new(
             config,
             Arc::clone(&self.store) as Arc<dyn clauseo_connectors::SecretStore>,
@@ -44,6 +51,16 @@ pub(crate) fn rig() -> Rig {
 pub(crate) fn manual_rig() -> Rig {
     rig_with(FakeOptions::default(), true, |_| {})
 }
+
+/// A manual-clock rig under `os`'s keychain rules.
+pub(crate) fn manual_rig_as(os: KeychainOs) -> Rig {
+    rig_with(FakeOptions::default(), true, |config| {
+        config.keychain_os = os;
+    })
+}
+
+/// Both keychains' rules, for the guards every OS keeps.
+pub(crate) const BOTH_OSES: [KeychainOs; 2] = [KeychainOs::Mac, KeychainOs::Other];
 
 pub(crate) fn rig_with(
     mut options: FakeOptions,

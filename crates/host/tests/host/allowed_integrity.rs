@@ -201,6 +201,39 @@ fn a_refused_hash_read_deletes_nothing_and_is_read_again_on_ask() {
     host.shutdown();
 }
 
+/// A revoke made while the hash was never read is saved after `KeychainReadAgain` as a revoke:
+/// when that save fails, the stored pair is voided, so the revoked site is not allowed again
+/// after a restart (the earlier run's file and hash would have matched).
+#[test]
+fn a_revoke_saved_after_a_read_again_voids_the_pair_when_the_save_fails() {
+    let dir = Dir::new("allowed_integrity_reopen_revoke", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
+    let (host, _) = restart(&dir, 0, &keychain);
+    allow_in(&dir, &host, "m", "a.test");
+    host.shutdown();
+
+    keychain.refuse_reads(true);
+    let (host, _) = restart(&dir, 1, &keychain);
+    host.refused(revoke("a.test"), ErrorCode::BlocklistRevokeNotSaved);
+    keychain.refuse_reads(false);
+    keychain.fail_next_writes(1);
+    assert_eq!(
+        host.ok(HostCommand::KeychainReadAgain {}),
+        CommandOutcome::Done
+    );
+    for _ in 0..2_000 {
+        if keychain.peek(ACCOUNT).is_none() {
+            break;
+        }
+        wait("a pause", async_io::Timer::after(Duration::from_millis(5)));
+    }
+    assert_eq!(keychain.peek(ACCOUNT), None, "the stored pair is voided");
+    host.shutdown();
+    let (host, _) = restart(&dir, 2, &keychain);
+    assert_eq!(listed(&host), []);
+    host.shutdown();
+}
+
 /// Each refusal a real Mac gives a read (errSecAuthFailed and errSecDuplicateItem as platform
 /// failures, errSecNoAccessForItem as no storage access) is a hash never read: no allows, and
 /// neither an allow nor a revoke writes or deletes anything in the store.

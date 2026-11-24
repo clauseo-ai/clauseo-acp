@@ -375,7 +375,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Leave order | `ErrorCode::SigninAgentsStillRunning` | yes |
 | Launch while the keys load (0048) | `ErrorCode::AgentKeysLoading` | yes |
 | Launch with an unreadable key (0048): its read had not answered in time (`AgentKeyUnreadable`), or the key store answered it with an error, such as a denied permission prompt (`AgentKeyDenied`) | `ErrorCode::AgentKeyUnreadable`, `ErrorCode::AgentKeyDenied` | yes |
-| Settings › Connectors: Sign out, Remove, Sign in or a new key while the keychain refuses the saved sign-in (its read, or the write or delete, until Clauseo is allowed to use it); nothing was changed, and the connector's own row shows the sign-in could not be read | `ErrorCode::ConnectorKeychainRefused` | yes |
+| Settings › Connectors: Sign out, Sign in or a new key (on a Mac) while the keychain refuses the saved sign-in (its read, or the write, or a key's delete, until Clauseo is allowed to use it); nothing was changed, and the connector's own row shows the sign-in could not be read. Remove is never refused for it: case law is forgotten here and listed with `left_in_keychain` (the saved sign-in stays in the keychain) until the next add, sign-out or remove | `ErrorCode::ConnectorKeychainRefused` | yes |
 | Open in Word with a path too long for Word (0026, Windows) | `ErrorCode::MatterDocumentPathTooLong` | no |
 | A protected name in the matter is a shortcut (Windows, S15 PR4a2) | `ErrorCode::MatterProtectedLink` | no |
 | Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |

@@ -1529,6 +1529,15 @@ export type ConnectorView = {
 	 *  failed). Additive (R24's wire-gaps follow-up): an older host leaves it out.
 	 */
 	last_recharge?: RechargeOutcome,
+	/**
+	 *  Whether the last `ConnectorCommand::Remove` (which answered `Done`) left the saved
+	 *  sign-in in the keychain: the keychain refused its read (on a Mac nothing was then revoked
+	 *  or deleted) or its delete. The connector is forgotten on this computer either way, and
+	 *  listed while this is set; a later Add reads that sign-in again. It lasts until the next
+	 *  `Add`, `AddApiKey`, `SignOut` or `Remove`. False is written as a missing field, and a
+	 *  missing field reads as false (additive: an older host leaves it out).
+	 */
+	left_in_keychain?: boolean,
 };
 
 /**

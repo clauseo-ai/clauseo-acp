@@ -43,6 +43,10 @@ pub struct Config {
     pub clock: Arc<dyn Clock>,
     /// `<data_dir>/connectors/state.json`.
     pub state_file: PathBuf,
+    /// Whose keychain rules the lawyer's own commands follow while the saved sign-in can't be
+    /// read ([`KeychainOs::refuses_unreadable`]): this computer's ([`KeychainOs::this`]) in
+    /// production, macOS's in the fake's config.
+    pub keychain_os: KeychainOs,
 }
 
 impl Config {
@@ -57,7 +61,43 @@ impl Config {
             recharge_interval: RECHARGE_INTERVAL,
             clock: Arc::new(SystemClock),
             state_file,
+            keychain_os: KeychainOs::this(),
         }
+    }
+}
+
+/// The keychain whose rules a refused read follows. Every OS keeps the guards on automatic
+/// deletes and overwrites (none runs while the last read of the item was refused); only the
+/// lawyer's own commands differ by OS. A parameter, not a `cfg`, so both branches are tested
+/// on any OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeychainOs {
+    /// macOS: a refused read is the keychain's own answer (a Deny, or another build's item),
+    /// which the lawyer can turn by choosing Allow when it asks again.
+    Mac,
+    /// Windows and Linux: no keychain prompt resolves a refusal there, and no access list goes
+    /// by the app's signature.
+    Other,
+}
+
+impl KeychainOs {
+    /// The OS this build runs on.
+    pub const fn this() -> KeychainOs {
+        if cfg!(target_os = "macos") {
+            KeychainOs::Mac
+        } else {
+            KeychainOs::Other
+        }
+    }
+
+    /// Whether the lawyer's Sign in, Sign out and Add key are refused while the saved sign-in
+    /// can't be read (`StoreError::Refused`, nothing revoked, deleted or replaced): only on
+    /// macOS, where an Allow can make it readable again. Elsewhere they go ahead as before
+    /// the refusal was told apart: what can't be read is not revoked, and is deleted or
+    /// replaced. Remove is never refused: it forgets the connector here, and on macOS leaves
+    /// an unreadable item in the keychain (`RemoveReport::left_in_keychain`).
+    pub const fn refuses_unreadable(self) -> bool {
+        matches!(self, KeychainOs::Mac)
     }
 }
 
@@ -71,6 +111,7 @@ impl fmt::Debug for Config {
             .field("recharge_deadline", &self.recharge_deadline)
             .field("recharge_interval", &self.recharge_interval)
             .field("state_file", &self.state_file)
+            .field("keychain_os", &self.keychain_os)
             .finish_non_exhaustive()
     }
 }

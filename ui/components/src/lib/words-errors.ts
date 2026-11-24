@@ -255,8 +255,8 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
     "Claude didn't start, because Clauseo couldn't set up the folder it keeps for Claude on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.",
   // provisional (U3-err-agent.start_unreachable): online, Clauseo couldn't reach the agent at its start
   "agent.start_unreachable": START_UNREACHABLE.claude,
-  // the keychain refused case law's saved sign-in, so Sign out, Sign in or a key changed nothing (until the lawyer
-  // allows Clauseo the keychain). Provisional English, no copy approval yet; hi: later
+  // provisional (U3-err-connector.keychain_refused): the keychain refused case law's saved sign-in, so Sign out, Sign
+  // in, a key or a balance read changed nothing (until the lawyer allows Clauseo the keychain); hi: later
   "connector.keychain_refused":
     "Clauseo couldn't read your saved case-law sign-in on this computer, so nothing was changed. If this computer asks for permission, choose Allow, then try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer

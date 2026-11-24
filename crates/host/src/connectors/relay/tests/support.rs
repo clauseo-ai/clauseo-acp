@@ -31,6 +31,8 @@ pub(super) struct Rig {
     pub(super) scratch: ScratchDir,
     pub(super) _connectors: Connectors,
     pub(super) handle: ConnectorHandle,
+    /// The keychain stand-in, whose refusals a test turns on.
+    pub(super) store: Arc<MemoryStore>,
     pub(super) clock: ManualClock,
     pub(super) events: Arc<Recorder>,
     pub(super) relays: Relays,
@@ -71,8 +73,8 @@ pub(super) fn rig_with(options: &RigOptions) -> Rig {
         config.origin = Origin::Fake(url::Url::parse(upstream).unwrap());
     }
     let origin = config.origin.clone();
-    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
-    let connectors = Connectors::new(config, store).unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let connectors = Connectors::new(config, Arc::clone(&store) as Arc<dyn SecretStore>).unwrap();
     let handle = connectors.get("case-law").unwrap();
     let day_file = scratch.path().join("connectors").join("day.json");
     if let Some(text) = &options.day_json {
@@ -100,6 +102,7 @@ pub(super) fn rig_with(options: &RigOptions) -> Rig {
         scratch,
         _connectors: connectors,
         handle,
+        store,
         clock,
         events,
         relays,

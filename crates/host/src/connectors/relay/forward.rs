@@ -336,9 +336,9 @@ fn failed(session: &Session, call: &Call, err: &Error) -> Option<Vec<u8>> {
     }
     let text = match err {
         Error::Auth(AuthError::KeyRevoked) => texts::KEY_REVOKED.to_owned(),
-        Error::Auth(AuthError::NotAdded | AuthError::SignedOut | AuthError::Store(_)) => {
-            texts::SIGNED_OUT.to_owned()
-        }
+        Error::Auth(AuthError::NotAdded | AuthError::SignedOut) => texts::SIGNED_OUT.to_owned(),
+        // The keychain refused the saved sign-in: not signed out, so not "sign in again".
+        Error::Auth(AuthError::Store(_)) => texts::UNREADABLE.to_owned(),
         Error::Http { status } => texts::http_status(*status),
         // S28's own body limit (8 MB): too large either way.
         Error::Network(kind) if kind == "answer too large" => texts::REPLY_TOO_LARGE.to_owned(),

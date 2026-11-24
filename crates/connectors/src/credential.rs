@@ -49,6 +49,15 @@ pub struct SignOutReport {
     pub revoked: bool,
 }
 
+/// What `remove` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoveReport {
+    /// Whether the saved sign-in stays in the keychain: the keychain refused its read (on macOS
+    /// nothing was revoked or deleted then) or its delete. The connector is forgotten on this
+    /// install either way; a later Add reads that item again.
+    pub left_in_keychain: bool,
+}
+
 /// A connector's credential, in memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Credential {

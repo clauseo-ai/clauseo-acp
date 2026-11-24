@@ -27,6 +27,9 @@ pub(crate) const REPLY_TOO_LARGE: &str = "The case-law reply was over Clauseo's 
      for less, for example fewer documents or a smaller part.";
 pub(crate) const SIGNED_OUT: &str =
     "Case law is signed out. Tell the lawyer to sign in again under Settings, Connectors.";
+pub(crate) const UNREADABLE: &str = "Case law can't be reached right now: Clauseo couldn't read \
+     its saved case-law sign-in on this computer. Tell the lawyer to allow Clauseo to read its \
+     saved keys (on a Mac, choose Allow when it asks), then try again.";
 pub(crate) const KEY_REVOKED: &str = "The firm's case-law API key no longer works. Tell the \
      lawyer to add a new key under Settings, Connectors.";
 pub(crate) const NO_ANSWER: &str = "The case-law service did not answer. Try again later.";

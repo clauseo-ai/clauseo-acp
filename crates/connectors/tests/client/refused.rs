@@ -1,8 +1,12 @@
 //! A keychain that refuses to read the item (macOS's errSecInteractionNotAllowed, a platform
-//! failure, which is not "no item"): the credential is `Unreadable`, never signed out, and
-//! sign-out, remove, sign-in and a new key are refused before the item is deleted or replaced.
+//! failure, which is not "no item"): the credential is `Unreadable`, never signed out. On macOS
+//! sign-out, sign-in and a new key are refused before the item is deleted or replaced, and
+//! remove forgets the connector here only, the item left in the keychain; on Windows and Linux
+//! the lawyer's commands go ahead as before.
 
-use clauseo_connectors::{CredentialKind, CredentialStatus, Error, SignInError, StoreError};
+use clauseo_connectors::{
+    CredentialKind, CredentialStatus, Error, KeychainOs, RemoveReport, SignInError, StoreError,
+};
 
 use crate::support::*;
 
@@ -86,19 +90,86 @@ fn sign_out_while_refused_is_refused_and_deletes_nothing() {
     assert_eq!(handle.status(), CredentialStatus::SignedOut);
 }
 
+/// Remove is the way out while the item can't be read (Deny pressed): the connector is
+/// forgotten on this install, with no revoke and no delete, and the item stays in the keychain,
+/// which the report says.
 #[test]
-fn remove_while_refused_is_refused_and_forgets_nothing() {
+fn remove_while_refused_forgets_the_connector_and_leaves_the_item() {
     let rig = rig();
     let (_connectors, handle, stored) = refused_after_restart(&rig);
-    let state = state_file(&rig);
-    let err = handle.remove().unwrap_err();
-    assert!(
-        matches!(&err, Error::Store(e) if is_unreadable(e)),
-        "{err:?}"
+    assert_eq!(
+        handle.remove().unwrap(),
+        RemoveReport {
+            left_in_keychain: true
+        }
     );
     assert_eq!(rig.store.peek("case-law").unwrap(), stored);
     assert_eq!(rig.store.deletes(), 0);
-    assert_eq!(state_file(&rig), state, "the connector stays added");
+    assert_eq!(rig.fake.requests_to("/revoke").len(), 0);
+    assert!(
+        !state_file(&rig).contains("case-law"),
+        "{}",
+        state_file(&rig)
+    );
+    assert_eq!(handle.status(), CredentialStatus::NotAdded);
+}
+
+/// Windows and Linux: the lawyer's Sign out, Sign in, Add key and Remove go ahead while the
+/// item can't be read, as before the refusal was told apart (no Allow resolves it there).
+/// What can't be read is not revoked.
+#[test]
+fn off_macos_the_lawyers_commands_go_ahead_while_refused() {
+    let rig = rig();
+    sign_in(&rig);
+    let stored = rig.store.peek("case-law").unwrap();
+    let refused = |rig: &Rig| {
+        let (connectors, handle) = rig.restart_as(KeychainOs::Other);
+        rig.store.put("case-law", &stored);
+        rig.store.refuse_reads(true);
+        rig.fake.clear_requests();
+        (connectors, handle)
+    };
+
+    let (_connectors, handle) = refused(&rig);
+    assert_eq!(handle.status(), CredentialStatus::Unreadable);
+    handle.sign_out().unwrap();
+    assert!(rig.store.peek("case-law").is_none(), "deleted");
+    assert_eq!(rig.fake.requests_to("/revoke").len(), 0);
+    assert!(state_file(&rig).contains(r#""ended":"signed_out""#));
+
+    let (_connectors, handle) = refused(&rig);
+    let pending = handle.begin_sign_in(None).unwrap();
+    let (_page, result) = complete(&rig.fake, pending);
+    result.unwrap();
+    assert_ne!(rig.store.peek("case-law").unwrap(), stored, "replaced");
+
+    let (_connectors, handle) = refused(&rig);
+    let key = rig.fake.new_api_key();
+    handle.add_api_key(&key).unwrap();
+    assert_ne!(rig.store.peek("case-law").unwrap(), stored, "replaced");
+
+    let (_connectors, handle) = refused(&rig);
+    assert_eq!(
+        handle.remove().unwrap(),
+        RemoveReport {
+            left_in_keychain: false
+        }
+    );
+    assert!(rig.store.peek("case-law").is_none(), "deleted");
+    assert!(!state_file(&rig).contains("case-law"));
+}
+
+/// Only macOS refuses the lawyer's commands for an unreadable item; this build's own OS picks.
+#[test]
+fn only_macos_refuses_the_lawyers_commands() {
+    assert!(KeychainOs::Mac.refuses_unreadable());
+    assert!(!KeychainOs::Other.refuses_unreadable());
+    let this = if cfg!(target_os = "macos") {
+        KeychainOs::Mac
+    } else {
+        KeychainOs::Other
+    };
+    assert_eq!(KeychainOs::this(), this);
 }
 
 #[test]

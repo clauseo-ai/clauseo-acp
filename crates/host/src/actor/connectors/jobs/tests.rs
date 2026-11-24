@@ -1,8 +1,11 @@
-//! The jobs' drop guards: the recharge watch's, and a `Check` that ends without a result.
+//! The jobs' drop guards: the recharge watch's, and a `Check` that ends without a result; and
+//! the refusal a call that found the saved sign-in unreadable gets.
 
-use clauseo_protocol::{MatterId, ThreadId, TurnId};
+use clauseo_connectors::{AuthError, Error as Failed, StoreError};
+use clauseo_protocol::{ErrorCode, MatterId, ThreadId, TurnId};
 use uuid::{Builder, Uuid};
 
+use super::failures::{refusal, unreadable};
 use super::{Change, Finished, Job, Post, Unfinished, WatchEnded};
 use crate::actor::connectors::ConnectorInput;
 use crate::actor::connectors::hint::HintState;
@@ -71,4 +74,20 @@ fn a_check_that_panics_ends_the_hints_wait() {
     assert!(hint.waits());
     hint.no_liveness();
     assert!(!hint.waits(), "the matter still waits on liveness");
+}
+
+/// A call that found the saved sign-in unreadable is `connector.keychain_refused`, never the
+/// signed-out `signin_failed`; a sign-in that ended still is, and a delete the keychain refused
+/// after a revoke is `internal` (not "nothing was changed").
+#[test]
+fn an_unreadable_sign_in_on_a_call_is_keychain_refused() {
+    let refused = Failed::Auth(AuthError::Store(StoreError::Refused("denied".to_owned())));
+    assert!(unreadable(&refused));
+    assert_eq!(refusal(&refused).code, ErrorCode::ConnectorKeychainRefused);
+    let ended = Failed::Auth(AuthError::SignedOut);
+    assert!(!unreadable(&ended));
+    assert_eq!(refusal(&ended).code, ErrorCode::SigninFailed);
+    let not_deleted = Failed::Store(StoreError::Platform("a platform failure".to_owned()));
+    assert!(!unreadable(&not_deleted));
+    assert_eq!(refusal(&not_deleted).code, ErrorCode::Internal);
 }

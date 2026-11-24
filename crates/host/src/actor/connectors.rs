@@ -232,8 +232,18 @@ fn begin(actor: &mut Actor, id: CommandId, command: ConnectorCommand) -> Result<
     if actor.connectors.wired.is_none() {
         return Err(refused("no data connectors on this install"));
     }
-    // An error shown lasts until the next command.
+    // An error shown lasts until the next command; a sign-in left in the keychain by a remove,
+    // until the connector is added again, signed out or removed.
     actor.connectors.state.error = None;
+    if matches!(
+        command,
+        ConnectorCommand::Add { .. }
+            | ConnectorCommand::AddApiKey { .. }
+            | ConnectorCommand::SignOut { .. }
+            | ConnectorCommand::Remove { .. }
+    ) {
+        actor.connectors.state.left_in_keychain = false;
+    }
     let job = match command {
         ConnectorCommand::DismissCaseLawHint { matter } => {
             hint::dismiss(actor, matter)?;
@@ -480,6 +490,10 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
         }
         Change::Failed(message) => state.error = Some(Failure::sign_in(message)),
         Change::Reset => state.reset(),
+        Change::Removed { left_in_keychain } => {
+            state.reset();
+            state.left_in_keychain = left_in_keychain;
+        }
         Change::Recharge {
             recharge,
             outcome,

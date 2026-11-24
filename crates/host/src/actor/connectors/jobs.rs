@@ -541,11 +541,16 @@ fn watch(reach: &Reach, recharge: String, cancel: &CancelFlag) -> Option<Finishe
     Some(finished)
 }
 
-/// `SignOut` and `Remove`: the keychain item goes whether or not the revoke worked. A saved
-/// credential the keychain refuses to read refuses the command first, changing nothing.
+/// `SignOut` and `Remove`: the keychain item goes whether or not the revoke worked. On a Mac a
+/// saved credential the keychain refuses to read refuses `SignOut` first, changing nothing;
+/// `Remove` then forgets the connector here only and says the item stays in the keychain
+/// (`ConnectorView::left_in_keychain`), as it does when the keychain refuses the delete.
 fn sign_out(handle: &ConnectorHandle, command: Option<CommandId>, remove: bool) -> Finished {
+    let mut left_in_keychain = false;
     let result = if remove {
-        handle.remove()
+        handle.remove().map(|report| {
+            left_in_keychain = report.left_in_keychain;
+        })
     } else {
         handle.sign_out().map(|report| {
             if !report.revoked {
@@ -566,6 +571,8 @@ fn sign_out(handle: &ConnectorHandle, command: Option<CommandId>, remove: bool) 
         );
         return Finished::refused(command, refusal(error));
     }
+    // A delete the keychain refused after the revoke lands here, not as `keychain_refused`:
+    // the revoke may have changed something.
     let reply = result.map_err(|error| {
         tracing::warn!(
             connector = "case-law",
@@ -580,7 +587,11 @@ fn sign_out(handle: &ConnectorHandle, command: Option<CommandId>, remove: bool) 
     });
     Finished {
         reply,
-        change: Change::Reset,
+        change: if remove {
+            Change::Removed { left_in_keychain }
+        } else {
+            Change::Reset
+        },
         ..Finished::new(command)
     }
 }
