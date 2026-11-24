@@ -285,3 +285,71 @@ fn a_new_threads_first_session_seeds_its_kept_values() {
     assert_eq!(notices, [told], "{}", events.dump());
     host.shutdown();
 }
+
+/// The text of every notice logged on the thread, Clauseo's and the agent's.
+fn notice_texts(events: &Events) -> Vec<String> {
+    (events.events())
+        .filter_map(|event| match event {
+            clauseo_protocol::DomainEvent::Notice(notice) => Some(notice.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Replayed from the live proof (`pickers-kept-resumed-notice`): codex-acp resumes the thread on
+/// its default and warns that it was recorded with gpt-6-luna; the start sets gpt-6-luna and low
+/// back, and no notice of any kind reaches the thread.
+#[test]
+fn codex_acps_resume_warning_is_left_out_when_the_kept_model_is_set_back() {
+    let dir = Dir::new(
+        "pickers_kept_resumed_notice",
+        &[(CODEX, Scenario::Local("pickers-kept-resumed-notice"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    host.settle();
+    assert_eq!(
+        started_and_notices(&events, second).0,
+        names("GPT-6 Luna", "Low")
+    );
+    assert_eq!(
+        notice_texts(&events),
+        Vec::<String>::new(),
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// Any other warning codex-acp sends at the start still shows (`pickers-kept-other-notice`).
+#[test]
+fn another_warning_at_the_start_still_shows() {
+    let dir = Dir::new(
+        "pickers_kept_other_notice",
+        &[(CODEX, Scenario::Local("pickers-kept-other-notice"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    run(&host, &mut events, thread, "And clause 5?");
+    host.settle();
+    assert_eq!(
+        notice_texts(&events),
+        ["Codex could not refresh its plugins; try again later."],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}

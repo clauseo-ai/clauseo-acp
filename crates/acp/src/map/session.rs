@@ -189,6 +189,17 @@ pub(crate) fn notice(notice: acp::Notice) -> AgentUpdate {
     AgentUpdate::Notice { level, text }
 }
 
+/// The models of codex-acp's warning at a resume that runs on another model than the session
+/// was recorded with, `(recorded, resumed)`: "This session was recorded with model `X` but is
+/// resuming with `Y`. …" (codex-acp 2.10.0, sent as a `notice` after `session/load`'s or
+/// `session/resume`'s answer). `None` for any other text.
+pub fn codex_resumed_model(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix("This session was recorded with model `")?;
+    let (recorded, rest) = rest.split_once("` but is resuming with `")?;
+    let (resumed, _) = rest.split_once('`')?;
+    (!recorded.is_empty() && !resumed.is_empty()).then_some((recorded, resumed))
+}
+
 pub(crate) fn stop_reason(reason: acp::StopReason) -> StopReason {
     match reason {
         acp::StopReason::EndTurn => StopReason::EndTurn,
