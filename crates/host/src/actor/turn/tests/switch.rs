@@ -32,19 +32,28 @@ fn rig(test: &str) -> Rig {
 /// `other`, its own scenario, whose session is `sess-2` and whose steps after the handshake are
 /// `other`, so a test sees which agent a call reached; else the same as `fake-agent`'s.
 pub(super) fn two_agents(test: &str, other: Option<&str>) -> Rig {
+    two_agents_new(
+        test,
+        other.map(|steps| (r#"{"sessionId":"sess-2"}"#, steps)),
+    )
+}
+
+/// [`two_agents`], with [`OTHER`]'s `session/new` answered `new` (a JSON result) when it plays
+/// its own steps.
+pub(super) fn two_agents_new(test: &str, other: Option<(&str, &str)>) -> Rig {
     let dir = TempDir::new(test);
     Rig::prepare(dir.path(), test, PROMPT_ENDS, None);
     let path = dir.path().join("data").join("settings.json");
     let mut settings: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     settings["agents"][OTHER] = settings["agents"]["fake-agent"].clone();
-    if let Some(steps) = other {
+    if let Some((new, steps)) = other {
         let scenario = dir.path().join(format!("{test}-other.jsonl"));
         let header = format!(
             "{{\"scenario\":\"{test}-other\",\"description\":\"a unit test\",\
              \"on_stdin_close\":\"exit\"}}\n"
         );
-        let handshake = super::rig::HANDSHAKE.replace("sess-1", "sess-2");
+        let handshake = super::rig::HANDSHAKE.replace(r#"{"sessionId":"sess-1"}"#, new);
         let text = format!("{header}{handshake}{steps}");
         crate::write::write_file(&scenario, text.as_bytes()).unwrap();
         let scenario = scenario.display().to_string();

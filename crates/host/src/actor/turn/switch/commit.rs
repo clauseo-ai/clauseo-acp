@@ -3,7 +3,7 @@
 //! next turn when its own ended meanwhile, or put the row back.
 
 use clauseo_protocol::{
-    AgentId, AgentSessionDetached, AgentSwitched, ContextHandoff, DetachReason, Envelope,
+    AgentId, AgentSessionDetached, AgentSwitched, ContextHandoff, DetachReason, Endpoint, Envelope,
     ErrorCode, HandoffId, HandoffStatus, StreamId, ThreadId, TurnId,
 };
 
@@ -73,7 +73,19 @@ pub(super) fn commit(
             handoff: actor.ids.mint(actor.now().wall)?,
             message,
             from: handover::endpoint(actor, thread, &from, !owed),
-            to: handover::endpoint(actor, thread, &to, owed),
+            to: if owed {
+                handover::endpoint(actor, thread, &to, true)
+            } else {
+                // The new agent has no session yet: what the turn's picks and the agent's kept
+                // options say it starts with (`prompt_picks.rs`).
+                let (model, effort) =
+                    super::super::prompt_picks::starting_with(actor, thread, turn, to.as_str());
+                Endpoint {
+                    agent: to.clone(),
+                    model,
+                    effort,
+                }
+            },
             answers_covered: built.answers,
             items_included: built.included,
             items_left_out: built.left_out,
@@ -133,6 +145,10 @@ pub(super) fn commit(
         entry.row.acp_session_id = None;
         entry.row.updated = now;
         out.draft.thread_row(entry.row.clone());
+        // The old agent's `CreateThread` picks went with `take`; the new session starts with
+        // the message's own (`SendPrompt.config`), as a thread's first session does
+        // (`prompt_picks.rs`).
+        super::super::prompt_picks::switched(actor, thread, turn);
         Some(before)
     };
     keep(actor, thread, &from, id, text);
