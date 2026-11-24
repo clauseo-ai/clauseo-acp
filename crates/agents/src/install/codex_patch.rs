@@ -1,34 +1,33 @@
 //! codex-acp's sandboxed shell gets the network when the session has web search.
 //!
-//! codex-acp 2.2.2 hardcodes `networkAccess: false` in the sandbox policy of its
-//! `workspace-write` and `agent` modes (`dist/index.js:34287, 34303`) and sends that policy with
-//! every turn, so no Codex config can turn the shell's network on. After `npm ci`, before the
-//! marker, the install rewrites those two lines to
+//! codex-acp 2.10.0 (as 2.2.2 before it) hardcodes `networkAccess: false` in the sandbox
+//! policy of its `workspace-write` and `agent` modes (`dist/index.js:43291, 43307`) and sends
+//! that policy with every turn, so no Codex config can turn the shell's network on. After
+//! `npm ci`, before the marker, the install rewrites those two lines to
 //! `networkAccess: process.env.CLAUSEO_CODEX_NETWORK === "1",`; the host sets that variable
 //! when the session's web search is on (`clauseo-host`'s `agent::codex::launch_env`). The
-//! read-only mode's `networkAccess: false` has no comma and stays.
+//! read-only mode's `networkAccess: false` (`:43277`) is outside both modes and stays.
 //!
-//! The file must be 2.2.2's, byte for byte ([`PRISTINE`], the tarball's file, the same on
-//! every platform), and the result must be [`PATCHED`]. Each line is found by its mode's text
-//! (`static WorkspaceWrite = new _AgentMode(`, `static Agent = new _AgentMode(`), never by line
-//! number. Anything else fails the try as a deterministic failure (`TryError::stop`). The new
-//! bytes go to a temp file beside it, renamed over it, so no half-written file is left. A file
-//! that already has [`PATCHED`] is left as it is.
+//! The patch goes by the file's text, not its hash. Each mode is found by the text that starts
+//! it (`static WorkspaceWrite = new _AgentMode(`, `static Agent = new _AgentMode(`), exactly
+//! once in the file; inside it, up to the next `static `, there must be one
+//! `type: "workspaceWrite"` and one network line, either still `networkAccess: false,` or
+//! already patched. Anything else fails the try as a deterministic failure (`TryError::stop`).
+//! A file whose two modes are already patched is left as it is. The new bytes go to a temp file
+//! beside it, renamed over it, so no half-written file is left.
 //!
 //! An install is patched when its lock holds codex-acp ([`patched_by`]). Its install hash then
 //! includes [`TAG`] (`Snapshot::install_hash`), so an install made before the patch has another
 //! folder and is redone once. A codex-acp bump fails `pinned_codex_acp_is_the_patched_version`
-//! until the patch is redone for it, or removed once codex-acp takes the setting itself.
+//! until the patch is checked against it, or removed once codex-acp takes the setting itself.
 
 use std::fmt;
 use std::path::Path;
 
 use clauseo_protocol::AgentId;
-use sha2::{Digest as _, Sha256};
 
 use super::TryError;
 use crate::config::AgentsConfig;
-use crate::integrity::to_hex;
 use crate::pins::AgentPins;
 use crate::write;
 
@@ -37,8 +36,8 @@ mod tests;
 
 /// The package patched.
 pub(crate) const PACKAGE: &str = "@agentclientprotocol/codex-acp";
-/// Its version the patch is made for.
-pub(crate) const VERSION: &str = "2.2.2";
+/// Its version the patch was last checked against.
+pub(crate) const VERSION: &str = "2.10.0";
 /// The file patched, `/`-separated below the install folder.
 const FILE: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 /// Added to the install hash of an agent that is patched: change it when the patch changes.
@@ -46,12 +45,6 @@ pub(crate) const TAG: &str = "codex-shell-network-1";
 /// The variable the patched file reads ([`TO`] spells it out).
 #[cfg(test)]
 const VAR: &str = "CLAUSEO_CODEX_NETWORK";
-/// codex-acp 2.2.2's `dist/index.js`, as its tarball (the lock's integrity) holds it.
-pub(crate) const PRISTINE: &str =
-    "6b1bb4e7e9caaf4aeca1042ae4aec2dc2433b0b0e4b1614b38a4d41699902aaa";
-/// The same file once patched.
-pub(crate) const PATCHED: &str = "c60271fcbdf7696fc96462d0194311530c8f1d8451474f9d04a5d1a6221ebedd";
-
 /// The line replaced, in each mode.
 const FROM: &[u8] = b"networkAccess: false,";
 /// What replaces it.
@@ -63,22 +56,11 @@ const MODES: [&[u8]; 2] = [
 ];
 /// What starts the next mode, so a mode's line is looked for only inside its own.
 const NEXT: &[u8] = b"static ";
+/// The sandbox policy each patched mode must have.
+const POLICY: &[u8] = b"type: \"workspaceWrite\"";
 
-/// The two hashes a file is checked against, in hex.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Pins<'a> {
-    pub(crate) pristine: &'a str,
-    pub(crate) patched: &'a str,
-}
-
-/// codex-acp 2.2.2's pins.
-pub(crate) const PINS: Pins<'static> = Pins {
-    pristine: PRISTINE,
-    patched: PATCHED,
-};
-
-/// Tests only: the file and the pins used instead of [`FILE`] and [`PINS`], for `agent`'s
-/// install, on the fixture's packages. Outside `test-support` the field does not exist.
+/// Tests only: the file used instead of [`FILE`], for `agent`'s install, on the fixture's
+/// packages. Outside `test-support` the field does not exist.
 #[cfg(feature = "test-support")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexPatchForTests {
@@ -86,38 +68,23 @@ pub struct CodexPatchForTests {
     pub agent: AgentId,
     /// The file, `/`-separated below the install folder.
     pub file: String,
-    /// The SHA-256 of the file before the patch, in hex.
-    pub pristine: String,
-    /// The SHA-256 of the file after it, in hex.
-    pub patched: String,
 }
 
 /// Why a file was not patched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PatchError {
-    /// The file is neither the pristine one nor the patched one (its SHA-256).
-    Unexpected(String),
-    /// A mode's text is not there exactly once, or its line is not in it.
+    /// A mode's text is not there exactly once, or its policy or network line is not in it
+    /// exactly once.
     Anchor(&'static str),
-    /// The patched bytes are not the pinned result (their SHA-256).
-    Result(String),
 }
 
 impl fmt::Display for PatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PatchError::Unexpected(found) => write!(
-                f,
-                "codex-acp's dist/index.js is not the {VERSION} file Clauseo patches \
-                 (SHA-256 {found})"
-            ),
             PatchError::Anchor(mode) => write!(
                 f,
-                "codex-acp's dist/index.js has no single {mode} mode with its network line"
-            ),
-            PatchError::Result(found) => write!(
-                f,
-                "codex-acp's patched dist/index.js is not the expected file (SHA-256 {found})"
+                "codex-acp's dist/index.js (Clauseo patches {VERSION}) has no single {mode} \
+                 mode with one network line"
             ),
         }
     }
@@ -126,7 +93,7 @@ impl fmt::Display for PatchError {
 /// What [`patch_file`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
-    /// The two lines were replaced.
+    /// The lines not yet patched were replaced.
     Patched,
     /// The file was already patched: left as it is.
     AlreadyPatched,
@@ -138,32 +105,30 @@ pub(crate) fn patched_by(pins: &AgentPins) -> bool {
     pins.packages().iter().any(|package| package.path == path)
 }
 
-/// The SHA-256 of `bytes` in hex.
-fn sha256(bytes: &[u8]) -> String {
-    to_hex(&Sha256::digest(bytes))
-}
-
-/// `bytes` patched: `None` when they already are, an error when they are neither the pristine
-/// file nor the patched one, or when the result is not `pins.patched`.
-pub(crate) fn patch(bytes: &[u8], pins: Pins<'_>) -> Result<Option<Vec<u8>>, PatchError> {
-    let found = sha256(bytes);
-    if found == pins.patched {
-        return Ok(None);
-    }
-    if found != pins.pristine {
-        return Err(PatchError::Unexpected(found));
-    }
+/// `bytes` patched: `None` when both modes already are, an error when a mode, its policy or
+/// its network line is not there exactly once.
+pub(crate) fn patch(bytes: &[u8]) -> Result<Option<Vec<u8>>, PatchError> {
     let mut at = Vec::with_capacity(MODES.len());
     for mode in MODES {
         let name = mode_name(mode);
         let start = only(bytes, mode).ok_or(PatchError::Anchor(name))?;
-        let body = start + mode.len();
-        let end = find(bytes, NEXT, body).unwrap_or(bytes.len());
-        let line = find(&bytes[..end], FROM, body).ok_or(PatchError::Anchor(name))?;
-        at.push(line);
+        let from = start + mode.len();
+        let end = find(bytes, NEXT, from).unwrap_or(bytes.len());
+        let body = &bytes[from..end];
+        if count(body, POLICY) != 1 {
+            return Err(PatchError::Anchor(name));
+        }
+        match (count(body, FROM), count(body, TO)) {
+            (1, 0) => at.extend(find(body, FROM, 0).map(|line| from + line)),
+            (0, 1) => {}
+            _ => return Err(PatchError::Anchor(name)),
+        }
+    }
+    if at.is_empty() {
+        return Ok(None);
     }
     at.sort_unstable();
-    let mut out = Vec::with_capacity(bytes.len() + MODES.len() * (TO.len() - FROM.len()));
+    let mut out = Vec::with_capacity(bytes.len() + at.len() * (TO.len() - FROM.len()));
     let mut from = 0;
     for line in at {
         out.extend_from_slice(&bytes[from..line]);
@@ -171,10 +136,6 @@ pub(crate) fn patch(bytes: &[u8], pins: Pins<'_>) -> Result<Option<Vec<u8>>, Pat
         from = line + FROM.len();
     }
     out.extend_from_slice(&bytes[from..]);
-    let result = sha256(&out);
-    if result != pins.patched {
-        return Err(PatchError::Result(result));
-    }
     Ok(Some(out))
 }
 
@@ -195,6 +156,17 @@ fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
         .map(|at| at + from)
 }
 
+/// How many times `needle` is in `hay`, not overlapping.
+fn count(hay: &[u8], needle: &[u8]) -> usize {
+    let mut n = 0;
+    let mut from = 0;
+    while let Some(at) = find(hay, needle, from) {
+        n += 1;
+        from = at + needle.len();
+    }
+    n
+}
+
 /// Where `needle` is in `hay`, when it is there exactly once.
 fn only(hay: &[u8], needle: &[u8]) -> Option<usize> {
     let first = find(hay, needle, 0)?;
@@ -203,9 +175,9 @@ fn only(hay: &[u8], needle: &[u8]) -> Option<usize> {
 
 /// Patches the file at `path` in place: the new bytes to a temp file beside it, renamed over
 /// it, with its permissions kept.
-pub(crate) fn patch_file(path: &Path, pins: Pins<'_>) -> Result<Outcome, FileError> {
+pub(crate) fn patch_file(path: &Path) -> Result<Outcome, FileError> {
     let bytes = std::fs::read(path).map_err(FileError::Io)?;
-    let Some(out) = patch(&bytes, pins).map_err(FileError::Patch)? else {
+    let Some(out) = patch(&bytes).map_err(FileError::Patch)? else {
         return Ok(Outcome::AlreadyPatched);
     };
     write::replace_atomic(path, &out).map_err(FileError::Io)?;
@@ -235,26 +207,17 @@ pub(crate) fn apply(
         if fake.agent != *agent {
             return Ok(());
         }
-        let pins = Pins {
-            pristine: &fake.pristine,
-            patched: &fake.patched,
-        };
-        return run(config, &rel(folder, &fake.file), agent, pins);
+        return run(config, &rel(folder, &fake.file), agent);
     }
     if !patched_by(pins) {
         return Ok(());
     }
-    run(config, &rel(folder, FILE), agent, PINS)
+    run(config, &rel(folder, FILE), agent)
 }
 
 /// [`patch_file`] on `path`, logged, its error a try's.
-fn run(
-    config: &AgentsConfig,
-    path: &Path,
-    agent: &AgentId,
-    pins: Pins<'_>,
-) -> Result<(), TryError> {
-    match patch_file(path, pins) {
+fn run(config: &AgentsConfig, path: &Path, agent: &AgentId) -> Result<(), TryError> {
+    match patch_file(path) {
         Ok(outcome) => {
             let what = match outcome {
                 Outcome::Patched => "patched",
