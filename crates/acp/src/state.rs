@@ -180,6 +180,10 @@ pub(crate) struct SessionState {
     /// `plan_removed` of it empties the plan. No other plan's entries are kept, since only the
     /// shown plan's removal changes what the host shows.
     pub(crate) shown_plan: Option<CompactString>,
+    /// Each task Claude Code runs (a helper or a shell command; `map/task.rs`), by its task id:
+    /// the call that launched it, so a `task_updated`, which names only the task, can name the
+    /// helper. Kept from its `task_started` to its first settle.
+    pub(crate) tasks: BTreeMap<CompactString, CompactString>,
 }
 
 impl SessionState {
@@ -189,6 +193,7 @@ impl SessionState {
             origin,
             prompt: None,
             shown_plan: None,
+            tasks: BTreeMap::new(),
         }
     }
 }

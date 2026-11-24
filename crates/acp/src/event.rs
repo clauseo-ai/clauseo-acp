@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentSessionId, AvailableCommand, CompactString, ConfigOption, ContentBlock, Cost, Count,
-    ElicitationRequest, Finite, LimitStopReason, NoticeLevel, PermissionOption, PlanEntry,
-    TextOrBlob, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation,
-    TurnId,
+    ElicitationRequest, Finite, HelperOutcome, LimitStopReason, NoticeLevel, PermissionOption,
+    PlanEntry, TextOrBlob, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStatus, ToolKind,
+    ToolLocation, TurnId,
 };
 
 /// One event from the agent connection. Not `#[non_exhaustive]`: a new variant breaks `host`'s
@@ -114,6 +114,25 @@ pub enum AcpEvent {
         helper: CompactString,
         /// How it ended.
         state: HelperState,
+    },
+    /// The agent says the task of helper `helper` settled: the helper ended with `outcome`.
+    /// claude-agent-acp passes Claude Code's task frames on as `_claude/sdkMessage` when the
+    /// session's `_meta.claudeCode.emitRawSDKMessages` names them (`map/task.rs`): a
+    /// `task_notification` names the launching call, and a `task_updated` with a settle status
+    /// names the task, which its `task_started` tied to that call. Both may come for one
+    /// settle, so the host takes the first. `helper` may name a call that launched no helper
+    /// (a shell command runs as a task too): the host drops it. Nothing else of the frame
+    /// comes with it.
+    HelperSettled {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came, relative to the session's turns.
+        origin: Origin,
+        /// The helper: the `toolCallId` of the call that launched it.
+        helper: CompactString,
+        /// How it ended: `completed` is `Done`, `failed` `Failed`, `stopped` and `killed`
+        /// `Stopped`; a `task_notification` status it does not know is `Failed`.
+        outcome: HelperOutcome,
     },
     /// The agent asks for permission. Answer with `AcpClient::answer_permission`.
     PermissionRequested {

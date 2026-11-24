@@ -180,6 +180,7 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
             | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

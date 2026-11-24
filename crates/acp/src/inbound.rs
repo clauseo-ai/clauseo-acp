@@ -97,7 +97,8 @@ impl Inbound {
                 self.shared.emit(map::warning_event(None, warning)).await;
             }
             crate::line::SKIPPED_UPDATE_METHOD => self.skipped_update(&message.params).await,
-            // `$/cancel_request` and extension notifications: nothing to do.
+            map::task::METHOD => self.task_frame(&message.params).await,
+            // `$/cancel_request` and other extension notifications: nothing to do.
             _ => {}
         }
     }
@@ -150,6 +151,58 @@ impl Inbound {
                 };
                 self.shared.emit(event).await;
             }
+        }
+    }
+
+    /// `_claude/sdkMessage`: one of Claude Code's task frames (`map/task.rs`). A start ties its
+    /// task to the call that launched it; a settle becomes [`AcpEvent::HelperSettled`] naming
+    /// that call. Anything else (`init`, a frame it does not read, a session id that is not
+    /// one) is dropped with nothing logged: the frames carry the helper's task, paths, report
+    /// and usage, and none of that goes anywhere.
+    async fn task_frame(&mut self, params: &Value) {
+        let session = params.get("sessionId").and_then(Value::as_str);
+        let Some(session) = session.and_then(|session| AgentSessionId::new(session).ok()) else {
+            return;
+        };
+        let Some(frame) = params.get("message").and_then(map::task::read) else {
+            return;
+        };
+        let settled = {
+            let mut state = self.shared.state();
+            let known = state.sessions.get_mut(session.as_str());
+            let origin = known
+                .as_ref()
+                .map_or(crate::event::Origin::Idle, |known| known.origin);
+            match frame {
+                map::task::Frame::Started { task, launch } => {
+                    if let Some(known) = known {
+                        known.tasks.insert(task, launch);
+                    }
+                    None
+                }
+                map::task::Frame::Notified {
+                    task,
+                    launch,
+                    outcome,
+                } => {
+                    if let (Some(known), Some(task)) = (known, task) {
+                        known.tasks.remove(task.as_str());
+                    }
+                    Some((origin, launch, outcome))
+                }
+                map::task::Frame::Updated { task, outcome } => known
+                    .and_then(|known| known.tasks.remove(task.as_str()))
+                    .map(|launch| (origin, launch, outcome)),
+            }
+        };
+        if let Some((origin, helper, outcome)) = settled {
+            let event = AcpEvent::HelperSettled {
+                session,
+                origin,
+                helper,
+                outcome,
+            };
+            self.shared.emit(event).await;
         }
     }
 

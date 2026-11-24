@@ -63,6 +63,7 @@ fn helpers_and_updates(events: Vec<AcpEvent>) -> Vec<(Option<CompactString>, Age
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
             | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
@@ -242,6 +243,7 @@ fn shape(event: &AcpEvent) -> (&'static str, Option<&str>, Option<&str>) {
         other @ (AcpEvent::HelperSpawned { .. }
         | AcpEvent::HelperAnswer { .. }
         | AcpEvent::HelperEnded { .. }
+        | AcpEvent::HelperSettled { .. }
         | AcpEvent::PermissionRequested { .. }
         | AcpEvent::ElicitationRequested { .. }
         | AcpEvent::ElicitationCompleted { .. }

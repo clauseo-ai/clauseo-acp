@@ -23,6 +23,9 @@
 //!   ([`AcpEvent::HelperUpdate`], [`AcpEvent::HelperAnswer`]; its permission and elicitation
 //!   requests become the root's), and its end (`subagent_state_update`:
 //!   [`AcpEvent::HelperEnded`]). A helper's update never touches the root's per-session state.
+//!   Claude Code's task frames, which the adapter passes on as `_claude/sdkMessage`, say when a
+//!   helper's task settled ([`AcpEvent::HelperSettled`]); per session, each running task's
+//!   launching call (`state.rs`), until its settle.
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
 //!   typed plan limit signals ([`LimitSignal`]), and the stdout line filter with its caps
 //!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB, at most 64 updates read
@@ -65,6 +68,9 @@
 //!   `initialize`'s steering capability (`steering.rs`: `_meta.steering.supported` and
 //!   `agentCapabilities._meta.claudeCode.promptQueueing`). A `session/new`, `session/load` or
 //!   `session/resume` `_meta` is sent verbatim and never read.
+//! - Of a `_claude/sdkMessage`, only the frame's `type` and `subtype`, its task and call ids and
+//!   its status are read (`map/task.rs`); nothing of it is logged, and any other frame or
+//!   extension notification is dropped unread.
 //! - A malformed line (not UTF-8 JSON-RPC), an unknown update or an unknown content block never
 //!   ends the connection, and nothing is written back for it: it becomes a [`ProtocolWarning`],
 //!   naming its session when the message named one, or a `ContentBlock::Unsupported`.

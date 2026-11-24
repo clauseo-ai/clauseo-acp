@@ -194,6 +194,7 @@ fn shape(event: &AcpEvent) -> String {
             session.as_ref().map(|session| short(session.as_str()))
         ),
         other @ (AcpEvent::HelperInBackground { .. }
+        | AcpEvent::HelperSettled { .. }
         | AcpEvent::PermissionRequested { .. }
         | AcpEvent::ElicitationRequested { .. }
         | AcpEvent::ElicitationCompleted { .. }
@@ -217,6 +218,7 @@ fn origin(event: &AcpEvent) -> Option<Origin> {
         | AcpEvent::HelperSpawned { origin, .. }
         | AcpEvent::HelperAnswer { origin, .. }
         | AcpEvent::HelperEnded { origin, .. }
+        | AcpEvent::HelperSettled { origin, .. }
         | AcpEvent::PermissionRequested { origin, .. }
         | AcpEvent::ElicitationRequested { origin, .. }
         | AcpEvent::Limit { origin, .. }

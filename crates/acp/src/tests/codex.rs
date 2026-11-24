@@ -144,6 +144,7 @@ fn item_plans_by_plan_id() {
             | AcpEvent::HelperSpawned { .. }
             | AcpEvent::HelperAnswer { .. }
             | AcpEvent::HelperEnded { .. }
+            | AcpEvent::HelperSettled { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
