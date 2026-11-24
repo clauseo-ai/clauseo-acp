@@ -24,6 +24,14 @@ pub enum StoreError {
     /// The state file could not be written.
     #[error("the connectors' state file could not be written: {0}")]
     StateFile(String),
+    /// The keychain refused a read, a write or a delete of the saved credential (an error that
+    /// is not "no item": macOS's errSecAuthFailed, a duplicate item or errSecNoAccessForItem on
+    /// another build's item, a locked keychain), so the item and the state file were left as
+    /// they were: a sign-out, a sign-in or a new key refused before anything was revoked,
+    /// deleted or replaced, or a delete or a write that did not happen. The credential reads as
+    /// `Unreadable` until a read works.
+    #[error("the keychain refused the saved credential, so it was left as it is: {0}")]
+    Refused(String),
 }
 
 /// Why no bearer token can be given.

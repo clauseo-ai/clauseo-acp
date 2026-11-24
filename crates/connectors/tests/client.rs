@@ -30,6 +30,14 @@ mod mcp;
 mod refresh;
 
 #[cfg(test)]
+#[path = "client/refused.rs"]
+mod refused;
+
+#[cfg(test)]
+#[path = "client/refused_writes.rs"]
+mod refused_writes;
+
+#[cfg(test)]
 #[path = "client/signin.rs"]
 mod signin;
 

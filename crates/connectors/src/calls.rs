@@ -407,6 +407,9 @@ pub(crate) fn add_api_key(
     if !crate::credential::is_api_key(key) {
         return Err(Error::BadKeyFormat);
     }
+    // Before the request: a credential the keychain refuses to read could not be revoked when
+    // the key replaced it.
+    handle.check_readable()?;
     let key = Secret::from(key);
     let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
     let url = handle.account_url();
