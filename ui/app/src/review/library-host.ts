@@ -11,6 +11,7 @@ import type {
   ConnectorStatus,
   ConnectorsState,
   MatterSummary,
+  McpServerView,
   SetupEvent,
 } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "../library/addons.ts";
@@ -65,12 +66,15 @@ const RAO_ICON = svg(
 
 /** An added tool's server, its saved values held. */
 const server = (s: {
+  name: string;
   command?: string;
   args?: string[];
   url?: string;
   env?: string[];
   headers?: string[];
-}) => ({
+}): McpServerView => ({
+  name: s.name,
+  kind: s.url === undefined ? "local" : "remote",
   ...(s.command === undefined ? {} : { command: s.command }),
   args: s.args ?? [],
   ...(s.url === undefined ? {} : { url: s.url }),
@@ -161,7 +165,12 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       id: "court-diary",
       name: "court-diary",
       from: { kind: "program", text: "npx" },
-      server: server({ command: "npx", args: ["-y", "court-diary-mcp"], env: ["DIARY_TOKEN"] }),
+      server: server({
+        name: "court-diary",
+        command: "npx",
+        args: ["-y", "court-diary-mcp"],
+        env: ["DIARY_TOKEN"],
+      }),
       scope: { matter: SHARMA! },
       switched: [SHARMA!, MEHTA!],
     }),
@@ -170,7 +179,11 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       name: "firm-precedents",
       from: { kind: "address", text: "https://precedents.raoandco.in/mcp" },
       icon: RAO_ICON,
-      server: server({ url: "https://precedents.raoandco.in/mcp", headers: ["Authorization"] }),
+      server: server({
+        name: "precedents",
+        url: "https://precedents.raoandco.in/mcp",
+        headers: ["Authorization"],
+      }),
       status: "needs_secret",
     }),
     tool({
