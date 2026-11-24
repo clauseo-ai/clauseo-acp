@@ -64,8 +64,7 @@ const NO_FACTS: CaseLawFacts = {
   signIn: null,
 };
 
-/** Case Law's facts from the connectors' state, and its credit by the one rule (the store's, which keeps the figure
- * last read for an out-of-credit state). */
+/** Case Law's facts from the connectors' state, and its credit by the one rule (store/case-law-credit.ts). */
 export function caseLawFacts(
   state: ConnectorsState,
   heard: boolean,

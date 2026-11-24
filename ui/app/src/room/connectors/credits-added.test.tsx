@@ -56,7 +56,7 @@ const marked = (order: number): ViewEntry => ({
     event: uuid(order, 10),
     level: "warning",
     text: "Clauseo Case Law is out of credit.",
-    kind: CASE_LAW_OUT_OF_CREDIT as never,
+    kind: CASE_LAW_OUT_OF_CREDIT,
     ts: order * 1000,
   },
 });

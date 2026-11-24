@@ -124,7 +124,14 @@ test("the list: Case Law not yet listed by the host reads needs_setup, and a too
   );
 });
 
-const HEARD: CaseLawFacts = { heard: true, off: null, pack: null, credits: null, signIn: null };
+const HEARD: CaseLawFacts = {
+  heard: true,
+  off: null,
+  pack: null,
+  credits: null,
+  out: null,
+  signIn: null,
+};
 
 test("Case Law's state from each status the host gives", () => {
   const shown = (status: AddonStatus, facts: Partial<CaseLawFacts> = {}) =>
