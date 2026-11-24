@@ -234,14 +234,17 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 /// URL elicitation, notices, compaction, boolean config options, `plan`, and the AIR
 /// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`.
 ///
-/// `recommendedValue` (claude-agent-acp 0.89.1, `clientSupportsRecommendedConfigValue`,
-/// `acp-agent.js:8203`): the model and effort options lose their "Default" rows and show real
-/// values. The effort's `currentValue` is the adapter's recommendation ("medium" when the model
-/// offers it, `session-effort.js:68-90`), which the adapter also applies to the SDK
-/// (`acp-agent.js:7625`). The model's "Default" row goes only when it resolves to a listed
-/// model, which then becomes the `currentValue` (`session-model.js:163-190`). codex-acp 2.2.2
-/// only adds `_meta.jetbrains.air.recommendedValue` to its options, whose values were already
-/// concrete (`dist/index.js:44000-44020`).
+/// `recommendedValue` (claude-agent-acp 0.110.1, `clientSupportsRecommendedConfigValue`,
+/// `session-config-options.js:78`, read at `v1/acp-agent.js:8040`): the model and effort options
+/// lose their "Default" rows and show real values. The effort's `currentValue` is the adapter's
+/// recommendation ("medium" when the model offers it, `session-effort.js:95-97`, `:112-130`), which
+/// the adapter also applies to the SDK (`v1/acp-agent.js:8061-8063`). The model's "Default" row
+/// goes only when it resolves to a listed model, which then becomes the `currentValue`
+/// (`session-model.js:216-240`). Declaring the AIR capabilities also makes 0.110.1 put each model's
+/// effort levels on its model row (`_meta.jetbrains.air.reasoningEfforts`, `session-model.js:268`);
+/// Clauseo does not read them yet (checked live with these capabilities, 2026-11-24,
+/// `tests/claude_0110.rs`). codex-acp 2.2.2 only adds `_meta.jetbrains.air.recommendedValue` to its
+/// options, whose values were already concrete (`dist/index.js:44000-44020`).
 pub(crate) fn client_capabilities() -> acp::ClientCapabilities {
     let mut air = serde_json::Map::new();
     air.insert(

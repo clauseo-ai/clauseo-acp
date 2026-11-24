@@ -1,12 +1,12 @@
-//! claude-agent-acp 0.89.1's real answers (`fixtures/claude-agent-acp-0.89.1.jsonl`, captured
-//! on Linux with a scratch, signed-out Claude home: its `initialize` with the new capability
-//! fields, its `_auth/status_update`, its `session/new` with modes and config options, its first
-//! `available_commands_update`, its `session/prompt` refusal, and its `session/new` refusal of a
-//! folder it cannot stat, the path made `/matters/lease`).
+//! claude-agent-acp 0.110.1's real answers (`fixtures/claude-agent-acp-0.110.1.jsonl`, captured
+//! on macOS with a scratch, signed-out Claude home and Clauseo's client capabilities: its
+//! `initialize`, its `_auth/status_update` and `auth/status_update`, its `session/new` with modes
+//! and config options, its two `available_commands_update`s, its `session/prompt` refusal, and
+//! its `session/new` refusal of a folder it cannot stat, the path `/matters/lease`).
 
 use super::*;
 
-const FIXTURE: &str = include_str!("fixtures/claude-agent-acp-0.89.1.jsonl");
+const FIXTURE: &str = include_str!("fixtures/claude-agent-acp-0.110.1.jsonl");
 
 /// The fixture's line `n` (0-based).
 fn line(n: usize) -> Value {
@@ -22,11 +22,11 @@ fn answer(n: usize, request: &Value) -> Value {
 }
 
 #[test]
-fn a_real_0_89_1_start_parses_and_ignores_auth_status() {
+fn a_real_0_110_1_start_parses_and_ignores_auth_status() {
     let (client, events, driver, mut agent) = pipes();
     let calls = async move {
         let info = client.initialize().await.unwrap();
-        assert_eq!(info.version.as_deref(), Some("0.89.1"));
+        assert_eq!(info.version.as_deref(), Some("0.110.1"));
         assert!(info.capabilities.load_session);
         assert!(info.capabilities.session.resume);
         assert_eq!(info.auth_methods.len(), 2);
@@ -40,10 +40,11 @@ fn a_real_0_89_1_start_parses_and_ignores_auth_status() {
             .await
             .unwrap();
         let modes = start.modes.expect("modes");
-        assert_eq!(modes.current, "default");
+        // With no `defaultMode` in the settings it starts in `auto` (`session-mode.js:47-48`).
+        assert_eq!(modes.current, "auto");
         assert!(modes.available.iter().any(|mode| mode.id == "plan"));
         let ids: Vec<&str> = start.config_options.iter().map(|o| o.id.as_str()).collect();
-        assert_eq!(ids, ["mode", "model", "effort", "fast"]);
+        assert_eq!(ids, ["model", "effort", "fast", "ultracode", "mode"]);
         let refused = client
             .prompt(
                 &start.session,
@@ -63,13 +64,15 @@ fn a_real_0_89_1_start_parses_and_ignores_auth_status() {
         assert_eq!(init["method"], "initialize");
         agent.send(&answer(0, &init));
         agent.send(&line(1));
+        agent.send(&line(2));
         let new = agent.read().await;
         assert_eq!(new["method"], "session/new");
-        agent.send(&answer(2, &new));
-        agent.send(&line(3));
+        agent.send(&answer(3, &new));
+        agent.send(&line(4));
+        agent.send(&line(5));
         let prompt = agent.read().await;
         assert_eq!(prompt["method"], "session/prompt");
-        agent.send(&answer(4, &prompt));
+        agent.send(&answer(6, &prompt));
         agent.read_end().await;
     };
     let (driver, (), ()) =
@@ -124,7 +127,7 @@ fn a_refused_session_new_names_its_method_and_data_keys() {
         let init = agent.read().await;
         agent.send(&answer(0, &init));
         let new = agent.read().await;
-        agent.send(&answer(5, &new));
+        agent.send(&answer(7, &new));
         agent.read_end().await;
     };
     let (driver, (), ()) =
