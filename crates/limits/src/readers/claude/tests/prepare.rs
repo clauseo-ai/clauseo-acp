@@ -132,6 +132,7 @@ fn every_read_keeps_the_scheduler_off() {
     for (name, value) in [
         ("CLAUDE_CODE_HARBOR_KITE", "0"),
         ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+        ("CLAUDE_CODE_DISABLE_ADVISOR_TOOL", "1"),
     ] {
         assert_eq!(
             spec.env().get(OsStr::new(name)),
