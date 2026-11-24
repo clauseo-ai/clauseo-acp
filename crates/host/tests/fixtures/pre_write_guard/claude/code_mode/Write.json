@@ -1,0 +1,17 @@
+{
+  "session_id": "46db3c74-4cae-4b7b-8f27-68eaffe0eae9",
+  "transcript_path": "/home/lawyer/.claude/projects/-m/46db3c74-4cae-4b7b-8f27-68eaffe0eae9.jsonl",
+  "cwd": "{matter}",
+  "prompt_id": "111f6cd7-8791-42b9-a739-188a1b99beb4",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "{matter}/Contract.docx",
+    "content": "changed by script\n"
+  },
+  "tool_use_id": "toolu_cc_797ecb62de5e42cb9ceabd8f23454983"
+}
