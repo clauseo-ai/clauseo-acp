@@ -9,16 +9,29 @@ use std::time::Duration;
 
 use clauseo_connectors::fake::Fixture;
 use clauseo_protocol::{
-    AddonKind, AddonStatus, ConnectorCommand, HostCommand, HostEvent, ToolsPatch,
+    Addon, AddonKind, AddonStatus, ConnectorCommand, HostCommand, HostEvent, ToolsPatch,
 };
 
 use super::{addons, addons_changed, drain, item};
-use crate::connector_rig::{Rig, Start, add, add_key, refresh, sign_out, signed_in};
+use crate::connector_rig::{Gate, Rig, Start, add, add_key, refresh, sign_out, signed_in};
 use crate::support::{Dir, Running, wait};
+
+/// Case law's row, read until listed: it is left out until the start-up has read the
+/// credential, and those reads start no check. The read that lists it may start one.
+fn case_law_row(host: &Running) -> Addon {
+    for _ in 0..4_000 {
+        let items = addons(host);
+        if let Some(row) = items.iter().find(|row| row.id == "case-law") {
+            return row.clone();
+        }
+        wait("a pause", async_io::Timer::after(Duration::from_millis(5)));
+    }
+    panic!("case law never listed");
+}
 
 /// Case law's status in the list (a read, so it may start a check).
 fn status(host: &Running) -> AddonStatus {
-    item(&addons(host), AddonKind::Tool, "case-law").status
+    case_law_row(host).status
 }
 
 /// The `pricing.json` fetches the fake has had.
@@ -126,7 +139,7 @@ fn a_preview_price_list_is_not_offered_and_checked_at_most_every_30_s() {
     rig.fake.set_pricing(Fixture::File("pricing-preview.json"));
     drain(&rig.host, &mut rig.sub);
     let clock = rig.host.clock.clone();
-    let _ = addons(&rig.host);
+    let _ = case_law_row(&rig.host);
     addons_changed(&mut rig.sub);
     assert_eq!(status(&rig.host), AddonStatus::NotOffered);
     clock.advance(Duration::from_secs(29));
@@ -151,7 +164,7 @@ fn a_check_with_no_result_counts_as_ended_after_two_minutes() {
     rig.fake.set_pricing(down());
     let release = rig.fake.hold_next("/pricing.json");
     let clock = rig.host.clock.clone();
-    let _ = addons(&rig.host);
+    let _ = case_law_row(&rig.host);
     fetched(&rig, 1);
     // Past 30 s but within 2 minutes: the first still runs, so these reads start none.
     clock.advance(Duration::from_secs(31));
@@ -176,7 +189,7 @@ fn signing_in_and_signed_out_have_their_own_statuses() {
     let dir = Dir::new("addons_law_signing_in", &[]);
     let mut rig = Rig::start(&dir, Start::default());
     drain(&rig.host, &mut rig.sub);
-    let _ = addons(&rig.host);
+    let _ = case_law_row(&rig.host);
     rig.ok(add());
     addons_changed(&mut rig.sub);
     assert_eq!(status(&rig.host), AddonStatus::SigningIn);
@@ -251,7 +264,7 @@ fn switched_off_or_locked_case_law_starts_no_check() {
     let dir = Dir::new("addons_law_off", &[]);
     let rig = Rig::start(&dir, Start::default());
     rig.host.ok(connectors_off());
-    let row = item(&addons(&rig.host), AddonKind::Tool, "case-law").clone();
+    let row = case_law_row(&rig.host);
     assert!(!row.on && !row.locked, "{row:?}");
     rig.host.settle();
     assert_eq!(fetches(&rig), 0);
@@ -259,7 +272,7 @@ fn switched_off_or_locked_case_law_starts_no_check() {
     let dir = Dir::new("addons_law_locked", &[]);
     dir.set_policy(r#"{"tools": {"connectors": false}}"#);
     let rig = Rig::start(&dir, Start::default());
-    let row = item(&addons(&rig.host), AddonKind::Tool, "case-law").clone();
+    let row = case_law_row(&rig.host);
     assert!(!row.on && row.locked, "{row:?}");
     rig.host.settle();
     assert_eq!(fetches(&rig), 0);
@@ -272,7 +285,7 @@ fn connecting_case_law_sends_addons_changed_and_reads_ready() {
     let dir = Dir::new("addons_law_connect", &[]);
     let mut rig = Rig::start(&dir, Start::default());
     drain(&rig.host, &mut rig.sub);
-    let before = item(&addons(&rig.host), AddonKind::Tool, "case-law").clone();
+    let before = case_law_row(&rig.host);
     assert_ne!(before.status, AddonStatus::Ready, "{before:?}");
     assert!(before.on, "{before:?}");
     rig.ok(ConnectorCommand::Check {});
@@ -283,4 +296,29 @@ fn connecting_case_law_sends_addons_changed_and_reads_ready() {
     addons_changed(&mut rig.sub);
     assert_eq!(status(&rig.host), AddonStatus::Ready);
     rig.assert_no_secret_seen();
+}
+
+/// Before the start-up has read the credential (a keychain prompt still open) case law is left
+/// out of the list; once read, one `AddonsChanged` adds it, signed in: `ready`.
+#[test]
+fn case_law_is_left_out_until_the_credential_is_read() {
+    let dir = Dir::new("addons_law_held", &[]);
+    let gate = std::sync::Arc::new(Gate::default());
+    let mut rig = Rig::start_held(&dir, &gate);
+    drain(&rig.host, &mut rig.sub);
+    let items = addons(&rig.host);
+    assert!(!items.iter().any(|row| row.id == "case-law"), "{items:?}");
+    gate.open();
+    addons_changed(&mut rig.sub);
+    assert_eq!(
+        item(&addons(&rig.host), AddonKind::Tool, "case-law").status,
+        AddonStatus::Ready
+    );
+    let after = drain(&rig.host, &mut rig.sub);
+    assert!(
+        !after
+            .iter()
+            .any(|event| matches!(event, HostEvent::AddonsChanged {})),
+        "{after:?}"
+    );
 }

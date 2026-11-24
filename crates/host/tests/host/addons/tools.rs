@@ -59,7 +59,7 @@ fn mcp_servers_are_listed_and_a_save_sends_addons_changed() {
         linear.from,
         Some(AddonFrom {
             kind: AddonFromKind::Address,
-            text: "https://mcp.linear.app/mcp".to_owned()
+            text: "https://mcp.linear.app".to_owned()
         })
     );
     assert!(linear.on, "{linear:?}");
@@ -104,19 +104,33 @@ fn under_a_managed_mcp_file_the_lawyers_servers_are_blocked() {
     assert!(github.locked && !github.can_remove, "{github:?}");
 }
 
-/// A remote server's address is listed without its query, which may carry a token.
+/// A remote server's address is listed as its scheme and host only: a token in its path (as
+/// Zapier's addresses carry one) or its query never reaches the list.
 #[test]
-fn an_address_is_listed_without_its_query() {
+fn an_address_is_listed_as_its_host_only() {
     let dir = Dir::new("addons_mcp_query", &[]);
     dir.set_settings(
         &[],
         json!({"mcp": {"servers": {
-            "notes": {"url": "https://mcp.example.com/mcp?token=abc123", "enabled": true},
+            "notes": {"url": "https://mcp.example.com/mcp/s/abc123/mcp?token=def456", "enabled": true},
+            "local": {"url": "http://127.0.0.1:8123/mcp", "enabled": true},
         }}}),
     );
     let host = dir.start(0);
-    let notes = item(&addons(&host), AddonKind::Tool, "notes").clone();
-    let from = notes.from.clone().expect("no address");
-    assert_eq!(from.text, "https://mcp.example.com/mcp");
-    assert!(!format!("{notes:?}").contains("abc123"), "{notes:?}");
+    let items = addons(&host);
+    let notes = item(&items, AddonKind::Tool, "notes");
+    assert_eq!(
+        notes.from.as_ref().map(|from| from.text.as_str()),
+        Some("https://mcp.example.com")
+    );
+    let text = format!("{notes:?}");
+    assert!(
+        !text.contains("abc123") && !text.contains("def456"),
+        "{text}"
+    );
+    let local = item(&items, AddonKind::Tool, "local");
+    assert_eq!(
+        local.from.as_ref().map(|from| from.text.as_str()),
+        Some("http://127.0.0.1:8123")
+    );
 }

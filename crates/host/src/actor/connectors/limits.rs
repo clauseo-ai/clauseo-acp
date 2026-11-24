@@ -11,6 +11,9 @@ use clauseo_protocol::CommandId;
 
 use super::{READ_INTERVAL, USED_IDS};
 
+/// A read in flight this long counts as ended.
+const READ_STUCK_AFTER: Duration = Duration::from_mins(2);
+
 /// The one-a-minute account read: when the last began, and whether one is in flight.
 #[derive(Debug, Default)]
 pub(super) struct Reads {
@@ -20,12 +23,13 @@ pub(super) struct Reads {
 
 impl Reads {
     /// Takes the read slot at `now` when no read is in flight and the last began more than
-    /// [`READ_INTERVAL`] ago.
+    /// [`READ_INTERVAL`] ago. A read in flight that began over [`READ_STUCK_AFTER`] ago counts as
+    /// ended, so a lost result does not stop the reads for good.
     pub(super) fn take(&mut self, now: Duration) -> bool {
-        let due = self
-            .last
-            .is_none_or(|last| now.saturating_sub(last) > READ_INTERVAL);
-        if self.in_flight || !due {
+        let since = |last: Duration| now.saturating_sub(last);
+        let due = self.last.is_none_or(|last| since(last) > READ_INTERVAL);
+        let stuck = self.last.is_none_or(|last| since(last) > READ_STUCK_AFTER);
+        if (self.in_flight && !stuck) || !due {
             return false;
         }
         self.in_flight = true;
@@ -101,5 +105,27 @@ impl UsedIds {
                 self.set.remove(&old);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::Reads;
+
+    /// One read at a time, a minute apart; one in flight whose result never came counts as
+    /// ended 2 minutes after it began.
+    #[test]
+    fn a_read_in_flight_counts_as_ended_after_two_minutes() {
+        let secs = Duration::from_secs;
+        let mut reads = Reads::default();
+        assert!(reads.take(secs(0)));
+        assert!(!reads.take(secs(61)), "taken while one was in flight");
+        assert!(!reads.take(secs(120)), "taken while one was in flight");
+        assert!(reads.take(secs(121)));
+        reads.in_flight = false;
+        assert!(!reads.take(secs(150)), "taken within a minute");
+        assert!(reads.take(secs(182)));
     }
 }

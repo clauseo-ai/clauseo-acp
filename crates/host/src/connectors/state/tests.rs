@@ -511,3 +511,24 @@ fn the_addon_status_follows_the_state_in_order() {
         assert_eq!(state.addon_status(), status, "{state:?}");
     }
 }
+
+/// Signed in, a balance read as zero is `needs_credit` before any paid call fails; a positive
+/// one, or none read yet, is `ready`.
+#[test]
+fn a_known_zero_balance_is_needs_credit_and_an_unknown_one_ready() {
+    use clauseo_protocol::AddonStatus;
+    let mut state = CaseLaw {
+        liveness: Some(live()),
+        ..CaseLaw::default()
+    };
+    state.set_credential(CredentialStatus::SignedIn(CredentialKind::ApiKey));
+    assert_eq!(
+        state.addon_status(),
+        AddonStatus::Ready,
+        "no balance read yet"
+    );
+    state.set_account(account(0, "0.00"), at(1_000));
+    assert_eq!(state.addon_status(), AddonStatus::NeedsCredit);
+    state.set_account(account(50, "5.00"), at(2_000));
+    assert_eq!(state.addon_status(), AddonStatus::Ready);
+}

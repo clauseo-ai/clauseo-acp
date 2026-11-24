@@ -114,9 +114,10 @@ impl CaseLaw {
 
     /// Case law's status in the skills and tools list (`ListAddons`), which lists it whatever
     /// the liveness check says. In order: signing in; signed out or revoked (before liveness);
-    /// signed in, out of credit or usable; a last sign-in that failed is `needs_setup`; then by
-    /// the check: not made yet or offered is `needs_setup`, answered but not offered (a preview
-    /// price list) `not_offered`, no answer (`Liveness::failed`) `unreachable`.
+    /// signed in, out of credit (or a balance read as zero) or usable; a last sign-in that
+    /// failed is `needs_setup`; then by the check: not made yet or offered is `needs_setup`,
+    /// answered but not offered (a preview price list) `not_offered`, no answer
+    /// (`Liveness::failed`) `unreachable`.
     pub(crate) fn addon_status(&self) -> AddonStatus {
         if self.signing_in {
             return AddonStatus::SigningIn;
@@ -125,7 +126,9 @@ impl CaseLaw {
             Some(CredentialStatus::SignedOut | CredentialStatus::KeyRevoked) => {
                 return AddonStatus::SignedOut;
             }
-            Some(CredentialStatus::SignedIn(_)) if self.out_of_credit.is_some() => {
+            Some(CredentialStatus::SignedIn(_))
+                if self.out_of_credit.is_some() || self.no_credit() =>
+            {
                 return AddonStatus::NeedsCredit;
             }
             Some(CredentialStatus::SignedIn(_)) => return AddonStatus::Ready,
@@ -140,6 +143,13 @@ impl CaseLaw {
             Some(liveness) if liveness.pricing.is_some() => AddonStatus::NotOffered,
             Some(_) => AddonStatus::Unreachable,
         }
+    }
+
+    /// Whether the account read shows no credit left (an unread balance is not known to be).
+    fn no_credit(&self) -> bool {
+        self.account
+            .as_ref()
+            .is_some_and(|account| account.balance_credits <= 0)
     }
 
     /// A new credential: when it is no longer usable, the account, the out-of-credit state,
