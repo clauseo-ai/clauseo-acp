@@ -58,6 +58,7 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
 pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
     // A helper end the failed write lost is open again for the retries below.
     super::helpers::reopen_from_view(actor, thread);
+    super::switch::unblocked(actor, thread);
     retry_closing(actor, thread);
     undo::retry(actor, thread);
     limits::retry_stops(actor, thread, true);

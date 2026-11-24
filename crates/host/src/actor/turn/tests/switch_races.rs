@@ -426,7 +426,8 @@ fn a_prompt_out_after_the_turn_ended_still_delivers_the_handover() {
 
 /// A mode change held on a switch whose turn is cancelled while its commit is in flight waits
 /// for the commit: nothing launches meanwhile, and when the store refuses the commit the row is
-/// back on the old agent and the change runs there; the new agent never starts.
+/// back on the old agent and the change runs there; the new agent never starts. The old
+/// session's detach, refused with the commit, is logged `Closed` once the stream drains.
 #[test]
 fn a_change_held_on_a_refused_commit_runs_on_the_old_agent() {
     let mut rig = two_agents("switch-refused-held", Some(MODE_THEN_PROMPT));
@@ -475,6 +476,11 @@ fn a_change_held_on_a_refused_commit_runs_on_the_old_agent() {
         attached(&log),
         ["sess-1", "sess-1"],
         "the change relaunched the old agent, the new one never started: {log:?}"
+    );
+    assert_eq!(
+        detaches(&log).first(),
+        Some(&DetachReason::Closed),
+        "the old session's end is logged once the refused commit drains: {log:?}"
     );
     assert_eq!(
         count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
