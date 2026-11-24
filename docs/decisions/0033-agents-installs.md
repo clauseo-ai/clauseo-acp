@@ -70,18 +70,19 @@ after its signature checked out with the Node release keys (signed by Richard La
 snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache`, `signin`, `node` or
 `python` (the last two would name the shared lock files).
 
-**Engine bumps.** `.github/workflows/engine-watch.yml` runs `.github/scripts/engine-watch.mjs`
-every 6 hours. When npm publishes a newer claude-agent-acp, codex-acp or `@openai/codex`, it
-rewrites G16's `package.json`, regenerates the lock (`npm install --package-lock-only
---ignore-scripts`), re-measures the sizes table and its stamp, and force-pushes the branch
-`engines/claude-acp-<v>_codex-acp-<v>_codex-<v>` with a draft pull request. The sizes are each
-platform's installed entries summed: the tarball sizes and the registry's `dist.unpackedSize`, 0
-for the few old packages without one (`--check-sizes` re-measures today's lock and must match the
-table). The same commit moves `crates/limits/tests/live/engines.seq` (one decimal line) to one past
-the larger of its value and the published `engines.json`'s `seq`. Stage B compiles that file in as
-the bundled seq, and the publish job publishes the merged pair under it. Nothing runs on GitHub
-beyond the bump: the suite and a real-agent smoke run on the CI thread's lanes before the branch
-merges.
+**Engine bumps.** `.github/workflows/engine-watch.yml` runs `.github/scripts/engine-watch.mjs` every
+6 hours. When npm publishes a newer claude-agent-acp, codex-acp or `@openai/codex`, it rewrites
+G16's `package.json`, regenerates the lock (`npm install --package-lock-only --ignore-scripts`),
+re-measures the sizes table and its stamp, and force-pushes the branch
+`engines/claude-acp-<v>_codex-acp-<v>_codex-<v>`, which the CI thread opens as a pull request (as
+max-clauseo-agent; a pull request made with the job's token would start no other workflow). The
+sizes are each platform's installed entries summed: the tarball sizes and the registry's
+`dist.unpackedSize`, 0 for the few old packages without one (`--check-sizes` re-measures today's
+lock and must match the table). The same commit moves `crates/limits/tests/live/engines.seq` (one
+decimal line) to one past the larger of its value and the published `engines.json`'s `seq`. Stage B
+compiles that file in as the bundled seq, and the publish job publishes the merged pair under it.
+Nothing runs on GitHub beyond the bump: the suite and a real-agent smoke run on the CI thread's
+lanes before the branch merges.
 
 **The layout** under `Locations::data_dir`:
 - `agents/runtime/node-v24.22.0-<os>-<arch>/`: a downloaded Node.
