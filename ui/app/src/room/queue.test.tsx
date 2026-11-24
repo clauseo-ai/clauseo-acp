@@ -7,7 +7,15 @@
 // other's status renders no row of the open transcript.
 import { act, createElement, memo, Profiler, type ProfilerOnRenderCallback } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { agentText, reset, THREAD, upsert, userMessage, uuid } from "../testing/stream-script.ts";
+import {
+  agentText,
+  reset,
+  step,
+  THREAD,
+  upsert,
+  userMessage,
+  uuid,
+} from "../testing/stream-script.ts";
 import type {
   EntryId,
   StreamId,
@@ -409,4 +417,98 @@ test("a message already removed when the conversation opens stays as it is: noth
   await h.settle();
   expect(field().value).toBe("");
   expect(h.one("unsent")).toBeNull();
+});
+
+/** The rail's New conversation: the matter's draft opens. */
+const newDraft = () =>
+  h!.click(h!.host.querySelector<HTMLButtonElement>('[data-testid="new-conversation"]'));
+const draftRow = () =>
+  h!.all("conversation").find((b) => b.textContent?.includes("New conversation"));
+/** The only message of THREAD waiting for an undo, and this window's Stop pressed on it. */
+async function stoppedOnly() {
+  h!.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h!.settle();
+  await h!.click(h!.one("cancel"));
+}
+
+test("typing in the matter's draft as the host removes the stopped conversation: the words join the field, after the typed ones", async () => {
+  h = await mountWith("idle");
+  await stoppedOnly();
+  await newDraft();
+  expect(openTitle()).toBe("New conversation");
+  await h.type("My own note.");
+  await leaves(THREAD);
+  await h.settle();
+  expect(field().value).toBe(`My own note.\n\n${QUESTION}`);
+  expect(line()).toBe(STOPPED);
+  // the next keystroke keeps them: the field holds them, and the draft follows the field
+  await h.type(`${field().value} Thanks.`);
+  await h.click(rowTitled(TITLE));
+  await h.click(draftRow());
+  expect(field().value).toBe(`My own note.\n\n${QUESTION} Thanks.`);
+});
+
+test("a draft with typed words, not open as the removal comes: the words merge after them", async () => {
+  h = await mountWith("idle");
+  await stoppedOnly();
+  await newDraft();
+  await h.type("Typed first.");
+  await h.click(rowTitled(TITLE));
+  await leaves(THREAD);
+  await h.settle();
+  expect(openTitle()).toBe(TITLE);
+  await h.click(draftRow());
+  expect(field().value).toBe(`Typed first.\n\n${QUESTION}`);
+  expect(line()).toBe(STOPPED);
+});
+
+test("a conversation removed in another matter: its words land in that matter's draft, not the open matter's", async () => {
+  const B = { matter: uuid(9, 2), name: "Mehta v. Union", kind: "folder" as const };
+  const THIRD = uuid(9, 1);
+  h = await mountRoom({
+    matters: [THE_MATTER, B],
+    threads: (matter) =>
+      matter === B.matter
+        ? [
+            {
+              thread: THIRD,
+              matter: B.matter,
+              agent: "claude-acp",
+              status: "idle",
+              title: "Bail note",
+            },
+          ]
+        : [row(THREAD, "idle", "Lease notice"), row(OTHER, "idle", TITLE)],
+  });
+  const matterRow = (name: string) =>
+    h!.all("matter-row").find((r) => r.textContent?.includes(name));
+  if (h.one("matter")?.textContent !== THE_MATTER.name) await h.click(matterRow(THE_MATTER.name));
+  await stoppedOnly();
+  await h.click(matterRow(B.name));
+  expect(h.one("matter")?.textContent).toBe(B.name);
+  await leaves(THREAD);
+  await h.settle();
+  // nothing in the open matter: its field and rows are as they were
+  expect(field().value).toBe("");
+  expect(draftRow()).toBeUndefined();
+  await h.click(matterRow(THE_MATTER.name));
+  await h.click(draftRow());
+  expect(field().value).toBe(QUESTION);
+  expect(line()).toBe(STOPPED);
+});
+
+test("Stop of a running answer, then a later message ended before it started with no Stop: the neutral line", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([userMessage(1, 1, "Read clause nine.")], headerOf(THREAD, "running"))]);
+  await h.settle();
+  await h.click(h.one("cancel"));
+  // the answer ends: the Stop has nothing left to say of
+  h.deliver([upsert(step(3, { stop: "cancelled" })), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  h.deliver([upsert(asked(4, 2, LATER, "sent")), upsert(headerOf(THREAD, heldBy("restore")))]);
+  await h.settle();
+  h.deliver([upsert(asked(4, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  expect(field().value).toBe(LATER);
+  expect(line()).toBe(NEUTRAL);
 });

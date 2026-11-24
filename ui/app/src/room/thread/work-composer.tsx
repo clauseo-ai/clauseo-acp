@@ -72,7 +72,13 @@ import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
 import { useNotSentRestore } from "./steer-restore.ts";
-import { markStopped, unsentDrafts, useUnsentRestore, type Why } from "./unsent-restore.ts";
+import {
+  markStopped,
+  unsentDrafts,
+  useComposerTaker,
+  useUnsentRestore,
+  type Why,
+} from "./unsent-restore.ts";
 import { tooLong } from "./prompt-cost.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
@@ -325,7 +331,7 @@ export function WorkComposer({
   // a later message stopped before its turn started: its words back into the field, after the words there with a
   // blank line between; with no field, into the draft, whose composer says so once it shows. A conversation left with
   // nothing is the host's to remove, and conversations.ts gives its words to a new draft then (unsent-restore.ts)
-  useUnsentRestore(store, stream, ({ text, why }) => {
+  const giveBack = (text: string, why: Why) => {
     const f = field.current;
     const back = draftOf(text);
     if (f !== null) {
@@ -338,7 +344,11 @@ export function WorkComposer({
       drafts.set(draftKey, there === undefined ? back : joinDrafts(there, back, "\n\n"));
     }
     if (draftKey !== null) unsentDrafts.set(draftKey, why);
-  });
+  };
+  useUnsentRestore(store, stream, ({ text, why }) => giveBack(text, why));
+  // a removed conversation's words for this conversation's draft (conversations.ts), while this composer is mounted:
+  // into the field, after the words typed there, never over them
+  useComposerTaker(draftKey, giveBack);
   useNotSentRestore(store, stream, (text) => {
     const f = field.current;
     const back = draftOf(text);

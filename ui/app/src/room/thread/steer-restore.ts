@@ -59,8 +59,8 @@ export function useNotSentRestore(
   });
 }
 
-/** Calls `changed` with the view of `stream` as its user messages change. Reads the view only when its ids or a user
- * message's entry changed, so a streamed chunk costs one identity check per message. */
+/** Calls `changed` with the view of `stream` as its entries come and go or its user messages change. Reads the view
+ * only when its ids or a user message's entry changed, so a streamed chunk costs one identity check per message. */
 export function useUserMessages(
   store: ViewStore | null,
   stream: StreamId | null,
@@ -78,12 +78,14 @@ export function useUserMessages(
     const check = () => {
       const v = store.view(stream);
       if (v === undefined) return;
-      if (v.ids !== ids) {
+      const added = v.ids !== ids;
+      if (added) {
         ids = v.ids;
         own = ids.filter((id) => id.startsWith(USER));
       }
       const now = own.map((id) => v.entries.get(id)?.user_message);
-      if (now.length === users.length && now.every((m, i) => m === users[i])) return;
+      // an entry added or removed (a step: a turn ended) counts too; a streamed chunk changes neither
+      if (!added && now.length === users.length && now.every((m, i) => m === users[i])) return;
       users = now;
       give.current(v);
     };
