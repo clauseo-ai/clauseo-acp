@@ -198,7 +198,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
   ];
 }
 
-type CaseLawState = "needs_setup" | "ready" | "out" | "unreachable" | "off";
+type CaseLawState = "needs_setup" | "ready" | "out" | "unreachable" | "off" | "ended";
 
 const CONNECTOR: Record<CaseLawState, ConnectorStatus | null> = {
   needs_setup: "not_added",
@@ -206,6 +206,7 @@ const CONNECTOR: Record<CaseLawState, ConnectorStatus | null> = {
   out: { out_of_credit: {} },
   unreachable: null,
   off: "not_added",
+  ended: "signed_out",
 };
 
 const connectorsOf = (status: ConnectorStatus | null, available = true): ConnectorsState => ({
@@ -255,7 +256,11 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
     openSettings: () => {},
   });
   const status: AddonStatus =
-    caseLaw === "out" ? "ready" : caseLaw === "off" ? "needs_setup" : caseLaw;
+    caseLaw === "out"
+      ? "ready"
+      : caseLaw === "off" || caseLaw === "ended"
+        ? "needs_setup"
+        : caseLaw;
   provideAddons(
     transport,
     fixedAddons(

@@ -105,4 +105,8 @@ export const HI = {
   "Open Settings to check": null,
   // UC-1242: Clauseo Case Law's detail while the lawyer has turned connectors off
   "Connectors are turned off. You can turn them on in Settings, under Connectors.": null,
+  // UC-1243, UC-1244: Clauseo Case Law added once, its sign-in ended or its key revoked: the card's
+  // word, and its detail above Open Settings
+  "Signed out": null,
+  "Sign in again in Settings, under Connectors.": null,
 } as const;

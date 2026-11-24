@@ -2,7 +2,14 @@
 // today's reads (addons-interim.ts), and the assistant's name (assistant.ts).
 import { expect, test } from "vitest";
 import type { AddonView } from "./addons.ts";
-import { caseLawStatus, interimItems, packItem, serverItem } from "./addons-interim.ts";
+import {
+  caseLawStatus,
+  interimItems,
+  interimList,
+  packItem,
+  serverItem,
+} from "./addons-interim.ts";
+import { FakeTransport } from "../transport/fake-transport.ts";
 import { caseLawFacts } from "./addons-source.ts";
 import { assistantName } from "./assistant.ts";
 import { fromLine, haveCount, nameOf, rowLine, scopeTag } from "./model.ts";
@@ -117,7 +124,13 @@ test("the interim list: packs, servers and Case Law's status from today's reads"
 
 test("Case Law's facts and the rail's count: what the lawyer has", () => {
   const off = { available: false, locked: false, connectors: [] };
-  expect(caseLawFacts(off, false)).toEqual({ heard: false, off: null, pack: null, credits: null });
+  expect(caseLawFacts(off, false)).toEqual({
+    heard: false,
+    off: null,
+    pack: null,
+    credits: null,
+    signIn: null,
+  });
   expect(caseLawFacts(off, true).off).toBe("lawyer");
   expect(caseLawFacts({ ...off, locked: true }, true).off).toBe("firm");
   const signedIn = {
@@ -148,4 +161,18 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     skills: 4,
     connectors: 0,
   });
+});
+
+test("with no app feed, the list is complete once the packs are read: the rail's count shows", async () => {
+  const transport = new FakeTransport({
+    query: (query) => {
+      if (query === "list_skill_packs") return { skill_packs: [] };
+      throw new Error("not scripted");
+    },
+  });
+  const list = interimList(transport);
+  expect(list.state().complete).toBe(false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(list.state()).toMatchObject({ complete: true });
+  expect(list.state().items?.length).toBe(6);
 });

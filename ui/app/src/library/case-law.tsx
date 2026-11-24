@@ -67,6 +67,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   }
   if (shown === "unreachable") return <Tag text={lb(lang, "Can't reach it right now")} />;
   if (shown === "off") return <Tag text={lb(lang, "Turned off")} />;
+  if (shown === "ended") return <Tag text={lb(lang, "Signed out")} />;
   if (shown === "trouble")
     return <Tag text={troubleTag(lang, acts.facts.off === "firm" ? "blocked" : a.status) ?? ""} />;
   const credits = acts.facts.credits;
@@ -104,7 +105,7 @@ export function CaseLawCard({
       <Button kind="primary" className="lib-feature-add" onClick={open}>
         {cr(lang, "Add Clauseo Case Law")}
       </Button>
-    ) : shown === "off" && open !== null ? (
+    ) : (shown === "off" || shown === "ended") && open !== null ? (
       <Button kind="tone" className="lib-feature-add" onClick={open}>
         {tw(lang, "Open Settings")}
       </Button>
@@ -155,6 +156,17 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
             "Connectors are turned off. You can turn them on in Settings, under Connectors.",
           )}
         </p>
+        {open !== null && (
+          <Button kind="tone" size="small" onClick={open}>
+            {tw(lang, "Open Settings")}
+          </Button>
+        )}
+      </div>
+    );
+  if (shown === "ended")
+    return (
+      <div className="lib-trouble" role="status">
+        <p>{lb(lang, "Sign in again in Settings, under Connectors.")}</p>
         {open !== null && (
           <Button kind="tone" size="small" onClick={open}>
             {tw(lang, "Open Settings")}
