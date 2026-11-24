@@ -257,7 +257,7 @@ fn a_reload_announces_its_helpers_again() {
             ][..]
         )
     );
-    let replay = got.get(2).unwrap();
+    let replay = &got[2];
     assert!(
         replay
             .iter()
@@ -334,11 +334,11 @@ fn a_helpers_skipped_update_is_the_roots() {
         Step::Raw(oversize(&start(""), end)),
     ]);
     assert_eq!(
-        shapes(got.get(2).unwrap()),
+        shapes(&got[2]),
         ["root-a helper helper-a: tool update exec-1"]
     );
     assert_eq!(
-        got.get(3).unwrap().as_slice(),
+        got[3].as_slice(),
         [AcpEvent::UpdateSkipped {
             session: Some(id("root-a")),
             origin: Origin::Idle,
