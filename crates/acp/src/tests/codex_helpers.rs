@@ -1,7 +1,7 @@
 //! codex-acp 2.10.0's helper sessions (`ConnectOptions::helper_sessions`), played from recorded
 //! frames. Each fixture `fixtures/codex-acp-2.10.0-helpers-*.jsonl` holds what the agent sent in
-//! one recorded run, cut to the frames these tests need, the home folder renamed
-//! `/Users/lawyer`, ids kept: x1 one helper, x2 two at once, x3 a cancel, x4 a helper's helper,
+//! one recorded run, cut to the frames these tests need, the matter folder renamed
+//! `/Users/lawyer/Matters/Lease`, ids kept: x1 one helper, x2 two at once, x3 a cancel, x4 a helper's helper,
 //! x8 a helper's permission request, f1d the replay of `session/load` after a restart.
 
 use clauseo_protocol::{StopReason, ToolLocation};
@@ -17,13 +17,30 @@ const X4: &str = include_str!("fixtures/codex-acp-2.10.0-helpers-x4.jsonl");
 const X8: &str = include_str!("fixtures/codex-acp-2.10.0-helpers-x8.jsonl");
 const F1D: &str = include_str!("fixtures/codex-acp-2.10.0-helpers-f1d.jsonl");
 
-/// The recorded matter folder, the session's `cwd` here, so the helper's reads fall inside it.
-fn folder() -> PathBuf {
-    PathBuf::from("/Users/lawyer/Library/Caches/clauseo-stagec/issue13/matter-rec-codex")
+/// `path`, written `/a/b`, as an absolute path on this OS: `C:\a\b` on Windows, where a path
+/// without a drive is not absolute.
+fn abs(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", path.replace('/', "\\"))
+    } else {
+        path.to_owned()
+    }
 }
 
+/// The session's `cwd`: the fixtures' matter folder on this OS, so the helper's reads fall
+/// inside it.
+fn folder() -> PathBuf {
+    PathBuf::from(abs("/Users/lawyer/Matters/Lease"))
+}
+
+/// The frames of a fixture, its matter folder written as [`folder`].
 fn frames(text: &str) -> Vec<Value> {
-    text.lines()
+    // unix-paths-ok: the fixtures' folder, replaced by this OS's form of it
+    let recorded = "/Users/lawyer/Matters/Lease";
+    let here = serde_json::to_string(&folder().display().to_string()).unwrap();
+    let here = here.trim_matches('"');
+    text.replace(recorded, here)
+        .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
