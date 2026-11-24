@@ -155,8 +155,10 @@ pub(crate) const CLAUDE_MARKETPLACE_OFF_VAR: &str =
 /// `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS&&`: the built-in list is empty when this variable is
 /// on and the session is not interactive, which every Agent SDK session is (stdout is a pipe).
 /// It is read as a yes/no (`1`, `true`, `yes`, `on` count as on). It also gives the lead its
-/// own `WebFetch` back: the web-fetch type is withheld from the lead's tools only while built-in
-/// types are on (C0-ENGINE-FACTS.md, part c).
+/// own `WebFetch` back: the lead's tool list drops `WebFetch` only while the web-fetch agent
+/// stands in for it, which needs the agent mode `default`, and this variable makes it `none`
+/// (search text `return n&&dfe()==="default"` in 2.1.293, `return o&&y0e()==="default"` in
+/// 2.1.330).
 pub(crate) const CLAUDE_BUILTIN_AGENTS_OFF_VAR: &str = "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS";
 
 /// A launch variable Clauseo sets to `0` on every Claude launch, every login
