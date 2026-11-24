@@ -18,7 +18,8 @@
 //! - `TurnStarted` names the model and effort that answer holds (else the thread's options,
 //!   when nothing was set) ([`started_with`]): what the session really runs. A pick that could
 //!   not be used (not offered, refused, or past the wait) gets the lawyer one notice in the turn,
-//!   `NoticeKind::PickNotUsed`, naming what the answer runs with.
+//!   `NoticeKind::PickNotUsed`, naming what the answer runs with. Sets still out when the wait runs
+//!   out finish in the background, and their answer is logged then.
 
 use std::collections::BTreeMap;
 
@@ -52,6 +53,8 @@ struct Ran {
     answer: Option<Vec<ConfigOption>>,
     /// A pick could not be used.
     not_used: bool,
+    /// While its sets are out and [`send::PICKS_WAIT`] has not run out: the wait's timer.
+    waiting: Option<futures::future::AbortHandle>,
 }
 
 /// Routes a `SendPrompt` with `config` held for the turn it makes; a steer that joins the

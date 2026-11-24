@@ -176,6 +176,69 @@ fn an_effort_pick_is_checked_against_the_model_picks_answer() {
 }
 
 #[test]
+fn a_pick_answered_past_the_wait_is_told_and_its_late_answer_is_logged() {
+    let dir = Dir::new(
+        "pickers_turn_timeout",
+        &[(FAKE, Scenario::Local("pickers-turn-timeout"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    run(&host, thread, "One", &[]);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let two = send(
+        &host,
+        thread,
+        "Two",
+        (&[("model", "sonnet")], DeliveryRequest::Queue),
+    );
+    // The set is out and unanswered: the wait runs out.
+    host.wait_armed(std::time::Duration::from_secs(20));
+    host.clock.advance(std::time::Duration::from_secs(21));
+    assert_eq!(events.until_turn_ended(two).stop, StopReason::EndTurn);
+    let sonnet = |event: &DomainEvent| {
+        matches!(event, DomainEvent::ConfigOptionsReplaced(replaced)
+            if replaced.options.iter().any(|option| matches!(&option.kind,
+                clauseo_protocol::ConfigOptionKind::Select { current_value, .. }
+                    if current_value == "sonnet")))
+    };
+    events.until("the late answer", |events| {
+        events.position(sonnet).is_some()
+    });
+    events.assert_no_mismatch();
+    // Two ran on what the thread held, and said so.
+    let start = started(&events, two);
+    assert_eq!(
+        start.model,
+        Some(named("opus", "Opus 5.5")),
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        not_used(&events),
+        [NoticeKind::PickNotUsed {
+            model: Some("Opus 5.5".to_owned()),
+            effort: Some("High".to_owned()),
+        }],
+        "{}",
+        events.dump()
+    );
+    let start_at = events
+        .position(|event| matches!(event, DomainEvent::TurnStarted(s) if s.turn == two))
+        .unwrap();
+    assert!(
+        events.position(sonnet).unwrap() > start_at,
+        "{}",
+        events.dump()
+    );
+    // The session is on sonnet now: Three's opus is set.
+    let events = run(&host, thread, "Three", &[("model", "opus")]);
+    let start = started(&events, last_turn(&events));
+    assert_eq!(start.model, Some(named("opus", "Opus 5.5")));
+    host.shutdown();
+}
+
+#[test]
 fn a_steer_that_runs_as_its_own_turn_keeps_its_picks() {
     let dir = Dir::new(
         "pickers_steer_fresh",
