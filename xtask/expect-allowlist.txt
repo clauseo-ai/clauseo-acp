@@ -92,6 +92,8 @@ crates/desktop/src/connectors/local_day.rs offset unsafe_code
 # The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
 # clauseo-counts takes time as an input.
 crates/desktop/src/counts.rs now clippy::disallowed_methods
+# The pre-write guard's panic hook (process.rs): its process ends refused, exit 2, in plain words.
+crates/host/src/pre_write_guard/process.rs exit_refused clippy::exit
 # setup-result.json's stamp (result_file.rs, 0049): SystemTime::now, read there alone, so a
 # result an earlier run left isn't read as this run's.
 crates/sandbox/src/windows/setup/result_file.rs now_secs clippy::disallowed_methods
@@ -740,3 +742,5 @@ crates/host/src/crash/native/win.rs - unsafe_code
 crates/desktop/src/counts/crashes/win.rs - unsafe_code
 crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
+# The pre-write guard's panic test runs the test binary itself as the panicking guard.
+crates/host/src/pre_write_guard/tests/panics.rs a_panic_in_the_guard_exits_2_with_the_plain_line clippy::disallowed_methods

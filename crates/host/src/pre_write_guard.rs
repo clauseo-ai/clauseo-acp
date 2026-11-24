@@ -159,11 +159,19 @@
 //! captured again from the real tool whenever a pinned Claude Code or Codex version moves. In
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
 //! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
+//!
+//! What fails closed is the guard's own trouble, not its input: a read of stdin that fails, as
+//! Claude Code's hook, is [`DENY`] with [`COULD_NOT_CHECK_AGENT`], and so is a panic should one
+//! happen after all ([`main`], `process.rs`). Claude Code's entry also sets `onFailure: block`
+//! (`agent/loads.rs`), so a crash, a timeout or another exit code refuses the step too; the host
+//! shows the lawyer [`COULD_NOT_CHECK`] in place of such a step's text
+//! (`actor/turn/updates/guard_failed.rs`).
 
 mod answers;
 mod ask;
 mod codex;
 mod names;
+mod process;
 mod reach;
 pub(crate) mod record;
 mod shell;
@@ -177,12 +185,16 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
-pub use answers::{IGNORED, UNCHECKED};
+pub(crate) use answers::could_not_answer;
+pub use answers::{COULD_NOT_CHECK, COULD_NOT_CHECK_AGENT, IGNORED, UNCHECKED};
 use answers::{Ignored, Refusal};
+#[cfg(test)]
+pub(crate) use ask::LOCAL_READS;
 use codex::{
     codex_home_arg, has_codex_part, in_codex_folder, names_codex_home, patch_targets,
     reaches_codex_home,
 };
+pub use process::main;
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::{Reach, existing_resolved, lexical};
@@ -234,7 +246,8 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read, but as Codex's hook (no `--matter`) [`DENY`] with [`UNCHECKED`] when
-/// it is empty, unreadable or not JSON; else 0 with nothing written. With
+/// it is empty, unreadable or not JSON, and as Claude Code's [`DENY`] with
+/// [`COULD_NOT_CHECK_AGENT`] when reading it failed; else 0 with nothing written. With
 /// `CLAUSEO_GUARD_TIMINGS` set in the environment (not empty, not `0`), one more line follows,
 /// the phase timings (`timings.rs`).
 /// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
@@ -279,6 +292,8 @@ fn run_timed(
         Err(ignored) if as_codex_hook(args) && ignored.unread() => {
             (Some(UNCHECKED.to_owned()), DENY)
         }
+        // Its own read failed: no answer, so Claude Code's step is refused.
+        Err(Ignored::Unreadable) => (Some(COULD_NOT_CHECK_AGENT.to_owned()), DENY),
         Err(ignored) => (Some(ignored.line()), 0),
     };
     if !refused && ask::wanted(args) && ask::asks(&bytes) {
@@ -303,7 +318,7 @@ fn run_timed(
 }
 
 /// Whether the guard runs as Codex's hook: no `--matter` (Claude's hook always passes one,
-/// `agent/loads.rs`, `guard_entry`), with a record or without. There input that
+/// `agent/loads.rs`, `guard_entries`), with a record or without. There input that
 /// is empty, unreadable or not JSON refuses ([`UNCHECKED`], [`DENY`]).
 fn as_codex_hook(args: &[OsString]) -> bool {
     matter_arg(args).is_none()

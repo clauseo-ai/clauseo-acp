@@ -7,6 +7,64 @@ use clauseo_protocol::MatterPath;
 /// Codex's hook) could not read its input.
 pub const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
+/// What the lawyer reads in place of a blocked step's text when Claude Code's guard hook could
+/// not answer: it crashed, timed out, ended with a code other than 0 or 2, or (its own line,
+/// [`COULD_NOT_CHECK_AGENT`]) caught an error of its own ([`could_not_answer`]).
+pub const COULD_NOT_CHECK: &str = "Clauseo couldn't check whether this paper is open elsewhere, so \
+                                   nothing was changed. Try again.";
+
+/// What the agent reads when the guard catches an error of its own (Claude Code's hook): the
+/// lawyer's words, with one retry and then the lawyer, so a guard that keeps failing does not
+/// keep the agent retrying.
+pub const COULD_NOT_CHECK_AGENT: &str = "Clauseo couldn't check whether this paper is open \
+                                         elsewhere, so nothing was changed. Try once more; if it \
+                                         fails again, stop and tell the lawyer.";
+
+/// What follows a held paper's path in [`Refusal::HeldOpen`]'s reason.
+const HELD_OPEN_TAIL: &str = " is open in Word or another program on this computer. A change \
+                              made now would be lost when that program saves it. Ask the lawyer \
+                              to close it, or write to a copy with another name.";
+
+/// The reasons of the refusals other than [`Refusal::HeldOpen`], as [`Refusal::reason`] gives
+/// them.
+const FIXED_REASONS: [&str; 4] = [
+    "Clauseo doesn't let the agent change the .codex folder in a matter: files there change \
+     what the agent loads and runs.",
+    "Clauseo doesn't let the agent touch Codex's own folder (CODEX_HOME): files there change \
+     what the agent loads and runs. Run tools by name (for example rg), not by their path in \
+     that folder.",
+    "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init in its shell: run the stetdoc \
+     command you need directly.",
+    "Clauseo can't read this command: it is nested too deep or is too long. Split it into \
+     smaller commands.",
+];
+
+/// Whether `text`, a blocked step's result, is Claude Code's guard hook that could not answer:
+/// a `[…]` on one line holding the hook's own command (its program, then [`FLAG`] as a
+/// word), whose text after the closing `]: ` holds none of the guard's refusal reasons. Keyed
+/// on the command Clauseo wrote, never on Claude Code's words around it. A matter folder whose
+/// path holds `]: ` reads as could not answer (the step is blocked either way).
+///
+/// [`FLAG`]: super::FLAG
+pub(crate) fn could_not_answer(text: &str) -> bool {
+    let marker = format!(" {} ", super::FLAG);
+    text.match_indices(&marker).any(|(at, _)| {
+        let (before, after) = text.split_at(at);
+        let line = before.rsplit('\n').next().unwrap_or_default();
+        let Some(close) = after.find("]: ") else {
+            return false;
+        };
+        let bracket = after.get(..close).unwrap_or_default();
+        let rest = after.get(close + 3..).unwrap_or_default();
+        line.contains('[') && !bracket.contains('\n') && !refusal_in(rest)
+    })
+}
+
+/// Whether `text` holds one of the guard's refusal reasons.
+fn refusal_in(text: &str) -> bool {
+    text.contains(HELD_OPEN_TAIL) || FIXED_REASONS.iter().any(|reason| text.contains(reason))
+}
+
 /// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).
 pub const IGNORED: &str = "Clauseo's pre-write guard ignored its input";
 
@@ -70,26 +128,13 @@ pub(super) enum Refusal {
 impl Refusal {
     /// What the agent is told.
     pub(super) fn reason(&self) -> String {
+        let [codex_folder, codex_home, stetdoc, unread] = FIXED_REASONS;
         match self {
-            Self::HeldOpen(path) => format!(
-                "{path} is open in Word or another program on this computer. A change made now \
-                 would be lost when that program saves it. Ask the lawyer to close it, or write \
-                 to a copy with another name."
-            ),
-            Self::CodexFolder => "Clauseo doesn't let the agent change the .codex folder in a \
-                                  matter: files there change what the agent loads and runs."
-                .to_owned(),
-            Self::CodexHome => "Clauseo doesn't let the agent touch Codex's own folder \
-                                (CODEX_HOME): files there change what the agent loads and runs. \
-                                Run tools by name (for example rg), not by their path in that \
-                                folder."
-                .to_owned(),
-            Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
-                                   in its shell: run the stetdoc command you need directly."
-                .to_owned(),
-            Self::Unread => "Clauseo can't read this command: it is nested too deep or is too \
-                             long. Split it into smaller commands."
-                .to_owned(),
+            Self::HeldOpen(path) => format!("{path}{HELD_OPEN_TAIL}"),
+            Self::CodexFolder => codex_folder.to_owned(),
+            Self::CodexHome => codex_home.to_owned(),
+            Self::StetdocServe => stetdoc.to_owned(),
+            Self::Unread => unread.to_owned(),
         }
     }
 }
