@@ -172,6 +172,11 @@ impl ThreadState {
         self.running
     }
 
+    /// How many helpers the view holds started and not ended; a count, so asking costs nothing.
+    pub const fn open_helpers(&self) -> u32 {
+        self.index.open_helpers
+    }
+
     /// The messages of its queued prompts, in the order they go (`queued_order.rs`).
     pub fn queued_order(&self) -> Vec<MessageId> {
         crate::queued_order(self.entries.values())
@@ -256,6 +261,8 @@ pub(crate) struct Index {
     pub(crate) users: HashMap<MessageId, Seq>,
     pub(crate) tool_calls: HashMap<ToolCallId, Seq>,
     pub(crate) helpers: HashMap<HelperId, Seq>,
+    /// Helpers started and not ended.
+    pub(crate) open_helpers: u32,
     pub(crate) permissions: HashMap<PermissionRequestId, Seq>,
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
@@ -303,6 +310,9 @@ impl Index {
                 }
                 ViewEntry::Helper(helper) => {
                     index.helpers.insert(helper.helper, order);
+                    if helper.outcome.is_none() {
+                        index.open_helpers += 1;
+                    }
                 }
                 ViewEntry::Permission(permission) => {
                     index.permissions.insert(permission.request, order);
