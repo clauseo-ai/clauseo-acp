@@ -69,6 +69,13 @@ const CWD_MISSING: &str = "`cwd` does not exist";
 /// adapter passes it on in the answer's `data.details`.
 const ACCESS_REFUSED: &str = "Can't access working directory";
 
+/// The reason claude-agent-acp 0.110.1 names in `data.startupFailureReason` when Claude Code
+/// 2.1.330 stops at start over its working folder ("Can't read the current directory …", "The
+/// current directory no longer exists …"): the adapter asks it for a startup failure result
+/// (`CLAUDE_CODE_STARTUP_FAILURE_RESULTS`, `startup-failure.js`) and answers -32602 with the
+/// CLI's own text, which no longer holds [`ACCESS_REFUSED`].
+const CWD_UNAVAILABLE: &str = "\"startupFailureReason\":\"cwd_unavailable\"";
+
 /// The failure for a working folder the agent could not access ([`ACCESS_REFUSED`]).
 const ACCESS_DETAIL: &str = "the agent could not open the matter folder as its working folder";
 
@@ -116,11 +123,11 @@ pub(crate) fn open_folder(folder: &Path) -> io::Result<()> {
     }
 }
 
-/// The refusal for a launch that failed with `error`, when it is Claude's "`cwd` does not
-/// exist" answer to `session/new` (-32602, `data` holding `cwd`): `matter.folder_permission`;
-/// when the answer's message or `data` says Claude Code can't access its working folder
-/// ([`ACCESS_REFUSED`]): `agent.folder_inaccessible`. Neither has a path. `None` for any other
-/// failure, which keeps its own code.
+/// The refusal for a launch that failed with `error`, when it is Claude's "`cwd` does not exist"
+/// answer to `session/new` (-32602, `data` holding `cwd`): `matter.folder_permission`; when the
+/// answer's message or `data` says Claude Code can't access its working folder ([`ACCESS_REFUSED`],
+/// or [`CWD_UNAVAILABLE`] in `data`): `agent.folder_inaccessible`. Neither has a path. `None` for
+/// any other failure, which keeps its own code.
 pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
     let Error::Acp(
         acp @ clauseo_acp::Error::Rpc {
@@ -137,7 +144,7 @@ pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
     let access_refused = message.contains(ACCESS_REFUSED)
         || acp
             .rpc_data()
-            .is_some_and(|text| text.contains(ACCESS_REFUSED));
+            .is_some_and(|text| text.contains(ACCESS_REFUSED) || text.contains(CWD_UNAVAILABLE));
     if access_refused {
         tracing::warn!("the agent could not open the matter folder as its working folder at start");
         return Some(Error::refused(
