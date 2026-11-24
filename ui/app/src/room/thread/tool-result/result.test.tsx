@@ -490,6 +490,8 @@ test("in the room: opening the group reads no blob; an error read turns its row 
   const reads: HostQuery[] = [];
   h = await mountRoom({
     query: (q) => {
+      // the room's own start-up read (the skill list, library/) is not a blob read
+      if (q === "list_skill_packs") return { skill_packs: [] };
       reads.push(q);
       return { blob: { offset: 0, end: 1, text: F.OPAQUE_ERROR.inline! } };
     },

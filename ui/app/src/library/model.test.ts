@@ -154,6 +154,7 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     off: null,
     pack: { paise: 23_600, credits: 2_000 },
     credits: 1_240,
+    signIn: null,
   });
   const items = interimItems([], null, signedIn, true);
   expect(haveCount(items, facts)).toEqual({ skills: 4, connectors: 1 });

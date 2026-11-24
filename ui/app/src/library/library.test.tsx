@@ -196,7 +196,7 @@ test("the side panel explains skills, naming the assistant, until a row is picke
   const explain = text("library-explainer")!;
   expect(explain).toContain("What a skill is");
   expect(explain).toContain("When a question calls for it, Claude reads the skill and follows it.");
-  await h!.click(row("Legal drafting")?.querySelector("button"));
+  await h!.click(row("Legal drafting"));
   expect(h!.one("library-explainer")).toBeNull();
   const detail = h!.one("library-detail")!;
   expect(detail.querySelector(".lib-detail-name")?.textContent).toBe("Legal drafting");
@@ -204,12 +204,12 @@ test("the side panel explains skills, naming the assistant, until a row is picke
   expect(detail.querySelector(".lib-detail-label")?.textContent).toBe("Where Claude uses it");
   expect(text("library-detail-where")).toBe("Every matter");
   expect(detail.querySelector("button")).toBeNull();
-  await h!.click(row("Lease review")?.querySelector("button"));
+  await h!.click(row("Lease review"));
   expect(h!.one("library-detail")?.querySelector(".lib-trouble")?.textContent).toBe(
     "Its files changed after you added it, so Clauseo stopped using it.",
   );
   // a second press on the picked row goes back to the explainer
-  await h!.click(row("Lease review")?.querySelector("button"));
+  await h!.click(row("Lease review"));
   expect(h!.one("library-explainer")).not.toBeNull();
 });
 
@@ -305,7 +305,7 @@ test("Connectors: Case Law first, then the Web browser, then your own connectors
     { name: "firm-precedents", line: "MCP server at precedents.raoandco.in", tag: "Key missing" },
   ]);
   expect(text("library-explainer")).toContain("Your own connectors are MCP servers");
-  await h!.click(row("court-diary")?.querySelector("button"));
+  await h!.click(row("court-diary"));
   const facts = h!.one("library-detail")?.querySelector(".lib-facts")?.textContent;
   expect(facts).toBe("Commandnpx -y court-diary-mcpSaved valuesDIARY_TOKEN");
 });

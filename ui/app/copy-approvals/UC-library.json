@@ -628,5 +628,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "Clauseo Case Law's detail when its sign-in ended or its key was revoked, above Open Settings (library/case-law.tsx CaseLawBlocks). New (review #1298). Words are provisional"
+  },
+  "UC-1245": {
+    "en": "Open Settings",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's button on its card and in its detail while connectors are turned off or its sign-in ended: opens Settings at Connectors (library/case-law.tsx). Same words as UET-15, kept in the place's own words file so the place's chunk doesn't pull the tool line's words into a shared chunk (vite-config.test.ts's bare-chunk rule). Words are provisional"
   }
 }
