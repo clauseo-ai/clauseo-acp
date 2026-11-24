@@ -480,6 +480,87 @@ fn controlled_folder_access_follows_the_most_specific_registry_place() {
     );
 }
 
+/// The environment the expansion tests see, looked up case-blind as Windows' is.
+fn windows_env(name: &str) -> Option<String> {
+    match name.to_ascii_uppercase().as_str() {
+        "USERPROFILE" => Some("C:\\Users\\ada".to_owned()),
+        "PUBLIC" => Some("C:\\Users\\Public".to_owned()),
+        _ => None,
+    }
+}
+
+#[test]
+fn an_added_folder_expands_its_variables_and_keeps_what_it_cannot() {
+    use super::expand::expand_with;
+    assert_eq!(
+        expand_with("%USERPROFILE%\\Matters", windows_env),
+        "C:\\Users\\ada\\Matters"
+    );
+    assert_eq!(
+        expand_with("%PUBLIC%\\Documents\\Firm", windows_env),
+        "C:\\Users\\Public\\Documents\\Firm"
+    );
+    // Names are not case-sensitive, as Windows' are.
+    assert_eq!(
+        expand_with("%userprofile%\\Matters", windows_env),
+        "C:\\Users\\ada\\Matters"
+    );
+    // Two variables, and an unknown one left as written.
+    assert_eq!(
+        expand_with("%PUBLIC%\\%USERPROFILE%", windows_env),
+        "C:\\Users\\Public\\C:\\Users\\ada"
+    );
+    assert_eq!(
+        expand_with("%NOPE%\\Matters", windows_env),
+        "%NOPE%\\Matters"
+    );
+    assert_eq!(
+        expand_with("%NOPE%%USERPROFILE%", windows_env),
+        "%NOPE%C:\\Users\\ada"
+    );
+    // A lone % is left alone, and a value is not expanded again.
+    assert_eq!(expand_with("D:\\100%", windows_env), "D:\\100%");
+    assert_eq!(expand_with("D:\\a%b", windows_env), "D:\\a%b");
+    assert_eq!(expand_with("D:\\Matters", windows_env), "D:\\Matters");
+    assert_eq!(
+        expand_with("%NOPE%", |_| Some("%USERPROFILE%".to_owned())),
+        "%USERPROFILE%"
+    );
+}
+
+#[test]
+fn controlled_folder_access_counts_a_folder_added_with_a_variable() {
+    use super::expand::expand_with;
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(&dir, "1");
+    let mut added = Fake::windows(true);
+    // Windows' own defaults do not cover the matters folder: only the added folder does.
+    added.protected = Vec::new();
+    added.matters = Some(PathBuf::from("C:/Users/ada/Matters/Clauseo"));
+    let blocking = PermissionRow {
+        id: PermissionId::ControlledFolderAccess,
+        state: OsPermissionState::Blocking,
+        folder: None,
+        settings_path: Some(CFA_SETTINGS.to_owned()),
+        note: Some(CFA_NOTE.to_owned()),
+    };
+    let home = |name: &str| {
+        name.eq_ignore_ascii_case("USERPROFILE")
+            .then(|| "C:/Users/ada".to_owned())
+    };
+    if let Some(cfa) = added.cfa.as_mut() {
+        cfa.protected = vec![PathBuf::from(expand_with("%USERPROFILE%/Matters", home))];
+    }
+    assert_eq!(rows(&added, &store), std::slice::from_ref(&blocking));
+
+    // A variable that does not expand leaves the folder as written, which the matters folder is
+    // not under.
+    if let Some(cfa) = added.cfa.as_mut() {
+        cfa.protected = vec![PathBuf::from(expand_with("%NOPE%/Matters", home))];
+    }
+    assert_eq!(rows(&added, &store), NONE);
+}
+
 #[test]
 fn rows_go_on_the_wire_in_snake_case() {
     let row = PermissionRow {
