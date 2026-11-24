@@ -141,6 +141,17 @@ pub(super) fn words(text: &str) -> AgentUpdate {
     }
 }
 
+/// A chunk of the lead's answer, as its own message.
+pub(super) fn answer(text: &str) -> AgentUpdate {
+    AgentUpdate::MessageChunk {
+        role: MessageRole::Answer,
+        acp_message_id: Some("msg_lead".into()),
+        content: ContentBlock::Text {
+            text: text.to_owned(),
+        },
+    }
+}
+
 fn thought(text: &str) -> AgentUpdate {
     AgentUpdate::MessageChunk {
         role: MessageRole::Thought,
