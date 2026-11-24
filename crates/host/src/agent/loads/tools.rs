@@ -44,7 +44,11 @@ use serde_json::{Map, Value};
 ///   `Bash`, `PowerShell`, `Monitor` or `Agent` is listed; named here so the list says so.
 ///   Without it the lead answers first and a helper's hand-back wakes it again, which
 ///   claude-agent-acp 0.110.1 keeps inside the same prompt turn for Clauseo.
-pub(crate) const CLAUDE_TOOLS: [&str; 22] = [
+/// - `REPL`: Claude Code's Code Mode (experimental), turned on by
+///   [`super::CLAUDE_CODE_MODE_VAR`]; its script calls the other tools. Claude Code offers it
+///   only when it grants Code Mode to the session, and refuses Code Mode when the tool list
+///   leaves it out. The calls a script makes reach the host with `toolu_cc_` ids.
+pub(crate) const CLAUDE_TOOLS: [&str; 23] = [
     "Read",
     "Glob",
     "Grep",
@@ -67,6 +71,7 @@ pub(crate) const CLAUDE_TOOLS: [&str; 22] = [
     "TaskList",
     "TaskUpdate",
     "Yield",
+    "REPL",
 ];
 
 /// The tool only Windows adds to [`CLAUDE_TOOLS`]: `PowerShell`, its one shell
@@ -94,8 +99,6 @@ pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 ///   elsewhere with `path`. Loses nothing: a matter folder is no repository to branch.
 /// - `Workflow`: starts agents from a script, outside the helpers' limits. Loses nothing:
 ///   Clauseo's helpers go through `Agent`.
-/// - `REPL`: runs code in Claude Code's own interpreter, beside the shell. Loses nothing: the
-///   shell runs what a matter needs.
 /// - `LSP`: asks a code language server. Loses nothing a matter needs.
 /// - `DesignSync`: sends files to and from claude.ai's design projects, off this computer.
 ///   Loses nothing a matter needs.
@@ -105,7 +108,7 @@ pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 ///   only: `Read` reads the output file, and Claude Code says when the command ends.
 /// - `ListAgents` (`ListPeers`, the same tool): lists the agents a session may message. Loses
 ///   nothing: a helper is continued by the id `Agent` gave.
-pub(crate) const NOT_OFFERED: [&str; 17] = [
+pub(crate) const NOT_OFFERED: [&str; 16] = [
     "CronCreate",
     "CronDelete",
     "CronList",
@@ -114,7 +117,6 @@ pub(crate) const NOT_OFFERED: [&str; 17] = [
     "EnterWorktree",
     "ExitWorktree",
     "Workflow",
-    "REPL",
     "LSP",
     "DesignSync",
     "PushNotification",
