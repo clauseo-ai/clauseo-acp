@@ -195,6 +195,7 @@ mod quit {
                 text: "Start a command.".to_owned(),
             }],
             delivery: DeliveryRequest::Queue,
+            config: None,
         });
         assert!(
             matches!(outcome, CommandOutcome::PromptAccepted { .. }),

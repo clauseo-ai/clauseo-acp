@@ -161,6 +161,7 @@ mod limits;
 mod lists;
 mod matter;
 mod mcp;
+mod models;
 mod number;
 mod open_enum;
 mod patch;
@@ -286,6 +287,7 @@ wire_types! {
         SearchAnswer, SearchHit, SearchKind, SearchMode, SearchPage, SearchProgress, SearchRequest,
         SearchScope, SnippetPart,
     },
+    models::{AgentModels, ModelEntry, NamedChoice},
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
         ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeKind, NoticeLevel,

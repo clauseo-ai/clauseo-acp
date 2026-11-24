@@ -134,6 +134,7 @@ fn an_edit_while_the_agent_launches_relaunches_it_before_the_prompt_goes() {
             text: "Read the brief.".to_owned(),
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
+        config: None,
     };
     rig.dispatch_holding(10, command, prepared).unwrap();
     if rig.held.is_empty() {

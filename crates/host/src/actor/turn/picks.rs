@@ -29,9 +29,8 @@
 //!   it.
 //! - A `SetConfigOption` that succeeds keeps its pick in the matter's prefs for the thread's
 //!   agent kind ([`remember`]).
-//! - The seed's value, the agent's own default (`agent_options/seed.rs`), is never sent: a
-//!   session's picks leave it out without a word ([`wanted`]), since the agent starting on its
-//!   default is what it asks for, and a `SetConfigOption` of it is refused (`command.invalid`).
+//! - A prompt's own picks (`SendPrompt::config`) are set just before that prompt goes out
+//!   (`prompt_picks.rs`).
 
 use clauseo_acp::{AcpClient, AcpEvent, AgentUpdate, SessionStart};
 use clauseo_protocol::{
@@ -45,7 +44,6 @@ use super::super::Actor;
 use super::agents::{Stage, Waiting};
 use super::out::Out;
 use super::{Then, state};
-use crate::actor::agent_options::seed::AGENT_DEFAULT;
 use crate::agent::forced_ask::config_allowed;
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
@@ -87,6 +85,11 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
         .or(actor.threads.get(&thread)?.header.as_ref())
 }
 
+/// The options the thread's header holds now (empty before any were logged).
+pub(super) fn thread_options(actor: &Actor, thread: ThreadId) -> Vec<ConfigOption> {
+    header(actor, thread).map_or_else(Vec::new, |header| header.config_options.clone())
+}
+
 /// The options the thread logged last; `None` until a session of it has attached. Before that,
 /// logged options are the agent's for a session still being created, not the thread's own.
 ///
@@ -112,12 +115,6 @@ pub(super) fn settable(
     option: &AgentChoiceId,
     value: &ConfigValue,
 ) -> Result<(), Error> {
-    if matches!(value, ConfigValue::Select(choice) if choice.as_str() == AGENT_DEFAULT) {
-        return Err(Error::refused(
-            ErrorCode::CommandInvalid,
-            format!("config option {option} takes the agent's own values, not the seed's default"),
-        ));
-    }
     let picked = if let Some(options) = logged(actor, thread) {
         category_of(options, option)
     } else {
@@ -179,8 +176,7 @@ fn verdict(option: &AgentChoiceId, picked: Option<bool>, value: &ConfigValue) ->
 /// The picks `thread`'s new session takes, leaving out those `options` (its start's) already
 /// hold: the thread's own logged values of the model and effort, else `CreateThread`'s config,
 /// else the matter's prefs for its agent's kind; each with the value of a `SetConfigOption` of
-/// its option waiting for the session instead, the last one waiting. A pick of the seed's value
-/// (a draft's config sent from the seed) is left out: the agent keeps its own default.
+/// its option waiting for the session instead, the last one waiting.
 pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
     candidates(actor, thread, options)
         .into_iter()
@@ -205,7 +201,6 @@ fn candidates(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> 
         picks.retain(|(id, _)| *id != pick.0);
         picks.push(pick);
     }
-    picks.retain(|pick| pick.1.as_str() != AGENT_DEFAULT);
     picks
 }
 

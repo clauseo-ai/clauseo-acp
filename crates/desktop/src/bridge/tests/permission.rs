@@ -69,6 +69,7 @@ fn answer_permission_checks_the_option_and_confirms_always_allow() {
             text: "Edit the four clauses.".to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     });
     let answer = |confirm: &dyn Confirm, request, option: &str| {
         let option = AgentChoiceId::new(option).unwrap();
@@ -129,6 +130,7 @@ fn answer_permission_refuses_the_plan_exit_options_that_change_the_mode() {
             text: "Plan the edits, then make them.".to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     });
     let request = until_pending(&messages, &mut Vec::new(), 1);
     for option in MODE_OPTIONS {
@@ -165,6 +167,7 @@ fn a_conversation_only_allow_is_sent_with_no_confirm() {
             text: "List the folder.".to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     });
     let request = until_pending(&messages, &mut Vec::new(), 1);
     let option = AgentChoiceId::new("allow_for_session").unwrap();

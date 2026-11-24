@@ -397,6 +397,11 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Mode { ctx, mode, result } => {
             super::answers::on_mode(actor, thread, ctx, same, &mode, result);
         }
+        AgentReply::PromptPicked(options) => {
+            if same {
+                super::prompt_picks::on_set(actor, thread, options);
+            }
+        }
         AgentReply::PromptRefused { turn, error } => {
             end::on_prompt_refused(actor, thread, turn, &error);
         }

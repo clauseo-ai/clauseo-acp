@@ -1,0 +1,5 @@
+{"scenario":"claude-session-options-refused","description":"The model probe refused: session/options answers an error, so the probe gives nothing","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"options":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/claude-agent-acp","version":"0.110.1"}}}}
+{"expect":{"method":"session/options","as":"opts","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"opts","error":{"code":-32603,"message":"Internal error"}}}

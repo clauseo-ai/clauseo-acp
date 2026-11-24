@@ -24,6 +24,7 @@ fn queue_prompt(rig: &mut Rig, n: u128, thread: clauseo_protocol::ThreadId) -> T
             text: "And clause 5?".to_owned(),
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
+        config: None,
     };
     match rig.dispatch(n, command) {
         Ok(CommandOutcome::PromptAccepted { turn, .. }) => turn,
@@ -230,6 +231,7 @@ fn refused_under_the_install_leaves_the_queue_held(
                 text: "And clause 6?".to_owned(),
             }],
             delivery,
+            config: None,
         },
     );
     assert!(sent.is_err(), "{sent:?}");

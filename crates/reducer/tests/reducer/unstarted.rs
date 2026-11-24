@@ -69,6 +69,8 @@ fn one_failed_turn(
     if started {
         let checkpoint_before = log.fresh().unwrap();
         log.push(TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         })
@@ -147,6 +149,8 @@ fn a_failed_relaunch_after_an_exit_shows_both_failed_turns() {
         .unwrap();
     let checkpoint_before = log.fresh().unwrap();
     log.push(TurnStarted {
+        model: None,
+        effort: None,
         turn: first,
         checkpoint_before,
     })

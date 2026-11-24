@@ -15,9 +15,15 @@ pub(super) fn run_turn_command(actor: &mut Actor, ctx: &CommandCtx, command: Hos
         thread,
         content,
         delivery,
+        config,
     } = command
     {
-        (thread, TurnCommand::SendPrompt { content, delivery })
+        let turn = TurnCommand::SendPrompt {
+            content,
+            delivery,
+            config,
+        };
+        (thread, turn)
     } else if let HostCommand::Cancel { thread } = command {
         (thread, TurnCommand::Cancel)
     } else if let HostCommand::AnswerPermission {

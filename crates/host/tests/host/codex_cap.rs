@@ -81,6 +81,7 @@ fn prompt_with(
         thread,
         content: text(question),
         delivery,
+        config: None,
     }
 }
 
@@ -200,6 +201,7 @@ fn a_chatgpt_question_with_a_file_at_codex_s_cap_is_sent_and_one_over_is_refused
             PromptBlock::File { file },
         ],
         delivery: DeliveryRequest::Queue,
+        config: None,
     };
     // A short question first, to read the link exactly as the host sends it.
     let CommandOutcome::PromptAccepted { turn, .. } = host.ok(with_file("Read it.")) else {

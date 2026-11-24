@@ -39,6 +39,9 @@ pub fn every_entry() -> Vec<ViewEntry> {
 /// A thread's header, with its usage: the one `HeaderEntry` the tests build.
 pub fn header_entry() -> HeaderEntry {
     HeaderEntry {
+        model: None,
+        effort: None,
+        code_mode: false,
         order: seq(1),
         thread: thread_id(2),
         matter: matter_id(1),

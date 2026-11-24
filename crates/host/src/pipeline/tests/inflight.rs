@@ -126,6 +126,8 @@ fn opening(turn: TurnId) -> Vec<DomainEvent> {
             delivery: Delivery::Queue,
         }),
         DomainEvent::TurnStarted(TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before: id::<CheckpointId>(5),
         }),

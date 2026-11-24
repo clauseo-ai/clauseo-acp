@@ -214,6 +214,7 @@ fn list_agents(
         .map(|id| AgentSummary {
             kind: AgentKind::of(&id),
             config_options: options.of(id.as_str()).to_vec(),
+            models: options.models_of(id.as_str()),
             id,
         })
         .collect()

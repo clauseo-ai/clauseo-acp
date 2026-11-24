@@ -294,6 +294,8 @@ fn long_turn(log: &mut Log, number: usize, chunks: usize, tools: usize) -> Fx<Ve
             &format!("Question {number} about the lease."),
         ),
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         }

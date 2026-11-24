@@ -155,6 +155,8 @@ fn a_turn_that_starts_while_a_question_waits_needs_the_lawyer() {
     let mut state = fold(log.events());
     let checkpoint_before = log.fresh().unwrap();
     let started = TurnStarted {
+        model: None,
+        effort: None,
         turn,
         checkpoint_before,
     };

@@ -8,12 +8,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AddonList, AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName,
-    CompactString, ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit,
-    LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus,
-    Protection, ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer,
-    SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
-    TurnId, UpdateView, ViewEntry, WordBlackline,
+    AddonList, AgentId, AgentKind, AgentModels, AgentPrefs, AllowedSite, BlobHash, CheckpointId,
+    ClientName, CompactString, ConfigOption, Count, Date, Error, FileChange, FileRefId,
+    FolderPlace, LastExit, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
+    NamedChoice, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason, RestoreRequest,
+    RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId,
+    ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -354,11 +354,16 @@ pub struct AgentSummary {
     /// `fake-agent`. Left out of the JSON when `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<AgentKind>,
-    /// Its config options as its latest session reported them (the host keeps them across
-    /// restarts), so a new conversation can offer the model and effort before any session;
-    /// empty, and left out of the JSON, until its first conversation started.
+    /// Its config options as its latest session (or the host's probe of the agent) reported
+    /// them, kept across restarts, so a new conversation can offer the model and effort before
+    /// any session; empty, and left out of the JSON, until either has run.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub config_options: Vec<ConfigOption>,
+    /// Its models and their efforts by name, with the ones a new session starts on: from the
+    /// host's probe of the agent (at start and after a sign-in) or its latest session, kept
+    /// across restarts. `None`, and left out of the JSON, until either has run.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub models: Option<AgentModels>,
 }
 
 /// Where new matters go, for `GetDefaultLocation`.
@@ -557,6 +562,17 @@ pub struct ThreadSummary {
     /// The time of the newest event in its stream.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_activity: Option<Timestamp>,
+    /// The model its latest turn ran with (or runs with, while it runs), from that turn's
+    /// `TurnStarted`; missing reads as `None`: no turn yet, or one logged before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<NamedChoice>,
+    /// The effort its latest turn ran with, as `model`; `None` too for a model with no effort.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<NamedChoice>,
+    /// Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
+    /// as `false`, and `false` is left out.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub code_mode: bool,
 }
 
 /// What a missing `ThreadSummary::seen` reads as: nothing to show.

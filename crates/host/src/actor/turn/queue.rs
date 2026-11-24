@@ -33,8 +33,8 @@ use std::collections::VecDeque;
 
 use clauseo_counts::schema::Delivery;
 use clauseo_protocol::{
-    ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId, PromptBlock,
-    QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
+    ConfigPicks, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
+    PromptBlock, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::commands::CommandCtx;
@@ -176,14 +176,16 @@ pub(super) fn send_prompt(
     ctx: CommandCtx,
     thread: ThreadId,
     content: Vec<PromptBlock>,
-    delivery: DeliveryRequest,
+    (delivery, config): (DeliveryRequest, Option<ConfigPicks>),
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     let blocks = steps::prompt_blocks(actor, thread, content)?;
     super::logout::refuse(actor, thread, &blocks)?;
     super::codex_cap::refuse(actor, thread, &blocks)?;
     with_stream(actor, ctx, thread, move |actor| {
-        route(actor, ctx, thread, blocks, delivery)
+        super::prompt_picks::send_prompt(actor, thread, config, |actor| {
+            route(actor, ctx, thread, blocks, delivery)
+        })
     });
     Ok(())
 }

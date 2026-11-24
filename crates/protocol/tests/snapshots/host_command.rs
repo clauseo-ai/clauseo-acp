@@ -48,6 +48,7 @@ golden! { HostCommand::name_of {
             PromptBlock::File { file: file_ref_id(3) },
         ],
         delivery: DeliveryRequest::SendNow,
+        config: None,
     };
     EditQueuedPrompt => edit_queued_prompt: HostCommand::EditQueuedPrompt {
         thread: thread_id(2),

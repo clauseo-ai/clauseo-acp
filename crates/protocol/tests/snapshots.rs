@@ -464,6 +464,9 @@ mod host_event {
         ThreadsChanged => threads_changed: HostEvent::ThreadsChanged(ThreadsChanged {
             matter: matter_id(1),
             threads: vec![ThreadSummary {
+                model: None,
+                effort: None,
+                code_mode: false,
                 thread: thread_id(2),
                 matter: matter_id(1),
                 title: Some("Draft the reply".into()),

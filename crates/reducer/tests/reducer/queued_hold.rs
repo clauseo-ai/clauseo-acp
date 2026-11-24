@@ -75,6 +75,8 @@ fn a_turn_waiting_for_a_restore_shows_queued_with_the_hold_until_it_starts() {
         &mut log,
         &mut state,
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         },

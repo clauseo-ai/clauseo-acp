@@ -151,6 +151,7 @@ fn prompt_file_outside_matter_refused() {
         thread,
         content: vec![PromptBlock::File { file }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     };
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();

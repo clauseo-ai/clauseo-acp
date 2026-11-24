@@ -403,6 +403,9 @@ mod pickers_idle;
 #[path = "host/pickers_log.rs"]
 mod pickers_log;
 #[cfg(test)]
+#[path = "host/pickers_probe.rs"]
+mod pickers_probe;
+#[cfg(test)]
 #[path = "host/pickers_seed.rs"]
 mod pickers_seed;
 #[cfg(test)]

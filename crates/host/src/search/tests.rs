@@ -71,6 +71,8 @@ fn turn_events() -> Vec<DomainEvent> {
             delivery: Delivery::Queue,
         }),
         DomainEvent::TurnStarted(TurnStarted {
+            model: None,
+            effort: None,
             turn: turn(),
             checkpoint_before: id::<CheckpointId>(30),
         }),

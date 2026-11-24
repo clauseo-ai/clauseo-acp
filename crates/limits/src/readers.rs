@@ -8,6 +8,7 @@ mod claude;
 mod codex;
 mod env;
 mod hold;
+mod models;
 mod paths;
 mod run;
 mod tap;
@@ -20,7 +21,7 @@ use std::pin::Pin;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use clauseo_process::{Launcher, Timer};
-use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
+use clauseo_protocol::{AccountLimits, AgentKind, AgentModels, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
 use zeroize::{Zeroize as _, Zeroizing};
 
@@ -158,6 +159,16 @@ fn no_entry(id: &str) -> ReadOutcome {
 pub trait ReadLimits: Send + Sync {
     /// Reads `agent`'s limits once.
     fn read(&self, agent: AgentKind) -> Pin<Box<dyn Future<Output = ReadOutcome> + Send>>;
+
+    /// Probes `agent`'s models and efforts once, with no prompt and no conversation
+    /// (`readers/models.rs`); `None` when the probe failed or this reader has none.
+    fn probe_models(
+        &self,
+        agent: AgentKind,
+    ) -> Pin<Box<dyn Future<Output = Option<AgentModels>> + Send>> {
+        let _ = agent;
+        Box::pin(async { None })
+    }
 }
 
 /// [`ReadLimits`] over a [`Launcher`] and a [`Timer`].
@@ -380,5 +391,35 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 })
             }
         }
+    }
+
+    fn probe_models(
+        &self,
+        agent: AgentKind,
+    ) -> Pin<Box<dyn Future<Output = Option<AgentModels>> + Send>> {
+        let entries = Arc::clone(&self.entries);
+        let launch_env = self.launch_env.clone();
+        let launcher = Arc::clone(&self.launcher);
+        let timer = self.timer.clone();
+        let run_dir = self.run_dir.clone();
+        let codex_home = self.codex_home.clone();
+        let claude_home = self.claude_home.clone();
+        let gate = Arc::clone(self.gate(agent));
+        Box::pin(async move {
+            let _running = gate.enter().await;
+            let launch = entry_now(&entries, launch_env.as_ref(), agent)?;
+            match agent {
+                AgentKind::Claude => {
+                    // The data folder: the run folder is `<data_dir>/limits/run`.
+                    let data_dir = run_dir.parent().and_then(std::path::Path::parent)?;
+                    let home = claude_home.as_deref();
+                    models::claude_probe(&*launcher, &timer, &launch, &run_dir, data_dir, home)
+                        .await
+                }
+                AgentKind::Codex => {
+                    models::codex_probe(&*launcher, &timer, &launch, &run_dir, &codex_home).await
+                }
+            }
+        })
     }
 }

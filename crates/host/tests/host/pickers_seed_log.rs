@@ -1,7 +1,6 @@
 //! The line a fresh data folder's first conversation logs for a pick the agent does not take
 //! (`actor/turn/picks.rs`): the same lifecycle line as any stale pick. Its model is `-`, since
-//! `loggable` writes only a value the agent lists, and its effort `-`, since the seed's default
-//! (`agent_options/seed.rs`) is left out of the picks without a word.
+//! `loggable` writes only a value the agent lists, and its effort `-`, since no effort was picked.
 //!
 //! The log is the process's global subscriber, so this module holds one test: nextest runs it
 //! in a process of its own.
@@ -11,7 +10,6 @@ use clauseo_protocol::{AgentId, CommandOutcome, HostCommand};
 use clauseo_settings::Locations;
 
 use crate::pickers::{CLAUDE, current, logged, picks, turn};
-use crate::pickers_seed::AGENT_DEFAULT;
 use crate::support::{Dir, Scenario};
 use crate::write;
 
@@ -30,7 +28,7 @@ fn an_unknown_pick_on_a_fresh_folder_is_logged_and_the_default_runs() {
     let host = dir.start(0);
     let folder = dir.folder("m", &[("brief.txt", "x\n")]);
     let matter = host.create_matter("m", &folder);
-    let config = picks(&[("model", "claude-gone-9"), ("effort", AGENT_DEFAULT)]);
+    let config = picks(&[("model", "claude-gone-9")]);
     let outcome = host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(CLAUDE).unwrap(),
@@ -60,10 +58,6 @@ fn an_unknown_pick_on_a_fresh_folder_is_logged_and_the_default_runs() {
         dropped,
         ["the agent does not take a config pick; dropped agent=claude-acp model=- effort=-"],
         "{log}"
-    );
-    assert!(
-        !log.contains(AGENT_DEFAULT),
-        "the seed's default is never a pick: {log}"
     );
     assert!(
         !log.contains("claude-gone-9"),

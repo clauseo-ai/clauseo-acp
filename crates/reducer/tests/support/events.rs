@@ -236,6 +236,8 @@ pub fn start_turn(log: &mut Log, prompt: &str) -> Fx<TurnId> {
     log.push(user_message(turn, message, prompt))?;
     let checkpoint_before = log.fresh()?;
     log.push(TurnStarted {
+        model: None,
+        effort: None,
         turn,
         checkpoint_before,
     })?;

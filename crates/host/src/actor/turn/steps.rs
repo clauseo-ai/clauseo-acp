@@ -113,6 +113,7 @@ pub(super) fn accept(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
+    super::prompt_picks::claim(actor, thread, turn);
     let message = actor.ids.mint(now)?;
     let built = build::user_message(turn, message, None, blocks.clone(), delivery);
     let outcome = CommandOutcome::PromptAccepted { turn, message };
@@ -431,11 +432,15 @@ pub(super) fn on_before_turn(
         for event in before_events(actor, matter, thread, turn, checkpoint)? {
             out.push_matter(actor, matter, event)?;
         }
+        let options = super::picks::thread_options(actor, thread);
+        let (model, effort) = super::prompt_picks::started_with(actor, thread, turn, &options);
         out.push(
             actor,
             TurnStarted {
                 turn,
                 checkpoint_before: before,
+                model,
+                effort,
             },
         )?;
         out.send(actor, Then::Started(turn))

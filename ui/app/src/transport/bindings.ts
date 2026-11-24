@@ -530,6 +530,24 @@ export type AgentLimitsView = {
 };
 
 /**
+ *  An agent's models before any session of a conversation, from the host's probe of the agent
+ *  or its latest session (kept across restarts). `current_model` and `current_effort` are what a
+ *  new session starts with: the agent's own default unless a session reported otherwise.
+ */
+export type AgentModels = {
+	/**  The id of the agent's model option, the key of a model pick in `ConfigPicks`. */
+	model_option: string,
+	/**  The id of its effort option, the key of an effort pick; `None` when the agent named none. */
+	effort_option?: string,
+	/**  The models, in the agent's order. */
+	models: ModelEntry[],
+	/**  The model a new session starts on, one of `models`' ids. */
+	current_model: string,
+	/**  The effort it starts with; `None` for a model that takes none. */
+	current_effort?: string,
+};
+
+/**
  *  The agent's own display name, from `initialize`'s `agentInfo.title`, cleaned for display by
  *  the host. It never picks or identifies the agent: the agent's settings id does that.
  */
@@ -619,11 +637,17 @@ export type AgentSummary = {
 	 */
 	kind?: AgentKind,
 	/**
-	 *  Its config options as its latest session reported them (the host keeps them across
-	 *  restarts), so a new conversation can offer the model and effort before any session;
-	 *  empty, and left out of the JSON, until its first conversation started.
+	 *  Its config options as its latest session (or the host's probe of the agent) reported
+	 *  them, kept across restarts, so a new conversation can offer the model and effort before
+	 *  any session; empty, and left out of the JSON, until either has run.
 	 */
 	config_options?: ConfigOption[],
+	/**
+	 *  Its models and their efforts by name, with the ones a new session starts on: from the
+	 *  host's probe of the agent (at start and after a sign-in) or its latest session, kept
+	 *  across restarts. `None`, and left out of the JSON, until either has run.
+	 */
+	models?: AgentModels,
 };
 
 /**  An answer or a thought, as one text. Entry id `agent_text:<message>`. */
@@ -2732,6 +2756,18 @@ export type HeaderEntry = {
 	plan: PlanEntry[],
 	/**  Context and cost, once reported. */
 	usage?: ContextUsage,
+	/**
+	 *  The model its latest turn ran with (or runs with, while it runs), from that turn's
+	 *  `TurnStarted`; missing reads as `None`: no turn yet, or one logged before the field.
+	 */
+	model?: NamedChoice,
+	/**  The effort its latest turn ran with, as `model`; `None` too for a model with no effort. */
+	effort?: NamedChoice,
+	/**
+	 *  Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
+	 *  as `false`, and `false` is left out.
+	 */
+	code_mode?: boolean,
 };
 
 /**  Which pages of a section a header or footer is on. */
@@ -2899,7 +2935,14 @@ export type HostCommand =
 	 *  missing field. A mode this version does not know is refused when the command decodes.
 	 */
 	delivery?: DeliveryRequest,
-} }) & { add_skill?: never; allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; mcp?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; remove_skill?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_default_location?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+	/**
+	 *  Model and effort for this prompt, set on the agent's session just before the prompt
+	 *  goes out (one the session does not offer is dropped), and before its session starts
+	 *  when the thread has none yet. A steer that joins the running turn ignores it.
+	 *  Missing sets none.
+	 */
+	config?: ConfigPicks,
+} }) & { add_skill?: never; allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; mcp?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; remove_skill?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_default_location?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } |
 /**  Replace a queued prompt's text; the turn keeps its id, its place and its file blocks. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
@@ -4725,6 +4768,23 @@ export type ModeChanged = {
 	mode_id: string,
 };
 
+/**  One model the agent offers. */
+export type ModelEntry = {
+	/**  The model's id, the value of the model option. */
+	id: string,
+	/**  Its name. */
+	name: string,
+	/**  The agent's description of it, when it gave one. */
+	description?: string,
+	/**
+	 *  The efforts it takes, lowest first; empty for a model that takes none, or whose efforts
+	 *  the host has not learnt yet.
+	 */
+	efforts?: NamedChoice[],
+	/**  The effort the agent recommends for it, one of `efforts`' ids. */
+	default_effort?: string,
+};
+
 /**  Whether the app animates. */
 export type Motion = 
 /**  As the OS's reduce-motion setting says. */
@@ -4733,6 +4793,14 @@ export type Motion =
 "reduce" | 
 /**  Full animation. */
 "full";
+
+/**  A choice the agent offers by id, with its name to show. */
+export type NamedChoice = {
+	/**  The agent's id for it, sent back in `ConfigPicks`. */
+	id: string,
+	/**  Its name, as the agent gives it ("Opus 5.5", "Medium"). */
+	name: string,
+};
 
 /**
  *  Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
@@ -7291,6 +7359,18 @@ export type ThreadSummary = {
 	last_stop?: LastStop,
 	/**  The time of the newest event in its stream. */
 	last_activity?: Timestamp,
+	/**
+	 *  The model its latest turn ran with (or runs with, while it runs), from that turn's
+	 *  `TurnStarted`; missing reads as `None`: no turn yet, or one logged before the field.
+	 */
+	model?: NamedChoice,
+	/**  The effort its latest turn ran with, as `model`; `None` too for a model with no effort. */
+	effort?: NamedChoice,
+	/**
+	 *  Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
+	 *  as `false`, and `false` is left out.
+	 */
+	code_mode?: boolean,
 };
 
 /**
@@ -7786,6 +7866,14 @@ export type TurnStarted = {
 	turn: TurnId,
 	/**  The checkpoint taken before it; a turn never runs without one. */
 	checkpoint_before: CheckpointId,
+	/**
+	 *  The model it runs with, as the session's options and the prompt's picks
+	 *  (`SendPrompt::config`) name it; `None` when the agent reports no model option, and in
+	 *  an event logged before the field.
+	 */
+	model?: NamedChoice,
+	/**  The effort it runs with, as `model`; `None` too for a model that takes none. */
+	effort?: NamedChoice,
 };
 
 /**

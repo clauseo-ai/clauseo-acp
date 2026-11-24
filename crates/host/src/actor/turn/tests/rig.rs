@@ -369,6 +369,8 @@ impl Rig {
             }
             .into(),
             TurnStarted {
+                model: None,
+                effort: None,
                 turn,
                 checkpoint_before: self.last_recorded(),
             }

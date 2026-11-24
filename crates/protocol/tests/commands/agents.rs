@@ -13,11 +13,13 @@ fn list_agents_is_a_plain_string_and_answers_agents() {
     round_trips(&HostQuery::ListAgents);
     let answer = QueryResult::Agents(vec![
         AgentSummary {
+            models: None,
             id: AgentId::new("codex-acp").unwrap(),
             kind: Some(AgentKind::Codex),
             config_options: Vec::new(),
         },
         AgentSummary {
+            models: None,
             id: AgentId::new("fake-agent").unwrap(),
             kind: None,
             config_options: Vec::new(),

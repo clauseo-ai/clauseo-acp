@@ -386,6 +386,8 @@ fn known_kind_with_bad_payload_is_an_error() {
         v7_text(8)
     );
     let expected = DomainEvent::from(TurnStarted {
+        model: None,
+        effort: None,
         turn: turn_id(3),
         checkpoint_before: checkpoint_id(8),
     });
@@ -440,6 +442,8 @@ fn a_struct_payload_also_decodes_from_a_list_by_position() {
     // serde reads a struct from a list in field order, in JSON and in MessagePack alike, so a
     // struct payload is its map or its fields as a list.
     let expected = DomainEvent::from(TurnStarted {
+        model: None,
+        effort: None,
         turn: turn_id(3),
         checkpoint_before: checkpoint_id(8),
     });
@@ -503,6 +507,8 @@ fn every_kind_round_trips_in_json_and_messagepack() {
 fn envelope_writes_the_schema_version() {
     let written = envelope(
         TurnStarted {
+            model: None,
+            effort: None,
             turn: turn_id(3),
             checkpoint_before: checkpoint_id(8),
         }

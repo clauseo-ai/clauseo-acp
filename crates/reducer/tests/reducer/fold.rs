@@ -258,6 +258,8 @@ fn status_follows_the_turn() {
     assert_eq!(status(&state), ThreadStatus::Starting);
     let checkpoint_before = log.fresh().unwrap();
     let started = clauseo_protocol::TurnStarted {
+        model: None,
+        effort: None,
         turn,
         checkpoint_before,
     };
