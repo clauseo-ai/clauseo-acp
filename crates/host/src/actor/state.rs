@@ -49,9 +49,13 @@ pub(crate) struct ThreadEntry {
     pub(crate) row: ThreadRow,
     /// The header as of the last time the stream was unloaded, for `ListThreads`.
     pub(crate) header: Option<clauseo_protocol::HeaderEntry>,
-    /// How and when its last turn ended, for the matter's status: from the loaded state's last
-    /// step when the stream is unloaded, and from each durable `TurnEnded`.
+    /// How and when its last turn ended, for the matter's status: from the folded state's last
+    /// step when the stream loads and unloads, and from each durable `TurnEnded` that makes a
+    /// step (`rail::note_folded`).
     pub(crate) last_stop: Option<super::rail::Stop>,
+    /// It has nothing to show: no step, and every message it had was removed before its turn
+    /// started. Left out of the rail's lists (`rail::blank`).
+    pub(crate) blank: bool,
     pub(crate) turn: turn::TurnState,
     /// The papers its undos removed that the host still looks for (`turn/came_back.rs`).
     pub(crate) came_back: turn::CameBackWatches,

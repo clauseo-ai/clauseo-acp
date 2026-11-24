@@ -588,6 +588,9 @@ mod versions;
 mod word_open;
 
 #[cfg(test)]
+#[path = "host/unstarted.rs"]
+mod unstarted;
+#[cfg(test)]
 #[path = "host/word_round_trip.rs"]
 mod word_round_trip;
 #[cfg(all(test, unix))]

@@ -22,8 +22,11 @@
 //! when it starts, waits on the lawyer, and ends, and not per chunk.
 //!
 //! A matter that leaves the list goes out in `MattersChanged::removed`, and its threads with it
-//! (no `ThreadsChanged`). A matter that comes (created, or brought back) goes out as a changed
-//! row, and its threads, if any, as one `ThreadsChanged` of new rows.
+//! (no `ThreadsChanged`). A thread that turns blank (`rail::blank`: every message it had was
+//! removed before its turn started) leaves its matter's list in `ThreadsChanged::removed`, and
+//! comes back as a new row once it has something to show. A matter that comes (created, or
+//! brought back) goes out as a changed row, and its threads, if any, as one `ThreadsChanged` of
+//! new rows.
 //!
 //! [`current`] is the whole state as `all: true` lists: the first frames of every app
 //! subscription and the catch-up of one that lagged (`app.rs`).
@@ -71,13 +74,14 @@ struct Published {
     threads: BTreeMap<ThreadId, (ThreadSummary, bool)>,
 }
 
-/// Every matter's row in `ListMatters`' order, each with its threads in `ListThreads`' order.
+/// Every matter's row in `ListMatters`' order, each with its threads in `ListThreads`' order
+/// (blank ones left out).
 type Whole = Vec<(MatterSummary, Vec<(ThreadSummary, bool)>)>;
 
 fn whole(actor: &Actor) -> Whole {
     let mut threads: BTreeMap<MatterId, Vec<(ThreadSummary, bool)>> = BTreeMap::new();
     for thread in actor.threads.values() {
-        if actor.matters.contains_key(&thread.row.matter) {
+        if actor.matters.contains_key(&thread.row.matter) && !thread.blank {
             threads
                 .entry(thread.row.matter)
                 .or_default()
@@ -166,11 +170,18 @@ fn compare_threads(
     touched: BTreeSet<ThreadId>,
 ) -> Vec<HostEvent> {
     let mut threads: BTreeMap<MatterId, Vec<ThreadSummary>> = BTreeMap::new();
+    let mut gone: BTreeMap<MatterId, Vec<ThreadId>> = BTreeMap::new();
     for id in touched {
         let Some(thread) = actor.threads.get(&id) else {
             continue;
         };
         if !actor.matters.contains_key(&thread.row.matter) {
+            continue;
+        }
+        if thread.blank {
+            if published.threads.remove(&id).is_some() {
+                gone.entry(thread.row.matter).or_default().push(id);
+            }
             continue;
         }
         let row = rail::thread_summary(actor, thread);
@@ -179,24 +190,27 @@ fn compare_threads(
         }
     }
     let mut matters = Vec::new();
-    for &matter in threads.keys() {
+    let changed: BTreeSet<MatterId> = threads.keys().chain(gone.keys()).copied().collect();
+    for matter in changed {
         if let Some(row) = rail::matter_summary(actor, matter)
             && let Some(changed) = keep_matter(published, row)
         {
             matters.push(changed);
         }
     }
-    events(matters, Vec::new(), threads)
+    events(matters, Vec::new(), threads, gone)
 }
 
-/// Compares every row, and finds the matters that left the list.
+/// Compares every row, and finds the matters and threads that left the list.
 fn compare_all(actor: &Actor, published: &mut Published) -> Vec<HostEvent> {
     let mut listed = BTreeSet::new();
+    let mut shown = BTreeSet::new();
     let mut matters = Vec::new();
     let mut threads: BTreeMap<MatterId, Vec<ThreadSummary>> = BTreeMap::new();
     for (matter, rows) in whole(actor) {
         listed.insert(matter.matter);
         for row in rows {
+            shown.insert(row.0.thread);
             if let Some(changed) = keep_thread(published, row) {
                 threads.entry(changed.matter).or_default().push(changed);
             }
@@ -214,10 +228,18 @@ fn compare_all(actor: &Actor, published: &mut Published) -> Vec<HostEvent> {
     for matter in &removed {
         published.matters.remove(matter);
     }
-    published
-        .threads
-        .retain(|_, (row, _)| listed.contains(&row.matter));
-    events(matters, removed, threads)
+    let mut gone: BTreeMap<MatterId, Vec<ThreadId>> = BTreeMap::new();
+    published.threads.retain(|&id, (row, _)| {
+        if !listed.contains(&row.matter) {
+            return false;
+        }
+        if shown.contains(&id) {
+            return true;
+        }
+        gone.entry(row.matter).or_default().push(id);
+        false
+    });
+    events(matters, removed, threads, gone)
 }
 
 /// `row` when it differs from the one sent (which it then replaces); `None` when it does not.
@@ -247,12 +269,17 @@ fn keep_matter(published: &mut Published, row: MatterSummary) -> Option<MatterSu
     Some(row)
 }
 
-/// The events for what changed: the matters first, then each matter's threads.
+/// The events for what changed: the matters first, then each matter's threads, changed and
+/// `gone` (left the list while the matter stays).
 fn events(
     matters: Vec<MatterSummary>,
     removed: Vec<MatterId>,
-    threads: BTreeMap<MatterId, Vec<ThreadSummary>>,
+    mut threads: BTreeMap<MatterId, Vec<ThreadSummary>>,
+    mut gone: BTreeMap<MatterId, Vec<ThreadId>>,
 ) -> Vec<HostEvent> {
+    for &matter in gone.keys() {
+        threads.entry(matter).or_default();
+    }
     let mut events = Vec::with_capacity(threads.len() + 1);
     if !matters.is_empty() || !removed.is_empty() {
         events.push(HostEvent::MattersChanged(MattersChanged {
@@ -265,7 +292,7 @@ fn events(
         HostEvent::ThreadsChanged(ThreadsChanged {
             matter,
             threads,
-            removed: Vec::new(),
+            removed: gone.remove(&matter).unwrap_or_default(),
             all: false,
         })
     }));

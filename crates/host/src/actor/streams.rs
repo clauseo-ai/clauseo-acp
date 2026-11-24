@@ -189,6 +189,10 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     }
     if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread()) {
         turn::history_settles(actor, thread, thread_state);
+        // Its last step and whether it is blank, with what committed while it loaded.
+        if let Some(entry) = actor.threads.get_mut(&thread) {
+            super::rail::keep_from_state(entry, thread_state);
+        }
     }
     let loaded = Box::new(Loaded {
         state,
@@ -212,7 +216,8 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
 
 /// Unloads `stream` when nothing needs it: no view subscriber, no commit in flight, and
 /// the turn path does not keep it (a thread's open turn, a matter whose writer is held). A
-/// thread keeps its header for `ListThreads` and its last step's ending for the matter's status.
+/// thread keeps its header for `ListThreads`, its last step's ending for the matter's status, and
+/// whether it is blank (`rail::blank`).
 pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
     let Some(StreamSlot::Loaded(loaded)) = actor.streams.get(&stream) else {
         return;
@@ -236,9 +241,7 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
         turn::history_settles(actor, thread, state);
         if let Some(entry) = actor.threads.get_mut(&thread) {
             entry.header = state.header().cloned();
-            if let Some(stop) = super::rail::last_step(state) {
-                entry.last_stop = Some(stop);
-            }
+            super::rail::keep_from_state(entry, state);
         }
         actor.lists.touch_thread(thread);
     }
@@ -352,6 +355,11 @@ fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<S
                 };
                 for event in &encoded {
                     loaded.views.retain_mut(|sub| sub.offer(event));
+                }
+                if let (StreamId::Thread(thread), Some(state)) = (stream, loaded.state.as_thread())
+                    && let Some(entry) = actor.threads.get_mut(&thread)
+                {
+                    super::rail::note_folded(entry, state, envelopes);
                 }
                 if due || loaded.since_snapshot >= SNAPSHOT_EVERY_EVENTS {
                     take_snapshot(&mut actor.work, &actor.snapshots, stream, loaded);

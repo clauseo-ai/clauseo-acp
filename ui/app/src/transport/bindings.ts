@@ -6905,9 +6905,10 @@ export type ThreadSummary = {
  *  window drops the rows of threads it has open (their own stream tells it more). With `all`
  *  false, `threads` holds only the rows that changed or are new; with `all` true it is the
  *  matter's whole thread list, as `ListThreads` answers, and the window drops every thread of
- *  the matter not in it. A thread never leaves its matter's list (an archived thread stays, with
- *  the `archived` status), so `removed` is always empty today; it is there so a later removal
- *  needs no new shape. A matter that leaves the list takes its threads with it
+ *  the matter not in it. An archived thread stays, with the `archived` status; a thread leaves
+ *  its matter's list (`removed`, with `all` false) only when it has nothing to show: every message
+ *  it had was removed before its turn started and no turn ended with a step. It comes back as a
+ *  new row once it has. A matter that leaves the list takes its threads with it
  *  (`MattersChanged::removed`), with no `ThreadsChanged`.
  */
 export type ThreadsChanged = {
@@ -6915,7 +6916,7 @@ export type ThreadsChanged = {
 	matter: MatterId,
 	/**  The changed rows, or with `all` every row of the matter. */
 	threads: ThreadSummary[],
-	/**  Threads that left the matter's list; always empty today. */
+	/**  Threads that left the matter's list; always empty with `all`. */
 	removed: ThreadId[],
 	/**  Whether `threads` is the matter's whole list. */
 	all: boolean,

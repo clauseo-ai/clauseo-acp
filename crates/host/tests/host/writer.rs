@@ -11,17 +11,17 @@ use crate::support::{Dir, FAKE, Running, Scenario};
 
 /// Thread A (`permission-kinds`) holds the writer at `perm-1`; thread B (`prompt-stream`) in
 /// the same matter has sent a prompt whose turn waits behind A.
-struct TwoThreads {
-    matter: MatterId,
-    a: ThreadId,
-    b: ThreadId,
-    turn_a: TurnId,
-    turn_b: TurnId,
-    events_a: Events,
-    events_b: Events,
+pub(crate) struct TwoThreads {
+    pub(crate) matter: MatterId,
+    pub(crate) a: ThreadId,
+    pub(crate) b: ThreadId,
+    pub(crate) turn_a: TurnId,
+    pub(crate) turn_b: TurnId,
+    pub(crate) events_a: Events,
+    pub(crate) events_b: Events,
 }
 
-fn dir(test: &str) -> Dir {
+pub(crate) fn dir(test: &str) -> Dir {
     Dir::new(
         test,
         &[
@@ -32,7 +32,7 @@ fn dir(test: &str) -> Dir {
 }
 
 /// Builds [`TwoThreads`] and checks B's `TurnQueued { behind: A }`.
-fn b_waits_behind_a(dir: &Dir, host: &Running) -> TwoThreads {
+pub(crate) fn b_waits_behind_a(dir: &Dir, host: &Running) -> TwoThreads {
     let folder = dir.folder("m", &[("brief.txt", "Clause 4 draft\n")]);
     let matter = host.create_matter("m", &folder);
     let a = host.create_thread(matter, PERM);
