@@ -165,7 +165,12 @@ test.each(AGENTS)(
     ]) {
       const c = fetchOf(agent, URL, "failed", said);
       expect(missOf(c)).toBeNull();
-      expect(doneOf("en", c)).toBe("Tried to read livelaw.in online.");
+      // told as tried, never as a page that couldn't open (ChatGPT's open-page step reads as its search)
+      expect(doneOf("en", c)).toBe(
+        agent === "Claude"
+          ? "Tried to read livelaw.in online."
+          : `Tried to search online for '${URL}'.`,
+      );
       expect(markOf("en", c)).toBe("Failed");
       expect(troubleOf("en", [c])).toBe("1 failed.");
     }

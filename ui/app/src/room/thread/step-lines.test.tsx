@@ -281,7 +281,7 @@ describe("ChatGPT's own helper steps (codex-acp 2.10.0: kind other, no tool name
       "Asked a helper, worked with a helper.",
     );
     expect(summaryOf("en", [start, titled("sendInput"), titled("closeAgent")])).toBe(
-      "Worked with a helper, asked a helper.",
+      "Asked a helper, worked with a helper.",
     );
     expect(summaryOf("en", [titled("listAgents")])).toBe("Worked with a helper.");
   });

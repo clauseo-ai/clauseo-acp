@@ -61,7 +61,7 @@ const KANOON = { query: "SARFAESI section 13(2) notice period" };
 const PAGES = "Count the pages of the plaint";
 const sharma = (agent: Agent) => sharmaSteps(agent).map((e) => e.tool_call!);
 
-export const UC_STEP_LINES: Entry[] = [
+const UC_STEP_LINES: Entry[] = [
   // the long answer's steps on the Sharma matter, opened: papers, a search, a skill, Indian Kanoon, a command
   opened("UC-1100", "Used {tool}.", sharma(C)),
   opened("UC-1101", "Tried to use {tool}.", [
