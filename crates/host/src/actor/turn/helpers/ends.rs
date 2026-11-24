@@ -18,7 +18,8 @@ use crate::log_file::Cause;
 
 /// Pushes `HelperEnded { outcome }` for every open helper of the thread into `out`, and closes
 /// them. A helper whose own end (its handback, with its report) a failed write lost gets that
-/// end again instead.
+/// end again instead. The kept end stays until the view shows it or a turn's end is durable,
+/// so a retry whose write fails too writes it once more.
 fn end_open(
     actor: &mut Actor,
     thread: ThreadId,
@@ -33,7 +34,8 @@ fn end_open(
         known.open = false;
         let (outcome, summary) = helpers
             .sent_ends
-            .remove(&known.id)
+            .get(&known.id)
+            .cloned()
             .unwrap_or((outcome, None));
         ended.push((known.id, outcome, summary));
     }
