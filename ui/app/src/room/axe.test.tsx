@@ -16,7 +16,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { MatterSummary, ViewEntry } from "../transport/protocol.ts";
+import type { MatterSummary, ThreadStatus, ViewEntry } from "../transport/protocol.ts";
 import {
   batch,
   chosen,
@@ -156,9 +156,12 @@ const SCENES: Record<string, Scene> = {
 /** The open thread's header: queued for the matter, or waiting on the lawyer. */
 function headerFor(scene: Scene): ViewEntry {
   const head = header("needs_you");
-  if (scene.queued === true) head.header!.status = { queued: { behind: THREAD } };
+  if (scene.queued === true) head.header!.status = RESTORING;
   return head;
 }
+
+/** A queued status with the host's hold (#1286's TurnQueued.hold), read as an optional field until its binding. */
+const RESTORING = { queued: { behind: THREAD, hold: "restore" } } as unknown as ThreadStatus;
 
 /** The other conversation for the wait: its id sorts below THREAD's, so THREAD opens. */
 const OTHER = uuid(0, 1);
@@ -203,13 +206,13 @@ function transportFor(scene: Scene): FakeTransport {
                       thread: THREAD,
                       matter: MATTER,
                       agent: "claude-acp",
-                      status: { queued: { behind: THREAD } },
+                      status: RESTORING,
                     },
                     {
                       thread: OTHER,
                       matter: MATTER,
                       agent: "claude-acp",
-                      status: { queued: { behind: THREAD } },
+                      status: RESTORING,
                       title: "Draft petition",
                     },
                   ]

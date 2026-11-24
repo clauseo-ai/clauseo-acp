@@ -26,6 +26,7 @@ import type {
 import { mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
 import { forgetSteerRestores } from "./thread/steer-restore.ts";
 import { forgetUnsent } from "./thread/unsent-restore.ts";
+import { fakeNext } from "./fake-next.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (stream-commits.test.tsx's way)
 const rowCommits = new Map<string, number>();
@@ -79,8 +80,10 @@ const headerOf = (thread: string, status: ThreadStatus): ViewEntry => ({
   },
 });
 
+/** The host's app events (ThreadsChanged), alone of the rows today's host lacks. */
+const APP = fakeNext({ matters: () => [], parts: ["app"] });
 const mountWith = (other: ThreadStatus, own: ThreadStatus = "idle") =>
-  mountRoom({ threads: [row(THREAD, own, "Lease notice"), row(OTHER, other, TITLE)] });
+  mountRoom({ threads: [row(THREAD, own, "Lease notice"), row(OTHER, other, TITLE)], next: APP });
 
 /** The wait over the composer, while the host holds the open conversation's turn for the matter. */
 const wait = () => h!.one("matter-hold");
@@ -183,7 +186,8 @@ test("today's host: queued behind another conversation with no hold says another
   await h.settle();
   expect(working()).toBe("Waiting to answer.");
   expect(wait()?.textContent).toBe(OTHER_ANSWER);
-  expect(h.host.textContent).not.toMatch(/undo|restore|moved/i);
+  expect(h.host.textContent).not.toContain("changing this matter's papers");
+  expect(h.host.textContent).not.toContain("being moved");
   expect(h.host.textContent).not.toContain(`'${TITLE}'`);
 });
 
@@ -479,6 +483,7 @@ test("a conversation removed in another matter: its words land in that matter's 
             },
           ]
         : [row(THREAD, "idle", "Lease notice"), row(OTHER, "idle", TITLE)],
+    next: APP,
   });
   const matterRow = (name: string) =>
     h!.all("matter-row").find((r) => r.textContent?.includes(name));
@@ -510,5 +515,22 @@ test("Stop of a running answer, then a later message ended before it started wit
   h.deliver([upsert(asked(4, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
   expect(field().value).toBe(LATER);
+  expect(line()).toBe(NEUTRAL);
+});
+
+test("the store dropped the conversation's view before the host's removal: the words seen while it was open come back", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, heldBy("undo")))]);
+  await h.settle();
+  h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  // the lawyer leaves the resting conversation: its view goes from the store
+  await h.click(rowTitled(TITLE));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(h.store.view(`thread:${THREAD}` as StreamId)).toBeUndefined();
+  await leaves(THREAD);
+  await h.settle();
+  await h.click(draftRow());
+  expect(field().value).toBe(QUESTION);
   expect(line()).toBe(NEUTRAL);
 });
