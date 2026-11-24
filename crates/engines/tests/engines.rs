@@ -14,6 +14,9 @@ mod fixtures;
 #[path = "engines/key.rs"]
 mod key;
 #[cfg(test)]
+#[path = "engines/lock.rs"]
+mod lock;
+#[cfg(test)]
 #[path = "engines/names.rs"]
 mod names;
 #[cfg(test)]

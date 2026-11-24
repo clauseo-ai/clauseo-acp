@@ -18,6 +18,10 @@ const FIELDS: [&str; 7] = [
     "sizes",
 ];
 
+/// The rows `sizes` has: 2 agents × 3 OSes × 2 architectures (Linux's are glibc's; musl uses
+/// them too, as the app's snapshot does).
+const SIZE_ROWS: usize = 12;
+
 /// One of the two engines, as `sizes` names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Agent {
@@ -118,12 +122,17 @@ impl EngineList {
         &self.package_lock
     }
 
-    /// Each engine's sizes per platform.
+    /// The app's free-space input: each engine's download and unpacked bytes on each platform,
+    /// one row for every (agent, os, arch).
     pub fn sizes(&self) -> &[Size] {
         &self.sizes
     }
 
-    /// The exact `engines.json` bytes that verified: what the caller stores.
+    /// The exact `engines.json` bytes that verified, for storage only (so the stored file is
+    /// the signed one). Install from [`package_json`](Self::package_json) and
+    /// [`package_lock`](Self::package_lock), re-serialised; never hand these bytes to another
+    /// parser to install from: a key repeated in a JSON object is last-wins here, and another
+    /// parser might read it otherwise.
     pub fn json(&self) -> &[u8] {
         &self.json
     }
@@ -158,6 +167,10 @@ pub(crate) fn parse(json: &[u8]) -> Result<EngineList, Error> {
         if !seen.insert((size.agent, size.os, size.arch)) {
             return Err(Error::DuplicateSize);
         }
+    }
+    // With no repeats, 12 rows are every agent × OS × architecture the enums name.
+    if seen.len() != SIZE_ROWS {
+        return Err(Error::SizesIncomplete);
     }
     Ok(EngineList {
         json: json.to_vec(),

@@ -13,7 +13,7 @@
     "description": "The one home of the adapters' npm pins. G16's live tests (crates/limits/tests/live.rs) and its nightly job read an `npm ci` of this file.",
     "license": "GPL-3.0-or-later",
     "dependencies": {
-      "@agentclientprotocol/claude-agent-acp": "0.90.0",
+      "@agentclientprotocol/claude-agent-acp": "0.89.2",
       "@agentclientprotocol/codex-acp": "2.2.2"
     },
     "overrides": {
@@ -31,13 +31,13 @@
         "version": "0.0.0",
         "license": "GPL-3.0-or-later",
         "dependencies": {
-          "@agentclientprotocol/claude-agent-acp": "0.90.0",
+          "@agentclientprotocol/claude-agent-acp": "0.89.2",
           "@agentclientprotocol/codex-acp": "2.2.2"
         }
       },
       "node_modules/@agentclientprotocol/claude-agent-acp": {
-        "version": "0.90.0",
-        "resolved": "https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/claude-agent-acp-0.90.0.tgz",
+        "version": "0.89.2",
+        "resolved": "https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/claude-agent-acp-0.89.2.tgz",
         "integrity": "sha512-t1k8YPDvo/zUghL3x2pFs40tWfYTLhYmK8jt37CVBpY7eq1Ztj2hLZBAmy9ZX++tUyJaGfuuMrzvJGvU9tjBsg==",
         "license": "Apache-2.0",
         "dependencies": {

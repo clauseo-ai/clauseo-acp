@@ -54,8 +54,8 @@
         }
       },
       "node_modules/@agentclientprotocol/codex-acp": {
-        "version": "2.2.1",
-        "resolved": "https://registry.npmjs.org/@agentclientprotocol/codex-acp/-/codex-acp-2.2.1.tgz",
+        "version": "2.2.2-0",
+        "resolved": "https://registry.npmjs.org/@agentclientprotocol/codex-acp/-/codex-acp-2.2.2-0.tgz",
         "integrity": "sha512-vNdeNV3jxbqaH7MYvVWzyB6cMOz+YGIV9W1xyBDsQfoii92DulZLM+ahCL2T2G6uohlaB1Yma347p2kLfAab2w==",
         "license": "Apache-2.0",
         "dependencies": {

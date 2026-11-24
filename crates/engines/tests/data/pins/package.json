@@ -1,0 +1,14 @@
+{
+  "name": "clauseo-limits-live",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one home of the adapters' npm pins. G16's live tests (crates/limits/tests/live.rs) and its nightly job read an `npm ci` of this file.",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.89.1",
+    "@agentclientprotocol/codex-acp": "2.2.2"
+  },
+  "overrides": {
+    "@openai/codex": "0.162.1"
+  }
+}
