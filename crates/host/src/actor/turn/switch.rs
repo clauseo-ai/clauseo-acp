@@ -43,7 +43,7 @@ mod commit;
 mod handover;
 mod settle;
 
-pub(super) use commit::committed;
+pub(super) use commit::{committed, unblocked};
 pub(super) use settle::{
     at_start, delivered, ends, going_out, keeps_detach, prompt, release, started_by_switch,
 };
@@ -114,6 +114,9 @@ pub(super) struct Kept {
     owed: Option<AgentId>,
     /// The switch's commit in flight, which may outlive its turn.
     in_flight: Option<commit::InFlight>,
+    /// The old agent's `Closed` detach, owed by a switch commit the store refused after its
+    /// turn ended: the refusal blocks the stream, so it is logged once the stream drains.
+    detach_owed: bool,
 }
 
 impl Switch {

@@ -4,7 +4,7 @@
 
 use clauseo_protocol::{
     AgentId, AgentSessionDetached, AgentSwitched, ContextHandoff, DetachReason, Envelope,
-    ErrorCode, HandoffId, HandoffStatus, ThreadId, TurnId,
+    ErrorCode, HandoffId, HandoffStatus, StreamId, ThreadId, TurnId,
 };
 
 use super::super::super::Actor;
@@ -253,10 +253,27 @@ pub(in super::super) fn committed(
     if found {
         failure::on_store_failure(actor, thread, failed);
     } else if detach {
-        agents::log_detach(actor, thread, DetachReason::Closed);
+        // The refusal blocked the stream until its commits drain: the detach waits for that.
+        if actor.pipeline.blocked(StreamId::Thread(thread)).is_some() {
+            if let Some(state) = state(actor, thread) {
+                state.switch.detach_owed = true;
+            }
+        } else {
+            agents::log_detach(actor, thread, DetachReason::Closed);
+        }
     }
     // Refused: the row is back, so the changes held since the turn ended run on the old agent.
     super::release(actor, thread, held);
+}
+
+/// `thread`'s stream drained after a failure: the `Closed` detach a refused switch commit
+/// owes is logged now.
+pub(in super::super) fn unblocked(actor: &mut Actor, thread: ThreadId) {
+    let owed =
+        state(actor, thread).is_some_and(|state| std::mem::take(&mut state.switch.detach_owed));
+    if owed {
+        agents::log_detach(actor, thread, DetachReason::Closed);
+    }
 }
 
 /// `turn`'s switch is durable: the held changes, then the turn, wait for the new agent.
