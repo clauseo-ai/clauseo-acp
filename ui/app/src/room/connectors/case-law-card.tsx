@@ -11,10 +11,6 @@ import { rupees } from "@clauseo/components/lib/money.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 
-/** The credits one page of search results costs (the library design's note, 24 Nov): what turns the smallest pack's
- * credits into "about {n} searches". The host doesn't send it before an account exists; change it here if it moves. */
-const SEARCH_PAGE_CREDITS = 20;
-
 /** The smallest pack as the host lists it: its gross price (`price_paise`, GST included) and its credits. */
 export type Pack = { paise: number; credits: number };
 
@@ -24,14 +20,9 @@ export function CaseLawCard({ pack, onAdd }: { pack: Pack | null; onAdd: () => v
     lang,
     "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.",
   );
-  // the price from the host's live price list, never a figure kept here; none while the host lists no price
-  const cost =
-    pack === null
-      ? null
-      : cr(lang, "From {price}, about {n} searches", {
-          price: rupees(pack.paise),
-          n: String(Math.max(1, Math.round(pack.credits / SEARCH_PAGE_CREDITS))),
-        });
+  // the price from the host's live price list, never a figure kept here; none while the host lists no price. No
+  // count of searches: what a pack buys depends on the question (one real question took 393 credits)
+  const cost = pack === null ? null : cr(lang, "From {price}.", { price: rupees(pack.paise) });
   return (
     <div className="w-full shrink-0 px-thread-pad pb-s4" data-testid="case-law-offer">
       <div className="mx-auto max-w-measure">

@@ -78,14 +78,14 @@ test("the card shows on a new conversation while the connector is not added", as
   expect(card.querySelector("section")?.getAttribute("aria-label")).toBe("Clauseo Case Law");
   expect(card.querySelector(".lim-note-title")?.textContent).toBe("Clauseo Case Law");
   // with a price: the price and the terms, each on its own line
-  expect(h!.one("case-law-offer-price")?.textContent).toBe("From ₹236, about 100 searches");
+  expect(h!.one("case-law-offer-price")?.textContent).toBe("From ₹236.");
   expect(h!.one("case-law-offer-terms")?.textContent).toBe(
     "Prepaid, including GST. No subscription.",
   );
   expect(h!.one("case-law-offer-price")?.className).toContain("block");
   expect(h!.one("case-law-offer-terms")?.className).toContain("block");
   expect(card.querySelector(".lim-note-sub")?.textContent).toBe(
-    `${SENTENCE}From ₹236, about 100 searches` + "Prepaid, including GST. No subscription.",
+    `${SENTENCE}From ₹236.` + "Prepaid, including GST. No subscription.",
   );
   expect(h!.one("case-law-offer-add")?.textContent).toBe("Add Clauseo Case Law");
   expect(h!.one("case-law-offer-source")?.textContent).toBe("Powered by Indian Kanoon");
