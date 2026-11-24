@@ -80,6 +80,8 @@ open_data_enum! {
         Restarting = "restarting",
         /// Clauseo stopped the idle agent to save memory.
         IdleStopped = "idle_stopped",
+        /// The lawyer moved the conversation to another agent.
+        Switched = "switched",
         _ =>
         /// A reason from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -92,6 +94,7 @@ open_data_enum! {
         DetachReason::Closed,
         DetachReason::Restarting,
         DetachReason::IdleStopped,
+        DetachReason::Switched,
     ];
 }
 

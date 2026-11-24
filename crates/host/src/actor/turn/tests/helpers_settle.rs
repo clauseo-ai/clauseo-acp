@@ -426,6 +426,7 @@ fn a_settle_behind_held_words_ends_the_helper_with_them_in_the_prompted_turn() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     // The prompt's turn waits for its before checkpoint, so no turn is live.
     let accepted = rig

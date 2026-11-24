@@ -196,6 +196,7 @@ mod quit {
             }],
             delivery: DeliveryRequest::Queue,
             config: None,
+            agent: None,
         });
         assert!(
             matches!(outcome, CommandOutcome::PromptAccepted { .. }),

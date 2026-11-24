@@ -35,6 +35,7 @@ fn send(rig: &mut Rig, n: u128, thread: ThreadId, delivery: DeliveryRequest) -> 
         }],
         delivery,
         config: None,
+        agent: None,
     };
     match rig.dispatch(n, command) {
         Ok(CommandOutcome::PromptAccepted { turn, .. }) => turn,
@@ -114,6 +115,7 @@ fn checkpointing_send(rig: &mut Rig, thread: ThreadId, n: u128) -> TurnId {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     let turn = match rig.dispatch_holding(n, sent, held) {
         Ok(CommandOutcome::PromptAccepted { turn, .. }) => turn,

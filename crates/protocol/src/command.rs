@@ -221,6 +221,14 @@ pub enum HostCommand {
         /// config is ignored. Missing sets none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         config: Option<ConfigPicks>,
+        /// The agent to answer it, by registry id. Another agent than the thread's moves the
+        /// conversation to it when the message's turn starts, with a handover of the earlier
+        /// conversation; refused with `thread.background_work` while the thread's agent may
+        /// still be working in the background, and with `command.invalid` for an agent that is
+        /// not in the settings. Missing, or the thread's own agent: no switch. A steer naming
+        /// another agent never joins the running turn: it waits as the next turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentId>,
     },
     /// Replace a queued prompt's text; the turn keeps its id, its place and its file blocks.
     EditQueuedPrompt {

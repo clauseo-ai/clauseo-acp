@@ -15,8 +15,8 @@ use std::fmt::{Debug, Display};
 use clauseo_protocol::{
     AgentChoiceId, AgentId, BlobHash, BlobRef, BlockedSiteId, CheckpointId, CommandId,
     CompactString, Count, DomainEvent, ElicitationId, Envelope, EventId, FileRefId, Finite,
-    FolderRefId, HelperId, MatterId, MatterPath, MessageId, PermissionRequestId, RawPayload, Seq,
-    StreamId, ThreadId, Timestamp, Title, ToolCallId, TurnId,
+    FolderRefId, HandoffId, HelperId, MatterId, MatterPath, MessageId, PermissionRequestId,
+    RawPayload, Seq, StreamId, ThreadId, Timestamp, Title, ToolCallId, TurnId,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -79,6 +79,11 @@ pub fn helper_id(n: u64) -> HelperId {
 /// A `CheckpointId` from `v7(n)`.
 pub fn checkpoint_id(n: u64) -> CheckpointId {
     CheckpointId::new(v7(n)).unwrap()
+}
+
+/// A `HandoffId` from `v7(n)`.
+pub fn handoff_id(n: u64) -> HandoffId {
+    HandoffId::new(v7(n)).unwrap()
 }
 
 /// A `PermissionRequestId` from `v7(n)`.

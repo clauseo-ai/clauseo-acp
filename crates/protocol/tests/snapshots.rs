@@ -234,6 +234,9 @@ mod domain_event {
         AgentRetrying => agent_retrying: event("agent_retrying");
         AgentRetryEnded => agent_retry_ended: event("agent_retry_ended");
         AgentSessionDetached => agent_session_detached: event("agent_session_detached");
+        AgentSwitched => agent_switched: event("agent_switched");
+        ContextHandoff => context_handoff: event("context_handoff");
+        HandoffSettled => handoff_settled: event("handoff_settled");
         UserMessage => user_message: event("user_message");
         TurnQueued => turn_queued: event("turn_queued");
         QueuedPromptEdited => queued_prompt_edited: event("queued_prompt_edited");
@@ -378,6 +381,7 @@ mod view_entry {
         Marker => marker: entry("marker");
         MatterHeader => matter_header: entry("matter_header");
         Version => version: entry("version");
+        Handoff => handoff: entry("handoff");
     } }
 
     /// A header whose agent has named itself, as `AgentNamed` sets it. Its own snapshot, so the

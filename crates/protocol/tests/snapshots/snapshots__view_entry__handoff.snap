@@ -1,0 +1,24 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"handoff\")"
+---
+{
+  "handoff": {
+    "order": 3,
+    "handoff": "01900000-0000-7000-8000-000000000013",
+    "message": "01900000-0000-7000-8000-000000000005",
+    "from": {
+      "agent": "claude-acp",
+      "model": "Opus",
+      "effort": "High"
+    },
+    "to": {
+      "agent": "codex-acp"
+    },
+    "answers_covered": 4,
+    "items_included": 9,
+    "items_left_out": 2,
+    "status": "delivered",
+    "ts": 1760000000000
+  }
+}

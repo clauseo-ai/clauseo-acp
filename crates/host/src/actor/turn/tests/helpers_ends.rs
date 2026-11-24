@@ -228,6 +228,7 @@ fn a_send_now_stops_the_running_helper() {
         }],
         delivery: DeliveryRequest::SendNow,
         config: None,
+        agent: None,
     };
     rig.dispatch(11, now).unwrap();
     rig.run_until("both turns' ends", |actor| {
@@ -297,6 +298,7 @@ fn a_helper_s_held_step_and_words_land_in_the_prompted_turn() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     // The prompt's turn waits for its before checkpoint, so no turn is live.
     let accepted = rig

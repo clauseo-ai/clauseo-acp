@@ -312,6 +312,7 @@ fn detach_reason() {
         (DetachReason::Closed, r#""closed""#),
         (DetachReason::Restarting, r#""restarting""#),
         (DetachReason::IdleStopped, r#""idle_stopped""#),
+        (DetachReason::Switched, r#""switched""#),
     ];
     for (value, json) in &cases {
         assert_eq!(serde_json::to_string(value).unwrap(), *json);
@@ -328,7 +329,14 @@ fn detach_reason() {
     let names = DetachReason::VARIANT_NAMES;
     assert_eq!(
         names,
-        ["Exited", "Closed", "Restarting", "IdleStopped", "Unknown"]
+        [
+            "Exited",
+            "Closed",
+            "Restarting",
+            "IdleStopped",
+            "Switched",
+            "Unknown"
+        ]
     );
 }
 
