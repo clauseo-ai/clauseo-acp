@@ -107,6 +107,10 @@ impl Envelope {
 /// a reader maps [`EnvelopeRead::Newer`] to `store.newer_version` and a decode error to
 /// `store.corrupt`, in JSON and in `MessagePack` alike, without reading error text.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "read once per stored row and unpacked at once; boxing would cost every read an allocation"
+)]
 pub enum EnvelopeRead {
     /// Written at [`SCHEMA_VERSION`], or older and upcast to it.
     Current(Envelope),

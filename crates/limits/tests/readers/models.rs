@@ -51,7 +51,7 @@ fn session_options_give_every_model_its_names_and_efforts() {
         .collect();
     assert_eq!(efforts, ["Low", "Medium", "High", "Xhigh", "Max"]);
     assert_eq!(models.model("fable").unwrap().efforts.len(), 3);
-    assert!(models.model("haiku").unwrap().efforts.is_empty());
+    assert_eq!(models.model("haiku").unwrap().efforts, []);
 }
 
 #[test]

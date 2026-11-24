@@ -54,5 +54,5 @@ pub(crate) fn live_models(kind: Kind) {
             model.default_effort
         );
     }
-    assert!(!models.models.is_empty());
+    assert_ne!(models.models, []);
 }

@@ -164,7 +164,7 @@ fn a_session_report_keeps_each_models_probed_efforts() {
     assert_eq!(models.current_model, "fable");
     assert_eq!(models.current_effort.as_deref(), Some("high"));
     assert_eq!(models.model("opus").unwrap().efforts.len(), 3);
-    assert!(models.model("haiku").unwrap().efforts.is_empty());
+    assert_eq!(models.model("haiku").unwrap().efforts, []);
 }
 
 #[test]

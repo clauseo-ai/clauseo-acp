@@ -8,24 +8,22 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
 
 use clauseo_limits::{ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AgentId, AgentKind, AgentModels, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand,
-    ModelEntry, NamedChoice, StreamId, ThreadId, TurnStarted,
+    HostEvent, ModelEntry, NamedChoice, Principal, StreamId, ThreadId, TurnStarted,
 };
 
 use crate::pickers::{CLAUDE, picks, turn};
 use crate::pickers_seed::agent_summary;
-use crate::support::{Dir, Running, Scenario, text};
+use crate::support::{Dir, Running, Scenario, text, wait};
 
 /// A reader whose reads find the agent signed in (Claude's usage method missing) and whose
 /// probe answers `models`, counting the probes.
 struct ProbeReader {
     models: Option<AgentModels>,
-    probes: Arc<AtomicUsize>,
+    probed: async_channel::Sender<()>,
 }
 
 impl ReadLimits for ProbeReader {
@@ -37,9 +35,9 @@ impl ReadLimits for ProbeReader {
         &self,
         _agent: AgentKind,
     ) -> Pin<Box<dyn Future<Output = Option<AgentModels>> + Send>> {
-        let (models, probes) = (self.models.clone(), Arc::clone(&self.probes));
+        let (models, probed) = (self.models.clone(), self.probed.clone());
         Box::pin(async move {
-            probes.fetch_add(1, Ordering::SeqCst);
+            let _gone = probed.try_send(());
             models
         })
     }
@@ -82,25 +80,40 @@ fn probed() -> AgentModels {
     }
 }
 
-fn start(dir: &Dir, run: u16, models: Option<AgentModels>) -> (Running, Arc<AtomicUsize>) {
-    let probes = Arc::new(AtomicUsize::new(0));
-    let reader = ProbeReader {
-        models,
-        probes: Arc::clone(&probes),
-    };
+/// Starts run `run` with a [`ProbeReader`]; the receiver gets one item per probe.
+fn start(
+    dir: &Dir,
+    run: u16,
+    models: Option<AgentModels>,
+) -> (Running, async_channel::Receiver<()>) {
+    let (probed, probes) = async_channel::unbounded();
+    let reader = ProbeReader { models, probed };
     let host = dir.start_with(run, |config| config.with_limits_reader(Arc::new(reader)));
     (host, probes)
 }
 
-/// Asks `ListAgents` until `done` holds of Claude's models, for at most ten seconds.
-fn models_when(host: &Running, done: impl Fn(Option<&AgentModels>) -> bool) -> Option<AgentModels> {
-    let until = Instant::now() + Duration::from_secs(10);
+/// Asks `ListAgents` until `done` holds of Claude's models, again after each settings change
+/// the host publishes (a kept probe publishes one), under the harness's watchdog.
+fn models_when(host: &Running, done: impl Fn(Option<&AgentModels>) -> bool) -> AgentModels {
+    use futures::StreamExt as _;
+    let subscribed = host.handle.subscribe_app(Principal::LocalDesktop);
+    let mut sub = wait("subscribe_app", subscribed).unwrap();
     loop {
         let models = agent_summary(host, CLAUDE).models;
-        if done(models.as_ref()) || Instant::now() > until {
-            return models;
+        if done(models.as_ref()) {
+            return models.expect("the models are kept");
         }
-        std::thread::sleep(Duration::from_millis(10));
+        wait("a settings change", async {
+            loop {
+                let item = sub.next().await.expect("the app stream ended");
+                if matches!(
+                    crate::settings::decode(&item),
+                    HostEvent::SettingsChanged(_)
+                ) {
+                    break;
+                }
+            }
+        });
     }
 }
 
@@ -110,8 +123,8 @@ fn a_fresh_folder_names_the_real_models_after_the_probe() {
         "pickers_probe_fresh",
         &[(CLAUDE, Scenario::Bundled("pickers-seed"))],
     );
-    let (host, probes) = start(&dir, 0, Some(probed()));
-    let models = models_when(&host, |models| models.is_some()).expect("the probe was kept");
+    let (host, probed_once) = start(&dir, 0, Some(probed()));
+    let models = models_when(&host, |models| models.is_some());
     assert_eq!(models, probed());
     let opus = models.model(&models.current_model).unwrap();
     assert_eq!(opus.name, "Opus 5.5", "the default by its real name");
@@ -125,7 +138,8 @@ fn a_fresh_folder_names_the_real_models_after_the_probe() {
     // The options a session would report, so a pick before the first message is checked.
     let options = agent_summary(&host, CLAUDE).config_options;
     assert_eq!(options.len(), 2);
-    assert_eq!(probes.load(Ordering::SeqCst), 1, "one probe per start");
+    wait("the probe", probed_once.recv()).unwrap();
+    assert!(probed_once.try_recv().is_err(), "one probe per start");
     host.shutdown();
 }
 
@@ -136,14 +150,11 @@ fn a_failed_probe_keeps_the_kept_models() {
         &[(CLAUDE, Scenario::Bundled("pickers-seed"))],
     );
     let (host, _) = start(&dir, 0, Some(probed()));
-    models_when(&host, |models| models.is_some()).expect("the probe was kept");
+    models_when(&host, |models| models.is_some());
     host.shutdown();
-    let (host, probes) = start(&dir, 1, None);
-    let until = Instant::now() + Duration::from_secs(10);
-    while probes.load(Ordering::SeqCst) == 0 && Instant::now() < until {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(probes.load(Ordering::SeqCst), 1, "the probe ran");
+    let (host, probed_once) = start(&dir, 1, None);
+    wait("the failed probe", probed_once.recv()).unwrap();
+    host.settle();
     assert_eq!(agent_summary(&host, CLAUDE).models, Some(probed()));
     host.shutdown();
 }
@@ -182,7 +193,7 @@ fn probed_picks_are_set_before_their_prompts_and_each_turn_names_its_model() {
         &[(CLAUDE, Scenario::Bundled("pickers-probed"))],
     );
     let (host, _) = start(&dir, 0, Some(probed()));
-    models_when(&host, |models| models.is_some()).expect("the probe was kept");
+    models_when(&host, |models| models.is_some());
     let folder = dir.folder("m", &[("brief.txt", "x\n")]);
     let matter = host.create_matter("m", &folder);
     // A pick of the probed Fable before the first message: set at the launch.

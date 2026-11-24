@@ -47,7 +47,7 @@ fn first_conversation(
     let dir = Dir::new(test, &[(agent, Scenario::Bundled(scenario))]);
     let host = dir.start(0);
     let fresh = agent_summary(&host, agent);
-    assert!(fresh.config_options.is_empty(), "no seed");
+    assert_eq!(fresh.config_options, [], "no seed");
     assert_eq!(fresh.models, None);
     let folder = dir.folder("m", &[("brief.txt", "x\n")]);
     let matter = host.create_matter("m", &folder);

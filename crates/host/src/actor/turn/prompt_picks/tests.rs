@@ -74,11 +74,11 @@ fn picks(pairs: &[(&str, &str)]) -> ConfigPicks {
     ConfigPicks::new(map).unwrap()
 }
 
-fn named(id: &str, name: &str) -> Option<NamedChoice> {
-    Some(NamedChoice {
+fn named(id: &str, name: &str) -> NamedChoice {
+    NamedChoice {
         id: id.into(),
         name: name.into(),
-    })
+    }
 }
 
 #[test]
@@ -86,7 +86,10 @@ fn without_picks_the_options_current_values() {
     let chosen = choose(&options("opus", "medium"), &ConfigPicks::default(), None);
     assert_eq!(
         chosen,
-        (named("opus", "Opus 5.5"), named("medium", "Medium"))
+        (
+            Some(named("opus", "Opus 5.5")),
+            Some(named("medium", "Medium"))
+        )
     );
 }
 
@@ -97,7 +100,10 @@ fn an_effort_pick_names_its_level() {
         &picks(&[("effort", "max")]),
         None,
     );
-    assert_eq!(chosen, (named("opus", "Opus 5.5"), named("max", "Max")));
+    assert_eq!(
+        chosen,
+        (Some(named("opus", "Opus 5.5")), Some(named("max", "Max")))
+    );
 }
 
 #[test]
@@ -111,7 +117,10 @@ fn a_model_pick_takes_the_new_models_levels() {
     );
     assert_eq!(
         chosen,
-        (named("fable", "Fable 5.2"), named("medium", "Medium"))
+        (
+            Some(named("fable", "Fable 5.2")),
+            Some(named("medium", "Medium"))
+        )
     );
     // Fable has no max: its default instead.
     let chosen = choose(
@@ -119,14 +128,14 @@ fn a_model_pick_takes_the_new_models_levels() {
         &picks(&[("model", "fable")]),
         Some(&models),
     );
-    assert_eq!(chosen.1, named("medium", "Medium"));
+    assert_eq!(chosen.1, Some(named("medium", "Medium")));
     // Haiku takes no effort.
     let chosen = choose(
         &options("opus", "medium"),
         &picks(&[("model", "haiku")]),
         Some(&models),
     );
-    assert_eq!(chosen, (named("haiku", "Haiku 5.5"), None));
+    assert_eq!(chosen, (Some(named("haiku", "Haiku 5.5")), None));
 }
 
 #[test]
@@ -136,6 +145,6 @@ fn a_pick_the_options_do_not_offer_is_not_named() {
         &picks(&[("model", "gone")]),
         None,
     );
-    assert_eq!(chosen.0, named("opus", "Opus 5.5"));
+    assert_eq!(chosen.0, Some(named("opus", "Opus 5.5")));
     assert_eq!(choose(&[], &ConfigPicks::default(), None), (None, None));
 }

@@ -37,7 +37,7 @@ pub(crate) fn after_read(actor: &mut Actor, agent: AgentKind, outcome: &ReadOutc
         return;
     }
     tracing::info!(?agent, "model probe started");
-    let probe = actor.limits_reader().probe_models(agent);
+    let probe = super::super::limits::reader(actor).probe_models(agent);
     actor.spawn_post(async move {
         let models = probe.await;
         Input::Limits(LimitsInput::Probed { agent, models })

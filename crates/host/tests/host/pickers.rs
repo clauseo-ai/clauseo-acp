@@ -148,7 +148,7 @@ fn a_first_conversation_keeps_the_options_and_a_pick_becomes_the_matters() {
     );
     let host = dir.start(0);
     // Before any session or probe, no options: there is no seed (`pickers_seed.rs`).
-    assert!(agent_options(&host).is_empty());
+    assert_eq!(agent_options(&host), []);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = turn(&host, thread, "Summarise clause 4.");
     let kept = agent_options(&host);

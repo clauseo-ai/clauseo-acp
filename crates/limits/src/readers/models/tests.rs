@@ -45,7 +45,7 @@ fn claude_options_give_every_model_its_efforts_and_the_defaults() {
     let fable = models.model("fable").unwrap();
     assert_eq!(fable.efforts.len(), 3);
     assert_eq!(fable.description, None, "an empty description is none");
-    assert!(models.model("haiku").unwrap().efforts.is_empty());
+    assert_eq!(models.model("haiku").unwrap().efforts, []);
 }
 
 #[test]

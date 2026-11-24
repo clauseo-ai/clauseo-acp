@@ -165,6 +165,9 @@ crates/protocol/src/host_error.rs HostError::invalid_command clippy::needless_pa
 # `ProtectionView` carries four independent flags on a query view (#766 adds
 # `data_fence_names_only`); an enum would merge unrelated settings. Approved by the protocol owner.
 crates/protocol/src/protection.rs ProtectionView clippy::struct_excessive_bools
+crates/protocol/src/envelope.rs EnvelopeRead clippy::large_enum_variant
+crates/protocol/src/query.rs ThreadSummary clippy::struct_excessive_bools
+crates/protocol/src/view/entry.rs HeaderEntry clippy::struct_excessive_bools
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/raw.rs JsonValue dead_code

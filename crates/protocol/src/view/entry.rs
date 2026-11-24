@@ -33,6 +33,10 @@ pub struct AgentRetry {
 /// A thread's header. Entry id `header:<thread>`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent flags of a thread's header, each its own wire field"
+)]
 pub struct HeaderEntry {
     /// The `seq` of `ThreadCreated`.
     pub order: Seq,
