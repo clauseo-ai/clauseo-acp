@@ -463,6 +463,20 @@ test("signed out with figures: the name alone, no meter, no line and no card", a
   expect(plan()?.classList.contains("room-plan-press")).toBe(false);
 });
 
+test("a ChatGPT plan the host can't name (sci, sci_plus): the bar under the neutral name, never the id", async () => {
+  // the host names only the plans it knows (limits' codex_plan): for "sci" or "sci_plus" the sign-in and the view
+  // come with no plan name at all
+  await room("codex-acp", "en", NO_PLAN_SIGN_IN);
+  const { plan: _, ...unnamed } = entry(30);
+  await view({ codex: unnamed });
+  expect(shown()).toContain("ChatGPT plan");
+  expect(shown()).toContain("Plenty left until the 6:10 pm reset");
+  expect(plan()?.querySelector(".rounded-meter")).not.toBeNull();
+  const card = await openCard();
+  expect(card?.querySelector(".plan-card-name")?.textContent).toBe("ChatGPT plan");
+  expect(card?.textContent).not.toMatch(/sci/i);
+});
+
 test("codex-acp signed out: the name alone", async () => {
   await room("codex-acp", "en", SIGNED_OUT);
   await view({ codex: entry(30, { plan: "ChatGPT Plus" }) });
