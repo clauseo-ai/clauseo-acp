@@ -22,9 +22,13 @@ pub(crate) const FEATURES: [&str; 2] = [
     // query to clients2.google.com. AimEnabled: the AI-mode eligibility fetch, and
     // PreconnectToSearch: the search-engine preconnect, both to www.google.com. MediaRouter:
     // Cast discovery on the local network. AutofillServerCommunication: autofill's form
-    // predictions (content-autofill.googleapis.com).
+    // predictions (content-autofill.googleapis.com). MacAppCodeSignClone: on macOS, Chrome clones
+    // its whole app at every start and relinks the clone's executable
+    // (`chrome/browser/mac/code_sign_clone_manager.mm`); macOS counts that as modifying an app and
+    // blames the app that started Chrome, so the lawyer saw "Clauseo was prevented from modifying
+    // apps on your Mac". Chrome for Testing never clones; the switch is Google's own workaround.
     "--disable-features=Translate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,\
-     PreconnectToSearch,MediaRouter,AutofillServerCommunication",
+     PreconnectToSearch,MediaRouter,AutofillServerCommunication,MacAppCodeSignClone",
     // agent-browser's entries less NetworkServiceInProcess, the network service in the browser's
     // process and out of its sandbox (`chrome/sandbox.rs`; current Chrome reads it only as
     // NetworkServiceInProcess2, `content_features.cc`, so it did nothing there), plus

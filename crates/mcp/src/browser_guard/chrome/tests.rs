@@ -120,11 +120,21 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     for (switch, wanted) in [
         (
             "--disable-features=",
-            ["Translate", "NetworkTimeServiceQuerying", "AimEnabled"],
+            [
+                "Translate",
+                "NetworkTimeServiceQuerying",
+                "AimEnabled",
+                "MacAppCodeSignClone",
+            ],
         ),
         (
             "--enable-features=",
-            ["NetworkService", "WebMCPTesting", "DevToolsWebMCPSupport"],
+            [
+                "NetworkService",
+                "WebMCPTesting",
+                "DevToolsWebMCPSupport",
+                "SkipListAccountsWithoutGaiaCookies",
+            ],
         ),
     ] {
         let lists: Vec<&String> = args.iter().filter(|a| a.starts_with(switch)).collect();
