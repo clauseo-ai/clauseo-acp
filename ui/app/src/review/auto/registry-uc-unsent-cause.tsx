@@ -1,7 +1,8 @@
 // UC's entries for why a message never started, as the host says it (#1314: TurnEnded.cause, the entry's `unsent`,
-// stand-ins until that binding): the working line for a stop, a newer message sent first, and the answer it was for
-// stopping, each with the words back in the box; and the queue's line for a copy the host marks as waiting for an
-// update or a sign-in (copy_of). The real room over the parallel answers' host (registry-uc-parallel.tsx).
+// stand-ins until that binding; the status stays removed): the working line for a newer message sent first and for
+// the answer it was for having stopped, each with the words back in the box (a stop reads as UC-1147, a removal as
+// UC-1280); and the queue's line for a copy the host queued for an update or a sign-in (copy_of), whose original's
+// words stay out of the box. The real room over the parallel answers' host (parallel-hosts.ts).
 import { userMessage, uuid } from "../../testing/stream-script.ts";
 import type { ViewEntry } from "../../transport/protocol.ts";
 import type { Entry } from "../entry.ts";
@@ -9,8 +10,8 @@ import { later, stoppedHost } from "../parallel-hosts.ts";
 import { RoomOver } from "../states.tsx";
 import { matterWords } from "../words.ts";
 
-const ended = (status: string, cause: string) => () => (
-  <RoomOver host={() => stoppedHost(later(status, cause))} />
+const ended = (cause: string) => () => (
+  <RoomOver host={() => stoppedHost(later("removed", cause))} />
 );
 
 /** The copy the host queued for a message held for `cause`, marked on its own entry (#1314's copy_of, a stand-in
@@ -32,33 +33,29 @@ const held = (cause: "update" | "sign_in") => () => (
 
 const UC_UNSENT_CAUSE: Entry[] = [
   {
-    id: "UC-1296",
-    words: matterWords("Not sent, because you stopped it."),
-    screen: "matters/other",
-    render: ended("removed", "stopped"),
-  },
-  {
     id: "UC-1297",
-    words: matterWords("Not sent: you sent a newer message first."),
+    words: matterWords("Not sent: you sent a newer message first. It's back in the box below."),
     screen: "matters/other",
-    render: ended("not_sent", "sent_now"),
+    render: ended("sent_now"),
   },
   {
     id: "UC-1298",
-    words: matterWords("Not sent, because the answer it was for stopped."),
+    words: matterWords("Not sent: the answer it was for had stopped. It's back in the box below."),
     screen: "matters/other",
-    render: ended("not_sent", "not_sent"),
+    render: ended("not_sent"),
   },
   {
     id: "UC-1299",
-    words: matterWords("This waits because Clauseo was updating. It goes once Clauseo is ready."),
+    words: matterWords(
+      "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
+    ),
     screen: "matters/queue",
     render: held("update"),
   },
   {
     id: "UC-1247",
     words: matterWords(
-      "This waits because {agent} needed you to sign in. It goes once you're signed in.",
+      "You were signed out of {agent}. This message waits in the queue and goes once you're signed in.",
     ),
     screen: "matters/queue",
     render: held("sign_in"),

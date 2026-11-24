@@ -267,10 +267,12 @@ export function QueueStrip({
     reason === "update"
       ? w.m("Clauseo is installing an update. Your queued questions go once it's done.")
       : copyOf?.cause === "update"
-        ? w.m("This waits because Clauseo was updating. It goes once Clauseo is ready.")
+        ? w.m(
+            "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
+          )
         : copyOf?.cause === "sign_in"
           ? w.m(
-              "This waits because {agent} needed you to sign in. It goes once you're signed in.",
+              "You were signed out of {agent}. This message waits in the queue and goes once you're signed in.",
               {
                 agent: copyOf.agent,
               },

@@ -1,47 +1,38 @@
 {
-  "UC-1296": {
-    "en": "Not sent, because you stopped it.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "The composer's working line when the host says a message never started because it was stopped (#1314: TurnEnded.cause stopped). The words are back in the box. Replaces UC-1147's wording where the host gives the cause; UC-1147 stays for this window's own Stop with no cause."
-  },
   "UC-1297": {
-    "en": "Not sent: you sent a newer message first.",
+    "en": "Not sent: you sent a newer message first. It's back in the box below.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The composer's working line when a message never started because a newer one was sent now first (#1314: cause sent_now, status not_sent). The words are back in the box. New."
+    "note": "The composer's working line when a message never started because the lawyer sent a newer one now first (#1314: unsent sent_now). The words are back in the box."
   },
   "UC-1298": {
-    "en": "Not sent, because the answer it was for stopped.",
+    "en": "Not sent: the answer it was for had stopped. It's back in the box below.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The composer's working line when a message never started because the answer it was sent into stopped (#1314: cause not_sent, status not_sent). The words are back in the box. New."
+    "note": "The composer's working line when a held steer never started because the answer it was for had stopped (#1314: unsent not_sent). The words are back in the box."
   },
   "UC-1299": {
-    "en": "This waits because Clauseo was updating. It goes once Clauseo is ready.",
+    "en": "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The queue's line under its head while a queued message is the host's copy of one held for an update (#1314: copy_of.cause update on the copy; the original is hidden). The installing line (queue_held_reason update) takes its place while the update installs. New."
+    "note": "The queue's line under its head while a queued message is the host's copy of one held for an update (#1314: copy_of.cause update on the copy, the original's entry may be missing). The original's words don't come back to the box: the copy is the message. The installing line (queue_held_reason update) takes its place while the update installs."
   },
   "UC-1247": {
-    "en": "This waits because {agent} needed you to sign in. It goes once you're signed in.",
+    "en": "You were signed out of {agent}. This message waits in the queue and goes once you're signed in.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The queue's line while a queued message is the host's copy of one held for the agent's sign-in (#1314: copy_of.cause sign_in); {agent} is Claude or ChatGPT. Same shape as UC-1299. New."
+    "note": "The queue's line while a queued message is the host's copy of one held for the agent's sign-in (#1314: copy_of.cause sign_in); {agent} is Claude or ChatGPT. The original's words don't come back to the box. Same shape as UC-1299."
   }
 }
