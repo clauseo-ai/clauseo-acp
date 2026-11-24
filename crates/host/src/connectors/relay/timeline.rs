@@ -1,7 +1,9 @@
 //! The relay's lifecycle lines, one set per session (host.log keeps them): the relay opened, the
 //! first `initialize` answered, the first `tools/list` answered and the first `tools/call` with
-//! its outcome class, each with the milliseconds since the relay opened on the host clock. Fixed
-//! fields only: never the token, a query, arguments or a reply's text.
+//! its outcome class, each with the milliseconds since the relay opened on the host clock; and,
+//! as they happen, the server refusing the upstream `initialize` and the server's tool list
+//! differing from the copy served. Fixed fields only: never the token, a query, arguments or a
+//! reply's text.
 
 use std::time::Duration;
 
@@ -134,5 +136,28 @@ pub(crate) fn first_call(session: &Session, class: CallClass) {
         ms = since_open_ms(session),
         outcome = class.as_str(),
         "case-law relay: first tools/call"
+    );
+}
+
+/// Logs that the server answered the upstream `initialize` with an error.
+pub(crate) fn server_refused(session: &Session) {
+    tracing::info!(
+        target: LIFECYCLE,
+        session = %session.key.id(),
+        ms = since_open_ms(session),
+        class = "jsonrpc_error",
+        "case-law relay: the server refused initialize"
+    );
+}
+
+/// Logs that the server's tool list differed from the copy this connection had; `told` says
+/// whether the agent had listed it and so was sent `notifications/tools/list_changed`.
+pub(crate) fn list_differed(session: &Session, told: bool) {
+    tracing::info!(
+        target: LIFECYCLE,
+        session = %session.key.id(),
+        ms = since_open_ms(session),
+        told,
+        "case-law relay: the server's tool list differed from the copy served"
     );
 }

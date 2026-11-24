@@ -532,6 +532,14 @@ impl FakeHandle {
         self.lock().api.fresh_recharge = fresh;
     }
 
+    /// The MCP `initialize` and `tools/list` results from now on (the shipped copies at start):
+    /// a server whose text changed since the build.
+    pub fn set_mcp_lists(&self, initialize: Value, tools_list: Value) {
+        let mut state = self.lock();
+        state.api.initialize = initialize;
+        state.api.tools_list = tools_list;
+    }
+
     /// MCP answers come as `text/event-stream` (one `message` event) instead of JSON.
     pub fn respond_as_sse(&self, sse: bool) {
         self.lock().api.sse = sse;

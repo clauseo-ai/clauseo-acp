@@ -45,7 +45,7 @@ fn the_answer_passes_as_sent_on_one_line() {
         &[("Content-Type", "text/event-stream")],
         stream.as_bytes(),
     );
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(
         agent.recv_line().unwrap(),
         br#"{"jsonrpc":"2.0", "id":2,"result":{}}"#.to_vec()
@@ -57,7 +57,7 @@ fn a_member_present_as_null_counts() {
     let rig = rig();
     let mut agent = rig.agent();
     answer_next(&rig, r#"{"jsonrpc":"2.0","id":1,"result":null}"#);
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     assert_eq!(
         agent.recv(),
         json!({"jsonrpc": "2.0", "id": 1, "result": null})
@@ -67,7 +67,7 @@ fn a_member_present_as_null_counts() {
         &rig,
         r#"{"jsonrpc":"2.0","id":2,"method":null,"result":{}}"#,
     );
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(agent.recv()["error"]["message"], texts::NO_ANSWER);
 }
 
@@ -76,11 +76,11 @@ fn a_duplicate_top_level_key_or_an_oversized_id_answers_nothing() {
     let rig = rig();
     let mut agent = rig.agent();
     answer_next(&rig, r#"{"jsonrpc":"2.0","id":1,"id":1,"result":{}}"#);
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     assert_eq!(agent.recv()["error"]["message"], texts::NO_ANSWER);
     // A duplicate key deeper down is the connector's to send.
     answer_next(&rig, r#"{"jsonrpc":"2.0","id":2,"result":{"a":1,"a":2}}"#);
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(
         agent.recv_line().unwrap(),
         br#"{"jsonrpc":"2.0","id":2,"result":{"a":1,"a":2}}"#.to_vec()
@@ -91,7 +91,7 @@ fn a_duplicate_top_level_key_or_an_oversized_id_answers_nothing() {
         &rig,
         &json!({"jsonrpc": "2.0", "id": long, "result": {}}).to_string(),
     );
-    agent.send_value(&json!({"jsonrpc": "2.0", "id": long, "method": "ping"}));
+    agent.send_value(&json!({"jsonrpc": "2.0", "id": long, "method": "resources/list"}));
     assert_eq!(agent.recv()["error"]["message"], texts::NO_ANSWER);
 }
 

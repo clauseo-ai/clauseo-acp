@@ -9,15 +9,20 @@ use crate::error::Error;
 use crate::known::KnownConnector;
 use crate::recharge::{PaymentRef, is_insufficient_credits, payment_ref};
 
-/// The case-law server's `initialize` result as Clauseo ships it: its capabilities, server name
-/// and instructions. The relay answers the agent's `initialize` from it at once, with the
-/// protocol version it negotiates in place of this one, and the fake connector serves it too.
-pub const CASE_LAW_INITIALIZE: &str = include_str!("../fixtures/mcp/initialize.json");
-/// The case-law server's `tools/list` result as Clauseo ships it, one page. The relay answers
-/// the agent's `tools/list` from it at once; the fake connector serves the same file. The host's
-/// tool rules already name these tools (`UNASKED_TOOLS`, `Spend::of`), so a tool the server
-/// adds reaches lawyers with a release, as those rules do.
-pub const CASE_LAW_TOOLS_LIST: &str = include_str!("../fixtures/mcp/tools-list.json");
+/// The case-law server's `initialize` result for protocol version 2025-06-18 as Clauseo ships
+/// it (`assets/case_law/initialize.json`): the server's own bytes (connectors main e9448d7),
+/// compact, keys sorted, with the production base URL `https://data.clauseo.chat` in its
+/// instructions, which the host replaces with the origin's. The relay answers from the last copy
+/// the server gave, cached per origin and version; this is the fallback before there is one, and
+/// the other versions' answers are derived from it. The fake connector serves it too.
+pub const CASE_LAW_INITIALIZE: &str = include_str!("../assets/case_law/initialize.json");
+/// The server's `tools/list` result for 2025-06-18 and 2025-11-25
+/// (`assets/case_law/tools_list.json`): the fallback, as [`CASE_LAW_INITIALIZE`] is.
+pub const CASE_LAW_TOOLS_LIST: &str = include_str!("../assets/case_law/tools_list.json");
+/// The server's `tools/list` result for 2025-03-26 (and with no version header): each tool's
+/// title in its annotations, no output schema (`assets/case_law/tools_list_2025-03-26.json`).
+pub const CASE_LAW_TOOLS_LIST_2025_03_26: &str =
+    include_str!("../assets/case_law/tools_list_2025-03-26.json");
 
 /// The MCP headers the relay forwards; each is sent only when given.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

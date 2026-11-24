@@ -4,7 +4,7 @@
 //!
 //! In order: read the connector's name from the command line, `CLAUSEO_RELAY`
 //! (`127.0.0.1:<port>`) and the token from the file `CLAUSEO_RELAY_TOKEN_FILE` names (64
-//! lowercase hex characters), exit 2 on anything else; connect (five tries over about 2 s, for
+//! lowercase hex characters), exit 2 on anything else; connect (tried again for about 2 s, for
 //! a relay still starting) and send the handshake line (`handshake.rs`); then pump
 //! lines both ways (`pump.rs`). When the relay refuses or is not there, each request the agent
 //! sends gets the "not reachable" error with its `id` (`answer.rs`), and the mode keeps reading

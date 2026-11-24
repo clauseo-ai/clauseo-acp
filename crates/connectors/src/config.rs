@@ -123,8 +123,9 @@ impl Origin {
     }
 
     /// The origin's scheme, host and port, without a trailing `/`: `https://data.clauseo.chat`,
-    /// `https://data-staging.clauseo.chat` or `http://127.0.0.1:<port>`.
-    pub(crate) fn prefix(&self) -> String {
+    /// `https://data-staging.clauseo.chat` or `http://127.0.0.1:<port>`. The host keys its copy of
+    /// the server's MCP answers by it.
+    pub fn prefix(&self) -> String {
         match self {
             Origin::Production => PRODUCTION_ORIGIN.to_owned(),
             #[cfg(feature = "staging")]

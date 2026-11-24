@@ -6,6 +6,7 @@
 use std::io::{self, BufReader};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -18,15 +19,21 @@ pub(crate) const CONNECT_FAILED: &str = "connect_failed";
 /// How long the connect may take, and then how long the hello and the answer may take in all.
 /// The host answers at once.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-/// The pauses between connect tries: five tries, about 1.5 s of pauses and 2 s in all on a
-/// refused port, for a relay still starting as the agent starts this program. A relay that
-/// answers, even with a refusal, is never tried again.
+/// How long the connect is tried again, for a relay still starting as the agent starts this
+/// program: bounded by time, not by count, as a refused loopback connect can itself take about
+/// 2 s on Windows. A try under way when it ends still finishes. A relay that answers, even with
+/// a refusal, is never tried again.
+const CONNECT_WINDOW: Duration = Duration::from_secs(2);
+/// The pauses between the first connect tries; then [`LONGEST_PAUSE`] until
+/// [`CONNECT_WINDOW`] ends.
 const CONNECT_PAUSES: [Duration; 4] = [
     Duration::from_millis(100),
     Duration::from_millis(200),
     Duration::from_millis(400),
     Duration::from_millis(800),
 ];
+/// The pause between later connect tries.
+const LONGEST_PAUSE: Duration = Duration::from_millis(800);
 /// The longest handshake answer. The host's answers are a few dozen bytes.
 const ANSWER_MAX_BYTES: usize = 1024;
 
@@ -60,26 +67,27 @@ pub(crate) fn connect(addr: SocketAddr, token: &str, connector: &str) -> Result<
     Ok(Link { reader, socket })
 }
 
-/// Connects to `addr`, trying again after each of [`CONNECT_PAUSES`] when the connect fails.
+/// Connects to `addr`, trying again after [`CONNECT_PAUSES`] while [`CONNECT_WINDOW`] lasts.
+/// The stream has `TCP_NODELAY`: each line goes out at once, not after the peer's delayed ACK.
 fn connect_with_retries(addr: SocketAddr) -> io::Result<TcpStream> {
+    // The window is a stop that fires by itself; each pause is a wait on it.
+    let (_timer, window) = socket::stop_after(CONNECT_WINDOW);
     let mut pauses = CONNECT_PAUSES.iter();
     loop {
         match TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT) {
-            Ok(stream) => return Ok(stream),
-            Err(error) => match pauses.next() {
-                Some(pause) => wait(*pause),
-                None => return Err(error),
-            },
+            Ok(stream) => {
+                if stream.set_nodelay(true).is_err() {
+                    // Lines still go; only later.
+                }
+                return Ok(stream);
+            }
+            Err(error) => {
+                let pause = pauses.next().copied().unwrap_or(LONGEST_PAUSE);
+                if let Err(RecvTimeoutError::Disconnected) = window.recv_timeout(pause) {
+                    return Err(error);
+                }
+            }
         }
-    }
-}
-
-/// Waits for `after` (`clippy.toml` bans `thread::sleep`): the sender is held, so nothing
-/// wakes the wait early.
-fn wait(after: Duration) {
-    let (_hold, wake) = std::sync::mpsc::channel::<()>();
-    if wake.recv_timeout(after).is_err() {
-        // The time is up, as the sender is still held.
     }
 }
 

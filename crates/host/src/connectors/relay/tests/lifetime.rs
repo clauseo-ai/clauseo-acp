@@ -23,7 +23,7 @@ fn after_end_the_token_no_longer_works_though_its_file_would_still_exist() {
     assert!(late.closed());
     // The connection that was open is closed, and nothing it sends is forwarded.
     assert!(open.closed());
-    open.send_value(&request(1, "ping"));
+    open.send_value(&request(1, "resources/list"));
     assert_eq!(rig.mcp_requests().len(), 0);
 }
 

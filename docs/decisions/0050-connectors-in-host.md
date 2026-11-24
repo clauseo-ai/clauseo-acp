@@ -141,17 +141,43 @@ check (`MAX_REPLY_BYTES`) stands in front, since S28's limit is 8 MB.
 
 Codex lists a turn's tools only from MCP servers already ready and leaves a pending optional one
 out; on a slow link the case-law handshake took 14 to 34 s, so new conversations had no case law.
-The relay now answers `initialize` and `tools/list` itself, at once, from the copies the
-connectors crate ships (`CASE_LAW_INITIALIZE`, `CASE_LAW_TOOLS_LIST`, the files the fake serves),
-with no network (`connectors/relay/forward/local.rs`). It negotiates the protocol version as a
-server does: the agent's when it is one of `SUPPORTED_VERSIONS`, else the newest. A warm-up thread
-then sends the server the agent's `initialize` (capabilities blanked, that version) and
-`notifications/initialized` (`forward/warm.rs`); every forwarded message of the connection waits
-for it, so the first `tools/call` carries the server's `MCP-Protocol-Version` and
-`Mcp-Session-Id`, and the credential as before. A failed warm-up is tried again by the next
-forwarded message; a `tools/call` that cannot get it is refunded and answered as unreachable.
-The relay writes lifecycle lines to host.log: opened, first `initialize`, first `tools/list` and
-first `tools/call` with its outcome class, each with the ms since it opened.
+The relay now answers `initialize`, `tools/list` and `ping` itself, at once, with no network
+(`connectors/relay/forward/local.rs`).
+
+- **The copy it answers from** (`relay/copies.rs`) is the last `initialize` and `tools/list`
+  results the server gave, cached per origin and protocol version in
+  `<data>/connectors/cache/<hash>-<version>.json` (`{initialize, tools_list, fetched_at}`, the
+  two results only, at most 256 KiB, written atomically): the server's answers vary with the
+  version (shapes) and the origin (the instructions' base URL), never with the caller. With no
+  cache it is the shipped copy, `crates/connectors/assets/case_law/`: the server's own 2025-06-18
+  `initialize`, 2025-06-18 `tools/list` and 2025-03-26 `tools/list` (connectors main e9448d7),
+  pinned by hash; 2025-11-25's and 2025-03-26's `initialize` are derived as the server derives
+  them, and `https://data.clauseo.chat` in the instructions becomes the origin's. A cache file
+  that does not read, is over the bound or holds an empty or nameless tool list is ignored and
+  replaced; such a list from the server never replaces a good copy.
+- **Version and capabilities.** As the server: 2025-11-25, 2025-06-18 and 2025-03-26 as asked,
+  anything else 2025-11-25 (`INITIALIZE_VERSIONS`). The local `initialize` declares the server's
+  capabilities with `tools.listChanged: true`; `resources/*` is forwarded as before. `tools/list`
+  and `ping` are local only after a local `initialize`; an agent on 2026-07-28 (no
+  `initialize`) is forwarded as before. The warm-up's `tools/list` carries
+  `MCP-Protocol-Version`, and nothing is cached when the server picks another version.
+- **The warm-up** (`forward/warm.rs`) sends the server the agent's `initialize` (capabilities
+  blanked, that version) and `notifications/initialized` on a thread of its own, then reads the
+  server's whole `tools/list` (every page) and stores both as the copy. When that list differs
+  from the one the connection was given, an agent that listed tools gets
+  `notifications/tools/list_changed` and the next `tools/list` gets the server's; new
+  instructions reach the next session. Every forwarded message waits for the `initialize`, so the
+  first `tools/call` carries the server's `MCP-Protocol-Version` and `Mcp-Session-Id`. Waiters
+  share one attempt and its outcome (no retry storm); each waits at most 20 s; the next message
+  after a failure starts a new attempt. A credential that ends during it sends
+  `CredentialEnded` at once; a JSON-RPC error answer is logged and each call gets
+  `SESSION_REFUSED`. After the wait the session is checked again: a call whose session ended is
+  refunded and not sent.
+- **Sockets.** Both ends set `TCP_NODELAY`. The connector tries its connect for about 2 s (by
+  time: a refused loopback connect can take about 2 s on Windows).
+- **host.log** (lifecycle target): relay opened, first `initialize`, first `tools/list` and first
+  `tools/call` with its outcome class, each with ms since it opened; the server refusing
+  `initialize`; the server's tool list differing from the copy served.
 
 ### The state and the commands
 

@@ -13,12 +13,17 @@ use serde_json::Value;
 use super::super::limits::MAX_CONNECTIONS_PER_TOKEN;
 use super::super::limits::{MAX_HELLO_BYTES, MAX_IN_FLIGHT, MAX_LINE_BYTES};
 use super::super::texts;
-use super::forward::Warm;
+use super::forward::{Listed, Warm};
 use super::handshake::{self, Line, Refusal, Watchdog};
 use super::{Session, hang_up, lock};
 
 /// Starts connection `id`'s thread. The handshake's deadline is armed before this returns.
 pub(super) fn start(session: &Arc<Session>, id: u64, stream: TcpStream) -> io::Result<()> {
+    // Each line goes out at once: without it the newline after a line waits on the agent's
+    // delayed ACK, about 40 ms a line on Linux.
+    if stream.set_nodelay(true).is_err() {
+        // Lines still go; only later.
+    }
     let watchdog = Watchdog::arm(session, stream.try_clone()?)?;
     let session = Arc::clone(session);
     std::thread::Builder::new()
@@ -82,6 +87,7 @@ fn run(session: &Arc<Session>, id: u64, stream: TcpStream, watchdog: Watchdog) {
         writer,
         upstream: Mutex::new(Upstream::default()),
         warm: Warm::default(),
+        listed: Listed::new(session.hub.copies.newest().tools_list),
         flight,
     });
     pump(&conn, &mut reader);
@@ -103,6 +109,8 @@ pub(crate) struct Conn {
     pub(crate) upstream: Mutex<Upstream>,
     /// The upstream `initialize` still owed for the one answered locally (`forward/warm.rs`).
     pub(crate) warm: Warm,
+    /// The tool list this connection answers `tools/list` with (`forward/local.rs`).
+    pub(crate) listed: Listed,
     pub(crate) flight: Arc<Flight>,
 }
 
@@ -110,11 +118,13 @@ impl Conn {
     /// A connection past its handshake on `stream`, for a test that drives `forward` itself.
     #[cfg(test)]
     pub(crate) fn for_test(session: Arc<Session>, stream: TcpStream) -> Conn {
+        let listed = Listed::new(session.hub.copies.newest().tools_list);
         Conn {
             session,
             writer: Writer(Mutex::new(stream)),
             upstream: Mutex::new(Upstream::default()),
             warm: Warm::default(),
+            listed,
             flight: Arc::new(Flight::default()),
         }
     }
@@ -126,13 +136,9 @@ pub(crate) struct Writer(Mutex<TcpStream>);
 impl Writer {
     /// Writes `line` and a newline under the lock.
     pub(crate) fn line(&self, line: &[u8]) -> io::Result<()> {
-        // One write for the line and its newline: two small writes would wait on the peer's
-        // delayed ACK (Nagle), about 40 ms a line on Linux.
-        let mut whole = Vec::with_capacity(line.len().saturating_add(1));
-        whole.extend_from_slice(line);
-        whole.push(b'\n');
         let mut stream = lock(&self.0);
-        stream.write_all(&whole)?;
+        stream.write_all(line)?;
+        stream.write_all(b"\n")?;
         stream.flush()
     }
 
