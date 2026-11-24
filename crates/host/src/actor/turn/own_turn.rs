@@ -367,8 +367,19 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                     usage_ended(actor, thread, turn);
                 }
             }
-            event @ (AcpEvent::HelperUpdate { .. }
-            | AcpEvent::HelperInBackground { .. }
+            // A helper's update held with no turn live (its words; its steps wait as plain
+            // updates): `turn`'s own, as the plain updates above are. Handed on as `Idle` it
+            // would find no agent-started turn and wait again.
+            AcpEvent::HelperUpdate {
+                session,
+                helper,
+                update,
+                ..
+            } => {
+                let origin = Origin::Turn(turn);
+                super::helpers::on_update(actor, thread, &session, origin, &helper, update);
+            }
+            event @ (AcpEvent::HelperInBackground { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
