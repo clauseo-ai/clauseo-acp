@@ -43,6 +43,10 @@ export const HI = {
   "Waiting for the background work.": null,
   // ChatGPT's wait for its helpers (UC-1281; provisional; hi: later)
   "Waiting for helpers.": null,
+  // the working line while the lead waits on its helpers (step-names.ts doingPick; UC-1125,
+  // UC-1126). Provisional; hi: later
+  "Waiting for a helper to finish.": null,
+  "Waiting for {n} helpers to finish.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

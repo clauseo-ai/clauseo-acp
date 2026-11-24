@@ -187,6 +187,21 @@ export const HI = {
   "worked with a helper": null,
   "1 held back.": null,
   "{n} held back.": null,
+  // a helper's card in the answer (helper-card.tsx, UC-1115 to UC-1124, UC-1127 to UC-1129).
+  // Provisional; hi: later
+  "Working for {time}": null,
+  "Took {time}": null,
+  "Failed after {time}": null,
+  "Stopped after {time}": null,
+  "less than a minute": null,
+  "{n} min": null,
+  "Finished.": null,
+  "It ended without reporting back to {agent}.": null,
+  "Before that: {what}": null,
+  "By then: {what}": null,
+  "Paper reader": null,
+  Researcher: null,
+  "Helper {n}": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

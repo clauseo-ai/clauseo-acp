@@ -1,0 +1,137 @@
+{
+  "UC-1115": {
+    "en": "Working for {time}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The helper card's state while it works, on the right of its first line: {time} is UC-1119 or UC-1120, read again each minute. New (the helper used to fold into the step group as UC-906)."
+  },
+  "UC-1116": {
+    "en": "Took {time}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The helper card's state once it is done: how long it took, in whole minutes. New."
+  },
+  "UC-1117": {
+    "en": "Failed after {time}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The helper card's state once it failed, in the primary ink with the break, never red. New."
+  },
+  "UC-1118": {
+    "en": "Stopped after {time}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The helper card's state once it was stopped (the lawyer's Stop, or the agent quit under it). New."
+  },
+  "UC-1119": {
+    "en": "less than a minute",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "{time} in UC-1115 to UC-1118 under a minute. No seconds tick. New."
+  },
+  "UC-1120": {
+    "en": "{n} min",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "{time} in UC-1115 to UC-1118 from a minute on, whole minutes. New."
+  },
+  "UC-1121": {
+    "en": "Finished.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A done helper's card when it reported nothing back. New."
+  },
+  "UC-1122": {
+    "en": "It ended without reporting back to {agent}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A failed helper's card when it gave no reason (the host closes a helper still open at the answer's end as failed). {agent}: Claude or ChatGPT. New."
+  },
+  "UC-1123": {
+    "en": "Before that: {what}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A failed helper's card, under why it failed: what it did, in the step group's words (\"2 papers read.\"). New."
+  },
+  "UC-1124": {
+    "en": "By then: {what}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A stopped helper's card: what it did before it was stopped, in the step group's words. New."
+  },
+  "UC-1125": {
+    "en": "Waiting for a helper to finish.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The working line while the lead waits on one helper, in place of \"Thinking it through.\" or the launching step's words. New."
+  },
+  "UC-1126": {
+    "en": "Waiting for {n} helpers to finish.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The working line while the lead waits on two or more helpers. New."
+  },
+  "UC-1127": {
+    "en": "Paper reader",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The name on the card of Claude's paper-reader helper (Clauseo's own type). New."
+  },
+  "UC-1128": {
+    "en": "Researcher",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The name on the card of Claude's researcher helper (Clauseo's own type). New."
+  },
+  "UC-1129": {
+    "en": "Helper {n}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The name on the card of a helper with no type, by its place among the conversation's unnamed helpers. New."
+  }
+}

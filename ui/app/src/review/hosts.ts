@@ -7,6 +7,7 @@
 // a permission request may never come back.
 import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/stream-script.ts";
 import type {
+  ConfigOption,
   AgentId,
   AvailableCommand,
   CommandOutcome,
@@ -69,6 +70,8 @@ export function roomHost(
 /** A thread's state for the review: its entries and status, and what the host refuses or loses. */
 export type ThreadState = {
   entries: ViewEntry[];
+  /** The header's model and effort options, as the agent reports them; none by default. */
+  options?: ConfigOption[];
   /** The thread's agent, as its list row and header name it; claude-acp by default. */
   agent?: AgentId;
   status?: ThreadStatus;
@@ -187,6 +190,7 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.status = state.status ?? "idle";
   head.header!.commands = state.commands ?? [];
   head.header!.agent = agent;
+  if (state.options !== undefined) head.header!.config_options = state.options;
   const transport: FakeTransport = new FakeTransport({
     ...(state.platform === undefined ? {} : { platform: state.platform }),
     ...(state.limits === undefined ? {} : { setup: { first: () => SIGNED_IN } }),

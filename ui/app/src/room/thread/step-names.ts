@@ -11,6 +11,8 @@ import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
+import { helperEntryId, helperPartOf } from "./helper-entries.ts";
+import { waitingWords, workingHelpers } from "./helper-view.ts";
 import { taskOf } from "./task-words.ts";
 import {
   caseLawOf,
@@ -344,6 +346,9 @@ export const unsettled = (entry: ToolCallEntry): boolean =>
 
 const TOOL = "tool_call:";
 const TEXT = "agent_text:";
+/** A lead step that launches helpers or waits on them: Claude's Agent (Task) and Yield, ChatGPT's
+ * spawnAgent. */
+const LAUNCH = /^(agent|task|yield|spawnAgent)$/i;
 
 /** The working line's words while a turn runs: what its newest step is doing ("Reading Lease.pdf."), "Thinking it
  * through." while its newest output is a thought, and null while it writes the answer, has finished its newest step,
@@ -351,10 +356,24 @@ const TEXT = "agent_text:";
 export function doingPick(lang: Lang): (v: StreamView | undefined) => string | null {
   return (v) => {
     if (v === undefined || !turnRunning(v.header?.header?.status)) return null;
+    // while helpers work and the lead's newest is their launch, a Yield or a step done: it waits
+    const helpers = workingHelpers(v);
+    const waits = (call: ToolCallEntry) =>
+      helpers > 0 && (LAUNCH.test(call.tool_name ?? call.title) || !unsettled(call));
     for (let i = v.ids.length - 1; i >= 0; i -= 1) {
       const id = v.ids[i]!;
+      const part = helperPartOf(v.entries.get(id));
+      // a helper's own steps and words are its card's, not the lead's
+      const own =
+        part?.kind === "step" ? part.helper : part?.kind === "text" ? part.entry.helper : null;
+      if (own !== null && v.entries.has(helperEntryId(own))) continue;
+      if (part?.kind === "helper") {
+        if (part.entry.parent === undefined && helpers > 0) return waitingWords(lang, helpers);
+        continue;
+      }
       if (id.startsWith(TOOL)) {
         const call = v.entries.get(id)?.tool_call;
+        if (call !== undefined && waits(call)) return waitingWords(lang, helpers);
         return call !== undefined && unsettled(call) ? doingOf(lang, call) : null;
       }
       if (id.startsWith(TEXT))
