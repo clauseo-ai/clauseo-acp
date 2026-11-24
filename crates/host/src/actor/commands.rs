@@ -7,6 +7,8 @@
 //! failure.
 
 mod lookup;
+#[cfg(test)]
+mod tests;
 mod to_turn;
 
 use clauseo_protocol::{
@@ -348,6 +350,17 @@ fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     actor.finish_command(ctx.id, Err(refusal));
 }
 
+/// The thread row once a rename's or an archive's commit failed: `before`, the row the command
+/// started from, with what the thread's session wrote since (`now`) kept: its session id and
+/// its kept model and effort (`turn/picks/own.rs`), each in a commit of its own.
+fn rolled_back(before: ThreadRow, now: &ThreadRow) -> ThreadRow {
+    ThreadRow {
+        acp_session_id: now.acp_session_id.clone(),
+        own_picks: now.own_picks.clone(),
+        ..before
+    }
+}
+
 /// A command's commit returned.
 pub(super) fn command_committed(
     actor: &mut Actor,
@@ -370,7 +383,7 @@ pub(super) fn command_committed(
         }
         (AfterCommand::Row { before }, Err(_)) => {
             if let Some(entry) = actor.threads.get_mut(&before.id) {
-                entry.row = *before;
+                entry.row = rolled_back(*before, &entry.row);
             }
         }
         (AfterCommand::Relocated { matter, folder }, outcome) => {
@@ -440,7 +453,8 @@ fn create_thread(
         created: now.wall,
         updated: now.wall,
         seen_seq: None,
-        own_picks: None,
+        // None only for a row from before schema 9 (`turn/picks/own.rs`).
+        own_picks: Some(clauseo_protocol::ConfigPicks::default()),
     };
     let event = DomainEvent::ThreadCreated(ThreadCreated {
         matter,

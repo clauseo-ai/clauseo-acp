@@ -367,6 +367,8 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
 /// and options (and the "context not restored" notice), then the held replay and the waiting
 /// work.
 pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+    // A new thread's first session: what it runs with becomes its kept values (`picks/own.rs`).
+    super::picks::own::seed_first(actor, thread, &start.config_options);
     match attach_commit(actor, thread, &start, loaded) {
         Ok(()) => {}
         Err(error) => {
