@@ -300,6 +300,10 @@ mod connectors;
 #[path = "snapshots/mcp.rs"]
 mod mcp;
 
+#[cfg(test)]
+#[path = "snapshots/addons.rs"]
+mod addons;
+
 mod view_patch {
     use super::*;
 
@@ -479,6 +483,7 @@ mod host_event {
             super::connectors::connectors_state(),
         );
         McpToolsChanged => mcp_tools_changed: HostEvent::McpToolsChanged(super::mcp::tools_view());
+        AddonsChanged => addons_changed: HostEvent::AddonsChanged {};
         CaseLawHint => case_law_hint: HostEvent::CaseLawHint {
             matter: matter_id(1),
             thread: thread_id(2),

@@ -493,6 +493,7 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::ProtectionChanged { .. }
         | HostEvent::ProtectionViewChanged { .. }
         | HostEvent::PapersChanged { .. }
+        | HostEvent::AddonsChanged {}
         | HostEvent::SiteBlocked { .. } => false,
     }
 }

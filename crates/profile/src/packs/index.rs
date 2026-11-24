@@ -84,7 +84,7 @@ pub fn codex_index_with_packs(
 /// `description` as an index line's use text: none when it fails 0031's filter, else its first
 /// [`DESCRIPTION_WORDS`] words, then at most [`DESCRIPTION_CHARS`] characters, `…` included,
 /// with `…` when cut.
-fn use_text(description: &str) -> Option<String> {
+pub fn use_text(description: &str) -> Option<String> {
     if !is_listable(description) {
         return None;
     }

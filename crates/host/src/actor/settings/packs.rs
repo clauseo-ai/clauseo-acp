@@ -315,6 +315,7 @@ pub(in crate::actor) fn write(
         );
         let changed = HostEvent::SettingsChanged(super::view(actor));
         super::super::app::publish(actor, &changed);
+        super::super::query::addons::changed(actor);
     }
     super::receipt(actor, ctx)
 }

@@ -49,7 +49,8 @@ use crate::window_events::FullScreen;
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
 /// `settings_changed`, `connectors_changed` (R24), `update_changed` (0037), `protection_changed`,
-/// `protection_view_changed` (0051) and `mcp_tools_changed` (Settings › Tools), so it never gets
+/// `protection_view_changed` (0051), `mcp_tools_changed` (Settings › Tools) and `addons_changed`
+/// (the skills and tools list), so it never gets
 /// the matter and thread lists (0023) or an app event the host adds later. Any other label
 /// carries neither, whatever it follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,7 +58,8 @@ pub(crate) enum AppEvents {
     /// Every app and limits event: `main`.
     All,
     /// The app feed's `settings_changed`, `connectors_changed`, `update_changed`,
-    /// `protection_changed`, `protection_view_changed` and `mcp_tools_changed` only, and the
+    /// `protection_changed`, `protection_view_changed`, `mcp_tools_changed` and `addons_changed`
+    /// only, and the
     /// limits: the settings window.
     SettingsAndLimits,
     /// No app or limits event: any other label.
@@ -87,6 +89,7 @@ impl AppEvents {
                     || json.starts_with(r#"{"protection_changed":"#)
                     || json.starts_with(r#"{"protection_view_changed":"#)
                     || json.starts_with(r#"{"mcp_tools_changed":"#)
+                    || json.starts_with(r#"{"addons_changed":"#)
             }
             (_, Self::Nothing) => false,
         }

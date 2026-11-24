@@ -176,6 +176,12 @@ pub(crate) fn liveness_from(status: u16, body: &[u8], mcp_url: &str, at: SystemT
 /// [`Connectors::liveness`](crate::Connectors::liveness): the cached answer while it is young
 /// enough, else one fetch of `pricing.json`.
 pub(crate) fn cached_liveness(shared: &Shared) -> Liveness {
+    liveness_with(shared, false)
+}
+
+/// [`cached_liveness`], but with `retry_failure` a cached answer that is not live is fetched
+/// again at once ([`Connectors::recheck_liveness`](crate::Connectors::recheck_liveness)).
+pub(crate) fn liveness_with(shared: &Shared, retry_failure: bool) -> Liveness {
     // Asked before the cache's lock (wasted when the cache answers): a slow proxy lookup never
     // holds every other liveness caller.
     let route = shared.agent.route();
@@ -185,7 +191,9 @@ pub(crate) fn cached_liveness(shared: &Shared) -> Liveness {
         && let Some(at) = cached.fetched_at
         && let Ok(age) = now.duration_since(at)
     {
-        let ttl = if cached.pricing.is_some() {
+        let ttl = if retry_failure && !cached.live {
+            Duration::ZERO
+        } else if cached.pricing.is_some() {
             LIVENESS_TTL
         } else {
             LIVENESS_FAILURE_TTL

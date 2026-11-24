@@ -82,6 +82,7 @@ export const APP_EVENTS = [
   "update_changed",
   "protection_view_changed",
   "mcp_tools_changed",
+  "addons_changed",
 ] as const;
 
 /** The HostEvent keys `APP_EVENTS` leaves out: each is handled by another branch of the channel's receive callback, or

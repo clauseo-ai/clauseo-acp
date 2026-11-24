@@ -1,0 +1,70 @@
+---
+source: crates/protocol/tests/snapshots/addons.rs
+expression: "&answer"
+---
+{
+  "addons": {
+    "items": [
+      {
+        "kind": "skill",
+        "id": "legal-drafting",
+        "name": "legal-drafting",
+        "description": "Drafting or revising a legal document, or marking up a draft",
+        "source": "built_in",
+        "scope": "all",
+        "on": true,
+        "has_scripts": false,
+        "status": "ready",
+        "can_remove": false,
+        "locked": false
+      },
+      {
+        "kind": "skill",
+        "id": "pdf",
+        "name": "PDF",
+        "description": "Reads, fills and merges PDF files.",
+        "source": "added",
+        "from": {
+          "kind": "skills_sh",
+          "text": "anthropics/skills/pdf"
+        },
+        "scope": {
+          "matter": "01900000-0000-7000-8000-000000000001"
+        },
+        "on": true,
+        "has_scripts": true,
+        "status": "changed",
+        "can_remove": true,
+        "locked": false
+      },
+      {
+        "kind": "tool",
+        "id": "case-law",
+        "name": "Case law (Indian Kanoon)",
+        "description": "Searches Indian judgments and statutes.",
+        "source": "built_in",
+        "scope": "all",
+        "on": false,
+        "status": "needs_setup",
+        "can_remove": false,
+        "locked": false
+      },
+      {
+        "kind": "tool",
+        "id": "linear",
+        "name": "linear",
+        "description": "",
+        "source": "added",
+        "from": {
+          "kind": "address",
+          "text": "https://mcp.linear.app/mcp"
+        },
+        "scope": "all",
+        "on": true,
+        "status": "needs_secret",
+        "can_remove": false,
+        "locked": true
+      }
+    ]
+  }
+}

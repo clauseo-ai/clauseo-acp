@@ -151,6 +151,7 @@ pub(in crate::actor) fn on_done(actor: &mut Actor, done: SkillDone) {
             } else {
                 let changed = HostEvent::SettingsChanged(super::view(actor));
                 super::super::app::publish(actor, &changed);
+                super::super::query::addons::changed(actor);
                 super::receipt(actor, &ctx)
             }
         }

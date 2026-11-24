@@ -33,6 +33,7 @@ use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 use crate::revisions::RevisionsDone;
 
+pub(super) mod addons;
 pub(super) mod blackline;
 mod folder_support;
 mod skill_packs;
@@ -160,6 +161,7 @@ pub(super) fn query(
         HostQuery::GetUpdate => super::update::answer(actor, reply),
         HostQuery::LastExit => super::last_exit::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
+        HostQuery::ListAddons { matter } => addons::list(actor, matter, reply),
         // From the cache (decision record 0051): never detected here.
         HostQuery::Protection => {
             let view = super::protection::view(actor);

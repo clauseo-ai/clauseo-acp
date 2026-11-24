@@ -74,6 +74,7 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Search(_)
         | QueryResult::FolderSupport(_)
         | QueryResult::SkillPacks(_)
+        | QueryResult::Addons(_)
         | QueryResult::Update(_)
         | QueryResult::LastExit(_)
         | QueryResult::Protection(_)
@@ -133,6 +134,7 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::McpToolsChanged(_)
+            | HostEvent::AddonsChanged {}
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }

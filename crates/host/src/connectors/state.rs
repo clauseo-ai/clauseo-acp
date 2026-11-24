@@ -15,8 +15,9 @@ use clauseo_connectors::{
     Pricing,
 };
 use clauseo_protocol::{
-    Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, ConnectorView,
-    ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome, Timestamp,
+    AddonStatus, Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus,
+    ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome,
+    Timestamp,
 };
 
 mod money;
@@ -109,6 +110,20 @@ impl CaseLaw {
     /// Whether the price list says live.
     pub(crate) fn live(&self) -> bool {
         self.liveness.as_ref().is_some_and(|liveness| liveness.live)
+    }
+
+    /// Case law's status in the skills and tools list (`ListAddons`), which lists it whatever
+    /// the liveness check says: signed in (added and usable) is `ready`; else live, so it can
+    /// be added, is `needs_setup`; else (the check failed, found it not offered, or has not
+    /// answered yet) `unreachable`.
+    pub(crate) fn addon_status(&self) -> AddonStatus {
+        if self.signed_in() {
+            AddonStatus::Ready
+        } else if self.live() {
+            AddonStatus::NeedsSetup
+        } else {
+            AddonStatus::Unreachable
+        }
     }
 
     /// A new credential: when it is no longer usable, the account, the out-of-credit state,

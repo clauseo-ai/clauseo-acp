@@ -268,13 +268,14 @@ impl Bridge {
                     HostQuery::GetSettings
                         | HostQuery::GetUpdate
                         | HostQuery::ListSkillPacks
+                        | HostQuery::ListAddons { .. }
                         | HostQuery::Protection
                         | HostQuery::AllowedSites
                 ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
                     "the settings window reads only the settings, the update state, the skill \
-                     packs, the protection view and the allowed sites",
+                     packs, the skills and tools list, the protection view and the allowed sites",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -303,6 +304,9 @@ impl Bridge {
             // The skill packs and their states (0040): reads the packs folder, writes nothing.
             // Both windows show them: Settings' Skills pane and the main window's matter picker.
             | HostQuery::ListSkillPacks
+            // Every skill and tool in one list (the main window's Skills and Connectors place
+            // and Settings): reads the packs folder and the settings, writes nothing.
+            | HostQuery::ListAddons { .. }
             // The sandbox's view (0051): the host's cache, read only. Both windows show it.
             | HostQuery::Protection
             // The sites allowed despite the block list (0053, PR 2): stored state, no paths.

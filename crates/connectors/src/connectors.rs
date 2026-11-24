@@ -116,6 +116,12 @@ impl Connectors {
         crate::pricing::cached_liveness(&self.shared)
     }
 
+    /// [`Self::liveness`], except that a cached answer that is not live is fetched again: the
+    /// host's re-check when the lawyer opens the skills and tools list (the host paces it).
+    pub fn recheck_liveness(&self) -> Liveness {
+        crate::pricing::liveness_with(&self.shared, true)
+    }
+
     /// The origin the config named: where every request goes and whose pay links are taken.
     /// Fixed for the life of the value; the host reads it to recheck a pay link before it opens
     /// one (`PayUrl::is_for`).

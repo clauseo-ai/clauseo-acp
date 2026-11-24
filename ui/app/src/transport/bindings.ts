@@ -295,6 +295,127 @@ export type Ack = {
 	cursor: Cursor,
 };
 
+/**  One skill or tool. */
+export type Addon = {
+	/**  A skill or a tool. */
+	kind: AddonKind,
+	/**  Its id: a built-in's fixed name, a skill pack's id, or a tool's server name. */
+	id: string,
+	/**  Its name, for display. */
+	name: string,
+	/**
+	 *  One line, at most 200 characters: a fixed line for a built-in, the first skill's
+	 *  `SKILL.md` description for an added skill, and empty for an added tool (the app shows
+	 *  `from` instead).
+	 */
+	description: string,
+	/**  Built in, or added. */
+	source: AddonSource,
+	/**
+	 *  Where an added item came from; left out for a built-in, and for an added skill with no
+	 *  known source.
+	 */
+	from?: AddonFrom,
+	/**  Where it is on: every matter, or only the matters it is switched on in. */
+	scope: AddonScope,
+	/**  Whether it is on (for the matter asked about, once scopes land). */
+	on: boolean,
+	/**
+	 *  Skills only: whether its folder holds a file an agent could run (anything but Markdown,
+	 *  text and images, or a file marked executable). Left out for a tool.
+	 */
+	has_scripts?: boolean,
+	/**  Whether it can be used as it is, and if not, why not in one word. */
+	status: AddonStatus,
+	/**  Whether the lawyer can remove it: added items the lawyer controls. */
+	can_remove: boolean,
+	/**  Whether the firm decides its switches: a change answers `settings.locked`. */
+	locked: boolean,
+};
+
+/**  Where an added item came from. JSON: `{"kind": "url", "text": "https://…"}`. */
+export type AddonFrom = {
+	/**  The kind of place. */
+	kind: AddonFromKind,
+	/**
+	 *  The place: a skills.sh or GitHub name, a URL, a file or folder name, a program, an
+	 *  `https` address, or the app imported from.
+	 */
+	text: string,
+};
+
+/**  The kind of place an added item came from. */
+export type AddonFromKind = 
+/**  A skill from skills.sh. */
+"skills_sh" | 
+/**  A skill from a GitHub repository. */
+"github" | 
+/**  A skill from a web address. */
+"url" | 
+/**  A skill from a zip file. */
+"zip" | 
+/**  A skill from a folder on this computer. */
+"folder" | 
+/**  A tool that runs a program on this computer. */
+"program" | 
+/**  A tool at an `https` address. */
+"address" | 
+/**  A tool imported from another app. */
+"import";
+
+/**  A skill, or a tool (an MCP server). */
+export type AddonKind = 
+/**  A skill. */
+"skill" | 
+/**  A tool: an MCP server. */
+"tool";
+
+/**
+ *  `ListAddons`' answer: skills first, then tools; within each, built-ins first, then added
+ *  ones, each group sorted by id.
+ */
+export type AddonList = {
+	/**  The rows. */
+	items: Addon[],
+};
+
+/**  Where an item is on. JSON: `"all"` or `{"matter": "<id>"}`. */
+export type AddonScope = 
+/**  On in every matter unless switched off in one. */
+"all" | 
+/**  Off everywhere except the matters it is switched on in, starting with this one. */
+{ matter: MatterId };
+
+/**  Whether Clauseo ships the item or someone added it. */
+export type AddonSource = 
+/**  Shipped with Clauseo: it cannot be removed. */
+"built_in" | 
+/**  Added by the lawyer, the firm or a pack installer. */
+"added";
+
+/**  Whether an item can be used as it is. */
+export type AddonStatus = 
+/**  It can be used. */
+"ready" | 
+/**
+ *  A skill's files changed since it was turned on: `SetSkillPack {id, on: true}` turns it
+ *  on again.
+ */
+"changed" | 
+/**  It cannot be used as it is. */
+"invalid" | 
+/**  The firm's policy, or the lawyer's own `skills.extra`, does not allow it. */
+"blocked" | 
+/**  A tool's saved key or header value is missing. */
+"needs_secret" | 
+/**  It needs setting up first: case law is reachable but not connected yet. */
+"needs_setup" | 
+/**
+ *  Case law is not set up, and Clauseo could not reach it (offline, a proxy, or no check
+ *  has succeeded yet). Reading the list again starts a new check, at most every 30 s.
+ */
+"unreachable";
+
 /**  The agent's stable ACP v1 capabilities, plus Clauseo's steering capability. */
 export type AgentCapabilities = {
 	/**  The agent replays a session's history on `session/load`. */
@@ -3142,9 +3263,9 @@ export type HostError = {
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -3154,19 +3275,19 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ account_limits_changed: AccountLimits }) & { addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The whole limits view after a change. Never logged and in no stream: it reaches
  *  `subscribe_limits` subscribers only (R16).
  */
-({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The display settings changed: the whole view after the change. App-wide, never part of
  *  a stream: it reaches app subscribers only.
  */
-({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
  *  App-wide, never logged and in no stream: it reaches app subscribers only, as each state
@@ -3176,7 +3297,7 @@ export type HostEvent =
 ({ browser_install: {
 	/**  Where it stands. */
 	state: BrowserInstallState,
-} }) & { account_limits_changed?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  What the re-read of the firm's browser policy that `HostCommand::RecheckBrowserPolicy`
  *  asked for found: `Checking` as it starts, then its end. App-wide, never logged and in no
@@ -3186,41 +3307,46 @@ export type HostEvent =
 ({ browser_policy: {
 	/**  What the read found. */
 	state: BrowserPolicyState,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
  *  it reaches app subscribers only.
  */
-({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ matters_changed: MattersChanged }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
  *  list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
  *  it has open.
  */
-({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; update_changed?: never } | 
+({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; update_changed?: never } | 
 /**
  *  How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
  *  stream: it reaches app subscribers only.
  */
-({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The updater's state changed: the whole view after the change (decision record 0037).
  *  App-wide, never part of a stream: it reaches app subscribers only.
  */
-({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never } | 
+({ update_changed: UpdateView }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never } | 
 /**
  *  The connectors' state changed: the whole state after the change (R24). App-wide, never
  *  logged and in no stream: it reaches app subscribers only, and every app catch-up carries
  *  the latest one, as for `SettingsChanged`.
  */
-({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The lawyer's MCP servers, or who decides them, changed: the whole view after the change
  *  (Settings › Tools). App-wide, never logged and in no stream: it reaches app subscribers
  *  only, and every app catch-up carries the latest one, as for `SettingsChanged`. It names
  *  variables and headers, never a value.
  */
-({ mcp_tools_changed: McpToolsView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ mcp_tools_changed: McpToolsView }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  A skill or tool came, went or changed (`HostQuery::ListAddons`): the app reads the list
+ *  again. App-wide and never logged; a catch-up carries none. JSON: `{"addons_changed": {}}`.
+ */
+({ addons_changed: Record<string, never> }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A turn's web searches looked like Indian case law and the case-law connector is live but
  *  not added (R24): the app offers it under the answer. Once per matter, never after the
@@ -3234,7 +3360,7 @@ export type HostEvent =
 	thread: ThreadId,
 	/**  The turn whose searches fired it. */
 	turn: TurnId,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A matter's protection changed (decision record 0051): the sandbox came or went, or why it
  *  is off changed. App-wide, never logged and in no stream: it reaches app subscribers
@@ -3246,7 +3372,7 @@ export type HostEvent =
 	matter: MatterId,
 	/**  Its protection now. */
 	protection: Protection,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  What a matter's papers hold changed since `HostQuery::ListPapers` last answered: the
  *  background scan found tracked changes in a `.docx` the listing showed without them, or
@@ -3256,7 +3382,7 @@ export type HostEvent =
 ({ papers_changed: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  This computer's protection view changed (decision record 0051): the sandbox's detection,
  *  the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
@@ -3267,7 +3393,7 @@ export type HostEvent =
 ({ protection_view_changed: {
 	/**  The view now. */
 	view: ProtectionView,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The egress proxy refused a site the block list names (decision record 0053): the app
  *  tells the lawyer. App-wide, never logged and in no stream: it reaches app subscribers
@@ -3293,7 +3419,7 @@ export type HostEvent =
 	override_allowed: boolean,
 	/**  How many times the site was refused in this turn, at least 1. */
 	count: number,
-} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
+} }) & { account_limits_changed?: never; addons_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; mcp_tools_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -3303,7 +3429,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -3315,7 +3441,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  The files that differ between two versions of a matter, or between a version and the
  *  matter's folder as it is now when `to` is `None` (nothing is stored).
@@ -3327,7 +3453,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  What restoring a version would do now, file by file. Writes nothing. */
 ({ preview_restore: {
 	/**  The matter. */
@@ -3338,7 +3464,7 @@ export type HostQuery =
 	scope: RestoreRequest,
 	/**  The `restore` checkpoint it would take back, as `RestoreVersion` takes it. */
 	undoes?: CheckpointId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  What undoing a turn's step would meet now: the step's files whose content in the folder
  *  differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
@@ -3350,7 +3476,7 @@ export type HostQuery =
 	thread: ThreadId,
 	/**  The step's turn. */
 	turn: TurnId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -3359,14 +3485,14 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never; word_blackline?: never } | 
 /**  The display settings in force, and the keys the firm's policy locks. */
 "get_settings" | 
 /**  The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`). */
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  The agents in the settings, for a new thread's choice of agent. */
 "list_agents" | 
 /**
@@ -3381,7 +3507,7 @@ export type HostQuery =
  *  Search inside matters and conversations (decision 0043). Answered
  *  `QueryResult::Search`.
  */
-({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; word_blackline?: never } | 
+({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; word_blackline?: never } | 
 /**
  *  The Windows folder check of the place a `CreateMatter` with `source` would use, before
  *  the matter exists: the New matter dialog's warning. Send the same `source` the create
@@ -3397,7 +3523,7 @@ export type HostQuery =
 ({ folder_support: {
 	/**  Where the matter would be made, as `CreateMatter` names it. */
 	source: MatterSource,
-} }) & { compare_versions?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
+} }) & { compare_versions?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Where the updater stands (decision record 0037), read after subscribing to the app
  *  stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
@@ -3415,6 +3541,16 @@ export type HostQuery =
  *  thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
  */
 "list_skill_packs" | 
+/**
+ *  Every skill and tool, built in and added, in one list (`addons.rs`); read off the host
+ *  thread. Answered `QueryResult::Addons`. `matter` is accepted and changes nothing yet:
+ *  every row's scope is `all` and `on` the all-matters default until per-matter switches
+ *  land (D2). JSON: `{"list_addons": {"matter": "..."}}`, `matter` optional.
+ */
+({ list_addons: {
+	/**  The matter whose switches `on` follows (D2); `None` for the all-matters default. */
+	matter?: MatterId,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  This computer's sandbox and the firm's protection settings (decision record 0051).
  *  Answered `QueryResult::Protection`, from the host's cache, at once.
@@ -3447,7 +3583,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
 /**
  *  The tracked changes of one Word file of a matter, read with stetdoc from a private copy
  *  (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
@@ -3459,7 +3595,7 @@ export type HostQuery =
 	matter: MatterId,
 	/**  The Word file. */
 	path: MatterPath,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never };
+} }) & { compare_versions?: never; folder_support?: never; list_addons?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never };
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -5570,25 +5706,25 @@ export type PythonProgress =
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ matters: MatterSummary[] }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ threads: ThreadSummary[] }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ entries: ViewEntry[] }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ file_changes: FileChange[] }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ restore_preview: RestorePreview }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewUndo`. */
-({ undo_preview: UndoPreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never; word_blackline?: never } | 
+({ undo_preview: UndoPreview }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never; word_blackline?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ blob: BlobRange }) & { addons?: never; agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ settings: SettingsView }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetUpdate`. */
-({ update: UpdateView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; word_blackline?: never } | 
+({ update: UpdateView }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; word_blackline?: never } | 
 /**  For `LastExit`. */
-({ last_exit: LastExit }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ last_exit: LastExit }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -5619,31 +5755,33 @@ export type QueryResult =
 	 *  file.
 	 */
 	place: FolderPlace,
-} }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+} }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
-({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ agents: AgentSummary[] }) & { addons?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`. */
-({ default_location: DefaultLocation }) & { agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ default_location: DefaultLocation }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
  *  came first.
  */
-({ search: SearchAnswer }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ search: SearchAnswer }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
  *  `{"folder_support": {}}` for a fine folder.
  */
-({ folder_support: PickedFolderSupport }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ folder_support: PickedFolderSupport }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListSkillPacks`. */
-({ skill_packs: PackStatus[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ skill_packs: PackStatus[] }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+/**  For `ListAddons`. */
+({ addons: AddonList }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `Protection`. */
-({ protection: ProtectionView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ protection: ProtectionView }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `AllowedSites`. */
-({ allowed_sites: AllowedSite[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+({ allowed_sites: AllowedSite[] }) & { addons?: never; agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `WordBlackline`. */
-({ word_blackline: WordBlackline }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ word_blackline: WordBlackline }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `ListRevisions`. */
-({ revisions: RevisionList }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never };
+({ revisions: RevisionList }) & { addons?: never; agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; last_exit?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never };
 
 /**
  *  Why a thread's queued turns wait, the most specific reason that applies. Set only while
