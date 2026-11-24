@@ -3,6 +3,7 @@
 // a kind no program opens from Clauseo (.zip) shows the matter's folder (Show in Finder on the Mac); a deleted paper
 // has none. Two papers on one note each open their own; many papers fold past five.
 import { act } from "react";
+import type { Platform } from "@clauseo/components/lib/display.ts";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { MATTER, reset, step, uuid } from "../../testing/stream-script.ts";
@@ -39,7 +40,7 @@ const changed = (paths: readonly string[], change: ChangeKind = "modified"): Vie
     checkpoint_after: uuid(1, 9),
   });
 
-async function noteWith(entry: ViewEntry, platform: "macos" | "windows" = "macos") {
+async function noteWith(entry: ViewEntry, platform: Platform = "mac") {
   const room = await mountRoom({
     platform,
     next: fakeNext({ matters: () => [], papers: PAPERS, parts: ["papers"] }),
