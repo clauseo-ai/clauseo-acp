@@ -5,7 +5,7 @@
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, Matter, Overlap, TimelineEntry, TurnMeta,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChange, MatterPath, ThreadId,
@@ -86,9 +86,9 @@ pub(crate) struct RepairJob {
 /// - The timeline holds the turn's own after-turn checkpoint (matched by thread and turn): its
 ///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
 ///   from `before` to it, each flagged (no tool call is known for them), without the others'
-///   papers, and without those a card logged after it credits as they were at it
-///   ([`credited_later`]); the folder is not looked at, since another turn may have changed it
-///   since.
+///   papers, and without those a card logged after it credits as they were at it unless its own
+///   tool calls wrote them too, then naming that card's answer ([`credited_later`]); the folder
+///   is not looked at, since another turn may have changed it since.
 /// - Otherwise, when other turns of the matter were left open too, or every thread was read
 ///   and R8's last checkpoint is not `before` (another turn ran beside this one and ended, or
 ///   later turns ran after its end failed): a new after-turn checkpoint is taken, its changes
@@ -151,7 +151,7 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
             .into_iter()
             .map(FileChange::with_lawyer_edits)
             .collect();
-        let (changes, later) = credited_later(timeline, entry.id, &logged, changes);
+        let (changes, later) = credited_later(timeline, entry.id, &logged, &named, changes);
         let (changes, mut left_out) = match &overlap {
             Some(overlap) => clauseo_matters::left_out(changes, overlap),
             None => (changes, Vec::new()),
@@ -193,35 +193,49 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
 /// Drops from `changes`, those up to the turn's own after-turn checkpoint `own`, each change
 /// whose every path a card logged after `own` credits with the content it has at `own`: an
 /// answer that ran beside this one and ended later wrote it before `own` was taken, and its
-/// card holds it. Those are returned, naming no one: an answer whose card came later is never
-/// named on this card, and a paper it changed after `own` stays here, flagged, as it was.
+/// card holds it. Those are returned, naming no one, and a paper it changed after `own` stays
+/// here, flagged, as it was. A change to a paper the turn's own tool calls wrote too (`named`)
+/// stays here as well, naming the answers whose cards credit it: an answer's own writes are on
+/// its card.
 fn credited_later(
     timeline: &[TimelineEntry],
     own: CheckpointId,
     logged: &[Logged],
+    named: &BTreeSet<MatterPath>,
     changes: Vec<FileChange>,
 ) -> (Vec<FileChange>, Vec<FileChange>) {
     let at = |id: CheckpointId| timeline.iter().position(|entry| entry.id == id);
     let Some(own) = at(own) else {
         return (changes, Vec::new());
     };
-    let mut credited: BTreeMap<&MatterPath, Vec<Option<&ContentId>>> = BTreeMap::new();
+    let mut credited: BTreeMap<&MatterPath, Vec<(Option<&ContentId>, ThreadId)>> = BTreeMap::new();
     let cards = logged.iter().filter(|record| {
         record.thread.is_some() && at(record.checkpoint).is_some_and(|position| position > own)
     });
-    for file in cards.flat_map(|record| &record.files) {
-        if file.may_include_lawyer_edits() {
+    for record in cards {
+        let Some(thread) = record.thread else {
             continue;
-        }
-        credited.entry(file.path()).or_default().push(file.after());
-        if let ChangeKind::Renamed { from } = file.change() {
-            credited.entry(from).or_default().push(None);
+        };
+        for file in record
+            .files
+            .iter()
+            .filter(|file| !file.may_include_lawyer_edits())
+        {
+            credited
+                .entry(file.path())
+                .or_default()
+                .push((file.after(), thread));
+            if let ChangeKind::Renamed { from } = file.change() {
+                credited.entry(from).or_default().push((None, thread));
+            }
         }
     }
     if credited.is_empty() {
         return (changes, Vec::new());
     }
-    changes.into_iter().partition(|change| {
+    let mut kept = Vec::new();
+    let mut later = Vec::new();
+    for change in changes {
         let from = match change.change() {
             ChangeKind::Renamed { from } => Some((from, None)),
             ChangeKind::Added
@@ -229,9 +243,29 @@ fn credited_later(
             | ChangeKind::Deleted
             | ChangeKind::Unknown { .. } => None,
         };
-        let mut paths = std::iter::once((change.path(), change.after())).chain(from);
-        !paths.all(|(path, now)| credited.get(path).is_some_and(|left| left.contains(&now)))
-    })
+        let paths: Vec<(&MatterPath, Option<&ContentId>)> =
+            std::iter::once((change.path(), change.after()))
+                .chain(from)
+                .collect();
+        let mut by = BTreeSet::new();
+        let all = paths.iter().all(|(path, now)| {
+            let crediting = credited.get(path).into_iter().flatten();
+            let threads: Vec<ThreadId> = crediting
+                .filter(|(left, _)| left == now)
+                .map(|(_, thread)| *thread)
+                .collect();
+            by.extend(threads.iter().copied());
+            !threads.is_empty()
+        });
+        if !all {
+            kept.push(change);
+        } else if paths.iter().any(|(path, _)| named.contains(*path)) {
+            kept.push(change.with_also_changed_by(by.into_iter().collect()));
+        } else {
+            later.push(change);
+        }
+    }
+    (kept, later)
 }
 
 /// Whether the folder holds a change since `before` to a paper `overlap` names as the turn's own
