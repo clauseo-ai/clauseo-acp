@@ -10,7 +10,7 @@
 //! and so does which setup commands it may send (`setup.rs`, which the bridge holds).
 
 use std::collections::{HashMap, HashSet};
-use std::path::{MAIN_SEPARATOR, Path};
+use std::path::{MAIN_SEPARATOR, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
@@ -92,8 +92,9 @@ pub(crate) struct Bridge {
     /// (`close_window`): a call still waiting for the host when its window closed drops its
     /// stream instead of keeping it. Locked only inside `windows`' lock.
     closed: Mutex<HashMap<String, u64>>,
-    /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
-    issued: Mutex<HashSet<FolderRefId>>,
+    /// The folder refs `pick_folder` issued in this run, with each folder's path; `CreateMatter`
+    /// takes no other.
+    issued: Mutex<HashMap<FolderRefId, PathBuf>>,
     /// The paths `pick_skill` returned in this run; `AddSkill` takes no other.
     pub(super) skills_picked: Mutex<HashSet<String>>,
     /// The settings window's `RefreshLimits`, at most one per agent per 10 s.
@@ -135,7 +136,7 @@ impl Bridge {
             opens: AtomicU64::new(0),
             builds: Mutex::new(HashMap::new()),
             closed: Mutex::new(HashMap::new()),
-            issued: Mutex::new(HashSet::new()),
+            issued: Mutex::new(HashMap::new()),
             skills_picked: Mutex::new(HashSet::new()),
             refreshes: RefreshThrottle::default(),
             setup,
@@ -536,9 +537,22 @@ impl Bridge {
         let path = picked::long_name(&path);
         let home = home.map(picked::long_name);
         let display = picked::display(&path, home.as_deref(), MAIN_SEPARATOR);
-        let folder = self.host().await?.register_folder(path).await?;
-        lock(&self.issued).insert(folder);
-        Ok(Some(PickedFolder { folder, display }))
+        // The mount table is read by a child process (`/sbin/mount`), so off the async thread.
+        let place = path.clone();
+        let asked_home = home.clone();
+        let permission = tauri::async_runtime::spawn_blocking(move || {
+            crate::permissions::pick_permission(&place, asked_home.as_deref())
+        })
+        .await
+        .ok()
+        .flatten();
+        let folder = self.host().await?.register_folder(path.clone()).await?;
+        lock(&self.issued).insert(folder, path);
+        Ok(Some(PickedFolder {
+            folder,
+            display,
+            permission,
+        }))
     }
 
     /// Asks `picker` for a skill's folder and records its path, with Windows' short names spelt
@@ -555,10 +569,15 @@ impl Bridge {
         Some(path)
     }
 
+    /// The path of the folder `pick_folder` issued as `folder` in this run, if it did.
+    pub(crate) fn picked_path(&self, folder: FolderRefId) -> Option<PathBuf> {
+        lock(&self.issued).get(&folder).cloned()
+    }
+
     /// Tests: the folder refs issued so far.
     #[cfg(test)]
     pub(crate) fn issued(&self) -> HashSet<FolderRefId> {
-        lock(&self.issued).clone()
+        lock(&self.issued).keys().copied().collect()
     }
 }
 

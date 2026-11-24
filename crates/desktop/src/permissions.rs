@@ -19,6 +19,10 @@
 //!   is read in this process from the registry (`permissions/windows.rs`), once per process
 //!   ([`ReadOnce`]): no child process, so no console and nothing to outlive the app.
 //!
+//! A folder picked (`pick_folder`) in a place macOS guards (the Desktop, Downloads, a cloud
+//! folder, a removable or network volume) gets its permission asked at the pick: `pick.rs`. Those
+//! ids are never listed here.
+//!
 //! Linux lists none. The OS reads sit behind [`Probe`], so the rules are tested anywhere.
 
 use std::path::{Path, PathBuf};
@@ -29,12 +33,18 @@ use clauseo_settings::SystemFiles;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 
+use crate::bridge::Bridge;
 use crate::open::AppData;
+use clauseo_protocol::FolderRefId;
+use pick::Mount;
 use store::{Answer, Asked, Store};
 use system::SystemProbe;
 
 #[cfg(target_os = "macos")]
 mod mac;
+mod pick;
+#[cfg(test)]
+mod pick_tests;
 mod store;
 mod system;
 #[cfg(test)]
@@ -53,6 +63,31 @@ pub(crate) enum PermissionId {
     Keychain,
     /// Windows: Defender's Controlled folder access, which blocks writes under Documents.
     ControlledFolderAccess,
+    /// macOS, at a pick: the picked folder is on the Desktop (`pick.rs`). Never listed.
+    FilesDesktop,
+    /// macOS, at a pick: the picked folder is in Downloads. Never listed.
+    FilesDownloads,
+    /// macOS, at a pick: the picked folder is on a removable volume. Never listed.
+    FilesRemovable,
+    /// macOS, at a pick: the picked folder is on a network volume. Never listed.
+    FilesNetwork,
+    /// macOS, at a pick: the picked folder is in a cloud folder (iCloud Drive, a File Provider
+    /// one). Never listed.
+    FilesCloud,
+}
+
+impl PermissionId {
+    /// Whether the id is asked at a pick, for the folder picked (`pick.rs`), not listed.
+    pub(crate) fn is_pick_time(self) -> bool {
+        matches!(
+            self,
+            Self::FilesDesktop
+                | Self::FilesDownloads
+                | Self::FilesRemovable
+                | Self::FilesNetwork
+                | Self::FilesCloud
+        )
+    }
 }
 
 /// Where a permission stands. Not `PermissionState`: protocol's (an agent's permission request)
@@ -155,6 +190,8 @@ pub(crate) trait Probe: Send + Sync {
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError>;
     /// macOS: reads `item` with the dialog allowed; whether it read (or has gone).
     fn read_keychain(&self, item: &KeychainItem) -> bool;
+    /// macOS: the mount table, for a picked folder's place; empty elsewhere.
+    fn mounts(&self) -> Vec<Mount>;
 }
 
 /// Lists the permissions this build needs on this computer, each with its state: macOS's
@@ -175,24 +212,42 @@ pub(crate) async fn permissions<R: Runtime>(
 }
 
 /// Asks for `id`, off the UI thread and as long as the OS's dialog stays up, and answers its
-/// row after. `command.invalid` for one `permissions` would not list now. Granted to `main` and
-/// `settings` alike: the OS prompt rises only when the lawyer presses Allow there.
+/// row after. `command.invalid` for one `permissions` would not list now. A pick-time id
+/// (`pick.rs`) asks for the folder `folder` names, which must be one `pick_folder` issued; any
+/// other id ignores `folder`. Granted to `main` and `settings` alike: the OS prompt rises only
+/// when the lawyer presses Allow there.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn ask_permission<R: Runtime>(
     app: AppHandle<R>,
     app_data: State<'_, AppData>,
+    bridge: State<'_, Bridge>,
     id: PermissionId,
+    folder: Option<FolderRefId>,
 ) -> Result<PermissionRow, HostError> {
     crate::ipc::timed("ask_permission", async {
         let store = system_store(&app, &app_data.0);
-        blocking(move || ask(&SYSTEM, &store, id)).await
+        let picked = id
+            .is_pick_time()
+            .then(|| pick::picked_folder(folder, |folder| bridge.picked_path(folder)))
+            .transpose()?;
+        blocking(move || match picked {
+            Some(folder) => pick::ask_at_pick(&SYSTEM, id, &folder),
+            None => ask(&SYSTEM, &store, id),
+        })
+        .await
     })
     .await
 }
 
 /// The OS, its Controlled folder access read once per process.
 static SYSTEM: ReadOnce<SystemProbe> = ReadOnce::new(SystemProbe);
+
+/// The permission a folder picked at `folder` needs, with `home` as the pick gives it, on this
+/// computer (`pick.rs`); `None` when none. Reads the mount table on macOS, never the folder.
+pub(crate) fn pick_permission(folder: &Path, home: Option<&Path>) -> Option<PermissionId> {
+    pick::at_pick(&SYSTEM, folder, home)
+}
 
 /// The store in `data_dir` for this app's build.
 fn system_store<R: Runtime>(app: &AppHandle<R>, data_dir: &Path) -> Store {
@@ -308,6 +363,14 @@ pub(crate) fn ask(
             })
         }
         PermissionId::ControlledFolderAccess => Ok(cfa_row()),
+        PermissionId::FilesDesktop
+        | PermissionId::FilesDownloads
+        | PermissionId::FilesRemovable
+        | PermissionId::FilesNetwork
+        | PermissionId::FilesCloud => Err(HostError::new(
+            ErrorCode::CommandInvalid,
+            format!("{id:?} is asked for the folder it was picked for"),
+        )),
     }
 }
 
@@ -528,5 +591,8 @@ impl<P: Probe> Probe for ReadOnce<P> {
     }
     fn read_keychain(&self, item: &KeychainItem) -> bool {
         self.probe.read_keychain(item)
+    }
+    fn mounts(&self) -> Vec<Mount> {
+        self.probe.mounts()
     }
 }

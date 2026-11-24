@@ -8,6 +8,7 @@ use std::time::Duration;
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Locations, PlatformDirs as _, SystemDirs, SystemEnv};
 
+use super::pick::{Mount, parse_mounts};
 use super::{Cfa, KeychainCheck, KeychainItem, Platform, Probe, cfa_from_layers};
 
 /// A child's exit code and stdout; `None` when it outlasted its limit.
@@ -115,6 +116,26 @@ fn protected_defaults() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// The longest `/sbin/mount` may take to list the mounts before a pick gives up on them.
+const MOUNT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The mount table, from `/sbin/mount` (macOS): it lists the kernel's mounts and opens no volume.
+/// Empty when it fails, exits non-zero or outlasts [`MOUNT_TIMEOUT`] (logged), so a pick then
+/// asks for no permission.
+fn mount_table() -> Vec<Mount> {
+    match run(Path::new("/sbin/mount"), &[], Some(MOUNT_TIMEOUT)) {
+        Ok(Some((Some(0), listing))) => parse_mounts(&String::from_utf8_lossy(&listing)),
+        Ok(_) => {
+            tracing::warn!("permissions: /sbin/mount gave no mount table");
+            Vec::new()
+        }
+        Err(error) => {
+            tracing::warn!(%error, "permissions: /sbin/mount did not start");
+            Vec::new()
+        }
+    }
+}
+
 /// The OS itself.
 pub(super) struct SystemProbe;
 
@@ -174,7 +195,7 @@ impl Probe for SystemProbe {
         let ran = run(Path::new("/bin/ls"), &[folder.as_os_str()], None).map_err(|error| {
             HostError::new(
                 ErrorCode::Internal,
-                format!("the Documents listing did not start: {error}"),
+                format!("the folder's listing did not start: {error}"),
             )
         })?;
         // `ls` exits 1 with "Operation not permitted" when macOS refuses.
@@ -183,5 +204,13 @@ impl Probe for SystemProbe {
 
     fn read_keychain(&self, item: &KeychainItem) -> bool {
         read(&item.service, &item.account)
+    }
+
+    fn mounts(&self) -> Vec<Mount> {
+        if cfg!(target_os = "macos") {
+            mount_table()
+        } else {
+            Vec::new()
+        }
     }
 }

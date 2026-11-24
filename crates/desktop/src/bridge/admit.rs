@@ -271,7 +271,7 @@ fn picked_skill(bridge: &Bridge, path: &str) -> Result<(), HostError> {
 }
 
 fn picked(bridge: &Bridge, folder: FolderRefId) -> Result<(), HostError> {
-    if lock(&bridge.issued).contains(&folder) {
+    if lock(&bridge.issued).contains_key(&folder) {
         Ok(())
     } else {
         Err(invalid(format!(

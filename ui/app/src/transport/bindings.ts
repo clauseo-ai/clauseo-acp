@@ -84,6 +84,13 @@ export const commands = {
 	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
 	 */
 	display: string,
+	/**
+	 *  macOS: the permission the folder's place needs, asked for at the pick
+	 *  (`permissions/pick.rs`); `null` when none is needed, and always on Windows and Linux.
+	 *  Optional in the TypeScript types only, so the UI's folder fixtures stay valid; the wire
+	 *  always carries it.
+	 */
+	permission?: PermissionId | null,
 } | null, HostError>(__TAURI_INVOKE("pick_folder", { start })),
 	/**
 	 *  [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
@@ -140,6 +147,13 @@ export const commands = {
 	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
 	 */
 	display: string,
+	/**
+	 *  macOS: the permission the folder's place needs, asked for at the pick
+	 *  (`permissions/pick.rs`); `null` when none is needed, and always on Windows and Linux.
+	 *  Optional in the TypeScript types only, so the UI's folder fixtures stay valid; the wire
+	 *  always carries it.
+	 */
+	permission?: PermissionId | null,
 } | null, HostError>(__TAURI_INVOKE("chooser_choose", { chooser })),
 	/**  Closes the chooser session; `command.invalid` when it is not open. */
 	chooserCancel: (chooser: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_cancel", { chooser })),
@@ -246,10 +260,12 @@ export const commands = {
 	permissions: () => typedError<PermissionRow[], HostError>(__TAURI_INVOKE("permissions")),
 	/**
 	 *  Asks for `id`, off the UI thread and as long as the OS's dialog stays up, and answers its
-	 *  row after. `command.invalid` for one `permissions` would not list now. Granted to `main` and
-	 *  `settings` alike: the OS prompt rises only when the lawyer presses Allow there.
+	 *  row after. `command.invalid` for one `permissions` would not list now. A pick-time id
+	 *  (`pick.rs`) asks for the folder `folder` names, which must be one `pick_folder` issued; any
+	 *  other id ignores `folder`. Granted to `main` and `settings` alike: the OS prompt rises only
+	 *  when the lawyer presses Allow there.
 	 */
-	askPermission: (id: PermissionId) => typedError<PermissionRow, HostError>(__TAURI_INVOKE("ask_permission", { id })),
+	askPermission: (id: PermissionId, folder: string | null) => typedError<PermissionRow, HostError>(__TAURI_INVOKE("ask_permission", { id, folder })),
 };
 
 /* Constants */
@@ -5059,7 +5075,20 @@ export type PermissionId =
 /**  macOS: reading Clauseo's own stored keys without a keychain dialog. */
 "keychain" | 
 /**  Windows: Defender's Controlled folder access, which blocks writes under Documents. */
-"controlled_folder_access";
+"controlled_folder_access" | 
+/**  macOS, at a pick: the picked folder is on the Desktop (`pick.rs`). Never listed. */
+"files_desktop" | 
+/**  macOS, at a pick: the picked folder is in Downloads. Never listed. */
+"files_downloads" | 
+/**  macOS, at a pick: the picked folder is on a removable volume. Never listed. */
+"files_removable" | 
+/**  macOS, at a pick: the picked folder is on a network volume. Never listed. */
+"files_network" | 
+/**
+ *  macOS, at a pick: the picked folder is in a cloud folder (iCloud Drive, a File Provider
+ *  one). Never listed.
+ */
+"files_cloud";
 
 /**  What a permission option does, as ACP v1 names it. */
 export type PermissionKind = 
@@ -5179,6 +5208,13 @@ export type PickedFolder = {
 	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
 	 */
 	display: string,
+	/**
+	 *  macOS: the permission the folder's place needs, asked for at the pick
+	 *  (`permissions/pick.rs`); `null` when none is needed, and always on Windows and Linux.
+	 *  Optional in the TypeScript types only, so the UI's folder fixtures stay valid; the wire
+	 *  always carries it.
+	 */
+	permission?: PermissionId | null,
 };
 
 /**

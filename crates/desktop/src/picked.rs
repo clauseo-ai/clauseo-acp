@@ -14,6 +14,8 @@ use std::path::Path;
 use clauseo_protocol::FolderRefId;
 use serde::Serialize;
 
+use crate::permissions::PermissionId;
+
 /// A folder the lawyer picked: the ref `CreateMatter` takes, and the path to show.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(specta::Type))]
@@ -24,6 +26,12 @@ pub(crate) struct PickedFolder {
     /// separator (`Documents/Acme`, `Documents\Acme` on Windows); otherwise the full path
     /// (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
     pub(crate) display: String,
+    /// macOS: the permission the folder's place needs, asked for at the pick
+    /// (`permissions/pick.rs`); `null` when none is needed, and always on Windows and Linux.
+    /// Optional in the TypeScript types only, so the UI's folder fixtures stay valid; the wire
+    /// always carries it.
+    #[cfg_attr(test, specta(optional))]
+    pub(crate) permission: Option<PermissionId>,
 }
 
 /// The folder as the window shows it. A folder under `home` is each part of the rest of its
