@@ -212,3 +212,112 @@ fn both_agents_make_a_clean_edit_when_asked_for_no_tracked_changes() {
     assert_eq!(approvals["UC-985"]["en"], LINE);
     assert!(approvals["UC-985"]["hi"].is_null());
 }
+
+/// Claude lists, searches and reads files with `Glob`, `Grep` and `Read`, never through a shell:
+/// once in Claude's text on every OS, with or without a working stetdoc, never in Codex's (its
+/// tools are others); "Working at scale" no longer reads the text copies with `cat` or `sed -n`;
+/// verbatim in `registry-uc-agents.tsx` and in its approvals file.
+#[test]
+fn claude_lists_and_reads_files_with_its_own_tools() {
+    use clauseo_profile::instructions::{CLAUDE_FILES, SCALE_CLAUDE};
+    const LINE: &str = "To list, search or read files in the matter folder or your notes folder, \
+                        use the Glob, Grep and Read tools. Do not use PowerShell or Bash commands \
+                        for listing, searching or reading files.";
+    assert_eq!(CLAUDE_FILES.trim(), LINE);
+    for shell_read in ["`cat`", "`sed -n`", "with your shell", "one grep or script"] {
+        assert!(!SCALE_CLAUDE.contains(shell_read), "{shell_read}");
+    }
+    let root = std::env::temp_dir().join("rules-claude-files");
+    for stetdoc in [false, true] {
+        let profile = launch_profile(&root).with_stetdoc_cli(stetdoc);
+        for macos in [false, true] {
+            let claude = profile.claude_instructions_for(macos);
+            let codex = profile.codex_instructions_for(macos);
+            assert_eq!(claude.matches(LINE).count(), 1, "{claude}");
+            assert!(!codex.contains("Glob, Grep and Read"), "{codex}");
+        }
+    }
+    let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/app");
+    let registry = std::fs::read_to_string(ui.join("src/review/registry-uc-agents.tsx")).unwrap();
+    assert!(registry.contains("\"UC-1200\""));
+    assert!(registry.contains(&serde_json::to_string(LINE).unwrap()));
+    let approvals =
+        std::fs::read_to_string(ui.join("copy-approvals/UC-claude-files.json")).unwrap();
+    let approvals: serde_json::Value = serde_json::from_str(&approvals).unwrap();
+    assert_eq!(approvals["UC-1200"]["en"], LINE);
+}
+
+/// Helpers on both agents, in the same one case (more than eight documents or about 300 pages,
+/// long papers only) or when the lawyer asks for them, at most six for one answer: Claude's
+/// "Working at scale" says so, and so does Codex's `AGENTS.md`, which is verbatim in
+/// `registry-uc-agents.tsx` and in its approvals file and in neither agent's instructions.
+#[test]
+fn both_agents_start_helpers_in_the_same_cases() {
+    use clauseo_profile::instructions::{SCALE_CLAUDE, codex_agents_md};
+    for part in [
+        "more than eight documents or about 300 pages read, or the lawyer asks for helpers:",
+        "Launch at most six helpers for one answer.",
+    ] {
+        assert_eq!(SCALE_CLAUDE.matches(part).count(), 1, "{part}");
+    }
+    let codex = codex_agents_md();
+    for part in [
+        "more than eight documents or about 300 pages read",
+        "longer than about 15,000 characters into 4 to 6 batches",
+        "Start each sub-agent fresh, without your conversation history (fork_turns=\"none\").",
+        "Start at most six sub-agents for one answer.",
+        "unless the lawyer asks for helpers in their message.",
+    ] {
+        assert_eq!(codex.matches(part).count(), 1, "{part}");
+    }
+    let root = std::env::temp_dir().join("rules-codex-agents");
+    let profile = launch_profile(&root);
+    for macos in [false, true] {
+        assert!(
+            !profile
+                .codex_instructions_for(macos)
+                .contains("sub-agents in one case")
+        );
+        assert!(
+            !profile
+                .claude_instructions_for(macos)
+                .contains("sub-agents in one case")
+        );
+    }
+    let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/app");
+    let registry = std::fs::read_to_string(ui.join("src/review/registry-uc-agents.tsx")).unwrap();
+    assert!(registry.contains("\"UC-1201\""));
+    assert!(registry.contains(&serde_json::to_string(codex).unwrap()));
+    let approvals =
+        std::fs::read_to_string(ui.join("copy-approvals/UC-claude-files.json")).unwrap();
+    let approvals: serde_json::Value = serde_json::from_str(&approvals).unwrap();
+    assert_eq!(approvals["UC-1201"]["en"], codex);
+}
+
+/// Both agents, every OS: unfinished work is reported as done and left, with an offer to go on
+/// (Codex at Low effort stopped part-way with "a partial list" and no offer, Windows run of 24
+/// Nov), and file repairs and format fixes count as mechanics the lawyer is not told about.
+#[test]
+fn both_agents_say_what_is_left_and_offer_to_continue() {
+    use clauseo_profile::instructions::LEGAL;
+    const LEFT: &str =
+        "If you stop short, say what is done and what is left, and offer to continue.";
+    assert_eq!(LEGAL.matches(LEFT).count(), 1);
+    assert_eq!(
+        LEGAL
+            .matches("mechanics (file repairs, format fixes)")
+            .count(),
+        1
+    );
+    let profile = launch_profile(&std::env::temp_dir().join("rules-left"));
+    for macos in [false, true] {
+        assert_eq!(
+            profile.claude_instructions_for(macos).matches(LEFT).count(),
+            1
+        );
+        assert_eq!(
+            profile.codex_instructions_for(macos).matches(LEFT).count(),
+            1
+        );
+    }
+}

@@ -1,0 +1,1 @@
+To list, search or read files in the matter folder or your notes folder, use the Glob, Grep and Read tools. Do not use PowerShell or Bash commands for listing, searching or reading files.

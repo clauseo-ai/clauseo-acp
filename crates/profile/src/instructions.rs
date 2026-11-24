@@ -157,6 +157,32 @@ pub fn claude_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CLAUDE_SHELL_MACOS.trim())
 }
 
+/// The line every Claude session gets after the instructions, on every OS: list, search and read
+/// files with Claude Code's `Glob`, `Grep` and `Read`, never through the shell. Claude Code
+/// 2.1.330 holds a `Bash` or `PowerShell` listing or read (`ls -R`, `cat`, `Get-ChildItem`)
+/// for its server's classifier in auto mode, which refused folder listings on Windows; `Glob`,
+/// `Grep` and `Read` in the matter and the notes folder ran with no classifier at all (stage D's
+/// probe, 24 Nov, 9 cases). The host offers all three on every OS (`agent::loads::tools`).
+pub const CLAUDE_FILES: &str = include_str!("../assets/instructions/claude-files.txt");
+
+/// [`CLAUDE_FILES`], trimmed.
+pub fn claude_files() -> &'static str {
+    CLAUDE_FILES.trim()
+}
+
+/// What a Codex session (the lawyer's `ChatGPT`) finds in `AGENTS.md` in Codex's home, written by
+/// the host at each launch: when to start sub-agents (helpers) and how. Codex delegates only when
+/// "the user or applicable AGENTS.md" asks, so the request is put there (stage C2's live runs,
+/// 24 Nov). The threshold is Claude's (more than eight documents or about 300 pages, long papers
+/// only, or when the lawyer asks), and at most six for one answer, as Claude's "Working at scale"
+/// says. It is not part of `developer_instructions`, so its own cap applies, not Codex's.
+pub const CODEX_AGENTS_MD: &str = include_str!("../assets/instructions/codex-agents.md");
+
+/// [`CODEX_AGENTS_MD`], trimmed: the file's text as the host writes it.
+pub fn codex_agents_md() -> &'static str {
+    CODEX_AGENTS_MD.trim()
+}
+
 /// Whether Claude's instructions end with the "Working at scale" part ([`claude_scale`]).
 /// Measured setting: arm C2f ran with it.
 pub const SHIP_WORKING_AT_SCALE: bool = true;

@@ -14,9 +14,12 @@ use super::{
     claude_launch_vars, session_meta,
 };
 
-/// What macOS and Linux offer, web or not; Windows offers the same without `Bash`.
-const EVERY_SYSTEM: [&str; 20] = [
+/// What macOS and Linux offer, web or not; Windows offers the same without `Bash`. `Glob` and
+/// `Grep` on every system: the instructions send listings, searches and reads to them.
+const EVERY_SYSTEM: [&str; 22] = [
     "Read",
+    "Glob",
+    "Grep",
     "Edit",
     "Write",
     "NotebookEdit",
@@ -94,15 +97,35 @@ fn macos_and_linux_offer_exactly_the_decided_tools() {
     assert_eq!(claude_tools(false, true), web);
 }
 
-/// Windows: the same without `Bash`, plus its shell and its search tools.
+/// Windows: the same without `Bash`, plus its shell.
 #[test]
 fn windows_offers_exactly_the_decided_tools() {
     let mut windows = EVERY_SYSTEM.to_vec();
     windows.retain(|name| *name != "Bash");
-    windows.extend(["PowerShell", "Glob", "Grep"]);
+    windows.push("PowerShell");
     assert_eq!(claude_tools(true, false), windows);
     windows.extend(["WebFetch", "WebSearch"]);
     assert_eq!(claude_tools(true, true), windows);
+}
+
+/// `Glob`, `Grep` and `Read` on every system, web or not: Claude's instructions send every
+/// listing, search and read of the matter to them (`clauseo_profile::instructions::CLAUDE_FILES`),
+/// and Claude Code 2.1.330 offers `Glob` and `Grep` on macOS and Linux only when `tools` names
+/// them.
+#[test]
+fn every_system_offers_glob_grep_and_read() {
+    for windows in [false, true] {
+        for web in [false, true] {
+            let tools = claude_tools(windows, web);
+            for name in ["Glob", "Grep", "Read"] {
+                assert_eq!(
+                    tools.iter().filter(|t| **t == name).count(),
+                    1,
+                    "{name}: {tools:?}"
+                );
+            }
+        }
+    }
 }
 
 /// Windows' one shell is `PowerShell`: its list names it and never `Bash`, web search on or off;
