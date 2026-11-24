@@ -378,6 +378,12 @@ fn tool_call_started(
         return;
     }
     state.index.tool_calls.insert(event.tool_call, seq);
+    // The turn's first script call puts the running turn in code mode.
+    if state.running == Some(event.turn) && clauseo_protocol::is_code_mode_call(&event.acp_id) {
+        update_header(state, "tool_call_started", out, |header| {
+            !std::mem::replace(&mut header.code_mode, true)
+        });
+    }
     let entry = ToolCallEntry {
         order: seq,
         tool_call: event.tool_call,

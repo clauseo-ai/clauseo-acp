@@ -2764,8 +2764,11 @@ export type HeaderEntry = {
 	/**  The effort its latest turn ran with, as `model`; `None` too for a model with no effort. */
 	effort?: NamedChoice,
 	/**
-	 *  Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
-	 *  as `false`, and `false` is left out.
+	 *  Whether the running (else the latest) turn is in code mode: set by the reducer at the
+	 *  turn's first script call (`ToolCallStarted` whose ACP id passes
+	 *  [`is_code_mode_call`](crate::is_code_mode_call)), cleared by the next `TurnStarted`. Each
+	 *  ended turn keeps its own mark on its step (`StepEntry::code_mode`). Missing reads as
+	 *  `false`, and `false` is left out.
 	 */
 	code_mode?: boolean,
 };
@@ -6991,6 +6994,11 @@ export type StepEntry = {
 	 *  not ended has no step; after a crash, start-up repair's `TurnEnded` gives the time.
 	 */
 	ts: Timestamp,
+	/**
+	 *  Whether the turn ran in code mode, from its `TurnEnded`: the answer shows "Code mode".
+	 *  False is written as a missing field, and a missing field reads as false.
+	 */
+	code_mode?: boolean,
 };
 
 /**  A step (a turn's changes) was undone. */
@@ -7367,8 +7375,11 @@ export type ThreadSummary = {
 	/**  The effort its latest turn ran with, as `model`; `None` too for a model with no effort. */
 	effort?: NamedChoice,
 	/**
-	 *  Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
-	 *  as `false`, and `false` is left out.
+	 *  Whether the running (else the latest) turn is in code mode: set by the reducer at the
+	 *  turn's first script call (`ToolCallStarted` whose ACP id passes
+	 *  [`is_code_mode_call`](crate::is_code_mode_call)), cleared by the next `TurnStarted`. Each
+	 *  ended turn keeps its own mark on its step (`StepEntry::code_mode`). Missing reads as
+	 *  `false`, and `false` is left out.
 	 */
 	code_mode?: boolean,
 };
@@ -7798,6 +7809,12 @@ export type TurnEnded = {
 	usage?: TurnUsage,
 	/**  The checkpoint taken after it; `None` when that failed, which is shown, never silent. */
 	checkpoint_after?: CheckpointId,
+	/**
+	 *  Whether it ran in code mode: it made a script call
+	 *  ([`is_code_mode_call`](crate::is_code_mode_call)). False is written as a missing field, and
+	 *  a missing field reads as false.
+	 */
+	code_mode?: boolean,
 };
 
 /**

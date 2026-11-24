@@ -226,6 +226,7 @@ pub fn turn_ended(turn: TurnId, checkpoint_after: CheckpointId) -> Fx<DomainEven
             cached_write: None,
         }),
         checkpoint_after: Some(checkpoint_after),
+        code_mode: false,
     }
     .into())
 }

@@ -143,6 +143,7 @@ fn a_failed_resume_clears_it_with_no_attach() {
         stop: clauseo_protocol::StopReason::Failed,
         checkpoint_after: Some(after),
         usage: None,
+        code_mode: false,
     };
     push(&mut log, &mut state, DomainEvent::TurnEnded(failed));
     assert_eq!(since(&state), None);

@@ -107,6 +107,7 @@ fn turn_events() -> Vec<DomainEvent> {
             stop: StopReason::EndTurn,
             usage: None,
             checkpoint_after: None,
+            code_mode: false,
         }),
     ]
 }
@@ -341,6 +342,7 @@ fn a_queued_prompt_taken_back_leaves_and_a_cancelled_running_turn_keeps_its_prom
             stop: StopReason::Cancelled,
             usage: None,
             checkpoint_after: None,
+            code_mode: false,
         })
     };
     let mut events = turn_events();

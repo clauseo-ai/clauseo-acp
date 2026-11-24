@@ -1,0 +1,13 @@
+{"scenario":"code-mode-turns","description":"Two turns: the first makes a script call (toolCallId toolu_cc_01, as Claude Code's code mode names them) and the second makes none","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"toolu_cc_01","title":"Run a script","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"toolu_cc_01","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Counted with a script."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Plain answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

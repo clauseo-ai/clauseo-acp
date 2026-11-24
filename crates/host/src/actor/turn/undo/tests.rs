@@ -50,6 +50,7 @@ fn log_beside(
         stop: StopReason::EndTurn,
         usage: None,
         checkpoint_after: Some(id::<CheckpointId>(6)),
+        code_mode: false,
     }));
     events
         .into_iter()

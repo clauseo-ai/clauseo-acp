@@ -339,6 +339,11 @@ pub struct TurnEnded {
     /// The checkpoint taken after it; `None` when that failed, which is shown, never silent.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checkpoint_after: Option<CheckpointId>,
+    /// Whether it ran in code mode: it made a script call
+    /// ([`is_code_mode_call`](crate::is_code_mode_call)). False is written as a missing field, and
+    /// a missing field reads as false.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub code_mode: bool,
 }
 
 /// A step (a turn's changes) was undone.
