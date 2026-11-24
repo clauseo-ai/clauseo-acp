@@ -34,6 +34,9 @@ pub(in super::super) struct InFlight {
     before: Option<Box<Before>>,
     /// The old agent's detach is in the commit.
     detach: bool,
+    /// The config and mode changes the switch held when its turn ended first: they run once
+    /// the commit returns, on the new agent when it is durable, else on the old one.
+    pub(super) held: Vec<Waiting>,
 }
 
 /// A thread's row and picks before a switch.
@@ -141,11 +144,12 @@ pub(super) fn commit(
             handoff: id,
             before,
             detach: detach.is_some() && !owed,
+            held: Vec::new(),
         });
     }
     let sent = out.send(actor, Then::Switched(turn));
     if sent.is_err() {
-        refused(actor, thread, turn);
+        let _no_turn_ended = refused(actor, thread, turn);
     }
     sent
 }
@@ -164,14 +168,15 @@ fn keep(
             id,
             text,
             settled: false,
+            went_out: std::rc::Rc::default(),
         });
     }
 }
 
 /// The switch's commit of `turn` was refused: the row and picks go back, its handover was never
 /// logged, and its turn's switch is back to before the commit. Whether the old agent's detach
-/// went with it.
-fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+/// went with it, and the changes held on the commit once its turn ended.
+fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (bool, Vec<Waiting>) {
     let in_flight = state(actor, thread).and_then(|state| {
         state
             .switch
@@ -187,7 +192,7 @@ fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
         switch.stage = Stage::Reading;
     }
     let Some(in_flight) = in_flight else {
-        return false;
+        return (false, Vec::new());
     };
     if let Some(before) = in_flight.before
         && let Some(entry) = actor.threads.get_mut(&thread)
@@ -196,7 +201,7 @@ fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
         entry.row = row;
         entry.picks = picks;
     }
-    in_flight.detach
+    (in_flight.detach, in_flight.held)
 }
 
 /// The switch's commit for `turn` returned. Durable: the new agent launches for the turn, the
@@ -227,24 +232,31 @@ pub(in super::super) fn committed(
             switched(actor, thread, turn);
         } else if let Some(InFlight {
             from,
-            handoff: Some(id),
+            handoff,
+            held,
             ..
         }) = in_flight
         {
-            tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch's turn ended before its commit; the next turn carries the handover");
-            if let Some(state) = state(actor, thread) {
-                state.switch.owed = Some(from);
+            if let Some(id) = handoff {
+                tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch's turn ended before its commit; the next turn carries the handover");
+                if let Some(state) = state(actor, thread) {
+                    state.switch.owed = Some(from);
+                }
+                settle::log(actor, thread, id, HandoffStatus::Failed);
             }
-            settle::log(actor, thread, id, HandoffStatus::Failed);
+            // Durable: the held changes run on the new agent.
+            super::release(actor, thread, held);
         }
         return;
     };
-    let detach = refused(actor, thread, turn);
+    let (detach, held) = refused(actor, thread, turn);
     if found {
         failure::on_store_failure(actor, thread, failed);
     } else if detach {
         agents::log_detach(actor, thread, DetachReason::Closed);
     }
+    // Refused: the row is back, so the changes held since the turn ended run on the old agent.
+    super::release(actor, thread, held);
 }
 
 /// `turn`'s switch is durable: the held changes, then the turn, wait for the new agent.

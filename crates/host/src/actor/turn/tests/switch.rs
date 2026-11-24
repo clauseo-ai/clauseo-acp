@@ -181,3 +181,41 @@ fn a_queued_switch_meeting_background_work_waits_held_then_switches() {
     assert_eq!(delivered, 1, "{log:?}");
     rig.finish();
 }
+
+/// A queued switch whose agent the settings no longer have when its turn starts (as after a
+/// restart that restored it, the settings changed meanwhile) goes back to the held queue
+/// unchanged; nothing is switched or launched.
+#[test]
+fn a_queued_switch_to_an_agent_gone_from_the_settings_waits_held() {
+    let mut rig = rig("switch-gone");
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    let turn = rig.current_turn(thread, TurnPhase::Accepting);
+    let gone = AgentId::new("removed-agent").unwrap();
+    if let Some(current) = rig
+        .actor
+        .threads
+        .get_mut(&thread)
+        .unwrap()
+        .turn
+        .current
+        .as_deref_mut()
+    {
+        current.switch = Some(switch::Switch::new(gone));
+    }
+    steps::on_accepted(&mut rig.actor, thread, turn);
+    assert!(rig.actor.threads[&thread].turn.current.is_none());
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [turn]);
+    assert!(
+        queue::queue_held(&rig.actor, thread),
+        "back in the held queue"
+    );
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
+    rig.settle_commits();
+    let log = rig.log(thread);
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        0
+    );
+    rig.finish();
+}
