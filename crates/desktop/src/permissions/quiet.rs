@@ -19,6 +19,13 @@
 //! is kept to the Ask's reads; the step's silent check waits it out ([`while_quiet`]). One Ask
 //! at a time: a second waits for the first.
 //!
+//! Never `kSecUseAuthenticationUISkip` for these reads instead: with it a would-ask item reads
+//! as NOT FOUND (`errSecItemNotFound`, which `keyring` maps to `NoEntry`), and the callers act
+//! on "no item": the case-law refresh deletes the credential and saves signed-out, the
+//! allow-list writes a new hash over the item, the desktop's key marker clears. With the switch
+//! the read fails with `errSecInteractionNotAllowed`, which `keyring` maps to `PlatformFailure`,
+//! an error every caller keeps apart from not-found (`codes.rs` keeps the two apart too).
+//!
 //! The switch sits behind [`Switch`], so its bookkeeping is tested anywhere; outside macOS it
 //! does nothing. Its changes are logged on a lifecycle target (host.log keeps them), never a
 //! value.
