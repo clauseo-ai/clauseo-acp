@@ -121,3 +121,39 @@ fn out_of_credit_passes_the_result_on_and_reports_the_payment() {
     agent.recv();
     assert_eq!(rig.events.take(), Vec::new());
 }
+
+/// Only an out-of-credit answer reports `OutOfCredit`, the event the host marks the thread by:
+/// a connector that can't be reached (its connection closes, or it answers 503) and a signed-out
+/// credential report none.
+#[test]
+fn unreachable_and_signed_out_report_no_out_of_credit() {
+    let rig = rig();
+    rig.sign_in();
+    let mut agent = rig.agent();
+    rig.fake.close_next("/mcp/case-law");
+    agent.send_value(&call(1, "search_law"));
+    agent.recv();
+    rig.fake.fail_next("/mcp/case-law", 503);
+    agent.send_value(&call(2, "search_law"));
+    agent.recv();
+    rig.fake.revoke_all();
+    agent.send_value(&call(3, "search_law"));
+    assert_eq!(error_text(&agent.recv()), texts::SIGNED_OUT);
+    let events = rig.events.take();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, RelayEvent::OutOfCredit { .. })),
+        "{events:?}"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            RelayEvent::CredentialEnded {
+                ended: CredentialEnd::SignedOut,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+}

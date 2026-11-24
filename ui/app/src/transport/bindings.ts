@@ -4682,6 +4682,13 @@ export type NoticeKind =
  *  thread.
  */
 "sandbox_off" | 
+/**
+ *  A Case Law call of this thread's agent (or of a helper it ran, through the same
+ *  session) was refused for lack of credit. Once a turn. It carries no pay link: the app
+ *  reads that, and whether credits came, from the connectors' state, so it can say
+ *  "ask again" once they do.
+ */
+"case_law_out_of_credit" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

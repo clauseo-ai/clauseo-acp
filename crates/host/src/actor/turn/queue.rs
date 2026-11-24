@@ -522,6 +522,7 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let turn = head.turn;
+    state.credit_told = false;
     state.current = Some(Box::new(Current::new(
         turn,
         head.message,

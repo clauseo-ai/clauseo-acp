@@ -308,6 +308,17 @@ fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
 
 /// One host `Notice` for each `NoticeKind`, with its fallback text, and a skill pack notice for
 /// each `PackSkipReason`, so the corpus holds every reason.
+/// The notice a thread gets when a Case Law call of its agent met an out-of-credit refusal.
+fn case_law_out_of_credit() -> Notice {
+    Notice {
+        level: NoticeLevel::Warning,
+        text: "Case Law is out of credits, so it couldn't search. Once credits are added, ask \
+               again to search case law."
+            .to_owned(),
+        kind: Some(NoticeKind::CaseLawOutOfCredit),
+    }
+}
+
 pub(super) fn notices() -> Vec<DomainEvent> {
     let mut notices = vec![
         Notice {
@@ -394,6 +405,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::SandboxOff),
         },
+        case_law_out_of_credit(),
     ];
     notices.extend(
         [
