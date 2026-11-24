@@ -1,9 +1,11 @@
 // The agent a new conversation runs, fixed at `create_thread` by its first message (HANDOFF item 9), and the plan name a
 // row shows for it. The order, first that is given (Rohan, 2026-11-02, HANDOFF item 9): the lawyer's choice in the
-// composer (R15's ListAgents gives the options); the plan used most in the matter, a tie going to the one used most
-// recently; in a matter with no conversation, the "Start new conversations with" setting (H7's default-agent key, which
-// U11 sets; not on the wire yet, so null today); else the fallback (DEFAULT_AGENT, or a listed agent when the host
-// doesn't list that one). A plan is counted by kind, not by agent id: `claude` and `claude-acp` are both Claude, so
+// composer (R15's ListAgents gives the options); then, since round 24, the matter's most
+// recent conversation's agent and the plan last asked with on this computer (agentFor gives
+// the whole order); the plan used most in the matter, a tie going to the one used most
+// recently, stays as a fallback, as do the "Start new conversations with" setting (H7's
+// default-agent key, not on the wire yet, so null today) and DEFAULT_AGENT (or a listed agent
+// when the host doesn't list that one). A plan is counted by kind, not by agent id: `claude` and `claude-acp` are both Claude, so
 // they count together, and the agent the matter runs is the one of the winning kind used most recently. Agent ids are
 // the settings' keys (`agents.<id>`), which R15 renamed from `claude` to `claude-acp`, so nothing here keys on an id
 // but DEFAULT_AGENT and the canonical ids, and the plan names go by the agent's kind (R15's `AgentSummary`), read off
@@ -51,6 +53,9 @@ const PLAN: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
 
 /** Each kind's canonical agent id: the one the plan option prefers when the host lists it. */
 const CANONICAL: Record<AgentKind, AgentId> = { claude: DEFAULT_AGENT, codex: "codex-acp" };
+
+/** A kind's canonical agent id: claude-acp, codex-acp. */
+export const canonicalAgent = (kind: AgentKind): AgentId => CANONICAL[kind];
 
 /** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
  * `claude`, Codex's `codex`), for an agent the list doesn't hold or lists with no kind (#154 gives a kind to
@@ -136,11 +141,33 @@ function fallbackOf(agents: readonly AgentSummary[]): AgentId {
 const ofKind = (kind: AgentKind, agents: readonly AgentSummary[], threads: readonly Used[]) =>
   choiceOf(kind, agents, threads) ?? (agents.length === 0 ? CANONICAL[kind] : undefined);
 
-/** The agent `create_thread` names. With the sign-in states heard (D-014, D-043), a new conversation never defaults to
- * a plan that isn't signed in while another is: the lawyer's choice; else the matter's plan, if signed in; else the
- * plan last asked with anywhere, if signed in and listed; else the setting, if signed in; else the only plan signed
- * in; else, with both or neither signed in, the order without sign-in (the matter's, the setting, Claude), so the gate
- * offers the sign-in. */
+/** The agent of the matter's most recent conversation (H6's last activity, else the newest): itself
+ * where the host lists it or lists nothing yet, else its kind's listed agent; null with no
+ * conversation, or one of no kind not listed. */
+function latestUsed(threads: readonly Used[], agents: readonly AgentSummary[]): AgentId | null {
+  let latest: Used | undefined;
+  for (const t of threads) if (latest === undefined || later(t, latest)) latest = t;
+  if (latest === undefined) return null;
+  if (agents.length === 0 || isListed(latest.agent, agents)) return latest.agent;
+  const kind = kindOf(latest.agent, agents);
+  return kind === undefined ? null : (choiceOf(kind, agents, threads) ?? null);
+}
+
+/** The agent `create_thread` names, first that applies (round 24's rule, after the Windows tester
+ * saw a new matter start on Claude after a restart):
+ * 1. the lawyer's choice in the draft;
+ * 2. the agent of the matter's most recent conversation (recent, not most used: a matter just moved
+ *    to ChatGPT stays there);
+ * 3. the plan last asked with on this computer, in any matter (plan-default.ts's lastPlan, which
+ *    the first sign-in seeds while none is kept, so on a new install it is the plan signed in to
+ *    first);
+ * 4. with sign-in states heard, the setting, then the only plan signed in;
+ * 5. else the order without sign-in (the matter's most used, the setting, Claude), so the gate
+ *    offers the sign-in.
+ * Steps 2 and 3 count only an agent the host lists (or, before the list, one with a kind) and, once
+ * sign-in states are heard, one signed in (D-014, D-043: never a plan signed out while another is
+ * in). Before any sign-in state is heard, as just after a restart, they count as they are: the kept
+ * plan shows, never a fall to Claude over it. */
 export function agentFor({
   chosen,
   setting = null,
@@ -150,21 +177,23 @@ export function agentFor({
   last = null,
 }: AgentInputs): AgentId {
   if (chosen !== null) return chosen;
-  const matter = mostUsed(threads, agents);
-  const plain = () => matter ?? setting ?? fallbackOf(agents);
-  if (signed === null) return plain();
-  const ok = (agent: AgentId | null): agent is AgentId => {
+  const usable = (agent: AgentId | null): agent is AgentId => {
     if (agent === null) return false;
     const kind = kindOf(agent, agents);
-    return (
-      kind !== undefined && signed.has(kind) && (agents.length === 0 || isListed(agent, agents))
-    );
+    if (kind === undefined || (agents.length > 0 && !isListed(agent, agents))) return false;
+    return signed === null || signed.has(kind);
   };
-  if (ok(matter)) return matter;
-  if (ok(last)) return last;
-  if (ok(setting)) return setting;
-  const ready = KINDS.filter((k) => signed.has(k)).flatMap((k) => ofKind(k, agents, threads) ?? []);
-  return ready.length === 1 && ready[0] !== undefined ? ready[0] : plain();
+  const recent = latestUsed(threads, agents);
+  if (usable(recent)) return recent;
+  if (usable(last)) return last;
+  if (signed !== null) {
+    if (usable(setting)) return setting;
+    const ready = KINDS.filter((k) => signed.has(k)).flatMap(
+      (k) => ofKind(k, agents, threads) ?? [],
+    );
+    if (ready.length === 1 && ready[0] !== undefined) return ready[0];
+  }
+  return mostUsed(threads, agents) ?? setting ?? fallbackOf(agents);
 }
 
 /** The plan of an agent's kind, "Claude" or "ChatGPT"; null for an agent of no kind, which has no plan to name. */
