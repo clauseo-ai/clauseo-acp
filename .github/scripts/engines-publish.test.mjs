@@ -297,6 +297,13 @@ test("the archived floor: the highest <lane>-<n>.json that verifies, and the pla
   const full = JSON.stringify(Array.from({ length: 100 }, (_, i) => ({ name: `other-${i}` })));
   assert.equal(await floor({ ...release(null, { 1: full, 2: names("engines-5.json") }), ...archive(5) }), 5);
   await assert.rejects(floor({ ...release("{}") }), /not a list/);
+  // At most 20 tries, highest first; archives with none of those verifying stop the plan.
+  const many = Array.from({ length: 25 }, (_, i) => i + 1);
+  const forged = Object.assign({}, ...many.slice(5).map((n) => archive(n, (text) => makeKey().sign(Buffer.from(text)))));
+  const manyRelease = release(names(...many.map((n) => `engines-${n}.json`)));
+  await assert.rejects(floor({ ...manyRelease, ...forged, ...archive(5) }), /^Error: 25 archived lists, none of the highest 20 verifies$/);
+  assert.equal(await floor({ ...manyRelease, ...forged, ...archive(6) }), 6);
+  await assert.rejects(floor({ ...release(names("engines-3.json")) }), /1 archived lists, none of the highest 20 verifies/);
   // In the plan: the floor is max(live, archived), and the seq goes one above it.
   const c = checkout(key);
   try {

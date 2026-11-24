@@ -14,8 +14,11 @@
 #   'refs/heads/main'` checks below live in the dispatched ref's own copy of this file, so a tag
 #   whose copy drops them would otherwise reach `release` (which allows tag:v*).
 #
-# BEFORE APPROVING publish, the approver checks in plan's job summary: the ref is
-# refs/heads/main; the commit is on main; the pins (versions), apps and seq are the merged ones.
+# BEFORE APPROVING publish, the approver reads the run's ref and commit from GitHub itself, in the
+# "Review deployments" dialog or the run page's header (code dispatched from another ref can print
+# anything, so plan's ref line is a convenience only): the ref must be refs/heads/main and the
+# commit on main. Then, from plan's job summary: the pins (versions), apps, seq and sha256 are the
+# merged ones.
 #
 # - By hand only (workflow_dispatch), on main of clauseo-ai/clauseo-acp only (a fork's copy does
 #   nothing). Never on a push or a pull request. After an engine bump (engine-watch.yml) merges,
@@ -30,7 +33,7 @@
 #   new seq must be above the floor and at most 2^16 above it (the verifier's ceiling); plan prints the choice and why, and publish re-downloads the live list
 #   right before signing and refuses if it is not the one plan saw. rollback_to=<n> publishes the archived <lane>-<n>.json
 #   again (its signature checked under the lane's key; its apps, pins and sizes kept) with seq =
-#   live + 1 and generated = now.
+#   floor + 1 and generated = now.
 # - Two jobs. `plan` (no environment, no secret, contents: read) builds and self-checks
 #   engines.json, prints what will be signed to the job summary (seq old -> new, versions, apps,
 #   commit, sha256, the whole file) and hands the file on as an artifact. `publish` is the only
@@ -58,7 +61,7 @@ on:
         options: [engines, engines-test]
         default: engines
       rollback_to:
-        description: "Publish the archived list of this seq again, as live + 1 (empty: the list from main)"
+        description: "Publish the archived list of this seq again, as floor + 1 (empty: the list from main)"
         type: string
         required: false
         default: ""

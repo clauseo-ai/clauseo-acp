@@ -50,6 +50,8 @@ export const LANES = { engines: "release", "engines-test": "release-test" };
 export const MAX_SEQ = 2 ** 32;
 /** How far above the floor a list's seq may be (crates/engines refuses seq > floor + 2^16). */
 export const MAX_STEP = 2 ** 16;
+/** How many archived lists, highest first, plan tries before it gives up on the floor. */
+export const MAX_ARCHIVE_TRIES = 20;
 export const REGISTRY = "https://registry.npmjs.org/";
 export const DEPENDENCIES = ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"];
 export const OVERRIDES = ["@openai/codex"];
@@ -227,7 +229,8 @@ const apiHeaders = (token) => ({ accept: "application/vnd.github+json", ...(toke
 const API = (repo) => `https://api.github.com/repos/${repo}`;
 
 /** The highest n whose archived <lane>-<n>.json and .sig verify (the lane's key, the exact trusted
- * comment, the self-check, seq n), trying from the highest down; null when none does. An older
+ * comment, the self-check, seq n), trying the highest MAX_ARCHIVE_TRIES from the top down; null when
+ * there are no archives, and an error when there are and none of those verifies. An older
  * signed list can't then be published again over a newer one that only the archive still holds. */
 export async function archivedFloor(fetchImpl, repo, lane, pubkey, token) {
   const headers = apiHeaders(token);
@@ -246,7 +249,8 @@ export async function archivedFloor(fetchImpl, repo, lane, pubkey, token) {
     }
     if (assets.length < 100) break;
   }
-  for (const n of seqs.sort((a, b) => b - a)) {
+  seqs.sort((a, b) => b - a);
+  for (const n of seqs.slice(0, MAX_ARCHIVE_TRIES)) {
     const [json, sig] = await Promise.all([`${lane}-${n}.json`, `${lane}-${n}.json.sig`].map((f) => getText(fetchImpl, assetUrl(repo, lane, f))));
     if (json === null || sig === null || engineSignatureProblems(Buffer.from(json), sig, pubkey).length) continue;
     try {
@@ -255,6 +259,7 @@ export async function archivedFloor(fetchImpl, repo, lane, pubkey, token) {
       // not a list that verifies: try the next one down
     }
   }
+  if (seqs.length) throw new Error(`${seqs.length} archived lists, none of the highest ${MAX_ARCHIVE_TRIES} verifies`);
   return null;
 }
 
