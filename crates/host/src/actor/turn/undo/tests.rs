@@ -1,7 +1,5 @@
 //! The step `UndoStep` and `PreviewUndo` read from a thread's log: the answer's card is its
-//! `only`.
-
-use std::collections::BTreeSet;
+//! `only`, change by change.
 
 use clauseo_protocol::{
     ChangeKind, CheckpointId, ContentId, Count, DomainEvent, Envelope, EventId, FileChange,
@@ -74,11 +72,10 @@ fn the_card_in_the_log_is_the_steps_only() {
         )
         .unwrap(),
     ];
-    let step = step_of(&log(turn, Some(files)), turn).unwrap();
+    let step = step_of(&log(turn, Some(files.clone())), turn).unwrap();
     assert_eq!(step.before, id::<CheckpointId>(5));
     assert_eq!(step.after, id::<CheckpointId>(6));
-    let card: BTreeSet<MatterPath> = [path("a.docx"), path("b.docx")].into();
-    assert_eq!(step.only, Some(card));
+    assert_eq!(step.only, Some(files));
 }
 
 #[test]

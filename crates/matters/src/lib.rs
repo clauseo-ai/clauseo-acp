@@ -186,7 +186,7 @@ pub use rules::is_excluded_path;
 pub use scan::scan;
 pub use trash::{FolderTrash, OsTrash, Removals, Trash, TrashError};
 pub use types::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
+    Card, Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,
     NewMatter, Progress, ReplaceFile, Replaced, Restore, RestoreFiles, RestorePlan, Restored,
     Retention, ScanReport, Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,

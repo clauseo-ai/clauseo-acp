@@ -15,7 +15,9 @@ use crate::history::{HistoryStore, Oid};
 use crate::no_download::NoDownload;
 use crate::skip_record::SkipRecord;
 use crate::stat::{CacheEntry, EntryState, Stat, find_by_path};
-use crate::types::{Checkpoint, CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
+use crate::types::{
+    Card, Checkpoint, CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone,
+};
 use crate::writeback::{self, Names, Op, skipped, writable};
 use crate::{Error, locks, rules};
 
@@ -36,13 +38,14 @@ struct Step {
 /// Undo deletes a file only when it is known to have been absent when the step began, and never
 /// writes over one the step read for the first time: see [`kept_because`]. A step it may not
 /// undo gets no operation and is kept ([`Step::unversioned`]). Modified and deleted files have
-/// earlier blobs and are put back as ever. With `only`, the step is its changes to those paths.
+/// earlier blobs and are put back as ever. With `only`, the step is limited to the card:
+/// [`changes_of`].
 fn step(
     core: &Core,
     folder: &Path,
     settings: &Settings,
     (before, after): (CheckpointId, CheckpointId),
-    only: Option<&BTreeSet<MatterPath>>,
+    only: Option<Card<'_>>,
 ) -> Result<Vec<Step>, Error> {
     let mut changes = changes_of(core, before, after, only)?;
     let mut kept = Vec::with_capacity(changes.len());
@@ -107,19 +110,43 @@ fn step(
     Ok(steps)
 }
 
-/// The changes from `before` to `after`, only those whose path (a rename's new path) is in
-/// `only` when it is given: the papers on the answer's card, not another answer's made meanwhile.
+/// The changes from `before` to `after`, limited to the answer's card when `only` gives it.
+/// A change to a path on the card (a rename's new path) must be one the card holds, same kind
+/// and for a rename the same old path, else `NotOnCard`: the diff pairs a rename by content
+/// alone and may split the card's, which undone half would delete a file and write nothing. A
+/// change off the card is left out when another answer changed its path ([`Card::others`]),
+/// and is kept otherwise, as without a card: the card not counting it (a file grown over the
+/// cap is skipped there, deleted here) is no reason to undo less and report success.
 fn changes_of(
     core: &Core,
     before: CheckpointId,
     after: CheckpointId,
-    only: Option<&BTreeSet<MatterPath>>,
+    only: Option<Card<'_>>,
 ) -> Result<Vec<clauseo_protocol::FileChange>, Error> {
-    let mut changes = core.changes_between(before, after)?;
-    if let Some(only) = only {
-        changes.retain(|change| only.contains(change.path()));
+    let changes = core.changes_between(before, after)?;
+    let Some(card) = only else {
+        return Ok(changes);
+    };
+    let mut kept = Vec::with_capacity(changes.len());
+    for change in changes {
+        let path = change.path();
+        let mut on_card = card
+            .changes
+            .iter()
+            .filter(|listed| listed.path() == path)
+            .peekable();
+        if on_card.peek().is_some() {
+            if !on_card.any(|listed| listed.change() == change.change()) {
+                return Err(Error::NotOnCard { path: path.clone() });
+            }
+        } else if card.others.contains(path)
+            || matches!(change.change(), ChangeKind::Renamed { from } if card.others.contains(from))
+        {
+            continue;
+        }
+        kept.push(change);
     }
-    Ok(changes)
+    Ok(kept)
 }
 
 /// The paths the step added that hold the content of a file it took out of a folder the
@@ -207,7 +234,7 @@ pub(crate) fn edited_since(
     folder: &Path,
     settings: &Settings,
     (before, after): (CheckpointId, CheckpointId),
-    only: Option<&BTreeSet<MatterPath>>,
+    only: Option<Card<'_>>,
 ) -> Result<Vec<MatterPath>, Error> {
     let changes = changes_of(core, before, after, only)?;
     // The files `step` keeps are never undone, so never edited since for this.

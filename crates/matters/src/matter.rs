@@ -28,7 +28,7 @@ use crate::checkpoint::{Core, Named, Overlap, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
-    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, ReplaceFile,
+    Card, Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, ReplaceFile,
     Replaced, RestoreFiles, RestorePlan, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
     VersionFile,
 };
@@ -423,12 +423,13 @@ impl Matter {
 
     /// The files the step from `before` to `after` changed whose content now differs from
     /// `after` (edited since), sorted: the list for "Undo anyway" or "Keep current". With
-    /// `only`, as for [`UndoRequest::only`], the step's files are those of `only`.
+    /// `only`, the step is limited to the answer's card as for [`UndoRequest::only`], and a
+    /// change on the card the step does not hold as the card says fails with `NotOnCard`.
     pub fn edited_since(
         &mut self,
         before: CheckpointId,
         after: CheckpointId,
-        only: Option<&BTreeSet<MatterPath>>,
+        only: Option<Card<'_>>,
     ) -> Result<Vec<MatterPath>, Error> {
         json::check(&self.folder, self.id)?;
         undo::edited_since(

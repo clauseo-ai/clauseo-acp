@@ -28,6 +28,7 @@ fn variant(err: &Error) -> &'static str {
         Error::DuplicateCheckpoint { .. } => "DuplicateCheckpoint",
         Error::MissingDecision { .. } => "MissingDecision",
         Error::UnexpectedDecision { .. } => "UnexpectedDecision",
+        Error::NotOnCard { .. } => "NotOnCard",
         Error::UnknownFile { .. } => "UnknownFile",
         Error::DuplicateFile { .. } => "DuplicateFile",
         Error::NoFilesChosen => "NoFilesChosen",
@@ -46,7 +47,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 20] {
+fn hand_built() -> [(Error, ErrorCode); 21] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -111,6 +112,10 @@ fn hand_built() -> [(Error, ErrorCode); 20] {
         ),
         (
             Error::UnexpectedDecision { path: path("a") },
+            ErrorCode::CommandInvalid,
+        ),
+        (
+            Error::NotOnCard { path: path("a") },
             ErrorCode::CommandInvalid,
         ),
         (
