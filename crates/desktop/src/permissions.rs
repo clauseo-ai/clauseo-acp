@@ -10,10 +10,11 @@
 //!   Clauseo, and the grant covers every process Clauseo starts.
 //! - macOS `keychain`, when reading one of Clauseo's own keychain items would make macOS ask
 //!   (an item a build signed otherwise wrote): found out silently (`permissions/mac.rs`).
-//!   Keychain dialogs are off for the whole process from start (`permissions/quiet.rs`), so
-//!   asking is the only time one shows: it reads each such item with dialogs on, then the
-//!   agents' keys are read again. The row follows the check at every listing
-//!   (`permissions/keychain.rs`). Account names only, never a value.
+//!   Keychain dialogs are off in this process for its whole life (`permissions/quiet.rs`), so
+//!   asking is the only time one shows: a child process (`permissions/ask_child.rs`) reads
+//!   each such item with dialogs on, the row says `asking` meanwhile, then the check runs
+//!   again here and the row follows it (`permissions/keychain.rs`). Account names only, never
+//!   a value.
 //! - Windows `controlled_folder_access`, when Defender's Controlled folder access is on and
 //!   the matters folder is under a protected folder. What it blocks is the assistants' own tools
 //!   (the Windows VM's block, event 1123, named `powershell.exe`), not `Clauseo.exe`, so
@@ -29,6 +30,7 @@
 //! Linux lists none. The OS reads sit behind [`Probe`], so the rules are tested anywhere.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use clauseo_protocol::{ErrorCode, HostError};
@@ -38,14 +40,18 @@ use tauri::{AppHandle, Runtime, State};
 
 use crate::bridge::Bridge;
 use crate::open::AppData;
+use ask_child::AskResult;
 use clauseo_protocol::FolderRefId;
 pub(crate) use keychain::KeychainGranted;
-use keychain::{ask_keychain, keychain_row};
+use keychain::{ask_keychain, asking_row, keychain_row};
 use pick::Mount;
 pub(crate) use quiet::quiet_start;
 use store::{Answer, Asked, Store};
 use system::SystemProbe;
 
+pub(crate) mod ask_child;
+#[cfg(test)]
+mod ask_child_tests;
 #[cfg(any(target_os = "macos", test))]
 mod codes;
 #[cfg(any(windows, test))]
@@ -124,6 +130,8 @@ pub(crate) enum OsPermissionState {
     Blocking,
     /// Could not tell: a silent check failed in a way that says neither.
     Unknown,
+    /// Clauseo is asking now: the OS's dialog may be up (the keychain Ask's child runs).
+    Asking,
 }
 
 /// One row of the step.
@@ -140,6 +148,11 @@ pub(crate) struct PermissionRow {
     pub(crate) settings_path: Option<String>,
     /// More words: the keychain items concerned (service and account), or what else helps.
     pub(crate) note: Option<String>,
+    /// Whether this build has asked for it (the store): a keychain row that would ask after an
+    /// Ask is worded "choose Always Allow". Optional in the TypeScript types only, so the UI's
+    /// fixtures stay valid; the wire always carries it.
+    #[cfg_attr(test, specta(optional))]
+    pub(crate) asked: bool,
 }
 
 /// Where macOS lets the lawyer change Clauseo's access to Documents.
@@ -204,8 +217,11 @@ pub(crate) trait Probe: Send + Sync {
     fn protected_defaults(&self) -> Vec<PathBuf>;
     /// macOS: lists `folder` from a child process, as long as it takes; whether that worked.
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError>;
-    /// macOS: reads `item` with the dialog allowed; whether it read (or has gone).
-    fn read_keychain(&self, item: &KeychainItem) -> bool;
+    /// macOS: reads `items` in the keychain Ask's child process (`ask_child.rs`), which has
+    /// dialogs on, as long as it takes; each item's answer, never a value.
+    fn ask_keychain(&self, items: &[KeychainItem]) -> Result<Vec<AskResult>, HostError>;
+    /// Whether the keychain Ask's child runs now.
+    fn keychain_asking(&self) -> &AtomicBool;
     /// macOS: the mount table, for a picked folder's place; empty elsewhere.
     fn mounts(&self) -> Vec<Mount>;
 }
@@ -316,12 +332,17 @@ pub(crate) fn list(probe: &dyn Probe, asked: &Asked) -> Listing {
                 listing.rows.push(documents_row(&documents, state));
                 listing.documents = Some(documents);
             }
-            // Never inside an Ask's window, when a read would ask (`quiet.rs`).
-            let check = quiet::while_quiet(|| probe.keychain());
-            if let Some(row) = keychain_row(&check, asked.get(&PermissionId::Keychain).copied()) {
-                listing.rows.push(row);
+            let recorded = asked.get(&PermissionId::Keychain).copied();
+            if probe.keychain_asking().load(Ordering::SeqCst) {
+                // At once, while the Ask's child waits on the lawyer.
+                listing.rows.push(asking_row(recorded.is_some()));
+            } else {
+                let check = probe.keychain();
+                if let Some(row) = keychain_row(&check, recorded) {
+                    listing.rows.push(row);
+                }
+                listing.keychain = check.would_ask.into_iter().chain(check.unknown).collect();
             }
-            listing.keychain = check.would_ask.into_iter().chain(check.unknown).collect();
         }
         Platform::Windows => {
             if cfa_blocks(probe) {
@@ -361,7 +382,7 @@ pub(crate) fn ask(
             keep(store, id, answer);
             Ok(documents_row(&documents, answer.state()))
         }
-        PermissionId::Keychain => Ok(ask_keychain(probe, store, listing.keychain, granted)),
+        PermissionId::Keychain => ask_keychain(probe, store, &listing.keychain, granted),
         PermissionId::ControlledFolderAccess => Ok(cfa_row()),
         PermissionId::FilesDesktop
         | PermissionId::FilesDownloads
@@ -396,6 +417,7 @@ fn documents_row(documents: &Path, state: OsPermissionState) -> PermissionRow {
         folder: Some(documents.display().to_string()),
         settings_path: (state == OsPermissionState::Denied).then(|| FILES_SETTINGS.to_owned()),
         note: None,
+        asked: state != OsPermissionState::NotAsked,
     }
 }
 
@@ -431,6 +453,7 @@ fn cfa_row() -> PermissionRow {
         folder: None,
         settings_path: Some(CFA_SETTINGS.to_owned()),
         note: Some(CFA_NOTE.to_owned()),
+        asked: false,
     }
 }
 
@@ -554,8 +577,11 @@ impl<P: Probe> Probe for ReadOnce<P> {
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
         self.probe.list_folder(folder)
     }
-    fn read_keychain(&self, item: &KeychainItem) -> bool {
-        self.probe.read_keychain(item)
+    fn ask_keychain(&self, items: &[KeychainItem]) -> Result<Vec<AskResult>, HostError> {
+        self.probe.ask_keychain(items)
+    }
+    fn keychain_asking(&self) -> &AtomicBool {
+        self.probe.keychain_asking()
     }
     fn mounts(&self) -> Vec<Mount> {
         self.probe.mounts()

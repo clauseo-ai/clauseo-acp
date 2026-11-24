@@ -6,11 +6,12 @@
 //! - [`accounts`] lists a service's items by their attributes only (`SecItemCopyMatching` with
 //!   `kSecReturnAttributes` and `kSecMatchLimitAll`), which never asks.
 //! - [`silent_read`] reads one item's data plainly, with keychain dialogs off for the whole
-//!   process (`quiet.rs`): a would-ask item fails with `errSecInteractionNotAllowed` instead of
-//!   asking (`codes.rs` maps the answer). No `kSecUseAuthenticationUISkip`: it covers only
-//!   items that need authentication, not another build's access list, whose read still asked.
-//! - [`read`] reads one item for the step's Ask, which runs its reads in
-//!   `quiet::with_dialogs_allowed`, so macOS's dialog shows then and only then.
+//!   process (`quiet.rs`): a would-ask item fails (`errSecAuthFailed`, probed on a Mac)
+//!   instead of asking (`codes.rs` maps the answer). No `kSecUseAuthenticationUISkip`: it
+//!   covers only items that need authentication, not another build's access list, whose read
+//!   still asked; and it reads a would-ask item as not found, which callers act on.
+//! - [`read`] reads one item for the step's Ask, in the Ask's child process (`ask_child.rs`),
+//!   which has dialogs on: macOS's dialog shows there and only then.
 //!
 //! Every value read is zeroed at once and never logged; only result codes are logged.
 
@@ -82,24 +83,17 @@ pub(super) fn silent_read(service: &str, account: &str) -> Option<bool> {
     answer
 }
 
-/// Reads the item, waiting on macOS's dialog when the Ask turned dialogs on (`quiet.rs`):
-/// whether it read, or has gone (nothing left to ask for). A refusal or a cancel is logged by
-/// code.
-pub(super) fn read(service: &str, account: &str) -> bool {
+/// Reads the item in the Ask's child, waiting on macOS's dialog: `Ok(true)` it read (the value
+/// zeroed at once), `Ok(false)` it has gone (nothing left to ask for), `Err(code)` refused,
+/// cancelled or failed. The child logs nothing; its answer says the code.
+pub(super) fn read(service: &str, account: &str) -> Result<bool, i32> {
     match generic_password(PasswordOptions::new_generic_password(service, account)) {
         Ok(mut value) => {
             value.zeroize();
-            true
+            Ok(true)
         }
-        Err(error) if error.code() == ITEM_NOT_FOUND => true,
-        Err(error) => {
-            tracing::info!(
-                service,
-                code = error.code(),
-                "permissions: keychain read refused"
-            );
-            false
-        }
+        Err(error) if error.code() == ITEM_NOT_FOUND => Ok(false),
+        Err(error) => Err(error.code()),
     }
 }
 

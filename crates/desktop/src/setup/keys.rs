@@ -447,11 +447,30 @@ async fn off_thread<T: Send + 'static>(
 
 /// The answer to a keychain error: its text names the agent and the kind, never the key.
 fn key_error(error: &KeyError) -> HostError {
-    let code = match error {
+    HostError::new(
+        key_error_code(error, cfg!(target_os = "macos")),
+        error.to_string(),
+    )
+}
+
+/// The code of a keychain error. A refusal of the keychain itself is `agent.key_denied`, the
+/// code the app ties to "if this computer asks for permission, choose Allow" (the permissions
+/// step's keychain row): `NoAccess` (`errSecNoStorageAccess`, as a delete of another build's
+/// item answers with dialogs off), and on macOS (`mac`) `PlatformFailure`'s kind, as a save
+/// over another build's item answers (its look-up refused with `errSecAuthFailed`, then its
+/// add with `errSecDuplicateItem`), probed on a Mac. A key the keychain refuses is
+/// `command.invalid`; anything else `internal`.
+fn key_error_code(error: &KeyError, mac: bool) -> ErrorCode {
+    match error {
         KeyError::Invalid { .. } => ErrorCode::CommandInvalid,
+        KeyError::NoAccess { .. } => ErrorCode::AgentKeyDenied,
+        KeyError::Keychain { kind, .. }
+            if mac && *kind == clauseo_agents::keys::PLATFORM_FAILURE =>
+        {
+            ErrorCode::AgentKeyDenied
+        }
         _ => ErrorCode::Internal,
-    };
-    HostError::new(code, error.to_string())
+    }
 }
 
 /// The answer to a save whose marker could not be written: `internal`, naming the agent and
@@ -473,5 +492,41 @@ fn error_kind(error: &KeyError) -> &'static str {
         KeyError::StoredInvalid { .. } => "stored_invalid",
         KeyError::NoAccess { .. } => "no_access",
         KeyError::Keychain { kind, .. } => kind,
+    }
+}
+
+#[cfg(test)]
+mod key_error_tests {
+    use clauseo_agents::keys::{KeyError, PLATFORM_FAILURE};
+    use clauseo_protocol::{AgentId, ErrorCode};
+
+    use super::key_error_code;
+
+    #[test]
+    fn a_keychain_that_refuses_a_save_or_a_delete_is_key_denied() {
+        let agent = AgentId::new("claude-acp").unwrap();
+        let refused_delete = KeyError::NoAccess {
+            agent: agent.clone(),
+        };
+        let refused_save = KeyError::Keychain {
+            agent: agent.clone(),
+            kind: PLATFORM_FAILURE,
+        };
+        assert_eq!(
+            key_error_code(&refused_delete, true),
+            ErrorCode::AgentKeyDenied
+        );
+        assert_eq!(
+            key_error_code(&refused_delete, false),
+            ErrorCode::AgentKeyDenied
+        );
+        assert_eq!(
+            key_error_code(&refused_save, true),
+            ErrorCode::AgentKeyDenied
+        );
+        // Elsewhere a platform failure says nothing about a refusal.
+        assert_eq!(key_error_code(&refused_save, false), ErrorCode::Internal);
+        let none = KeyError::NoKeychain { agent };
+        assert_eq!(key_error_code(&none, true), ErrorCode::Internal);
     }
 }

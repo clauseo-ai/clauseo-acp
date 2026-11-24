@@ -2,12 +2,15 @@
 //! Documents ask), and the macOS and Windows reads (`mac.rs`, `windows.rs`, the latter in this
 //! process), with nothing to read elsewhere.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Locations, PlatformDirs as _, SystemDirs, SystemEnv};
 
+use super::ask_child::{AskResult, FLAG, request_lines, results};
 use super::pick::{Mount, parse_mounts};
 use super::{Cfa, KeychainCheck, KeychainItem, Platform, Probe, cfa_from_layers};
 
@@ -17,19 +20,21 @@ type Ran = Option<(Option<i32>, Vec<u8>)>;
 /// The most of a child's stdout kept; the rest is read and dropped, so the child never stalls.
 const OUTPUT_MAX: u64 = 1024 * 1024;
 
-/// Runs `program args` through the process crate (its tree, `CREATE_NO_WINDOW` on Windows) and
-/// answers its exit code and stdout; `Ok(None)` when it outlasts `limit` (its tree is killed).
-/// Blocks: called on the commands' blocking thread.
+/// Runs `program args` through the process crate (its tree, `CREATE_NO_WINDOW` on Windows),
+/// writes `input` to its stdin and closes it, and answers its exit code and stdout; `Ok(None)`
+/// when it outlasts `limit` (its tree is killed). Blocks: called on the commands' blocking
+/// thread. The handle kills the tree when it drops, and desktop's exit stops every live tree.
 pub(super) fn run(
     program: &Path,
     args: &[&std::ffi::OsStr],
+    input: &[u8],
     limit: Option<Duration>,
 ) -> Result<Ran, clauseo_process::Error> {
     use std::pin::pin;
 
     use clauseo_process::{AsyncIoTimer, Launcher as _, Timer as _};
-    use futures::AsyncReadExt as _;
-    use futures::future::{Either, join3, select};
+    use futures::future::{Either, join4, select};
+    use futures::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let spec = clauseo_process::LaunchSpec::new(
         program.to_owned(),
@@ -39,6 +44,7 @@ pub(super) fn run(
     )?;
     let launcher = clauseo_process::PassthroughLauncher::new(clauseo_process::SpawnOptions::new());
     let clauseo_process::Launched {
+        mut stdin,
         mut stdout,
         stderr,
         mut handle,
@@ -52,7 +58,13 @@ pub(super) fn run(
                 futures::io::copy(&mut stdout, &mut futures::io::sink()).await?;
                 Ok::<_, std::io::Error>(out)
             };
-            let (read, drained, report) = join3(read, stderr.drain(), handle.exited()).await;
+            let write = async {
+                // A child that ends without reading it all closes the pipe: nothing to do.
+                let _closed = stdin.write_all(input).await;
+                let _closed = stdin.close().await;
+            };
+            let (read, drained, report, ()) =
+                join4(read, stderr.drain(), handle.exited(), write).await;
             drop(drained);
             (read.unwrap_or_default(), report.code())
         });
@@ -84,7 +96,9 @@ pub(crate) const KEYCHAIN_SERVICES: [&str; 4] = [
 ];
 
 #[cfg(target_os = "macos")]
-use super::mac::{accounts, read, silent_read};
+pub(super) use super::mac::read;
+#[cfg(target_os = "macos")]
+use super::mac::{accounts, silent_read};
 
 /// No keychain items to read outside macOS.
 #[cfg(not(target_os = "macos"))]
@@ -98,10 +112,10 @@ fn silent_read(_service: &str, _account: &str) -> Option<bool> {
     None
 }
 
-/// No keychain items to read outside macOS.
+/// No keychain to read outside macOS: `errSecUnimplemented`.
 #[cfg(not(target_os = "macos"))]
-fn read(_service: &str, _account: &str) -> bool {
-    false
+pub(super) fn read(_service: &str, _account: &str) -> Result<bool, i32> {
+    Err(-4)
 }
 
 #[cfg(windows)]
@@ -126,7 +140,7 @@ const MOUNT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Empty when it fails, exits non-zero or outlasts [`MOUNT_TIMEOUT`] (logged), so a pick then
 /// asks for no permission.
 fn mount_table() -> Vec<Mount> {
-    match run(Path::new("/sbin/mount"), &[], Some(MOUNT_TIMEOUT)) {
+    match run(Path::new("/sbin/mount"), &[], &[], Some(MOUNT_TIMEOUT)) {
         Ok(Some((Some(0), listing))) => parse_mounts(&String::from_utf8_lossy(&listing)),
         Ok(_) => {
             tracing::warn!("permissions: /sbin/mount gave no mount table");
@@ -138,6 +152,9 @@ fn mount_table() -> Vec<Mount> {
         }
     }
 }
+
+/// Whether the keychain Ask's child runs now (`keychain.rs`).
+static KEYCHAIN_ASKING: AtomicBool = AtomicBool::new(false);
 
 /// The OS itself.
 pub(super) struct SystemProbe;
@@ -195,7 +212,7 @@ impl Probe for SystemProbe {
     }
 
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
-        let ran = run(Path::new("/bin/ls"), &[folder.as_os_str()], None).map_err(|error| {
+        let ran = run(Path::new("/bin/ls"), &[folder.as_os_str()], &[], None).map_err(|error| {
             HostError::new(
                 ErrorCode::Internal,
                 format!("the folder's listing did not start: {error}"),
@@ -205,8 +222,30 @@ impl Probe for SystemProbe {
         Ok(matches!(ran, Some((Some(0), _))))
     }
 
-    fn read_keychain(&self, item: &KeychainItem) -> bool {
-        read(&item.service, &item.account)
+    fn ask_keychain(&self, items: &[KeychainItem]) -> Result<Vec<AskResult>, HostError> {
+        let failed =
+            |what: String| HostError::new(ErrorCode::Internal, format!("the keychain Ask {what}"));
+        let exe =
+            std::env::current_exe().map_err(|error| failed(format!("found no app: {error}")))?;
+        let input = request_lines(items);
+        // No limit: macOS's dialog may stay up as long as the lawyer leaves it.
+        let ran = run(&exe, &[OsStr::new(FLAG)], input.as_bytes(), None)
+            .map_err(|error| failed(format!("did not start: {error}")))?;
+        let Some((code, output)) = ran else {
+            return Err(failed("did not end".to_owned()));
+        };
+        let answers = results(&String::from_utf8_lossy(&output));
+        tracing::info!(
+            ?code,
+            items = items.len(),
+            answers = answers.len(),
+            "permissions: keychain Ask ended"
+        );
+        Ok(answers)
+    }
+
+    fn keychain_asking(&self) -> &AtomicBool {
+        &KEYCHAIN_ASKING
     }
 
     fn mounts(&self) -> Vec<Mount> {

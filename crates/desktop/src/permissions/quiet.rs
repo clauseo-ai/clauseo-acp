@@ -1,5 +1,6 @@
-//! The process-wide switch that keeps macOS's legacy keychain dialogs off, so none shows unless
-//! the lawyer pressed Allow in the permissions step.
+//! The process-wide switch that keeps macOS's legacy keychain dialogs off in the app's own
+//! process for its whole life, so none shows unless the lawyer pressed Allow in the permissions
+//! step.
 //!
 //! Clauseo's keychain items carry an access list naming the build that wrote them; a data read
 //! of another build's item (an ad hoc build signs differently every time) makes macOS ask
@@ -8,29 +9,27 @@
 //! allow-list hash at each host start, the MCP secrets at each launch, the step's own silent
 //! check. [`quiet_start`] turns keychain user interaction off for the whole process
 //! (`SecKeychainSetUserInteractionAllowed(false)` through security-framework's safe
-//! `SecKeychain::disable_user_interaction`), so each of those reads fails with
-//! `errSecInteractionNotAllowed` instead of asking, and the step's keychain row explains. A
-//! locked login keychain answers the same way, and the Ask covers it too: macOS then asks to
-//! unlock.
+//! `SecKeychain::disable_user_interaction`), so each of those reads fails instead of asking,
+//! and the step's keychain row explains. Probed on a Mac: the read fails with
+//! `errSecAuthFailed` (-25293), for another build's item and for a locked keychain alike
+//! (`codes.rs`).
 //!
-//! [`with_dialogs_allowed`] is the one way out: the step's Ask runs its reads inside it, with
-//! interaction on only for those reads and off again right after the last, even when one
-//! panics. Another thread's read in that moment could raise a dialog of its own, so the window
-//! is kept to the Ask's reads; the step's silent check waits it out ([`while_quiet`]). One Ask
-//! at a time: a second waits for the first.
+//! Nothing in this process turns dialogs back on. The step's Ask reads in a child process of
+//! its own (`ask_child.rs`), which starts with dialogs on: macOS's dialog shows there, and
+//! only while the lawyer's Ask runs; another thread of the app never meets dialogs on.
 //!
 //! Never `kSecUseAuthenticationUISkip` for these reads instead: with it a would-ask item reads
 //! as NOT FOUND (`errSecItemNotFound`, which `keyring` maps to `NoEntry`), and the callers act
 //! on "no item": the case-law refresh deletes the credential and saves signed-out, the
 //! allow-list writes a new hash over the item, the desktop's key marker clears. With the switch
-//! the read fails with `errSecInteractionNotAllowed`, which `keyring` maps to `PlatformFailure`,
-//! an error every caller keeps apart from not-found (`codes.rs` keeps the two apart too).
+//! the read fails with `errSecAuthFailed`, which `keyring`'s macOS store maps to
+//! `PlatformFailure` (only -25300 is `NoEntry`), an error every caller keeps apart from
+//! not-found (`codes.rs` keeps the two apart too).
 //!
 //! The switch sits behind [`Switch`], so its bookkeeping is tested anywhere; outside macOS it
 //! does nothing. Its changes are logged on a lifecycle target (host.log keeps them), never a
 //! value.
 
-use std::cell::Cell;
 use std::sync::Mutex;
 
 use crate::bridge::lock;
@@ -83,24 +82,15 @@ impl Switch for Os {
     }
 }
 
-/// The switch's state: the lock while dialogs are off, and the Ask's turn.
+/// The switch's state: the lock while dialogs are off (kept for the process's life).
 pub(crate) struct Quiet<S: Switch> {
-    /// Held while the dialogs are off.
     lock: Mutex<Option<S::Lock>>,
-    /// Held through an Ask's window, and by a silent check waiting one out.
-    turn: Mutex<()>,
-}
-
-thread_local! {
-    /// Whether this thread holds a [`Quiet`]'s turn: a nested call runs as part of it.
-    static HOLDS_TURN: Cell<bool> = const { Cell::new(false) };
 }
 
 impl<S: Switch> Quiet<S> {
     pub(crate) const fn new() -> Self {
         Self {
             lock: Mutex::new(None),
-            turn: Mutex::new(()),
         }
     }
 
@@ -125,48 +115,10 @@ impl<S: Switch> Quiet<S> {
         }
     }
 
-    /// Runs `work` with the dialogs on, then turns them off again, also when `work` panics.
-    /// One at a time; a call inside another's `work` runs as part of it.
-    pub(crate) fn with_dialogs_allowed<T>(&self, work: impl FnOnce() -> T) -> T {
-        if HOLDS_TURN.get() {
-            return work();
-        }
-        let _turn = lock(&self.turn);
-        // Declared after the turn, so dropped before it: off again while still this call's.
-        let _again = Again { quiet: self };
-        HOLDS_TURN.set(true);
-        drop(lock(&self.lock).take());
-        if S::REAL {
-            tracing::info!(target: TARGET, allowed = ?S::allowed(), "keychain dialogs on for the Ask");
-        }
-        work()
-    }
-
-    /// Runs `work` once no Ask's window is open, so its reads never meet the dialogs on.
-    pub(crate) fn while_quiet<T>(&self, work: impl FnOnce() -> T) -> T {
-        if HOLDS_TURN.get() {
-            return work();
-        }
-        let _turn = lock(&self.turn);
-        work()
-    }
-
     /// Whether the dialogs are off now, by this bookkeeping: the tests'.
     #[cfg(test)]
     pub(crate) fn is_quiet(&self) -> bool {
         lock(&self.lock).is_some()
-    }
-}
-
-/// Turns the dialogs off again when dropped: the end of an Ask's window, however it ends.
-struct Again<'a, S: Switch> {
-    quiet: &'a Quiet<S>,
-}
-
-impl<S: Switch> Drop for Again<'_, S> {
-    fn drop(&mut self) {
-        HOLDS_TURN.set(false);
-        self.quiet.start();
     }
 }
 
@@ -177,14 +129,4 @@ static QUIET: Quiet<Os> = Quiet::new();
 /// show unless the lawyer pressed Allow in the permissions step. Idempotent.
 pub(crate) fn quiet_start() {
     QUIET.start();
-}
-
-/// Runs `work` (the step's Ask) with keychain dialogs on, off again right after.
-pub(crate) fn with_dialogs_allowed<T>(work: impl FnOnce() -> T) -> T {
-    QUIET.with_dialogs_allowed(work)
-}
-
-/// Runs `work` (the step's silent check) once no Ask's window is open.
-pub(crate) fn while_quiet<T>(work: impl FnOnce() -> T) -> T {
-    QUIET.while_quiet(work)
 }

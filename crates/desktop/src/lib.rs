@@ -304,7 +304,7 @@ pub fn run() -> tauri::Result<()> {
         .setup(|app| {
             // Keychain dialogs off before any keychain read (the agents' keys, the host's): none
             // may show unless the lawyer pressed Allow in the permissions step. Another build's
-            // item reads errSecInteractionNotAllowed instead; the step's row explains (quiet.rs).
+            // item fails to read (errSecAuthFailed) instead; the step's row explains (quiet.rs).
             permissions::quiet_start();
             // A quit signal from here on stops the agents as the normal quit does.
             #[cfg(unix)]

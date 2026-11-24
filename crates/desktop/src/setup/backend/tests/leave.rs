@@ -199,7 +199,8 @@ fn main_s_first_key_whose_keychain_read_fails_leaves_the_reused_login_untouched(
     let setup = rig.setup();
     let send = setup.run(MAIN, command("set_agent_key", &codex(), &key));
     let error = rig.pumped(send).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::Internal);
+    // A refused keychain (`NoAccess`): the keychain-needs-OK case.
+    assert_eq!(error.code(), ErrorCode::AgentKeyDenied);
     assert_untouched(&rig);
     rig.keychain.fail_reads(false);
     assert_eq!(rig.keychain.load(&codex()).unwrap(), None, "nothing stored");

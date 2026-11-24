@@ -350,6 +350,7 @@ fn asking_for_a_picked_folder_grants_when_listing_it_works() {
             folder: Some("/Users/ada/Desktop/Acme".to_owned()),
             settings_path: None,
             note: None,
+            asked: true,
         }
     );
     assert_eq!(probe.asked(), vec!["/Users/ada/Desktop/Acme".to_owned()]);
