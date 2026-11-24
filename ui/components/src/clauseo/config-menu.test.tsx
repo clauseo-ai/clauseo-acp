@@ -115,23 +115,13 @@ test("a pointer's open moves no focus to a value", async () => {
   );
 });
 
-test("the default row: the trigger shows the name alone, the menu adds the quiet note after it", async () => {
-  const menu: ConfigMenu = {
-    ...menuOf("default"),
-    options: [
-      { value: "default", name: "Opus 5.5", note: "(default)" },
-      { value: "sonnet", name: "Sonnet 5.5" },
-    ],
-  };
-  const trigger = await mount(menu);
-  expect(trigger.textContent).toBe("Opus 5.5");
-  expect(trigger.getAttribute("aria-label")).toBe("Model: Opus 5.5");
+test("a menu on no value: the trigger says the menu's own name, never an id, and no row is ticked", async () => {
+  const trigger = await mount(menuOf(""));
+  expect(trigger.textContent).toBe("Model");
+  expect(trigger.getAttribute("aria-label")).toBe("Model");
   await act(async () => trigger.click());
   await settle();
-  const ticked = document.querySelector('[aria-checked="true"]')!;
-  expect(ticked.textContent).toBe("Opus 5.5 (default)");
-  expect(ticked.querySelector(".text-muted")?.textContent).toBe(" (default)");
-  expect(document.querySelector('[aria-checked="false"]')?.textContent).toBe("Sonnet 5.5");
+  expect(document.querySelector('[aria-checked="true"]')).toBeNull();
 });
 
 test("a polite live region says the value as the trigger names it each time it changes, never as it first shows", async () => {

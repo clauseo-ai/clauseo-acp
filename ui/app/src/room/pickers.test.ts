@@ -1,19 +1,58 @@
-// pickers.ts's rules: which of an agent's options the pickers show, the value a draft shows, and what create_thread
-// sends as config.
+// pickers.ts's rules: the models and efforts a draft or a conversation shows, the effort that follows a change of
+// model, and what create_thread (or a held plan's send_prompt) sends as config, under each agent's own keys.
 import { expect, test } from "vitest";
-import type { ConfigOption } from "../transport/protocol.ts";
+import type { AgentModels, ConfigOption } from "../transport/protocol.ts";
 import { menusOf } from "./config-menus.ts";
 import {
-  AGENT_DEFAULT_VALUE,
   draftConfig,
-  draftPickables,
   draftShown,
-  draftValue,
-  pickables,
-  resolvedDefault,
-  setOption,
-  takesEffort,
+  effortFor,
+  modelPick,
+  threadModels,
+  threadShown,
+  nextPicks,
+  configOf,
+  pickStands,
 } from "./pickers.ts";
+
+const level = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) });
+const LMH = ["low", "medium", "high"].map(level);
+
+/** Claude's, as the probe gives them: Opus takes three efforts, Fable two, Haiku none. */
+const CLAUDE: AgentModels = {
+  model_option: "model",
+  effort_option: "effort",
+  current_model: "opus",
+  current_effort: "high",
+  models: [
+    {
+      id: "opus",
+      name: "Opus 5.5",
+      description: "Most capable",
+      efforts: LMH,
+      default_effort: "medium",
+    },
+    {
+      id: "fable",
+      name: "Fable 5.2",
+      efforts: [level("low"), level("medium")],
+      default_effort: "medium",
+    },
+    { id: "haiku", name: "Haiku 5.5", efforts: [] },
+  ],
+};
+
+/** ChatGPT's, its effort under its own key. */
+const CODEX: AgentModels = {
+  model_option: "model",
+  effort_option: "reasoning_effort",
+  current_model: "gpt-6.2-sol",
+  current_effort: "medium",
+  models: [
+    { id: "gpt-6.2-sol", name: "gpt-6.2-sol", efforts: LMH, default_effort: "medium" },
+    { id: "gpt-6-luna", name: "gpt-6-luna", efforts: LMH, default_effort: "low" },
+  ],
+};
 
 const select = (id: string, category: string, current: string, values: string[]): ConfigOption =>
   ({
@@ -25,264 +64,183 @@ const select = (id: string, category: string, current: string, values: string[])
     },
   }) as ConfigOption;
 
-const MODEL = select("model", "model", "opus", ["opus", "sonnet", "haiku"]);
-const EFFORT = select("effort", "thought_level", "high", ["low", "medium", "high"]);
-const MODE = select("mode", "mode", "default", ["default", "plan"]);
-
-test("the model, then the effort; a mode, an option with no values and no options at all show nothing", () => {
-  expect(pickables([MODE, EFFORT, MODEL]).map((p) => p.id)).toEqual(["model", "effort"]);
-  expect(pickables([MODEL]).map((p) => p.category)).toEqual(["model"]);
-  expect(pickables([select("model", "model", "x", [])])).toEqual([]);
-  expect(pickables([MODE])).toEqual([]);
-  expect(pickables(undefined)).toEqual([]);
-  expect(pickables([])).toEqual([]);
-});
-
-test("a draft shows its pick, else the matter's remembered value, else the agent's; each only while offered", () => {
-  const [model] = pickables([MODEL]);
-  expect(draftValue(model!, "haiku", "sonnet")).toBe("haiku");
-  expect(draftValue(model!, undefined, "sonnet")).toBe("sonnet");
-  expect(draftValue(model!, "gone", "also-gone")).toBe("opus");
-  expect(draftValue(model!)).toBe("opus");
-});
-
-test("create_thread's config: none without a pick; a pick of the model alone keeps the remembered effort", () => {
-  const options = [MODEL, EFFORT, MODE];
-  expect(draftConfig(options, undefined, { model: "sonnet" })).toBeUndefined();
-  expect(draftConfig(options, {}, { model: "sonnet" })).toBeUndefined();
-  // a pick the options no longer offer is no pick
-  expect(draftConfig(options, { model: "gone" }, undefined)).toBeUndefined();
-  expect(draftConfig(options, { model: "haiku" }, { effort: "low" })).toEqual({
-    model: "haiku",
+test("a draft shows its pick, else the matter's remembered value, else what a new session starts on", () => {
+  expect(draftShown(CLAUDE, undefined, undefined)).toMatchObject({ model: "opus", effort: "high" });
+  expect(draftShown(CLAUDE, undefined, { model: "fable", effort: "low" })).toMatchObject({
+    model: "fable",
     effort: "low",
   });
-  // the pickers' options only: a remembered mode is the host's to apply, never sent from here
-  expect(draftConfig(options, { effort: "medium" }, { mode: "plan" })).toEqual({
+  expect(draftShown(CLAUDE, { model: "opus" }, { model: "fable", effort: "low" })).toMatchObject({
     model: "opus",
+    effort: "low",
+  });
+  // a remembered model the agent no longer offers: what a new session starts on
+  expect(draftShown(CLAUDE, undefined, { model: "retired" })).toMatchObject({ model: "opus" });
+  // no models yet: nothing to show, and nothing made up
+  expect(draftShown(undefined, { model: "opus" }, undefined)).toBeUndefined();
+  expect(draftShown({ ...CLAUDE, models: [] }, undefined, undefined)).toBeUndefined();
+});
+
+test("a change of model keeps the effort the new model takes, else takes that model's default", () => {
+  expect(effortFor(CLAUDE, "fable", "low")).toBe("low");
+  expect(effortFor(CLAUDE, "fable", "high")).toBe("medium");
+  expect(effortFor(CLAUDE, "haiku", "high")).toBe("");
+  const shown = draftShown(CLAUDE, undefined, undefined)!;
+  expect(modelPick(shown, "fable")).toEqual({ model: "fable", effort: "medium" });
+  expect(modelPick(shown, "haiku")).toEqual({ model: "haiku" });
+  const low = draftShown(CLAUDE, { effort: "low" }, undefined)!;
+  expect(modelPick(low, "fable")).toEqual({ model: "fable", effort: "low" });
+  // ChatGPT's effort goes under its own key
+  expect(modelPick(draftShown(CODEX, undefined, undefined)!, "gpt-6-luna")).toEqual({
+    model: "gpt-6-luna",
+    reasoning_effort: "medium",
+  });
+});
+
+test("create_thread's config: none without a pick; a pick of the model alone keeps the effort shown", () => {
+  expect(draftConfig(CLAUDE, undefined, { model: "fable" })).toBeUndefined();
+  expect(draftConfig(CLAUDE, {}, undefined)).toBeUndefined();
+  expect(draftConfig(CLAUDE, { model: "opus" }, { effort: "low" })).toEqual({
+    model: "opus",
+    effort: "low",
+  });
+  // a model that takes no effort sends none, even one remembered
+  expect(draftConfig(CLAUDE, { model: "haiku" }, { effort: "low" })).toEqual({ model: "haiku" });
+  expect(draftConfig(CODEX, { reasoning_effort: "high" }, undefined)).toEqual({
+    model: "gpt-6.2-sol",
+    reasoning_effort: "high",
+  });
+  expect(draftConfig(undefined, { model: "opus" }, undefined)).toBeUndefined();
+});
+
+test("every model the host sends is listed, in its order, a description only where the agent gives one", () => {
+  const many: AgentModels = {
+    ...CLAUDE,
+    models: Array.from({ length: 12 }, (_, i) => ({
+      id: `m${i}`,
+      name: `Model ${i}`,
+      efforts: LMH,
+    })),
+    current_model: "m11",
+  };
+  const [model, effort] = menusOf("en", draftShown(many, undefined, undefined)!, () => {});
+  expect(model!.options.map((o) => o.name)).toEqual(many.models.map((m) => m.name));
+  expect(model!.value).toBe("m11");
+  expect(effort!.options.map((o) => o.name)).toEqual(["Low", "Medium", "High"]);
+  const [claude] = menusOf("en", draftShown(CLAUDE, undefined, undefined)!, () => {});
+  expect(claude!.options.map((o) => o.description)).toEqual(["Most capable", undefined, undefined]);
+  // no seed words, no default note
+  const said = JSON.stringify(menusOf("en", draftShown(CLAUDE, undefined, undefined)!, () => {}));
+  for (const word of ["default", "Default"]) expect(said).not.toContain(word);
+});
+
+test("the effort menu follows the model shown, and is left out for a model that takes none", () => {
+  const fable = menusOf("en", draftShown(CLAUDE, { model: "fable" }, undefined)!, () => {});
+  expect(fable[1]!.options.map((o) => o.value)).toEqual(["low", "medium"]);
+  expect(fable[1]!.value).toBe("medium");
+  expect(menusOf("en", draftShown(CLAUDE, { model: "haiku" }, undefined)!, () => {})).toHaveLength(
+    1,
+  );
+});
+
+test("a conversation's models: its header's model option, each model's efforts from the agent's list", () => {
+  const options = [
+    select("mode", "mode", "default", ["default", "plan"]),
+    select("model", "model", "fable", ["opus", "fable", "new-one"]),
+    select("effort", "thought_level", "low", ["low", "medium"]),
+    select("fast", "other", "off", ["off", "on"]),
+  ];
+  const models = threadModels(options, CLAUDE)!;
+  expect(models.models.map((m) => m.id)).toEqual(["opus", "fable", "new-one"]);
+  expect(models.models[0]!.efforts).toEqual(LMH);
+  // a model the agent's list doesn't hold takes no efforts unless it is the current one
+  expect(models.models[2]!.efforts).toEqual([]);
+  expect(models).toMatchObject({
+    current_model: "fable",
+    current_effort: "low",
+    effort_option: "effort",
+  });
+  // no model option in the header: the agent's own list
+  expect(threadModels([], CLAUDE)).toBe(CLAUDE);
+  expect(threadModels([options[0]!], undefined)).toBeUndefined();
+});
+
+test("a conversation's line names the record, during and after a turn; the options only before any record", () => {
+  const options = [
+    select("model", "model", "opus", ["opus", "fable", "haiku"]),
+    select("effort", "thought_level", "high", ["low", "medium", "high"]),
+  ];
+  const ran = { model: { id: "fable", name: "Fable 5.2" }, effort: { id: "low", name: "Low" } };
+  expect(threadShown(options, CLAUDE, ran)).toMatchObject({ model: "fable", effort: "low" });
+  expect(threadShown(options, CLAUDE, { ...ran, running: true })).toMatchObject({
+    model: "fable",
+    effort: "low",
+  });
+  // before any record: the session's options; while a turn runs with none: nothing
+  expect(threadShown(options, CLAUDE, {})).toMatchObject({ model: "opus", effort: "high" });
+  expect(threadShown(options, CLAUDE, { running: true })).toMatchObject({ model: "", effort: "" });
+  // a turn that names its model only: no effort, never the last one
+  expect(threadShown(options, CLAUDE, { model: ran.model })).toMatchObject({
+    model: "fable",
+    effort: "",
+  });
+  // a model the list no longer holds, named as it ran
+  const gone = threadShown([], CLAUDE, { model: { id: "old", name: "Opus 4" } })!;
+  expect(gone.model).toBe("old");
+  expect(gone.models.models[0]).toEqual({ id: "old", name: "Opus 4" });
+  expect(threadShown([], undefined, ran)).toBeUndefined();
+});
+
+test("the next message's picks: the pick over the record, a picked model with the effort it takes", () => {
+  const shown = threadShown([], CLAUDE, {
+    model: { id: "opus", name: "Opus 5.5" },
+    effort: { id: "high", name: "High" },
+  })!;
+  expect(nextPicks(shown, null)).toEqual({ model: "opus", effort: "high" });
+  expect(nextPicks(shown, { effort: "low" })).toEqual({ model: "opus", effort: "low" });
+  // Fable has no High: its default
+  expect(nextPicks(shown, { model: "fable" })).toEqual({ model: "fable", effort: "medium" });
+  expect(configOf(CLAUDE, { model: "fable", effort: "medium" })).toEqual({
+    model: "fable",
     effort: "medium",
   });
+  expect(configOf(CODEX, { model: "gpt-6-luna", effort: "" })).toEqual({ model: "gpt-6-luna" });
+  expect(configOf(CLAUDE, { model: "", effort: "" })).toBeUndefined();
 });
 
-test("a pick in a conversation is set_config_option with a select value", () => {
-  expect(setOption("t-1", "model", "haiku")).toEqual({
-    set_config_option: { thread: "t-1", option_id: "model", value: { select: "haiku" } },
-  });
-});
-
-/** claude-agent-acp 0.89.1's shape (agent-options.json): a Default row on each, the model's naming what it resolves to
- * in its description, the effort's naming nothing. */
-const named = (
-  id: string,
-  category: string,
-  current: string,
-  values: [string, string, string?][],
-) =>
-  ({
-    id,
-    name: id,
-    category,
-    kind: {
-      select: {
-        current_value: current,
-        options: values.map(([value, name, description]) => ({
-          value,
-          name,
-          ...(description === undefined ? {} : { description }),
-        })),
-      },
-    },
-  }) as ConfigOption;
-const CLAUDE_MODEL = named("model", "model", "default", [
-  ["default", "Default (recommended)", "Opus 5.5"],
-  ["opus", "Opus 5.5", "For complex work and everyday tasks"],
-  ["sonnet", "Sonnet 5.5", "Most efficient for simpler tasks"],
-]);
-const CLAUDE_EFFORT = named("effort", "thought_level", "default", [
-  ["default", "Default"],
-  ["low", "Low"],
-  ["medium", "Medium"],
-]);
-const shownOf = (options: ConfigOption[], value?: string) => {
-  const menus = menusOf(
-    "en",
-    pickables(options),
-    (p) => value ?? p.current,
-    () => {},
-  );
-  return menus.map((m) => {
-    const o = m.options.find((x) => x.value === m.value)!;
-    return { name: o.name, note: o.note, description: o.description };
-  });
-};
-
-test("the default resolved: the agent's model by its own name, with (default) as the note and no description", () => {
-  const [model] = pickables([CLAUDE_MODEL]);
-  expect(resolvedDefault(model!)).toBe("Opus 5.5");
-  expect(shownOf([CLAUDE_MODEL])).toEqual([
-    { name: "Opus 5.5", note: "(default)", description: undefined },
-  ]);
-});
-
-test("the default unresolved: the agent's own name for it, with no note", () => {
-  const [effort] = pickables([CLAUDE_EFFORT]);
-  expect(resolvedDefault(effort!)).toBeUndefined();
-  expect(shownOf([CLAUDE_EFFORT])).toEqual([
-    { name: "Default", note: undefined, description: undefined },
-  ]);
-  // a Default row with an empty description names nothing either
-  const blank = named("model", "model", "default", [["default", "Default", " "]]);
-  expect(shownOf([blank])).toEqual([{ name: "Default", note: undefined, description: " " }]);
-});
-
-test("an explicit pick shows as the agent names it; the menu still marks the default row", () => {
-  expect(shownOf([CLAUDE_MODEL], "sonnet")).toEqual([
-    { name: "Sonnet 5.5", note: undefined, description: "Most efficient for simpler tasks" },
-  ]);
-  const [menu] = menusOf(
-    "en",
-    pickables([CLAUDE_MODEL]),
-    () => "sonnet",
-    () => {},
-  );
-  expect(menu!.options.map((o) => [o.name, o.note])).toEqual([
-    ["Opus 5.5", "(default)"],
-    ["Opus 5.5", undefined],
-    ["Sonnet 5.5", undefined],
-  ]);
-  // ChatGPT's values are all concrete, with no Default row: nothing is marked
-  expect(shownOf([MODEL, EFFORT])).toEqual([
-    { name: "opus", note: undefined, description: undefined },
-    { name: "high", note: undefined, description: undefined },
-  ]);
+test("a pick stands until a turn starts with it, or a pick_not_used comes after it; a turn ending leaves it", () => {
+  const pick = { model: "fable", effort: "low", notices: 4 };
+  const opus = { model: { id: "opus", name: "Opus" }, effort: { id: "high", name: "High" } };
+  expect(pickStands(pick, opus, 4)).toBe(true);
   expect(
-    menusOf(
-      "hi",
-      pickables([CLAUDE_MODEL]),
-      () => "default",
-      () => {},
-    )[0]!.options[0]!.note,
-  ).toBe("(डिफ़ॉल्ट)");
+    pickStands(
+      pick,
+      { model: { id: "fable", name: "Fable" }, effort: { id: "low", name: "Low" } },
+      4,
+    ),
+  ).toBe(false);
+  // the model taken, the effort not: it stands
+  expect(pickStands(pick, { model: { id: "fable", name: "Fable" }, effort: opus.effort }, 4)).toBe(
+    true,
+  );
+  expect(pickStands(pick, opus, 9)).toBe(false);
 });
 
-/** The host's seed before an agent's first session (seed.rs): each option's one choice the sentinel, named Default. */
-const seed = (id: string, category: string) =>
-  named(id, category, AGENT_DEFAULT_VALUE, [[AGENT_DEFAULT_VALUE, "Default"]]);
-const SEED_CLAUDE = [seed("model", "model"), seed("effort", "thought_level")];
-const SEED_CODEX = [seed("model", "model"), seed("reasoning_effort", "thought_level")];
-const seedShown = (options: ConfigOption[], plan?: string) =>
-  menusOf(
-    "en",
-    pickables(options),
-    (p) => p.current,
-    () => {},
-    undefined,
-    plan,
-  ).map((m) => [m.id, m.value, m.options.map((o) => [o.name, o.note, o.description])]);
-
-test("the seed's model reads as the plan's own default, its effort as the default effort", () => {
-  expect(seedShown(SEED_CLAUDE, "Claude")).toEqual([
-    ["model", AGENT_DEFAULT_VALUE, [["Claude's default", undefined, undefined]]],
-    ["effort", AGENT_DEFAULT_VALUE, [["Default effort", undefined, undefined]]],
-  ]);
-  expect(seedShown(SEED_CODEX, "ChatGPT")).toEqual([
-    ["model", AGENT_DEFAULT_VALUE, [["ChatGPT's default", undefined, undefined]]],
-    ["reasoning_effort", AGENT_DEFAULT_VALUE, [["Default effort", undefined, undefined]]],
-  ]);
-  // with no plan to name (a conversation's own menus never see the seed), the agent's name stands
-  expect(seedShown(SEED_CLAUDE)[0]![2]).toEqual([["Default", undefined, undefined]]);
-});
-
-test("create_thread's config never carries the seed's sentinel", () => {
-  const pick = { model: AGENT_DEFAULT_VALUE, effort: AGENT_DEFAULT_VALUE };
-  expect(draftConfig(SEED_CLAUDE, pick, undefined)).toBeUndefined();
-  expect(draftConfig(SEED_CLAUDE, {}, pick)).toBeUndefined();
-  expect(draftConfig(SEED_CODEX, { model: AGENT_DEFAULT_VALUE }, undefined)).toBeUndefined();
-  // a real pick beside a seeded option: only the real one goes
-  const mixed = [MODEL, seed("effort", "thought_level")];
-  expect(draftConfig(mixed, { model: "haiku" }, { effort: AGENT_DEFAULT_VALUE })).toEqual({
-    model: "haiku",
-  });
-});
-
-test("a seeded option the matter remembers a pick for shows no picker; the rest stand", () => {
-  const ids = (options: ConfigOption[], remembered?: Record<string, string>) =>
-    draftPickables(pickables(options), remembered).map((p) => p.id);
-  // the remembered model runs, so no "Claude's default" for it; the effort, not remembered, keeps its seed
-  expect(ids(SEED_CLAUDE, { model: "haiku" })).toEqual(["effort"]);
-  expect(ids(SEED_CODEX, { model: "gpt-5", reasoning_effort: "high" })).toEqual([]);
-  // nothing remembered: both seed menus, as they were
-  expect(ids(SEED_CLAUDE, undefined)).toEqual(["model", "effort"]);
-  expect(ids(SEED_CLAUDE, {})).toEqual(["model", "effort"]);
-  // the agent's own options and a remembered pick: unchanged
-  expect(ids([MODEL, EFFORT], { model: "haiku", effort: "low" })).toEqual(["model", "effort"]);
-});
-
-/** A model menu: each choice says if it takes an effort (takes_effort; missing means it does). */
-const withEffortFlags = (
-  current: string,
-  flags: Record<string, boolean | undefined>,
-): ConfigOption =>
-  ({
-    id: "model",
-    name: "model",
-    category: "model",
-    kind: {
-      select: {
-        current_value: current,
-        options: Object.entries(flags).map(([value, takes]) => ({
-          value,
-          name: value,
-          ...(takes === undefined ? {} : { takes_effort: takes }),
-        })),
-      },
-    },
-  }) as ConfigOption;
-const ids = (options: ConfigOption[], shown?: ReturnType<typeof draftShown>) =>
-  (shown ?? pickables(options)).map((p) => p.id);
-
-test("a model that takes no effort gives no effort picker; true or missing keeps it", () => {
-  expect(ids([withEffortFlags("haiku", { haiku: false }), EFFORT])).toEqual(["model"]);
-  expect(ids([withEffortFlags("opus", { opus: true }), EFFORT])).toEqual(["model", "effort"]);
-  expect(ids([withEffortFlags("opus", { opus: undefined }), EFFORT])).toEqual(["model", "effort"]);
-  // a flag on another model's choice is not this one's
-  expect(ids([withEffortFlags("opus", { opus: true, haiku: false }), EFFORT])).toEqual([
-    "model",
-    "effort",
-  ]);
-  expect(takesEffort(undefined)).toBe(true);
-  expect(takesEffort({ value: "haiku", name: "Haiku", takes_effort: false })).toBe(false);
-});
-
-test("the model the menu shows decides: a draft's pick, else the remembered, else the agent's", () => {
-  const options = [withEffortFlags("opus", { opus: true, haiku: false }), EFFORT];
-  // the draft's picked model takes none: no effort, though the agent's current one takes one
-  expect(ids(options, draftShown(options, { model: "haiku" }, undefined))).toEqual(["model"]);
-  // a pick of an effort-taking model shows it again, whatever the remembered model
-  expect(ids(options, draftShown(options, { model: "opus" }, { model: "haiku" }))).toEqual([
-    "model",
-    "effort",
-  ]);
-  // no pick: the remembered model decides
-  expect(ids(options, draftShown(options, undefined, { model: "haiku" }))).toEqual(["model"]);
-  expect(ids(options, draftShown(options, undefined, undefined))).toEqual(["model", "effort"]);
-  // a pick the options no longer offer is no pick: the remembered one, then the agent's
-  expect(ids(options, draftShown(options, { model: "gone" }, { model: "haiku" }))).toEqual([
-    "model",
-  ]);
-});
-
-test("the draft sends no effort for a model that takes none, even one picked or remembered", () => {
-  const options = [withEffortFlags("opus", { opus: true, haiku: false }), EFFORT];
-  expect(draftConfig(options, { model: "haiku", effort: "low" }, undefined)).toEqual({
-    model: "haiku",
-  });
-  // the remembered effort stays out too
-  expect(draftConfig(options, { model: "haiku" }, { effort: "low" })).toEqual({ model: "haiku" });
-  // an effort pick alone, over a model that takes none: nothing of the draft's to send
-  expect(draftConfig(options, { effort: "low" }, { model: "haiku" })).toBeUndefined();
-  // an effort-taking model sends its effort as before
-  expect(draftConfig(options, { model: "opus", effort: "low" }, undefined)).toEqual({
-    model: "opus",
-    effort: "low",
-  });
+test("an account's own list, as the host lists it: in its order, each by its name, ids never read", () => {
+  // another sign-in gets another list: a 1M-context Fable, and the host's order, not sorted by name or version
+  const account: AgentModels = {
+    model_option: "model",
+    effort_option: "effort",
+    current_model: "claude-fable-5-1[1m]",
+    current_effort: "medium",
+    models: [
+      { id: "claude-fable-5-1[1m]", name: "Fable 5.1 [1m]", efforts: LMH },
+      { id: "claude-opus-5-5", name: "Opus 5.5", efforts: LMH },
+      { id: "claude-haiku-5-5", name: "Haiku 5.5" },
+      { id: "claude-fable-5-1", name: "Fable 5.1", efforts: LMH },
+    ],
+  };
+  const [model] = menusOf("en", draftShown(account, undefined, undefined)!, () => {});
+  expect(model!.options).toEqual(account.models.map((m) => ({ value: m.id, name: m.name })));
+  expect(model!.value).toBe("claude-fable-5-1[1m]");
 });

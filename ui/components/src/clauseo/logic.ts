@@ -1,4 +1,5 @@
 // The room's small pieces of logic, apart from the DOM, so the tests can hold them.
+import type { ConfigMenu } from "./status-line.tsx";
 
 /* ---------- Citations show whole rows only ---------- */
 
@@ -69,3 +70,10 @@ export function settleCurve(base: number, measure: (weight: number, stretch: num
     return { w, s: Math.round(lo * 100) / 100 };
   });
 }
+
+/** The words a menu's trigger says: the value's name; the menu's own name while it stands on no value (an effort the
+ * model gives no value for), never an id. */
+export const menuName = (menu: ConfigMenu): string =>
+  menu.atRest ??
+  menu.options.find((o) => o.value === menu.value)?.name ??
+  (menu.value === "" ? menu.label : menu.value);

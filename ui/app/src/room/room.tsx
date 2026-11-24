@@ -234,7 +234,6 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
-  const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
     setup &&
@@ -374,6 +373,8 @@ function RoomFrame({
   const plan = planOfOpen === null ? "" : planLine(w.lang, planOfOpen, key ? openKind : undefined);
   // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
   const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
+  // a new conversation's model and effort, before its first question
+  const draftMenus = useDraftMenus(talks, conversations, open, w.lang, shield.required);
   // the tool line's room: the plan's name its words use, Settings, and the transport whose browser policy re-read it
   // offers (browser-policy.ts, made by the line's chunk once it is in)
   const toolRoom = useMemo(
@@ -598,6 +599,8 @@ function RoomFrame({
                                 choice={choice}
                                 menus={draftMenus}
                                 plan={plan}
+                                agents={talks.agents}
+                                sandboxRequired={shield.required}
                                 focus={talks.focus?.n ?? null}
                                 archived={talks.archived}
                                 onThread={matters.onThread}

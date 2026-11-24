@@ -136,6 +136,41 @@ export function downloadNameOf(kind: NoticeKind | undefined | null): string | nu
   return typeof name === "string" && name !== "" ? name : null;
 }
 
+/** The line for a pick the agent couldn't use (pick_not_used, sent once before the answer's turn starts): the agent by
+ * name, and what the answer ran with, the model and the effort as the agent names them, each left out when the
+ * session names none. The fields say what ran, not which pick failed, so the words name both picks. No agent known,
+ * or another kind: null, and the host's text shows. */
+function pickNotUsed(kind: NoticeKind, w: NoticeWords, agent?: AgentName): string | null {
+  const used =
+    typeof kind === "object" && kind !== null && "pick_not_used" in kind
+      ? (kind.pick_not_used as unknown)
+      : undefined;
+  const name = agentNameOf(agent);
+  if (typeof used !== "object" || used === null || name === null) return null;
+  const named = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? isolate(v) : null);
+  const model = "model" in used ? named(used.model) : null;
+  const effort = "effort" in used ? named(used.effort) : null;
+  if (model !== null && effort !== null)
+    return w.th(
+      "{name} couldn't use the model or effort you picked for this answer, so it used {model} at {effort} effort.",
+      { name, model, effort },
+    );
+  if (model !== null)
+    return w.th(
+      "{name} couldn't use the model or effort you picked for this answer, so it used {model}.",
+      { name, model },
+    );
+  if (effort !== null)
+    return w.th(
+      "{name} couldn't use the model or effort you picked for this answer, so it used {effort} effort.",
+      { name, effort },
+    );
+  return w.th(
+    "{name} couldn't use the model or effort you picked for this answer, so it kept the settings it had.",
+    { name },
+  );
+}
+
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. `agent`: the open conversation's agent
  * (useAgentPlan), named as the outside-matter stop names it (stops.ts). */
@@ -170,6 +205,8 @@ export function noticeLine(
   }
   const guard = kind === undefined ? null : guardBlocked(kind, w, agent);
   if (guard !== null) return guard;
+  const pick = kind === undefined ? null : pickNotUsed(kind, w, agent);
+  if (pick !== null) return pick;
   if (typeof kind === "string") {
     if (kind === "context_not_restored")
       return w.th(

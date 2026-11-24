@@ -5,7 +5,7 @@
 // model and effort wait with it.
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
-import type { ConfigOption } from "../../transport/protocol.ts";
+import type { AgentModels } from "../../transport/protocol.ts";
 import {
   A,
   AT,
@@ -29,26 +29,20 @@ const planButton = (name: string) =>
     (b) => b.textContent?.trim() === name,
   ) ?? null;
 
-const MODEL = {
-  id: "model",
-  name: "Model",
-  category: "model",
-  kind: {
-    select: {
-      current_value: "default",
-      options: [
-        { value: "default", name: "Default model" },
-        { value: "other", name: "Other model" },
-      ],
-    },
-  },
-} as ConfigOption;
+const MODELS: AgentModels = {
+  model_option: "model",
+  current_model: "opus",
+  models: [
+    { id: "opus", name: "Opus" },
+    { id: "sonnet", name: "Sonnet" },
+  ],
+};
 
 const CLAUDE_ONLY = [install(CLAUDE, READY), install(CODEX, READY), signIn(CLAUDE, SIGNED_IN)];
 
 test("ChatGPT chosen but not set up: one line, Set up ChatGPT, and Use Claude instead, which downloads nothing", async () => {
   const t = await mountFirstRun({
-    options: [MODEL],
+    models: MODELS,
     first: [...CLAUDE_ONLY, signIn(CODEX, { signed_out: {} })],
   });
   // Claude signed in: the field, the model menu

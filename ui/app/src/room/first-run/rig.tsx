@@ -12,7 +12,7 @@ import { OnlineSource, fakeOnline } from "../../transport/online.ts";
 import type {
   AgentId,
   CommandOutcome,
-  ConfigOption,
+  AgentModels,
   HostCommand,
   InstallProgress,
   MatterSummary,
@@ -137,8 +137,8 @@ export type RigOptions = {
   picked?: { folder: string; display: string } | null;
   /** The open matter's threads (list_threads); none by default. */
   threads?: ThreadSummary[];
-  /** The options each listed agent last reported (AgentSummary.config_options); none by default. */
-  options?: ConfigOption[];
+  /** The models each listed agent offers, as the host's probe fills them (AgentSummary.models); none by default. */
+  models?: AgentModels;
   /** What the window says of the network (navigator.onLine); offline unless a test says so, so a waiting install says
    * the offline words. setOnline changes it after. */
   online?: boolean;
@@ -203,7 +203,7 @@ async function mountRoom(o: RigOptions) {
       agents: () =>
         (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
           id,
-          ...(o.options === undefined ? {} : { config_options: o.options }),
+          ...(o.models === undefined ? {} : { models: o.models }),
           ...(id === CLAUDE
             ? { kind: "claude" as const }
             : id === CODEX

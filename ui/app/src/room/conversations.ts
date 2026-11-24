@@ -27,7 +27,14 @@ import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
-import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
+import type {
+  AgentId,
+  ConfigPicks,
+  MatterId,
+  MessageId,
+  ThreadId,
+  Timestamp,
+} from "../transport/protocol.ts";
 import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { rememberPlan } from "./plan-default.ts";
@@ -180,8 +187,9 @@ export class Conversations {
     this.#emit();
   }
 
-  /** The lawyer's model or effort pick in the draft (pickers.ts), for the plan it runs now: create_thread sends it. */
-  pick(option: string, value: string): void {
+  /** The lawyer's model or effort picks in the draft (pickers.ts), for the plan it runs now: create_thread sends
+   * them. A change of model comes with the effort the new model takes (pickers.ts's modelPick). */
+  pick(chosen: ConfigPicks): void {
     const m = this.#current;
     if (m === null || m.open === null || threadOf(m, m.open) !== null) return;
     const kind = this.#agents.kindOf(agentOf(m, this.#agents));
@@ -189,7 +197,7 @@ export class Conversations {
     m.draft ??= { key: m.open, shown: false, chosen: null };
     if (m.draft.key !== m.open) return;
     const picks = m.draft.picks ?? {};
-    m.draft.picks = { ...picks, [kind]: { ...picks[kind], [option]: value } };
+    m.draft.picks = { ...picks, [kind]: { ...picks[kind], ...chosen } };
     this.#emit();
   }
 

@@ -1,0 +1,92 @@
+{
+  "UC-1293": {
+    "en": "Loading models…",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's status line, in the model and effort menus' place, quiet words and no control, until the host's probe has filled the agent's models (a new conversation, a held plan, or a conversation with no session yet). Replaces the seed's \"{agent}'s default\" and \"Default effort\" (UC-874, UC-884, retired): no made-up default is shown"
+  },
+  "UC-1370": {
+    "en": "Couldn't read the models yet. You can still ask.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's status line, in the model and effort menus' place, quiet words and no control, while the host's probe of the agent's models failed or timed out and nothing fills them (AgentSummary.models_unread, true through the host's bounded retries). Ask stays enabled; the menus come once a probe or a session fills the models. Beside UC-1293's \"Loading models…\". New"
+  },
+  "UC-1372": {
+    "en": "Models show after your first message.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's status line, in the model and effort menus' place, quiet words and no control, where the firm requires the sandbox (ProtectionView.required): every usage read is refused there, so the host runs no probe and the models come with the first session. In place of \"Loading models…\", which would never end. Ask stays enabled. New"
+  },
+  "UC-1371": {
+    "en": "{name} couldn't use the model or effort you picked for this answer, so it used {model} at {effort} effort.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet notice row at the top of an answer whose model or effort pick (SendPrompt.config, create_thread's config or set_config_option) the agent couldn't use: the host's pick_not_used notice, sent once before the turn starts, naming what the answer ran with: the model and the effort. {name} is the agent, Claude or ChatGPT. The fields say what ran, not which pick failed, so the words name both picks. The status line shows the turn's record. Never an error. New"
+  },
+  "UC-1373": {
+    "en": "{name} couldn't use the model or effort you picked for this answer, so it used {model}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet notice row at the top of an answer whose model or effort pick (SendPrompt.config, create_thread's config or set_config_option) the agent couldn't use: the host's pick_not_used notice, sent once before the turn starts, naming what the answer ran with: the model only (the session names no effort). {name} is the agent, Claude or ChatGPT. The fields say what ran, not which pick failed, so the words name both picks. The status line shows the turn's record. Never an error. New"
+  },
+  "UC-1374": {
+    "en": "{name} couldn't use the model or effort you picked for this answer, so it used {effort} effort.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet notice row at the top of an answer whose model or effort pick (SendPrompt.config, create_thread's config or set_config_option) the agent couldn't use: the host's pick_not_used notice, sent once before the turn starts, naming what the answer ran with: the effort only (the session names no model). {name} is the agent, Claude or ChatGPT. The fields say what ran, not which pick failed, so the words name both picks. The status line shows the turn's record. Never an error. New"
+  },
+  "UC-1375": {
+    "en": "{name} couldn't use the model or effort you picked for this answer, so it kept the settings it had.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet notice row at the top of an answer whose model or effort pick (SendPrompt.config, create_thread's config or set_config_option) the agent couldn't use: the host's pick_not_used notice, sent once before the turn starts, naming what the answer ran with: neither (the session names none). {name} is the agent, Claude or ChatGPT. The fields say what ran, not which pick failed, so the words name both picks. The status line shows the turn's record. Never an error. New"
+  },
+  "UC-1376": {
+    "en": "Next message: {settings}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's status line in a conversation, quiet words after the model and effort menus, while the lawyer's pick differs from the turn's record the menus name (during an answer, or after one): the pick, which goes with the next message as SendPrompt.config, steers included; {settings} is the model and effort by the agent's names, \" · \" between (\"Next message: Opus 5.5 · High\"). It stays until a turn starts with the pick, or the host says the agent couldn't use it (pick_not_used). New"
+  },
+  "UC-1294": {
+    "en": "Code mode",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet tag on an answer that used Claude's code mode: at the answer's foot beside Copy, from its step (StepEntry.code_mode, kept across a reload), on every answer that used it; and while an answer runs, after the model and effort on the status line above the working line, only from the moment the header's code_mode turns true (the turn's first script call). Never before an answer has used it, and never in the composer at rest: Clauseo cannot promise code mode. New"
+  },
+  "UC-1295": {
+    "en": "Claude used code mode for this answer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "What assistive technology hears for the \"Code mode\" tag (UC-1294), at the answer's foot and on the status line while the answer runs; the visible word is hidden from it. New"
+  }
+}

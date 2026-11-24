@@ -82,7 +82,7 @@ export class AgentList {
   configFor(agent: AgentId, picks: DraftPicks | undefined, matter: MatterSummary | null) {
     const kind = this.kindOf(agent);
     if (kind === undefined) return undefined;
-    const options = this.agents.find((a) => a.id === agent)?.config_options;
-    return draftConfig(options, picks?.[kind], matter?.agent_prefs?.[kind]);
+    const models = this.agents.find((a) => a.id === agent)?.models;
+    return draftConfig(models, picks?.[kind], matter?.agent_prefs?.[kind]);
   }
 }
