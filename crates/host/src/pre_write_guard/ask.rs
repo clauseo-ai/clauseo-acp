@@ -14,7 +14,8 @@ use serde_json::Value;
 /// The tools that only read on this computer and change nothing: these alone go on unasked.
 /// `ToolSearch` only loads the schemas of Claude Code's deferred tools (a plan exit loads
 /// `ExitPlanMode`'s that way, live run of 2026-11-05); the tool it finds still asks when called.
-pub(crate) const LOCAL_READS: [&str; 8] = [
+/// `Yield` (Claude Code 2.1.330) only waits for the session's own background work to report.
+pub(crate) const LOCAL_READS: [&str; 9] = [
     "Read",
     "Glob",
     "Grep",
@@ -23,6 +24,7 @@ pub(crate) const LOCAL_READS: [&str; 8] = [
     "TodoWrite",
     "Task",
     "ToolSearch",
+    "Yield",
 ];
 
 /// What Claude Code is told when it must ask.
