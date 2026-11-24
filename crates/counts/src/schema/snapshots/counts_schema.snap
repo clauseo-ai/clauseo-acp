@@ -1572,7 +1572,9 @@ expression: counts_schema()
         "agent.start_unreachable",
         "connector.keychain_refused",
         "addon.unknown",
-        "addon.built_in"
+        "addon.built_in",
+        "thread.background_work",
+        "prompt.handoff_too_long"
       ],
       "type": "string"
     },
