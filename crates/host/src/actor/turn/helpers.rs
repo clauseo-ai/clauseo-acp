@@ -12,7 +12,7 @@
 //! the ends a cut-short run brings (a Stop, a turn's close, a detach, a failed write's retry, a
 //! past run's helpers left open in the log) in `ends.rs`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
@@ -44,15 +44,17 @@ pub(in crate::actor::turn) use ends::{on_cancel, on_close, on_detach, reopen_fro
 /// The helpers of one conversation, from its first helper on.
 #[derive(Debug, Default)]
 pub(super) struct Helpers {
-    /// Every helper started, open or ended, by the agent's id for it.
-    known: HashMap<CompactString, Known>,
+    /// Every helper started, open or ended, by the agent's id for it. A `BTreeMap`, so walking
+    /// it has one order.
+    known: BTreeMap<CompactString, Known>,
     /// Launch steps whose helper has not started yet, by the step's ACP id (Claude: an `Agent`
     /// call whose input has not come).
     launches: HashMap<CompactString, claude::Launch>,
     /// Steps stamped with a helper and not logged yet, by the step's ACP id.
     steps: HashMap<CompactString, HelperId>,
-    /// Claude's handback calls, by their ACP id, until their update says whether it landed.
-    handbacks: HashMap<CompactString, claude::Handback>,
+    /// Claude's handback calls, by their ACP id, until their update says whether it landed. A
+    /// `BTreeMap`, so walking it has one order.
+    handbacks: BTreeMap<CompactString, claude::Handback>,
     /// Words not logged yet, in first-word order.
     words: words::Held,
 }
@@ -173,9 +175,12 @@ pub(super) fn listed_model(model: CompactString, options: &[ConfigOption]) -> Co
     let choices = options
         .iter()
         .filter(|option| option.category == ConfigCategory::Model)
-        .filter_map(|option| match &option.kind {
-            ConfigOptionKind::Select { options, .. } => Some(options),
-            _ => None,
+        .filter_map(|option| {
+            if let ConfigOptionKind::Select { options, .. } = &option.kind {
+                Some(options)
+            } else {
+                None
+            }
         })
         .flatten();
     let mut family = None;
