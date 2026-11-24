@@ -7,9 +7,10 @@ merged, on the machines that have real signed-in accounts. Nothing in CI runs it
 usage on a real account, so it sends exactly one prompt per agent and no more.
 
 ```sh
-# The pair from the pull request, installed as CI installs it.
+# The pair from the pull request, installed as the app installs it: npm runs no package scripts,
+# and still installs each platform's optional package (the Claude and Codex programs).
 cp crates/limits/tests/live/package.json crates/limits/tests/live/package-lock.json "$DIR"/
-(cd "$DIR" && npm ci)
+(cd "$DIR" && npm ci --ignore-scripts --no-audit --no-fund)
 node scripts/engine-smoke/smoke.mjs "$DIR/node_modules" [--agent claude|codex|both] \
   [--expect-model [claude:|codex:]<id>]... [--timeout 180]
 ```
