@@ -55,6 +55,7 @@ import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { RoomNotices } from "./notices.tsx";
+import { CaseLawOffer } from "./connectors/case-law-offer.tsx";
 import { useNoticePlace } from "@clauseo/components/clauseo/rail-shown.ts";
 import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
@@ -577,6 +578,8 @@ function RoomFrame({
                     {papers.papers.length > 0 && <OfferSlot transport={transport} />}
                   </>
                 )}
+                {/* home, no conversation open: no matter yet, or a new conversation before its first question */}
+                {(open === null || talks.drafting) && <CaseLawOffer transport={transport} />}
                 {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
                 <MarkdownHostContext value={answers}>
                   <PaperLinksContext value={paperLinks}>
