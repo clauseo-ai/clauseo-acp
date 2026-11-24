@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::event::{AcpEvent, ProtocolWarning};
 use crate::map;
-use crate::state::{PendingElicitation, PendingPermission, Shared};
+use crate::state::{PendingElicitation, PendingPermission, Shared, State};
 
 mod helpers;
 
@@ -108,7 +108,8 @@ impl Inbound {
     /// call shows how it ended, with no output. One that was or may have been a
     /// `tool_call_update` but showed no status becomes [`AcpEvent::UpdateSkipped`]. Another
     /// kind gives nothing (the reader logged it). Only what the line itself claimed passes on:
-    /// its own session (its root, for an announced helper's), tool call and status.
+    /// its own session (its root, for an announced helper's), tool call and status. For a
+    /// helper stopped outside a turn, whose updates are dropped, it gives only a warning.
     async fn skipped_update(&mut self, params: &Value) {
         let text = |key| params.get(key).and_then(Value::as_str);
         let tool_call_update = text("kind").map(|kind| kind == crate::line::TOOL_CALL_UPDATE);
@@ -133,14 +134,12 @@ impl Inbound {
             (_, session, tool_call, _) => {
                 // A helper's is its root's, as its updates are (`inbound/helpers.rs`).
                 let session = session.and_then(|session| AgentSessionId::new(session).ok());
-                let session = session.map(|session| helpers::root_of(&self.shared, session));
-                let origin = session
-                    .as_ref()
-                    .map_or(crate::event::Origin::Idle, |session| {
-                        let state = self.shared.state();
-                        let known = state.sessions.get(session.as_str());
-                        known.map_or(crate::event::Origin::Idle, |known| known.origin)
-                    });
+                let target = session.map(|session| helpers::skipped(&self.shared, session));
+                let (session, origin) = match target {
+                    Some(Ok((session, origin))) => (Some(session), origin),
+                    Some(Err(warning)) => return self.shared.emit(*warning).await,
+                    None => (None, crate::event::Origin::Idle),
+                };
                 let acp_tool_call_id = tool_call
                     .filter(|_| session.is_some())
                     .map(CompactString::from);
@@ -187,7 +186,7 @@ impl Inbound {
         // `map::helper_in_background`, and for a helper's session `inbound/helpers.rs`).
         let helper = map::helper(update);
         let in_background = map::helper_in_background(update);
-        let routed = helpers::route(&self.shared, session.as_ref(), update);
+        let routed = helpers::route(&self.shared, session.as_ref(), (name, update));
         let quarantined = params
             .get_mut("update")
             .map(map::quarantine_unknown_blocks)
@@ -270,57 +269,67 @@ impl Inbound {
         };
         let event = {
             let mut state = self.shared.state();
-            let key = state.next_key();
-            let origin_of = |session: &AgentSessionId| {
-                state
-                    .sessions
-                    .get(session.as_str())
-                    .map_or(crate::event::Origin::Idle, |s| s.origin)
-            };
-            match request {
-                Request::Permission(request) => {
-                    // A helper's request is its root's, so the root's cancel answers it too.
-                    let session = state.root_of(request.session);
-                    let origin = origin_of(&session);
-                    let pending = PendingPermission {
-                        session: CompactString::from(session.as_str()),
-                        options: request
-                            .options
-                            .iter()
-                            .map(|option| option.option_id.clone())
-                            .collect(),
-                        responder,
-                    };
-                    state.permissions.insert(key, pending);
-                    AcpEvent::PermissionRequested {
-                        session,
-                        origin,
-                        key,
-                        acp_tool_call_id: request.acp_tool_call_id,
-                        options: request.options,
-                        paths: request.paths,
-                        raw_input: request.raw_input,
-                    }
-                }
-                Request::Elicitation(request) => {
-                    let session = state.root_of(request.session);
-                    let origin = origin_of(&session);
-                    let url = matches!(request.request, ElicitationRequest::Url { .. });
-                    state
-                        .elicitations
-                        .insert(key, PendingElicitation { url, responder });
-                    AcpEvent::ElicitationRequested {
-                        session,
-                        origin,
-                        key,
-                        elicitation_id: request.elicitation_id,
-                        acp_tool_call_id: request.acp_tool_call_id,
-                        request: request.request,
-                    }
-                }
+            if helpers::stopped(&state, &request) {
+                helpers::refuse(request, responder)
+            } else {
+                file(&mut state, request, responder)
             }
         };
         self.shared.emit(event).await;
+    }
+}
+
+/// Files `request` as pending under its session (a helper's under its root, so the root's
+/// cancel answers it too) and gives its event.
+fn file(state: &mut State, request: Request, responder: Responder<Value>) -> AcpEvent {
+    let key = state.next_key();
+    let origin_of = |session: &AgentSessionId| {
+        state
+            .sessions
+            .get(session.as_str())
+            .map_or(crate::event::Origin::Idle, |s| s.origin)
+    };
+    match request {
+        Request::Permission(request) => {
+            // A helper's request is its root's, so the root's cancel answers it too.
+            let session = state.root_of(request.session);
+            let origin = origin_of(&session);
+            let pending = PendingPermission {
+                session: CompactString::from(session.as_str()),
+                options: request
+                    .options
+                    .iter()
+                    .map(|option| option.option_id.clone())
+                    .collect(),
+                responder,
+            };
+            state.permissions.insert(key, pending);
+            AcpEvent::PermissionRequested {
+                session,
+                origin,
+                key,
+                acp_tool_call_id: request.acp_tool_call_id,
+                options: request.options,
+                paths: request.paths,
+                raw_input: request.raw_input,
+            }
+        }
+        Request::Elicitation(request) => {
+            let session = state.root_of(request.session);
+            let origin = origin_of(&session);
+            let url = matches!(request.request, ElicitationRequest::Url { .. });
+            state
+                .elicitations
+                .insert(key, PendingElicitation { url, responder });
+            AcpEvent::ElicitationRequested {
+                session,
+                origin,
+                key,
+                elicitation_id: request.elicitation_id,
+                acp_tool_call_id: request.acp_tool_call_id,
+                request: request.request,
+            }
+        }
     }
 }
 

@@ -1,8 +1,8 @@
-//! Helper sessions across the connection's sessions: two roots, a helper announced again or
-//! under another root, a spawn on a session this connection never started, a session started
-//! under a helper's id, frames after a helper's end, a failed load, and a skipped update. Each
-//! step's events are taken once the step is over: a request's answer comes after every frame the
-//! agent sent before it.
+//! Helper sessions across the connection's sessions: two roots, a helper announced again under
+//! the same root or another, the cap on helpers per root, a spawn on a session this connection
+//! never started, ends that are refused, a session started under a helper's id, frames after a
+//! helper's end, a failed load, and a skipped update. Each step's events are taken once the step
+//! is over: a request's answer comes after every frame the agent sent before it.
 
 use super::*;
 use crate::line::MAX_LINE_BYTES;
@@ -101,12 +101,12 @@ fn new_session() -> NewSession {
 }
 
 /// `update` sent on `session`.
-fn on(session: &str, update: &Value) -> Value {
+pub(super) fn on(session: &str, update: &Value) -> Value {
     json!({"jsonrpc": "2.0", "method": "session/update",
         "params": {"sessionId": session, "update": update}})
 }
 
-fn spawned(session: &str, helper: &str, name: &str) -> Value {
+pub(super) fn spawned(session: &str, helper: &str, name: &str) -> Value {
     on(
         session,
         &json!({"sessionUpdate": "subagent_spawned", "subagentSessionId": helper, "name": name,
@@ -114,7 +114,7 @@ fn spawned(session: &str, helper: &str, name: &str) -> Value {
     )
 }
 
-fn ended(session: &str, helper: &str, state: &str) -> Value {
+pub(super) fn ended(session: &str, helper: &str, state: &str) -> Value {
     on(
         session,
         &json!({"sessionUpdate": "subagent_state_update", "subagentSessionId": helper,
@@ -129,19 +129,28 @@ fn options_on(session: &str) -> Value {
     frame
 }
 
-fn usage_on(session: &str) -> Value {
+pub(super) fn usage_on(session: &str) -> Value {
     on(
         session,
         &json!({"sessionUpdate": "usage_update", "used": 7, "size": 100}),
     )
 }
 
-fn invalid(session: &str, error: &str) -> String {
+/// The shape of an `InvalidUpdate` warning about update `name` on `session`.
+pub(super) fn warned(session: &str, name: &str, error: &str) -> String {
     let warning = crate::event::ProtocolWarning::InvalidUpdate {
-        name: Some("subagent_spawned".to_owned()),
+        name: Some(name.to_owned()),
         error: error.to_owned(),
     };
     format!("Some({session:?}) warning {warning:?}")
+}
+
+fn invalid(session: &str, error: &str) -> String {
+    warned(session, "subagent_spawned", error)
+}
+
+fn invalid_end(session: &str, error: &str) -> String {
+    warned(session, "subagent_state_update", error)
 }
 
 fn shapes_of(steps: &[Vec<AcpEvent>]) -> Vec<Vec<String>> {
@@ -226,7 +235,8 @@ fn a_session_started_under_a_helpers_id_is_its_own() {
 }
 
 /// A reload announces the root's helpers again, as `Replay`; each is filed again and its frames
-/// still find the root.
+/// still find the root. Once the replay ends it `disconnected`, outside any turn, a frame of it
+/// is dropped with a warning.
 #[test]
 fn a_reload_announces_its_helpers_again() {
     let got = run(&[
@@ -253,7 +263,11 @@ fn a_reload_announces_its_helpers_again() {
                     "root-a helper helper-a: options of 1".to_owned(),
                     "root-a ended helper-a: Disconnected".to_owned(),
                 ],
-                vec!["root-a helper helper-a: usage 7".to_owned()],
+                vec![warned(
+                    "helper-a",
+                    "usage_update",
+                    "an update of a helper stopped outside a turn"
+                )],
             ][..]
         )
     );
@@ -283,6 +297,167 @@ fn frames_after_a_helpers_end_still_find_the_root() {
             "root-a ended helper-a: Completed",
             "root-a helper helper-a: usage 7",
         ]
+    );
+}
+
+/// An end for a helper never announced only warns: no `HelperEnded`, and the helper's frames
+/// stay an unknown session's.
+#[test]
+fn an_end_of_a_helper_never_announced_warns() {
+    let got = run(&[
+        Step::New("root-a"),
+        Step::Send(vec![ended("root-a", "helper-a", "completed")]),
+        Step::Send(vec![options_on("helper-a")]),
+    ]);
+    let error = "a subagentSessionId not announced under this session";
+    assert_eq!(
+        shapes_of(&got).get(1..),
+        Some(
+            &[
+                vec![invalid_end("root-a", error)],
+                vec!["helper-a options of 1".to_owned()],
+            ][..]
+        )
+    );
+}
+
+/// An end of another root's helper, sent on the other root or on a session this connection
+/// never started, only warns; the helper still runs under its own root, which can end it.
+#[test]
+fn an_end_from_another_root_warns() {
+    let got = run(&[
+        Step::New("root-a"),
+        Step::New("root-b"),
+        Step::Send(vec![spawned("root-a", "helper-a", "Lease")]),
+        Step::Send(vec![
+            ended("root-b", "helper-a", "completed"),
+            ended("nobody", "helper-a", "cancelled"),
+        ]),
+        Step::Send(vec![
+            usage_on("helper-a"),
+            ended("root-a", "helper-a", "completed"),
+        ]),
+    ]);
+    let error = "a subagentSessionId not announced under this session";
+    assert_eq!(
+        shapes_of(&got).get(3..),
+        Some(
+            &[
+                vec![invalid_end("root-b", error), invalid_end("nobody", error)],
+                vec![
+                    "root-a helper helper-a: usage 7".to_owned(),
+                    "root-a ended helper-a: Completed".to_owned(),
+                ],
+            ][..]
+        )
+    );
+}
+
+/// A second end of one helper only warns, whatever state it names: the first end stands.
+#[test]
+fn a_second_end_warns() {
+    let got = run(&[
+        Step::New("root-a"),
+        Step::Send(vec![spawned("root-a", "helper-a", "Lease")]),
+        Step::Send(vec![ended("root-a", "helper-a", "completed")]),
+        Step::Send(vec![
+            ended("root-a", "helper-a", "completed"),
+            ended("root-a", "helper-a", "cancelled"),
+        ]),
+        Step::Send(vec![usage_on("helper-a")]),
+    ]);
+    let error = "a subagentSessionId that already ended";
+    assert_eq!(
+        shapes_of(&got).get(2..),
+        Some(
+            &[
+                vec!["root-a ended helper-a: Completed".to_owned()],
+                vec![invalid_end("root-a", error), invalid_end("root-a", error)],
+                // Still completed, not stopped: its frame keeps the root's origin.
+                vec!["root-a helper helper-a: usage 7".to_owned()],
+            ][..]
+        )
+    );
+}
+
+/// A helper announced again under the same root, on the root or on another of its helpers'
+/// sessions (which would make that helper its parent), only warns: one helper, one
+/// `HelperSpawned`, its first parent kept.
+#[test]
+fn a_helper_announced_again_under_the_same_root_warns() {
+    let got = run(&[
+        Step::New("root-a"),
+        Step::Send(vec![
+            spawned("root-a", "helper-a", "Lease"),
+            spawned("helper-a", "helper-b", "Order"),
+        ]),
+        Step::Send(vec![
+            spawned("root-a", "helper-a", "Lease"),
+            spawned("helper-b", "helper-a", "Lease"),
+            spawned("root-a", "helper-b", "Order"),
+        ]),
+        Step::Send(vec![options_on("helper-a")]),
+    ]);
+    let error = "a subagentSessionId already announced";
+    assert_eq!(
+        shapes_of(&got).get(1..),
+        Some(
+            &[
+                vec![
+                    "root-a spawned helper-a by None: \"Lease\" None".to_owned(),
+                    "root-a spawned helper-b by Some(\"helper-a\"): \"Order\" None".to_owned(),
+                ],
+                vec![
+                    invalid("root-a", error),
+                    invalid("helper-b", error),
+                    invalid("root-a", error),
+                ],
+                vec!["root-a helper helper-a: options of 1".to_owned()],
+            ][..]
+        )
+    );
+}
+
+/// A root takes at most 1024 helpers: the 1025th is refused and its frames stay an unknown
+/// session's, while another root still takes its own.
+#[test]
+fn a_root_takes_at_most_1024_helpers() {
+    let many = |range: std::ops::Range<usize>| {
+        let spawn = |n| spawned("root-a", &format!("helper-{n}"), "Lease");
+        Step::Send(range.map(spawn).collect())
+    };
+    let got = run(&[
+        Step::New("root-a"),
+        Step::New("root-b"),
+        many(0..512),
+        many(512..1024),
+        Step::Send(vec![
+            spawned("root-a", "helper-1024", "Lease"),
+            spawned("root-b", "helper-b", "Order"),
+        ]),
+        Step::Send(vec![options_on("helper-1024"), options_on("helper-b")]),
+    ]);
+    let spawned_events = got[2..4]
+        .iter()
+        .flatten()
+        .filter(|event| matches!(event, AcpEvent::HelperSpawned { .. }))
+        .count();
+    assert_eq!(spawned_events, 1024);
+    let error = "a subagentSessionId past the cap on helpers under one session";
+    assert_eq!(
+        shapes_of(&got).get(4..),
+        Some(
+            &[
+                vec![
+                    invalid("root-a", error),
+                    "root-b spawned helper-b by None: \"Order\" None".to_owned(),
+                ],
+                vec![
+                    "helper-1024 options of 1".to_owned(),
+                    "root-b helper helper-b: options of 1".to_owned(),
+                ],
+            ][..]
+        )
     );
 }
 

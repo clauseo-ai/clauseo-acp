@@ -2,7 +2,7 @@
 //! state, a helper's failure, malformed `subagent_*` updates, and which chunks are a report.
 
 use super::*;
-use crate::event::{HelperState, ProtocolWarning};
+use crate::event::ProtocolWarning;
 
 /// x1's frames without those `skip` picks out.
 fn x1_without(skip: impl Fn(&Value) -> bool) -> Vec<Value> {
@@ -25,6 +25,9 @@ fn on(session: &str, update: &Value) -> Value {
 }
 
 const HELPER: &str = "01a20c29-d483-7382-9b0e-1629bbf4cee4";
+
+/// A second helper of x1's root, made up.
+const OTHER: &str = "01a20c29-e000-7382-9b0e-1629bbf4cee4";
 
 /// `initialize` asks for helper sessions only with the switch on: `nativeSubagentSessions`
 /// joins the AIR list; off, the list is as it was.
@@ -112,9 +115,9 @@ fn with_the_switch_off_the_same_frames_map_as_before() {
 }
 
 /// Switch on, a helper whose `subagent_spawned` never came: its frames map as any unknown
-/// session's do, as before; its end still names the root, the session it came on.
+/// session's do, as before; its end only warns, so no card could end that was never shown.
 #[test]
-fn a_helper_never_announced_maps_as_an_unknown_session() {
+fn a_helper_never_announced_maps_as_an_unknown_session_and_its_end_warns() {
     let events = play(
         true,
         X1_ROOT,
@@ -122,9 +125,18 @@ fn a_helper_never_announced_maps_as_an_unknown_session() {
     );
     let shapes = shapes(&events);
     assert_eq!(shapes.get(1).map(String::as_str), Some("d483 options of 1"));
+    let warning = ProtocolWarning::InvalidUpdate {
+        name: Some("subagent_state_update".to_owned()),
+        error: "a subagentSessionId not announced under this session".to_owned(),
+    };
     assert_eq!(
-        shapes.get(16).map(String::as_str),
-        Some("bdfa ended d483: Completed")
+        shapes.get(16),
+        Some(&format!("Some(\"bdfa\") warning {warning:?}"))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AcpEvent::HelperEnded { .. }))
     );
     let helper = events.iter().filter(
         |event| matches!(event, AcpEvent::Update { session, .. } if session.as_str() == HELPER),
@@ -232,7 +244,8 @@ fn a_helpers_failure_is_a_warning_not_the_roots_limit() {
 }
 
 /// `subagent_*` updates that cannot be read warn and announce nothing; a real task is kept; an
-/// unknown or missing state warns and still ends the helper, as `Other`.
+/// unknown or missing state only warns and leaves the helper running, so a known state still
+/// ends it.
 #[test]
 fn malformed_subagent_updates_warn() {
     let spawned = |fields: Value| {
@@ -258,7 +271,7 @@ fn malformed_subagent_updates_warn() {
             spawned(json!({"subagentSessionId": X1_ROOT, "name": "Lease"})),
             spawned(json!({"subagentSessionId": HELPER})),
             spawned(json!({"subagentSessionId": HELPER, "name": "Lease", "task": ""})),
-            spawned(json!({"subagentSessionId": HELPER, "name": "Lease",
+            spawned(json!({"subagentSessionId": OTHER, "name": "Lease",
                 "task": "Delegated task for Order"})),
             ended(json!("paused")),
             ended(Value::Null),
@@ -284,11 +297,9 @@ fn malformed_subagent_updates_warn() {
             ),
             invalid(spawn, "no name string"),
             "bdfa spawned d483 by None: \"Lease\" None".to_owned(),
-            "bdfa spawned d483 by None: \"Lease\" Some(\"Delegated task for Order\")".to_owned(),
+            "bdfa spawned e000 by None: \"Lease\" Some(\"Delegated task for Order\")".to_owned(),
             invalid(state, "unknown state \"paused\""),
-            format!("bdfa ended d483: {:?}", HelperState::Other),
             invalid(state, "no state string"),
-            format!("bdfa ended d483: {:?}", HelperState::Other),
             "bdfa ended d483: Failed".to_owned(),
         ]
     );
