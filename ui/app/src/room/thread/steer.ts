@@ -47,9 +47,7 @@ export const injectedTurn = (m: UserMessageEntry): TurnId | undefined =>
 export function askedAs(m: UserMessageEntry): AskedAs {
   const outcome = outcomeOf(m);
   if (outcome === "not_sent") return "not_sent";
-  // not_sent (#1314; read as a string until that binding): its words went back to the field, or its copy waits
-  const status: string = m.status;
-  if (status === "queued" || status === "removed" || status === "not_sent") return "hidden";
+  if (m.status === "queued" || m.status === "removed") return "hidden";
   if (outcome === "injected") return "mark";
   if (outcome === null && m.delivery === "steer") return "waiting";
   return "question";

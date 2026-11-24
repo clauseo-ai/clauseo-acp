@@ -21,7 +21,7 @@ const QUEUED: ThreadStatus = { queued: { behind: THREAD } };
 
 const LATER = "And does the renewal letter change the sublet clause?";
 /** The later message, waiting or ended before its turn started; with `unsent`, the host's cause (#1314's entry
- * field, a stand-in until that binding), and a status the bindings may not name yet (not_sent). */
+ * field, a stand-in until that binding). */
 export const later = (status: string, unsent?: string): ViewEntry => {
   const e = userMessage(4, 2, LATER);
   const m = {

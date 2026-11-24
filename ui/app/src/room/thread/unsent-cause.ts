@@ -1,20 +1,20 @@
 // Why a message never started, as the host says it (#1314: TurnEnded.cause, carried on the user-message entry as
-// `unsent`; the status stays removed), and the copy the host queued of one held for an update or a sign-in
+// `unsent`; the status is removed), and the copy the host queued of one held for an update or a sign-in
 // (`copy_of` on the copy's own entry, naming its original, which an old log may lack). Read here, and only here:
 // absent on older logs and until #1314 lands, and an unknown value reads as absent, when the wording falls back to
 // this window's own Stop record (unsent-restore.ts).
 import type { StreamView } from "../../store/view.ts";
-import type { UserMessageEntry } from "../../transport/protocol.ts";
+import type { MessageId, UserMessageEntry } from "../../transport/protocol.ts";
 
 /** The causes #1314 names; its enum is open, so any other value reads as none. */
 export type Cause = "stopped" | "removed" | "sent_now" | "sign_in" | "update" | "not_sent";
 
-/** The entry as #1314 gives it. TODO(#1314): a stand-in until that binding is on main, when UserMessageEntry carries
- * `unsent` and `copy_of` itself and this becomes UserMessageEntry. */
-type CausedEntry = UserMessageEntry & {
-  unsent?: string;
-  copy_of?: { message: string; cause: string };
-};
+// TODO(#1314): stand-ins, named and shaped as #1314's bindings (UnsentCause, CopyOf, UserMessageEntry's `unsent` and
+// `copy_of`). Once that binding is on main, delete these three, import UnsentCause and CopyOf from protocol.ts if
+// still needed, and read UserMessageEntry as it is.
+type UnsentCause = Cause | "unknown";
+type CopyOf = { message: MessageId; cause: UnsentCause };
+type CausedEntry = UserMessageEntry & { unsent?: UnsentCause; copy_of?: CopyOf };
 
 const CAUSES: readonly string[] = [
   "stopped",
@@ -31,11 +31,8 @@ export function causeOf(m: UserMessageEntry): Cause | null {
   return typeof cause === "string" && CAUSES.includes(cause) ? (cause as Cause) : null;
 }
 
-/** Whether the message ended before its turn started: removed (and, should a host say so, not_sent). */
-export function endedUnsent(m: UserMessageEntry): boolean {
-  const status: string = m.status;
-  return status === "removed" || status === "not_sent";
-}
+/** Whether the message ended before its turn started: removed. */
+export const endedUnsent = (m: UserMessageEntry): boolean => m.status === "removed";
 
 /** Whether its words come back to the lawyer's box: not for one held for a sign-in or an update, whose copy the host
  * queues; for every other cause, and for none. */
