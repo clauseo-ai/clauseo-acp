@@ -157,6 +157,8 @@ export function troubleLine(lang: Lang, status: AddonStatus, who: string): strin
       return lb(lang, "Your firm doesn't allow this one on this computer.");
     case "needs_secret":
       return lb(lang, "Its saved key is missing, so {who} can't reach it.", { who });
+    case "not_offered":
+      return lb(lang, "Not available yet.");
     case "unreachable":
       return lb(
         lang,

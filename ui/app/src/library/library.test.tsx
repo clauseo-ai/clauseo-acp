@@ -3,16 +3,20 @@
 // the built-ins and the added skill packs with where each is on; Connectors leads with Clauseo Case
 // Law in each of its states, then the Web browser, then the lawyer's own MCP servers; the side
 // panel explains the part until a row is picked, then shows that item; the words name the
-// assistant. Opening a matter closes the place.
+// assistant. Opening a matter closes the place. The list comes from list_addons over a scripted
+// host that lists as the real one does (Case Law's status from the connectors' state, left out
+// until first checked) and says addons_changed after each change.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FakeTransport } from "../transport/fake-transport.ts";
+import type { AddonStatus, QueryResult } from "../transport/bindings.ts";
 import type {
   ConnectorStatus,
   ConnectorsState,
   McpToolsView,
   PackStatus,
 } from "../transport/protocol.ts";
+import type { AddonView } from "./addons.ts";
 import { mountRoom, type Harness } from "../room/thread/harness.ts";
 import { SEEN_KEY } from "./seen.ts";
 
@@ -81,12 +85,70 @@ const caseLaw = (
 
 const settings = vi.fn();
 
+/** Case Law's status as the host gives it from the connectors' state (stage D's order). */
+function hostStatus(state: ConnectorsState): AddonStatus {
+  const s = state.connectors.find((c) => c.id === "case-law")?.status;
+  if (s === undefined) return "unreachable";
+  if (s === "signing_in") return "signing_in";
+  if (s === "signed_out" || s === "key_revoked") return "signed_out";
+  if (typeof s === "object" && "signed_in" in s) return "ready";
+  if (typeof s === "object" && "out_of_credit" in s) return "needs_credit";
+  return "needs_setup";
+}
+
+/** What the scripted host lists: Case Law left out until a connectors' state, unless set. */
+type World = { packs: PackStatus[]; tools: McpToolsView | null; caseLaw: AddonStatus | null };
+let world: World = { packs: PACKS, tools: null, caseLaw: null };
+let reads = 0;
+
+const row0 = (kind: AddonView["kind"], id: string, source: AddonView["source"]): AddonView => ({
+  kind,
+  id,
+  name: id,
+  description: "",
+  source,
+  scope: "all",
+  on: true,
+  status: "ready",
+  can_remove: source === "added",
+  locked: false,
+});
+
+function hostList(w: World): AddonView[] {
+  const builtIns = ["legal-drafting", "legal-research", "matter-brief", "stetdoc"];
+  return [
+    ...builtIns.map((id) => row0("skill", id, "built_in")),
+    ...w.packs.map((p) => ({
+      ...row0("skill", p.id, "added"),
+      name: p.name ?? p.id,
+      from: { kind: "folder" as const, text: p.id },
+      on: p.state === "on",
+      status: (p.state === "changed" ? "changed" : "ready") as AddonStatus,
+    })),
+    ...(w.caseLaw === null ? [] : [{ ...row0("tool", "case-law", "built_in"), status: w.caseLaw }]),
+    row0("tool", "browser", "built_in"),
+    ...(w.tools?.servers ?? []).map((s) => ({
+      ...row0("tool", s.name, "added"),
+      from:
+        s.kind === "remote"
+          ? { kind: "address" as const, text: s.url ?? "" }
+          : { kind: "program" as const, text: s.command ?? "" },
+      status: (s.headers.some((v) => !v.saved) ? "needs_secret" : "ready") as AddonStatus,
+    })),
+  ];
+}
+
 async function mount(packs: PackStatus[] = PACKS) {
   settings.mockReset();
+  world = { packs, tools: null, caseLaw: null };
+  reads = 0;
   h = await mountRoom({
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
-      if (query === "list_skill_packs") return { skill_packs: packs };
+      if (typeof query === "object" && "list_addons" in query) {
+        reads += 1;
+        return { addons: { items: hostList(world) } } as QueryResult;
+      }
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     openSettings: settings,
@@ -95,8 +157,17 @@ async function mount(packs: PackStatus[] = PACKS) {
   return h;
 }
 
-const play = async (event: Parameters<FakeTransport["appEvent"]>[0]) => {
+/** Plays an app event, the list changing with it as the host's would; `caseLaw` sets Case Law's
+ * status where the connectors' state can't say it (not offered). */
+const play = async (
+  event: Parameters<FakeTransport["appEvent"]>[0],
+  caseLaw?: AddonStatus | null,
+) => {
+  if ("connectors_changed" in event) world.caseLaw = hostStatus(event.connectors_changed);
+  if ("mcp_tools_changed" in event) world.tools = event.mcp_tools_changed;
+  if (caseLaw !== undefined) world.caseLaw = caseLaw;
   await act(async () => h!.transport.appEvent(event));
+  await act(async () => h!.transport.appEvent({ addons_changed: {} }));
   await h!.settle();
 };
 
@@ -259,7 +330,7 @@ test("Clauseo Case Law added: its credits and where it is on", async () => {
   expect(h!.one("library")?.textContent).not.toMatch(/searches/);
 });
 
-test("the host lists no connector (its liveness check failed): Case Law is unreachable, and its button opens Settings to check", async () => {
+test("no answer from Case Law: unreachable, and Retry reads the list again, which checks again", async () => {
   await mount();
   await play({ connectors_changed: caseLaw(null) });
   await open();
@@ -270,9 +341,12 @@ test("the host lists no connector (its liveness check failed): Case Law is unrea
   expect(card.querySelector(".lib-feature-line")?.textContent).toBe(GIVES);
   expect(text("case-law-trouble")).toBe("Can't reach it right now");
   const retry = card.querySelector(".lib-feature-add")!;
-  expect(retry.textContent).toBe("Open Settings to check");
+  expect(retry.textContent).toBe("Retry");
+  const before = reads;
   await h!.click(retry);
-  expect(h!.transport.calls).toContainEqual({ call: "open_settings", section: "connectors" });
+  await h!.settle();
+  expect(reads).toBe(before + 1);
+  expect(h!.transport.calls).not.toContainEqual({ call: "open_settings", section: "connectors" });
   await h!.click(card.querySelector(".lib-feature-hit"));
   expect(h!.one("library-detail")?.querySelector(".lib-trouble p")?.textContent).toBe(
     "Clauseo can't reach Clauseo Case Law right now, so Claude can't search judgments.",
@@ -391,17 +465,44 @@ test("Case Law signing in: the waiting card, nothing to press", async () => {
   expect(card.querySelector(".lib-feature-add")).toBeNull();
 });
 
-test("Case Law whose last sign-in failed: Can't reach it right now", async () => {
+test("Case Law whose last sign-in failed: the host lists it needs_setup, so it is offered again", async () => {
   await mount();
   await play({ connectors_changed: caseLaw({ error: { message: "refused" } }) });
   await open();
   await tab("Connectors");
+  expect(h!.one("case-law-card")?.getAttribute("data-shown")).toBe("offer");
+});
+
+test("Case Law not offered: Not available yet., no button, no Retry, and not in the rail's count", async () => {
+  await mount();
+  await play({ mcp_tools_changed: TOOLS });
+  await play({ connectors_changed: caseLaw(null) }, "not_offered");
+  expect(h!.one("library-entry")?.textContent).toBe(
+    "Skills and connectors7 skills, 2 connectorsNew",
+  );
+  await open();
+  await tab("Connectors");
   const card = h!.one("case-law-card")!;
-  expect(card.getAttribute("data-shown")).toBe("unreachable");
-  expect(text("case-law-trouble")).toBe("Can't reach it right now");
-  expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Open Settings to check");
+  expect(card.getAttribute("data-shown")).toBe("unavailable");
+  expect(text("case-law-trouble")).toBe("Not available yet.");
+  expect(card.querySelector("button.lib-feature-add")).toBeNull();
   await h!.click(card.querySelector(".lib-feature-hit"));
-  expect(text("library-detail")).not.toContain("Add Clauseo Case Law");
+  const detail = h!.one("library-detail")!;
+  expect(detail.querySelector(".lib-trouble")?.textContent).toBe("Not available yet.");
+  expect(detail.textContent).not.toContain("Retry");
+  expect(detail.textContent).not.toContain("Add Clauseo Case Law");
+});
+
+test("Case Law not yet checked (the host lists it nowhere yet): needs_setup, the offer, never Can't reach", async () => {
+  await mount();
+  await open();
+  await tab("Connectors");
+  // listed by the place before the host lists it, waiting for the connectors' state
+  expect(h!.one("case-law-card")?.getAttribute("data-shown")).toBe("waiting");
+  await play({ connectors_changed: caseLaw("not_added") }, null);
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("offer");
+  expect(h!.one("library")?.textContent).not.toContain("Can't reach it right now");
 });
 
 test("Clauseo Case Law not added, with no price listed: the terms alone, no count", async () => {

@@ -3,16 +3,19 @@
 // question), a card at the reading column's top says what it does, with one button to Skills and connectors, on its
 // Connectors tab with Clauseo Case Law picked (library/open-library.ts's useOpenCaseLaw), whose card adds it. That
 // place lists Case Law even when the host doesn't, so the button leads somewhere on the machine whose liveness check
-// failed. It shows while connectors are on and the connector is not added, listed or not: the host lists it only
-// once its liveness check passes (store/connectors.ts's useCaseLawOffer, the one place a dismissal would join). It
+// failed. It shows while connectors are on, the connector is not added, and Skills and connectors' list (list_addons)
+// says Case Law can be set up or had no answer; never while it is not offered (store/connectors.ts's useCaseLawOffer,
+// the one place a dismissal would join). It
 // goes the moment a `connectors_changed` lists it added: no restart. Added but broken (a refused key, a lapsed
 // sign-in) is still added, so the card stays gone and the library's and Settings' words say what's wrong. The card
 // and its words come in the thread's chunk, so the room's first load carries none of them.
 import { lazy, Suspense } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
+import { addonsSourceOf, useAddons } from "../../library/addons-source.ts";
 import { useOpenCaseLaw } from "../../library/open-library.ts";
 import {
   CASE_LAW,
+  type CaseLawListed,
   connectorsStoreOf,
   useCaseLawOffer,
   useConnector,
@@ -38,11 +41,19 @@ function packOf(c: ConnectorView | undefined): Pack | null {
   return paise === undefined || smallest == null ? null : { paise, credits: smallest.credits };
 }
 
+/** Case Law's status in the list, as the card reads it; null until the list has answered. */
+function useListed(transport: HostTransport): CaseLawListed {
+  const items = useAddons(addonsSourceOf(transport)).items;
+  if (items === null) return null;
+  const status = items.find((a) => a.id === CASE_LAW && a.source === "built_in")?.status;
+  return status === "needs_setup" || status === "unreachable" ? status : "other";
+}
+
 /** The card while it shows; nothing otherwise, or outside the room, where there is no Skills and connectors. */
 export function CaseLawOffer({ transport }: { transport: HostTransport }) {
   const openCaseLaw = useOpenCaseLaw();
   const store = connectorsStoreOf(transport);
-  const shows = useCaseLawOffer(store);
+  const shows = useCaseLawOffer(store, useListed(transport));
   const pack = packOf(useConnector(store, CASE_LAW));
   if (!shows || openCaseLaw === null) return null;
   return (

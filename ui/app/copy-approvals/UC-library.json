@@ -584,15 +584,6 @@
     "by": "app track (provisional, 24 Nov round)",
     "note": "{who} or {Who} in the place's words when both plans are signed in (library/assistant.ts); with one, the plan's name (Claude or ChatGPT). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
-  "UC-1241": {
-    "en": "Open Settings to check",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's button on its card and in its detail while it can't be reached, until stage D's list_addons checks again itself (then it reads Retry, UC-1228): it opens Settings at Connectors, whose opening runs the host's check (library/case-law.tsx RecheckButton). New, in place of Retry (review #1298). Words are provisional"
-  },
   "UC-1242": {
     "en": "Connectors are turned off. You can turn them on in Settings, under Connectors.",
     "hi": null,
@@ -628,5 +619,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "Clauseo Case Law's button on its card and in its detail while connectors are turned off or its sign-in ended: opens Settings at Connectors (library/case-law.tsx). Same words as UET-15, kept in the place's own words file so the place's chunk doesn't pull the tool line's words into a shared chunk (vite-config.test.ts's bare-chunk rule). Words are provisional"
+  },
+  "UC-1248": {
+    "en": "Not available yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 25 Nov round)",
+    "note": "Clauseo Case Law's card word and detail line when the host lists it not_offered (list_addons): the case-law service answered but isn't offered yet, or this install has no connectors. No button, no Retry, not in the rail's count, and no home card (library/case-law.tsx, library/model.ts). New. UC-1241 \"Open Settings to check\" is retired with it: list_addons checks again itself, so the button reads Retry (UC-1228). Words are provisional"
   }
 }

@@ -1,18 +1,14 @@
-// The one place Skills and connectors reads from: the list, and Clauseo Case Law's facts from the
-// connectors' state (its credits and price, whether connectors are on), and the two things the
-// place can ask of the host (its Retry, and today's add flow, Settings at Connectors). Every part of
-// the place reads through here, so wiring stage D's list_addons is a change to this file alone.
-// TODO(stage D, D1: list_addons + addons_changed): replace interimList below with a reader that asks
-// `transport.query({ list_addons: {} })`, complete with its first answer, and reads again on each
-// `addons_changed` app event and on `read()`; make `recheck` { how: "again", run: read } (each
-// list_addons checks Case Law's reach again). Then delete addons-interim.ts.
+// The one place Skills and connectors reads from: the list (addons-list.ts, stage D's list_addons),
+// and Clauseo Case Law's facts from the connectors' state (its credits and price, whether connectors
+// are on), and the two things the place can ask of the host: its Retry (the list read again, which
+// checks Case Law's reach again) and today's add flow, Settings at Connectors.
 import { useSyncExternalStore } from "react";
 import { quietly } from "../room/open.ts";
 import { CASE_LAW, connectorsStoreOf } from "../store/connectors.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConnectorsState } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
-import { interimList } from "./addons-interim.ts";
+import { addonsList } from "./addons-list.ts";
 
 /** The list as read: null until the first answer; complete once every source has been heard. */
 export type ListState = { items: readonly AddonView[] | null; complete: boolean };
@@ -41,9 +37,8 @@ export type CaseLawFacts = {
 
 export type AddonsState = ListState & { caseLaw: CaseLawFacts };
 
-/** Case Law's Retry: what it does, so the button says it ("settings": opens Settings, whose opening
- * checks; "again": asks the list again, which checks). */
-export type Recheck = { how: "settings" | "again"; run: () => void };
+/** Case Law's Retry: reads the list again, which checks its reach again. */
+export type Recheck = { run: () => void };
 
 export type AddonsSource = {
   subscribe: (listener: () => void) => () => void;
@@ -96,11 +91,7 @@ export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFac
 }
 
 /** The source: a list reader, with Case Law's facts and the host's two asks. */
-export function sourceOver(
-  transport: HostTransport,
-  list: ListReader,
-  recheck: (open: () => void) => Recheck,
-): AddonsSource {
+export function sourceOver(transport: HostTransport, list: ListReader): AddonsSource {
   const connectors = connectorsStoreOf(transport);
   let state: AddonsState = { ...list.state(), caseLaw: NO_FACTS };
   let key = "";
@@ -136,15 +127,14 @@ export function sourceOver(
       return state;
     },
     read: list.read,
-    recheck: openConnectors === null ? null : recheck(openConnectors),
+    recheck: { run: list.read },
     openConnectors,
   };
 }
 
-/** The list's source over a transport, listening from the moment it is made. Until list_addons, Retry
- * opens Settings at Connectors, whose opening runs the host's check (refused from the main window). */
+/** The list's source over a transport, listening from the moment it is made. */
 export function createAddonsSource(transport: HostTransport): AddonsSource {
-  return sourceOver(transport, interimList(transport), (open) => ({ how: "settings", run: open }));
+  return sourceOver(transport, addonsList(transport));
 }
 
 const sources = new WeakMap<HostTransport, AddonsSource>();
@@ -171,14 +161,13 @@ export function provideAddons(transport: HostTransport, source: AddonsSource): v
 export function fixedAddons(
   items: readonly AddonView[],
   caseLaw: CaseLawFacts = { heard: true, off: null, pack: null, credits: null, signIn: null },
-  how: Recheck["how"] = "settings",
 ): AddonsSource {
   const state: AddonsState = { items, complete: true, caseLaw };
   return {
     subscribe: () => () => {},
     state: () => state,
     read: () => {},
-    recheck: { how, run: () => {} },
+    recheck: { run: () => {} },
     openConnectors: () => {},
   };
 }

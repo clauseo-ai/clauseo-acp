@@ -112,7 +112,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       description:
         "Drafts legal notices in the chamber's format, with the client's details taken from the matter.",
       from: { kind: "folder", text: "~/Documents/Skills/notice-drafting" },
-      scope: "matter",
+      scope: { matter: SHARMA! },
       switched: [SHARMA!],
       has_scripts: false,
     }),
@@ -162,7 +162,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       name: "court-diary",
       from: { kind: "program", text: "npx" },
       server: server({ command: "npx", args: ["-y", "court-diary-mcp"], env: ["DIARY_TOKEN"] }),
-      scope: "matter",
+      scope: { matter: SHARMA! },
       switched: [SHARMA!, MEHTA!],
     }),
     tool({
@@ -177,7 +177,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
       id: "gazette",
       name: "gazette-notifications",
       from: { kind: "address", text: "https://mcp.gazettewatch.in" },
-      scope: "matter",
+      scope: { matter: BLUEBELL! },
       switched: [BLUEBELL!],
     }),
     tool({
@@ -198,13 +198,21 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
   ];
 }
 
-type CaseLawState = "needs_setup" | "ready" | "out" | "unreachable" | "off" | "ended";
+type CaseLawState =
+  | "needs_setup"
+  | "ready"
+  | "out"
+  | "unreachable"
+  | "not_offered"
+  | "off"
+  | "ended";
 
 const CONNECTOR: Record<CaseLawState, ConnectorStatus | null> = {
   needs_setup: "not_added",
   ready: { signed_in: { low: false, balance: { credits: 1_240 } } },
   out: { out_of_credit: {} },
   unreachable: null,
+  not_offered: null,
   off: "not_added",
   ended: "signed_out",
 };
@@ -238,8 +246,6 @@ export type LibraryState = {
   both?: boolean;
   /** The host lists no price (no live price list). */
   noPrice?: boolean;
-  /** Retry as it will be once list_addons checks again itself. */
-  again?: boolean;
 };
 
 /** The room over the library's host, its list given before the room mounts. */
@@ -259,17 +265,18 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
   });
   const status: AddonStatus =
     caseLaw === "out"
-      ? "ready"
-      : caseLaw === "off" || caseLaw === "ended"
-        ? "needs_setup"
-        : caseLaw;
+      ? "needs_credit"
+      : caseLaw === "ended"
+        ? "signed_out"
+        : caseLaw === "off"
+          ? "needs_setup"
+          : caseLaw;
   provideAddons(
     transport,
-    fixedAddons(
-      libraryItems(status, state.added ?? true),
-      { ...caseLawFacts(connectors, true), ...(state.noPrice === true ? { pack: null } : {}) },
-      state.again === true ? "again" : "settings",
-    ),
+    fixedAddons(libraryItems(status, state.added ?? true), {
+      ...caseLawFacts(connectors, true),
+      ...(state.noPrice === true ? { pack: null } : {}),
+    }),
   );
   return transport;
 }

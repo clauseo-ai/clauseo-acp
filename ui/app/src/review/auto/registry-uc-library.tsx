@@ -1,4 +1,4 @@
-// Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1245; 24 Nov round, issues 6
+// Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1245, UC-1248; 24 Nov round, issues 6
 // to 8): the real room over library-host.ts, the place opened from the rail's row and pressed to
 // the state that shows each string. Clauseo Case Law's shared words (UC-1090 to UC-1096, UC-1300)
 // are registered beside it, by registry-uc-kanoon-card.tsx.
@@ -155,8 +155,7 @@ const UC_LIBRARY: Entry[] = [
     at({}, CONN, row("precedents")),
   ),
   e("UC-1227", "Can't reach it right now", at({ caseLaw: "unreachable" }, CONN)),
-  // Retry once list_addons checks again itself (stage D's D1); until then the button opens Settings
-  e("UC-1228", "Retry", at({ caseLaw: "unreachable", again: true }, CONN)),
+  e("UC-1228", "Retry", at({ caseLaw: "unreachable" }, CONN)),
   e(
     "UC-1229",
     "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.",
@@ -178,7 +177,6 @@ const UC_LIBRARY: Entry[] = [
   ),
   e("UC-1237", "You haven't added a skill yet.", at({ added: false })),
   e("UC-1238", "You haven't added a connector of your own yet.", at({ added: false }, CONN)),
-  e("UC-1241", "Open Settings to check", at({ caseLaw: "unreachable" }, CONN)),
   e(
     "UC-1242",
     "Connectors are turned off. You can turn them on in Settings, under Connectors.",
@@ -191,6 +189,7 @@ const UC_LIBRARY: Entry[] = [
     at({ caseLaw: "ended" }, CONN, CARD),
   ),
   e("UC-1245", "Open Settings", at({ caseLaw: "off" }, CONN)),
+  e("UC-1248", "Not available yet.", at({ caseLaw: "not_offered" }, CONN)),
   e("UC-1239", "the assistant", at({ both: true })),
   e("UC-1240", "The assistant", at({ both: true }, row("pdf"))),
 ];
