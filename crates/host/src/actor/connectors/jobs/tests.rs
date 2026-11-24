@@ -45,6 +45,7 @@ fn a_check_that_panics_ends_the_hints_wait() {
             command: None,
             slot: false,
             recharged: false,
+            recheck: None,
             change: job.on_panic(),
             generation: 0,
         };

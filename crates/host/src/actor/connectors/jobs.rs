@@ -19,6 +19,7 @@ mod failures;
 mod finished;
 
 use super::ConnectorInput;
+use super::recheck::Kind;
 use crate::actor::input::Input;
 use crate::connectors::ConnectorOpener;
 use crate::error::Error;
@@ -70,9 +71,8 @@ pub(super) enum Job {
     Remove,
     /// The account, holding the read slot.
     Read,
-    /// A fresh liveness check, a cached failure fetched again: the skills and tools list's
-    /// re-check of case law (`recheck.rs`).
-    Recheck,
+    /// A check a read of the skills and tools list started (`recheck.rs`).
+    Recheck(Kind),
     /// The account after a relay's paid `recharge` result, at once, without the slot and from
     /// the connector.
     Recharged,
@@ -87,7 +87,7 @@ impl Job {
                 error: Some(JOB_FAILED),
             },
             // The case-law hint's matters waiting on liveness stop waiting (`hint.rs`).
-            Job::Check { .. } | Job::Recheck => Change::NoLiveness,
+            Job::Check { .. } | Job::Recheck(_) => Change::NoLiveness,
             Job::Status
             | Job::ApiKey(_)
             | Job::Credits { .. }
@@ -99,8 +99,28 @@ impl Job {
         }
     }
 
-    fn holds_slot(&self) -> bool {
-        matches!(self, Job::Check { slot: true } | Job::Read)
+    pub(super) fn holds_slot(&self) -> bool {
+        matches!(
+            self,
+            Job::Check { slot: true } | Job::Read | Job::Recheck(Kind::Account)
+        )
+    }
+
+    /// The kind of list check the job is, if it is one.
+    fn recheck(&self) -> Option<Kind> {
+        match self {
+            Job::Recheck(kind) => Some(*kind),
+            Job::Status
+            | Job::Check { .. }
+            | Job::SignIn { .. }
+            | Job::ApiKey(_)
+            | Job::Credits { .. }
+            | Job::Watch { .. }
+            | Job::SignOut
+            | Job::Remove
+            | Job::Read
+            | Job::Recharged => None,
+        }
     }
 
     /// The number of the recharge watch the job is, if it is one.
@@ -110,7 +130,7 @@ impl Job {
             Job::Watch { number, .. } => Some(*number),
             Job::Status
             | Job::Check { .. }
-            | Job::Recheck
+            | Job::Recheck(_)
             | Job::SignIn { .. }
             | Job::ApiKey(_)
             | Job::SignOut
@@ -173,6 +193,7 @@ pub(super) fn spawn(reach: Reach, command: Option<CommandId>, job: Job) -> Resul
                 command,
                 slot: job.holds_slot(),
                 recharged: matches!(job, Job::Recharged),
+                recheck: job.recheck(),
                 change: job.on_panic(),
                 generation: reach.generation,
             };
@@ -208,6 +229,7 @@ struct Unfinished {
     command: Option<CommandId>,
     slot: bool,
     recharged: bool,
+    recheck: Option<Kind>,
     change: Change,
     generation: u64,
 }
@@ -229,6 +251,7 @@ impl Drop for Unfinished {
             post.send(ConnectorInput::Finished(Box::new(Finished {
                 slot: self.slot,
                 recharged: self.recharged,
+                recheck: self.recheck,
                 change: self.change.clone(),
                 generation: self.generation,
                 ..Finished::refused(self.command, refusal)
@@ -252,10 +275,21 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
             finished.liveness = Some(liveness);
             finished
         }
-        Job::Recheck => {
-            let mut finished = Finished::new(command);
-            finished.liveness = Some(reach.connectors.recheck_liveness());
-            finished.recheck = true;
+        Job::Recheck(kind) => {
+            let mut finished = match kind {
+                Kind::Liveness => {
+                    let mut finished = Finished::new(command);
+                    finished.liveness = Some(reach.connectors.recheck_liveness());
+                    finished
+                }
+                Kind::Account => {
+                    let liveness = reach.connectors.liveness();
+                    let mut finished = read(reach, command);
+                    finished.liveness = Some(liveness);
+                    finished
+                }
+            };
+            finished.recheck = Some(kind);
             finished
         }
         Job::SignIn { generation, opener } => sign_in(reach, command, generation, opener.as_ref()),

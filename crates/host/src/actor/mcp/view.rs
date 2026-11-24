@@ -51,7 +51,9 @@ pub(crate) fn managed(actor: &Actor) -> bool {
     std::fs::metadata(&actor.managed_mcp).is_ok()
 }
 
-fn server_view(actor: &Actor, name: &str, server: &McpServerLaunch) -> McpServerView {
+/// One server as Settings › Tools shows it. `url` is the address whole, query included: the Edit
+/// form saves it back (the list shows only its host; `ListAddons` drops the query).
+pub(crate) fn server_view(actor: &Actor, name: &str, server: &McpServerLaunch) -> McpServerView {
     let names = |values: &std::collections::BTreeMap<String, McpValue>, env: bool| {
         values
             .iter()

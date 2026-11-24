@@ -127,6 +127,10 @@ fn the_wire_words_are_the_contracts() {
         (AddonStatus::NeedsSecret, "needs_secret"),
         (AddonStatus::NeedsSetup, "needs_setup"),
         (AddonStatus::Unreachable, "unreachable"),
+        (AddonStatus::SigningIn, "signing_in"),
+        (AddonStatus::SignedOut, "signed_out"),
+        (AddonStatus::NeedsCredit, "needs_credit"),
+        (AddonStatus::NotOffered, "not_offered"),
     ];
     for (status, word) in statuses {
         assert_eq!(

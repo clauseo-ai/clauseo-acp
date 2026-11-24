@@ -441,3 +441,73 @@ fn the_pay_link_is_checked_against_the_origin_given() {
     // No link held, nothing to open.
     assert_eq!(CaseLaw::default().pay_link(&Origin::Production), None);
 }
+
+/// Case law's status in the skills and tools list, state by state, in the order it is decided:
+/// signing in, then the credential before liveness, then a failed sign-in, then the check.
+#[test]
+fn the_addon_status_follows_the_state_in_order() {
+    use clauseo_protocol::AddonStatus;
+    let preview = Liveness {
+        live: false,
+        pricing: Some(Pricing {
+            status: PricingStatus::Preview,
+            ..Pricing::default()
+        }),
+        fetched_at: Some(SystemTime::UNIX_EPOCH),
+    };
+    let failed = Liveness {
+        live: false,
+        pricing: None,
+        fetched_at: Some(SystemTime::UNIX_EPOCH),
+    };
+    let signed_in = Some(CredentialStatus::SignedIn(CredentialKind::OAuth));
+    let with = |credential, liveness: Option<Liveness>| CaseLaw {
+        credential,
+        liveness,
+        ..CaseLaw::default()
+    };
+    let cases = [
+        // Before the credential is read and before any check.
+        (with(None, None), AddonStatus::NeedsSetup),
+        (
+            with(Some(CredentialStatus::NotAdded), None),
+            AddonStatus::NeedsSetup,
+        ),
+        (with(None, Some(live())), AddonStatus::NeedsSetup),
+        (with(None, Some(preview.clone())), AddonStatus::NotOffered),
+        (with(None, Some(failed.clone())), AddonStatus::Unreachable),
+        (
+            with(Some(CredentialStatus::SignedOut), Some(failed.clone())),
+            AddonStatus::SignedOut,
+        ),
+        (
+            with(Some(CredentialStatus::KeyRevoked), Some(preview)),
+            AddonStatus::SignedOut,
+        ),
+        (with(signed_in, Some(failed.clone())), AddonStatus::Ready),
+        (
+            CaseLaw {
+                out_of_credit: Some(super::OutOfCredit { pay_url: None }),
+                ..with(signed_in, Some(live()))
+            },
+            AddonStatus::NeedsCredit,
+        ),
+        (
+            CaseLaw {
+                signing_in: true,
+                ..with(Some(CredentialStatus::SignedOut), Some(live()))
+            },
+            AddonStatus::SigningIn,
+        ),
+        (
+            CaseLaw {
+                error: Some(Failure::sign_in("no")),
+                ..with(Some(CredentialStatus::NotAdded), Some(failed))
+            },
+            AddonStatus::NeedsSetup,
+        ),
+    ];
+    for (state, status) in cases {
+        assert_eq!(state.addon_status(), status, "{state:?}");
+    }
+}

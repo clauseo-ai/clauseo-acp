@@ -1,44 +1,14 @@
-//! `ListAddons`, the one list of skills and tools, and `AddonsChanged`: the built-ins with
-//! their descriptions, the packs' scripts, descriptions and states, a firm's lock, and the
-//! event after a pack is turned on. The tools' rows are in `addons_tools.rs`.
+//! `ListAddons`' skills: the built-ins with their descriptions, the packs' scripts,
+//! descriptions and states, a firm's lock, and `AddonsChanged` after a pack is turned on.
 
-use clauseo_host::AppSubscription;
 use clauseo_protocol::{
-    Addon, AddonFrom, AddonFromKind, AddonKind, AddonScope, AddonSource, AddonStatus, HostCommand,
-    HostEvent, HostQuery, MatterId, PackId, QueryResult,
+    AddonFrom, AddonFromKind, AddonKind, AddonScope, AddonSource, AddonStatus, HostCommand,
+    HostQuery, MatterId, PackId, QueryResult,
 };
-use futures::StreamExt as _;
 
-use crate::support::{Dir, Running, foreign_uuid, wait};
+use super::{addons, addons_changed, drain, item};
+use crate::support::{Dir, foreign_uuid};
 use crate::write;
-
-/// The list, with no matter.
-pub(crate) fn addons(host: &Running) -> Vec<Addon> {
-    match host.query(HostQuery::ListAddons { matter: None }).unwrap() {
-        QueryResult::Addons(list) => list.items,
-        other => panic!("ListAddons answered {other:?}"),
-    }
-}
-
-/// The row of `kind` with `id`.
-pub(crate) fn item<'a>(items: &'a [Addon], kind: AddonKind, id: &str) -> &'a Addon {
-    items
-        .iter()
-        .find(|item| item.kind == kind && item.id == id)
-        .unwrap_or_else(|| panic!("{id} is not listed: {items:?}"))
-}
-
-/// Waits for the next `AddonsChanged` on `sub`, skipping every other event.
-pub(crate) fn addons_changed(sub: &mut AppSubscription) {
-    wait("an AddonsChanged", async {
-        loop {
-            let item = sub.next().await.expect("the app stream ended");
-            if let HostEvent::AddonsChanged {} = crate::settings::decode(&item) {
-                return;
-            }
-        }
-    });
-}
 
 /// Writes a valid pack `id` with one skill `review` described by `description`, and `extra`
 /// files beside its `SKILL.md`.
@@ -75,7 +45,7 @@ fn set_pack(id: &str, on: bool) -> HostCommand {
 }
 
 /// With no pack and no server: the three built-in skills, each with its fixed line, then
-/// `case-law` (listed though this host has no connectors wired: `unreachable`) and `browser`;
+/// `case-law` (listed though this install has no data connectors: `not_offered`) and `browser`;
 /// every row `all`, none removable. The test prints the answer as the wire carries it.
 #[test]
 fn the_built_ins_are_listed_with_descriptions() {
@@ -111,7 +81,7 @@ fn the_built_ins_are_listed_with_descriptions() {
     }
     let case_law = item(&items, AddonKind::Tool, "case-law");
     assert_eq!(case_law.name, "Case law (Indian Kanoon)");
-    assert_eq!(case_law.status, AddonStatus::Unreachable);
+    assert_eq!(case_law.status, AddonStatus::NotOffered);
     // A matter changes nothing in this version.
     let matter = MatterId::new(foreign_uuid(1)).unwrap();
     let QueryResult::Addons(with_matter) = host
@@ -155,6 +125,7 @@ fn packs_show_their_scripts_descriptions_and_states() {
     );
     let host = dir.start(0);
     let (mut sub, _first) = crate::settings::subscribe_app(&host);
+    drain(&host, &mut sub);
     host.ok(set_pack("plain-kit", true));
     addons_changed(&mut sub);
     let items = addons(&host);

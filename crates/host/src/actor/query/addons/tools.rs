@@ -1,5 +1,10 @@
 //! `ListAddons`' tools: Clauseo's own `case-law` and `browser`, then the lawyer's MCP servers
 //! as Settings › Tools shows them (`mcp/view.rs`), by name. None of them reads a file.
+//!
+//! - Under the firm's `managed-mcp.json` Settings › Tools shows no server; here the lawyer's
+//!   own are listed `blocked`, off and locked, so they do not vanish.
+//! - A remote server's address is shown without its query or fragment, which may hold a token.
+//!   Settings › Tools' `McpServerView.url` keeps it whole: its Edit form saves that field back.
 
 use clauseo_protocol::{
     Addon, AddonFrom, AddonFromKind, AddonKind, AddonSource, AddonStatus, McpControl,
@@ -34,9 +39,26 @@ pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
         },
     ];
     let view = crate::actor::mcp::view::view(actor);
+    if view.control == McpControl::FirmManaged {
+        let servers = effective.mcp_servers().iter();
+        rows.extend(servers.map(|(name, server)| {
+            let server = crate::actor::mcp::view::server_view(actor, name, server);
+            Addon {
+                on: false,
+                status: AddonStatus::Blocked,
+                ..added(&server, false)
+            }
+        }));
+        return rows;
+    }
     let lawyer = view.control == McpControl::Lawyer;
     rows.extend(view.servers.iter().map(|server| added(server, lawyer)));
     rows
+}
+
+/// `url` without its query or fragment.
+fn without_query(url: &str) -> String {
+    url.split(['?', '#']).next().unwrap_or(url).to_owned()
 }
 
 /// A server's row. `lawyer`: the lawyer decides the list, so the row can be removed and is not
@@ -47,9 +69,9 @@ fn added(server: &McpServerView, lawyer: bool) -> Addon {
             kind: AddonFromKind::Program,
             text,
         }),
-        McpServerKind::Remote => server.url.clone().map(|text| AddonFrom {
+        McpServerKind::Remote => server.url.as_deref().map(|url| AddonFrom {
             kind: AddonFromKind::Address,
-            text,
+            text: without_query(url),
         }),
     };
     let unsaved = server
