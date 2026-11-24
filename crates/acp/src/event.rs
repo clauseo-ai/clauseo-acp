@@ -483,6 +483,28 @@ pub enum ProtocolWarning {
     /// the agent's: it rides with the warnings, about the session but not its turn, so the host
     /// reads it for the live turn. A `connection` one is a [`ConnectionLost`] instead.
     Retrying(Retrying),
+    /// An MCP server that did not start, as codex-acp reports it: a failed `tool_call` titled
+    /// `mcp__<name>__startup` (`map/mcp_startup.rs`), which never becomes a step. Codex then
+    /// runs without that server's tools.
+    McpServerNotStarted {
+        /// The server's name, as the session sent it.
+        server: String,
+        /// Why, from the adapter's own words; the rest of its text is not kept.
+        reason: McpStartupReason,
+    },
+}
+
+/// Why an MCP server did not start ([`ProtocolWarning::McpServerNotStarted`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum McpStartupReason {
+    /// It failed to start for any other reason (in a recorded run, a program that exited at once).
+    Failed,
+    /// Codex's error says it timed out (in a recorded run, a server that never answered: 30 s).
+    TimedOut,
+    /// Its start-up was cancelled.
+    Cancelled,
+    /// codex-acp did not start it: Codex's own config has a server of that name.
+    NameTaken,
 }
 
 /// One JSON-RPC line, copied to `ConnectOptions::frame_tap`.

@@ -17,6 +17,7 @@ mod codex;
 mod codex_helpers;
 mod helpers;
 mod interface;
+mod mcp_startup;
 mod mcp_wire;
 mod progress;
 mod prompts;
