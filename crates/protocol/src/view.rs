@@ -217,8 +217,9 @@ impl ViewEntry {
     /// `raw_input`, `raw_output`, then `content` items; for a `Helper`, `task` then `summary`;
     /// for a `UserMessage`, `content` items; for an `AgentContent`, its block; for a compaction
     /// `Marker`, its `summary`. Every other entry costs 0, a `HelperText` too: the host cuts each
-    /// one's text to the limit. Message text (`ContentBlock::Text`, an agent text's `text`) is a `String`, not a
-    /// `TextOrBlob`, and is not counted here: the reducer splits it into text patches.
+    /// one's text to the limit. Message text (`ContentBlock::Text`, an agent text's `text`) is a
+    /// `String`, not a `TextOrBlob`, and is not counted here: the reducer splits it into text
+    /// patches.
     pub fn inline_len(&self) -> usize {
         match self {
             Self::ToolCall(e) => {

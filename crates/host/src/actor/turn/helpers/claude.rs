@@ -87,7 +87,8 @@ pub(super) fn is_handback(tool_name: Option<&str>) -> bool {
 }
 
 impl Launch {
-    /// The launch step logged as `call` in `turn` with `title`, made by the helper `parent` (`None`: the lead).
+    /// The launch step logged as `call` in `turn` with `title`, made by the helper `parent`
+    /// (`None`: the lead).
     pub(in crate::actor::turn) const fn new(
         call: ToolCallId,
         turn: TurnId,
