@@ -319,19 +319,20 @@ fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off()
             Some(&OsString::from(value))
         );
     }
-    assert_eq!(launch.len(), 7);
+    assert_eq!(launch.len(), 8);
 }
 
-/// The variables that keep helpers off the lead's model: Claude Code's own agent types and its
-/// web-fetch agent off and at most six helpers at once on every login, and every helper on
-/// Haiku on Anthropic's own login only. Each wins over a hook's own value; a cloud login gets
-/// neither helper-model variable, and the adapter's own environment never has them.
+/// The variables that keep helpers off the lead's model: Claude Code's own agent types, its
+/// web-fetch agent and its fork off and at most six helpers at once on every login, and every
+/// helper on Haiku on Anthropic's own login only. Each wins over a hook's own value; a cloud
+/// login gets neither helper-model variable, and the adapter's own environment never has them.
 #[test]
 fn helpers_stay_off_the_lead_model_and_only_anthropics_login_forces_haiku() {
     let every_login = [
         ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"),
         ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
         ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
+        ("CLAUDE_CODE_FORK_SUBAGENT", "0"),
     ];
     let first_party = [
         ("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"),
@@ -341,11 +342,13 @@ fn helpers_stay_off_the_lead_model_and_only_anthropics_login_forces_haiku() {
         "env": {
             "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0",
             "CLAUDE_CODE_WEB_FETCH_AGENT": "1",
+            "CLAUDE_CODE_FORK_SUBAGENT": "1",
             "CLAUDE_CODE_SUBAGENT_MODEL": "opus",
         },
         "settings": {"env": {
             "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "20",
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "0",
+            "CLAUDE_CODE_FORK_SUBAGENT": "1",
         }},
     }}});
     for control in [McpControl::Clauseo, McpControl::Managed] {

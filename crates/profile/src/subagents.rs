@@ -16,7 +16,7 @@
 //! model that takes an effort level; on one that does not, Claude Code drops it without a word.
 //!
 //! These two are the only helpers a Claude session has: the host turns Claude Code's own agent
-//! types off on every login, and on Anthropic's own login runs every helper on
+//! types and its fork off on every login, and on Anthropic's own login runs every helper on
 //! [`PAPER_READER_MODEL`] whatever a definition or the lead's call says
 //! (`agent::loads::subagents` in the host).
 

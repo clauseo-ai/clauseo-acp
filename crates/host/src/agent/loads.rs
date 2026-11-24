@@ -180,6 +180,16 @@ pub(crate) const CLAUDE_HELPERS_AT_ONCE_VAR: &str = "CLAUDE_CODE_MAX_CONCURRENT_
 /// The most helpers a Claude session runs at once ([`CLAUDE_HELPERS_AT_ONCE_VAR`]).
 pub(crate) const CLAUDE_HELPERS_AT_ONCE: &str = "6";
 
+/// A launch variable Clauseo sets to `0` on every Claude launch, every login
+/// ([`CLAUDE_LAUNCH_VARS`]): no fork, the `Agent` tool's `subagent_type: "fork"` that copies the
+/// lead with its whole conversation and runs on the lead's own model. The built-in switch
+/// ([`CLAUDE_BUILTIN_AGENTS_OFF_VAR`]) leaves it on: a live run on Claude Code 2.1.330 offered
+/// "paper-reader, fork". Claude Code 2.1.x binary, search text
+/// `if(s.CLAUDE_CODE_FORK_SUBAGENT===!1)return"disabled"` (2.1.330; `a.` in 2.1.293): read as a
+/// yes/no/unset, `0` turns it off before Anthropic's flag is read. The same switch decides
+/// whether helpers are forced to start in the background (search text `function bZt()`).
+pub(crate) const CLAUDE_FORK_OFF_VAR: &str = "CLAUDE_CODE_FORK_SUBAGENT";
+
 // A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
 // and in the limits reader's and sign-in's `CLAUDE_FORCED_VARS`, with a test in
 // `tools_tests.rs`. A variable that depends on the login goes in
@@ -188,7 +198,7 @@ pub(crate) const CLAUDE_HELPERS_AT_ONCE: &str = "6";
 /// The variables every Claude launch sets, each in the adapter's own environment
 /// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
 /// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
-pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 7] = [
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 8] = [
     (CLAUDE_CRON_OFF_VAR, "1"),
     (CLAUDE_GIT_STATUS_OFF_VAR, "1"),
     (CLAUDE_MESSAGING_OFF_VAR, "0"),
@@ -196,6 +206,7 @@ pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 7] = [
     (CLAUDE_BUILTIN_AGENTS_OFF_VAR, "1"),
     (CLAUDE_WEB_FETCH_AGENT_VAR, "0"),
     (CLAUDE_HELPERS_AT_ONCE_VAR, CLAUDE_HELPERS_AT_ONCE),
+    (CLAUDE_FORK_OFF_VAR, "0"),
 ];
 
 /// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
