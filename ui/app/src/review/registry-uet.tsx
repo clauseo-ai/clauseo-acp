@@ -144,8 +144,8 @@ export const UET: Entry[] = [
   // the rows: names, chips and reasons
   entry("UET-09", lineWords("Web search"), [web(), browser()]),
   entry("UET-10", lineWords("Browser"), [web(), browser()]),
-  entry("UET-11", popWords("On"), [web(), browser()]),
-  entry("UET-41", popWords("Off"), [web(), browser("off")]),
+  entry("UET-11", lineWords("On"), [web(), browser()]),
+  entry("UET-41", lineWords("Off"), [web(), browser("off")]),
   entry("UET-12", lineWords("Can't search on this login"), [web("no_search_on_this_login")]),
   // beside the Off chip, in its row
   entry("UET-13", lineWords("In Settings"), [web("off"), browser("off")]),

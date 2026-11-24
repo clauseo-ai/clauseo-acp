@@ -114,7 +114,7 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     glyph: glyphState(tool),
     name: toolsLine(lang, toolName(tool)),
     on,
-    chip: tw(lang, on ? "On" : "Off"),
+    chip: toolsLine(lang, on ? "On" : "Off"),
     // once nothing blocks it, the reason says what it is ready for
     reason:
       reason === null

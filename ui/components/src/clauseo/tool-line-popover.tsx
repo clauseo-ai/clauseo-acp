@@ -53,7 +53,7 @@ export function ToolLinePopover({
 }: {
   /** Where each tool stands, in words: the button's accessible name and its tooltip. */
   label: string;
-  /** The tools' glyphs, hidden from assistive technology: the label says them. */
+  /** The tools as the line shows them, each glyph, name and On or Off: the label speaks for them. */
   glyphs: ReactNode;
   children: ReactNode;
 }) {

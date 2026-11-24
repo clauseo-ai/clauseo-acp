@@ -292,12 +292,17 @@
     margin-top: calc((var(--s5) * var(--k) - var(--size-icon-line)) / 2);
   }
 
-  /* ---------- the tool line: its glyphs on the status line, one quiet button ---------- */
+  /* ---------- the tool line: each tool's glyph, name and On or Off, one quiet button ---------- */
   .room-tool-glyphs {
     display: inline-flex;
     align-items: center;
-    gap: var(--s1);
+    gap: var(--s3);
     vertical-align: middle;
+  }
+  .room-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
   }
 
   /* ---------- the tool line's popover: a row per tool, its glyph, name and chip, what's under it past the glyph ---------- */
