@@ -109,4 +109,7 @@ export const HI = {
   // word, and its detail above Open Settings
   "Signed out": null,
   "Sign in again in Settings, under Connectors.": null,
+  // UC-1245: the button beside Turned off and Signed out: opens Settings at Connectors (the place's own
+  // words, so its chunk shares no words file with the tool line's popover)
+  "Open Settings": null,
 } as const;

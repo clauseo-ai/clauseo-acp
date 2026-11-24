@@ -8,7 +8,6 @@
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
-import { tw } from "@clauseo/components/lib/words-tools.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
@@ -107,7 +106,7 @@ export function CaseLawCard({
       </Button>
     ) : (shown === "off" || shown === "ended") && open !== null ? (
       <Button kind="tone" className="lib-feature-add" onClick={open}>
-        {tw(lang, "Open Settings")}
+        {lb(lang, "Open Settings")}
       </Button>
     ) : shown === "unreachable" ? (
       <RecheckButton recheck={acts.recheck} />
@@ -158,7 +157,7 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
         </p>
         {open !== null && (
           <Button kind="tone" size="small" onClick={open}>
-            {tw(lang, "Open Settings")}
+            {lb(lang, "Open Settings")}
           </Button>
         )}
       </div>
@@ -169,7 +168,7 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
         <p>{lb(lang, "Sign in again in Settings, under Connectors.")}</p>
         {open !== null && (
           <Button kind="tone" size="small" onClick={open}>
-            {tw(lang, "Open Settings")}
+            {lb(lang, "Open Settings")}
           </Button>
         )}
       </div>

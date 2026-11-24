@@ -201,6 +201,7 @@ export const UC_LIBRARY: Entry[] = [
     "Sign in again in Settings, under Connectors.",
     at({ caseLaw: "ended" }, CONN, CARD),
   ),
+  e("UC-1245", "Open Settings", at({ caseLaw: "off" }, CONN)),
   e("UC-1239", "the assistant", at({ both: true })),
   e("UC-1240", "The assistant", at({ both: true }, row("pdf"))),
 ];
