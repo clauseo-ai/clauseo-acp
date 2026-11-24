@@ -276,8 +276,14 @@ expression: "Snapshot::of(&every)"
             "message": "01900000-0000-7000-8000-000c00000007",
             "from": {
               "agent": "claude-acp",
-              "model": "Opus",
-              "effort": "High"
+              "model": {
+                "id": "opus",
+                "name": "Opus"
+              },
+              "effort": {
+                "id": "high",
+                "name": "High"
+              }
             },
             "to": {
               "agent": "codex-acp"

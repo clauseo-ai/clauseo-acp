@@ -168,6 +168,7 @@ fn event(n: u64) -> DomainEvent {
             delivery: Delivery::default(),
             config: std::collections::BTreeMap::new(),
             copy_of: None,
+            agent: None,
         }
         .into(),
         1 => TurnStarted {

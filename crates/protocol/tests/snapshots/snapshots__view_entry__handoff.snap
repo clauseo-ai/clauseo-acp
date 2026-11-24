@@ -9,8 +9,14 @@ expression: "entry(\"handoff\")"
     "message": "01900000-0000-7000-8000-000000000005",
     "from": {
       "agent": "claude-acp",
-      "model": "Opus",
-      "effort": "High"
+      "model": {
+        "id": "opus",
+        "name": "Opus"
+      },
+      "effort": {
+        "id": "high",
+        "name": "High"
+      }
     },
     "to": {
       "agent": "codex-acp"

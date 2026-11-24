@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentCapabilities, AgentId, AgentSessionId, AvailableCommand, CompactString, CompactionStatus,
-    ConfigOption, Cost, Count, DetachReason, DoneBy, HandoffId, MatterId, MessageId, NoticeKind,
-    NoticeLevel, PlanEntry, RenameSource, SnoozeBy, TextOrBlob, Timestamp, TurnId,
+    ConfigOption, Cost, Count, DetachReason, DoneBy, HandoffId, MatterId, MessageId, NamedChoice,
+    NoticeKind, NoticeLevel, PlanEntry, RenameSource, SnoozeBy, TextOrBlob, Timestamp, TurnId,
 };
 
 /// A thread was created in a matter: the first event of its stream.
@@ -220,12 +220,12 @@ pub struct AgentSwitched {
 pub struct Endpoint {
     /// The agent.
     pub agent: AgentId,
-    /// The model's name as shown, from the thread's config options; left out when not known.
+    /// The model, from the thread's config options; left out when not known.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub model: Option<String>,
-    /// The effort's name as shown, from the thread's config options; left out when not known.
+    pub model: Option<NamedChoice>,
+    /// The effort, from the thread's config options; left out when not known.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub effort: Option<String>,
+    pub effort: Option<NamedChoice>,
 }
 
 /// The conversation's earlier items are being handed to the agent a switch moved to, with the

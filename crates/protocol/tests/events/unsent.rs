@@ -77,6 +77,7 @@ fn user_message(copy_of: Option<CopyOf>) -> DomainEvent {
         delivery: Delivery::Queue,
         config: std::collections::BTreeMap::new(),
         copy_of,
+        agent: None,
     }
     .into()
 }

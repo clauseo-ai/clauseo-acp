@@ -13,11 +13,11 @@ use clauseo_protocol::{
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, Endpoint,
     ExpiryReason, HandoffEntry, HandoffEntryStatus, HeaderEntry, HelperEntry, HelperOutcome,
     HelperTextEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
-    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
-    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
-    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
+    MatterHeaderEntry, MatterKind, NamedChoice, NoticeEntry, NoticeKind, NoticeLevel, PageVia,
+    PermissionAbout, PermissionChoice, PermissionEntry, PermissionKind, PermissionOption,
+    PermissionState, Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob,
+    ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb,
+    UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry, WebResult,
 };
 
 use crate::examples::helpers::helper_started;
@@ -299,8 +299,14 @@ fn matter_entries() -> Vec<ViewEntry> {
             message: message_id(5),
             from: Endpoint {
                 agent: agent("claude-acp"),
-                model: Some("Opus".to_owned()),
-                effort: Some("High".to_owned()),
+                model: Some(NamedChoice {
+                    id: "opus".into(),
+                    name: "Opus".into(),
+                }),
+                effort: Some(NamedChoice {
+                    id: "high".into(),
+                    name: "High".into(),
+                }),
             },
             to: Endpoint {
                 agent: agent("codex-acp"),
