@@ -181,6 +181,12 @@ export const HI = {
   // later)
   "Waited for helpers.": null,
   "Worked with a helper.": null,
+  // a helper step that failed, the helper already asked; its part of the folded line; an edit, deletion, move or
+  // command held back, counted in the trouble line apart from what failed (UC-1283 to UC-1286; provisional; hi: later)
+  "Tried to work with a helper.": null,
+  "worked with a helper": null,
+  "1 held back.": null,
+  "{n} held back.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

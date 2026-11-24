@@ -114,6 +114,42 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Row of ChatGPT's other helper steps (\"Start subagent <name>\" and the like, sendInput, resumeAgent, closeAgent, sendMessage, followupTask, interruptAgent, listAgents, and spawnAgent with no prompt). Would have read the title or \"Used send input.\"."
+    "note": "Row of a step that works with a helper already asked: ChatGPT's \"Complete/Interact with/Interrupt subagent <name>\", sendInput, resumeAgent, closeAgent, sendMessage, followupTask, interruptAgent, listAgents, and Claude's SendMessage. Never counted as a helper asked. Would have read the title or \"Used send input.\"."
+  },
+  "UC-1283": {
+    "en": "Tried to work with a helper.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a helper step that failed or was stopped. Was \"Tried to ask a helper.\" (#1299 re-read)."
+  },
+  "UC-1284": {
+    "en": "worked with a helper",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for the steps that work with a helper already asked, said once and never counted (\"Asked a helper, worked with a helper.\"). Was counted into \"asked {n} helpers\" (#1299 re-read)."
+  },
+  "UC-1285": {
+    "en": "1 held back.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Trouble line, with the break: an edit, deletion, move or command that Claude's safety check or Clauseo's off-limits rule refused, counted apart from \"1 failed.\" so the line agrees with the row's mark."
+  },
+  "UC-1286": {
+    "en": "{n} held back.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Trouble line: such steps counted, apart from \"{n} failed.\"."
   }
 }

@@ -252,7 +252,6 @@ describe("ChatGPT's own helper steps (codex-acp 2.10.0: kind other, no tool name
   });
 
   test.each([
-    "Start subagent extract",
     "Complete subagent extract",
     "Interact with subagent extract",
     "Interrupt subagent extract",
@@ -266,13 +265,47 @@ describe("ChatGPT's own helper steps (codex-acp 2.10.0: kind other, no tool name
   ])("%s worked with a helper, never its title", (title) => {
     const c = titled(title);
     expect(doneOf("en", c)).toBe("Worked with a helper.");
-    expect(doneOf("en", titled(title, {}, "failed"))).toBe("Tried to ask a helper.");
+    expect(doneOf("en", titled(title, {}, "failed"))).toBe("Tried to work with a helper.");
     expect(doingOf("en", titled(title, {}, "in_progress"))).toBe("Working on it.");
-    expect(summaryOf("en", [c])).toBe("Asked a helper.");
+    // never counted as a helper asked
+    expect(summaryOf("en", [c])).toBe("Worked with a helper.");
   });
 
-  test("a spawn with no prompt worked with a helper; with one, it says the task (UC-906)", () => {
-    expect(doneOf("en", titled("spawnAgent"))).toBe("Worked with a helper.");
+  test("only a step that starts a helper counts as one asked", () => {
+    const start = titled("Start subagent extract");
+    expect(doneOf("en", start)).toBe("Asked a helper.");
+    expect(doneOf("en", titled("Start subagent extract", {}, "failed"))).toBe(
+      "Tried to ask a helper.",
+    );
+    expect(summaryOf("en", [titled("spawnAgent"), titled("closeAgent")])).toBe(
+      "Asked a helper, worked with a helper.",
+    );
+    expect(summaryOf("en", [start, titled("sendInput"), titled("closeAgent")])).toBe(
+      "Worked with a helper, asked a helper.",
+    );
+    expect(summaryOf("en", [titled("listAgents")])).toBe("Worked with a helper.");
+  });
+
+  test("a command titled like one of the agents' own steps is still a command", () => {
+    for (const tool of ["PowerShell", "Bash"]) {
+      const tasklist = stepCall("execute", "tasklist", "completed", {
+        tool_name: tool,
+        raw: { command: "tasklist" },
+      });
+      expect(doneOf("en", tasklist)).toBe("Ran tasklist.");
+      expect(drawnKindOf(tasklist)).toBe("execute");
+      expect(summaryOf("en", [tasklist])).toBe("Ran 1 command.");
+      const wait = stepCall("execute", "wait", "completed", {
+        tool_name: tool,
+        raw: { command: "wait" },
+      });
+      expect(doneOf("en", wait)).not.toMatch(/helpers|background/);
+      expect(summaryOf("en", [wait])).toBe("Ran 1 command.");
+    }
+  });
+
+  test("a spawn with no prompt asked a helper; with one, it says the task (UC-906)", () => {
+    expect(doneOf("en", titled("spawnAgent"))).toBe("Asked a helper.");
     expect(
       doneOf("en", titled("spawnAgent", { prompt: "Extract the dates from the plaint" })),
     ).toBe("Asked a helper: Extract the dates from the plaint.");

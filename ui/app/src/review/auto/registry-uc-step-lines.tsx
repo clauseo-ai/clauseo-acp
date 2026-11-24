@@ -148,6 +148,24 @@ export const UC_STEP_LINES: Entry[] = [
   },
   opened("UC-1282", "Worked with a helper.", [
     stepCall("other", "Start subagent extract", "completed", { raw: {} }),
+    stepCall("other", "closeAgent", "completed", { raw: {} }),
+  ]),
+  opened("UC-1283", "Tried to work with a helper.", [
+    stepCall("other", "closeAgent", "failed", { raw: {} }),
+  ]),
+  folded("UC-1284", "worked with a helper", [
+    readOf(G, "Plaint.docx"),
+    stepCall("other", "spawnAgent", "completed", { raw: {} }),
+    stepCall("other", "closeAgent", "completed", { raw: {} }),
+  ]),
+  folded("UC-1285", "1 held back.", [
+    readOf(C, "Plaint.docx"),
+    heldOf("failed", undefined, "edit", "Edit"),
+  ]),
+  folded("UC-1286", "{n} held back.", [
+    readOf(C, "Plaint.docx"),
+    heldOf("failed", undefined, "edit", "Edit"),
+    heldOf("failed", RULED, "execute", "Bash"),
   ]),
 ];
 

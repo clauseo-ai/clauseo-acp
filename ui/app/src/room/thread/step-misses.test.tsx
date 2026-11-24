@@ -194,7 +194,7 @@ test("Clauseo's own off-limits rule: its own mark, agreeing with the reason, and
   expect(more).toBe("1 held back by Claude's safety check. 2 kept off limits by Clauseo.");
 });
 
-test("a held-back edit or command stays in the trouble line, with the break, its mark naming who held it", () => {
+test("a held-back edit or command stays in the trouble line as held back, with the break, its mark naming who held it", () => {
   const edit = heldOf("failed", undefined, "edit", "Edit");
   const command = heldOf("failed", undefined, "execute", "Bash");
   const ruledEdit = heldOf("failed", RULED, "edit", "Write");
@@ -206,7 +206,12 @@ test("a held-back edit or command stays in the trouble line, with the break, its
     [readOf("Claude", "a.pdf"), edit, command, ruledEdit].map((tool_call) => ({ tool_call })),
     false,
   );
-  expect(line.trouble).toBe("3 failed.");
+  // the trouble line agrees with the rows: held back, not failed
+  expect(line.trouble).toBe("3 held back.");
+  // beside a step that really failed, each counted apart
+  expect(troubleOf("en", [edit, readOf("Claude", "b.pdf", "failed")])).toBe(
+    "1 failed. 1 held back.",
+  );
   expect(line.more).toBe("");
 });
 
@@ -220,7 +225,8 @@ test("Claude's own tools say what they did, never their names", () => {
     ["ToolSearch", "Planned the work.", "Tried to plan the work."],
     ["EnterPlanMode", "Planned the work.", "Tried to plan the work."],
     ["ExitPlanMode", "Planned the work.", "Tried to plan the work."],
-    ["SendMessage", "Asked a helper.", "Tried to ask a helper."],
+    // SendMessage writes to a helper already asked: it works with one, it asks none
+    ["SendMessage", "Worked with a helper.", "Tried to work with a helper."],
     ["TaskStop", "Stopped background work.", "Tried to stop background work."],
     ["AskUserQuestion", "Asked you.", "Tried to ask you."],
   ];
@@ -244,7 +250,9 @@ test("Claude's own tools say what they did, never their names", () => {
       claudeOwn("TaskStop"),
       claudeOwn("AskUserQuestion"),
     ]),
-  ).toBe("Read 1 paper, planned the work, asked a helper, stopped background work, asked you.");
+  ).toBe(
+    "Read 1 paper, planned the work, worked with a helper, stopped background work, asked you.",
+  );
   expect(drawnKindOf(claudeOwn("TodoWrite"))).toBe("think");
 });
 

@@ -114,8 +114,10 @@ export function toolNameOf(title: string): { as: ToolAs | null } | undefined {
 
 /** Whether a step is Claude's Yield (Claude Code 2.1.330): its own wait for its background work (helpers, background
  * commands, Monitor), read-only. Told as waiting, never as another thing or a tool used. */
-export const yieldOf = (call: Pick<ToolCallEntry, "title" | "tool_name">): boolean =>
-  call.tool_name?.toLowerCase() === "yield" || call.title.trim() === "Yield";
+export const yieldOf = (call: Pick<ToolCallEntry, "title" | "tool_name" | "kind">): boolean =>
+  call.tool_name === undefined || call.tool_name === ""
+    ? call.kind === "other" && call.title.trim() === "Yield"
+    : call.tool_name.toLowerCase() === "yield";
 
 /** ChatGPT's own steps around its helpers, as codex-acp 2.10.0 sends them: kind other, no tool name, the title all
  * there is. "wait" waits for helpers (as Claude's Yield does); the rest work with one. */
@@ -136,15 +138,21 @@ const chatgptOwn = (entry: ToolCallEntry): boolean =>
 export const helpersWaitOf = (entry: ToolCallEntry): boolean =>
   chatgptOwn(entry) && entry.title.trim() === "wait";
 
-/** Whether a step is one of ChatGPT's other helper tools (CHATGPT_HELPER_TOOLS, or "Start subagent <name>" and the
- * like): told as "Worked with a helper.". Its spawn is helperOf's. */
+/** Whether a step is ChatGPT's start of a helper ("Start subagent <name>"): a helper asked, counted as one. Its
+ * spawn is helperOf's. */
+export const helperStartOf = (entry: ToolCallEntry): boolean =>
+  chatgptOwn(entry) && /^Start subagent\b/.test(entry.title.trim());
+
+/** Whether a step is one of ChatGPT's other helper tools (CHATGPT_HELPER_TOOLS, or "Complete subagent <name>" and the
+ * like): it works with a helper already asked, so it is told as "Worked with a helper." and never counted as one. */
 export const helperToolOf = (entry: ToolCallEntry): boolean =>
   chatgptOwn(entry) &&
+  !helperStartOf(entry) &&
   (CHATGPT_HELPER_TOOLS.has(entry.title.trim()) || SUBAGENT.test(entry.title.trim()));
 
-/** What one of Claude's own tools does, as the lawyer reads it: plans the work, asks a helper, stops background
- * work, or asks the lawyer. */
-export type OwnAs = "plan" | "helper" | "stop" | "ask";
+/** What one of Claude's own tools does, as the lawyer reads it: plans the work, works with a helper already asked
+ * (SendMessage), stops background work, or asks the lawyer. */
+export type OwnAs = "plan" | "worked" | "stop" | "ask";
 
 /** Claude Code's own tools, by name folded (lower case, no `_ . : -`): never shown by that name, not even made
  * readable ("Used todo write." was the fallback's). */
@@ -157,21 +165,24 @@ const OWN: Readonly<Record<string, OwnAs>> = {
   toolsearch: "plan",
   enterplanmode: "plan",
   exitplanmode: "plan",
-  sendmessage: "helper",
+  sendmessage: "worked",
   taskstop: "stop",
   askuserquestion: "ask",
 };
 
-/** What a call of one of Claude's own tools does, by its tool name or a title that is that name; null for any other. */
-export function ownToolOf(call: Pick<ToolCallEntry, "title" | "tool_name">): OwnAs | null {
+/** What a call of one of Claude's own tools does, by its tool name, or by a title that is that name on a step of kind
+ * other with no tool name; null for any other. */
+export function ownToolOf(call: Pick<ToolCallEntry, "title" | "tool_name" | "kind">): OwnAs | null {
   const fold = (s: string) =>
     s
       .trim()
       .replace(/^`+|`+$/g, "")
       .toLowerCase()
       .replace(/[_.:-]/g, "");
-  const by = call.tool_name === undefined ? undefined : OWN[fold(call.tool_name)];
-  return by ?? OWN[fold(call.title)] ?? null;
+  // the title counts only on a step of kind other with no tool name: a command titled "tasklist" is no planning
+  if (call.tool_name !== undefined && call.tool_name !== "")
+    return OWN[fold(call.tool_name)] ?? null;
+  return call.kind === "other" ? (OWN[fold(call.title)] ?? null) : null;
 }
 
 /** An MCP server's name as the lawyer reads it, where its own spelling says less: by the name folded (lower case,
