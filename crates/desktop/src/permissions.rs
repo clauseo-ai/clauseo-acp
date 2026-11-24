@@ -48,6 +48,7 @@ use pick::Mount;
 pub(crate) use quiet::quiet_start;
 use store::{Answer, Asked, Store};
 use system::SystemProbe;
+pub(crate) use system::end_keychain_ask;
 
 pub(crate) mod ask_child;
 #[cfg(test)]
@@ -69,6 +70,8 @@ mod quiet;
 mod quiet_tests;
 mod store;
 mod system;
+#[cfg(test)]
+mod system_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]

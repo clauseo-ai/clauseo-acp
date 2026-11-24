@@ -132,6 +132,8 @@ pub(crate) fn stop_then_after_host(
 /// `after_host`, in that order (quit.rs). The log and counts go first: a logoff's short budget
 /// must not be spent waiting on a setup job before they are saved.
 pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce(HostExit, bool)) {
+    // The keychain Ask's child, with its dialog, goes first: it must not outlive the app.
+    crate::permissions::end_keychain_ask();
     let cell = app.try_state::<Bridge>().map(|bridge| bridge.cell());
     stop_then_after_host(
         || {
@@ -248,8 +250,10 @@ pub(crate) fn hide_windows<R: Runtime>(app: &AppHandle<R>) {
 /// anyway). The count is read again after it, for a job that ended its process meanwhile.
 fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
     // The gate first, then the count: a start either is refused or was counted (process's
-    // `live.rs`). The app is exiting, so nothing starts again either way.
+    // `live.rs`). The app is exiting, so nothing starts again either way. A keychain Ask's
+    // child is ended at once: its dialog may wait on the lawyer for minutes.
     clauseo_process::close_spawns();
+    crate::permissions::end_keychain_ask();
     clauseo_process::live_handles() == 0
         && app
             .try_state::<SetupStop>()

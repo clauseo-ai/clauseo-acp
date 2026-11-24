@@ -4,8 +4,9 @@
 //! macOS's dialog shows here and only while the lawyer's Ask runs.
 //!
 //! Protocol, one JSON object per line:
-//! - stdin: `{"service":…,"account":…}` for each item to read; the child reads stdin to its end
-//!   first, then reads the items one by one (macOS shows one dialog per item).
+//! - stdin: `{"service":…,"account":…}` for each item to read, Clauseo's services only, at
+//!   most 64 lines of at most 1 KiB ([`requests`]); the child reads them first, then the items
+//!   one by one (macOS shows one dialog per item). A request it drops gets no answer.
 //! - stdout: per item, in order, `{"service":…,"account":…,"outcome":"read"|"gone"|"refused"}`,
 //!   with `"code":<OSStatus>` on a refusal. Never a value: each one read is zeroed at once
 //!   (`mac.rs`). Then it exits 0; a line it cannot parse is skipped.
@@ -15,11 +16,12 @@
 //! (`system.rs`).
 
 use std::ffi::OsStr;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read as _, Write};
 
 use serde::{Deserialize, Serialize};
 
 use super::KeychainItem;
+use super::system::KEYCHAIN_SERVICES;
 
 /// The flag that starts the child.
 pub(crate) const FLAG: &str = "--keychain-ask";
@@ -96,18 +98,70 @@ pub(crate) fn request_lines(items: &[KeychainItem]) -> String {
         .collect()
 }
 
-/// The items in the child's stdin, skipping lines that do not parse (and blank ones).
-pub(crate) fn requests(input: impl BufRead) -> Vec<AskItem> {
-    input
-        .lines()
-        .map_while(Result::ok)
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str(&line).ok())
-        .collect()
+/// The most request lines the child reads; the rest of its stdin is never read.
+pub(crate) const MAX_REQUESTS: usize = 64;
+/// The longest request line, newline aside; a longer one is dropped, never held whole.
+pub(crate) const LINE_MAX: usize = 1024;
+
+/// The items in the child's stdin, read with a bound: at most [`MAX_REQUESTS`] lines (blank
+/// ones aside), each at most [`LINE_MAX`] bytes. A line too long, one that does not parse, or
+/// one naming a service that is not Clauseo's (`KEYCHAIN_SERVICES`) is dropped and answered
+/// with nothing: the child never reads another app's item, so no program can borrow
+/// Clauseo's name for a dialog about it.
+pub(crate) fn requests(mut input: impl BufRead) -> Vec<AskItem> {
+    let mut items = Vec::new();
+    let mut line = Vec::new();
+    let mut lines = 0;
+    while lines < MAX_REQUESTS {
+        line.clear();
+        match (&mut input)
+            .take(LINE_MAX as u64 + 1)
+            .read_until(b'\n', &mut line)
+        {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let ended = line.last() == Some(&b'\n');
+        if !ended && line.len() > LINE_MAX {
+            if skip_line(&mut input).is_err() {
+                break;
+            }
+            lines += 1;
+            continue;
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        lines += 1;
+        let Ok(item) = serde_json::from_slice::<AskItem>(&line) else {
+            continue;
+        };
+        if KEYCHAIN_SERVICES.contains(&item.service.as_str()) {
+            items.push(item);
+        }
+    }
+    items
 }
 
-/// The child's work: reads the items in `input` to its end, then each with `read`, writing
-/// one line per item to `output` as it answers. Its exit code: 0, or 1 when `output` closed.
+/// Drops the rest of a line too long, a buffer at a time.
+fn skip_line(input: &mut impl BufRead) -> io::Result<()> {
+    loop {
+        let buffer = input.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        if let Some(at) = buffer.iter().position(|byte| *byte == b'\n') {
+            input.consume(at + 1);
+            return Ok(());
+        }
+        let all = buffer.len();
+        input.consume(all);
+    }
+}
+
+/// The child's work: reads the requests in `input` ([`requests`]), then each item with
+/// `read`, writing one line per item to `output` as it answers. Its exit code: 0, or 1 when
+/// `output` closed.
 pub(crate) fn serve(
     input: impl BufRead,
     mut output: impl Write,
