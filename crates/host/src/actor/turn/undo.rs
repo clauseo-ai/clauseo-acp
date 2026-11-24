@@ -102,9 +102,10 @@ pub(super) struct Step {
     paths: Vec<MatterPath>,
     /// The changes of the turn's `FilesChanged` (the after-turn checkpoint's: the answer's
     /// card), with the papers it left off them as other answers' running at the same time (its
-    /// `beside`), which the undo leaves as they are: R8's `Card`. `None` when the log holds no
-    /// `FilesChanged` for the turn (nothing changed, or the entry was lost): every change
-    /// between the two. The step's `after` is always the turn's after-turn checkpoint, never an
+    /// `beside`), which the undo leaves as they are: R8's `Card`. `None` when no `FilesChanged`
+    /// of the turn names a paper `beside` (the answer ran alone, or the log predates the card)
+    /// or the log holds none for the turn (nothing changed, or the entry was lost): every change
+    /// between the two, as an undo always did. The step's `after` is always the turn's after-turn checkpoint, never an
     /// `undo` one: a turn whose step was undone has none left.
     pub(super) only: Option<TurnCard>,
 }
@@ -138,6 +139,10 @@ pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
             undone = true;
         }
     }
+    // The card is taken only when the turn answered beside others (some `beside` named a
+    // paper): an answer that ran alone, or one logged before the card, undoes the whole step,
+    // as it always did.
+    let only = only.filter(|card| !card.others.is_empty());
     match (before, after, undone) {
         (Some(before), Some(after), false) => Ok(Step {
             before,

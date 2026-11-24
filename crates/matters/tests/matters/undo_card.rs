@@ -215,3 +215,49 @@ fn a_card_rename_the_step_splits_refuses_the_undo() {
         assert_eq!(fx.read("b.docx"), b"same");
     }
 }
+
+/// The reviewer's case: a turn grew `big.docx` over the cap and copied its old bytes to
+/// `copy.docx`. Its card (`after_turn`'s changes, the turn's `FilesChanged`, no `beside`)
+/// has `copy.docx` added, while the step pairs it with `big.docx` left out: the card refuses
+/// the undo. With no paper `beside` the host takes no card (`only` is `None`), so the undo is
+/// today's: the copy is kept, the grown file left as it is.
+#[test]
+fn an_over_cap_copy_with_nothing_beside_undoes_as_today() {
+    let mut fx = Fixture::new("undo-card-over-cap-copy");
+    fx.limits.file_cap_bytes = 10;
+    fx.write("big.docx", "small");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("big.docx", "far over the cap");
+    fx.write("copy.docx", "small");
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["big.docx", "copy.docx"]))
+        .unwrap();
+    assert_eq!(checkpoint.skipped.len(), 1);
+    assert_eq!(checkpoint.changes, [added("copy.docx", b"small")]);
+    let changes = checkpoint.changes;
+    let none = BTreeSet::new();
+    let only = Card {
+        changes: &changes,
+        others: &none,
+    };
+    let decisions = undo_all(&["copy.docx"]);
+    let mut request = undo_request(1, 3, &decisions, 4, 5);
+
+    // The card would refuse it.
+    let err = matter.edited_since(cid(1), cid(3), Some(only)).unwrap_err();
+    assert!(matches!(&err, Error::NotOnCard { .. }), "{err:?}");
+    request.only = Some(only);
+    let err = matter.undo(&request).unwrap_err();
+    assert!(matches!(&err, Error::NotOnCard { .. }), "{err:?}");
+    assert_eq!(matter.timeline().len(), 2);
+
+    // Without it, today's undo.
+    request.only = None;
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
+    let undone = matter.undo(&request).unwrap();
+    assert_none(&undone.restored);
+    assert_eq!(undone.kept, [path("copy.docx")]);
+    assert_eq!(fx.read("big.docx"), b"far over the cap");
+    assert_eq!(fx.read("copy.docx"), b"small");
+}

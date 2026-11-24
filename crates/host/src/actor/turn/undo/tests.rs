@@ -1,5 +1,6 @@
 //! The step `UndoStep` and `PreviewUndo` read from a thread's log: the answer's card is its
-//! `only`, change by change, with the papers it left off as other answers' (its `beside`).
+//! `only`, change by change, with the papers it left off as other answers' (its `beside`),
+//! taken only when some `beside` names a paper.
 
 use clauseo_protocol::{
     ChangeKind, CheckpointId, ContentId, Count, DomainEvent, Envelope, EventId, FileChange,
@@ -83,12 +84,13 @@ fn the_card_in_the_log_is_the_steps_only() {
         )
         .unwrap(),
     ];
-    let step = step_of(&log(turn, Some(files.clone())), turn).unwrap();
+    let beside = vec![path("notes/c.txt")];
+    let step = step_of(&log_beside(turn, Some(files.clone()), beside.clone()), turn).unwrap();
     assert_eq!(step.before, id::<CheckpointId>(5));
     assert_eq!(step.after, id::<CheckpointId>(6));
     let card = TurnCard {
         changes: files,
-        others: std::collections::BTreeSet::new(),
+        others: beside.into_iter().collect(),
     };
     assert_eq!(step.only, Some(card));
 }
@@ -111,4 +113,22 @@ fn a_log_without_the_card_undoes_the_whole_step() {
     let step = step_of(&log(turn, None), turn).unwrap();
     assert_eq!(step.after, id::<CheckpointId>(6));
     assert_eq!(step.only, None);
+}
+
+/// The reviewer's case: a file grown over the cap (skipped) and its old bytes copied to a new
+/// path, nothing `beside`: the answer ran alone, so the undo takes no card and is today's.
+#[test]
+fn an_answer_with_nothing_beside_takes_no_card() {
+    let turn = id::<TurnId>(3);
+    let copy = FileChange::new(
+        path("copy.docx"),
+        ChangeKind::Added,
+        None,
+        Some(content("c1")),
+        Count::new(5).unwrap(),
+    )
+    .unwrap();
+    let step = step_of(&log(turn, Some(vec![copy])), turn).unwrap();
+    assert_eq!(step.paths, [path("copy.docx")]);
+    assert!(step.only.is_none());
 }
