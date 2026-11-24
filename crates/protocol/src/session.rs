@@ -381,6 +381,18 @@ open_data_enum! {
         /// reads that, and whether credits came, from the connectors' state, so it can say
         /// "ask again" once they do.
         CaseLawOutOfCredit = "case_law_out_of_credit",
+        /// A prompt's own model or effort pick (`SendPrompt::config`) could not be used: the
+        /// session does not offer it, or the agent refused it. The answer ran with what the
+        /// session holds, named here by display name as the agent's choices name it. Once a
+        /// turn.
+        PickNotUsed = "pick_not_used" {
+            /// The model the answer ran with; left out when the session names none.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            model: Option<String>,
+            /// Its effort; left out when the session names none.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            effort: Option<String>,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -413,6 +425,10 @@ open_data_enum! {
             model: "Haiku 4.5".to_owned(),
         },
         NoticeKind::CaseLawOutOfCredit,
+        NoticeKind::PickNotUsed {
+            model: Some("Opus 5.5".to_owned()),
+            effort: None,
+        },
     ];
 }
 

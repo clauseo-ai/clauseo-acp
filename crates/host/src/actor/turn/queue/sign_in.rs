@@ -19,8 +19,12 @@
 //! (`commands.rs`). `restart_agents` lifts the hold and resumes the queue once, through
 //! [`resume`].
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::TurnQueued;
-use clauseo_protocol::{ContentBlock, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId};
+use clauseo_protocol::{
+    CompactString, ContentBlock, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId,
+};
 
 use super::super::super::Actor;
 use super::super::out::Out;
@@ -36,6 +40,9 @@ pub(in crate::actor::turn) struct Requeue {
     pub(in crate::actor::turn) turn: TurnId,
     /// Its prompt, as it was sent.
     pub(in crate::actor::turn) content: Vec<ContentBlock>,
+    /// Its own picks, as its `UserMessage` logged them (empty for none): the copy's
+    /// `UserMessage` logs them again, and the copy runs with them (`prompt_picks.rs`).
+    pub(in crate::actor::turn) config: BTreeMap<CompactString, CompactString>,
 }
 
 /// `requeue`'s turn has ended and its close is on its way: it goes back once that is durable.
@@ -79,7 +86,8 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     let turn: TurnId = actor.ids.mint(now)?;
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = DeliveryRequest::Queue.into();
-    let built = build::user_message(turn, message, None, requeue.content.clone(), delivery);
+    let mut built = build::user_message(turn, message, None, requeue.content.clone(), delivery);
+    built.value.config.clone_from(&requeue.config);
     // `at_head`: a restart puts it back ahead of the turns queued before it (`restore.rs`).
     let waits = TurnQueued::new(thread, turn, thread, Some(requeue.turn))
         .map_err(|error| Error::Internal(error.to_string()))?
@@ -107,6 +115,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     queue.held = true;
     queue.held_for_limit = false;
     queue.sign_in = Some(turn);
+    super::super::prompt_picks::restored(actor, thread, turn, &requeue.config);
     tracing::info!(%thread, "a turn is held for its agent's sign-in");
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {

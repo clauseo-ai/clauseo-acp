@@ -50,8 +50,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         end::end_turn(actor, thread, end);
         return;
     };
-    let options = super::picks::thread_options(actor, thread);
-    let picks = super::prompt_picks::for_prompt(actor, thread, turn, &options);
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -97,7 +95,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let clock = std::sync::Arc::clone(&actor.clock);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     let list_clock = std::sync::Arc::clone(&actor.clock);
-    let picked_post = actor.post.clone();
     let call = Abortable::new(
         async move {
             // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
@@ -115,7 +112,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
-            set_picks(&client, &session, picks, (&picked_post, thread, id)).await;
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let send = || client.prompt(&session, turn, content.clone());
             let result = retry.run(&client, send).await;
@@ -141,44 +137,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             let _gone = post.try_send(Input::Turn(input));
         }
     });
-}
-
-/// The actor's input channel.
-type Post = async_channel::Sender<Input>;
-
-/// Sets `picks` on `session`, in order, and posts the options of the agent's last answer to the
-/// actor (`AgentReply::PromptPicked`), when one was taken. A pick the agent refuses is skipped;
-/// the prompt goes out after them all the same.
-async fn set_picks(
-    client: &clauseo_acp::AcpClient,
-    session: &clauseo_protocol::AgentSessionId,
-    picks: Vec<super::picks::Pick>,
-    (post, thread, agent): (&Post, ThreadId, u64),
-) {
-    let mut last = None;
-    for (option, value) in picks {
-        let select = clauseo_protocol::ConfigValue::Select(value.clone());
-        match client
-            .set_config_option(session, option.clone(), select)
-            .await
-        {
-            Ok(options) => {
-                tracing::info!(target: LIFECYCLE, %option, %value, "a prompt's pick was set");
-                last = Some(options);
-            }
-            Err(error) => {
-                tracing::info!(%option, error = %crate::log_file::Cause(&error), "a prompt's pick was not set");
-            }
-        }
-    }
-    if let Some(options) = last {
-        let reply = AgentReply::PromptPicked(options);
-        let _gone = post.try_send(Input::Turn(TurnInput::Agent {
-            thread,
-            agent,
-            reply,
-        }));
-    }
 }
 
 /// The prompt's blocks, the undo note's text first when there is one.

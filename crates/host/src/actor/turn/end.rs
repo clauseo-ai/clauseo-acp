@@ -544,12 +544,13 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
         let mut current = state.current.take()?;
         together::log_overlap(thread, &current.overlap);
         let stopped = state.stopped_for_sign_in.take();
+        let config = super::prompt_picks::finished(&mut state.prompt_picks, current.turn);
         let close = &state.closing.as_ref()?.close;
         // A turn ended with no close of its own (a host bug lost its matter) is not counted.
         if close.turn != current.turn {
             return None;
         }
-        requeue = sign_in::requeue_of(&mut current, stopped, close);
+        requeue = sign_in::requeue_of(&mut current, (stopped, config), close);
         Some(counting::Ended {
             started: current.started,
             first_words: current.first_words,

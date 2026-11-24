@@ -316,6 +316,16 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Checkpointing;
     }
+    // The turn's own picks go first, so its `TurnStarted` names what the session took
+    // (`prompt_picks.rs`); their answer runs the checkpoint.
+    if super::prompt_picks::send_first(actor, thread, turn) {
+        return;
+    }
+    checkpoint(actor, thread, turn);
+}
+
+/// Step 4's checkpoint job, once the turn's picks are set.
+pub(super) fn checkpoint(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let now = actor.now().wall;
@@ -434,7 +444,8 @@ pub(super) fn on_before_turn(
             out.push_matter(actor, matter, event)?;
         }
         let options = super::picks::thread_options(actor, thread);
-        let (model, effort) = super::prompt_picks::started_with(actor, thread, turn, &options);
+        let (model, effort, notice) =
+            super::prompt_picks::started_with(actor, thread, turn, options);
         out.push(
             actor,
             TurnStarted {
@@ -444,6 +455,9 @@ pub(super) fn on_before_turn(
                 effort,
             },
         )?;
+        if let Some(notice) = notice {
+            out.push(actor, notice)?;
+        }
         out.send(actor, Then::Started(turn))
     })();
     if let Err(error) = started {

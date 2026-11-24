@@ -346,6 +346,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             kind: Some(NoticeKind::AutoModeUnavailable),
         },
         auto_model_notice(),
+        pick_notice(),
         Notice {
             level: NoticeLevel::Warning,
             text: "Clauseo blocked a request: it reaches outside this matter.".to_owned(),
@@ -439,6 +440,20 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         .map(|(reason, words)| skill_pack_notice(reason, words)),
     );
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// A host notice of kind `PickNotUsed`: the answer ran on Opus 5.5 at High effort.
+fn pick_notice() -> Notice {
+    Notice {
+        level: NoticeLevel::Info,
+        text: "Clauseo couldn't switch to the model or effort you picked for this answer, so it \
+               used Opus 5.5 at High effort."
+            .to_owned(),
+        kind: Some(NoticeKind::PickNotUsed {
+            model: Some("Opus 5.5".to_owned()),
+            effort: Some("High".to_owned()),
+        }),
+    }
 }
 
 /// The host notice that the session's model, Haiku 4.5, has no auto mode.
