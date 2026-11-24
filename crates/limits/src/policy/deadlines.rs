@@ -1,11 +1,12 @@
-//! The deadlines: each row's 15-minute stale mark and each shown reset time. The model starts
-//! no timer: the host sends `Input::Deadline` at [`next_deadline`].
+//! The deadlines: each row's 15-minute stale mark, each shown reset time and each turn end's
+//! read that came too soon. The model starts no timer: the host sends `Input::Deadline` at
+//! [`next_deadline`].
 
 use clauseo_protocol::Timestamp;
 
 use crate::model::AgentState;
 use crate::policy::Action;
-use crate::policy::triggers::request_read;
+use crate::policy::triggers::{due_turn_read, request_read};
 
 /// Acts on every mark of `state` that passed by `now`: a row past its reset time shows no
 /// percentage, drops its rejected flag (that limit is over) and asks one read; a row past its
@@ -35,12 +36,14 @@ pub(crate) fn sweep(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Ac
     if read {
         request_read(state, now, actions);
     }
+    due_turn_read(state, now, actions);
     changed
 }
 
-/// The earliest mark not yet acted on, over every agent.
+/// The earliest mark not yet acted on, over every agent: a row's stale mark or shown reset
+/// time, or a turn end's read that is due.
 pub(crate) fn next_deadline(states: &[AgentState]) -> Option<Timestamp> {
-    states
+    let row_marks = states
         .iter()
         .flat_map(AgentState::visible_rows)
         .flat_map(|row| {
@@ -50,8 +53,9 @@ pub(crate) fn next_deadline(states: &[AgentState]) -> Option<Timestamp> {
             let reset = row.window.resets_at.filter(|_| !row.reset_passed);
             [stale, reset]
         })
-        .flatten()
-        .min()
+        .flatten();
+    let due_reads = states.iter().filter_map(|state| state.reads.turn_read_due);
+    row_marks.chain(due_reads).min()
 }
 
 /// The earliest reset time of `state` not yet passed.

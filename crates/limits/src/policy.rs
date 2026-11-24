@@ -27,12 +27,10 @@ pub(crate) struct KindRules {
     /// it stays in view), reads when the last read started at least this long ago, in
     /// milliseconds.
     pub(crate) shown_after_ms: i64,
-    /// A turn's end that a live signal came before reads when the last read started at least
-    /// this long ago, in milliseconds.
+    /// A turn's end reads when the last read started at least this long ago, in milliseconds,
+    /// whether or not a live signal came during the turn. A turn's end sooner than that asks
+    /// one read for when the age is up.
     pub(crate) turn_read_after_ms: i64,
-    /// A turn's end that no live signal came before reads when the last read started at least
-    /// this long ago, in milliseconds.
-    pub(crate) turn_read_after_ms_no_live: i64,
     /// A live signal may add a window no read named yet (Claude's 5-hour and weekly windows).
     pub(crate) live_rows: bool,
     /// A per-model row at its limit counts as the agent at its limit. Not for Codex, whose model
@@ -46,11 +44,11 @@ pub(crate) struct KindRules {
 pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
     match agent {
         // Anthropic's usage endpoint answers 429 to polling at 30 to 60 s (claude-code#31637), so
-        // Claude keeps 2 minutes, its turn end's shorter age.
+        // Claude's turn end reads once a minute has passed since the last read, live signal or
+        // not: a minute is the shortest safe gap.
         AgentKind::Claude => KindRules {
             shown_after_ms: 2 * 60 * 1000,
-            turn_read_after_ms: 10 * 60 * 1000,
-            turn_read_after_ms_no_live: 2 * 60 * 1000,
+            turn_read_after_ms: 60 * 1000,
             live_rows: true,
             model_rows_stop: true,
             pauses_words: at_limit_words::CLAUDE_PAUSES,
@@ -58,7 +56,6 @@ pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
         AgentKind::Codex => KindRules {
             shown_after_ms: 60 * 1000,
             turn_read_after_ms: 60 * 1000,
-            turn_read_after_ms_no_live: 60 * 1000,
             live_rows: false,
             model_rows_stop: false,
             pauses_words: at_limit_words::CODEX_PAUSES,
@@ -108,8 +105,8 @@ pub enum Input {
         /// The agent.
         agent: AgentKind,
     },
-    /// A turn of `agent` ended. With no turn-start input, "this turn" is the time since the
-    /// agent's last turn end: a live signal since then makes this end wait the longer age.
+    /// A turn of `agent` ended: a read when the last one started a minute or more ago, else one
+    /// read when that minute is up (see [`Limits::next_deadline`]).
     TurnEnded {
         /// The agent.
         agent: AgentKind,
@@ -125,8 +122,7 @@ pub enum Input {
         /// Whether any question of any of its sessions is pending.
         asking: bool,
     },
-    /// A live rate-limit signal from `agent`. It counts toward the agent's next turn end, so
-    /// that end waits the longer age.
+    /// A live rate-limit signal from `agent`: its windows update, and no read starts.
     Live {
         /// The agent.
         agent: AgentKind,
@@ -250,7 +246,6 @@ impl Limits {
             }
             Input::Live { agent, signal } => {
                 if let Some(state) = self.state_mut(agent) {
-                    state.reads.live_seen();
                     actions.extend(apply_live(state, &signal, now));
                 }
             }
