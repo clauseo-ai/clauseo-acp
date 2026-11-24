@@ -23,15 +23,20 @@ export type CaseLawShown =
   | "unreachable"
   /** The lawyer turned connectors off. */
   | "off"
+  /** Added once, but its sign-in ended or its key was revoked. */
+  | "ended"
   /** Anything else in its way: the row's word for its status. */
   | "trouble";
 
 export function caseLawShown(a: AddonView, facts: CaseLawFacts): CaseLawShown {
   if (facts.off === "lawyer") return "off";
   if (facts.off === "firm" || a.status === "blocked") return "trouble";
-  if (a.status === "unreachable") return "unreachable";
+  if (a.status === "unreachable" || facts.signIn === "error") return "unreachable";
   if (a.status === "ready" || facts.credits !== null) return "added";
-  if (a.status === "needs_setup") return facts.heard ? "offer" : "waiting";
+  if (facts.signIn === "ended") return "ended";
+  if (facts.signIn === "signing_in" || !facts.heard) return "waiting";
+  // the offer only when it is truly not added
+  if (a.status === "needs_setup") return "offer";
   return "trouble";
 }
 

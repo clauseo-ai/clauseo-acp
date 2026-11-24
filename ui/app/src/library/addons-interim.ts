@@ -149,6 +149,7 @@ export function interimItems(
 export function interimList(transport: HostTransport): ListReader {
   const next = nextHostOf(transport);
   const connectors = connectorsStoreOf(transport);
+  const feedless = next.app == null;
   let packs: readonly PackStatus[] | null = null;
   let tools: McpToolsView | null = null;
   let state: ListState = { items: null, complete: false };
@@ -159,7 +160,8 @@ export function interimList(transport: HostTransport): ListReader {
     const heard = connectors.heard();
     state = {
       items: interimItems(packs, tools, connectors.state(), heard),
-      complete: tools !== null && heard,
+      // without an app feed neither the servers nor the connectors' state will come: count what is
+      complete: feedless || (tools !== null && heard),
     };
     for (const listener of listeners) listener();
   };

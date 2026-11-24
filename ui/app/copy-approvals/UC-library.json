@@ -610,5 +610,23 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "Clauseo Case Law's detail while the lawyer has turned connectors off in Settings, above Open Settings (UET-15, reused); the card says Turned off (UC-1071) in place of the offer, so a lawyer with credits is never offered them (library/case-law.tsx). New (review #1298). Words are provisional"
+  },
+  "UC-1243": {
+    "en": "Signed out",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's card, with a yellow dot, when it was added but its sign-in ended or its key was revoked; Open Settings (UET-15) beside it, never the offer (library/case-law.tsx). New (review #1298). Words are provisional"
+  },
+  "UC-1244": {
+    "en": "Sign in again in Settings, under Connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail when its sign-in ended or its key was revoked, above Open Settings (library/case-law.tsx CaseLawBlocks). New (review #1298). Words are provisional"
   }
 }

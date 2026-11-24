@@ -120,9 +120,14 @@ export function ItemDetail({
   // Case Law's own state decides its line: the firm's off is "blocked", the lawyer's off is said in
   // its blocks, and before the connectors' state arrives nothing is said yet
   const shown = isCaseLaw ? caseLawShown(a, caseLaw.facts) : null;
-  const status = shown === "trouble" && caseLaw.facts.off === "firm" ? "blocked" : a.status;
+  const status =
+    shown === "trouble" && caseLaw.facts.off === "firm"
+      ? "blocked"
+      : shown === "unreachable"
+        ? "unreachable"
+        : a.status;
   const trouble =
-    shown === "off" || shown === "waiting" || shown === "added"
+    shown === "off" || shown === "ended" || shown === "waiting" || shown === "added"
       ? null
       : troubleLine(lang, status, assistant.who);
   const description = descriptionOf(lang, a);

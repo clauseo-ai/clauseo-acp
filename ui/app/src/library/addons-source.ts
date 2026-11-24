@@ -34,6 +34,9 @@ export type CaseLawFacts = {
   pack: { paise: number; credits: number } | null;
   /** The credits left, from the last account read; null before one, or while not added. */
   credits: number | null;
+  /** Added once, but not signed in now: the sign-in ended or its key was revoked ("ended"), a
+   * sign-in is under way ("signing_in"), or the last one failed ("error"); null otherwise. */
+  signIn: "ended" | "signing_in" | "error" | null;
 };
 
 export type AddonsState = ListState & { caseLaw: CaseLawFacts };
@@ -53,7 +56,13 @@ export type AddonsSource = {
   openConnectors: (() => void) | null;
 };
 
-const NO_FACTS: CaseLawFacts = { heard: false, off: null, pack: null, credits: null };
+const NO_FACTS: CaseLawFacts = {
+  heard: false,
+  off: null,
+  pack: null,
+  credits: null,
+  signIn: null,
+};
 
 /** Case Law's facts from the connectors' state. */
 export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFacts {
@@ -69,8 +78,17 @@ export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFac
         : "signed_in" in s
           ? (s.signed_in.balance?.credits ?? null)
           : null;
+  const signIn =
+    s === "signed_out" || s === "key_revoked"
+      ? ("ended" as const)
+      : s === "signing_in"
+        ? ("signing_in" as const)
+        : typeof s === "object" && "error" in s
+          ? ("error" as const)
+          : null;
   return {
     heard,
+    signIn,
     off: state.available ? null : state.locked ? "firm" : "lawyer",
     pack: smallest === undefined ? null : { paise: smallest.paise, credits: smallest.credits },
     credits,
@@ -152,7 +170,7 @@ export function provideAddons(transport: HostTransport, source: AddonsSource): v
  * shots'. */
 export function fixedAddons(
   items: readonly AddonView[],
-  caseLaw: CaseLawFacts = { heard: true, off: null, pack: null, credits: null },
+  caseLaw: CaseLawFacts = { heard: true, off: null, pack: null, credits: null, signIn: null },
   how: Recheck["how"] = "settings",
 ): AddonsSource {
   const state: AddonsState = { items, complete: true, caseLaw };

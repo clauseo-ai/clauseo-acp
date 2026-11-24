@@ -356,3 +356,48 @@ test("connectors turned off by the lawyer: Turned off, and how to turn them on",
   );
   expect(detail).not.toContain("Add Clauseo Case Law");
 });
+
+test.each([
+  ["signed_out", "ended", "Signed out", "Open Settings"],
+  ["key_revoked", "ended", "Signed out", "Open Settings"],
+] as const)(
+  "Case Law whose sign-in ended (%s): says so and opens Settings, never the offer",
+  async (status, shown, tag, button) => {
+    await mount();
+    await play({ connectors_changed: caseLaw(status) });
+    await open();
+    await tab("Connectors");
+    const card = h!.one("case-law-card")!;
+    expect(card.getAttribute("data-shown")).toBe(shown);
+    expect(text("case-law-trouble")).toBe(tag);
+    expect(card.querySelector(".lib-feature-add")?.textContent).toBe(button);
+    expect(card.textContent).not.toContain("From ₹236");
+    await h!.click(card.querySelector(".lib-feature-hit"));
+    const detail = text("library-detail")!;
+    expect(detail).toContain("Sign in again in Settings, under Connectors.");
+    expect(detail).not.toContain("Add Clauseo Case Law");
+  },
+);
+
+test("Case Law signing in: the waiting card, nothing to press", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw("signing_in") });
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("waiting");
+  expect(card.querySelector(".lib-feature-add")).toBeNull();
+});
+
+test("Case Law whose last sign-in failed: Can't reach it right now", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw({ error: { message: "refused" } }) });
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.getAttribute("data-shown")).toBe("unreachable");
+  expect(text("case-law-trouble")).toBe("Can't reach it right now");
+  expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Open Settings to check");
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  expect(text("library-detail")).not.toContain("Add Clauseo Case Law");
+});
