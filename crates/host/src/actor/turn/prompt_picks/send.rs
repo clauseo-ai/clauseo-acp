@@ -9,7 +9,8 @@
 //!   still sent, and one only the new model offers is not dropped.
 //! - A model or effort pick the options do not offer, one the agent refuses, and every pick
 //!   when [`PICKS_WAIT`] runs out before the agent's answers, could not be used: the turn's
-//!   `TurnStarted` is followed by one `NoticeKind::PickNotUsed`.
+//!   `TurnStarted` is followed by one `NoticeKind::PickNotUsed`. So are picks to set when no
+//!   session is attached at step 4, and picks whose answer came from an agent since replaced.
 //! - Past [`PICKS_WAIT`] the turn goes on with the thread's options, but the sets are not
 //!   dropped: they finish in the background, and their answer, when it comes, is logged as
 //!   `ConfigOptionsReplaced`, so the thread's options say what the session holds and a later
@@ -92,11 +93,13 @@ pub(in crate::actor::turn) fn send_first(
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
         .and_then(|agent| Some((agent.id, agent.link.client.clone(), agent.session.clone()?)));
-    let (Some((id, client, session)), true) =
-        (agent, sets.model.is_some() || sets.effort.is_some())
-    else {
+    let to_set = sets.model.is_some() || sets.effort.is_some();
+    let attached = agent.is_some();
+    let (Some((id, client, session)), true) = (agent, to_set) else {
+        // Picks to set and no attached session to take them: they could not be used.
+        let unsent = to_set && !attached;
         if let Some(state) = state(actor, thread) {
-            let not_used = sets.not_used;
+            let not_used = sets.not_used || unsent;
             state.prompt_picks.ran.insert(
                 turn,
                 Ran {
@@ -281,7 +284,8 @@ pub(in crate::actor::turn) fn on_picked(
         // After the wait's end: the turn went on without it.
         return;
     }
-    let not_used = picked.not_used;
+    // An answer from an agent since replaced says nothing of the session the turn runs on.
+    let not_used = picked.not_used || !same;
     let ran = Ran {
         answer,
         not_used,
@@ -300,6 +304,30 @@ fn went_on(actor: &mut Actor, thread: ThreadId, turn: TurnId, ran: Ran) {
         .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Checkpointing);
     if waiting {
         steps::checkpoint(actor, thread, turn);
+    }
+}
+
+#[cfg(test)]
+impl Picked {
+    /// The agent's answer `options`, every pick taken.
+    pub(in crate::actor::turn) fn answered(options: Vec<ConfigOption>) -> Self {
+        Self {
+            answer: Some(options),
+            ..Self::default()
+        }
+    }
+}
+
+/// `turn`'s sets are out, as [`send_first`] leaves them, with no wait armed.
+#[cfg(test)]
+pub(in crate::actor::turn) fn sets_out(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let (wait, _registration) = futures::future::AbortHandle::new_pair();
+    if let Some(state) = state(actor, thread) {
+        let ran = Ran {
+            waiting: Some(wait),
+            ..Ran::default()
+        };
+        state.prompt_picks.ran.insert(turn, ran);
     }
 }
 

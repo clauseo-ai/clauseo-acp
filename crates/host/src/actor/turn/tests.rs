@@ -37,6 +37,7 @@ mod own_cancel;
 mod own_restart;
 mod papers;
 mod profile_live;
+mod prompt_picks;
 mod queue;
 mod refused_requeue;
 mod relocate;
