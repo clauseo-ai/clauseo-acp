@@ -35,13 +35,13 @@ fn accepting(dir: &Dir, name: &str) -> Scenario {
 }
 
 /// A generic agent's scenario whose `session/new` carries exactly `servers`.
-fn with_servers(dir: &Dir, name: &str, servers: &Value) -> Scenario {
+pub(super) fn with_servers(dir: &Dir, name: &str, servers: &Value) -> Scenario {
     let params = json!({"cwd": "{{any}}", "mcpServers": servers});
     template(dir, name, &agent_lines(name, "session/new", &params, &[]))
 }
 
 /// The `env` a local server whose program is `command` gets with no variables of its own.
-fn server_env(command: &Path) -> Value {
+pub(super) fn server_env(command: &Path) -> Value {
     if cfg!(unix) {
         let folder = command.parent().unwrap().display().to_string();
         json!([{"name": "PATH", "value": format!("{folder}:{INHERITED_PATH}")}])

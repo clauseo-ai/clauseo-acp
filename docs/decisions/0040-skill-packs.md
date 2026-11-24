@@ -473,6 +473,9 @@ of [Per matter](#per-matter) for the app: `matters.skill_packs` still narrows, b
   policy gives scope `matter` takes a lawyer's switch per matter, on and off. An item with scope
   `all` stays on in every matter, and its switch is `settings.locked`. An item the policy does
   not turn on cannot be turned on. `SetAddonScope` and `RemoveAddon` stay `settings.locked`.
+  A switch a matter stored before the lock counts for nothing on an item with scope `all` (and
+  on `browser` or `case-law` while `tools.browser` or `tools.connectors` is locked), in launches
+  and in the list alike, since the lawyer could not clear it.
   Under `managed-mcp.json` no lawyer's server is switched at all. For the app: a `ListAddons` row
   that is `locked` with scope `matter` is switchable per matter; `locked` with scope `all` is not.
 - **The older commands keep the switches whole.** Settings › Tools' edit keeps a server's scope.

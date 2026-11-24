@@ -125,7 +125,8 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
     }
     let now = actor.now().wall;
     // Its switches for skills and tools go with it: it comes back with none (decision record
-    // 0040). A commit that fails leaves them in the store; this run reads them back at restart.
+    // 0040). The entry keeps them until the commit is durable, so a failed one puts them back.
+    let switches = before.addon_switches.clone();
     let row = MatterRow {
         forgotten: Some(now),
         addon_switches: None,
@@ -136,7 +137,10 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
         .matters
         .remove(&matter)
         .ok_or_else(|| Error::Internal(format!("matter {matter} vanished")))?;
-    entry.row = row;
+    entry.row = MatterRow {
+        addon_switches: switches,
+        ..row
+    };
     // The worker goes: the matter may come back from another folder, and its worker would still
     // hold the old one. It is idle (nothing runs in the matter), so the join is short.
     entry.worker = None;
@@ -162,6 +166,9 @@ pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: boo
         actor.folder_supports.remove(&matter);
         super::papers::follow::forgotten(actor, matter);
         turn::stop_agents(actor, matter);
+        if let Some(entry) = actor.forgotten.get_mut(&matter) {
+            entry.row.addon_switches = None;
+        }
         return;
     }
     if let Some(mut entry) = actor.forgotten.remove(&matter) {

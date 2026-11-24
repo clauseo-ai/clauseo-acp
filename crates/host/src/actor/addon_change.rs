@@ -255,10 +255,15 @@ pub(in crate::actor) fn receipt_moving(
         .filter_map(|entry| {
             let before = &entry.row;
             let mut switches = before.addon_switches.clone()?;
-            let on = switches.get(kind, from)?;
+            let on = switches.get(kind, from);
+            // A switch left for the new name (an earlier commit that failed) goes too.
+            let stale = to.and_then(|to| switches.get(kind, to));
+            if on.is_none() && stale.is_none() {
+                return None;
+            }
             switches.set(kind, from, None);
             if let Some(to) = to {
-                switches.set(kind, to, Some(on));
+                switches.set(kind, to, on);
             }
             let after = MatterRow {
                 addon_switches: (!switches.is_empty()).then_some(switches),

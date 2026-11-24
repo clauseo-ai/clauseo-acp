@@ -3,6 +3,7 @@
 //! always `all`) and a matter's own switch (`matters.addon_switches`). An item applies in a
 //! matter when the matter's switch says so, else when its scope is `all`. Whether the item is on
 //! at all (a pack turned on, a server enabled, `tools.browser`) is the caller's other half.
+//! Under the firm's lock on the item's setting, an item with scope `all` ignores every switch.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -36,6 +37,45 @@ pub(in crate::actor) fn scope_all(effective: &Effective, kind: AddonKind, id: &s
             .mcp_servers()
             .get(id)
             .is_none_or(|server| !server.matter_scoped()),
+    }
+}
+
+/// The firm's locks that decide where items are on: under one, an item with scope `all` is on
+/// in every matter, whatever switch a matter stored before the lock (decision record 0040).
+#[derive(Clone, Default)]
+pub(in crate::actor) struct Locks {
+    /// The locked keys among `skills.enabled`, `mcp.servers`, `tools.browser` and
+    /// `tools.connectors`.
+    keys: Vec<&'static str>,
+}
+
+impl Locks {
+    /// The locks policy sets now.
+    pub(in crate::actor) fn of(effective: &Effective) -> Self {
+        let keys = [
+            "skills.enabled",
+            "mcp.servers",
+            "tools.browser",
+            "tools.connectors",
+        ]
+        .into_iter()
+        .filter(|key| match *key {
+            "mcp.servers" => effective.mcp_locked(),
+            key => effective.is_locked(key),
+        })
+        .collect();
+        Self { keys }
+    }
+
+    /// Whether a lock covers the item `id`.
+    pub(in crate::actor) fn covers(&self, kind: AddonKind, id: &str) -> bool {
+        let key = match kind {
+            AddonKind::Skill => "skills.enabled",
+            AddonKind::Tool if id == BROWSER => "tools.browser",
+            AddonKind::Tool if id == CASE_LAW => "tools.connectors",
+            AddonKind::Tool => "mcp.servers",
+        };
+        self.keys.contains(&key)
     }
 }
 
@@ -77,7 +117,9 @@ impl<'a> Placed<'a> {
 
     /// Whether the item's scope and the matter's switch put it in the matter.
     fn applies(&self, kind: AddonKind, id: &str) -> bool {
-        applies(self.switches, kind, id, scope_all(self.effective, kind, id))
+        let all = scope_all(self.effective, kind, id);
+        // A switch stored before the firm's lock counts for nothing under it.
+        (all && Locks::of(self.effective).covers(kind, id)) || applies(self.switches, kind, id, all)
     }
 
     /// The enabled servers on in the matter, by name.
@@ -114,9 +156,10 @@ impl<'a> Placed<'a> {
     }
 
     /// Whether the matter leaves Clauseo's tool `name` (`case-law`, `browser`) on: its
-    /// switch, else on.
+    /// switch, else on; on whatever its switch when policy locks the tool's setting.
     pub(crate) fn builtin_on(&self, name: &str) -> bool {
-        applies(self.switches, AddonKind::Tool, name, true)
+        Locks::of(self.effective).covers(AddonKind::Tool, name)
+            || applies(self.switches, AddonKind::Tool, name, true)
     }
 
     /// Clauseo's own tools the matter switches off.
