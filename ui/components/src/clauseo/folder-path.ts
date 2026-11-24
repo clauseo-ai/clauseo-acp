@@ -44,6 +44,8 @@ const MOST = 200;
 /** A matter's name from its folder: the folder's own name, cleaned of what a name may not hold and cut to its length.
  * The folder keeps its name. */
 export function folderName(display: string): string {
+  // a drive's top, D:\ or D:, has no name of its own
+  if (/^[A-Za-z]:[\\/]*$/.test(display)) return "";
   const name = splitPath(display).tail.replace(UNFIT, "").trim();
   return Array.from(name).slice(0, MOST).join("").trim();
 }
