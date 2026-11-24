@@ -300,8 +300,9 @@ describe("the meter's colour as the plan runs short", () => {
     [74, undefined],
     [75, "amber"],
     [94, "amber"],
-    [94.4, "amber"],
-    // 94.5% used shows "5% left" (rounded down): red, as the figure says
+    // 93.9% used shows "6% left" (rounded down): amber; past 94% it shows "5% left": red, as the figure says
+    [93.9, "amber"],
+    [94.4, "red"],
     [94.5, "red"],
     [94.9, "red"],
     [95, "red"],
