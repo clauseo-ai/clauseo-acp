@@ -22,7 +22,9 @@
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AgentId, CompactString, ErrorCode, StopReason, ThreadId, TurnId, UnsentCause};
+use clauseo_protocol::{
+    AgentId, CompactString, CopyOf, ErrorCode, StopReason, ThreadId, TurnId, UnsentCause,
+};
 
 use super::super::Actor;
 use super::super::input::SignInRequest;
@@ -266,11 +268,20 @@ pub(super) fn requeue_of(
     let stopped = stopped == Some(close.turn) && close.stop != StopReason::EndTurn;
     let waits_for_sign_in = failed || stopped;
     let updated = close.cause == Some(UnsentCause::Update) && close.stop == StopReason::Cancelled;
+    let cause = if updated {
+        UnsentCause::Update
+    } else {
+        UnsentCause::SignIn
+    };
     (waits_for_sign_in || updated).then(|| Requeue {
         turn: close.turn,
         content: std::mem::take(&mut current.prompt),
         config,
         sign_in: waits_for_sign_in,
+        copy_of: CopyOf {
+            message: current.message,
+            cause,
+        },
     })
 }
 

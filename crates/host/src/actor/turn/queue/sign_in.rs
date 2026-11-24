@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 
 use clauseo_protocol::TurnQueued;
 use clauseo_protocol::{
-    CompactString, ContentBlock, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId,
+    CompactString, ContentBlock, CopyOf, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId,
 };
 
 use super::super::super::Actor;
@@ -50,6 +50,8 @@ pub(in crate::actor::turn) struct Requeue {
     /// Whether the queue waits for the sign-in (`restart_agents` resumes it); false for an
     /// install's turn, which the lawyer resumes.
     pub(in crate::actor::turn) sign_in: bool,
+    /// The message the copy is of, and why it is copied: its `UserMessage` carries it.
+    pub(in crate::actor::turn) copy_of: CopyOf,
 }
 
 /// `requeue`'s turn has ended and its close is on its way: it goes back once that is durable.
@@ -96,6 +98,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     let delivery = DeliveryRequest::Queue.into();
     let mut built = build::user_message(turn, message, None, requeue.content.clone(), delivery);
     built.value.config.clone_from(&requeue.config);
+    built.value.copy_of = Some(requeue.copy_of);
     // `at_head`: a restart puts it back ahead of the turns queued before it (`restore.rs`).
     let waits = TurnQueued::new(thread, turn, thread, Some(requeue.turn))
         .map_err(|error| Error::Internal(error.to_string()))?

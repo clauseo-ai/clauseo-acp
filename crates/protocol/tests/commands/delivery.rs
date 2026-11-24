@@ -62,6 +62,7 @@ fn queue_has_one_wire_form() {
         }],
         delivery,
         config: std::collections::BTreeMap::new(),
+        copy_of: None,
     };
     let entry = |delivery: Delivery| UserMessageEntry {
         order: Seq::FIRST,
@@ -75,6 +76,7 @@ fn queue_has_one_wire_form() {
         at_head: false,
         ts: Timestamp::ZERO,
         unsent: None,
+        copy_of: None,
     };
     let queued = serde_json::to_string(&message(Delivery::Queue)).unwrap();
     assert!(!queued.contains("delivery"), "{queued}");

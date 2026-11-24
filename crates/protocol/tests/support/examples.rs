@@ -316,6 +316,7 @@ fn thread_events() -> Vec<DomainEvent> {
             }],
             delivery: Delivery::Steer,
             config: std::collections::BTreeMap::new(),
+            copy_of: None,
         }
         .into(),
         TurnQueued::new(thread_id(2), turn, thread_id(2), Some(turn_id(6)))

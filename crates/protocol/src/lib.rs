@@ -247,7 +247,7 @@ wire_types! {
         TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
         ToolCallStarted,
         ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-        UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+        CopyOf, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,

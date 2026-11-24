@@ -102,6 +102,7 @@ pub(super) fn user_message(
         at_head: false,
         ts,
         unsent: None,
+        copy_of: event.copy_of,
     };
     push_user_upsert(&mut out.changes, &entry);
     state.index.users.insert(event.message, seq);

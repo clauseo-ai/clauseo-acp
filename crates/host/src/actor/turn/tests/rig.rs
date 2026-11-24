@@ -367,6 +367,7 @@ impl Rig {
                 content: Vec::new(),
                 delivery: Delivery::Queue,
                 config: std::collections::BTreeMap::new(),
+                copy_of: None,
             }
             .into(),
             TurnStarted {

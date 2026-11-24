@@ -25,13 +25,14 @@ use crate::open_enum::{UnknownKind, serialize_one_key};
 pub use payload::{
     AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
     CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
-    ContentAppended, ElicitationExpired, ElicitationRequested, ElicitationResolved, FilesChanged,
-    HelperEnded, HelperStarted, HelperText, MatterCreated, MatterHold, MatterRelocated,
-    ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
-    PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
-    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    ContentAppended, CopyOf, ElicitationExpired, ElicitationRequested, ElicitationResolved,
+    FilesChanged, HelperEnded, HelperStarted, HelperText, MatterCreated, MatterHold,
+    MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired,
+    PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved,
+    StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed,
+    ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued,
+    TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored, WebResult,
+    WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.

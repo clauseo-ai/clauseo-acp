@@ -4,8 +4,9 @@
 //! whose copy is queued again, held. A started turn ends with no cause.
 
 use clauseo_protocol::{
-    CommandOutcome, ContentBlock, DeliveryRequest, DomainEvent, HostCommand, PromptBlock,
-    QueueHoldReason, StopReason, ThreadId, TurnEnded, TurnId, UnsentCause,
+    CommandOutcome, ContentBlock, CopyOf, DeliveryRequest, DomainEvent, HostCommand, MessageId,
+    PromptBlock, QueueHoldReason, StopReason, ThreadId, TurnEnded, TurnId, UnsentCause,
+    UserMessage,
 };
 
 use super::super::{End, TurnPhase, cancel, end, queue};
@@ -48,6 +49,24 @@ fn ended(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> TurnEnded {
     match found {
         Some(DomainEvent::TurnEnded(ended)) => ended,
         other => panic!("no TurnEnded for {turn}: {other:?}"),
+    }
+}
+
+/// The message of `thread`'s current turn: the one a cancel is about to end.
+fn current_message(rig: &Rig, thread: ThreadId) -> MessageId {
+    let current = rig.actor.threads[&thread].turn.current.as_ref();
+    current.expect("a current turn").message
+}
+
+/// The `UserMessage` logged for `turn` in `thread`'s log.
+fn logged_message(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> UserMessage {
+    let found = rig
+        .log(thread)
+        .into_iter()
+        .find(|event| matches!(event, DomainEvent::UserMessage(m) if m.turn == turn));
+    match found {
+        Some(DomainEvent::UserMessage(message)) => message,
+        other => panic!("no UserMessage for {turn}: {other:?}"),
     }
 }
 
@@ -130,6 +149,7 @@ fn a_sign_in_stop_during_the_checkpoint_ends_sign_in_and_its_copy_waits_for_the_
     let mut rig = Rig::start("unsent-checkpoint-sign-in", PROMPT_ENDS);
     let thread = rig.thread();
     let turn = checkpointing_send(&mut rig, thread, 30);
+    let original = current_message(&rig, thread);
     // What `stop_agents` does to the turn it cancels (`sign_in.rs`).
     rig.actor
         .threads
@@ -146,7 +166,14 @@ fn a_sign_in_stop_during_the_checkpoint_ends_sign_in_and_its_copy_waits_for_the_
     assert_eq!(event.stop, StopReason::Cancelled);
     assert_eq!(event.cause, Some(UnsentCause::SignIn));
     assert!(!started(&mut rig, thread, turn));
-    assert_eq!(queue::queued_turns(&rig.actor, thread).len(), 1);
+    let copies = queue::queued_turns(&rig.actor, thread);
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    let message = logged_message(&mut rig, thread, copies[0]);
+    let copy_of = CopyOf {
+        message: original,
+        cause: UnsentCause::SignIn,
+    };
+    assert_eq!(message.copy_of, Some(copy_of));
     assert_eq!(
         queue::queue_hold(&rig.actor, thread),
         Some(QueueHoldReason::SignIn)
@@ -159,6 +186,7 @@ fn an_install_cancel_during_the_checkpoint_ends_update_and_its_copy_is_held() {
     let mut rig = Rig::start("unsent-checkpoint-install", PROMPT_ENDS);
     let thread = rig.thread();
     let turn = checkpointing_send(&mut rig, thread, 30);
+    let original = current_message(&rig, thread);
     cancel_all(&mut rig.actor);
     rig.release_held();
     until_ended(&mut rig, thread);
@@ -173,10 +201,13 @@ fn an_install_cancel_during_the_checkpoint_ends_update_and_its_copy_is_held() {
     let text = vec![ContentBlock::Text {
         text: "Then clause 5?".to_owned(),
     }];
-    let copied = rig.log(thread).into_iter().any(|event| {
-        matches!(event, DomainEvent::UserMessage(m) if m.turn == copies[0] && m.content == text)
-    });
-    assert!(copied, "no copy of the message was logged");
+    let message = logged_message(&mut rig, thread, copies[0]);
+    assert_eq!(message.content, text);
+    let copy_of = CopyOf {
+        message: original,
+        cause: UnsentCause::Update,
+    };
+    assert_eq!(message.copy_of, Some(copy_of));
     assert_eq!(
         queue::queue_hold(&rig.actor, thread),
         Some(QueueHoldReason::Paused)
@@ -228,6 +259,7 @@ fn a_sign_in_stop_on_a_waiting_turn_ends_sign_in_and_its_copy_waits_for_the_sign
     let mut rig = Rig::start("unsent-sign-in", "");
     let thread = rig.thread();
     let waiting = rig.current_turn(thread, TurnPhase::Queued);
+    let original = current_message(&rig, thread);
     // What `stop_agents` does to the turn it cancels (`sign_in.rs`).
     rig.actor
         .threads
@@ -242,6 +274,12 @@ fn a_sign_in_stop_on_a_waiting_turn_ends_sign_in_and_its_copy_waits_for_the_sign
     assert_eq!(event.cause, Some(UnsentCause::SignIn));
     let copy = queue::queued_turns(&rig.actor, thread);
     assert_eq!(copy.len(), 1, "{copy:?}");
+    let message = logged_message(&mut rig, thread, copy[0]);
+    let copy_of = CopyOf {
+        message: original,
+        cause: UnsentCause::SignIn,
+    };
+    assert_eq!(message.copy_of, Some(copy_of));
     assert_eq!(
         queue::queue_hold(&rig.actor, thread),
         Some(QueueHoldReason::SignIn)
@@ -266,6 +304,7 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
         .as_mut()
         .unwrap()
         .prompt = text.clone();
+    let original = current_message(&rig, thread);
     cancel_all(&mut rig.actor);
     rig.settle_commits();
 
@@ -279,10 +318,13 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
     assert_eq!(copies.len(), 1, "{copies:?}");
     let copy = copies[0];
     assert_ne!(copy, waiting);
-    let copied = rig.log(thread).into_iter().any(
-        |event| matches!(event, DomainEvent::UserMessage(m) if m.turn == copy && m.content == text),
-    );
-    assert!(copied, "no copy of the message was logged");
+    let message = logged_message(&mut rig, thread, copy);
+    assert_eq!(message.content, text);
+    let copy_of = CopyOf {
+        message: original,
+        cause: UnsentCause::Update,
+    };
+    assert_eq!(message.copy_of, Some(copy_of));
     assert_eq!(
         queue::queue_hold(&rig.actor, thread),
         Some(QueueHoldReason::Paused)

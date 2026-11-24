@@ -2,10 +2,13 @@
 //! round-trip, a `TurnEnded` written before the field reads as no cause, and a cause a newer
 //! host adds reads as `Unknown`. The message's status `not_sent` is written as that word.
 
-use clauseo_protocol::{DomainEvent, StopReason, TurnEnded, UnsentCause, UserMessageStatus};
+use clauseo_protocol::{
+    CopyOf, Delivery, DomainEvent, StopReason, TurnEnded, UnsentCause, UserMessage,
+    UserMessageStatus,
+};
 use serde_json::json;
 
-use crate::fixtures::{round_trips, turn_id};
+use crate::fixtures::{message_id, round_trips, turn_id};
 
 fn ended(cause: Option<UnsentCause>) -> DomainEvent {
     TurnEnded {
@@ -72,4 +75,48 @@ fn the_not_sent_status_round_trips_as_not_sent() {
         serde_json::to_value(UserMessageStatus::NotSent).unwrap(),
         json!("not_sent")
     );
+}
+
+/// A `UserMessage` of `turn` with `copy_of`.
+fn user_message(copy_of: Option<CopyOf>) -> DomainEvent {
+    UserMessage {
+        turn: turn_id(5),
+        message: message_id(6),
+        acp_message_id: None,
+        content: Vec::new(),
+        delivery: Delivery::Queue,
+        config: std::collections::BTreeMap::new(),
+        copy_of,
+    }
+    .into()
+}
+
+#[test]
+fn a_held_copy_names_its_original_and_why_and_an_old_message_reads_none() {
+    let copy = CopyOf {
+        message: message_id(4),
+        cause: UnsentCause::Update,
+    };
+    round_trips(&user_message(Some(copy)));
+    let json = serde_json::to_value(user_message(Some(copy))).unwrap();
+    assert_eq!(
+        json["user_message"]["copy_of"],
+        json!({
+            "message": serde_json::to_value(message_id(4)).unwrap(),
+            "cause": "update",
+        })
+    );
+    let plain = serde_json::to_value(user_message(None)).unwrap();
+    assert_eq!(plain["user_message"].get("copy_of"), None, "{plain}");
+    round_trips(&user_message(None));
+
+    let old: DomainEvent = serde_json::from_value(json!({
+        "user_message": {
+            "turn": serde_json::to_value(turn_id(5)).unwrap(),
+            "message": serde_json::to_value(message_id(6)).unwrap(),
+            "content": [],
+        }
+    }))
+    .unwrap();
+    assert_eq!(old, user_message(None));
 }

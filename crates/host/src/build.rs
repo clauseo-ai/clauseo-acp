@@ -191,6 +191,7 @@ pub(crate) fn user_message(
         content,
         delivery,
         config: std::collections::BTreeMap::new(),
+        copy_of: None,
     })
 }
 

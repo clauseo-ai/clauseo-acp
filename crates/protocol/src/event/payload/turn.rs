@@ -10,6 +10,18 @@ use crate::{
     TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage, UnsentCause,
 };
 
+/// The original of a held copy: the message it was copied from, and why it was copied (the
+/// `UnsentCause` its turn ended with, `SignIn` or `Update`). Logged on the copy's `UserMessage`,
+/// so the app reads the copy as a fact, not by its place in the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct CopyOf {
+    /// The message it copies: the one its cancelled turn carried.
+    pub message: MessageId,
+    /// Why it was copied: `SignIn` for a sign-in stop, `Update` for an install's cancel.
+    pub cause: UnsentCause,
+}
+
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
 /// of `user_message_chunk` map to it too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +52,10 @@ pub struct UserMessage {
         specta(type = std::collections::BTreeMap<String, String>)
     )]
     pub config: std::collections::BTreeMap<CompactString, CompactString>,
+    /// The message this one copies, when it is a held copy a sign-in stop or an install's
+    /// cancel queued again; `None` for the lawyer's own message, and in logs before the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_of: Option<CopyOf>,
 }
 
 /// A turn waits: behind its own thread's running turn, or behind another thread's writer.

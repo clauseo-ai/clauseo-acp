@@ -103,6 +103,7 @@ fn thread_entries() -> Vec<ViewEntry> {
             at_head: false,
             ts: Timestamp::new(1_760_000_001_000).unwrap(),
             unsent: None,
+            copy_of: None,
         }),
         ViewEntry::AgentText(agent_text_entry()),
         ViewEntry::AgentContent(AgentContentEntry {

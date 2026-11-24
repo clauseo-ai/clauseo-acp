@@ -143,5 +143,6 @@ fn without_content(entry: &UserMessageEntry) -> UserMessageEntry {
         at_head: entry.at_head,
         ts: entry.ts,
         unsent: entry.unsent,
+        copy_of: entry.copy_of,
     }
 }
