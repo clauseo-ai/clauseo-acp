@@ -5,7 +5,7 @@ use clauseo_protocol::{
     NamedChoice,
 };
 
-use super::choose;
+use super::{PromptPicks, choose};
 use crate::actor::agent_options::tests::probed;
 
 fn select(
@@ -147,4 +147,27 @@ fn a_pick_the_options_do_not_offer_is_not_named() {
     );
     assert_eq!(chosen.0, Some(named("opus", "Opus 5.5")));
     assert_eq!(choose(&[], &ConfigPicks::default(), None), (None, None));
+}
+
+/// A session start that attaches without a step 4 wait (everything held) calls no
+/// `session_started`, so `session_starting` alone must drop what the last start left: its start
+/// options, which no `TurnStarted` took when that turn was cancelled, and its list wait.
+#[test]
+fn a_session_start_drops_the_last_starts_options_and_list_wait() {
+    let turn = clauseo_protocol::TurnId::new(
+        uuid::Builder::from_unix_timestamp_millis(1_790_000_000_000, &[3; 10]).into_uuid(),
+    )
+    .unwrap();
+    let mut picks = PromptPicks {
+        start: Some(options("opus", "medium")),
+        kept_wait: Some(turn),
+        kept_waited: true,
+        kept_told: true,
+        ..PromptPicks::default()
+    };
+    picks.session_starting();
+    assert_eq!(picks.start, None);
+    assert_eq!(picks.kept_wait, None);
+    assert!(!picks.kept_waited && !picks.kept_told);
+    assert!(picks.kept_lost.is_empty() && picks.kept_due.is_empty());
 }

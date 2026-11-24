@@ -154,13 +154,24 @@ pub(super) fn claim(
     logged
 }
 
-/// A session start begins (`picks::wanted`): what the last one left goes.
+/// A session start begins (`picks::wanted`): what the last one left goes, its start options and
+/// a step 4 waiting for its list among them, so a start that attaches without a wait (everything
+/// held) leaves no older options for the next `TurnStarted` to name. A turn whose step 4 still
+/// waits goes on at its own deadline (`send::on_picked`).
 pub(super) fn session_starting(actor: &mut Actor, thread: ThreadId) {
     if let Some(state) = state(actor, thread) {
-        let picks = &mut state.prompt_picks;
-        picks.kept_lost.clear();
-        picks.kept_due.clear();
-        (picks.kept_waited, picks.kept_told) = (false, false);
+        state.prompt_picks.session_starting();
+    }
+}
+
+impl PromptPicks {
+    /// [`session_starting`]'s work on one thread's picks.
+    fn session_starting(&mut self) {
+        self.kept_lost.clear();
+        self.kept_due.clear();
+        self.start = None;
+        self.kept_wait = None;
+        (self.kept_waited, self.kept_told) = (false, false);
     }
 }
 
