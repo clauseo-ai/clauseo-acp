@@ -12,6 +12,7 @@ import {
   reset,
   step,
   THREAD,
+  toolCall,
   TURN,
   userMessage,
   uuid,
@@ -24,12 +25,62 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
+import { StoreContext } from "../../store/hooks.ts";
+import type { ViewStore } from "../../store/store.ts";
+import { CASE_LAW_OUT_OF_CREDIT } from "../thread/case-law-notice.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
 import { stubFonts } from "../thread/testing.ts";
 import { dismissHint, refreshBalance } from "./main-commands.ts";
 import { OutOfCredit } from "./out-of-credit.tsx";
 
 stubFonts();
+
+/** A conversation's entries: a question, the refused step, and the host's case_law_out_of_credit mark after it. */
+const refusedEntries = (): ViewEntry[] => [
+  userMessage(1, 1, "Find the leading cases."),
+  toolCall(2, 1, "failed"),
+  {
+    notice: {
+      order: 3,
+      event: uuid(3, 10),
+      level: "warning",
+      text: "Clauseo Case Law is out of credit.",
+      kind: CASE_LAW_OUT_OF_CREDIT as never,
+      ts: 3_000,
+    },
+  },
+];
+
+/** A view store holding these streams' entries, and a send that adds a message to one. */
+function viewsOf(streams: Record<string, ViewEntry[]>) {
+  const listeners = new Set<() => void>();
+  const views = new Map(
+    Object.entries(streams).map(([stream, entries]) => [
+      stream,
+      {
+        ids: entries.map((_, i) => String(i)),
+        entries: new Map(entries.map((e, i) => [String(i), e])),
+      },
+    ]),
+  );
+  const store = {
+    view: (stream: string) => views.get(stream),
+    subscribe: (l: () => void) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+  } as unknown as ViewStore;
+  const send = (stream: string) => {
+    const v = views.get(stream)!;
+    const id = String(v.ids.length);
+    views.set(stream, {
+      ids: [...v.ids, id],
+      entries: new Map([...v.entries, [id, userMessage(9, 2, "Search again.")]]),
+    });
+    for (const l of listeners) l();
+  };
+  return { store, send };
+}
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let h: Harness | null = null;
@@ -280,7 +331,7 @@ test("the note yields to U12's limit warning, and comes back when the warning go
   expect(h.all("out-of-credit")).toHaveLength(1);
 });
 
-test("in every open conversation the note shows, and hiding it in one leaves the others", async () => {
+test("in every open conversation the note shows, and hiding it in one leaves the others; once credit is back, each that met the refusal says Credits added until its own next message", async () => {
   const transport = new FakeTransport({
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     openSettings: () => {},
@@ -288,21 +339,25 @@ test("in every open conversation the note shows, and hiding it in one leaves the
   const host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  // each conversation's own stream, both holding the host's out-of-credit mark after their last message
+  const views = viewsOf({ "thread:a": refusedEntries(), "thread:b": refusedEntries() });
+  const note = (c: "a" | "b") =>
+    createElement(
+      "div",
+      { "data-c": c },
+      createElement(OutOfCredit, {
+        transport,
+        conversation: c,
+        stream: `thread:${c}`,
+        onFocusField: () => {},
+      }),
+    );
   await act(async () =>
     root!.render(
       createElement(
-        "div",
-        null,
-        createElement(
-          "div",
-          { "data-c": "a" },
-          createElement(OutOfCredit, { transport, conversation: "a", onFocusField: () => {} }),
-        ),
-        createElement(
-          "div",
-          { "data-c": "b" },
-          createElement(OutOfCredit, { transport, conversation: "b", onFocusField: () => {} }),
-        ),
+        StoreContext,
+        { value: views.store },
+        createElement("div", null, note("a"), note("b")),
       ),
     ),
   );
@@ -321,8 +376,20 @@ test("in every open conversation the note shows, and hiding it in one leaves the
   expect(notes()).toEqual(["b"]);
   await act(async () => transport.appEvent({ connectors_changed: stateOf(SIGNED_IN) }));
   expect(notes()).toEqual([]);
+  // credit back: both conversations that met the refusal say Credits added
+  const added = () =>
+    [...host.querySelectorAll('[data-testid="credits-added"]')].map((n) =>
+      n.closest("[data-c]")?.getAttribute("data-c"),
+    );
+  await wait();
+  await wait();
+  expect(added()).toEqual(["a", "b"]);
+  // a message sent in a: only a's line goes
+  await act(async () => views.send("thread:a"));
+  expect(added()).toEqual(["b"]);
   await act(async () => transport.appEvent({ connectors_changed: stateOf(OUT) }));
   expect(notes()).toEqual(["a", "b"]);
+  expect(added()).toEqual([]);
 });
 
 test("the room's commands are the hint's dismissal and the balance read; the type takes nothing else", async () => {
