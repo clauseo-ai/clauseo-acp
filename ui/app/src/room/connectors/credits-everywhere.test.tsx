@@ -98,13 +98,10 @@ const library = async () => {
   };
 };
 
-test("out of credit with 7 last read: the composer and the library say not enough, with the figure", async () => {
+test("out of credit after 7 were read: the composer and the library say not enough, with no figure", async () => {
   await mount();
   await play(signed(7), { out_of_credit: { pay_url: PAY } });
-  expect(note()).toEqual({
-    lead: "Clauseo Case Law · 7 credits left",
-    rest: `${NOT_ENOUGH} Add credits`,
-  });
+  expect(note()).toEqual({ lead: "Clauseo Case Law", rest: `${NOT_ENOUGH} Add credits` });
   expect(h!.one("out-of-credit")?.textContent).not.toContain("Indian Kanoon");
   expect(h!.all("low-credit-before")).toHaveLength(0);
   const lib = await library();
