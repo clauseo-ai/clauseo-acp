@@ -2,13 +2,16 @@
 //! run of its words is a `HelperText` entry, its steps are tool calls naming it, and its end
 //! settles the entry once. Out of order: a step or words before the start fold and keep the
 //! helper; an end twice, an end of an unknown helper and a start twice change nothing. A
-//! snapshot and a fold from the log give the same view.
+//! snapshot and a fold from the log give the same view; a snapshot of schema 16, which had no
+//! helper entries, is refolded.
 
 use clauseo_protocol::{
     DomainEvent, EntryId, HelperEnded, HelperEntry, HelperId, HelperOutcome, HelperStarted,
     HelperText, TextOrBlob, ToolCallId, TurnId, ViewEntry,
 };
-use clauseo_reducer::{Anomaly, StreamState, ViewChange, apply};
+use clauseo_reducer::{
+    Anomaly, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, ViewChange, apply,
+};
 
 use crate::events::{short, tool_started, tool_status};
 use crate::fixtures::{Log, start_turn, thread_created};
@@ -228,4 +231,37 @@ fn a_step_and_words_before_the_start_keep_their_helper() {
     log.push(started(turn, helper, None)).unwrap();
     let state = fold(log.events());
     assert_eq!(shape(&state, helper), ["step", "words Early.", "start"]);
+}
+
+/// Schema 17 folds the helper events into `Helper` and `HelperText` entries: a snapshot schema 16
+/// wrote (a build that folded them into nothing) is refused, so the stream is refolded from its
+/// log and shows the helper's card; one this schema wrote reads back with the card.
+#[test]
+fn a_schema_16_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 17);
+    let (mut log, turn) = turn_log(86);
+    let helper: HelperId = log.fresh().unwrap();
+    log.push(started(turn, helper, None)).unwrap();
+    log.push(words(turn, helper, "Reading.")).unwrap();
+    let state = fold(log.events());
+    let old = SnapshotRef {
+        reducer_schema: 16,
+        state: &state,
+    };
+    let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
+    assert!(
+        matches!(
+            read,
+            Err(clauseo_reducer::Error::SchemaMismatch {
+                found: 16,
+                expected: 17
+            })
+        ),
+        "{read:?}"
+    );
+    let bytes = Snapshot::of(&state).to_bytes().unwrap();
+    let read = Snapshot::from_bytes(&bytes).unwrap().into_state().unwrap();
+    assert_eq!(read, state);
+    assert_eq!(shape(&read, helper), ["start", "words Reading."]);
+    assert_eq!(open(&read), 1);
 }
