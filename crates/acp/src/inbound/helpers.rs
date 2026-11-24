@@ -176,10 +176,10 @@ pub(super) fn refuse(request: Request, responder: Responder<Value>) -> AcpEvent 
 /// events carry the root's origin.
 ///
 /// A `subagent_spawned` records its helper under that root. It only warns when the root is not
-/// a session this connection started, when it names `session` or such a session, when the
-/// helper was announced before (under this root or another, which it keeps), and when the root
-/// has used its `MAX_PER_ROOT` (1024, `state/helper_sessions.rs`) helpers since it was last
-/// started.
+/// a session this connection started, when it comes on a helper that has ended, when it names
+/// `session` or such a session, when the helper was announced before (under this root or
+/// another, which it keeps), and when the root has used its `MAX_PER_ROOT` (1024,
+/// `state/helper_sessions.rs`) helpers since it was last started.
 ///
 /// A `subagent_state_update` ends a helper announced under that root, once. It only warns for a
 /// helper not announced under that root, for one that already ended, and for a state that is not
@@ -225,6 +225,10 @@ pub(super) fn subagent(
             let known = state.helpers.root_of(helper.as_str());
             let refused = if !state.sessions.contains_key(root.as_str()) {
                 Some("a subagent_spawned on a session this connection did not start")
+            } else if state.helpers.end_of(session.as_str()).is_some() {
+                // An ended helper launches nothing: its helper would run on into the root's
+                // later turns as if the root had launched it there.
+                Some("a subagent_spawned on a helper that has ended")
             } else if helper == session || state.sessions.contains_key(helper.as_str()) {
                 Some("a subagentSessionId that names a session of this connection")
             } else if known.is_some_and(|known| *known != root) {

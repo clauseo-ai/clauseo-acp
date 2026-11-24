@@ -418,6 +418,33 @@ fn a_helper_announced_again_under_the_same_root_warns() {
     );
 }
 
+/// A helper that has ended announces no helper of its own: the announcement only warns, and
+/// the would-be helper's frames stay an unknown session's.
+#[test]
+fn a_helper_that_has_ended_announces_no_helper() {
+    let got = run(&[
+        Step::New("root-a"),
+        Step::Send(vec![
+            spawned("root-a", "helper-a", "Relay"),
+            ended("root-a", "helper-a", "cancelled"),
+        ]),
+        Step::Send(vec![spawned("helper-a", "helper-b", "Reader")]),
+        Step::Send(vec![options_on("helper-b")]),
+    ]);
+    assert_eq!(
+        shapes_of(&got).get(2..),
+        Some(
+            &[
+                vec![invalid(
+                    "helper-a",
+                    "a subagent_spawned on a helper that has ended"
+                )],
+                vec!["helper-b options of 1".to_owned()],
+            ][..]
+        )
+    );
+}
+
 /// A root takes at most 1024 helpers: the 1025th is refused and its frames stay an unknown
 /// session's, while another root still takes its own.
 #[test]
