@@ -59,11 +59,12 @@ cargo fuzz run --fuzz-dir . -O --debug-assertions <target> <file>
 
 ## Seeds
 
-`seeds/<target>` holds at most 150 files and 1 MiB per target. They were picked from the corpora of
-earlier fuzzing campaigns: a libFuzzer merge kept the inputs that add coverage, and the ones adding
-the most features stayed. The nightly corpus is an artifact of the newest fuzz run on main (see the
-workflow's header). The seeds only start it when there is none. To refresh a target's seeds, merge a grown corpus into an empty folder
-with `-merge=1` and keep the result under the same caps.
+`seeds/<target>` holds at most 150 files per target, and about 1 MiB as a guide: `acp_stdout` is
+slightly over it since its helper-sessions seed. They were picked from the corpora of earlier
+fuzzing campaigns: a libFuzzer merge kept the inputs that add coverage, and the ones adding the most
+features stayed. The helper-sessions seed was written by hand from a bundled scenario. The nightly
+corpus is an artifact of the newest fuzz run on main (see the workflow's header). The seeds only start it when there is none. To refresh a target's seeds, merge a grown corpus into an empty folder
+with `-merge=1` and keep the result within the same limits.
 
 ## Cargo.lock
 
