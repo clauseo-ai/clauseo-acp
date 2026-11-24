@@ -324,6 +324,15 @@ is ignored, and the reducer keeps at most 50 pages per call. The new view types 
 `REDUCER_SCHEMA_VERSION` goes from 7 to 8, after the triage's 6 to 7: old snapshots are passed over
 and each thread's log is folded once at its next reopen, as for the bumps above.
 
+A turn waiting for a hold on the whole matter (#1286) logs `TurnQueued.hold` (`MatterHold`:
+`undo`, `restore` or `relocate`, left out when none). The fold gives any `TurnQueued` with a
+hold `Queued { behind }`, whatever `behind` says, with its prompt `Sent`, and the header
+carries the hold (`HeaderEntry.hold`) while the status is `Queued`. A restore's or a relocate's
+wait used to fold as a wait behind the thread's own turn, so `REDUCER_SCHEMA_VERSION` goes from
+13 to 14: old snapshots are passed over and each thread's log is folded once at its next reopen,
+as for the bumps above. No hold outlives the process: start-up logs a fresh `TurnQueued`
+without one for a turn whose last wait had one, so it shows as an ordinary queued message.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
