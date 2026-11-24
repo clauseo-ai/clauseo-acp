@@ -1,0 +1,65 @@
+{
+  "UC-1030": {
+    "en": "New folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New matter's first question, its first answer (a choice with a line under it). New: before, New matter opened one form with the name, client and folder all at once."
+  },
+  "UC-1031": {
+    "en": "Clauseo makes an empty folder for this matter. Add papers to it any time.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Under New folder on New matter's first question: what it means for the lawyer's files. New."
+  },
+  "UC-1032": {
+    "en": "Existing folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New matter's first question, its second answer: opens the folder picker at once. New; replaces reaching for Choose folder… inside the old form."
+  },
+  "UC-1033": {
+    "en": "Use a folder that already holds the papers. It stays where it is, and nothing is moved or copied.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Under Existing folder on New matter's first question. New."
+  },
+  "UC-1034": {
+    "en": "Change…",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The folder row's button in New matter's form once a folder is there (an existing folder picked, or where a new folder goes): picks another. In the dialog it replaces Choose folder… after a pick."
+  },
+  "UC-1035": {
+    "en": "The folder stays where it is. Nothing is moved or copied.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Under the folder row of New matter's existing-folder form. New."
+  },
+  "UC-1036": {
+    "en": "Choose where it goes.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The folder row of New matter's new-folder form where the host has no place for new matters (no default location): Choose folder… picks where it goes. New."
+  }
+}

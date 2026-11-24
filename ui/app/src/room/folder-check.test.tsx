@@ -99,9 +99,11 @@ const byId = <E extends HTMLElement>(id: string) =>
 const dialog = () => document.querySelector('[role="dialog"]');
 const warning = () => byId("folder-warning");
 
+/** New matter, then Existing folder: the picker's folder (the test's pick), and the name typed over the folder's. */
 async function openForm() {
   await act(async () => byId("new-matter")?.click());
   await act(async () => settled());
+  await press("matter-existing");
   const input = byId<HTMLInputElement>("matter-name") as HTMLInputElement;
   await act(async () => {
     Reflect.set(HTMLInputElement.prototype, "value", NAME, input);
@@ -140,7 +142,6 @@ function later() {
 test("a network drive: the warning's title, name, body and why, with Choose another folder and Create anyway in Create's place", async () => {
   const transport = await mount(checking([{ support: "network" }]));
   await openForm();
-  await press("matter-existing");
   expect(checked(transport)).toEqual([
     { folder_support: { source: { existing_folder: { folder: "ref-a" } } } },
   ]);
@@ -161,7 +162,6 @@ test("a network drive: the warning's title, name, body and why, with Choose anot
 test("a drive without file permissions: its own title, name and why, the same buttons", async () => {
   await mount(checking([{ support: "no_permissions" }]));
   await openForm();
-  await press("matter-existing");
   expect(warning()?.dataset["kind"]).toBe("no_permissions");
   expect(warning()?.getAttribute("aria-label")).toBe(
     fr("en", "This drive doesn't keep file permissions"),
@@ -180,7 +180,6 @@ test("a drive without file permissions: its own title, name and why, the same bu
 test("Choose another folder opens the picker again and checks that folder; a fine one takes the warning away", async () => {
   const transport = await mount(checking([{ support: "network" }, {}]));
   await openForm();
-  await press("matter-existing");
   await press("folder-choose");
   expect(transport.only("pick_folder")).toHaveLength(2);
   expect(checked(transport)).toHaveLength(2);
@@ -193,7 +192,6 @@ test("Choose another folder opens the picker again and checks that folder; a fin
 test("Create anyway makes the matter in the folder warned about", async () => {
   const transport = await mount(checking([{ support: "network" }]));
   await openForm();
-  await press("matter-existing");
   await press("folder-anyway");
   expect(created(transport)).toEqual([existing("ref-a")]);
   expect(dialog()).toBeNull();
@@ -203,7 +201,6 @@ test("create's own refusal: its line shows at once, and Create is held back for 
   const refused: HostError = { code: "matter.folder_is_home", message: "", retryable: false };
   const transport = await mount(checking([refused]));
   await openForm();
-  await press("matter-existing");
   expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
     createErrorLine("en", "matter.folder_is_home", "D:\\Matters\\ref-a"),
   );
@@ -224,7 +221,6 @@ test("a check that couldn't answer, a fine folder, one whose permissions can't c
   for (const check of cases) {
     const transport = await mount(checking([check]));
     await openForm();
-    await press("matter-existing");
     expect(checked(transport)).toHaveLength(1);
     expect(warning(), JSON.stringify(check)).toBeNull();
     expect(dialog()?.querySelector('[role="alert"]')).toBeNull();
@@ -239,8 +235,7 @@ test("a new pick drops the old answer: a network drive answered late for the fir
   const first = later();
   const transport = await mount(checking([first.promise, {}]));
   await openForm();
-  await press("matter-existing");
-  await press("matter-existing");
+  await press("folder-change");
   first.settle({ support: "network" });
   await settle();
   expect(checked(transport)).toHaveLength(2);
@@ -253,7 +248,6 @@ test("Create waits for the check: a network drive answered meanwhile shows its w
   const slow = later();
   const transport = await mount(checking([slow.promise]));
   await openForm();
-  await press("matter-existing");
   await press("create-matter");
   expect(created(transport)).toEqual([]);
   slow.settle({ support: "network" });
@@ -266,7 +260,6 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
   const never = new Promise<PickedFolderSupport>(() => {});
   const transport = await mount(checking([never]));
   await openForm();
-  await press("matter-existing");
   vi.useFakeTimers();
   await act(async () => byId("create-matter")?.click());
   await act(async () => vi.advanceTimersByTimeAsync(4900));
@@ -293,7 +286,6 @@ test.each(["mac", "linux"] as const)(
   async (platform) => {
     const transport = await mount(checking([{}, {}], ["ref-a", "ref-b"], platform, SLASHED));
     await openForm();
-    await press("matter-existing");
     expect(warning()?.dataset["kind"]).toBe("backslash");
     expect(warning()?.getAttribute("aria-label")).toBe(
       fr("en", "This folder's name has a backslash"),
@@ -319,7 +311,6 @@ test.each(["mac", "linux"] as const)(
   async (platform) => {
     const transport = await mount(checking([{}], ["ref-a"], platform, SLASHED));
     await openForm();
-    await press("matter-existing");
     await press("folder-anyway");
     expect(created(transport)).toEqual([existing("ref-a")]);
   },
@@ -332,7 +323,6 @@ test.each(["mac", "linux"] as const)(
     const above = () => "Documents/x\\y/Old\\Work/Acme Traders";
     const transport = await mount(checking([{}], ["ref-a"], platform, above));
     await openForm();
-    await press("matter-existing");
     expect(warning()?.dataset["kind"]).toBe("backslash");
     expect(warning()?.getAttribute("aria-label")).toBe(
       "A folder in this folder's path has a backslash",
@@ -349,7 +339,6 @@ test.each(["mac", "linux"] as const)(
 test("no backslash warning on Windows, nor for a plain path on macOS or Linux", async () => {
   await mount(checking([{}], ["ref-a"], "windows", () => "D:\\Matters\\Clauseo\\ Test"));
   await openForm();
-  await press("matter-existing");
   expect(warning()).toBeNull();
   expect(byId("create-matter")).not.toBeNull();
   for (const platform of ["mac", "linux"] as const) {
@@ -357,7 +346,6 @@ test("no backslash warning on Windows, nor for a plain path on macOS or Linux", 
     host?.remove();
     await mount(checking([{}], ["ref-a"], platform, () => "Documents/Clauseo Test Matter"));
     await openForm();
-    await press("matter-existing");
     expect(warning()).toBeNull();
     expect(byId("create-matter")).not.toBeNull();
   }
@@ -368,7 +356,6 @@ test.each(["mac", "linux"] as const)(
   async (platform) => {
     const transport = await mount(checking([{ support: "network" }], ["ref-a"], platform, SLASHED));
     await openForm();
-    await press("matter-existing");
     expect(warning()?.dataset["kind"]).toBe("backslash");
     await press("folder-anyway");
     expect(created(transport)).toEqual([]);
@@ -382,7 +369,6 @@ test.each(["mac", "linux"] as const)(
 test("a folder with a backslash that a check says is fine: Create anyway on its warning makes the matter at once", async () => {
   const transport = await mount(checking([{}], ["ref-a"], "mac", SLASHED));
   await openForm();
-  await press("matter-existing");
   await press("folder-anyway");
   expect(created(transport)).toEqual([existing("ref-a")]);
   expect(warning()).toBeNull();

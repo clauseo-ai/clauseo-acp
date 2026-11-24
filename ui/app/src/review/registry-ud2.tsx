@@ -77,7 +77,8 @@ const scanning = (event: FolderScanned) => () =>
       typeof query === "object" && "folder_support" in query
         ? { folder_support: {} }
         : { matters: [MATTER] },
-    pickFolder: () => ({ folder: FOLDER, display: "/Users/rmehra/Matters/Rathi Steels" }),
+    // a folder under a Windows lawyer's home, synced by OneDrive: the form shows its folders in order
+    pickFolder: () => ({ folder: FOLDER, display: "OneDrive\\Matters\\Rathi Steels" }),
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     scan: () => [event],
   });

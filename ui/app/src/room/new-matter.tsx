@@ -1,16 +1,17 @@
-// New matter, from the rail: the parts' NewMatterDialog over matters.ts. Two sources. Choose folder… picks an existing
-// folder (existing_folder) in the computer's own picker and shows how it reads; cancelled, nothing changes. Where the
-// host has H20's default location, "Use a new folder in" offers it (default_location, no picker). Create matter waits
-// for one of the two, and makes the matter from it. The host's refusal is said in the form by its code
-// (matter-form-check.ts), never its message. Made, the new matter opens, the dialog
-// closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder inside
+// New matter, from the rail: the parts' NewMatterDialog over matters.ts. It asks first: New folder or Existing folder.
+// Existing folder opens the computer's own picker at once; cancelled, the question stays and nothing is sent; picked,
+// the form holds that folder (existing_folder), the matter's name filled with the folder's own, and Create makes the
+// matter where the folder is. New folder's form makes the folder under H20's default location (default_location), or
+// under the folder Change… picks (new_folder). Create matter makes the matter from the answer's folder. The host's
+// refusal is said in the form by its code (matter-form-check.ts), never its message, in the answer's form. Made, the new
+// matter opens, the dialog closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder inside
 // or holding a matter's folder (matter.folder_inside_matter, matter.folder_holds_matter) names that matter when the list
 // has it, and Open {name} opens it, as the rail does; with no name it takes the line of any folder refused.
-// The first screen (UD1's first run) takes the same form in place, titled, with Back (FirstMatter), and says a folder
+// The first screen (UD1's first run) takes the form that offers both folders in place, titled, with Back (FirstMatter), and says a folder
 // its Open the folder couldn't make a matter of by the same code's words (RefusedLine, with RefusedOpen's Open {name});
 // all load with this chunk. A folder picked, either form asks the host about it first and warns or refuses as
 // folder-check.tsx says.
-import { useEffect, useState, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { createErrorLine, nestedRefusal } from "@clauseo/components/clauseo/matter-form-check.ts";
@@ -21,7 +22,9 @@ import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../transport/host-transport.ts";
 import type { HostError } from "../transport/protocol.ts";
 import { usePickedFolder } from "./folder-check.tsx";
-import type { MatterInfo } from "./host-next.ts";
+import type { MatterInfo, NextMatterSource } from "./host-next.ts";
+import type { Picked } from "./folder-check.tsx";
+import { useAnswer, useDefaultLocation } from "./new-matter-answer.ts";
 import type { Matters } from "./matters.ts";
 
 /** Whether a refusal is of the folder itself: Create waits for another, and the line offers another (or, for a folder
@@ -46,15 +49,30 @@ const refusalOf = (
   return { line: createErrorLine(lang, refused.code, path, at?.name), at };
 };
 
-export function NewMatter({
-  matters,
-  detailed,
-  open,
-  onOpenChange,
-  onMade,
-  onOpened,
-  finalFocus,
-}: {
+/** The form's test ids, as the e2e flows and the perf autoplay find them. */
+const IDS = {
+  name: "matter-name",
+  existing: "matter-existing",
+  made: "matter-made",
+  create: "create-matter",
+  open: "open-matter",
+  choose: "folder-choose",
+  anyway: "folder-anyway",
+};
+
+/** Where New folder makes the matter's folder: in the folder Change… picked, else the default location where the host
+ * has one; null with neither. */
+const madeIn = (
+  parent: Picked | null,
+  located: boolean,
+): { source: NextMatterSource; path?: string } | null =>
+  parent !== null
+    ? { source: { new_folder: { folder: parent.folder } }, path: parent.display }
+    : located
+      ? { source: "default_location" }
+      : null;
+
+type NewMatterProps = {
   matters: Matters;
   /** Whether the host gives details (H5): the form asks for the client, and offers the default location. */
   detailed: boolean;
@@ -66,11 +84,15 @@ export function NewMatter({
   onOpened?: () => void;
   /** Where focus goes back as the dialog closes: New matter's button. */
   finalFocus: RefObject<HTMLElement | null>;
-}) {
+};
+
+export function NewMatter(props: NewMatterProps) {
+  const { matters, detailed, open, onOpenChange, onMade, onOpened, finalFocus } = props;
   const w = useWords();
   const pick = usePickedFolder(matters, w.lang);
-  const [location, setLocation] = useState<string | null>(null);
   const [error, setError] = useState<{ line: string; code: string } | null>(null);
+  // a new folder's parent, picked by Change…
+  const [parent, setParent] = useState<Picked | null>(null);
   /** Choose folder…, a new folder picked dropping the last refusal's line. */
   const choose = async () => {
     const shown = await pick.pickExisting();
@@ -88,34 +110,32 @@ export function NewMatter({
   const checked = pick.refused === null ? null : refusal(pick.refused, pick.existing?.display);
   const opens = named ?? checked?.at ?? null;
   // H20's default location, read as the form opens: the folder line before a pick
-  useEffect(() => {
-    if (!open || !detailed) return;
-    let live = true;
-    void matters.defaultLocation().then((display) => {
-      if (live) setLocation(display);
-    });
-    return () => {
-      live = false;
-    };
-  }, [open, detailed, matters]);
+  const location = useDefaultLocation(matters, open && detailed);
+  const forget = () => {
+    pick.reset();
+    setParent(null);
+    setError(null);
+    setNamed(null);
+  };
+  const { branch, last, picking, answer, reset } = useAnswer(choose, forget);
   const close = (next: boolean) => {
     if (!next) {
-      pick.reset();
-      setError(null);
-      setNamed(null);
+      forget();
+      reset();
     }
     onOpenChange(next);
   };
-  const create = async (name: string, client: string, made: boolean) => {
+  /** Change… in New folder: where the matter's folder is made instead; the create says any refusal. */
+  const chooseParent = async () => {
+    const picked = await pick.pickParent();
+    if (picked === null) return null;
+    setParent(picked);
     setError(null);
     setNamed(null);
-    const where = await pick.where(made && detailed && location !== null);
-    if (where === null) return false;
-    const { source, path } = where;
-    if (where.refused !== undefined) {
-      setError({ line: refusal(where.refused, path).line, code: where.refused.code });
-      return false;
-    }
+    return picked.display;
+  };
+  /** The matter made from `source`, or the refusal said in the form, naming `path`. */
+  const make = async (name: string, client: string, source: NextMatterSource, path?: string) => {
     const details = detailed && client.trim() !== "" ? { client: client.trim() } : {};
     try {
       await matters.create(name, source, details);
@@ -126,9 +146,31 @@ export function NewMatter({
       setNamed(at);
       return false;
     }
-    pick.reset();
+    forget();
     onMade?.();
     return true;
+  };
+  /** Open {name}: the matter a nested folder belongs with, the dialog closed. */
+  const openNamed = (at: MatterInfo) => {
+    matters.open(at.matter);
+    onOpened?.();
+    close(false);
+  };
+  const create = async (name: string, client: string) => {
+    setError(null);
+    setNamed(null);
+    if (branch === "new") {
+      const made = madeIn(parent, detailed && location !== null);
+      return made !== null && make(name, client, made.source, made.path);
+    }
+    const where = await pick.where(false);
+    if (where === null) return false;
+    const { source, path } = where;
+    if (where.refused !== undefined) {
+      setError({ line: refusal(where.refused, path).line, code: where.refused.code });
+      return false;
+    }
+    return make(name, client, source, path);
   };
   return (
     <NewMatterDialog
@@ -136,42 +178,30 @@ export function NewMatter({
       onOpenChange={close}
       details={detailed}
       location={detailed ? location : null}
-      pickFolder={choose}
-      onMade={() => {
-        pick.reset();
-        setError(null);
-        setNamed(null);
-      }}
+      {...(branch === null ? {} : { branch })}
+      onBranch={(next) => void answer(next)}
+      last={last}
+      picking={picking}
+      {...(branch === "existing" && pick.existing !== null
+        ? { folder: pick.existing.display }
+        : {})}
+      pickFolder={branch === "new" ? chooseParent : choose}
+      onMade={forget}
       error={error?.line ?? checked?.line ?? null}
       folderError={refusesFolder(error?.code ?? pick.refused?.code)}
       warning={pick.warning}
       scan={pick.scan}
       unpick={pick.unpick}
       opening={pick.opening}
-      // a folder refused holds Create back until another is chosen; any other failure leaves it to try again
-      blocked={checked !== null || refusesFolder(error?.code)}
+      // a folder refused holds Create back until another is chosen; any other failure leaves it to try again. A new
+      // folder's refusal may turn on its name, so Create stays free there
+      blocked={branch !== "new" && (checked !== null || refusesFolder(error?.code))}
       {...(opens === null
         ? {}
-        : {
-            openMatter: {
-              name: opens.name,
-              open: () => {
-                matters.open(opens.matter);
-                onOpened?.();
-                close(false);
-              },
-            },
-          })}
+        : { openMatter: { name: opens.name, open: () => openNamed(opens) } })}
       onCreate={create}
-      testIds={{
-        name: "matter-name",
-        existing: "matter-existing",
-        made: "matter-made",
-        create: "create-matter",
-        open: "open-matter",
-        choose: "folder-choose",
-        anyway: "folder-anyway",
-      }}
+      // on the question, its two answers; in a form, the folder row's Choose folder… or Change…
+      testIds={{ ...IDS, existing: branch === null ? "matter-existing" : "folder-change" }}
       finalFocus={finalFocus}
     />
   );
@@ -191,7 +221,7 @@ export function FirstMatter({
   const w = useWords();
   const detailed = matters.view().detailed;
   const pick = usePickedFolder(matters, w.lang);
-  const [location, setLocation] = useState<string | null>(null);
+  const location = useDefaultLocation(matters, detailed);
   const [error, setError] = useState<{ line: string; code: string } | null>(null);
   // the matter the refusal names, when the list has it: Open {name} opens it
   const [named, setNamed] = useState<MatterInfo | null>(null);
@@ -206,16 +236,6 @@ export function FirstMatter({
   const checked =
     pick.refused === null ? null : refusalOf(matters, w.lang, pick.refused, pick.existing?.display);
   const opens = named ?? checked?.at ?? null;
-  useEffect(() => {
-    if (!detailed) return;
-    let live = true;
-    void matters.defaultLocation().then((display) => {
-      if (live) setLocation(display);
-    });
-    return () => {
-      live = false;
-    };
-  }, [detailed, matters]);
   const create = async (name: string, client: string, made: boolean) => {
     setError(null);
     setNamed(null);
@@ -265,15 +285,7 @@ export function FirstMatter({
         : { openMatter: { name: opens.name, open: () => matters.open(opens.matter) } })}
       onCreate={create}
       onCancel={onBack}
-      testIds={{
-        name: "matter-name",
-        existing: "matter-existing",
-        made: "matter-made",
-        create: "create-matter",
-        open: "open-matter",
-        choose: "folder-choose",
-        anyway: "folder-anyway",
-      }}
+      testIds={IDS}
     />
   );
 }

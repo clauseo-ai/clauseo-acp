@@ -23,6 +23,18 @@ export const HI = {
   "Create matter": "मामला बनाएँ",
   Back: "वापस",
   Cancel: "रद्द करें",
+  // New matter's first question: its two answers, each with what it means for the lawyer's files (Hindi later)
+  "New folder": null,
+  "Clauseo makes an empty folder for this matter. Add papers to it any time.": null,
+  "Existing folder": null,
+  "Use a folder that already holds the papers. It stays where it is, and nothing is moved or copied.":
+    null,
+  // in the folder row once a folder is there: opens the computer's own folder picker for another
+  "Change…": null,
+  // under the folder row of an existing folder
+  "The folder stays where it is. Nothing is moved or copied.": null,
+  // the new folder's row where the host has no place for new matters: Choose folder… picks where it goes
+  "Choose where it goes.": null,
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

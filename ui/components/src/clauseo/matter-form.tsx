@@ -1,14 +1,17 @@
 // The new matter form: a matter is a name, a client if there is one, and a folder. "Matter name", "Client (optional)",
 // then the Folder row (matter-form-folder.tsx): the chosen path, Choose folder… that opens the computer's own folder
-// picker at once, and, where the host has a place for new matters, "Use a new folder in ~/Documents/Clauseo". Every
+// picker at once, and, where the host has a place for new matters, "Use a new folder in Documents › Clauseo". Every
 // folder comes through the picker or that offer, never typed, since picking it in the computer's own panel is what lets
 // Clauseo read it. Create matter waits until there's a name and a folder; tried before (Enter), the field that's
 // missing says so under it. The lawyer's words take the composer's setting, 17 px at 600. First launch opens the form on
 // its first screen, and the rail's New matter opens the same form in a dialog. A warning about the folder picked, from
 // the caller, sits under the folder row, its two buttons in Create's place; a refusal sits there too, with its one way
 // on: Open {name} for a folder inside or holding a matter on the list, Choose another folder for any other folder
-// refused.
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+// refused. New matter's dialog asks first whether the matter takes a new folder or an existing one
+// (new-matter-choice.tsx), and opens the form for that answer alone (`branch`): an existing folder's form holds the
+// folder picked, its name in the name field selected to type over; a new folder's shows the folder Clauseo makes, under
+// the host's place for new matters, with Change… to pick where it goes instead.
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { Field } from "@base-ui/react/field";
 import { Input } from "@base-ui/react/input";
 import { Button } from "../ui/button.tsx";
@@ -19,7 +22,7 @@ import { useDisplay } from "../lib/display.ts";
 import { fr } from "../lib/words-folder.ts";
 import { mt } from "../lib/words-matters.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
-import { homeShown, under } from "./folder-path.ts";
+import { folderName, homeShown, under } from "./folder-path.ts";
 import { FolderRow } from "./matter-form-folder.tsx";
 import { Heading } from "./heading.tsx";
 import { PickerLine } from "./picker-line.tsx";
@@ -27,7 +30,14 @@ import { Say } from "./say.tsx";
 
 /** The folder the form holds: one the picker gave, as the desktop writes it; the new one under the host's place for
  * new matters; or none yet. */
-type Choice = { kind: "picked"; display: string } | { kind: "made" } | null;
+type Choice =
+  | { kind: "picked"; display: string }
+  | { kind: "made" }
+  | { kind: "under"; display: string }
+  | null;
+
+/** New matter's two answers: a new folder Clauseo makes, or an existing folder the lawyer has. */
+export type Branch = "new" | "existing";
 
 export type NewMatterFormProps = {
   /** Whether the client shows. Default true; a host that can't keep it yet passes false. */
@@ -38,7 +48,7 @@ export type NewMatterFormProps = {
   /** Optional: a folder chosen already as the form opens, as the desktop writes it ("Documents/Acme"). */
   folder?: string | null | undefined;
   /** Optional: where the host makes a new matter's folder, as the desktop writes it ("Documents/Clauseo"). Given, the
-   * form offers "Use a new folder in ~/Documents/Clauseo"; null or left out, it offers no such folder. */
+   * form offers "Use a new folder in Documents › Clauseo"; null or left out, it offers no such folder. */
   location?: string | null | undefined;
   /** Create the matter, pressed with a name and a folder: the words trimmed, and whether the folder is the new one
    * under `location` (true) or the one the picker gave (false). Given a promise, Create stands pressed and can't be
@@ -92,6 +102,11 @@ export type NewMatterFormProps = {
   /** Optional: in a dialog, the form's buttons stand as a dialog's do, at its end with the one that acts last, and the
    * way out is Cancel rather than Back. */
   inDialog?: boolean;
+  /** Optional: the form for one of New matter's two answers, focus on the name as it opens. "existing": the folder
+   * `folder` gives, the name filled with its own name and selected, Change… for another, and a line that it stays
+   * where it is. "new": the folder Clauseo makes, under `location` or, after Change…, under the folder `pickFolder`
+   * gives. Create's `made` is then true. Left out, the form offers both, as the first screen has it. */
+  branch?: Branch | undefined;
 };
 
 /** One text field on the work's surface: its label, then the lawyer's own words at the composer's 17 px and 600. Names
@@ -102,7 +117,9 @@ function TextInput({
   onChange,
   error,
   testId,
+  inputRef,
 }: {
+  inputRef?: Ref<HTMLInputElement> | undefined;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -125,6 +142,7 @@ function TextInput({
         aria-invalid={wrong ? true : undefined}
         aria-describedby={wrong ? id : undefined}
         data-testid={testId}
+        ref={inputRef}
         onChange={(e) => onChange(e.currentTarget.value)}
         className={cn(
           textControl,
@@ -138,6 +156,17 @@ function TextInput({
       )}
     </Field.Root>
   );
+}
+
+/** A branch's folder row: Change… once a folder is there, the existing folder's line that it stays where it is, and
+ * what a new folder's row reads before it has a place. */
+function rowWords(w: ReturnType<typeof useMatterFormWords>, branch: Branch, held: boolean) {
+  return {
+    ...(held ? { chooseLabel: w("Change…") } : {}),
+    ...(branch === "existing"
+      ? { note: held ? w("The folder stays where it is. Nothing is moved or copied.") : null }
+      : { none: w("Choose where it goes.") }),
+  };
 }
 
 /** The form. Create matter waits, faint, until the matter has a name and a folder. */
@@ -162,19 +191,33 @@ export function NewMatterForm({
   testIds,
   titled = true,
   inDialog = false,
+  branch,
 }: NewMatterFormProps) {
   const w = useMatterFormWords();
   const { lang } = useDisplay();
-  const [name, setName] = useState(name0);
+  const [name, setName] = useState(
+    branch === "existing" && name0 === "" && folder0 != null ? folderName(folder0) : name0,
+  );
+  const nameField = useRef<HTMLInputElement>(null);
+  // a branch's form opens in place of the question: focus on the name, an existing folder's name selected to type over
+  useEffect(() => {
+    if (branch === undefined) return;
+    nameField.current?.focus();
+    if (branch === "existing") nameField.current?.select();
+  }, [branch]);
   const [client, setClient] = useState(client0);
   const [choice, setChoice] = useState<Choice>(
-    folder0 === undefined || folder0 === null ? null : { kind: "picked", display: folder0 },
+    branch === "new"
+      ? { kind: "made" }
+      : folder0 === undefined || folder0 === null
+        ? null
+        : { kind: "picked", display: folder0 },
   );
   // the caller dropped the pick: set while rendering, as React allows for state that follows a prop
   const [unpicked, setUnpicked] = useState(unpick);
   if (unpicked !== unpick) {
     setUnpicked(unpick);
-    if (choice?.kind === "picked") setChoice(null);
+    if (choice?.kind === "picked" || choice?.kind === "under") setChoice(null);
   }
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState(false);
@@ -194,18 +237,27 @@ export function NewMatterForm({
   const held = choice?.kind === "made" && place === null ? null : choice;
   const named = name.trim() !== "";
   const ready = named && held !== null && !blocked;
+  const leaf = name.trim() === "" ? "…" : name.trim();
   const shown =
     held === null
       ? null
       : held.kind === "picked"
         ? homeShown(held.display)
-        : under(homeShown(place ?? ""), name.trim() === "" ? "…" : name.trim());
+        : under(homeShown(held.kind === "under" ? held.display : (place ?? "")), leaf);
   const choose = async () => {
     if (pickFolder === undefined || picking) return;
     setPicking(true);
     try {
       const chosen = await pickFolder();
-      if (live.current && chosen !== null) setChoice({ kind: "picked", display: chosen });
+      if (!live.current || chosen === null) return;
+      if (branch === "new") {
+        setChoice({ kind: "under", display: chosen });
+        return;
+      }
+      // the name still the last folder's own: it follows the folder picked now
+      if (branch === "existing" && choice?.kind === "picked" && name === folderName(choice.display))
+        setName(folderName(chosen));
+      setChoice({ kind: "picked", display: chosen });
     } catch {
       // the picker failed: the folder stays as it was
     } finally {
@@ -220,7 +272,7 @@ export function NewMatterForm({
     const made = onCreate(
       name.trim(),
       details ? client.trim() : "",
-      held !== null && held.kind === "made",
+      held !== null && held.kind !== "picked",
     );
     if (!(made instanceof Promise)) return;
     setPending(true);
@@ -258,7 +310,9 @@ export function NewMatterForm({
   );
   const cancelButton = onCancel !== undefined && (
     <Button kind="quiet" onClick={onCancel}>
-      <span className="deva-nudge">{inDialog ? w("Cancel") : w("Back")}</span>
+      <span className="deva-nudge">
+        {inDialog && branch === undefined ? w("Cancel") : w("Back")}
+      </span>
     </Button>
   );
   return (
@@ -287,12 +341,16 @@ export function NewMatterForm({
         onChange={setName}
         error={tried && !named ? w("Name the matter.") : null}
         testId={testIds?.name}
+        inputRef={nameField}
       />
       {details && <TextInput label={w("Client (optional)")} value={client} onChange={setClient} />}
       <FolderRow
         shown={shown}
-        made={held?.kind === "made"}
-        offer={place === null || held?.kind === "made" ? null : homeShown(place)}
+        made={held !== null && held.kind !== "picked"}
+        offer={
+          place === null || branch !== undefined || held?.kind === "made" ? null : homeShown(place)
+        }
+        {...(branch === undefined ? {} : rowWords(w, branch, held !== null))}
         picking={picking}
         wrong={hasError || (tried && held === null) ? errorId : undefined}
         onChoose={() => void choose()}

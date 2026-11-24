@@ -36,7 +36,6 @@ afterEach(async () => {
 
 const A: MatterSummary = { matter: uuid(1, 2), name: "Acme Ltd v. State", kind: "folder" };
 const MADE = uuid(5, 2);
-const NAME = "Mehta v. Mehta";
 
 /** Today's host with no default location, its picker the chooser over `chooser`. */
 function today(chooser: FakeHost["chooser"] = FAKE_CHOOSER): FakeHost {
@@ -86,10 +85,10 @@ function type(input: HTMLInputElement, text: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-async function openForm() {
+/** New matter, pressed: the question. Existing folder then opens the chooser over it. */
+async function ask() {
   await act(async () => byId("new-matter")?.click());
   await flush();
-  await act(async () => type(byId<HTMLInputElement>("matter-name") as HTMLInputElement, NAME));
 }
 
 async function press(el: HTMLElement | null | undefined) {
@@ -114,7 +113,7 @@ const lists = (transport: FakeTransport) =>
 
 test("Change opens the chooser over New matter at the last place; choosing resolves the pick with the folder", async () => {
   const transport = await mount(today());
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   expect(chooser()).not.toBeNull();
   expect(newMatter()).not.toBeNull();
@@ -131,6 +130,8 @@ test("Change opens the chooser over New matter at the last place; choosing resol
   expect(sessionCalls(transport).at(-1)).toEqual({ call: "chooser_choose", chooser: 1 });
   expect(chooser()).toBeNull();
   expect(newMatter()?.textContent).toContain("Documents\\Matters\\Rathi Steels");
+  // the name is the folder's last part, to type over
+  expect(byId<HTMLInputElement>("matter-name")?.value).toBe("Rathi Steels");
   // the pick went the transport's one way, and the folder registered is the one the form holds
   expect(transport.only("pick_folder")).toHaveLength(1);
 });
@@ -142,7 +143,7 @@ test("the chooser shows at once, Looking… where the places and the folders are
     hold: (call) => new Promise((go) => held[call].push(go)),
   };
   const transport = await mount(today(tree));
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   // open before the desktop has read anything: both say Looking…, and nothing can be chosen yet
   expect(chooser()).not.toBeNull();
@@ -176,7 +177,7 @@ test("the chooser shows at once, Looking… where the places and the folders are
 
 test("Up, a start point and a typed location each list where they say", async () => {
   const transport = await mount(today());
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   await press(byId("chooser-up"));
   expect(lists(transport).at(-1)).toEqual({ kind: "up" });
@@ -205,13 +206,16 @@ test("Up, a start point and a typed location each list where they say", async ()
 
 test("Cancel closes the session and the pick is null; Escape does the same and leaves New matter open", async () => {
   const transport = await mount(today());
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   await press(byId("chooser-cancel"));
   expect(sessionCalls(transport).at(-1)).toEqual({ call: "chooser_cancel", chooser: 1 });
   expect(chooser()).toBeNull();
   expect(newMatter()).not.toBeNull();
+  // the question stays, no form
   expect(newMatter()?.textContent).not.toContain("Documents\\");
+  expect(byId("matter-made")).not.toBeNull();
+  expect(byId("matter-name")).toBeNull();
   await press(byId("matter-existing"));
   expect(chooser()).not.toBeNull();
   await key("Escape");
@@ -223,7 +227,7 @@ test("Cancel closes the session and the pick is null; Escape does the same and l
 test("a folder that doesn't answer says so, and Try again reads it again; a refused folder doesn't open", async () => {
   const tree: FakeChooser = { ...FAKE_CHOOSER, last: null };
   const transport = await mount(today(tree));
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   // home: Desktop, Documents, Downloads, OneDrive (which doesn't answer)
   expect(byId("chooser-where")?.textContent).toBe("Home");
@@ -258,7 +262,7 @@ test("a declined confirm keeps the chooser open where it was; the next confirm c
       confirm ? { folder: "ref-chosen", display: path.replace("C:\\Users\\rmehra\\", "") } : null,
   };
   const transport = await mount(today(tree));
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   await press(byId("chooser-choose"));
   expect(sessionCalls(transport).at(-1)).toEqual({ call: "chooser_choose", chooser: 1 });
@@ -278,7 +282,7 @@ test("while the confirm is up, the chooser waits and says so", async () => {
     choose: () => new Promise((resolve) => (answer = resolve)),
   };
   await mount(today(tree));
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   await press(byId("chooser-choose"));
   expect(byId("chooser-waiting")?.textContent).toBe("Waiting for you to confirm…");
@@ -292,7 +296,7 @@ test("while the confirm is up, the chooser waits and says so", async () => {
 test("the picker's line covers the check before the chooser, and goes once the chooser shows", async () => {
   let check: (tree: FakeChooser) => void = () => {};
   await mount(today(() => new Promise((resolve) => (check = resolve))));
-  await openForm();
+  await ask();
   await press(byId("matter-existing"));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(300);
