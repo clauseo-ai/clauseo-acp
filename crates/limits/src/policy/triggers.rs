@@ -34,31 +34,16 @@ pub(crate) struct Reads {
     pub(crate) asking: bool,
     /// A read was asked for while the agent asked a question.
     pub(crate) pending_read: bool,
-    /// Whether a live signal came since the agent's last turn end. There is no turn-start input,
-    /// so the last turn end stands in for this turn's start.
-    turn_signal: TurnSignal,
+    /// A turn's end came before its age was up: one read starts at this time, unless a read
+    /// starts first.
+    pub(crate) turn_read_due: Option<Timestamp>,
 }
 
 impl Reads {
-    /// A live signal came: the agent's next turn end waits the longer age.
-    pub(crate) fn live_seen(&mut self) {
-        self.turn_signal = TurnSignal::Live;
-    }
-
     /// Whether a read is running.
     pub(crate) fn in_flight(&self) -> bool {
         self.flight != Flight::Idle
     }
-}
-
-/// Whether a live signal came during the agent's turn.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum TurnSignal {
-    /// None came.
-    #[default]
-    None,
-    /// At least one came.
-    Live,
 }
 
 /// Asks for a read of `state`'s agent. The read in flight counts; while the agent asks a
@@ -74,6 +59,7 @@ pub(crate) fn request_read(state: &mut AgentState, now: Timestamp, actions: &mut
     }
     reads.flight = Flight::Reading;
     reads.last_read_started = Some(now);
+    reads.turn_read_due = None;
     actions.push(Action::Read(state.agent));
 }
 
@@ -102,26 +88,44 @@ pub(crate) fn login_changed(state: &mut AgentState, now: Timestamp, actions: &mu
     request_read(state, now, actions);
 }
 
-/// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies: the
-/// longer one when a live signal came during the turn, the shorter one when none did. Either
-/// way the next turn starts with no live signal seen.
+/// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies. A turn
+/// end sooner than that age asks one read for when the age is up ([`due_turn_read`]).
 pub(crate) fn turn_ended(
     state: &mut AgentState,
     read_now: bool,
     now: Timestamp,
     actions: &mut Vec<Action>,
 ) {
-    let signal = std::mem::take(&mut state.reads.turn_signal);
+    state.reads.turn_read_due = None;
     if read_now {
         request_read(state, now, actions);
         return;
     }
-    let rules = kind_rules(state.agent);
-    let min_age = match signal {
-        TurnSignal::Live => rules.turn_read_after_ms,
-        TurnSignal::None => rules.turn_read_after_ms_no_live,
+    let min_age = kind_rules(state.agent).turn_read_after_ms;
+    if !read_if_older(state, min_age, now, actions) {
+        state.reads.turn_read_due = state
+            .reads
+            .last_read_started
+            .and_then(|started| Timestamp::new(started.as_millis() + min_age).ok());
+    }
+}
+
+/// The age of a turn end that came too soon is up: one read starts, or, while a read is in
+/// flight, one more follows it ([`Flight::ReadingStale`]). A read that starts before then
+/// clears the request ([`request_read`]).
+pub(crate) fn due_turn_read(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) {
+    let Some(due) = state.reads.turn_read_due else {
+        return;
     };
-    let _ = read_if_older(state, min_age, now, actions);
+    if due > now {
+        return;
+    }
+    state.reads.turn_read_due = None;
+    if state.reads.in_flight() {
+        state.reads.flight = Flight::ReadingStale;
+    } else {
+        request_read(state, now, actions);
+    }
 }
 
 /// A question became pending, or was answered: the read asked for meanwhile starts now.

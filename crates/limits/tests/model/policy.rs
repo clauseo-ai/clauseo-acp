@@ -212,16 +212,28 @@ fn signal(agent: AgentKind) -> Input {
 }
 
 #[test]
-fn claude_turn_end_with_a_live_signal_reads_at_ten_minutes_not_before() {
+fn claude_turn_end_with_a_live_signal_reads_at_a_minute_not_before() {
     let mut model = idle(CLAUDE);
-    model.input(signal(CLAUDE), at(9));
+    model.input(signal(CLAUDE), at_ms(30 * SECOND));
     assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at_ms(10 * MINUTE - SECOND)),
+        model.input(turn_ended(CLAUDE, false), at_ms(MINUTE - SECOND)),
         vec![]
     );
-    model.input(signal(CLAUDE), at_ms(10 * MINUTE - SECOND / 2));
     assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(10)),
+        model.input(turn_ended(CLAUDE, false), at(1)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn claude_turn_end_with_no_live_signal_reads_at_a_minute_not_before() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(MINUTE - SECOND)),
+        vec![]
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(1)),
         vec![Action::Read(CLAUDE)]
     );
 }
@@ -236,66 +248,97 @@ fn claude_turn_end_with_no_live_signal_reads_when_the_last_read_started_three_mi
 }
 
 #[test]
-fn claude_turn_end_with_no_live_signal_reads_none_when_the_last_read_started_a_minute_ago() {
-    let mut model = idle(CLAUDE);
-    assert_eq!(model.input(turn_ended(CLAUDE, false), at(1)), vec![]);
+fn claude_turn_end_61_seconds_after_the_last_read_reads_with_or_without_a_live_signal() {
+    let mut without = idle(CLAUDE);
+    assert_eq!(
+        without.input(turn_ended(CLAUDE, false), at_ms(61 * SECOND)),
+        vec![Action::Read(CLAUDE)],
+        "no live signal"
+    );
+    let mut with = idle(CLAUDE);
+    with.input(signal(CLAUDE), at_ms(30 * SECOND));
+    assert_eq!(
+        with.input(turn_ended(CLAUDE, false), at_ms(61 * SECOND)),
+        vec![Action::Read(CLAUDE)],
+        "a live signal came"
+    );
 }
 
 #[test]
-fn claude_turn_end_with_no_live_signal_reads_at_two_minutes_not_before() {
-    let mut model = idle(CLAUDE);
+fn claude_turn_end_30_seconds_after_the_last_read_reads_none_at_once_with_or_without_a_signal() {
+    let mut without = idle(CLAUDE);
     assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at_ms(2 * MINUTE - SECOND)),
+        without.input(turn_ended(CLAUDE, false), at_ms(30 * SECOND)),
+        vec![],
+        "no live signal"
+    );
+    let mut with = idle(CLAUDE);
+    with.input(signal(CLAUDE), at_ms(10 * SECOND));
+    assert_eq!(
+        with.input(turn_ended(CLAUDE, false), at_ms(30 * SECOND)),
+        vec![],
+        "a live signal came"
+    );
+}
+
+#[test]
+fn claude_turn_end_30_seconds_after_the_last_read_asks_one_read_for_a_minute_after_it() {
+    let mut model = idle(CLAUDE);
+    model.input(Input::Watching { any: true }, at_ms(SECOND));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(30 * SECOND)),
         vec![]
     );
+    assert_eq!(model.next_deadline(), Some(at_ms(MINUTE)));
     assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(2)),
-        vec![Action::Read(CLAUDE)]
-    );
-}
-
-#[test]
-fn claude_turn_end_with_a_live_signal_reads_none_at_three_minutes_and_reads_at_eleven() {
-    let mut model = idle(CLAUDE);
-    model.input(signal(CLAUDE), at(2));
-    assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(3)),
+        model.input(Input::Deadline, at_ms(59 * SECOND)),
         vec![],
-        "a live signal came during the turn: the 10-minute rule"
-    );
-    model.input(signal(CLAUDE), at(10));
-    assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(11)),
-        vec![Action::Read(CLAUDE)]
-    );
-}
-
-#[test]
-fn a_turn_end_clears_the_live_signal_so_the_next_turn_without_one_reads_at_two_minutes() {
-    let mut model = idle(CLAUDE);
-    model.input(signal(CLAUDE), at(1));
-    assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(3)),
-        vec![],
-        "turn A had a live signal"
+        "not due yet"
     );
     assert_eq!(
-        model.input(turn_ended(CLAUDE, false), at(4)),
+        model.input(Input::Deadline, at_ms(MINUTE)),
         vec![Action::Read(CLAUDE)],
-        "turn B had none: the last read started 4 minutes ago"
+        "the turn end's read, a minute after the last one"
+    );
+    assert_eq!(
+        model.input(Input::Deadline, at_ms(MINUTE + SECOND)),
+        vec![],
+        "asked once"
     );
 }
 
 #[test]
-fn a_turn_end_read_now_clears_the_live_signal_too() {
+fn a_read_started_before_the_deferred_turn_end_read_is_due_clears_it() {
     let mut model = idle(CLAUDE);
-    model.input(signal(CLAUDE), at(1));
-    model.input(turn_ended(CLAUDE, true), at(2));
+    model.input(Input::Watching { any: true }, at_ms(SECOND));
+    model.input(turn_ended(CLAUDE, false), at_ms(30 * SECOND));
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(40 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(41 * SECOND),
+    );
+    assert_eq!(
+        model.input(Input::Deadline, at_ms(MINUTE)),
+        vec![],
+        "the read at 40 s covers the turn end"
+    );
+}
+
+#[test]
+fn a_turn_end_read_now_leaves_the_next_turn_end_its_own_minute() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, true), at(2)),
+        vec![Action::Read(CLAUDE)]
+    );
     model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), at(2));
     assert_eq!(
         model.input(turn_ended(CLAUDE, false), at(4)),
         vec![Action::Read(CLAUDE)],
-        "the next turn had no signal and its read started 2 minutes ago"
+        "the read started 2 minutes ago"
     );
 }
 
