@@ -89,6 +89,23 @@ of its value and the published `engines.json`'s `seq`. Stage B compiles that fil
 bundled seq, and the publish job publishes the merged pair under it. Nothing runs on GitHub beyond
 the bump: the suite and a real-agent smoke run on the CI thread's lanes before the branch merges.
 
+**Publishing the engine list.** `.github/workflows/engines-publish.yml` signs G16's pins (the
+`package.json`, its lock and `engines.seq`) and the sizes table as `engines.json` (format
+`clauseo-engines/1`, canonical JSON as `pins.rs` writes it) with the Tauri updater key, no
+`--app-version`, so the trusted comment is exactly `timestamp:<n>\tfile:engines.json`, and uploads
+it with its `.sig` to a pre-release that is never marked latest. It runs by hand only
+(`workflow_dispatch`): after an engine bump merges, the CI thread or stage F dispatches it. Two
+lanes: `engines` (environment `release`, the app's key; apps are `tauri.conf.json`'s version and
+the latest `v<X.Y.Z>` release's) and `engines-test` (environment `release-test`, the test key; apps
+from the dispatch input). The seq is max(`engines.seq`, the live list's + 1) and must be above the
+live list's, which the app's rollback rule needs. Each list is also kept as `<lane>-<seq>.json`;
+`rollback_to=<n>` publishes that one again, its signature checked, with seq live + 1. A `plan` job
+with no environment and no secret builds and self-checks the file and prints it in its summary;
+`publish`, the only job with the environment, refuses anything but that file's sha256, checks the
+key signs for the lane's public key, signs, verifies and uploads. Precondition, an admin's: both
+environments must allow deployments from `main` (today `release` allows only `v*` tags and
+`release-test` only `test-v*`), and `release-test` needs a required reviewer.
+
 **The layout** under `Locations::data_dir`:
 - `agents/runtime/node-v24.22.0-<os>-<arch>/`: a downloaded Node.
 - `agents/<id>/install/<hash>/`: `package.json`, `package-lock.json`, `node_modules/` and
