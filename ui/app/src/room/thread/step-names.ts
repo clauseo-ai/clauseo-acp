@@ -14,6 +14,7 @@ import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
 import {
   caseLawOf,
+  helperStartOf,
   helpersWaitOf,
   helperToolOf,
   toolNameOf,
@@ -262,7 +263,7 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
   if (yieldOf(entry)) return stepLive(lang, "Waiting for the background work.");
   // ChatGPT's wait for its helpers, and its other helper tools, never their names (helper-words.ts)
   if (helpersWaitOf(entry)) return stepLive(lang, "Waiting for helpers.");
-  if (helperToolOf(entry)) return stepLive(lang, "Working on it.");
+  if (helperToolOf(entry) || helperStartOf(entry)) return stepLive(lang, "Working on it.");
   // a skill is a guide being read, never its internal name (skill-words.ts)
   const skill = skillOf(entry);
   if (skill !== null) {

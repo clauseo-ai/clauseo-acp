@@ -6,6 +6,7 @@ import { kindOf } from "./step-names.ts";
 import {
   caseLawOf,
   helpersWaitOf,
+  helperStartOf,
   helperToolOf,
   ownToolOf,
   toolNameOf,
@@ -24,7 +25,7 @@ export type GroupKind = StepKind | `case_law_${CaseLaw}`;
 export function groupKindOf(call: ToolCallEntry): GroupKind {
   const law = caseLawOf(call.title);
   if (law !== null) return `case_law_${law}`;
-  if (helperOf(call) || helperToolOf(call)) return "other";
+  if (helperOf(call) || helperStartOf(call) || helperToolOf(call)) return "other";
   if (helpersWaitOf(call)) return "think";
   // Claude's Yield, a wait, draws the thinking glyph, never other's
   if (yieldOf(call) || ownToolOf(call) === "plan") return "think";

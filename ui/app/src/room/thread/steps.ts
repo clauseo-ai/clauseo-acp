@@ -26,6 +26,7 @@ import {
 import { afterRan, taskOf } from "./task-words.ts";
 import {
   helpersWaitOf,
+  helperStartOf,
   helperToolOf,
   mcpOf,
   ownToolOf,
@@ -36,10 +37,18 @@ import {
 } from "./tool-names.ts";
 import { caseLawDone, skillDone, toolDone, usedDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
-import { helperOf, helperTaskOf, spawnOf } from "./helper-words.ts";
+import { helperOf, helperTaskOf } from "./helper-words.ts";
 import { groupKindOf, type GroupKind } from "./group-kind.ts";
 import { summaryOf } from "./step-summary.ts";
-import { heldMark, httpRefused, missOf, missWords, setbackLine, softHeld } from "./step-misses.ts";
+import {
+  heldBack,
+  heldMark,
+  httpRefused,
+  missOf,
+  missWords,
+  setbackLine,
+  softHeld,
+} from "./step-misses.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -256,11 +265,15 @@ export function restOf(
 /** What failed or was stopped in a group with a step that finished or is still to, in words for the folded line; ""
  * when nothing did. A group with every step over and none finished says what it tried instead (restOf). */
 export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  const failed = calls.filter(failedOf).length;
+  // an edit, deletion, move or command held back (its row's mark says who held it) is counted apart from what failed,
+  // so the line agrees with its rows; a read held back is no trouble at all (setbackOf)
+  const held = calls.filter((c) => failedOf(c) && heldBack(c)).length;
+  const failed = calls.filter(failedOf).length - held;
   const stopped = calls.filter((c) => c.status === "cancelled").length;
   const out: string[] = [];
   // counted on their own: the line before counts only what finished, so "of them" would point at nothing it named
   if (failed > 0) out.push(counted(lang, ["1 failed.", "{n} failed."], failed));
+  if (held > 0) out.push(counted(lang, ["1 held back.", "{n} held back."], held));
   if (stopped > 0) out.push(counted(lang, ["1 stopped.", "{n} stopped."], stopped));
   return out.join(" ");
 }
@@ -287,7 +300,7 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
 /** The rows of Claude's own tools (tool-names.ts, ownToolOf): done, and tried. */
 const OWN_DONE: Record<OwnAs, [done: StepKey, tried: StepKey]> = {
   plan: ["Planned the work.", "Tried to plan the work."],
-  helper: ["Asked a helper.", "Tried to ask a helper."],
+  worked: ["Worked with a helper.", "Tried to work with a helper."],
   stop: ["Stopped background work.", "Tried to stop background work."],
   ask: ["Asked you.", "Tried to ask you."],
 };
@@ -308,12 +321,11 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   // ChatGPT's wait for its helpers, and its other helper tools (helper-words.ts)
   if (helpersWaitOf(entry))
     return say("Waited for helpers.", "Tried to wait for the background work.");
-  if (helperToolOf(entry)) return say("Worked with a helper.", "Tried to ask a helper.");
+  if (helperToolOf(entry)) return say("Worked with a helper.", "Tried to work with a helper.");
+  if (helperStartOf(entry)) return say("Asked a helper.", "Tried to ask a helper.");
   if (helperOf(entry)) {
     const task = helperTaskOf(entry);
-    // ChatGPT's spawn with no prompt worked with a helper; Claude's untitled Agent asked one
-    if (task === "" && spawnOf(entry))
-      return say("Worked with a helper.", "Tried to ask a helper.");
+    // with no task a helper was still asked: Claude's untitled Agent, ChatGPT's spawn with no prompt
     if (task === "") return say("Asked a helper.", "Tried to ask a helper.");
     return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task }).replace(
       /…\.$/,

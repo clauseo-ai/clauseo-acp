@@ -14,6 +14,7 @@ import {
   readableTool,
   toolLabelOf,
   helpersWaitOf,
+  helperStartOf,
   helperToolOf,
   ownToolOf,
   toolNameOf,
@@ -95,6 +96,7 @@ type Sort =
   | "helper"
   | "used"
   | "wait"
+  | "worked"
   | "stop"
   | "ask"
   | "think";
@@ -103,7 +105,8 @@ type Sort =
 function sortOf(c: ToolCallEntry): { sort: Sort; name: string | null } {
   if (helperOf(c)) return { sort: "helper", name: null };
   if (yieldOf(c) || helpersWaitOf(c)) return { sort: "wait", name: null };
-  if (helperToolOf(c)) return { sort: "helper", name: null };
+  if (helperStartOf(c)) return { sort: "helper", name: null };
+  if (helperToolOf(c)) return { sort: "worked", name: null };
   // Claude's own tools by what they do, never their names
   const own = ownToolOf(c);
   if (own !== null) return { sort: OWN_SORT[own], name: null };
@@ -125,7 +128,7 @@ function sortOf(c: ToolCallEntry): { sort: Sort; name: string | null } {
 }
 
 /** Claude's own tools' sorts (tool-names.ts, ownToolOf). */
-const OWN_SORT: Record<OwnAs, Sort> = { plan: "think", helper: "helper", stop: "stop", ask: "ask" };
+const OWN_SORT: Record<OwnAs, Sort> = { plan: "think", worked: "worked", stop: "stop", ask: "ask" };
 
 /** The words of a sort counted, one and many. */
 const COUNTED: Partial<Record<Sort, [one: StepKey, many: StepKey]>> = {
@@ -171,6 +174,9 @@ function phraseOf(lang: Lang, sort: Sort, { n, names, unnamed }: Gathered): stri
       if (unnamed > 0) shown.push(steps(lang, "used a tool"));
       return shown.join(", ");
     }
+    case "worked":
+      // a helper already asked, worked with however often: said once, never counted as one asked
+      return steps(lang, "worked with a helper");
     case "stop":
       return steps(lang, "stopped background work");
     case "ask":
