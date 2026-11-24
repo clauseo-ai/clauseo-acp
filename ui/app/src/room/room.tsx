@@ -101,6 +101,7 @@ import { FirstMark } from "./first-mark.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
 import { useSacNote } from "./sac/use-sac-note.ts";
+import { useLibraryPlace } from "../library/room-place.tsx";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -290,6 +291,7 @@ function RoomFrame({
   const foldForNew = () => {
     madeFolded.current = railOpen;
     setRailOpen(false);
+    library.close();
   };
   // New conversation's key, while a matter's conversations are in and no dialog holds the keys
   const endVersions = versions.close;
@@ -307,6 +309,7 @@ function RoomFrame({
     if (!endVersions()) return;
     conversations.startNew();
     setRailOpen(false);
+    library.close();
   };
   // New matter, from its key or the native menu, as the rail's button does, wherever the rail stands
   const openNewMatter = () => {
@@ -395,6 +398,14 @@ function RoomFrame({
   // the desktop's own word on macOS's full screen: a notched Mac's full-screen window is shorter than its screen
   const hostFullScreen = useHostFullScreen(transport);
   const notice = <RoomNotices transport={transport} threads={threads} matters={view.matters} />;
+  // Skills and connectors: its rail row, and the place in the centre (the wall hidden) while open
+  const names = useMemo(() => new Map(view.matters.map((m) => [m.matter, m.name])), [view.matters]);
+  const library = useLibraryPlace({
+    transport,
+    names,
+    plan: kindOf(talks.agent, talks.agents),
+    onShow: () => setRailOpen(false),
+  });
   const title =
     open !== null
       ? scratch
@@ -410,6 +421,7 @@ function RoomFrame({
       data-panel={versions.open ? "" : undefined}
       data-deciding={deciding ? "" : undefined}
       {...layout.attrs}
+      {...(library.shown ? { "data-wall": "hidden" } : {})}
       ref={nodes.slot("window")}
     >
       {/* index.html's own #first-mark style keeps it seen in the unseen window: visibility: visible, fixed */}
@@ -423,7 +435,7 @@ function RoomFrame({
         search={false}
         unprotected={unprotectedFolder(open?.folder_support) || shield.explain !== undefined}
         onUnprotected={shield.explain}
-        versions={open !== null}
+        versions={open !== null && !library.shown}
         {...versions.toolbar}
         plan={null}
         planSlot={
@@ -433,16 +445,20 @@ function RoomFrame({
             transport={transport}
           />
         }
-        title={title}
-        titleLang={open !== null && !scratch ? (langOfText(title) ?? "en") : w.lang}
+        title={library.shown ? library.title : title}
+        titleLang={
+          open !== null && !scratch && !library.shown ? (langOfText(title) ?? "en") : w.lang
+        }
         titleHint=""
-        subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
+        subtitle={
+          scratch && !library.shown ? mt(w.lang, "Quick questions, kept like any matter") : ""
+        }
         history={[]}
         canUndo={false}
         railOpen={layout.rail.shown}
         onRail={layout.rail.toggle}
         railInPage={versions.rail == null}
-        papers={{ ...layout.papers, testId: "wall-toggle" }}
+        {...(library.shown ? {} : { papers: { ...layout.papers, testId: "wall-toggle" } })}
         // the dot while the rail is out of sight: folded, hidden, or Versions in its place
         railWaits={waits && !(atRail && !versions.open)}
         railRef={railToggle}
@@ -460,13 +476,20 @@ function RoomFrame({
           open={railOpen}
           onNewMatter={openNewMatter}
           onNewMatterPreload={preloadNewMatter}
-          onMoved={fold}
-          onConversation={() => setRailOpen(false)}
+          onMoved={() => {
+            library.close();
+            fold();
+          }}
+          onConversation={() => {
+            library.close();
+            setRailOpen(false);
+          }}
           onStartNew={versions.close}
           onEscape={fold}
           newMatterRef={newMatter}
           onSettings={openSettings}
           {...(place === "rail" ? { notice } : {})}
+          place={library.row}
         />
       )}
       {newMounted && (
@@ -502,7 +525,9 @@ function RoomFrame({
               welcome={welcome}
             />
           )}
-          {welcome ? null : open !== null && view.folderMissing ? (
+          {library.shown ? (
+            library.centre
+          ) : welcome ? null : open !== null && view.folderMissing ? (
             // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
             <>
               <LocatedFolder
@@ -586,6 +611,7 @@ function RoomFrame({
         <aside className="room-pane" id={room.id("pane")} ref={nodes.slot("pane")}>
           {place === "wall" && notice}
           {papers !== null &&
+            !library.shown &&
             (wallEmpty(papers) ? (
               <EmptyPapers body={false} />
             ) : (

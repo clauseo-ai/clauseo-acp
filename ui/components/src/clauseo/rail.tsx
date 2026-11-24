@@ -191,6 +191,7 @@ export function Rail({
   onSettings,
   brand = false,
   notice,
+  place,
   label,
   testIds,
   newMatterRef,
@@ -229,6 +230,8 @@ export function Rail({
   /** Optional: what the room says about Clauseo itself (an update, the first crash, a lab's terms),
    * as a RailNotice, in its own row at the rail's foot above Scratch matter. */
   notice?: ReactNode;
+  /** Optional: a place of the room's own (Skills and connectors): a foot row above Scratch matter. */
+  place?: ReactNode;
   /** Optional: test ids for New matter, Find's field, the scratch matter's row (which also carries
    * data-kind="scratch") and Settings. */
   testIds?: { newMatter?: string; scratch?: string; find?: string; settings?: string };
@@ -506,11 +509,16 @@ export function Rail({
         </div>
       )}
       {/* with Settings, the scratch matter and Settings stand on the rail's foot, always in view as the list scrolls */}
-      {settings === undefined && onSettings === undefined && notice === undefined && !testBuild ? (
+      {settings === undefined &&
+      onSettings === undefined &&
+      notice === undefined &&
+      place === undefined &&
+      !testBuild ? (
         scratchRow
       ) : (
         <div className="room-rail-foot">
           {notice}
+          {place}
           {scratchRow}
           {/* a test build says so, in a muted tag beside Settings: it is not a control and not an alert */}
           {testBuild && <TestBuildTag />}
