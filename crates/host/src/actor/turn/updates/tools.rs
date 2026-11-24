@@ -28,6 +28,7 @@ pub(super) fn tool_call(
         tracing::debug!(%thread, acp_id = %call.acp_id, "a tool call started twice");
         return Ok(());
     }
+    super::guard_failed::plain_call(&mut call);
     // The session's launch read whether Claude Code's policy settings may keep its shell's
     // folder across calls: then no shell call's starting folder is known.
     let start = agent(actor, thread).map(|agent| agent.shell_start.clone());
@@ -126,6 +127,7 @@ pub(super) fn tool_update(
     if matches!(context, Context::Outside { replay: true }) {
         return Ok(());
     }
+    super::guard_failed::plain_patch(&mut patch);
     // The turn's paths stay in memory, so they take the patch as the agent sent it. The
     // elicitation values withheld from this call (`withheld.rs`) then go before anything
     // logged reads it: the sources, and `build.rs`'s inline or blob decision.

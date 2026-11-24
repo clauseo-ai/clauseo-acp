@@ -10,7 +10,8 @@
 //! Claude gets none: claude-agent-acp sends the blocked call as a `tool_call` and its result as
 //! a `failed` update carrying the hook's reason, which the room already shows as a refused step
 //! ("Tried to …"), so a notice would tell it twice. Claude Code's entry passes no record file,
-//! and a line in the file of a Claude session is never read.
+//! and a line in the file of a Claude session is never read. A step refused because the guard
+//! could not answer reads plain words instead of the hook's text (`guard_failed.rs`).
 //!
 //! The file is in a folder of the session's own no agent's shell or patch tool may write
 //! (`launch_checks/folders.rs` `make_guard`), and is read only when the file opened has the
