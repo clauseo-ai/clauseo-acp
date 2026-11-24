@@ -45,7 +45,7 @@ export function CaseLawOffer({ transport }: { transport: HostTransport }) {
   if (!shows || openCaseLaw === null) return null;
   return (
     <Suspense fallback={null}>
-      <CaseLawCard pack={pack} onAdd={onOpen} />
+      <CaseLawCard pack={pack} onAdd={openCaseLaw} />
     </Suspense>
   );
 }
