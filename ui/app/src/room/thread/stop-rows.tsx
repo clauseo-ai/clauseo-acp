@@ -18,7 +18,6 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { listOf } from "@clauseo/components/lib/words-core.ts";
-import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
@@ -34,6 +33,7 @@ import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
 import type {
   EntryId,
+  FileChange,
   FileChoice,
   HostError,
   LimitStopEntry,
@@ -52,7 +52,6 @@ import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { loadVersions } from "../versions/use-versions.ts";
-import { alsoChanged } from "../versions/also-changed.ts";
 import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
 
 /** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
@@ -76,6 +75,10 @@ const LOCKED = "matter.file_locked";
 
 const QUIET = "text-small text-quiet";
 /** A matter path's file name: its last part, as the wall shows the file. */
+/** Whether another conversation's answer also changed the file (15a's also_changed_by): versions/also-changed.ts's
+ * test, kept here too so the thread's lazy list shares no chunk with Versions (vite-config.test.ts). */
+const alsoChanged = (f: FileChange): boolean => (f.also_changed_by?.length ?? 0) > 0;
+
 const fileNameOf = (path: string): string => path.split(/[\\/]/).pop() || path;
 
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -255,7 +258,7 @@ function Changed({ entry }: { entry: StepEntry }) {
       {!entry.undone && shared.length > 0 && (
         <p className={QUIET} data-testid="also-changed">
           <Say>
-            {vt(
+            {th(
               w.lang,
               "Another conversation also changed {papers}. Undoing this takes its change away too.",
               { papers: listOf(w.lang, shared) },
