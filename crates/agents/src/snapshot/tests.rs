@@ -53,7 +53,7 @@ fn the_embedded_snapshot_builds() {
         built.agent(&codex()).unwrap().signin_hosts,
         ["auth.openai.com", "chatgpt.com"]
     );
-    assert_eq!(built.pins(&claude()).unwrap().version(), "0.89.1");
+    assert_eq!(built.pins(&claude()).unwrap().version(), "0.110.1");
     assert_eq!(built.pins(&codex()).unwrap().version(), "2.10.0");
 }
 
@@ -125,7 +125,7 @@ fn no_entry_reachable_only_from_the_other_root_is_in_an_agents_lock() {
     let lock: Value = serde_json::from_str(snapshot.pins(&claude()).unwrap().lock()).unwrap();
     assert_eq!(
         lock["packages"][""]["dependencies"],
-        serde_json::json!({"@agentclientprotocol/claude-agent-acp": "0.89.1"})
+        serde_json::json!({"@agentclientprotocol/claude-agent-acp": "0.110.1"})
     );
 }
 
@@ -274,13 +274,13 @@ fn sizes_follow_the_records_formula() {
     let mac = Platform::new(Os::Darwin, Arch::Arm64);
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, false),
-        Some(112_272_099)
+        Some(174_188_051)
     );
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, true),
-        Some(112_272_099 + 53_049_576)
+        Some(174_188_051 + 53_049_576)
     );
-    let base: u64 = 2 * 112_272_099 + 284_447_720;
+    let base: u64 = 2 * 174_188_051 + 414_940_657;
     assert_eq!(
         snapshot.need_bytes(&claude(), mac, false, false),
         Some(base + base.div_ceil(10))
@@ -437,9 +437,9 @@ fn the_disk_need_adds_python_and_the_agent_s_download_leaves_it_out() {
     // The agent's download leaves Python out: its own Missing carries it.
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, false),
-        Some(112_272_099)
+        Some(174_188_051)
     );
-    let base: u64 = 2 * 112_272_099 + 284_447_720 + 70_000_000 + 220_000_000;
+    let base: u64 = 2 * 174_188_051 + 414_940_657 + 70_000_000 + 220_000_000;
     assert_eq!(
         snapshot.need_bytes(&claude(), mac, false, true),
         Some(base + base.div_ceil(10))
