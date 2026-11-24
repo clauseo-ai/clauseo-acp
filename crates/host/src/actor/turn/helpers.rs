@@ -8,25 +8,22 @@
 //! helper on: a conversation without one pays a `None` check per tool call update and a
 //! tool-name compare per tool call, and nothing per text chunk.
 //!
-//! Ends: the agent's own (Claude's handback, or a foreground launch step's final status); a Stop
-//! ends every open helper `Stopped`; a turn that ends by itself with helpers still open ends them
-//! `Failed` (they never handed back), unless a send-now cut that turn short; the agent session
-//! ending ends them `Stopped`.
+//! Ends: the agent's own (Claude's handback, or a foreground launch step's final status), here;
+//! the ends a cut-short run brings (a Stop, a turn's close, a detach, a failed write's retry, a
+//! past run's helpers left open in the log) in `ends.rs`.
 
 use std::collections::HashMap;
 
-use clauseo_acp::{AgentUpdate, MessageRole, Origin};
+use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
     AgentSessionId, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind, ContentBlock,
-    DomainEvent, HelperId, HelperOutcome, HelperStarted, HelperText, INLINE_LIMIT_BYTES,
-    StopReason, StreamId, TextOrBlob, ThreadId, ToolCallId, TurnId, ViewEntry,
+    DomainEvent, HelperId, HelperOutcome, HelperStarted, HelperText, INLINE_LIMIT_BYTES, StreamId,
+    TextOrBlob, ThreadId, ToolCallId, TurnId,
 };
 
 use super::super::Actor;
-use super::close::{Expiries, TurnClose};
 use super::out::Out;
-use super::{Then, TimerKind, TurnPhase, TurnTimer, current, lost, state, updates};
-use clauseo_reducer::ThreadState;
+use super::{Then, TimerKind, TurnTimer, lost, state, updates};
 
 use crate::build;
 use crate::coalesce::DURABLE_BATCH;
@@ -35,10 +32,14 @@ use crate::log_file::Cause;
 use crate::pipeline::Draft;
 
 pub(super) mod claude;
+mod ends;
 mod words;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) use ends::settle_loaded;
+pub(in crate::actor::turn) use ends::{on_cancel, on_close, on_detach, reopen_from_view};
 
 /// The helpers of one conversation, from its first helper on.
 #[derive(Debug, Default)]
@@ -330,165 +331,12 @@ pub(super) fn end(
     updates::commit(actor, thread, [built.value.into()], built.blobs)
 }
 
-/// Pushes `HelperEnded { outcome }` for every open helper of the thread into `out`, and closes
-/// them.
-fn end_open(
-    actor: &mut Actor,
-    thread: ThreadId,
-    outcome: HelperOutcome,
-    out: &mut Out,
-) -> Result<(), Error> {
-    let Some(helpers) = existing(actor, thread) else {
-        return Ok(());
-    };
-    let mut ended: Vec<HelperId> = Vec::new();
-    for known in helpers.known.values_mut().filter(|known| known.open) {
-        known.open = false;
-        ended.push(known.id);
-    }
-    // In start order, so the log reads as the helpers ran.
-    ended.sort_unstable();
-    for helper in ended {
-        out.push(actor, build::helper_ended(helper, outcome, None).value)?;
-    }
-    Ok(())
-}
-
-/// A cancel of `turn` (the lawyer's Stop, a failure, the host stopping): every open helper ends
-/// `Stopped`, unless `send_now` (the lawyer's next message cut the turn short), which leaves
-/// them open and keeps them open at the turn's end.
-pub(super) fn on_cancel(
-    actor: &mut Actor,
-    thread: ThreadId,
-    turn: TurnId,
-    send_now: bool,
-    out: &mut Out,
-) -> Result<(), Error> {
-    if send_now {
-        if let Some(helpers) = existing(actor, thread) {
-            helpers.kept = Some(turn);
-        }
-        return Ok(());
-    }
-    end_open(actor, thread, HelperOutcome::Stopped, out)
-}
-
-/// What a turn that ends by itself (a stop reason from the agent, no failure) writes for a
-/// helper still open: it never handed back a report. The one home of that word.
-const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
-
-/// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
-/// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
-/// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
-/// turn a send-now cut short, and a turn whose prompt never went out, leave them open. Start-up's repair of a turn a crash or a quit left
-/// open (its expiries listed from the log) ends `Stopped` every helper the log leaves open, so
-/// no card of the last run stays running.
-pub(super) fn on_close(actor: &mut Actor, out: &mut Out, close: &TurnClose) -> Result<(), Error> {
-    let thread = out.thread();
-    if matches!(close.expiries, Expiries::Listed { .. }) {
-        return end_logged_open(actor, thread, out);
-    }
-    let turn = close.turn;
-    // Only a turn whose prompt went out closes helpers: a queued turn removed, or one that
-    // failed before its prompt, leaves them as they are.
-    let prompted = current(actor, thread).is_some_and(|current| {
-        current.turn == turn
-            && matches!(
-                current.phase,
-                TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending
-            )
-    });
-    let Some(helpers) = existing(actor, thread) else {
-        return Ok(());
-    };
-    let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
-    // The engine gone (its detach, or a failure: the agent exited, the connection was lost)
-    // and a cancel stop every open helper, whoever cut the turn short.
-    let stopped =
-        close.detach.is_some() || close.failure.is_some() || close.stop == StopReason::Cancelled;
-    let outcome = if close.detach.is_some() {
-        HelperOutcome::Stopped
-    } else if kept || !prompted {
-        return Ok(());
-    } else if stopped {
-        HelperOutcome::Stopped
-    } else {
-        ENDED_BY_ITSELF
-    };
-    end_open(actor, thread, outcome, out)
-}
-
-/// `HelperEnded { Stopped }` into `out` for every helper the thread's view holds with no end:
-/// the helpers of a run that stopped without ending them. One walk of the view, at start-up only.
-fn end_logged_open(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result<(), Error> {
-    let open: Vec<HelperId> = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.state.as_thread())
-        .map(|state| {
-            state
-                .entries()
-                .values()
-                .filter_map(|entry| match entry {
-                    ViewEntry::Helper(helper) if helper.outcome.is_none() => Some(helper.helper),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    for helper in open {
-        let ended = build::helper_ended(helper, HelperOutcome::Stopped, None).value;
-        out.push(actor, ended)?;
-    }
-    Ok(())
-}
-
-/// A thread's stream loaded: the helpers its log leaves open end `Stopped` when no agent of this
-/// run can still be running them (the run that started them crashed or quit, its agent gone),
-/// whether or not a turn was left open. A thread with an open turn, a repair or a close in
-/// progress, or a live agent is left to those paths. Costs one count read for a thread without
-/// open helpers; a second load finds none open.
-pub(crate) fn settle_loaded(actor: &mut Actor, thread: ThreadId) {
-    let stream = StreamId::Thread(thread);
-    let open = actor
-        .loaded(stream)
-        .and_then(|loaded| loaded.state.as_thread())
-        .map_or(0, ThreadState::open_helpers);
-    if open == 0 || actor.pipeline.in_flight(stream) {
-        return;
-    }
-    let busy = state(actor, thread).is_none_or(|state| {
-        state.agent.is_some()
-            || state.current.is_some()
-            || state.closing.is_some()
-            || state.reconciling
-    });
-    if busy {
-        return;
-    }
-    let sent = Out::new(actor, thread, None).and_then(|mut out| {
-        end_logged_open(actor, thread, &mut out)?;
-        out.send(actor, Then::Nothing)
-    });
-    if let Err(error) = sent {
-        tracing::warn!(%thread, error = %Cause(&error), "open helpers of a past run were not ended");
-    }
-}
-
-/// The agent session ended outside a turn: every open helper ends `Stopped`, and the thread
-/// forgets its helpers, whose ids belonged to that session.
-pub(super) fn on_detach(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result<(), Error> {
-    end_open(actor, thread, HelperOutcome::Stopped, out)?;
-    if let Some(state) = state(actor, thread) {
-        state.helpers = None;
-    }
-    Ok(())
-}
-
 /// An update the agent stamped with the helper it knows as `helper`. Replayed and late ones
 /// are dropped. A new step goes through the lead's step path with the helper set (Claude's
 /// handback is its end instead, `claude.rs`); a step update goes as the lead's (it names its
-/// step by id); answer text becomes the helper's words; everything else (thoughts, plans,
-/// usage, mode, options, titles) is dropped, so a helper never touches the conversation's own.
+/// step by id); answer text becomes the helper's words (held for the agent's own turn when none
+/// is live, as steps are); everything else (thoughts, plans, usage, mode, options, titles) is
+/// dropped, so a helper never touches the conversation's own.
 pub(super) fn on_update(
     actor: &mut Actor,
     thread: ThreadId,
@@ -516,10 +364,26 @@ pub(super) fn on_update(
         }
         AgentUpdate::MessageChunk {
             role: MessageRole::Answer,
+            acp_message_id,
             content: ContentBlock::Text { text },
-            ..
         } => match updates::live_turn(actor, thread, origin) {
             Some(turn) => words(actor, thread, turn, helper, &text),
+            // With no turn live the words wait for the agent's own turn, as its steps do.
+            None if origin == Origin::Idle => {
+                let update = AgentUpdate::MessageChunk {
+                    role: MessageRole::Answer,
+                    acp_message_id,
+                    content: ContentBlock::Text { text },
+                };
+                let event = AcpEvent::HelperUpdate {
+                    session: session.clone(),
+                    origin,
+                    helper: helper.clone(),
+                    update,
+                };
+                super::own_turn::hold_helper(actor, thread, event);
+                Ok(())
+            }
             None => {
                 tracing::debug!(%thread, "a helper's words outside a turn were dropped");
                 Ok(())
