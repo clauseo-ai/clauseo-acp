@@ -59,7 +59,7 @@ impl Switch for Os {
     const REAL: bool = true;
     fn disable() -> Result<Self::Lock, i32> {
         security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
-            .map_err(|error| error.code())
+            .map_err(security_framework::base::Error::code)
     }
     fn allowed() -> Option<bool> {
         security_framework::os::macos::keychain::SecKeychain::user_interaction_allowed().ok()
