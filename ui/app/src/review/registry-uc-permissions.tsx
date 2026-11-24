@@ -5,6 +5,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { PermissionRow, PermissionsHost } from "../room/first-run/permissions-host.ts";
 import type { SetupEvent } from "../transport/protocol.ts";
+import { WINDOWS } from "@clauseo/components/clauseo/first-launch/windows-words.ts";
 import type { Entry } from "./entry.ts";
 import { render } from "./registry-ud1-scene.tsx";
 import { SettingsOver } from "./states-settings.tsx";
@@ -29,8 +30,8 @@ export const KEYS: PermissionRow = { ...NONE, id: "keychain", state: "would_ask"
 const MAC_PATH = "System Settings › Privacy & Security › Files and Folders › Clauseo";
 const WIN_PATH =
   "Windows Security › Virus & threat protection › Ransomware protection › Allow an app through Controlled folder access";
-const WIN_NOTE =
-  "Claude's and ChatGPT's own programs need allowing too, or choose a matters folder outside Documents.";
+/** The desktop's note now repeats the row's reason (CFA_NOTE), so the row leaves it out. */
+const WIN_NOTE = WINDOWS.why;
 
 /** A fake host listing `rows`; each ask answers `after`'s row, or waits for good when it has none. */
 export const fakePermissions = (
@@ -76,10 +77,22 @@ const KEY_WAITING = permissionsScene(fakePermissions([{ ...DOCS, state: "granted
 export const DENIED = permissionsScene(
   fakePermissions([{ ...DOCS, state: "denied", settings_path: MAC_PATH }, KEYS]),
 );
+/** Documents allowed, the keychain refused with the desktop's note naming `note`'s items. */
+const keyDenied = (note: string) =>
+  permissionsScene(
+    fakePermissions([
+      { ...DOCS, state: "granted" },
+      { ...KEYS, state: "denied", note },
+    ]),
+  );
 const KEY_DENIED = permissionsScene(
   fakePermissions([
     { ...DOCS, state: "granted" },
-    { ...KEYS, state: "denied", note: "Clauseo couldn't read: Claude sign-in, Westlaw connector." },
+    {
+      ...KEYS,
+      state: "denied",
+      note: "ai.clauseo.desktop (claude-acp), ai.clauseo.desktop.connectors (westlaw)",
+    },
   ]),
 );
 const FAILED = permissionsScene(
@@ -134,6 +147,13 @@ export const MATTER_CHOSEN = blockedMatter(
   ['[data-testid="folder-choice"]'],
 );
 const MATTER_SCREEN = "room/thread";
+/** A lawyer with matters, matter A open on the Mac, the keychain not asked yet: the band over the room. */
+const BAND = render({
+  events: [
+    { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
+  ],
+  permissions: fakePermissions([{ ...DOCS, state: "granted" }, KEYS]),
+});
 
 export const UC_PERMISSIONS: Entry[] = [
   { id: "UC-1150", words: w("Before your first matter"), screen: SCREEN, render: BOTH },
@@ -188,7 +208,7 @@ export const UC_PERMISSIONS: Entry[] = [
   { id: "UC-1159", words: w("Open System Settings"), screen: SCREEN, render: DENIED },
   {
     id: "UC-1160",
-    words: w("macOS asks again the next time Clauseo opens. Choose Always Allow then."),
+    words: w("You can allow it here at any time."),
     screen: SCREEN,
     render: KEY_DENIED,
   },
@@ -222,6 +242,34 @@ export const UC_PERMISSIONS: Entry[] = [
     render: WIN_BLOCKING,
   },
   { id: "UC-1166", words: w("Check again"), screen: SCREEN, render: WIN_BLOCKING },
+  // #1303: the band over the room for a lawyer with matters, the refused keychain row's plain line, Windows Security
+  {
+    id: "UC-1275",
+    words: w("Before you go on"),
+    screen: "room/thread",
+    render: BAND,
+  },
+  {
+    id: "UC-1276",
+    words: w("Without it, Clauseo can't read your saved sign-ins for connectors."),
+    screen: SCREEN,
+    render: keyDenied("ai.clauseo.desktop.connectors (westlaw)"),
+  },
+  {
+    id: "UC-1277",
+    words: w("Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT."),
+    screen: SCREEN,
+    render: keyDenied("ai.clauseo.desktop (claude-acp)"),
+  },
+  {
+    id: "UC-1278",
+    words: w(
+      "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.",
+    ),
+    screen: SCREEN,
+    render: KEY_DENIED,
+  },
+  { id: "UC-1279", words: w("In Windows Security: {path}"), screen: SCREEN, render: WIN_BLOCKING },
   // Settings › Privacy's Permissions group (#1303): the same rows, for a lawyer who already has matters
   {
     id: "UC-1260",
@@ -246,7 +294,7 @@ export const UC_PERMISSIONS: Entry[] = [
   },
   {
     id: "UC-1168",
-    words: m("Move this matter's folder out of Documents in File Explorer, then choose it here."),
+    words: m("Move this matter's folder out of {folder} in File Explorer, then choose it here."),
     screen: MATTER_SCREEN,
     render: MATTER_BLOCKED,
   },

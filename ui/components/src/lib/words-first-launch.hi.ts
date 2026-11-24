@@ -237,7 +237,7 @@ export const HI = {
   "Not allowed.": null,
   "You can allow it in {path}.": null,
   "Open System Settings": null,
-  "macOS asks again the next time Clauseo opens. Choose Always Allow then.": null,
+  "You can allow it here at any time.": null,
   "Clauseo couldn't ask macOS. Try again.": null,
   "Windows is blocking your matters folder": null,
   "Windows blocks the assistants' tools, such as PowerShell, from saving in protected folders. Choose a matters folder outside Documents, Desktop and Pictures, or ask your IT team.":
@@ -245,6 +245,14 @@ export const HI = {
   "Windows may be blocking your matters folder": null,
   "Choose a matters folder outside Documents": null,
   "Check again": null,
+  // #1303 (UC-1275 to UC-1279): the band's heading over the room for a lawyer who has matters, the refused keychain
+  // row's plain line in place of the desktop's raw note, and Windows Security's path introduced
+  "Before you go on": null,
+  "Without it, Clauseo can't read your saved sign-ins for connectors.": null,
+  "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT.": null,
+  "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.":
+    null,
+  "In Windows Security: {path}": null,
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

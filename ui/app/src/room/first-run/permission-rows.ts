@@ -1,12 +1,17 @@
 // The first screen's permissions step's rows as it draws them (issue 5), apart from permissions.tsx, which exports
-// only its component: the host's rows in order, and what each shows.
+// only its component: the host's rows in order, and what each shows; and which rows are not asked yet.
 import type { PermissionStepRow } from "@clauseo/components/clauseo/first-launch/permissions.tsx";
 import type { PermissionId, PermissionRow } from "./permissions-host.ts";
 
 /** The Mac's order: the Documents folder, then the keychain; Windows' one row after. */
 const ORDER: readonly PermissionId[] = ["files_documents", "keychain", "controlled_folder_access"];
 
-const unasked = (row: PermissionRow) => row.state === "not_asked" || row.state === "would_ask";
+/** Not asked yet: a Mac row before its ask, and a keychain row whose silent check couldn't tell ("unknown"), which an
+ * Allow settles. Windows' "unknown" is a block that can't be read, not a question. */
+export const unasked = (row: PermissionRow) =>
+  row.state === "not_asked" ||
+  row.state === "would_ask" ||
+  (row.id === "keychain" && row.state === "unknown");
 
 /** The rows the step draws, in order; on the Mac only the first row not asked yet has its Allow. */
 export function stepRows(
@@ -28,6 +33,9 @@ export function stepRows(
       turn = true;
       return { id: row.id, shows, ...given };
     }
+    // a refused keychain row keeps its Allow (it can be allowed at any time); its failed ask says so
+    if (row.id === failed && row.id === "keychain")
+      return { id: row.id, shows: "failed", ...given };
     const shows =
       row.state === "granted" || row.state === "blocking" || row.state === "unknown"
         ? row.state

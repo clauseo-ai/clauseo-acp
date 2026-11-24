@@ -56,7 +56,10 @@ test("a matter in a protected folder outside the matters folder (the Desktop) sh
     platform: "windows",
     permissions: host([CFA]),
   });
-  expect(byId("matter-blocked")).not.toBeNull();
+  // it names the folder the matter is in
+  expect(byId("matter-blocked")?.textContent).toContain(
+    "Move this matter's folder out of Desktop in File Explorer, then choose it here.",
+  );
 });
 
 test("a matter outside the protected folders shows no line", async () => {

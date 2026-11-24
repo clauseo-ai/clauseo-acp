@@ -20,7 +20,7 @@ export type {
 
 /** The step's host. */
 export type PermissionsHost = {
-  /** The rows needed on this build. */
+  /** The rows needed on this build; rejects when the desktop couldn't say (a caller keeps what it had). */
   list(): Promise<PermissionRow[]>;
   /** Asks for one row; resolves with the row after, once the lawyer has answered macOS. */
   ask(id: PermissionId): Promise<PermissionRow>;
@@ -68,11 +68,12 @@ const desktop = (transport: HostTransport): PermissionsHost => ({
   ...(HAS_SET_DEFAULT_LOCATION ? { chooseMattersFolder: () => chooseOver(transport) } : {}),
 });
 
-/** The step's host for the window's transport. A list that fails lists no rows. */
+/** The step's host for the window's transport. A list that fails rejects: the step keeps the rows it had, and a
+ * first read that fails shows nothing. */
 export function permissionsHostOf(transport: HostTransport): PermissionsHost {
   const host = provided.get(transport) ?? (transport.kind === "tauri" ? desktop(transport) : NONE);
   return {
-    list: () => host.list().catch(() => []),
+    list: () => host.list(),
     ask: (id) => host.ask(id),
     ...(host.chooseMattersFolder === undefined
       ? {}
@@ -91,6 +92,22 @@ function homeRelative(path: string): string {
     .toLowerCase()
     .replace(/^\/+|\/+$/g, "");
   return plain.replace(/^(?:[a-z]:\/)?(?:users|home)\/[^/]+\/?/, "");
+}
+
+/** The protected folder a matter's folder is in, as the lawyer's computer names it (its first part, home-relative:
+ * "Documents", "Desktop", "Pictures"), or null when blockingRow finds no block. */
+export function blockedIn(
+  rows: readonly PermissionRow[],
+  display: string | undefined,
+): string | null {
+  if (display === undefined || blockingRow(rows, display) === null) return null;
+  const parts = display
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((p) => p !== "");
+  const home = parts.findIndex((p, i) => /^(users|home)$/i.test(p) && i <= 1);
+  const first = home === -1 ? parts[0] : parts[home + 2];
+  return first ?? null;
 }
 
 /** The Controlled folder access row that blocks a matter whose folder reads `display` (MatterInfo's folder_display),

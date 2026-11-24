@@ -205,7 +205,7 @@ export const HI = {
   // the open matter's line where Windows' Controlled folder access protects its folder (issue 5; the app track's
   // words, provisional, hi: later): UC-1167, UC-1168, UC-1164
   "Windows' Controlled folder access blocks saving in this folder": null,
-  "Move this matter's folder out of Documents in File Explorer, then choose it here.": null,
+  "Move this matter's folder out of {folder} in File Explorer, then choose it here.": null,
   "Choose the moved folder": null,
   // set_default_location's outcome, under "Choose a matters folder outside Documents" (UC-1169)
   "New matters now go in {folder}. Matters you already have stay where they are.": null,

@@ -142,16 +142,51 @@ test("refused: Not allowed, where to change it as the desktop says, and System S
   expect(opened).toHaveBeenCalledTimes(1);
 });
 
-test("the keychain refused: macOS asks again next time, and the desktop's note names the items", async () => {
-  const note = "Clauseo couldn't read: Claude sign-in, Westlaw connector.";
-  const { host } = fakeHost([KEYS], () => ({ ...KEYS, state: "denied", note }));
+test("the keychain refused: it can be allowed here at any time, its Allow stays, and the items are said plainly", async () => {
+  // the desktop's note as permissions.rs writes it: "service (account)", joined with ", "
+  const note = "ai.clauseo.desktop.connectors (westlaw), ai.clauseo.desktop.connectors (manupatra)";
+  const { host, ask } = fakeHost([KEYS], () => ({ ...KEYS, state: "denied", note }));
   await mountFirstRun({ matters: [], permissions: host });
   await press(allowIn("keychain"));
+  expect(shown()).toEqual([["keychain", "denied"]]);
   expect(byId("permission-denied")?.textContent).toBe(
-    "Not allowed. macOS asks again the next time Clauseo opens. Choose Always Allow then.",
+    "Not allowed. You can allow it here at any time.",
   );
-  expect(byId("permission-note")?.textContent).toBe(note);
+  expect(byId("permission-note")?.textContent).toBe(
+    "Without it, Clauseo can't read your saved sign-ins for connectors.",
+  );
+  // never the raw note
+  expect(byId("permissions-step")?.textContent).not.toContain("ai.clauseo");
   expect(byId("permission-settings")).toBeNull();
+  await press(allowIn("keychain"));
+  expect(ask).toHaveBeenCalledTimes(2);
+});
+
+test("a keychain row its silent check couldn't read (unknown) counts as not asked: it has Allow", async () => {
+  const { host, ask } = fakeHost([{ ...KEYS, state: "unknown" }]);
+  await mountFirstRun({ matters: [], permissions: host });
+  expect(shown()).toEqual([["keychain", "ask"]]);
+  await press(allowIn("keychain"));
+  expect(ask).toHaveBeenCalledWith("keychain");
+  expect(shown()).toEqual([["keychain", "granted"]]);
+});
+
+test("a Check again that fails keeps the rows: the step never vanishes", async () => {
+  const denied: PermissionRow = { ...DOCS, state: "denied", settings_path: MAC_PATH };
+  let reads = 0;
+  const host: PermissionsHost = {
+    list: async () => {
+      reads += 1;
+      if (reads > 1) throw new Error("couldn't read");
+      return [denied];
+    },
+    ask: async () => denied,
+  };
+  await mountFirstRun({ matters: [], permissions: host });
+  expect(shown()).toEqual([["files_documents", "denied"]]);
+  await press(byId("permission-check"));
+  expect(reads).toBe(2);
+  expect(shown()).toEqual([["files_documents", "denied"]]);
 });
 
 test("an ask that fails says so, and its Allow stays for another try", async () => {
@@ -170,8 +205,7 @@ test("Windows, Controlled folder access blocking: said plainly, a matters folder
     state: "blocking",
     folder: "Documents\\Clauseo",
   };
-  const note =
-    "Claude's and ChatGPT's own programs need allowing too, or choose a matters folder outside Documents.";
+  const note = "Clauseo's helper programs need allowing too.";
   const { host, ask } = fakeHost([blocking], () => ({
     ...blocking,
     settings_path: WIN_PATH,
@@ -187,7 +221,9 @@ test("Windows, Controlled folder access blocking: said plainly, a matters folder
   expect(byId("permission-other-folder")?.textContent).toBe(
     "Choose a matters folder outside Documents",
   );
-  expect(byId("permission-path")?.textContent).toBe(WIN_PATH);
+  expect(byId("permission-path")?.textContent).toBe(
+    "In Windows Security: Virus & threat protection › Ransomware protection › Allow an app through Controlled folder access",
+  );
   expect(byId("permission-note")?.textContent).toBe(note);
   // nothing for the lawyer to allow here: no Allow, no macOS lead
   expect(allowIn("controlled_folder_access")).toBeNull();
@@ -214,4 +250,18 @@ test("Windows where the host can set a matters folder: the row's action is that 
   expect(byId("folder-choice-said")?.textContent).toBe(
     "Clauseo couldn't save the change. Try again.",
   );
+});
+
+test("Windows: a note that repeats the row's reason is not printed twice", async () => {
+  const why =
+    "Windows blocks the assistants' tools, such as PowerShell, from saving in protected folders. Choose a matters folder outside Documents, Desktop and Pictures, or ask your IT team.";
+  const blocking: PermissionRow = { ...NONE, id: "controlled_folder_access", state: "blocking" };
+  const { host } = fakeHost([blocking], () => ({
+    ...blocking,
+    settings_path: WIN_PATH,
+    note: why,
+  }));
+  await mountFirstRun({ matters: [], platform: "windows", permissions: host });
+  expect(byId("permission-note")).toBeNull();
+  expect(row("controlled_folder_access")?.textContent?.split(why).length).toBe(2);
 });
