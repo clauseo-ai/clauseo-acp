@@ -62,6 +62,10 @@ pub struct InitializeCapabilities {
     /// Opts into `attestation/generate` requests (the server's default is `false`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_attestation: Option<bool>,
+    /// Shows `humanCommand` approvals to a person and returns only a one-time decision. Needs
+    /// `experimentalApi`; the server's default is `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_human_approval: Option<bool>,
 }
 
 /// `initialize`'s response.

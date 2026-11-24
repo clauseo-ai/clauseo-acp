@@ -10,8 +10,8 @@ same protocol. Three constraints shape the crate that holds it:
 - No Codex crate. Walking Codex's lockfile from `codex-app-server-protocol` reaches 868 of 1,466
   packages, and crates.io has only a third-party fork. So the types are ours, written against
   the JSON schema Codex commits at `codex-rs/app-server-protocol/schema/json`.
-- The reader runs the Codex codex-acp bundles, `@openai/codex` 0.162.1, so the schema comes from
-  tag `rust-v0.162.1`.
+- The reader runs the Codex codex-acp bundles, `@openai/codex` 0.171.0, so the schema comes from
+  tag `rust-v0.171.0`.
 - Codex adds values often: `PlanType` has 18 today. Generated types (typify) close every enum,
   so one new plan would fail the whole read.
 
@@ -36,7 +36,7 @@ channels and the oneshot behind each call, and `tracing` for the debug lines on 
   `SpendControlLimitSnapshot`, `RateLimitResetCreditsSummary`, `RateLimitResetCredit`,
   `PlanType`, `RateLimitReachedType`, `RateLimitResetCreditStatus`, `RateLimitResetType`, and
   `AccountRateLimitsUpdatedNotification`. Each takes every field its definition gives.
-- **The vendored schema.** `crates/codex_appserver/schema/rust-v0.162.1/` holds the eight files
+- **The vendored schema.** `crates/codex_appserver/schema/rust-v0.171.0/` holds the eight files
   the drift test reads, byte for byte. `schema/README.md` gives the source, each SHA-256, what
   was checked at the tag and the refresh steps. A pin bump is a new folder, a green drift test,
   and the old folder removed.

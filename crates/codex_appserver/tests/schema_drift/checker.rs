@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 
 /// The Codex tag the vendored schema comes from, and so the folder under `schema/` the drift
 /// test reads. A pin bump changes it here (`schema/README.md`, "Refreshing on a pin bump").
-pub(crate) const SCHEMA_TAG: &str = "rust-v0.162.1";
+pub(crate) const SCHEMA_TAG: &str = "rust-v0.171.0";
 
 /// The folder of the vendored files.
 pub(crate) fn vendored_folder() -> std::path::PathBuf {

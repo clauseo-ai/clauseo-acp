@@ -37,12 +37,14 @@ pub(crate) fn outcome(answers: Answers) -> ReadOutcome {
         let unread = ChatgptAccount {
             email: None,
             plan_type: PlanType::Unknown(String::new()),
+            workspace_name: None,
         };
         return chatgpt(&unread, answers.limits.as_ref(), AccountRead::NotRead);
     };
     match read.account {
         None => ReadOutcome::SignedOut,
-        Some(Account::ApiKey) => pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY),
+        // A gcp sign-in is no ChatGPT plan, so it reads as an API key does: no plan limits.
+        Some(Account::ApiKey | Account::Gcp) => pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY),
         Some(Account::AmazonBedrock(_)) => pay_as_you_go(BillingProvider::Bedrock, REF_BEDROCK),
         Some(Account::Unknown(_)) => {
             ReadOutcome::Failed(ReadFailure::Malformed("unknown account type".to_owned()))
