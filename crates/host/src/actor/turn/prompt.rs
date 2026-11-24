@@ -56,11 +56,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     };
     current.phase = TurnPhase::Prompting;
-    let mut content = Vec::with_capacity(current.prompt.len() + 1);
-    if let Some(text) = note {
-        content.push(ContentBlock::Text { text });
-    }
-    content.extend(current.prompt.iter().cloned());
+    let content = with_note(note, &current.prompt);
     let cancelled = current.cancelled;
     // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
     if let Err(error) = super::codex_cap::refuse(actor, thread, &content) {
@@ -119,15 +115,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
-            if let Some(options) = set_picks(&client, &session, picks).await {
-                let reply = AgentReply::PromptPicked(options);
-                let input = TurnInput::Agent {
-                    thread,
-                    agent: id,
-                    reply,
-                };
-                let _gone = picked_post.try_send(Input::Turn(input));
-            }
+            set_picks(&client, &session, picks, (&picked_post, thread, id)).await;
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let send = || client.prompt(&session, turn, content.clone());
             let result = retry.run(&client, send).await;
@@ -155,14 +143,18 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     });
 }
 
-/// Sets `picks` on `session`, in order; the options of the agent's last answer, `None` when
-/// none was taken. A pick the agent refuses is skipped; the prompt goes out after them all the
-/// same.
+/// The actor's input channel.
+type Post = async_channel::Sender<Input>;
+
+/// Sets `picks` on `session`, in order, and posts the options of the agent's last answer to the
+/// actor (`AgentReply::PromptPicked`), when one was taken. A pick the agent refuses is skipped;
+/// the prompt goes out after them all the same.
 async fn set_picks(
     client: &clauseo_acp::AcpClient,
     session: &clauseo_protocol::AgentSessionId,
     picks: Vec<super::picks::Pick>,
-) -> Option<Vec<clauseo_protocol::ConfigOption>> {
+    (post, thread, agent): (&Post, ThreadId, u64),
+) {
     let mut last = None;
     for (option, value) in picks {
         let select = clauseo_protocol::ConfigValue::Select(value.clone());
@@ -179,5 +171,22 @@ async fn set_picks(
             }
         }
     }
-    last
+    if let Some(options) = last {
+        let reply = AgentReply::PromptPicked(options);
+        let _gone = post.try_send(Input::Turn(TurnInput::Agent {
+            thread,
+            agent,
+            reply,
+        }));
+    }
+}
+
+/// The prompt's blocks, the undo note's text first when there is one.
+fn with_note(note: Option<String>, prompt: &[ContentBlock]) -> Vec<ContentBlock> {
+    let mut content = Vec::with_capacity(prompt.len() + 1);
+    if let Some(text) = note {
+        content.push(ContentBlock::Text { text });
+    }
+    content.extend(prompt.iter().cloned());
+    content
 }

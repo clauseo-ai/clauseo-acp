@@ -87,7 +87,7 @@ fn select_of(
                 current_value,
                 options: choices,
             } => Some((&option.id, current_value, choices.as_slice())),
-            _ => None,
+            ConfigOptionKind::Boolean { .. } | ConfigOptionKind::Unknown { .. } => None,
         })
 }
 

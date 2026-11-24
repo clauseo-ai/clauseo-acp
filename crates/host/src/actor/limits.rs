@@ -449,11 +449,9 @@ fn start_read(actor: &mut Actor, agent: AgentKind) {
     });
 }
 
-impl Actor {
-    /// The limits reader, which probes the agents' models too.
-    pub(crate) fn limits_reader(&self) -> std::sync::Arc<dyn ReadLimits> {
-        std::sync::Arc::clone(&self.limits.reader)
-    }
+/// The limits reader, which probes the agents' models too.
+pub(crate) fn reader(actor: &Actor) -> Arc<dyn ReadLimits> {
+    Arc::clone(&actor.limits.reader)
 }
 
 /// Keeps `limits` as the last value for its account, off the loop.

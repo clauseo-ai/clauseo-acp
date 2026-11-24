@@ -91,7 +91,7 @@ mod tests {
         assert_eq!(read.effort_option, None);
         assert_eq!(read.current_effort, None);
         let model = read.model("m").unwrap();
-        assert!(model.efforts.is_empty());
+        assert_eq!(model.efforts, []);
         assert_eq!(model.default_effort, None);
         assert_eq!(model.description, None);
     }

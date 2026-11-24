@@ -521,6 +521,10 @@ impl Default for FolderState {
 /// One thread in a list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent flags of a list row, each its own wire field"
+)]
 pub struct ThreadSummary {
     /// The thread.
     pub thread: ThreadId,

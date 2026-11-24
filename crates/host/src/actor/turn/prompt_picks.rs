@@ -105,7 +105,9 @@ pub(super) fn for_prompt(
             let rank = match category {
                 ConfigCategory::Model => 0,
                 ConfigCategory::ThoughtLevel => 1,
-                _ => return None,
+                ConfigCategory::Mode | ConfigCategory::Other | ConfigCategory::Unknown => {
+                    return None;
+                }
             };
             (current != value.as_str() && offered.iter().any(|(id, _)| id == value.as_str()))
                 .then(|| (rank, (option.clone(), value.clone())))
@@ -208,11 +210,11 @@ fn named_of(choices: &[(String, String)], id: &str) -> Option<NamedChoice> {
     })
 }
 
+/// A select option's category, current value and choices (id, name).
+type Select<'a> = (ConfigCategory, &'a str, Vec<(String, String)>);
+
 /// The category, current value and choices (id, name) of the select option `id` of `options`.
-fn select<'a>(
-    options: &'a [ConfigOption],
-    id: &str,
-) -> Option<(ConfigCategory, &'a str, Vec<(String, String)>)> {
+fn select<'a>(options: &'a [ConfigOption], id: &str) -> Option<Select<'a>> {
     let option = options.iter().find(|option| option.id == id)?;
     let ConfigOptionKind::Select {
         current_value,

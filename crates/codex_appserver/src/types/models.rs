@@ -40,8 +40,9 @@ pub struct ModelListResponse {
 pub struct Model {
     /// Its id, the value a session's model option takes.
     pub id: String,
-    /// The model's own name.
-    pub model: String,
+    /// The model's own name (`model` on the wire).
+    #[serde(rename = "model")]
+    pub slug: String,
     /// Its display name.
     pub display_name: String,
     /// Its description.
