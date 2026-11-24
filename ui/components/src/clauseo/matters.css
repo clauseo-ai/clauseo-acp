@@ -197,9 +197,10 @@
     box-shadow: none;
     padding-right: calc(var(--size-control-small) + var(--s1));
   }
+  /* the chevron sits on the matter's first line: the row's top padding and half its line, less half the button */
   .room-house-more {
     position: absolute;
-    top: var(--s0-5);
+    top: calc(var(--s1-5) + calc(var(--lh-ui) * var(--k)) / 2 - var(--size-control-small) / 2);
     right: var(--s0-5);
   }
   .room-convs {
@@ -279,9 +280,11 @@
   .room-conv-said {
     @apply text-small text-muted;
   }
+  /* the chevron sits on the conversation's first line, as its status mark does: the row's top padding and half
+     its line, less half the button */
   .room-conv-more {
     position: absolute;
-    top: 0;
+    top: calc(var(--s1) + calc(var(--lh-small-row) * var(--k)) / 2 - var(--size-control-small) / 2);
     right: 0;
   }
   .room-conv-new {
