@@ -393,6 +393,9 @@ open_data_enum! {
             #[serde(default, skip_serializing_if = "Option::is_none")]
             effort: Option<String>,
         },
+        /// A script Claude ran in Claude Code's Code Mode failed or was refused before it ran,
+        /// and Claude went on another way. Claude Code's own sentence is not passed on.
+        ScriptFailed = "script_failed",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -429,6 +432,7 @@ open_data_enum! {
             model: Some("Opus 5.5".to_owned()),
             effort: None,
         },
+        NoticeKind::ScriptFailed,
     ];
 }
 

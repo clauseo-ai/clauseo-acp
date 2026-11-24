@@ -5172,6 +5172,11 @@ export type NoticeKind =
 	/**  Its effort; left out when the session names none. */
 	effort?: string,
 } }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  A script Claude ran in Claude Code's Code Mode failed or was refused before it ran,
+ *  and Claude went on another way. Claude Code's own sentence is not passed on.
+ */
+"script_failed" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

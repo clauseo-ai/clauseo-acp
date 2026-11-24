@@ -180,6 +180,7 @@ fn notice_kind() {
         &NoticeKind::ShellNetworkBlockedNoWebSearch,
     );
     decodes_in_both(r#""sandbox_off""#, &NoticeKind::SandboxOff);
+    decodes_in_both(r#""script_failed""#, &NoticeKind::ScriptFailed);
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

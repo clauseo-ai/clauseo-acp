@@ -409,6 +409,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         },
         case_law_out_of_credit(),
     ];
+    notices.push(script_failed_notice());
     notices.extend(
         [
             (
@@ -453,6 +454,15 @@ fn pick_notice() -> Notice {
             model: Some("Opus 5.5".to_owned()),
             effort: Some("High".to_owned()),
         }),
+    }
+}
+
+/// The host notice that a Code Mode script of Claude's failed.
+fn script_failed_notice() -> Notice {
+    Notice {
+        level: NoticeLevel::Info,
+        text: "A script didn't run; Claude tried another way.".to_owned(),
+        kind: Some(NoticeKind::ScriptFailed),
     }
 }
 
