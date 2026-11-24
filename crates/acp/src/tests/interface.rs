@@ -170,6 +170,8 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
                 warning: ProtocolWarning::UnknownUpdate { name },
             } => (session, Some(format!("unknown {name}"))),
             other @ (AcpEvent::Update { .. }
+            | AcpEvent::HelperUpdate { .. }
+            | AcpEvent::HelperInBackground { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

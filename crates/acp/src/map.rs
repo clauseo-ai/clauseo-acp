@@ -26,7 +26,9 @@ pub(crate) use too_long::rpc_says_too_long;
 /// The `sessionUpdate` names this crate maps: every stable variant of schema 1.11.0, and the
 /// unstable `plan_update` and `plan_removed` codex-acp sends. Anything else (the AIR
 /// `subagent_*` and `async_task_*` updates, a newer variant) is skipped with
-/// [`ProtocolWarning::UnknownUpdate`] before the update is decoded.
+/// [`ProtocolWarning::UnknownUpdate`] before the update is decoded. Clauseo advertises no
+/// subagents, so no `subagent_*` update comes; a helper's steps come as these kinds on the
+/// lead's session, stamped, and [`helper`] reads the stamp.
 pub(crate) const KNOWN_UPDATES: [&str; 16] = [
     "user_message_chunk",
     "agent_message_chunk",
@@ -234,6 +236,74 @@ pub(crate) fn update(
         }
     };
     out.push(update_event(session, origin, mapped));
+}
+
+/// The helper an update belongs to: its `_meta.claudeCode.parentToolUseId` when that is a
+/// non-empty string, else `None`. `update` is the raw `update` object, read before decoding.
+/// claude-agent-acp 0.110.1 sets the stamp in `stampParentToolUseId` (`dist/sdk-to-acp.js:9-17`)
+/// on the updates it makes from a helper's messages (`:169-170`, `:275-276`, `:398`,
+/// `:460-461`, `:505-506`, `:599-600`). Allocates nothing for an update without the stamp.
+pub(crate) fn helper(update: &Value) -> Option<CompactString> {
+    let stamp = update
+        .get("_meta")?
+        .get("claudeCode")?
+        .get("parentToolUseId")?;
+    stamp
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(CompactString::from)
+}
+
+/// The helper a `tool_call_update` says runs in the background: its `toolCallId` when its
+/// `_meta.claudeCode.toolResponse.isAsync` is `true`, else `None`. `update` is the raw `update`
+/// object, read before decoding. claude-agent-acp 0.110.1 keeps `isAsync` of the call's result in
+/// `toolResponseMarkers` (`dist/tool-calls/content.js:198-208`) and sends it on the call's
+/// `tool_call_update` (`dist/tool-calls/renderer.js:425-436`). Allocates nothing without it.
+pub(crate) fn helper_in_background(update: &Value) -> Option<CompactString> {
+    let meta = update
+        .get("_meta")?
+        .get("claudeCode")?
+        .get("toolResponse")?;
+    if meta.get("isAsync").and_then(Value::as_bool) != Some(true)
+        || update.get("sessionUpdate").and_then(Value::as_str) != Some("tool_call_update")
+    {
+        return None;
+    }
+    update
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .map(CompactString::from)
+}
+
+/// Turns each [`AcpEvent::Update`] in `events` into [`AcpEvent::HelperUpdate`] naming `helper`;
+/// every other event stays as it is.
+pub(crate) fn helper_updates(helper: &CompactString, events: &mut Vec<AcpEvent>) {
+    let all = std::mem::take(events);
+    *events = all
+        .into_iter()
+        .map(|event| match event {
+            AcpEvent::Update {
+                session,
+                origin,
+                update,
+            } => AcpEvent::HelperUpdate {
+                session,
+                origin,
+                helper: helper.clone(),
+                update,
+            },
+            other @ (AcpEvent::HelperUpdate { .. }
+            | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::PermissionRequested { .. }
+            | AcpEvent::ElicitationRequested { .. }
+            | AcpEvent::ElicitationCompleted { .. }
+            | AcpEvent::Limit { .. }
+            | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. }) => other,
+        })
+        .collect();
 }
 
 fn update_event(session: AgentSessionId, origin: Origin, update: AgentUpdate) -> AcpEvent {
