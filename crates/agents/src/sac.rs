@@ -69,7 +69,7 @@ const LAYOUTS: [(&str, &str); 2] = [
 /// override another Codex, since a stale hash quietly turns SAC's protection off: re-hash both
 /// `rg.exe` (`.github/scripts/engine-watch.mjs` does, with every bump) and update both.
 #[cfg(test)]
-const LAYOUTS_CODEX: &str = "0.162.1";
+const LAYOUTS_CODEX: &str = "0.171.0";
 
 /// Smart App Control's state: `VerifiedAndReputablePolicyState` under
 /// `HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy`.
