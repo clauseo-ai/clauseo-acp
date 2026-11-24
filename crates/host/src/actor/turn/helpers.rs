@@ -57,6 +57,11 @@ pub(super) struct Helpers {
     handbacks: BTreeMap<CompactString, claude::Handback>,
     /// Words not logged yet, in first-word order.
     words: words::Held,
+    /// The helper's own ends ([`end`]) this run sent and the log may not hold yet: the outcome
+    /// and report of each, so a retry after a failed write writes that same end (`ends.rs`).
+    /// Each goes once the retry writes it, once the view shows it landed, or once a turn's end
+    /// is durable (every commit before it is then).
+    sent_ends: BTreeMap<HelperId, (HelperOutcome, Option<String>)>,
 }
 
 /// A helper the host started.
@@ -330,8 +335,17 @@ pub(super) fn end(
         return Ok(());
     };
     known.open = false;
-    let built = build::helper_ended(known.id, outcome, summary.map(TextOrBlob::Inline));
+    let id = known.id;
+    helpers.sent_ends.insert(id, (outcome, summary.clone()));
+    let built = build::helper_ended(id, outcome, summary.map(TextOrBlob::Inline));
     updates::commit(actor, thread, [built.value.into()], built.blobs)
+}
+
+/// The thread's turn end is durable, and every commit before it: no end [`end`] sent is lost.
+pub(super) fn ends_durable(actor: &mut Actor, thread: ThreadId) {
+    if let Some(helpers) = existing(actor, thread) {
+        helpers.sent_ends.clear();
+    }
 }
 
 /// An update the agent stamped with the helper it knows as `helper`. Replayed and late ones
