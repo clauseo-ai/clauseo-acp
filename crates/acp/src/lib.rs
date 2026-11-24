@@ -6,7 +6,8 @@
 //!   `fake_agent` names the SDK, and no SDK type appears in this interface. A later SDK major
 //!   changes only this crate.
 //! - Per session, the shown item plan's id (`state.rs`), so a `plan_removed` of it empties the
-//!   plan.
+//!   plan. Per connection, the helper sessions codex-acp announced and each one's root session
+//!   (`state/helper_sessions.rs`).
 //! - What Clauseo advertises in `initialize` (`driver.rs`, `client_capabilities`), the version
 //!   check, and the refusal of `fs/*` and `terminal/*` (-32601).
 //! - Steering: the capability `initialize` gives (`steering.rs`) and `steer()`, which sends
@@ -14,7 +15,14 @@
 //! - Helpers (subagents the lead agent launches): Clauseo advertises no `subagents`, so
 //!   claude-agent-acp sends a helper's steps on the lead's session, stamped with the launching
 //!   call's id; this crate reads the stamp from the raw JSON and tags those updates
-//!   ([`AcpEvent::HelperUpdate`], [`AcpEvent::HelperInBackground`]).
+//!   ([`AcpEvent::HelperUpdate`], [`AcpEvent::HelperInBackground`]). With
+//!   [`ConnectOptions::helper_sessions`] (off unless the host sets it; for codex-acp only),
+//!   Clauseo asks for helper sessions (AIR `nativeSubagentSessions`): codex-acp announces each
+//!   helper (`subagent_spawned`, read from the raw JSON: [`AcpEvent::HelperSpawned`]), sends its
+//!   updates on the helper's own session id, which this crate maps onto the root session
+//!   ([`AcpEvent::HelperUpdate`], [`AcpEvent::HelperAnswer`]; its permission and elicitation
+//!   requests become the root's), and its end (`subagent_state_update`:
+//!   [`AcpEvent::HelperEnded`]). A helper's update never touches the root's per-session state.
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
 //!   typed plan limit signals ([`LimitSignal`]), and the stdout line filter with its caps
 //!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB, at most 64 updates read
@@ -43,13 +51,16 @@
 //!   A call's future may be dropped; its answer is then discarded.
 //! - Origins: `Turn(t)` while turn `t`'s prompt is in flight; `Late(t)` from `cancel()` until the
 //!   next prompt starts; `Replay` between sending `session/load` and its response; else `Idle`
-//!   (`session/resume` replays nothing, so it never tags `Replay`).
+//!   (`session/resume` replays nothing, so it never tags `Replay`). An announced helper's
+//!   events carry its root session's origin.
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`),
-//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response),
+//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response, and on
+//!   any update of an announced helper's session, for the warning that stands for its failure),
 //!   `claudeCode.parentToolUseId` (on any update: [`AcpEvent::HelperUpdate`]),
 //!   `claudeCode.toolResponse.isAsync` (on `tool_call_update`:
-//!   [`AcpEvent::HelperInBackground`]), and
+//!   [`AcpEvent::HelperInBackground`]), `jetbrains.air.phase` (on an `agent_message_chunk` of
+//!   an announced helper's session: [`AcpEvent::HelperAnswer`]), and
 //!   `initialize`'s steering capability (`steering.rs`: `_meta.steering.supported` and
 //!   `agentCapabilities._meta.claudeCode.promptQueueing`). A `session/new`, `session/load` or
 //!   `session/resume` `_meta` is sent verbatim and never read.
@@ -108,9 +119,9 @@ pub use client::AcpClient;
 pub use driver::Driver;
 pub use error::{Error, RpcData};
 pub use event::{
-    AcpEvent, AgentFailed, AgentUpdate, ConnectionLost, FrameDirection, LimitSignal, LimitStatus,
-    MessageRole, Origin, PendingKey, ProtocolWarning, RETRY_TEXT_CHARS, RawFrame, Retrying,
-    ToolCall,
+    AcpEvent, AgentFailed, AgentUpdate, ConnectionLost, FrameDirection, HelperState, LimitSignal,
+    LimitStatus, MessageRole, Origin, PendingKey, ProtocolWarning, RETRY_TEXT_CHARS, RawFrame,
+    Retrying, ToolCall,
 };
 pub use line::{ReadMark, ReadProgress};
 pub use map::model_line;
@@ -157,12 +168,10 @@ where
     let unread = Unread(command_receiver.clone());
     let (stop, stop_receiver) = async_channel::bounded(1);
     let frames_dropped = Arc::new(AtomicU64::new(0));
-    let shared = Arc::new(state::Shared::new(
-        events,
-        options.frame_tap,
-        Arc::clone(&frames_dropped),
-        stop,
-    ));
+    let shared = Arc::new(
+        state::Shared::new(events, options.frame_tap, Arc::clone(&frames_dropped), stop)
+            .with_helper_sessions(options.helper_sessions),
+    );
     let transport = Lines::new(
         line::LineSink::new(writer, Arc::clone(&shared)),
         line::incoming(reader, Arc::clone(&shared)),

@@ -15,6 +15,18 @@ pub struct ConnectOptions {
     /// frame is dropped and counted, as
     /// [`AcpClient::frames_dropped`](crate::AcpClient::frames_dropped) tells.
     pub frame_tap: Option<async_channel::Sender<RawFrame>>,
+    /// Asks the agent for each helper on its own session: `initialize` adds
+    /// `nativeSubagentSessions` to the AIR capabilities in `clientCapabilities._meta`, and the
+    /// driver maps what codex-acp 2.10.0 then sends ([`AcpEvent::HelperSpawned`],
+    /// [`AcpEvent::HelperUpdate`], [`AcpEvent::HelperAnswer`], [`AcpEvent::HelperEnded`]).
+    /// Off by default; off, `initialize` and every event are as they were without it. Only for
+    /// codex-acp: the same capability puts claude-agent-acp in a mode Clauseo does not use.
+    ///
+    /// [`AcpEvent::HelperSpawned`]: crate::AcpEvent::HelperSpawned
+    /// [`AcpEvent::HelperUpdate`]: crate::AcpEvent::HelperUpdate
+    /// [`AcpEvent::HelperAnswer`]: crate::AcpEvent::HelperAnswer
+    /// [`AcpEvent::HelperEnded`]: crate::AcpEvent::HelperEnded
+    pub helper_sessions: bool,
 }
 
 /// What `initialize` told about the agent.

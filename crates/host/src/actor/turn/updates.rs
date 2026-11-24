@@ -53,6 +53,15 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEv
     if let AcpEvent::HelperInBackground { .. } = *event {
         return;
     }
+    // A Codex helper's launch, report and end come only on a connection with
+    // `ConnectOptions::helper_sessions`, which no launch sets yet; the host's helper cards take
+    // them. Until then they are dropped here.
+    if let AcpEvent::HelperSpawned { .. }
+    | AcpEvent::HelperAnswer { .. }
+    | AcpEvent::HelperEnded { .. } = *event
+    {
+        return;
+    }
     if let AcpEvent::HelperUpdate {
         session,
         origin,
@@ -103,7 +112,10 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEv
             | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }
             | AcpEvent::UpdateSkipped { .. }
-            | AcpEvent::HelperInBackground { .. } => false,
+            | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::HelperSpawned { .. }
+            | AcpEvent::HelperAnswer { .. }
+            | AcpEvent::HelperEnded { .. } => false,
         }
     {
         agent.replayed.push(*event);
@@ -230,8 +242,12 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             acp_tool_call_id,
         } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
-        // `on_event` drops it before the rate cap; nothing reads it until the helper cards land.
-        AcpEvent::HelperInBackground { .. } => {}
+        // `on_event` drops these before the rate cap; nothing reads them until the helper cards
+        // land.
+        AcpEvent::HelperInBackground { .. }
+        | AcpEvent::HelperSpawned { .. }
+        | AcpEvent::HelperAnswer { .. }
+        | AcpEvent::HelperEnded { .. } => {}
     }
 }
 

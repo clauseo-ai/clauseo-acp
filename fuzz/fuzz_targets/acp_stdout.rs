@@ -2,7 +2,8 @@
 //! JSON-RPC decoding (crates/acp/src: inbound.rs, map.rs and driver.rs), into `AcpEvent`s and
 //! call results.
 //!
-//! Items driven: `connect` with `ConnectOptions::default()`, and the driver future it returns;
+//! Items driven: `connect` with `ConnectOptions::default()`, or with `helper_sessions` on when
+//! mode & 4, and the driver future it returns;
 //! `AcpClient::initialize`, `new_session`, `load_session`, `prompt`, `cancel`,
 //! `answer_permission` and `answer_elicitation`; and the `AcpEvent` stream.
 //!
@@ -169,11 +170,11 @@ fuzz_target!(|data: &[u8]| {
 
     let (written_tx, mut written) = mpsc::unbounded::<Vec<u8>>();
     let (stdout, stdout_rx) = mpsc::unbounded::<io::Result<Vec<u8>>>();
-    let (client, events, driver) = connect(
-        Stdin(written_tx),
-        stdout_rx.into_async_read(),
-        ConnectOptions::default(),
-    );
+    let options = ConnectOptions {
+        helper_sessions: mode & 4 != 0,
+        ..ConnectOptions::default()
+    };
+    let (client, events, driver) = connect(Stdin(written_tx), stdout_rx.into_async_read(), options);
     let client = &client;
     let session = AgentSessionId::new("sess-1").unwrap();
     let turn: TurnId = "01900000-0000-7000-8000-000000000001".parse().unwrap();
@@ -276,6 +277,10 @@ fuzz_target!(|data: &[u8]| {
                         content: ContentBlock::Text { text },
                         ..
                     },
+                ..
+            }
+            | AcpEvent::HelperAnswer {
+                content: ContentBlock::Text { text },
                 ..
             } = &event
             {
