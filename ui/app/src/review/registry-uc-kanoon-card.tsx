@@ -1,4 +1,4 @@
-// The home card offering Clauseo Case Law (UC-1090 to UC-1096; 24 Nov round, issue 8): the real room over a
+// The home card offering Clauseo Case Law (UC-1090 to UC-1096, and UC-1300 in place of the retired UC-1093; 24 Nov round, issue 8): the real room over a
 // scripted host, a matter with several papers open on a new conversation before its first question, and the
 // connectors' state on the app feed with the case-law connector listed and not added, or (UC-1096) not listed, as when
 // its liveness check failed. "Add Clauseo Case Law" opens Skills and connectors at Clauseo Case Law; its Add opens
@@ -84,7 +84,7 @@ export const UC_KANOON_CARD: Entry[] = [
   ),
   entry("UC-1091", "Add Clauseo Case Law"),
   entry("UC-1092", "Clauseo Case Law"),
-  entry("UC-1093", "From {price}, about {n} searches"),
+  entry("UC-1300", "From {price}."),
   entry("UC-1095", "Prepaid, including GST. No subscription."),
   entry("UC-1094", "Powered by Indian Kanoon"),
   {
