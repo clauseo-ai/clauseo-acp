@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom The change note's press for each paper it names (R24), over FakeTransport: a .docx
 // opens in Word, an .xlsx in Excel, a .pdf with the default app (Open), each through open_file with its own file ref;
 // a kind no program opens from Clauseo (.zip) shows the matter's folder (Show in Finder on the Mac); a deleted paper
-// has none. Two papers on one note each open their own; many papers fold past five.
+// has none, and one the list doesn't hold yet shows the folder. Each press is described by its paper's name. Two
+// papers on one note each open their own; many papers fold past six.
 import { act } from "react";
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import { settled } from "@clauseo/components/lib/late.ts";
@@ -122,13 +123,26 @@ test("two Word documents on one note each open their own", async () => {
   expect(opened()).toEqual([uuid(6, 8), uuid(1, 8)]);
 });
 
-test("a deleted paper, and an openable one the wall doesn't list, have no press", async () => {
+test("a deleted paper has no press; one the list doesn't hold yet shows the matter's folder", async () => {
   h = await noteWith(changed(["Advice memo.docx"], "deleted"));
   expect(rows()).toEqual([["Advice memo.docx", null]]);
   await h.unmount();
   document.body.replaceChildren();
-  h = await noteWith(changed(["Unlisted.xlsx"]));
-  expect(rows()).toEqual([["Unlisted.xlsx", null]]);
+  h = await noteWith(changed(["Just made.xlsx"]));
+  expect(rows()).toEqual([["Just made.xlsx", ["Show in Finder", "show-paper"]]]);
+  await h.click(pressFor("Just made.xlsx"));
+  await h.settle();
+  expect(h.transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: MATTER } }]);
+  expect(opened()).toEqual([]);
+});
+
+test("each press is described by its own paper's name, for a screen reader", async () => {
+  h = await noteWith(changed(["Advice memo.docx", "Damages schedule.xlsx", "Bundle.zip"]));
+  const named = ["Advice memo.docx", "Damages schedule.xlsx", "Bundle.zip"].map((name) => {
+    const id = pressFor(name)?.getAttribute("aria-describedby") ?? "";
+    return id === "" ? null : document.getElementById(id)?.textContent;
+  });
+  expect(named).toEqual(["Advice memo.docx", "Damages schedule.xlsx", "Bundle.zip"]);
 });
 
 test("a failed open says why in the note's error line, by its code", async () => {
@@ -143,13 +157,26 @@ test("a failed open says why in the note's error line, by its code", async () =>
   expect(error?.dataset["code"]).toBe("internal");
 });
 
+const exhibits = (n: number) => Array.from({ length: n }, (_, i) => `Exhibit ${i + 1}.pdf`);
+const more = () =>
+  h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="change-more"]') ?? null;
+
+test("six papers show in full, with no fold", async () => {
+  h = await noteWith(changed(exhibits(6)));
+  expect(rows()).toHaveLength(6);
+  expect(more()).toBeNull();
+});
+
 test("past six papers the rest fold under {n} more, and Show fewer folds them again", async () => {
-  const many = Array.from({ length: 8 }, (_, i) => `Exhibit ${i + 1}.pdf`);
-  h = await noteWith(changed(many));
-  expect(rows()).toHaveLength(5);
-  const more = h.one("files-changed")?.querySelector<HTMLElement>('[data-testid="change-more"]');
-  expect(more?.textContent).toBe("3 more");
-  await h.click(more);
+  h = await noteWith(changed(exhibits(7)));
+  expect(rows()).toHaveLength(6);
+  expect(more()?.textContent).toBe("1 more");
+  await h.unmount();
+  document.body.replaceChildren();
+  h = await noteWith(changed(exhibits(8)));
+  expect(rows()).toHaveLength(6);
+  expect(more()?.textContent).toBe("2 more");
+  await h.click(more());
   expect(rows()).toHaveLength(8);
-  expect(more?.textContent).toBe("Show fewer");
+  expect(more()?.textContent).toBe("Show fewer");
 });

@@ -54,9 +54,16 @@ export type WordOpen = {
   /** Shows the matter's folder, for a paper of a kind no program opens (a change note's Show in folder); null with no
    * list. */
   reveal: (() => Promise<string | null>) | null;
+  /** Whether the wall's list holds a matter-relative path, its opener or not. */
+  listed: (path: string) => boolean;
 };
 
-const NONE: WordOpen = { openerFor: () => null, wallOpenerFor: () => null, reveal: null };
+const NONE: WordOpen = {
+  openerFor: () => null,
+  wallOpenerFor: () => null,
+  reveal: null,
+  listed: () => false,
+};
 
 /** The types open_file opens, as crates/desktop/src/open.rs's DOCUMENT_TYPES lists them: keep the two in step. */
 const OPENABLE =
@@ -139,6 +146,7 @@ export function useWordOpeners(
       openerFor: (path) => word.get(path) ?? null,
       wallOpenerFor: (path) => word.get(path) ?? others.get(path) ?? null,
       reveal: onReveal,
+      listed: (path) => listed.papers.papers.some((p) => p.path === path),
     };
   }, [transport, listed, rdt, lang, opening]);
 }

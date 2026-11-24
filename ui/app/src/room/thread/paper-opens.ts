@@ -2,15 +2,15 @@
 // type the desktop opens (open-in-word.ts's isOpenable), opens with the computer's default app through open_file, named
 // for the program where the type says it: "Open in Word" for a Word document, "Open in Excel" for a spreadsheet, "Open"
 // for the rest (the host doesn't name the default app). A paper of a kind no program opens from Clauseo gets Show in
-// Finder (File Explorer, folder), which shows the matter's folder. A deleted paper, and an openable one the wall doesn't
-// list, get none.
+// Finder (File Explorer, folder), which shows the matter's folder, as does a paper the wall's list doesn't hold yet (a
+// paper the answer just made, until the list catches up). A deleted paper gets none.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import type { FileChange } from "../../transport/protocol.ts";
 import { isWordFile } from "../word/lock.ts";
-import { isOpenable, type WordOpen, type WordOpener } from "../word/open-in-word.ts";
+import { type WordOpen, type WordOpener } from "../word/open-in-word.ts";
 
 /** A paper's press on the note: its words, its test id, and the opener it presses; reveal: it shows the folder. */
 export type CardOpen = { label: string; testId: string; opener: WordOpener; reveal: boolean };
@@ -42,7 +42,8 @@ export function cardOpens(
       const label = SPREADSHEET.test(path) ? mt(lang, "Open in Excel") : t(lang, "Open");
       return { label, testId: "open-paper", opener, reveal: false };
     }
-    if (isOpenable(path) || word.reveal === null) return null;
+    // a Word document the list holds waits for the reader's words, which name its press
+    if (word.reveal === null || (isWordFile(path) && word.listed(path))) return null;
     const label = ui(lang, revealKey(platform));
     return { label, testId: "show-paper", opener: revealer(label, word.reveal), reveal: true };
   });
