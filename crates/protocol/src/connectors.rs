@@ -82,6 +82,42 @@ pub struct ConnectorView {
     /// missing field reads as false (additive: an older host leaves it out).
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub left_in_keychain: bool,
+    /// What one research question costs, by the connector's own estimate in the live price
+    /// list; `None` when not live or from a connector that does not send it. The host computes
+    /// no estimate. Additive: an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub research_question: Option<ResearchQuestionView>,
+}
+
+/// The connector's estimate of one research question, as its price list sends it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ResearchQuestionView {
+    /// Credits one research question takes, as the connector sent it.
+    pub credits: i32,
+    /// Its price in paise, GST included: the connector's `gross_inr` read as rupees and paise,
+    /// such as `4_720` for ₹47.20. `None` when that does not read.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub paise: Option<u32>,
+    /// The actions the estimate assumes; `None` when the connector sent none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub basis: Option<ResearchQuestionBasis>,
+}
+
+/// The actions one research question is estimated to take, as the connector counts them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ResearchQuestionBasis {
+    /// Pages of results for new searches.
+    pub new_search_pages: i32,
+    /// Pages of results for repeated searches.
+    pub repeat_search_pages: i32,
+    /// Judgments opened.
+    pub judgment_opens: i32,
+    /// Credits spent reading.
+    pub read_credits: i32,
+    /// Pages of citator results.
+    pub citator_pages: i32,
 }
 
 /// How a watched recharge ended. Closed: the host and the app are one version.
@@ -109,6 +145,14 @@ pub struct PackView {
     /// Its price in paise, GST included, such as `2_360` for ₹23.60 (200 credits). A pack
     /// whose price the host cannot read as rupees and paise is left out of the list.
     pub paise: u32,
+    /// About how many research questions it buys, by the connector's estimate; `None` from a
+    /// connector that does not send it. Additive: an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub research_questions: Option<i32>,
+    /// The same in the connector's words (`about 5 research questions`): the app shows it as
+    /// written, and nothing when it is `None`. Additive: an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub research_questions_text: Option<String>,
 }
 
 /// What the account spent lately, from the last account read. The account gives credits; the
@@ -161,6 +205,15 @@ pub struct Balance {
     /// follow-up): an older host leaves it out.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub as_of: Option<Timestamp>,
+    /// About how many research questions the balance buys, by the connector's estimate in the
+    /// account read; `None` from a connector that does not send it, and after a recharge's
+    /// balance until the next account read. Additive: an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub research_questions: Option<i32>,
+    /// The same in the connector's words (`about 5 research questions`): the app shows it as
+    /// written, and nothing when it is `None`. Additive: an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub research_questions_text: Option<String>,
 }
 
 /// How a connector is signed in. Closed: the host and the app are one version.

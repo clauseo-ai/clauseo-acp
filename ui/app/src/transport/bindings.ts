@@ -776,6 +776,17 @@ export type Balance = {
 	 *  follow-up): an older host leaves it out.
 	 */
 	as_of?: Timestamp,
+	/**
+	 *  About how many research questions the balance buys, by the connector's estimate in the
+	 *  account read; `None` from a connector that does not send it, and after a recharge's
+	 *  balance until the next account read. Additive: an older host leaves it out.
+	 */
+	research_questions?: number,
+	/**
+	 *  The same in the connector's words (`about 5 research questions`): the app shows it as
+	 *  written, and nothing when it is `None`. Additive: an older host leaves it out.
+	 */
+	research_questions_text?: string,
 };
 
 /**  How an account pays. */
@@ -1555,6 +1566,12 @@ export type ConnectorView = {
 	 *  missing field reads as false (additive: an older host leaves it out).
 	 */
 	left_in_keychain?: boolean,
+	/**
+	 *  What one research question costs, by the connector's own estimate in the live price
+	 *  list; `None` when not live or from a connector that does not send it. The host computes
+	 *  no estimate. Additive: an older host leaves it out.
+	 */
+	research_question?: ResearchQuestionView,
 };
 
 /**
@@ -5461,6 +5478,16 @@ export type PackView = {
 	 *  whose price the host cannot read as rupees and paise is left out of the list.
 	 */
 	paise: number,
+	/**
+	 *  About how many research questions it buys, by the connector's estimate; `None` from a
+	 *  connector that does not send it. Additive: an older host leaves it out.
+	 */
+	research_questions?: number,
+	/**
+	 *  The same in the connector's words (`about 5 research questions`): the app shows it as
+	 *  written, and nothing when it is `None`. Additive: an older host leaves it out.
+	 */
+	research_questions_text?: string,
 };
 
 /**  How many entries one `PageEntries` asks for: 1 to [`MAX_PAGE_ENTRIES`]. */
@@ -6417,6 +6444,33 @@ export type RenameSource =
 "placeholder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  The actions one research question is estimated to take, as the connector counts them. */
+export type ResearchQuestionBasis = {
+	/**  Pages of results for new searches. */
+	new_search_pages: number,
+	/**  Pages of results for repeated searches. */
+	repeat_search_pages: number,
+	/**  Judgments opened. */
+	judgment_opens: number,
+	/**  Credits spent reading. */
+	read_credits: number,
+	/**  Pages of citator results. */
+	citator_pages: number,
+};
+
+/**  The connector's estimate of one research question, as its price list sends it. */
+export type ResearchQuestionView = {
+	/**  Credits one research question takes, as the connector sent it. */
+	credits: number,
+	/**
+	 *  Its price in paise, GST included: the connector's `gross_inr` read as rupees and paise,
+	 *  such as `4_720` for ₹47.20. `None` when that does not read.
+	 */
+	paise?: number,
+	/**  The actions the estimate assumes; `None` when the connector sent none. */
+	basis?: ResearchQuestionBasis,
+};
 
 /**  What a restore would do now, for `PreviewRestore`. Each list is sorted by path. */
 export type RestorePreview = {

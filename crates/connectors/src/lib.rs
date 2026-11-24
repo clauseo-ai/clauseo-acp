@@ -70,7 +70,9 @@ pub use mcp::{
 };
 pub use net::bind_loopback_exclusive;
 pub use oauth::PendingSignIn;
-pub use pricing::{Liveness, Pack, Pricing, PricingStatus};
+pub use pricing::{
+    Liveness, Pack, Pricing, PricingStatus, ResearchQuestion, ResearchQuestionBasis,
+};
 pub use recharge::{Amount, PayUrl, PaymentRef, Recharge, RechargeStatus};
 pub use secret::{Bearer, Secret, new_relay_token};
 #[cfg(feature = "test-support")]

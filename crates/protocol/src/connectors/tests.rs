@@ -5,7 +5,7 @@ use zeroize::Zeroizing;
 
 use super::{
     Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, ConnectorView,
-    ConnectorsState, REDACTED_TEXT, RechargeOutcome, RedactedString,
+    ConnectorsState, PackView, REDACTED_TEXT, RechargeOutcome, RedactedString,
 };
 use crate::{CommandEnvelope, CommandId, ConnectorCommand, HostCommand, HostEvent};
 
@@ -170,6 +170,8 @@ fn the_state_and_the_hint_read_back() {
                     credits: 180,
                     paise: Some(2_124),
                     as_of: None,
+                    research_questions: None,
+                    research_questions_text: None,
                 }),
                 low: true,
                 method: None,
@@ -177,6 +179,7 @@ fn the_state_and_the_hint_read_back() {
             pay_url: None,
             last_recharge: None,
             left_in_keychain: false,
+            research_question: None,
         }],
     };
     let event = HostEvent::ConnectorsChanged(state);
@@ -188,7 +191,8 @@ fn the_state_and_the_hint_read_back() {
             && !json.contains("as_of")
             && !json.contains("method")
             && !json.contains("last_recharge")
-            && !json.contains("left_in_keychain"),
+            && !json.contains("left_in_keychain")
+            && !json.contains("research_question"),
         "{json}"
     );
 }
@@ -207,6 +211,7 @@ fn left_in_keychain_is_left_out_when_false() {
         pay_url: None,
         last_recharge: None,
         left_in_keychain,
+        research_question: None,
     };
     let json = serde_json::to_string(&view(false)).unwrap();
     assert!(!json.contains("left_in_keychain"), "{json}");
@@ -245,6 +250,8 @@ fn the_wire_gaps_fields_are_additive() {
                 credits: 5,
                 paise: None,
                 as_of: None,
+                research_questions: None,
+                research_questions_text: None,
             }),
             low: true,
             method: None,
@@ -255,6 +262,13 @@ fn the_wire_gaps_fields_are_additive() {
     )
     .unwrap();
     assert_eq!(older.last_recharge, None);
+    assert_eq!(older.research_question, None);
+    let older: PackView =
+        serde_json::from_str(r#"{"pack":"200","credits":200,"paise":2360}"#).unwrap();
+    assert_eq!(
+        (older.research_questions, older.research_questions_text),
+        (None, None)
+    );
     let words = |value: serde_json::Value| value.as_str().unwrap().to_owned();
     for (value, want) in [
         (

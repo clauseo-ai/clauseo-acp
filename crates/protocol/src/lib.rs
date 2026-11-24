@@ -230,6 +230,7 @@ wire_types! {
     connectors::{
         Balance, ConnectorErrorKind, ConnectorStatus, ConnectorView, ConnectorsState,
         DaySpendView, PackView, RechargeOutcome, RecentSpend, RedactedString, ConnectorSignInMethod,
+        ResearchQuestionBasis, ResearchQuestionView,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     details::{ClientName, Date, MatterStatus, PackId, PackList},

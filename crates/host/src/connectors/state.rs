@@ -6,18 +6,20 @@
 //!   sees is what they pay, and the app writes amounts by its own rule. Packs carry their own
 //!   `gross_inr`; the account's spend and balance are credits, priced at the price list's
 //!   `credit_inr` plus `gst_rate`. A figure that does not read is left out, never guessed.
+//! - The research-question estimates (a pack's, the balance's, one question's) are the
+//!   connector's own, passed on as sent; the host computes none, and an absent one stays absent.
 //! - A pay link is held only as a [`PayUrl`], which only the connector's own `/pay/` links
 //!   parse to; the view carries its text.
 //! - No token, key or account id is held here: the credential is the connectors crate's.
 
 use clauseo_connectors::{
     Account, CredentialKind, CredentialStatus, KnownConnector, Liveness, Origin, Pack, PayUrl,
-    Pricing,
+    Pricing, ResearchQuestion,
 };
 use clauseo_protocol::{
     AddonStatus, Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus,
     ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome,
-    Timestamp,
+    ResearchQuestionBasis, ResearchQuestionView, Timestamp,
 };
 
 mod money;
@@ -188,10 +190,14 @@ impl CaseLaw {
     }
 
     /// A balance a paid recharge's answer carried, applied at `at` to the account held (none
-    /// held, nothing to show it on): above nothing, it ends the out-of-credit state.
+    /// held, nothing to show it on): above nothing, it ends the out-of-credit state. The
+    /// account's research-question estimate was for the old balance, so it goes until the next
+    /// account read.
     pub(crate) fn set_balance(&mut self, credits: i64, at: Timestamp) {
         if let Some(account) = &mut self.account {
             account.balance_credits = credits;
+            account.research_questions = None;
+            account.research_questions_text = None;
             self.account_at = Some(at);
         }
         if credits > 0 {
@@ -246,6 +252,10 @@ impl CaseLaw {
             pay_url: self.pay_url.as_ref().map(|url| url.as_str().to_owned()),
             last_recharge: self.last_recharge,
             left_in_keychain: self.left_in_keychain,
+            research_question: self
+                .live_pricing()
+                .and_then(|pricing| pricing.research_question.as_ref())
+                .map(research_question_view),
         }
     }
 
@@ -342,7 +352,24 @@ fn pack_view(pack: &Pack) -> Option<PackView> {
         pack: pack.pack.clone(),
         credits,
         paise,
+        research_questions: pack.research_questions.map(clamp),
+        research_questions_text: pack.research_questions_text.clone(),
     })
+}
+
+/// The connector's estimate of one research question, as sent; its `gross_inr` in paise.
+fn research_question_view(question: &ResearchQuestion) -> ResearchQuestionView {
+    ResearchQuestionView {
+        credits: clamp(question.credits),
+        paise: paise(&question.gross_inr),
+        basis: question.basis.as_ref().map(|basis| ResearchQuestionBasis {
+            new_search_pages: clamp(basis.new_search_pages),
+            repeat_search_pages: clamp(basis.repeat_search_pages),
+            judgment_opens: clamp(basis.judgment_opens),
+            read_credits: clamp(basis.read_credits),
+            citator_pages: clamp(basis.citator_pages),
+        }),
+    }
 }
 
 /// The balance, priced from its credits at the gross rate; the account's own `balance_inr` is
@@ -352,6 +379,8 @@ fn balance(account: &Account, rate: Option<GrossRate>, as_of: Option<Timestamp>)
         credits: clamp(account.balance_credits),
         paise: rate.and_then(|rate| rate.paise(account.balance_credits)),
         as_of,
+        research_questions: account.research_questions.map(clamp),
+        research_questions_text: account.research_questions_text.clone(),
     }
 }
 
@@ -372,7 +401,7 @@ fn recent_spend(account: &Account, rate: Option<GrossRate>) -> RecentSpend {
     }
 }
 
-/// A count of credits in the wire's `i32`, held at its ends.
+/// A count (of credits, pages or questions) in the wire's `i32`, held at its ends.
 fn clamp(credits: i64) -> i32 {
     i32::try_from(credits).unwrap_or(if credits < 0 { i32::MIN } else { i32::MAX })
 }
