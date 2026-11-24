@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use super::super::{Pack, Refusal, added};
-use super::discover::{Found, discover, inside};
+use super::discover::{Found, discover};
 use super::{FromKind, Origin, SourceError, unzip};
 use crate::write;
 
@@ -334,7 +334,7 @@ pub fn install_picked(
     let folder = if skill.folder.is_empty() {
         staged.top.clone()
     } else {
-        inside(&staged.top, &skill.folder).ok_or(added::AddError::NoSkillMd)?
+        shown_folder(&staged.top, &skill.folder).ok_or(added::AddError::NoSkillMd)?
     };
     let source = added::read_source(&folder)?;
     let id = added::free_id(packs_root, &source.slug)?;
@@ -346,6 +346,25 @@ pub fn install_picked(
     let (files, pack) = added::build_from(&source, &id, today, allow_scripts, &record)?;
     added::install(packs_root, adding, &id, &files)?;
     Ok(Some(Installed { id: pack_id, pack }))
+}
+
+/// `top` joined with a shown skill's `folder` (`stage.json`'s record of a folder the walk found):
+/// each part a name (not empty, `.` or `..`, no `\` or `:`), staying under `top`. Unlike
+/// `discover::inside`, no archive-name rule (an 8.3 short name such as `x~1`, a trailing dot):
+/// the lawyer's own picked folder may use them and must add as it previewed, and an archive's
+/// names passed `unzip`'s rules already.
+fn shown_folder(top: &Path, folder: &str) -> Option<PathBuf> {
+    let mut out = top.to_path_buf();
+    for part in folder.split('/') {
+        if part.is_empty() || part == "." || part == ".." || part.contains(['\\', ':']) {
+            return None;
+        }
+        out.push(part);
+    }
+    let rest = out.strip_prefix(top).ok()?;
+    rest.components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+        .then_some(out)
 }
 
 /// Whether `name` is a token: 32 lowercase hex characters.

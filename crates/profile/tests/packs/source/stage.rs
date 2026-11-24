@@ -5,7 +5,7 @@ use clauseo_protocol::Date;
 use super::{Scratch, put, put_skill, skill_md, zip_of};
 use clauseo_profile::packs::source::{
     ADDING_DIR, FromKind, Origin, STAGE_TTL_MS, SourceError, Tree, close_preview, install_picked,
-    open_preview, parse_skills_sh, stage_tree, sweep,
+    open_preview, parse_skills_sh, preview_local, stage_tree, sweep,
 };
 use clauseo_profile::packs::{
     PACK_MANIFEST, PACKS_DIR, PackEntry, Refusal, Skip, added, load, manifest,
@@ -303,4 +303,34 @@ fn a_preview_still_being_filled_is_not_swept() {
     assert!(adding.join(&folder).join("tree/half.md").is_file());
     sweep(&adding, Some(NOW + STAGE_TTL_MS + 1));
     assert!(!adding.join(&folder).exists());
+}
+
+/// A picked folder of the lawyer's own adds as it previewed: a skill in a subfolder named like an
+/// 8.3 short name (`x~1`) or, off Windows, with a trailing dot (`notes.`) is listed and added,
+/// as the archive-name rules guard archives only.
+#[test]
+fn a_local_folder_adds_what_it_previewed_whatever_its_folder_names() {
+    let data = Scratch::new("stage-local-names");
+    let adding = data.path().join(ADDING_DIR);
+    let packs = data.path().join(PACKS_DIR);
+    let mine = data.path().join("mine");
+    put_skill(&mine, "skills/x~1", "short");
+    let mut expected = vec!["short"];
+    #[cfg(unix)]
+    {
+        put_skill(&mine, "skills/notes.", "dotted");
+        expected.push("dotted");
+    }
+    let preview = preview_local(&adding, &mine, NOW).unwrap();
+    let mut names: Vec<&str> = preview.skills.iter().map(|s| s.name.as_str()).collect();
+    names.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(names, expected);
+    for name in expected {
+        let staged = open_preview(&adding, &preview.token, NOW).unwrap();
+        let installed =
+            install_picked(&staged, name, (&packs, &adding), (today(), true), &|_| true);
+        assert!(matches!(installed, Ok(Some(_))), "{name}: {installed:?}");
+        assert!(packs.join(name).is_dir(), "{name}");
+    }
 }

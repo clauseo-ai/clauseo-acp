@@ -100,6 +100,17 @@ fn a_redirect_to_a_private_address_is_refused() {
         "https://[fd00::1]/x.zip",
         "https://[::ffff:127.0.0.1]/x.zip",
         "https://localhost/x.zip",
+        "https://[64:ff9b::7f00:1]/x.zip",
+        "https://[64:ff9b::808:808]/x.zip",
+        "https://[2002:c0a8:101::1]/x.zip",
+        "https://[2002:7f00:1::]/x.zip",
+        "https://224.0.0.1/x.zip",
+        "https://239.255.255.250/x.zip",
+        "https://[ff02::1]/x.zip",
+        "https://198.18.0.1/x.zip",
+        "https://198.19.255.254/x.zip",
+        "https://240.0.0.1/x.zip",
+        "https://255.255.255.255/x.zip",
     ];
     for (n, hop) in hops.iter().enumerate() {
         let path = format!("/hop{n}.zip");
