@@ -189,7 +189,11 @@ pub(crate) async fn ask_permission<R: Runtime>(
 
 /// The store in `data_dir` for this app's build.
 fn system_store<R: Runtime>(app: &AppHandle<R>, data_dir: &Path) -> Store {
-    let build = store::build_id(&app.package_info().version.to_string());
+    let build = store::build_id(
+        &app.package_info().version.to_string(),
+        option_env!("CLAUSEO_VERSION_SUFFIX"),
+        store::exe_identity(),
+    );
     Store::new(Arc::new(SystemFiles), data_dir, build)
 }
 

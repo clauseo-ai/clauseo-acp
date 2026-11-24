@@ -115,16 +115,32 @@ impl Store {
     }
 }
 
-/// This build's id: the version About shows, tauri.conf.json's `version` plus
-/// `CLAUSEO_VERSION_SUFFIX` when the build set one (`ui/app/src/settings/app-version.ts`).
-pub(crate) fn build_id(version: &str) -> String {
-    with_suffix(version, option_env!("CLAUSEO_VERSION_SUFFIX"))
-}
-
-/// `version`, with `-suffix` after it when `suffix` is set and not empty.
-pub(crate) fn with_suffix(version: &str, suffix: Option<&str>) -> String {
-    match suffix {
+/// This build's id: the version About shows (tauri.conf.json's `version`, plus
+/// `CLAUSEO_VERSION_SUFFIX` when the Rust build set one, `ui/app/src/settings/app-version.ts`),
+/// then `+<mtime>-<length>` of the running executable. The version alone would not do: release
+/// dry runs set the suffix for the UI only, so every ad hoc build reads `0.0.0`, yet macOS takes
+/// each new build for a new app and asks again. `exe` is the executable's modified time in whole
+/// seconds since the epoch and its length; `None` (unreadable) gives the version alone.
+pub(crate) fn build_id(version: &str, suffix: Option<&str>, exe: Option<(u64, u64)>) -> String {
+    let version = match suffix {
         Some(suffix) if !suffix.is_empty() => format!("{version}-{suffix}"),
         _ => version.to_owned(),
+    };
+    match exe {
+        Some((mtime, len)) => format!("{version}+{mtime}-{len}"),
+        None => version,
     }
+}
+
+/// The running executable's modified time (whole seconds since the epoch) and length, for
+/// [`build_id`]; `None` when either cannot be read.
+pub(crate) fn exe_identity() -> Option<(u64, u64)> {
+    let metadata = std::fs::metadata(std::env::current_exe().ok()?).ok()?;
+    let mtime = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some((mtime, metadata.len()))
 }
