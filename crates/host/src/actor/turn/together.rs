@@ -12,21 +12,32 @@
 //!   turns still before their after-turn checkpoint name ([`named_by_others`]): those are their
 //!   work, not the lawyer's edits outside Clauseo.
 //! - The after-turn checkpoint of a turn that ran beside others is measured from its own
-//!   before-turn checkpoint, without the papers only they named or were credited
-//!   ([`overlap_of`]). A turn that ran beside none is checkpointed as it always was.
+//!   before-turn checkpoint, without the papers only they wrote, were credited, or name in
+//!   calls still unfinished ([`overlap_of`]). A turn that ran beside none is checkpointed as it
+//!   always was.
+//! - A paper a checkpoint left out as a running turn's (out of a before-turn checkpoint's
+//!   outside edits, or off an after-turn checkpoint's card) is in that checkpoint already, so no
+//!   later checkpoint logs it. When that turn then ends with no card of its own, the paper is
+//!   logged as an outside edit on that checkpoint in its end's commit ([`log_absorbed`]), so it
+//!   stays on the record and undoable as any outside edit is.
 //!
-//! What the matter's thread makes of the places is in `matter_worker/beside.rs`.
+//! What the matter's thread makes of the places is in `matter_worker/beside.rs`; it reads a
+//! running turn's places when the job runs (`sent/shared.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clauseo_protocol::{ChangeKind, ContentId, MatterId, MatterPath, ThreadId};
+use clauseo_protocol::{
+    ChangeKind, CheckpointId, ContentId, DomainEvent, FileChange, MatterId, MatterPath,
+    OutsideEdits, StreamId, ThreadId, TurnId, ViewEntry,
+};
 
 use super::super::Actor;
 use super::close::TurnClose;
 use super::current;
 use crate::log_file::LIFECYCLE;
 use crate::matter_worker::{Ended, TurnOverlap};
-use crate::sent::TurnPaths;
+use crate::pipeline::MatterEvent;
+use crate::sent::{SharedPaths, TurnPaths};
 
 /// What a turn knows of the other turns of its matter that ran beside it.
 #[derive(Debug, Default)]
@@ -46,7 +57,13 @@ pub(super) struct Overlap {
     failed: Vec<(ThreadId, TurnPaths)>,
     /// Its tool calls' places as its end took them for its after-turn checkpoint, which the
     /// turns running beside it read until it leaves the matter.
-    pub(super) ending: Option<TurnPaths>,
+    pub(super) ending: Option<SharedPaths>,
+    /// The turns running as its last checkpoint job was sent, whose papers that checkpoint
+    /// leaves out (of its outside edits, or of its card), each with its turn.
+    measured: BTreeMap<ThreadId, TurnId>,
+    /// The changes of its papers other turns' checkpoints left out as its (of their outside
+    /// edits, or off their cards), by checkpoint: logged as outside edits if it ends with no card.
+    absorbed: BTreeMap<CheckpointId, Vec<FileChange>>,
     /// The papers its card credits it with, set once its after-turn checkpoint is in its card.
     card: Option<Vec<(MatterPath, Option<ContentId>)>>,
 }
@@ -90,13 +107,91 @@ pub(super) fn before_sent(actor: &mut Actor, matter: MatterId, thread: ThreadId)
             beside.insert(other);
         }
     }
+    let measured = named_by_others(actor, matter, thread)
+        .into_iter()
+        .filter_map(|(other, _)| Some((other, current_turn(actor, other)?)))
+        .collect();
     if let Some(own) = current(actor, thread) {
         own.overlap = Overlap {
             before: Some(at),
             beside,
+            measured,
             ..Overlap::default()
         };
     }
+}
+
+/// The turn `thread` runs now.
+fn current_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
+    Some(actor.threads.get(&thread)?.turn.current.as_deref()?.turn)
+}
+
+/// `thread`'s before-turn checkpoint answered: each change it left out of its outside edits as
+/// a running turn's is that turn's to log should it end with no card; one of a turn that ended
+/// meanwhile is an outside edit of this checkpoint after all, put back among `changes`.
+pub(super) fn before_answered(
+    actor: &mut Actor,
+    matter: MatterId,
+    thread: ThreadId,
+    checkpoint: &mut clauseo_matters::Checkpoint,
+) {
+    let left_out = std::mem::take(&mut checkpoint.left_out);
+    let measured = current(actor, thread)
+        .map(|own| std::mem::take(&mut own.overlap.measured))
+        .unwrap_or_default();
+    if left_out.is_empty() {
+        return;
+    }
+    let gone = absorb(actor, matter, &measured, checkpoint.outcome.id(), left_out);
+    if !gone.is_empty() {
+        checkpoint.changes.extend(gone);
+        checkpoint.changes.sort_by(|a, b| {
+            a.path()
+                .as_str()
+                .as_bytes()
+                .cmp(b.path().as_str().as_bytes())
+        });
+    }
+}
+
+/// Hands each change of `left_out`, which checkpoint `checkpoint` left out as the turns it names
+/// in `also_changed_by`, to those of them `measured` holds that still run the same turn, and
+/// returns, as outside edits, those of a turn that ended meanwhile and no running one holds.
+fn absorb(
+    actor: &mut Actor,
+    matter: MatterId,
+    measured: &BTreeMap<ThreadId, TurnId>,
+    checkpoint: CheckpointId,
+    left_out: Vec<FileChange>,
+) -> Vec<FileChange> {
+    let running = actor
+        .matters
+        .get(&matter)
+        .map(|entry| entry.turns.running.clone())
+        .unwrap_or_default();
+    let mut gone_edits = Vec::new();
+    for change in left_out {
+        let (mut held, mut gone) = (false, false);
+        for other in change.also_changed_by() {
+            let Some(turn) = measured.get(other) else {
+                continue;
+            };
+            let found = current(actor, *other)
+                .filter(|current| running.contains(other) && current.turn == *turn);
+            match found {
+                Some(current) => {
+                    let absorbed = current.overlap.absorbed.entry(checkpoint).or_default();
+                    absorbed.push(plain(&change));
+                    held = true;
+                }
+                None => gone = true,
+            }
+        }
+        if gone && !held {
+            gone_edits.push(plain(&change));
+        }
+    }
+    gone_edits
 }
 
 /// `thread`'s after-turn checkpoint has been sent to `matter`'s thread: no turn whose before-turn
@@ -135,12 +230,96 @@ fn credited(close: &TurnClose) -> Vec<(MatterPath, Option<ContentId>)> {
 }
 
 /// `thread`'s after-turn checkpoint and its events are in `close`, its card: the turns running
-/// beside it keep what the card credits once it ends.
-pub(super) fn carded(actor: &mut Actor, thread: ThreadId, close: &TurnClose) {
+/// beside it keep what the card credits once it ends. Each change `left_out` of the card as a
+/// turn's that ran beside it is that turn's to log should it end with no card; one of a turn
+/// that has ended meanwhile (it had no checkpoint either) is logged now, in `close`.
+pub(super) fn carded(
+    actor: &mut Actor,
+    (matter, thread): (MatterId, ThreadId),
+    close: &mut TurnClose,
+    left_out: Vec<FileChange>,
+) {
     let card = credited(close);
-    if let Some(own) = current(actor, thread) {
-        own.overlap.card = Some(card);
+    let Some(own) = current(actor, thread) else {
+        return;
+    };
+    own.overlap.card = Some(card);
+    let measured = std::mem::take(&mut own.overlap.measured);
+    let Some(checkpoint) = close.checkpoint_after else {
+        return;
+    };
+    let gone = absorb(actor, matter, &measured, checkpoint, left_out);
+    if !gone.is_empty() {
+        push_edits(actor, matter, close, checkpoint, gone);
     }
+}
+
+/// `thread`'s turn ends with no card (its after-turn checkpoint failed): the changes of its
+/// papers the checkpoints of turns that ended before it took are logged in `close`, its end's
+/// commit, as outside edits on those checkpoints.
+pub(super) fn log_absorbed(
+    actor: &mut Actor,
+    matter: MatterId,
+    thread: ThreadId,
+    close: &mut TurnClose,
+) {
+    let Some(own) = current(actor, thread) else {
+        return;
+    };
+    let absorbed = std::mem::take(&mut own.overlap.absorbed);
+    for (checkpoint, files) in absorbed {
+        push_edits(actor, matter, close, checkpoint, files);
+    }
+}
+
+/// `change` as an outside edit: neither flagged nor naming anyone.
+fn plain(change: &FileChange) -> FileChange {
+    FileChange::new(
+        change.path().clone(),
+        change.change().clone(),
+        change.before().cloned(),
+        change.after().cloned(),
+        change.size_bytes(),
+    )
+    .unwrap_or_else(|_| change.clone().with_also_changed_by(Vec::new()))
+}
+
+/// Puts `OutsideEdits` on `checkpoint` in `close`: `files` with those already logged on it (the
+/// reducer keeps the last `OutsideEdits` of a checkpoint), one per path, sorted.
+fn push_edits(
+    actor: &Actor,
+    matter: MatterId,
+    close: &mut TurnClose,
+    checkpoint: CheckpointId,
+    files: Vec<FileChange>,
+) {
+    let stream = StreamId::Matter(matter);
+    let mut all: BTreeMap<MatterPath, FileChange> = BTreeMap::new();
+    let logged = actor
+        .loaded(stream)
+        .and_then(|loaded| loaded.state.as_matter())
+        .and_then(|state| {
+            state.entries().values().rev().find_map(|entry| {
+                let ViewEntry::Version(version) = entry else {
+                    return None;
+                };
+                (version.checkpoint == checkpoint).then(|| version.files.clone())
+            })
+        })
+        .unwrap_or_default();
+    let in_flight = actor.pipeline.unreleased(stream).filter_map(|envelope| {
+        let DomainEvent::OutsideEdits(edits) = &envelope.event else {
+            return None;
+        };
+        (edits.checkpoint == checkpoint).then(|| edits.files.clone())
+    });
+    let earlier: Vec<Vec<FileChange>> = std::iter::once(logged).chain(in_flight).collect();
+    for file in earlier.into_iter().flatten().chain(files) {
+        all.insert(file.path().clone(), file);
+    }
+    let files = all.into_values().collect();
+    let edits = OutsideEdits { checkpoint, files };
+    close.push_matter(matter, MatterEvent::plain(edits));
 }
 
 /// `thread`'s turn ends: each turn running beside it in `matter` keeps the papers its card
@@ -174,7 +353,9 @@ pub(super) fn ended(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
                     ended.left.clone_from(left);
                 }
             }
-            (None, Some(places)) => running.overlap.failed.push((thread, places.clone())),
+            (None, Some(places)) => {
+                running.overlap.failed.push((thread, places.snapshot()));
+            }
             (None, None) => {}
         }
     }
@@ -189,10 +370,15 @@ pub(super) fn overlap_of(
     thread: ThreadId,
 ) -> Option<Box<TurnOverlap>> {
     let running = running_beside(actor, matter, thread);
+    let turns: BTreeMap<ThreadId, TurnId> = running
+        .iter()
+        .filter_map(|(other, _)| Some((*other, current_turn(actor, *other)?)))
+        .collect();
     let own = current(actor, thread)?;
     if own.overlap.beside.is_empty() {
         return None;
     }
+    own.overlap.measured = turns;
     Some(Box::new(TurnOverlap {
         since: own.checkpoint_before?,
         running,
@@ -201,8 +387,13 @@ pub(super) fn overlap_of(
     }))
 }
 
-/// The turns running in `matter` that ran beside `thread`'s, with their tool calls' places.
-fn running_beside(actor: &Actor, matter: MatterId, thread: ThreadId) -> Vec<(ThreadId, TurnPaths)> {
+/// The turns running in `matter` that ran beside `thread`'s, with their tool calls' places, which
+/// the matter's thread reads when the job runs.
+fn running_beside(
+    actor: &Actor,
+    matter: MatterId,
+    thread: ThreadId,
+) -> Vec<(ThreadId, SharedPaths)> {
     let Some(entry) = actor.matters.get(&matter) else {
         return Vec::new();
     };
@@ -228,7 +419,11 @@ fn running_beside(actor: &Actor, matter: MatterId, thread: ThreadId) -> Vec<(Thr
 /// as it resolves a turn's own for its after-turn checkpoint (`matter_worker::tool_paths`). One
 /// whose after-turn checkpoint was sent is left out: the matter's thread runs that checkpoint
 /// first, and it holds that turn's writes.
-pub(super) fn named_by_others(actor: &Actor, matter: MatterId, thread: ThreadId) -> Vec<TurnPaths> {
+pub(super) fn named_by_others(
+    actor: &Actor,
+    matter: MatterId,
+    thread: ThreadId,
+) -> Vec<(ThreadId, SharedPaths)> {
     let Some(entry) = actor.matters.get(&matter) else {
         return Vec::new();
     };
@@ -237,11 +432,11 @@ pub(super) fn named_by_others(actor: &Actor, matter: MatterId, thread: ThreadId)
         .running
         .iter()
         .filter(|other| **other != thread)
-        .filter_map(|other| actor.threads.get(other)?.turn.current.as_deref())
-        .filter(|current| current.overlap.after.is_none())
-        .map(|current| {
+        .filter_map(|other| Some((*other, actor.threads.get(other)?.turn.current.as_deref()?)))
+        .filter(|(_, current)| current.overlap.after.is_none())
+        .map(|(other, current)| {
             let paths = current.overlap.ending.as_ref();
-            paths.unwrap_or(&current.tool_paths).clone()
+            (other, paths.unwrap_or(&current.tool_paths).clone())
         })
         .collect()
 }

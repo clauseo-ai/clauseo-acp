@@ -49,6 +49,8 @@ mod sweep;
 mod title_window;
 mod together;
 mod together_order;
+mod together_race;
+mod together_repair;
 mod tools_live;
 mod tools_prompt;
 mod undo;

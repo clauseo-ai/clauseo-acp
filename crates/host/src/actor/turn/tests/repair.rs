@@ -285,8 +285,10 @@ fn a_reused_end_then_another_threads_turn_never_takes_its_checkpoint() {
     rig.finish();
 }
 
+/// Measured from its own start, the open turn leaves the other turn's notes.txt off its card;
+/// the lawyer's edit, which no checkpoint holds yet, is on it, flagged, so it is on a card.
 #[test]
-fn a_reused_end_then_another_turn_and_lawyer_edits_gives_an_empty_step() {
+fn a_reused_end_then_another_turn_and_lawyer_edits_puts_the_edit_on_its_card() {
     let mut rig = Rig::start("turn-repair-reused-edited", "");
     let (first, first_turn, before, _) = reused_end_then_another_turn(&mut rig);
     // The lawyer edits the folder before the restart; no checkpoint holds it yet.
@@ -296,10 +298,21 @@ fn a_reused_end_then_another_turn_and_lawyer_edits_gives_an_empty_step() {
     let mut rig = rig.restart(1);
     let log = rig.log(first);
     let end = ended(&log, first_turn).expect("the repair ended the turn");
-    assert_eq!(end.checkpoint_after, Some(before), "an empty step");
-    assert_eq!(changed(&log), []);
-    // The lawyer's edit is left for the next checkpoint to find as outside edits.
-    assert_eq!(rig.recorded().len(), checkpoints);
+    assert_ne!(end.checkpoint_after, Some(before), "a step of its own");
+    assert_eq!(changed(&log), [("memo.txt".to_owned(), true)]);
+    let beside: Vec<MatterPath> = log
+        .iter()
+        .filter_map(|event| {
+            let DomainEvent::FilesChanged(changed) = event else {
+                return None;
+            };
+            Some(changed.beside.clone())
+        })
+        .flatten()
+        .collect();
+    assert_eq!(beside, [MatterPath::new("notes.txt").unwrap()]);
+    // The new checkpoint holds the lawyer's edit.
+    assert_eq!(rig.recorded().len(), checkpoints + 1);
     rig.finish();
 }
 

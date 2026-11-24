@@ -18,10 +18,10 @@ use crate::matter_worker::MatterReply;
 
 /// A prompt "Write A." writes notes/a.txt, "Write B." notes/b.txt, each beside a completed edit
 /// tool call naming it; each turn then ends. A new agent plays it from the start.
-const WRITES: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write A."}]}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}]]}
+pub(super) const WRITES: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write A."}]}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}]]}
 "#;
 
-fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId, text: &str) -> TurnId {
+pub(super) fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId, text: &str) -> TurnId {
     let command = HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
@@ -37,7 +37,7 @@ fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId, text: &str) -> TurnId {
 }
 
 /// Each change of `turn`'s card in `log`: its path, its flag, and the other threads it names.
-fn card(log: &[DomainEvent], turn: TurnId) -> Vec<(String, bool, Vec<ThreadId>)> {
+pub(super) fn card(log: &[DomainEvent], turn: TurnId) -> Vec<(String, bool, Vec<ThreadId>)> {
     let changed: Option<&FilesChanged> = log.iter().find_map(|event| {
         if let DomainEvent::FilesChanged(changed) = event
             && changed.turn == turn
@@ -134,7 +134,7 @@ fn a_turn_whose_after_turn_checkpoint_was_sent_first_ran_before_the_next() {
 }
 
 /// Whether `input` is the answer to `thread`'s prompt.
-fn prompt_answer_of(thread: ThreadId, input: &Input) -> bool {
+pub(super) fn prompt_answer_of(thread: ThreadId, input: &Input) -> bool {
     matches!(
         input,
         Input::Turn(TurnInput::Agent {

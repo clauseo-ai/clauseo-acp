@@ -26,7 +26,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{self, NetEnv};
-use crate::sent::{Places, TurnPaths};
+use crate::sent::{Places, SharedPaths, TurnPaths};
 use crate::shell_writes;
 
 pub(crate) use jobs::{RecordDone, RestoreDone, RestoreJob, TurnCard, UndoJob};
@@ -156,10 +156,11 @@ pub(crate) enum MatterJob {
         registry: Registry,
     },
     /// The before-turn checkpoint. Its outside edits leave out the papers `running`, the places
-    /// the tool calls of the matter's other running turns named, hold (`beside.rs`).
+    /// the tool calls of the matter's other running turns name when it runs, hold (`beside.rs`);
+    /// those left out are in `Checkpoint::left_out`.
     BeforeTurn {
         meta: TurnMeta,
-        running: Vec<TurnPaths>,
+        running: Vec<(ThreadId, SharedPaths)>,
     },
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
     /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
@@ -172,18 +173,10 @@ pub(crate) enum MatterJob {
         overlap: Option<Box<beside::TurnOverlap>>,
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
-    /// the turn's own after-turn checkpoint when R8's timeline has one; with other turns of the
-    /// matter left open (`open`, their tool calls' places), a new after-turn checkpoint measured
-    /// from its own `before` without their papers; alone, `before` when anything checkpointed
-    /// since it started, a new after-turn checkpoint otherwise (see [`repair`]).
-    Repair {
-        meta: TurnMeta,
-        tool_paths: TurnPaths,
-        before: Option<CheckpointId>,
-        /// No other open turn of the matter started after this one.
-        last: bool,
-        open: Vec<(ThreadId, TurnPaths)>,
-    },
+    /// the turn's own after-turn checkpoint when R8's timeline has one, else a new one, each
+    /// measured from its own before-turn checkpoint without the other open turns' papers, the
+    /// later cards' or the later outside edits (see [`repair`]).
+    Repair(Box<RepairJob>),
     /// Undo one step.
     Undo(UndoJob),
     /// Restore a version.
@@ -465,7 +458,8 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::BeforeTurn { meta, running } => {
             MatterReply::BeforeTurn(open(settings, slot).and_then(|matter| {
                 let mut checkpoint = matter.before_turn(&meta)?;
-                beside::leave_out(matter.folder(), &running, &mut checkpoint.changes);
+                checkpoint.left_out =
+                    beside::leave_out(matter.folder(), &running, &mut checkpoint.changes);
                 turn_checkpoint(matter, checkpoint, None)
             }))
         }
@@ -486,20 +480,9 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             // Measured from its own start, a reused id's changes from `before` are not added.
             turn_checkpoint(matter, checkpoint, before.filter(|_| overlap.is_none()))
         })),
-        MatterJob::Repair {
-            meta,
-            mut tool_paths,
-            before,
-            last,
-            open: others,
-        } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            tool_paths.resolve_start();
-            let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
-            let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
-            let others = beside::of_open(matter.folder(), before, others, &tool_paths);
-            let overlap = others.as_ref().map(beside::Beside::overlap);
-            repair(matter, &meta, &named, before, last, overlap.as_ref())
-        })),
+        MatterJob::Repair(job) => {
+            MatterReply::AfterTurn(open(settings, slot).and_then(|matter| repair(matter, *job)))
+        }
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
                 before: job.before,
@@ -611,7 +594,8 @@ mod relocate;
 mod sides;
 mod too_deep;
 
-pub(crate) use beside::{Ended, TurnOverlap};
+pub(crate) use beside::{Ended, Logged, TurnOverlap};
+pub(crate) use checkpoints::RepairJob;
 use checkpoints::{repair, root_commit, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 #[cfg(test)]

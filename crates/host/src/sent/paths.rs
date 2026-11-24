@@ -215,8 +215,25 @@ impl TurnPaths {
     /// [`TurnPaths::written`] would hold were every call `Completed`. A turn running beside
     /// another may be writing them now (`matter_worker/beside.rs`).
     pub(crate) fn named(&self) -> Places {
+        self.named_by(|_| true)
+    }
+
+    /// What [`TurnPaths::named`] holds of the calls that have not ended (pending, in progress,
+    /// or of no status known): they may be writing those places now. A call that failed, or was
+    /// cancelled or denied, wrote nothing; one that completed is in [`TurnPaths::written`].
+    pub(crate) fn unfinished(&self) -> Places {
+        self.named_by(|call| {
+            matches!(
+                call.status,
+                None | Some(ToolCallStatus::Pending | ToolCallStatus::InProgress)
+            )
+        })
+    }
+
+    /// The places the calls `keep` holds name as ones they write, whatever their status.
+    fn named_by(&self, keep: impl Fn(&Call) -> bool) -> Places {
         let mut named = Places::default();
-        for call in self.calls.values() {
+        for call in self.calls.values().filter(|call| keep(call)) {
             let kind = call.kind.unwrap_or(ToolKind::Unknown);
             let done = ToolCallStatus::Completed;
             if clauseo_matters::names_a_write(kind, done, false) {

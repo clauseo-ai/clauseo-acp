@@ -214,8 +214,9 @@ struct Current {
     limit: Option<LimitMark>,
     /// The first too-long `sessionFailure` of the turn sent on an update (`AcpEvent::TooLong`).
     too_long: Option<clauseo_acp::TooLong>,
-    /// The places the turn's tool calls named, for the after-turn checkpoint.
-    tool_paths: crate::sent::TurnPaths,
+    /// The places the turn's tool calls named, for the after-turn checkpoint, shared with the
+    /// checkpoint jobs of the other turns of its matter (`sent/shared.rs`).
+    tool_paths: crate::sent::SharedPaths,
     /// Tool calls whose update the ACP reader dropped with no status read (`skipped.rs`).
     skipped: skipped::Skipped,
     /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
