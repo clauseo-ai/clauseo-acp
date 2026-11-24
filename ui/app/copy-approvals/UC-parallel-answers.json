@@ -16,5 +16,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "The card over the composer while that message waits, with no buttons. First draft (24 Nov) ended \"Your message goes once it's done.\"; the Windows test asked it to say the message is queued. Replaced U7-02 \"One conversation changes a matter's papers at a time. Your message is ready to go.\" with Stop the other (U7-03) and Queue (U7-04): another conversation's answer no longer holds a message back (issue 15)."
+  },
+  "UC-1147": {
+    "en": "Not sent, because you stopped it before it started. Your message is back in the box below.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's working line after Stop on a message that had not started (it waited for the matter): its words are back in the field, or, when it was the conversation's only message, in a new draft in the same matter. Until the next send. New: before, the message vanished with no word (Windows test, 24 Nov)."
   }
 }

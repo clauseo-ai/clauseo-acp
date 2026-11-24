@@ -71,7 +71,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
-import { useNotSentRestore } from "./steer-restore.ts";
+import { unsentDrafts, useNotSentRestore, useUnsentRestore } from "./steer-restore.ts";
 import { tooLong } from "./prompt-cost.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
@@ -211,6 +211,9 @@ export function WorkComposer({
   // "Answering." again. `lost` holds the thread's mark as the edit was lost, null for none; each clear checks it first,
   // so a send never sets the null already there (a second commit in the reply's frame, #253)
   const [lost, setLost] = useState<string | null>(null);
+  // a message stopped before its turn started came back into the field (here, or into this new draft when it was its
+  // conversation's only message): the working line says it wasn't sent until the next send
+  const [unsent, setUnsent] = useState(() => draftKey !== null && unsentDrafts.has(draftKey));
   // the thread's mark, read from the store only while an edit is lost: otherwise no flush renders the composer
   const watched = lost !== null && stream !== null ? stream : null;
   const subscribe = useCallback(
@@ -258,6 +261,10 @@ export function WorkComposer({
     // idle, Ask waits for the turn it sent; the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
+    if (unsent) {
+      setUnsent(false);
+      if (draftKey !== null) unsentDrafts.delete(draftKey);
+    }
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
     const files = (field.current?.mentioned() ?? []).map((m) => m.id);
     // its draft, remembered once accepted and under the cap, so these exact words given back (a stopped question, a
@@ -307,6 +314,26 @@ export function WorkComposer({
   );
   // a steer never sent: its words back into the field, after the words there on a new line, and its chips after the
   // chips there; with no field, the draft
+  // a message stopped before its turn started: its words back into the field, after the words there with a blank line
+  // between; when it was the conversation's only message, a new draft in the matter takes them, with the focus, and
+  // the emptied conversation, which the host no longer lists, is left
+  useUnsentRestore(store, stream, ({ text, only }) => {
+    const conversations = others?.conversations;
+    if (only && conversations !== undefined) {
+      conversations.startNew(draftOf(text));
+      const key = conversations.view().open;
+      if (key !== null) unsentDrafts.add(key);
+      return;
+    }
+    const f = field.current;
+    const back = draftOf(text);
+    if (f !== null) {
+      const there = f.draft();
+      if (isBlank(there)) f.fill(back);
+      else f.setText(joinDrafts(there, back, "\n\n"));
+    }
+    setUnsent(true);
+  });
   useNotSentRestore(store, stream, (text) => {
     const f = field.current;
     const back = draftOf(text);
@@ -360,26 +387,41 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : lost !== null
+      : unsent
         ? {
             state: {
               kind: "wait",
-              words: mt(w.lang, "That message had already gone."),
+              words: mt(
+                w.lang,
+                "Not sent, because you stopped it before it started. Your message is back in the box below.",
+              ),
               pill: null,
-              code: "thread.turn_not_queued",
             },
-            testId: "error",
+            testId: "unsent",
           }
-        : holdWait
+        : lost !== null
           ? {
-              // queued while an undo, a restore or a move holds the matter: a wait, never "Answering."
-              state: { kind: "wait", words: mt(w.lang, "Waiting to answer."), pill: null },
-              testId: "working",
+              state: {
+                kind: "wait",
+                words: mt(w.lang, "That message had already gone."),
+                pill: null,
+                code: "thread.turn_not_queued",
+              },
+              testId: "error",
             }
           : busy
             ? { state: answering, testId: "working" }
             : stopped);
   // U15's out-of-credit note, or its running-low line before sending: the two never show together
+          : holdWait
+            ? {
+                // queued while an undo, a restore or a move holds the matter: a wait, never "Answering."
+                state: { kind: "wait", words: mt(w.lang, "Waiting to answer."), pill: null },
+                testId: "working",
+              }
+            : busy
+              ? { state: answering, testId: "working" }
+              : stopped);
   const credit =
     transport === null ? null : (
       <>
