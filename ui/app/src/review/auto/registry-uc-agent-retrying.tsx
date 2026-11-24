@@ -1,5 +1,5 @@
 // UC's entry for the working line while the agent waits to retry its service (host #1335's HeaderEntry.retrying,
-// UC-1377, provisional): Clauseo's own words that the plan's servers are busy, in the real room over FakeTransport,
+// UC-1377, provisional): Clauseo's words that the plan can't reach its service, in the real room over FakeTransport,
 // the agent's own title and details in the header and never on screen.
 import { agentText, userMessage } from "../../testing/stream-script.ts";
 import type { Entry } from "../entry.ts";
@@ -29,7 +29,7 @@ const ENTRIES: Entry[] = [
   // Claude's answer running while the agent waits to retry: the busy line in place of "Answering.", no pen
   {
     id: "UC-1377",
-    words: matterWords("{name}'s servers are busy. It's trying again."),
+    words: matterWords("{name} isn't getting through to its service. It's trying again."),
     screen: "room/thread",
     render: () => <RoomOver host={host} />,
   },

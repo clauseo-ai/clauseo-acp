@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The working line while the agent waits to retry its service (retry-line.ts, host #1335), through the room over
-// FakeTransport: the header's retrying set says the plan's servers are busy in Clauseo's own words, never the
+// FakeTransport: the header's retrying set says the plan can't reach its service, in Clauseo's own words, never the
 // agent's title or details and no number; cleared, "Answering." comes back; a room opened while it is set says it at
 // once; and ChatGPT's thread names ChatGPT.
 import { assertWarm, WARM_MS, warmUp } from "@clauseo/components/lib/warm-up.ts";
@@ -23,7 +23,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-const CLAUDE_BUSY = "Claude's servers are busy. It's trying again.";
+const CLAUDE_BUSY = "Claude isn't getting through to its service. It's trying again.";
 const RETRY: AgentRetry = {
   since: 1_700_000_000_000,
   title: "Retrying Claude, attempt 2 of 10.",
@@ -94,6 +94,6 @@ test("ChatGPT's thread names ChatGPT", async () => {
   };
   h.deliver([reset(ASKED, running(codex, "codex-acp"))]);
   await h.settle();
-  expect(line()).toBe("ChatGPT's servers are busy. It's trying again.");
+  expect(line()).toBe("ChatGPT isn't getting through to its service. It's trying again.");
   expect(h.host.textContent).not.toContain("Reconnecting");
 });

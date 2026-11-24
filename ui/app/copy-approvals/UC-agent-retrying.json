@@ -1,7 +1,7 @@
 {
   "UC-1377": {
-    "en": "{name}'s servers are busy. It's trying again.",
-    "hi": "{name} के सर्वर व्यस्त हैं। वह फिर से कोशिश कर रहा है।",
+    "en": "{name} isn't getting through to its service. It's trying again.",
+    "hi": "{name} अपनी सेवा तक नहीं पहुँच पा रहा है। वह फिर से कोशिश कर रहा है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
