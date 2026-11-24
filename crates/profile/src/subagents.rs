@@ -14,6 +14,11 @@
 //! (`agent::loads::subagents` in the host). `effort` is read by 2.1.293 for an agent it is given
 //! (its agent schema takes it, and a helper's effort is the agent's own) and applies only on a
 //! model that takes an effort level; on one that does not, Claude Code drops it without a word.
+//!
+//! These two are the only helpers a Claude session has: the host turns Claude Code's own agent
+//! types off on every login, and on Anthropic's own login runs every helper on
+//! [`PAPER_READER_MODEL`] whatever a definition or the lead's call says
+//! (`agent::loads::subagents` in the host).
 
 use serde_json::{Map, Value};
 
