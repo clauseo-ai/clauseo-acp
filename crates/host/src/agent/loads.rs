@@ -191,6 +191,13 @@ pub(crate) const CLAUDE_HELPERS_AT_ONCE: &str = "6";
 /// live run on 2.1.330 with it at `0` still launched a helper in the background unasked.
 pub(crate) const CLAUDE_FORK_OFF_VAR: &str = "CLAUDE_CODE_FORK_SUBAGENT";
 
+/// The variable that, `1` in the flag settings' `env`, asks Claude Code for its Code Mode
+/// (experimental): a `REPL` tool whose script calls the other tools. An SDK session counts it
+/// only from the flag settings (the SDK's `settings` option), never from the process env, so
+/// [`session_meta`] puts it there alone. Claude Code may still refuse it (the model, the login,
+/// its own switch, a server gate) and then starts with the ordinary tools, saying nothing.
+pub(crate) const CLAUDE_CODE_MODE_VAR: &str = "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE";
+
 // A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
 // and in the limits reader's and sign-in's `CLAUDE_FORCED_VARS`, with a test in
 // `tools_tests.rs`. A variable that depends on the login goes in
@@ -282,7 +289,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   SDK's spawn of Claude Code, `v1/acp-agent.js:7659-7669`) and, with `keys` (a Claude agent),
 ///   in `claudeCode.options.settings.env` (flag settings, over a user's or project's), with
 ///   [`claude_flag_settings`] beside it. A hook value at `settings` or its `env` that is
-///   not an object is then replaced.
+///   not an object is then replaced. With `keys`, [`CLAUDE_CODE_MODE_VAR`] `"1"` goes in
+///   `claudeCode.options.settings.env` only, over any hook value.
 /// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
 ///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.110.1 then
@@ -377,6 +385,7 @@ pub(crate) fn session_meta(
         for (name, value) in CLAUDE_LAUNCH_VARS {
             settings_env.insert(name.to_owned(), Value::from(value));
         }
+        settings_env.insert(CLAUDE_CODE_MODE_VAR.to_owned(), Value::from("1"));
         settings.insert("env".to_owned(), Value::Object(settings_env));
         for (key, value) in claude_flag_settings() {
             settings.insert(key.to_owned(), value);

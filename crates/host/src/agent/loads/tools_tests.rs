@@ -10,13 +10,13 @@ use super::profile::{ClaudeBrowser, ClaudeKeys, Folders, Login};
 use super::profile_tests::{OFF, ON};
 use super::tools::{NOT_OFFERED, claude_tools};
 use super::{
-    CLAUDE_CRON_OFF_VAR, CLAUDE_GIT_STATUS_OFF_VAR, GIT_STATUS_SETTING, McpControl,
-    claude_launch_vars, session_meta,
+    CLAUDE_CODE_MODE_VAR, CLAUDE_CRON_OFF_VAR, CLAUDE_GIT_STATUS_OFF_VAR, GIT_STATUS_SETTING,
+    McpControl, claude_launch_vars, session_meta,
 };
 
 /// What macOS and Linux offer, web or not; Windows offers the same without `Bash`. `Glob` and
 /// `Grep` on every system: the instructions send listings, searches and reads to them.
-const EVERY_SYSTEM: [&str; 22] = [
+const EVERY_SYSTEM: [&str; 23] = [
     "Read",
     "Glob",
     "Grep",
@@ -39,6 +39,7 @@ const EVERY_SYSTEM: [&str; 22] = [
     "TaskList",
     "TaskUpdate",
     "Yield",
+    "REPL",
 ];
 
 static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
@@ -160,7 +161,6 @@ fn the_tools_left_out_are_denied_by_name() {
             "EnterWorktree",
             "ExitWorktree",
             "Workflow",
-            "REPL",
             "LSP",
             "DesignSync",
             "PushNotification",
@@ -420,6 +420,36 @@ fn helpers_stay_off_the_lead_model_and_only_anthropics_login_forces_haiku() {
     for (name, _) in first_party {
         assert_eq!(launch.get(&OsString::from(name)), None, "{name}");
     }
+}
+
+/// Every Claude launch asks for Code Mode in the flag settings' `env`, the one place an SDK
+/// session reads it, over a hook's `0`, and offers `REPL`, which it must not leave out.
+#[test]
+fn every_claude_launch_asks_for_code_mode_in_its_settings() {
+    for hook in [
+        json!({}),
+        json!({"claudeCode": {"options": {"settings": {"env": {"CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "0"}}}}}),
+    ] {
+        for control in [McpControl::Clauseo, McpControl::Managed] {
+            let meta = Value::Object(session_meta(
+                hook.as_object().cloned(),
+                control,
+                None,
+                Some(&keys(OFF)),
+            ));
+            let options = &meta["claudeCode"]["options"];
+            assert_eq!(
+                options["settings"]["env"][CLAUDE_CODE_MODE_VAR], "1",
+                "{hook}"
+            );
+            assert_eq!(options["env"].get(CLAUDE_CODE_MODE_VAR), None, "{hook}");
+            assert!(strings(&options["tools"]).contains(&"REPL"), "{hook}");
+            assert!(!strings(&options["disallowedTools"]).contains(&"REPL"));
+        }
+    }
+    // Not a Claude agent: no settings of Claude's at all.
+    let meta = Value::Object(session_meta(None, McpControl::Clauseo, None, None));
+    assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
 /// `SendMessage` stays offered (it continues a helper); `ListAgents` is neither offered nor
