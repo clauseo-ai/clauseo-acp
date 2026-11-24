@@ -1,6 +1,6 @@
-//! The built-in tools a Claude launch offers and denies, per system, and the variables every
-//! Claude launch sets (`tools.rs`, `loads.rs`). A pin bump that adds a tool changes nothing here
-//! until someone decides; these lists say what was decided.
+//! The built-in tools a Claude launch offers and denies, per system, and the variables and the
+//! engine frames every Claude launch sets (`tools.rs`, `loads.rs`). A pin bump that adds a tool
+//! changes nothing here until someone decides; these lists say what was decided.
 
 use std::ffi::OsString;
 
@@ -11,7 +11,8 @@ use super::profile_tests::{OFF, ON};
 use super::tools::{NOT_OFFERED, claude_tools};
 use super::{
     CLAUDE_ADVISOR_OFF_VAR, CLAUDE_CODE_MODE_VAR, CLAUDE_CRON_OFF_VAR, CLAUDE_GIT_STATUS_OFF_VAR,
-    GIT_STATUS_SETTING, McpControl, claude_launch_vars, session_meta,
+    CLAUDE_RAW_FRAMES, CLAUDE_RAW_FRAMES_KEY, GIT_STATUS_SETTING, McpControl, claude_launch_vars,
+    session_meta,
 };
 
 /// What macOS and Linux offer, web or not; Windows offers the same without `Bash`. `Glob` and
@@ -527,4 +528,35 @@ fn extra_flags_cannot_set_the_tools_or_the_settings() {
         meta["claudeCode"]["options"]["extraArgs"],
         json!({"debug": null})
     );
+}
+
+/// Every session start and load asks for exactly the decided engine frames, in
+/// `claudeCode.emitRawSDKMessages`, for every login and under the firm's managed MCP too, over a
+/// hook's own list (a hook asking for every frame, `true`, gets the list too); with no Claude
+/// keys (another agent, which ignores `claudeCode`) the list goes all the same.
+#[test]
+fn every_claude_session_asks_for_exactly_the_decided_engine_frames() {
+    let decided = json!([
+        {"type": "system", "subtype": "init"},
+        {"type": "system", "subtype": "task_started"},
+        {"type": "system", "subtype": "task_notification"},
+        {"type": "system", "subtype": "task_updated"},
+    ]);
+    assert_eq!(CLAUDE_RAW_FRAMES_KEY, "emitRawSDKMessages");
+    assert_eq!(CLAUDE_RAW_FRAMES.len(), 4);
+    for hook in [
+        json!({}),
+        json!({"claudeCode": {"emitRawSDKMessages": true}}),
+        json!({"claudeCode": {"emitRawSDKMessages": [{"type": "assistant"}]}}),
+    ] {
+        for login in [Login::FirstParty, Login::Bedrock, Login::OtherCloud] {
+            for control in [McpControl::Clauseo, McpControl::Managed] {
+                let keys = ClaudeKeys { login, ..keys(ON) };
+                let meta = session_meta(hook.as_object().cloned(), control, None, Some(&keys));
+                assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], decided, "{hook}");
+            }
+        }
+        let meta = session_meta(hook.as_object().cloned(), McpControl::Clauseo, None, None);
+        assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], decided, "{hook}");
+    }
 }

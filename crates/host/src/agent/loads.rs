@@ -225,6 +225,21 @@ pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 9] = [
     (CLAUDE_ADVISOR_OFF_VAR, "1"),
 ];
 
+/// The `_meta.claudeCode` key that names the engine frames claude-agent-acp 0.110.1 passes on
+/// as the notification `_claude/sdkMessage` (`dist/v1/acp-agent.js:2948-2953`, read at `:8127`
+/// for a new and a loaded session; the filter at `:8387-8395`).
+pub(crate) const CLAUDE_RAW_FRAMES_KEY: &str = "emitRawSDKMessages";
+
+/// The engine frames every Claude session asks for ([`CLAUDE_RAW_FRAMES_KEY`]), each a `type`
+/// and a `subtype`, and nothing else: the task frames say when a helper's task settled
+/// (`clauseo_acp`'s `map/task.rs`); `init` is asked for here and read by nothing yet.
+pub(crate) const CLAUDE_RAW_FRAMES: [(&str, &str); 4] = [
+    ("system", "init"),
+    ("system", "task_started"),
+    ("system", "task_notification"),
+    ("system", "task_updated"),
+];
+
 /// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
 pub(crate) const CROSS_SESSION_SETTING: &str = "crossSessionInbound";
 
@@ -313,6 +328,7 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   out, in both forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - `claudeCode.options.forwardSubagentText: true` ([`FORWARD_SUBAGENT_TEXT_OPTION`]).
+/// - `claudeCode.emitRawSDKMessages`: [`CLAUDE_RAW_FRAMES`], over a hook's own value.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
@@ -403,6 +419,11 @@ pub(crate) fn session_meta(
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
+    let frames = CLAUDE_RAW_FRAMES
+        .iter()
+        .map(|(kind, subtype)| serde_json::json!({"type": kind, "subtype": subtype}))
+        .collect();
+    claude.insert(CLAUDE_RAW_FRAMES_KEY.to_owned(), Value::Array(frames));
     meta.insert("claudeCode".to_owned(), Value::Object(claude));
     meta
 }
