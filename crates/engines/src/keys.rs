@@ -86,89 +86,117 @@ pub const fn release_guard(mode: Option<&str>, key: Option<&str>) -> Result<(), 
 
 /// The key id of `tauri_key` (Tauri's base64 of a minisign `.pub` file, ASCII whitespace
 /// ignored): the 8 bytes after `Ed` on the file's second line, little-endian. `None` when it
-/// isn't such a key. A `const fn`, for the release guard.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "const fn: slice::get isn't const; every index is checked against the length first"
-)]
+/// isn't such a key. A `const fn`, for the release guard: it decodes both layers of base64 as
+/// it goes, keeping no buffer.
 pub const fn key_id(tauri_key: &str) -> Option<u64> {
-    let mut file = [0u8; 512];
-    let Some(len) = decode(tauri_key.as_bytes(), 0, tauri_key.len(), &mut file) else {
-        return None;
-    };
-    // The key line: from after the first line break to the next one (or the end), less a `\r`.
-    let mut start = 0;
-    while start < len && file[start] != b'\n' {
-        start += 1;
+    let mut file = Base64::new(tauri_key.as_bytes());
+    // Past the untrusted comment line.
+    loop {
+        match file.next() {
+            Decoded::Byte(b'\n') => break,
+            Decoded::Byte(_) => {}
+            Decoded::Empty | Decoded::Invalid => return None,
+        }
     }
-    start += 1;
-    let mut end = start;
-    while end < len && file[end] != b'\n' {
-        end += 1;
+    // The key line, itself base64, up to the next line break or the end.
+    let mut line = Base64::new(&[]);
+    let (mut count, mut id) = (0u32, 0u64);
+    loop {
+        let text = match file.next() {
+            Decoded::Byte(b'\n' | b'\r') | Decoded::Empty => break,
+            Decoded::Byte(text) => text,
+            Decoded::Invalid => return None,
+        };
+        let byte = match line.push(text) {
+            Decoded::Byte(byte) => byte,
+            Decoded::Empty => continue,
+            Decoded::Invalid => return None,
+        };
+        match count {
+            0 if byte == b'E' => {}
+            1 if byte == b'd' => {}
+            2..=9 => id |= (byte as u64) << (8 * (count - 2)),
+            10..=41 => {}
+            _ => return None,
+        }
+        count += 1;
     }
-    if end > len {
-        return None;
-    }
-    if end > start && file[end - 1] == b'\r' {
-        end -= 1;
-    }
-    let (line, _) = file.split_at(end);
-    let mut key = [0u8; 64];
-    match decode(line, start, end, &mut key) {
-        Some(42) if key[0] == b'E' && key[1] == b'd' => {}
-        _ => return None,
-    }
-    let mut id = 0u64;
-    let mut at = 9;
-    while at >= 2 {
-        id = id << 8 | key[at] as u64;
-        at -= 1;
-    }
-    Some(id)
+    if count == 42 { Some(id) } else { None }
 }
 
-/// Standard base64 (`+/`, `=` padding) of `text[from..to]` decoded into `out`, ASCII whitespace
-/// skipped; the byte count, or `None` for another character, misplaced padding or no room.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "const fn: slice::get isn't const; every index is checked against the length first"
-)]
-const fn decode(text: &[u8], from: usize, to: usize, out: &mut [u8]) -> Option<usize> {
-    let (mut word, mut bits, mut len, mut padding) = (0u32, 0u32, 0usize, 0usize);
-    let mut at = from;
-    while at < to {
-        let byte = text[at];
-        at += 1;
-        if byte.is_ascii_whitespace() {
-            continue;
+/// What [`Base64`] gives for a step.
+#[derive(Clone, Copy)]
+enum Decoded {
+    /// A decoded byte.
+    Byte(u8),
+    /// No byte: the end of the text (`next`), or a character that completes none (`push`).
+    Empty,
+    /// A character that isn't base64, or one after the padding.
+    Invalid,
+}
+
+/// A standard base64 (`+/`, `=` padding) decoder, a byte at a time, in a const context.
+struct Base64<'a> {
+    /// The text not read yet.
+    rest: &'a [u8],
+    /// The bits read and not yet given out, in the low 16.
+    word: u32,
+    /// How many of `word`'s bits are pending.
+    bits: u32,
+    /// Whether a `=` was seen: only more `=` and whitespace may follow.
+    padded: bool,
+}
+
+impl<'a> Base64<'a> {
+    const fn new(rest: &'a [u8]) -> Self {
+        Self {
+            rest,
+            word: 0,
+            bits: 0,
+            padded: false,
         }
-        if byte == b'=' {
-            padding += 1;
-            continue;
-        }
-        if padding > 0 {
-            return None;
-        }
-        let Some(value) = sextet(byte) else {
-            return None;
-        };
-        word = (word << 6 | value as u32) & 0xFFFF;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            if len >= out.len() {
-                return None;
+    }
+
+    /// The next decoded byte of the text, ASCII whitespace skipped.
+    const fn next(&mut self) -> Decoded {
+        loop {
+            let [text, rest @ ..] = self.rest else {
+                return Decoded::Empty;
+            };
+            self.rest = rest;
+            match self.push(*text) {
+                Decoded::Empty => {}
+                Decoded::Byte(byte) => return Decoded::Byte(byte),
+                Decoded::Invalid => return Decoded::Invalid,
             }
-            // The low byte: `word` holds at most 16 bits, the top `bits` of them already used.
-            let [low, ..] = (word >> bits).to_le_bytes();
-            out[len] = low;
-            len += 1;
         }
     }
-    if padding > 2 {
-        return None;
+
+    /// Feeds one character (rather than reading `rest`): the byte it completes, if any.
+    const fn push(&mut self, text: u8) -> Decoded {
+        if text.is_ascii_whitespace() {
+            return Decoded::Empty;
+        }
+        if text == b'=' {
+            self.padded = true;
+            return Decoded::Empty;
+        }
+        if self.padded {
+            return Decoded::Invalid;
+        }
+        let Some(value) = sextet(text) else {
+            return Decoded::Invalid;
+        };
+        self.word = (self.word << 6 | value as u32) & 0xFFFF;
+        self.bits += 6;
+        if self.bits < 8 {
+            return Decoded::Empty;
+        }
+        self.bits -= 8;
+        // The low byte: `word` holds at most 16 bits, the top `bits` of them already given out.
+        let [low, ..] = (self.word >> self.bits).to_le_bytes();
+        Decoded::Byte(low)
     }
-    Some(len)
 }
 
 /// One base64 character's value.
@@ -184,20 +212,15 @@ const fn sextet(byte: u8) -> Option<u8> {
 }
 
 /// 16 hex digits (surrounding ASCII whitespace ignored) as a `u64`.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "const fn: slice::get isn't const; every index is checked against the length first"
-)]
 const fn hex_id(text: &str) -> Option<u64> {
-    let bytes = text.as_bytes();
-    let (mut id, mut digits, mut at) = (0u64, 0, 0);
-    while at < bytes.len() {
-        let byte = bytes[at];
-        at += 1;
-        let value = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'A'..=b'F' => byte - b'A' + 10,
-            _ if byte.is_ascii_whitespace() => continue,
+    let mut bytes = text.as_bytes();
+    let (mut id, mut digits) = (0u64, 0);
+    while let [byte, rest @ ..] = bytes {
+        bytes = rest;
+        let value = match *byte {
+            digit @ b'0'..=b'9' => digit - b'0',
+            digit @ b'A'..=b'F' => digit - b'A' + 10,
+            other if other.is_ascii_whitespace() => continue,
             _ => return None,
         };
         id = id << 4 | value as u64;
@@ -207,21 +230,16 @@ const fn hex_id(text: &str) -> Option<u64> {
 }
 
 /// `a == b`, in a const context.
-#[expect(
-    clippy::indexing_slicing,
-    reason = "const fn: slice::get isn't const; every index is checked against the length first"
-)]
 const fn eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut at = 0;
-    while at < a.len() {
-        if a[at] != b[at] {
-            return false;
+    let (mut a, mut b) = (a.as_bytes(), b.as_bytes());
+    loop {
+        match (a, b) {
+            ([], []) => return true,
+            ([x, rest_a @ ..], [y, rest_b @ ..]) if *x == *y => {
+                a = rest_a;
+                b = rest_b;
+            }
+            _ => return false,
         }
-        at += 1;
     }
-    true
 }
