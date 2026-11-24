@@ -21,7 +21,8 @@ use serde_json::{Map, Value};
 /// - `Read`, `Edit`, `Write`, `NotebookEdit`: the papers. A background command's output is read
 ///   with `Read` too (Claude Code names its output file and says so).
 /// - `Bash`: the shell on macOS and Linux; Windows leaves it out ([`WINDOWS_LEFT_OUT`]).
-/// - `Agent`: Clauseo's helpers (`clauseo_profile::subagents`), and Claude Code's own types.
+/// - `Agent`: Clauseo's helpers (`clauseo_profile::subagents`) alone. Every Claude launch turns
+///   Claude Code's own agent types off (`loads.rs`, `CLAUDE_BUILTIN_AGENTS_OFF_VAR`).
 /// - `SendMessage`: continues a helper, which starts in the background (Claude Code's answer to
 ///   `Agent` says so). `TaskStop`: stops a background command or helper.
 /// - `Skill`: the built-in skills and the launch's packs (decision record 0040).
