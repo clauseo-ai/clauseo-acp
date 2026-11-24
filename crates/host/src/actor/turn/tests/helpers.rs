@@ -25,8 +25,9 @@ use crate::agent::AgentInput;
 
 pub(super) const PROMPT: &str =
     r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}"#;
-const LEAD_STEP: &str = r#"{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-0","title":"Read","kind":"read","status":"in_progress"}}}"#;
-const CANCEL: &str = r#"{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}"#;
+pub(super) const LEAD_STEP: &str = r#"{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-0","title":"Read","kind":"read","status":"in_progress"}}}"#;
+pub(super) const CANCEL: &str =
+    r#"{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}"#;
 
 /// The recorded launch input, its folder left out.
 pub(super) const LAUNCH_INPUT: &str = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
@@ -163,7 +164,7 @@ fn prompt_answer(_: &Actor, input: &Input) -> bool {
 }
 
 /// Whether the host has logged the lead's step `tc-0`.
-fn lead_step_logged(actor: &mut Actor, thread: ThreadId) -> bool {
+pub(super) fn lead_step_logged(actor: &mut Actor, thread: ThreadId) -> bool {
     actor
         .loaded(StreamId::Thread(thread))
         .is_some_and(|loaded| loaded.sent.tool_call(&session(), "tc-0").is_some())
@@ -345,6 +346,77 @@ fn the_recorded_background_helper_ends_on_its_handback() {
             "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
             // The digest is past half the inline limit, so it is logged as a blob.
             "end paper-reader Done <blob>",
+            "turn_ended EndTurn",
+        ]
+    );
+    rig.finish();
+}
+
+/// A handback that says `success: false` sent nothing: the helper works on, and its next handback,
+/// whose report comes in its update rather than its call, ends it with that report.
+#[test]
+fn a_refused_handback_keeps_the_helper_and_a_later_one_ends_it_with_its_report() {
+    let mut rig = Rig::start("helpers-handback-twice", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    let first = call(
+        "toolu_H1",
+        "SubagentHandback",
+        Some(r#"{"message":"Draft."}"#),
+    );
+    stamped(&mut rig, thread, at, "toolu_A", first);
+    let refused = r#"{"success":false,"message":"Nothing was sent."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H1", None, COMPLETED, Some(refused)),
+    );
+    stamped(
+        &mut rig,
+        thread,
+        at,
+        "toolu_A",
+        call("toolu_R1", "Read", None),
+    );
+    stamped(
+        &mut rig,
+        thread,
+        at,
+        "toolu_A",
+        call("toolu_H2", "SubagentHandback", None),
+    );
+    let report = r#"{"message":"Final digest."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H2", Some(report), None, None),
+    );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H2", None, COMPLETED, Some(DELIVERED)),
+    );
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=Digest lease and notice task=true",
+            "step toolu_R1 paper-reader",
+            "end paper-reader Done Final digest.",
             "turn_ended EndTurn",
         ]
     );

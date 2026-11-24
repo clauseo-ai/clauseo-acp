@@ -6,17 +6,19 @@ use futures::channel::oneshot;
 
 use clauseo_acp::Origin;
 use clauseo_protocol::{
-    HelperOutcome, HostQuery, PageLimit, Principal, QueryResult, StreamId, ThreadId, ViewEntry,
+    DetachReason, DomainEvent, HelperOutcome, HostCommand, HostQuery, PageLimit, Principal,
+    QueryResult, StreamId, ThreadId, ViewEntry,
 };
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::helpers::{
-    COMPLETED, DELIVERED, LAUNCH_INPUT, PROMPT, call, in_background, lead, live_turn, one_turn,
-    patch, stamped, story, words,
+    CANCEL, COMPLETED, DELIVERED, LAUNCH_INPUT, LEAD_STEP, PROMPT, call, in_background, lead,
+    lead_step_logged, live_turn, one_turn, patch, stamped, story, words,
 };
 use super::rig::Rig;
 use crate::actor::input::Request;
+use crate::actor::turn::agents;
 use crate::actor::turn::helpers as turn_helpers;
 
 /// The helper's view after a reopen is the view before it: the same `Helper` and `HelperText`
@@ -72,18 +74,7 @@ fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
     let mut rig = Rig::start("helpers-crash", "");
     let thread = rig.thread();
     let turn = rig.running_turn(thread);
-    let start = turn_helpers::Start {
-        id: None,
-        acp_id: "toolu_A".into(),
-        parent: None,
-        call: None,
-        name: "paper-reader".into(),
-        label: None,
-        task: Some("Read.".to_owned()),
-        model: None,
-        background: true,
-    };
-    turn_helpers::start(&mut rig.actor, thread, turn, start).unwrap();
+    turn_helpers::start(&mut rig.actor, thread, turn, open_start()).unwrap();
     rig.settle_commits();
     let state = &mut rig.actor.threads.get_mut(&thread).unwrap().turn;
     state.current = None;
@@ -102,6 +93,11 @@ fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
         panic!("{entries:?}");
     };
     assert_eq!(entry.outcome, Some(HelperOutcome::Stopped));
+    let before = rig.log(thread).len();
+    let mut rig = rig.restart(2);
+    helper_entries(&mut rig, thread);
+    rig.settle_commits();
+    assert_eq!(rig.log(thread).len(), before, "a second start adds nothing");
     rig.finish();
 }
 
@@ -136,18 +132,7 @@ fn a_helper_left_open_past_its_turn_is_stopped_once_at_the_next_load() {
     let thread = rig.thread();
     let turn = send_prompt(&mut rig, 10, thread);
     until_ended(&mut rig, thread);
-    let start = turn_helpers::Start {
-        id: None,
-        acp_id: "toolu_A".into(),
-        parent: None,
-        call: None,
-        name: "paper-reader".into(),
-        label: None,
-        task: Some("Read.".to_owned()),
-        model: None,
-        background: true,
-    };
-    turn_helpers::start(&mut rig.actor, thread, turn, start).unwrap();
+    turn_helpers::start(&mut rig.actor, thread, turn, open_start()).unwrap();
     rig.settle_commits();
     // The crash takes the run's memory of its helpers with it.
     rig.actor.threads.get_mut(&thread).unwrap().turn.helpers = None;
@@ -175,6 +160,78 @@ fn a_helper_left_open_past_its_turn_is_stopped_once_at_the_next_load() {
         "a second start adds nothing"
     );
     rig.finish();
+}
+
+/// A Stop whose write fails: the retry after the stream drains still ends the helper, once.
+#[test]
+fn a_stop_whose_write_fails_ends_its_helper_on_the_retry() {
+    let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
+    let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n");
+    let mut rig = Rig::start("helpers-stop-fails", &steps);
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
+    let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(input)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    rig.fail(1, |event| matches!(event, DomainEvent::HelperEnded(_)));
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    until_ended(&mut rig, thread);
+    let story = story(&rig.log(thread));
+    let ends: Vec<&String> = story
+        .iter()
+        .filter(|line| line.starts_with("end "))
+        .collect();
+    assert_eq!(ends, ["end paper-reader Stopped -"], "{story:?}");
+    rig.finish();
+}
+
+/// The agent session ends with no turn running while a helper is open: the helper ends
+/// `Stopped` in the detach's write.
+#[test]
+fn a_detach_stops_an_open_helper() {
+    let mut rig = Rig::start("helpers-detach", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    turn_helpers::start(&mut rig.actor, thread, turn, open_start()).unwrap();
+    rig.settle_commits();
+    agents::log_detach(&mut rig.actor, thread, DetachReason::Closed);
+    rig.settle_commits();
+    let log = rig.log(thread);
+    assert_eq!(
+        story(&log)[1..],
+        [
+            "turn_ended EndTurn",
+            "start paper-reader call= model=- label=- task=true",
+            "end paper-reader Stopped -",
+        ]
+    );
+    assert!(matches!(
+        log.last(),
+        Some(DomainEvent::AgentSessionDetached(_))
+    ));
+    rig.finish();
+}
+
+/// A background helper's start with no launch step, as a test puts it in by hand.
+fn open_start() -> turn_helpers::Start {
+    turn_helpers::Start {
+        id: None,
+        acp_id: "toolu_A".into(),
+        parent: None,
+        call: None,
+        name: "paper-reader".into(),
+        label: None,
+        task: Some("Read.".to_owned()),
+        model: None,
+        background: true,
+    }
 }
 
 /// The thread's view entries that belong to a helper (its card, its words, its steps), as a

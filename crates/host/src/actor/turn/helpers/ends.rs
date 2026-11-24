@@ -1,0 +1,207 @@
+//! How a conversation's helpers end when their run is cut short: a Stop, a turn's close (by
+//! itself, a failure, the agent gone), a detach, a failed write's retry, and a past run's
+//! helpers left open in the log (`helpers.rs` for the rest).
+
+use clauseo_protocol::{
+    HelperId, HelperOutcome, StopReason, StreamId, ThreadId, TurnId, ViewEntry,
+};
+use clauseo_reducer::ThreadState;
+
+use super::super::super::Actor;
+use super::super::close::{Expiries, TurnClose};
+use super::super::out::Out;
+use super::super::{Then, TurnPhase, current, state};
+use super::existing;
+use crate::build;
+use crate::error::Error;
+use crate::log_file::Cause;
+
+/// Pushes `HelperEnded { outcome }` for every open helper of the thread into `out`, and closes
+/// them.
+fn end_open(
+    actor: &mut Actor,
+    thread: ThreadId,
+    outcome: HelperOutcome,
+    out: &mut Out,
+) -> Result<(), Error> {
+    let Some(helpers) = existing(actor, thread) else {
+        return Ok(());
+    };
+    let mut ended: Vec<HelperId> = Vec::new();
+    for known in helpers.known.values_mut().filter(|known| known.open) {
+        known.open = false;
+        ended.push(known.id);
+    }
+    // In start order, so the log reads as the helpers ran.
+    ended.sort_unstable();
+    for helper in ended {
+        out.push(actor, build::helper_ended(helper, outcome, None).value)?;
+    }
+    Ok(())
+}
+
+/// The thread's stream drained after a failed write (`failure.rs`): a helper this run marked
+/// ended is open again when the log does not hold its end, so the retried cancel or close ends
+/// it. Reads the view only for a thread that has helpers.
+pub(in crate::actor::turn) fn reopen_from_view(actor: &mut Actor, thread: ThreadId) {
+    if existing(actor, thread).is_none() {
+        return;
+    }
+    let open: Vec<HelperId> = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .map(open_in_view)
+        .unwrap_or_default();
+    let Some(helpers) = existing(actor, thread) else {
+        return;
+    };
+    for known in helpers.known.values_mut() {
+        if !known.open && open.contains(&known.id) {
+            known.open = true;
+        }
+    }
+}
+
+/// The helpers `state` holds started and not ended.
+fn open_in_view(state: &ThreadState) -> Vec<HelperId> {
+    if state.open_helpers() == 0 {
+        return Vec::new();
+    }
+    state
+        .entries()
+        .values()
+        .filter_map(|entry| match entry {
+            ViewEntry::Helper(helper) if helper.outcome.is_none() => Some(helper.helper),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A cancel of `turn` (the lawyer's Stop, a failure, the host stopping): every open helper ends
+/// `Stopped`, unless `send_now` (the lawyer's next message cut the turn short), which leaves
+/// them open and keeps them open at the turn's end.
+pub(in crate::actor::turn) fn on_cancel(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    send_now: bool,
+    out: &mut Out,
+) -> Result<(), Error> {
+    if send_now {
+        if let Some(helpers) = existing(actor, thread) {
+            helpers.kept = Some(turn);
+        }
+        return Ok(());
+    }
+    end_open(actor, thread, HelperOutcome::Stopped, out)
+}
+
+/// What a turn that ends by itself (a stop reason from the agent, no failure) writes for a
+/// helper still open: it never handed back a report. The one home of that word.
+const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
+
+/// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
+/// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
+/// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
+/// turn a send-now cut short, and a turn whose prompt never went out, leave them open.
+/// Start-up's repair of a turn a crash or a quit left open (its expiries listed from the log)
+/// ends `Stopped` every helper the log leaves open, so no card of the last run stays running.
+pub(in crate::actor::turn) fn on_close(
+    actor: &mut Actor,
+    out: &mut Out,
+    close: &TurnClose,
+) -> Result<(), Error> {
+    let thread = out.thread();
+    if matches!(close.expiries, Expiries::Listed { .. }) {
+        return end_logged_open(actor, thread, out);
+    }
+    let turn = close.turn;
+    // Only a turn whose prompt went out closes helpers: a queued turn removed, or one that
+    // failed before its prompt, leaves them as they are.
+    let prompted = current(actor, thread).is_some_and(|current| {
+        current.turn == turn
+            && matches!(
+                current.phase,
+                TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending
+            )
+    });
+    let Some(helpers) = existing(actor, thread) else {
+        return Ok(());
+    };
+    let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
+    // The engine gone (its detach, or a failure: the agent exited, the connection was lost)
+    // and a cancel stop every open helper, whoever cut the turn short.
+    let stopped =
+        close.detach.is_some() || close.failure.is_some() || close.stop == StopReason::Cancelled;
+    let outcome = if close.detach.is_some() {
+        HelperOutcome::Stopped
+    } else if kept || !prompted {
+        return Ok(());
+    } else if stopped {
+        HelperOutcome::Stopped
+    } else {
+        ENDED_BY_ITSELF
+    };
+    end_open(actor, thread, outcome, out)
+}
+
+/// `HelperEnded { Stopped }` into `out` for every helper the thread's view holds with no end:
+/// the helpers of a run that stopped without ending them. One walk of the view, at start-up only.
+fn end_logged_open(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result<(), Error> {
+    let open: Vec<HelperId> = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .map(open_in_view)
+        .unwrap_or_default();
+    for helper in open {
+        let ended = build::helper_ended(helper, HelperOutcome::Stopped, None).value;
+        out.push(actor, ended)?;
+    }
+    Ok(())
+}
+
+/// A thread's stream loaded: the helpers its log leaves open end `Stopped` when no agent of this
+/// run can still be running them (the run that started them crashed or quit, its agent gone),
+/// whether or not a turn was left open. A thread with an open turn, a repair or a close in
+/// progress, or a live agent is left to those paths. Costs one count read for a thread without
+/// open helpers; a second load finds none open.
+pub(crate) fn settle_loaded(actor: &mut Actor, thread: ThreadId) {
+    let stream = StreamId::Thread(thread);
+    let open = actor
+        .loaded(stream)
+        .and_then(|loaded| loaded.state.as_thread())
+        .map_or(0, ThreadState::open_helpers);
+    if open == 0 || actor.pipeline.in_flight(stream) {
+        return;
+    }
+    let busy = state(actor, thread).is_none_or(|state| {
+        state.agent.is_some()
+            || state.current.is_some()
+            || state.closing.is_some()
+            || state.reconciling
+    });
+    if busy {
+        return;
+    }
+    let sent = Out::new(actor, thread, None).and_then(|mut out| {
+        end_logged_open(actor, thread, &mut out)?;
+        out.send(actor, Then::Nothing)
+    });
+    if let Err(error) = sent {
+        tracing::warn!(%thread, error = %Cause(&error), "open helpers of a past run were not ended");
+    }
+}
+
+/// The agent session ended outside a turn: every open helper ends `Stopped`, and the thread
+/// forgets its helpers, whose ids belonged to that session.
+pub(in crate::actor::turn) fn on_detach(
+    actor: &mut Actor,
+    thread: ThreadId,
+    out: &mut Out,
+) -> Result<(), Error> {
+    end_open(actor, thread, HelperOutcome::Stopped, out)?;
+    if let Some(state) = state(actor, thread) {
+        state.helpers = None;
+    }
+    Ok(())
+}

@@ -56,6 +56,8 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
 /// or the cancel fallback. A turn whose checkpoint runs ends when the checkpoint answers. A turn
 /// that never started ends now.
 pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
+    // A helper end the failed write lost is open again for the retries below.
+    super::helpers::reopen_from_view(actor, thread);
     retry_closing(actor, thread);
     undo::retry(actor, thread);
     limits::retry_stops(actor, thread, true);
