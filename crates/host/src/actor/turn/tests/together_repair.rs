@@ -1,7 +1,9 @@
 //! The start-up repair of an answer left open beside others: it is measured from its own
 //! before-turn checkpoint, and the papers the other open answers wrote, those on cards logged
 //! since, and those logged as outside edits since are left off its card, so each paper is on
-//! one card or logged as an outside edit, never on none and never on the wrong one.
+//! one card or logged as an outside edit, never on none and never on the wrong one. Repaired
+//! from its own after-turn checkpoint, a paper a card logged after it credits is left off while
+//! it held there what that card left, its answer never named.
 
 use clauseo_protocol::{DomainEvent, FilesChanged, MatterPath, ThreadId, TurnId};
 
@@ -142,6 +144,53 @@ fn a_repair_from_its_own_checkpoint_leaves_the_other_open_answers_papers_off() {
         [("notes/b.txt".to_owned(), false, vec![])]
     );
     assert_eq!(beside(&log_b, turn_b), ["notes/a.txt"]);
+    rig.finish();
+}
+
+#[test]
+fn a_repair_from_its_own_checkpoint_leaves_off_what_a_later_card_credits() {
+    let mut rig = Rig::start("together-repair-own-ended", ASK_THEN_A);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    // A starts and waits on the lawyer; B starts beside it and writes notes/b.txt, running on.
+    let turn_a = send_prompt(&mut rig, 10, first, "Ask, then write A.");
+    let request = until_asked(&mut rig, first);
+    let turn_b = send_prompt(&mut rig, 11, second, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| {
+        prompt_answer_of(second, input)
+    });
+    // A writes notes/a.txt and ends: R8 takes its after-turn checkpoint (holding b.txt too),
+    // and both commits of its end fail, so the log never records it.
+    rig.fail(2, |event| matches!(event, DomainEvent::TurnEnded(_)));
+    answer(&mut rig, 12, first, request, "allow-once");
+    rig.run_until("A's end gave up", |actor: &mut Actor| {
+        actor.threads[&first].turn.current.is_none() && actor.work.commits == 0
+    });
+    assert!(!has_ended(&rig.log(first), turn_a), "A's turn is open");
+    // The lawyer edits memo.txt, so B's after-turn checkpoint is a new one, after A's; B ends,
+    // its card crediting b.txt.
+    rig.write_file("memo.txt", "Call the landlord.");
+    rig.release_held();
+    until_ended(&mut rig, &[second]);
+    let log_b = rig.log(second);
+    assert_eq!(
+        card(&log_b, turn_b),
+        [
+            ("memo.txt".to_owned(), true, vec![]),
+            ("notes/b.txt".to_owned(), false, vec![])
+        ]
+    );
+
+    // A's repair takes its own checkpoint: b.txt, as B's card left it, is not on A's card, and
+    // B is not named there.
+    let mut rig = crash(rig, &[]);
+    let log_a = rig.log(first);
+    assert!(has_ended(&log_a, turn_a), "A's turn is repaired");
+    assert_eq!(
+        card(&log_a, turn_a),
+        [("notes/a.txt".to_owned(), true, vec![])]
+    );
+    assert_eq!(beside(&log_a, turn_a), ["notes/b.txt"]);
+    assert!(!outside_papers(&mut rig).contains(&"notes/b.txt".to_owned()));
     rig.finish();
 }
 

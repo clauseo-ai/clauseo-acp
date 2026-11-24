@@ -418,18 +418,21 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
     match (kind, reply) {
         (JobKind::Before(turn), MatterReply::BeforeTurn(result)) => {
             note::read_first(actor, thread, move |actor| {
-                known::when_loaded(actor, thread, result, move |actor, result| {
+                known::when_loaded(actor, thread, result, false, move |actor, result| {
                     steps::on_before_turn(actor, thread, turn, result);
                 });
             });
         }
         (JobKind::After(turn), MatterReply::AfterTurn(result)) => {
-            known::when_loaded(actor, thread, result, move |actor, result| {
+            // Its end may log outside edits on another answer's checkpoint, merged with those
+            // already logged there: the matter's log is read first.
+            let edits = together::logs_edits(actor, thread, &result);
+            known::when_loaded(actor, thread, result, edits, move |actor, result| {
                 end::on_after_turn(actor, thread, turn, result);
             });
         }
         (JobKind::Reconcile(repair), MatterReply::AfterTurn(result)) => {
-            known::when_loaded(actor, thread, result, move |actor, result| {
+            known::when_loaded(actor, thread, result, false, move |actor, result| {
                 reconcile::on_after_turn(actor, thread, *repair, result);
             });
         }
