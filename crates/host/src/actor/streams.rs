@@ -203,12 +203,13 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
         since_snapshot,
     });
     actor.streams.insert(stream, StreamSlot::Loaded(loaded));
-    for waiter in loading.waiters {
-        waiter(actor, Ok(()));
-    }
-    // Helpers a past run left open end now that the log is here (`turn/helpers.rs`).
+    // Helpers a past run left open end now that the log is here (`turn/helpers.rs`), before a
+    // waiter is done with the stream and lets it unload.
     if let StreamId::Thread(thread) = stream {
         turn::settle_loaded(actor, thread);
+    }
+    for waiter in loading.waiters {
+        waiter(actor, Ok(()));
     }
     if let Some(StreamSlot::Loaded(loaded)) = actor.streams.get_mut(&stream)
         && loaded.since_snapshot >= SNAPSHOT_EVERY_EVENTS
