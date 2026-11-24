@@ -34,6 +34,8 @@ pub enum Error {
     Size,
     /// Two `sizes` rows for the same (agent, os, arch).
     DuplicateSize,
+    /// `sizes` lacks a row for one of the 12 (agent, os, arch) combinations the app ships for.
+    SizesIncomplete,
     /// `package_json` has a field an engines pin file doesn't (such as `scripts`), or isn't an
     /// object.
     PackageJsonField,
@@ -59,10 +61,21 @@ pub enum Error {
     /// The lock's root `dependencies` differ from `package_json`'s, or a pinned package (an
     /// engine, or an override) is installed at another version than its pin.
     LockMismatch,
+    /// A `packages` entry's `dependencies`, `optionalDependencies` or `peerDependencies` has
+    /// a spec that isn't a semver range or `npm:<name>@<range>` (a git, URL, `file:`, `link:`,
+    /// `workspace:` spec or a dist-tag), or isn't an object of strings.
+    LockSpec,
     /// The running app's version is not in `apps`.
     AppNotListed,
     /// `seq` is not above both the bundled seq and the seq in use (equal is not newer).
     NotNewer {
+        /// The list's `seq`.
+        seq: u64,
+        /// The larger of the bundled seq and the seq in use.
+        floor: u64,
+    },
+    /// `seq` is more than [`MAX_SEQ_STEP`](crate::MAX_SEQ_STEP) above the floor.
+    SeqJump {
         /// The list's `seq`.
         seq: u64,
         /// The larger of the bundled seq and the seq in use.
@@ -92,6 +105,7 @@ impl fmt::Display for Error {
             Error::Generated => "generated is not an RFC 3339 UTC time",
             Error::NoApps => "apps is empty or has an empty entry",
             Error::Size => "a sizes row is not valid",
+            Error::SizesIncomplete => "sizes lacks a platform the app ships for",
             Error::DuplicateSize => "two sizes rows name the same agent, OS and architecture",
             Error::PackageJsonField => "package_json has a field a pin file doesn't",
             Error::Dependencies => "package_json's dependencies are not the two engines",
@@ -101,10 +115,14 @@ impl fmt::Display for Error {
             Error::LockEntry => "a locked package is a link, bundled or malformed",
             Error::Integrity => "a locked package has no single sha512 integrity",
             Error::Resolved => "a locked package is not its own npm registry tarball",
+            Error::LockSpec => "a locked package depends on a spec outside the registry",
             Error::LockMismatch => "the lock does not match package_json's pins",
             Error::AppNotListed => "this app version is not in apps",
             Error::NotNewer { seq, floor } => {
                 return write!(f, "the list's seq {seq} is not above {floor}");
+            }
+            Error::SeqJump { seq, floor } => {
+                return write!(f, "the list's seq {seq} is too far above {floor}");
             }
             Error::Version => "a listed version is not plain semver",
             Error::BundledVersion => "a bundled version is missing or not plain semver",

@@ -3,7 +3,13 @@
 use clauseo_engines::{Context, Error, load_with_key};
 use serde_json::json;
 
-use crate::fixtures::{GOOD, KEY_A, NEWER, NOT_SEMVER, OLDER, Signed, bundled, context, refusal};
+use crate::fixtures::{
+    GOOD, KEY_A, NEWER, NOT_SEMVER, OLDER, SEQ_JUMP, SEQ_STEP, Signed, above, bundled, check,
+    context, pin, refusal,
+};
+
+const CLAUDE: &str = "@agentclientprotocol/claude-agent-acp";
+const CODEX: &str = "@agentclientprotocol/codex-acp";
 
 fn with(signed: &Signed, cx: &Context<'_>) -> Result<u64, Error> {
     load_with_key(signed.json, signed.sig, cx, KEY_A).map(|list| list.seq())
@@ -73,18 +79,18 @@ fn a_seq_not_above_the_bundled_one_is_refused() {
 
 #[test]
 fn a_version_older_than_the_bundled_one_is_refused() {
-    // The list's codex override (and its lock) is 0.162.0; the bundle pins 0.162.1.
+    // The list's codex override (and its lock) is just below the bundle's.
     assert_eq!(refusal(&OLDER), Some(Error::OlderThanBundled));
     // A bundle newer than the good list's claude-agent-acp.
     let mut newer_bundle = bundled();
-    newer_bundle["dependencies"]["@agentclientprotocol/claude-agent-acp"] = json!("0.89.2");
+    newer_bundle["dependencies"][CLAUDE] = json!(above(pin(CLAUDE)));
     assert_eq!(
         with(&GOOD, &context(&newer_bundle)),
         Err(Error::OlderThanBundled)
     );
     // A bundle a patch ahead of the list.
     let mut released = bundled();
-    released["dependencies"]["@agentclientprotocol/codex-acp"] = json!("2.2.3");
+    released["dependencies"][CODEX] = json!(above(pin(CODEX)));
     assert_eq!(
         with(&GOOD, &context(&released)),
         Err(Error::OlderThanBundled)
@@ -104,12 +110,32 @@ fn a_bundle_without_the_override_does_not_need_it() {
 fn a_version_that_is_not_plain_semver_is_refused() {
     assert_eq!(refusal(&NOT_SEMVER), Some(Error::Version));
     let mut range = bundled();
-    range["dependencies"]["@agentclientprotocol/codex-acp"] = json!("^2.2.2");
+    range["dependencies"][CODEX] = json!(format!("^{}", pin(CODEX)));
     assert_eq!(with(&GOOD, &context(&range)), Err(Error::BundledVersion));
     let mut missing = bundled();
     missing["dependencies"]
         .as_object_mut()
         .unwrap()
-        .remove("@agentclientprotocol/codex-acp");
+        .remove(CODEX);
     assert_eq!(with(&GOOD, &context(&missing)), Err(Error::BundledVersion));
+}
+
+#[test]
+fn a_seq_more_than_2_to_the_16_above_the_floor_is_refused() {
+    assert_eq!(clauseo_engines::MAX_SEQ_STEP, 1 << 16);
+    assert_eq!(check(&SEQ_STEP).unwrap().seq(), 1 + (1 << 16));
+    assert_eq!(
+        refusal(&SEQ_JUMP),
+        Some(Error::SeqJump {
+            seq: 2 + (1 << 16),
+            floor: 1
+        })
+    );
+    // Measured from the larger of the bundled seq and the seq in use.
+    let bundled = bundled();
+    let cx = Context {
+        in_use_seq: Some(2),
+        ..context(&bundled)
+    };
+    assert_eq!(with(&SEQ_JUMP, &cx), Ok(2 + (1 << 16)));
 }

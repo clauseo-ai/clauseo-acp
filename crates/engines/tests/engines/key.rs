@@ -77,8 +77,9 @@ fn key_ids_read_as_minisign_prints_them() {
     assert_eq!(key_id("dW50cnVzdGVkIGNvbW1lbnQ6IHgKUlc="), None);
 }
 
+use base64::Engine as _;
+
 fn base64_decode(text: &str) -> Vec<u8> {
-    use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
         .decode(text.trim())
         .unwrap()
@@ -86,15 +87,64 @@ fn base64_decode(text: &str) -> Vec<u8> {
 
 #[test]
 fn the_release_guard_needs_the_release_key_in_a_release_build() {
+    fn guard(mode: Option<&str>, key: Option<&str>) -> Result<(), &'static str> {
+        release_guard(mode, key, TAURI_CONF)
+    }
     let release = conf_pubkey();
-    assert_eq!(release_guard(None, None), Ok(()));
-    assert_eq!(release_guard(Some("test"), Some(KEY_A)), Ok(()));
-    assert_eq!(release_guard(Some("dry"), None), Ok(()));
-    assert_eq!(release_guard(Some("release"), Some(&release)), Ok(()));
-    assert!(release_guard(Some("release"), Some(KEY_A)).is_err());
-    assert!(release_guard(Some("release"), None).is_err());
-    assert!(release_guard(Some("release"), Some("")).is_err());
-    assert!(release_guard(Some("release"), Some("garbage")).is_err());
-    assert!(release_guard(Some(""), None).is_err());
-    assert!(release_guard(Some("Release"), Some(&release)).is_err());
+    assert_eq!(guard(None, None), Ok(()));
+    assert_eq!(guard(Some("test"), Some(KEY_A)), Ok(()));
+    assert_eq!(guard(Some("dry"), None), Ok(()));
+    assert_eq!(guard(Some("release"), Some(&release)), Ok(()));
+    // A trailing line break, as an environment variable may carry, is not part of the key.
+    assert_eq!(
+        guard(Some("release"), Some(&format!("{release}\n"))),
+        Ok(())
+    );
+    assert!(guard(Some("release"), Some(KEY_A)).is_err());
+    assert!(guard(Some("release"), None).is_err());
+    assert!(guard(Some("release"), Some("")).is_err());
+    assert!(guard(Some("release"), Some("garbage")).is_err());
+    assert!(guard(Some(""), None).is_err());
+    assert!(guard(Some("Release"), Some(&release)).is_err());
+    // The release key's id with other bytes (another untrusted comment): not the config's key.
+    let file = String::from_utf8(base64_decode(&release)).unwrap();
+    let renamed = file.replacen("minisign public key", "minisign  public key", 1);
+    let same_id = base64::engine::general_purpose::STANDARD.encode(renamed);
+    assert_eq!(key_id(&same_id), Some(RELEASE_KEY_ID));
+    assert!(guard(Some("release"), Some(&same_id)).is_err());
+    // A config with no pubkey, or two.
+    assert!(release_guard(Some("release"), Some(&release), "{}").is_err());
+    let twice = format!("{{\"pubkey\": \"{release}\", \"pubkey\": \"{release}\"}}");
+    assert!(release_guard(Some("release"), Some(&release), &twice).is_err());
+}
+
+#[test]
+fn key_ids_need_canonical_base64_as_the_runtime_does() {
+    use base64::engine::general_purpose::STANDARD;
+    const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let file = String::from_utf8(base64_decode(&conf_pubkey())).unwrap();
+    // The release key's file with line breaks added until its base64 ends in padding.
+    let padded = (0..3)
+        .map(|extra| STANDARD.encode(format!("{file}{}", "\n".repeat(extra))))
+        .find(|key| key.ends_with('='))
+        .unwrap();
+    assert_eq!(key_id(&padded), Some(RELEASE_KEY_ID));
+    // Padding dropped, or one too many.
+    assert_eq!(key_id(padded.trim_end_matches('=')), None);
+    assert_eq!(key_id(&format!("{padded}=")), None);
+    // Non-zero bits under the padding, which the runtime's decoder refuses too.
+    let at = padded.rfind(|c| c != '=').unwrap();
+    let value = ALPHABET.find(&padded[at..=at]).unwrap();
+    assert_eq!(
+        value & 1,
+        0,
+        "canonical base64 leaves the dropped bits zero"
+    );
+    let mut changed = padded;
+    changed.replace_range(at..=at, &ALPHABET[value | 1..=value | 1]);
+    assert!(STANDARD.decode(&changed).is_err());
+    assert_eq!(key_id(&changed), None);
+    // A space inside the key line.
+    let spaced = file.replacen("\nRW", "\nR W", 1);
+    assert_eq!(key_id(&STANDARD.encode(spaced)), None);
 }

@@ -3,10 +3,11 @@
 use clauseo_engines::Error;
 
 use crate::fixtures::{
-    ABSOLUTE_KEY, BACKSLASH_KEY, DOTDOT_KEY, EXTRA_DEP, EXTRA_OVERRIDE, IN_BUNDLE,
-    INSTALLED_MISMATCH, LINK, LOCK_V2, MISSING_DEP, MISSING_INTEGRITY, MISSING_RESOLVED,
-    NON_NPM_RESOLVED, OTHER_RESOLVED, OVERRIDE_ALIAS, OVERRIDE_GIT, OVERRIDE_REF, ROOT_MISMATCH,
-    SCRIPTS, SHA1_INTEGRITY, Signed, TWO_INTEGRITY, refusal,
+    ABSOLUTE_KEY, BACKSLASH_KEY, DEP_BUILD, DEP_GIT, DEP_NPM_ALIAS, DOTDOT_KEY, EXTRA_DEP,
+    EXTRA_OVERRIDE, IN_BUNDLE, INSTALLED_MISMATCH, LINK, LOCK_V2, MISSING_DEP, MISSING_INTEGRITY,
+    MISSING_RESOLVED, NON_NPM_RESOLVED, OTHER_RESOLVED, OVERRIDE_ALIAS, OVERRIDE_DROPPED,
+    OVERRIDE_GIT, OVERRIDE_OBJECT, OVERRIDE_REF, PACKAGE_JSON_ARRAY, ROOT_MISMATCH, SCRIPTS,
+    SHA1_INTEGRITY, Signed, TWO_INTEGRITY, WORKSPACES, refusal,
 };
 
 fn each(cases: &[(&str, &Signed)], expected: &Error) {
@@ -112,5 +113,39 @@ fn a_lock_that_disagrees_with_the_pins_is_refused() {
             ("installed version", &INSTALLED_MISMATCH),
         ],
         &Error::LockMismatch,
+    );
+}
+
+#[test]
+fn a_package_json_that_is_not_a_pin_file_is_refused() {
+    each(
+        &[
+            ("an array", &PACKAGE_JSON_ARRAY),
+            ("workspaces", &WORKSPACES),
+        ],
+        &Error::PackageJsonField,
+    );
+}
+
+#[test]
+fn an_override_that_is_not_a_string_or_is_dropped_is_refused() {
+    each(
+        &[
+            ("an object", &OVERRIDE_OBJECT),
+            ("dropped while the bundle pins it", &OVERRIDE_DROPPED),
+        ],
+        &Error::Overrides,
+    );
+}
+
+#[test]
+fn a_dependency_that_is_not_one_plain_version_is_refused() {
+    each(
+        &[
+            ("npm: alias", &DEP_NPM_ALIAS),
+            ("git+", &DEP_GIT),
+            ("build metadata", &DEP_BUILD),
+        ],
+        &Error::Version,
     );
 }

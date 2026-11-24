@@ -28,6 +28,14 @@ const PACKAGE_JSON_FIELDS: [&str; 7] = [
     "overrides",
 ];
 
+/// The furthest a list's `seq` may be above the floor: 2^16 publishes.
+pub const MAX_SEQ_STEP: u64 = 1 << 16;
+
+/// One plain semver version with no build metadata.
+fn is_exact(text: &str) -> bool {
+    Version::parse(text).is_ok_and(|version| version.build.is_empty())
+}
+
 /// Every rule after the shape, in the crate docs' order.
 pub(crate) fn check(list: &EngineList, cx: &Context<'_>) -> Result<(), Error> {
     let package_json = list
@@ -62,15 +70,22 @@ pub(crate) fn check(list: &EngineList, cx: &Context<'_>) -> Result<(), Error> {
     {
         return Err(Error::Overrides);
     }
-    // Every pin is one exact version: no range, tag, `npm:` alias, git or file spec, `$ref`.
+    // An override the bundle pins stays pinned.
+    if OVERRIDES.iter().any(|name| {
+        cx.bundled_package_json
+            .get("overrides")
+            .and_then(|bundled| bundled.get(*name))
+            .is_some()
+            && !overrides.contains_key(*name)
+    }) {
+        return Err(Error::Overrides);
+    }
+    // Every pin is one exact version with no build metadata: no range, tag, `npm:` alias, git
+    // or file spec, `$` reference, `+build`.
     if dependencies
         .values()
         .chain(overrides.values())
-        .any(|value| {
-            value
-                .as_str()
-                .is_none_or(|text| Version::parse(text).is_err())
-        })
+        .any(|value| value.as_str().is_none_or(|text| !is_exact(text)))
     {
         return Err(Error::Version);
     }
@@ -81,6 +96,12 @@ pub(crate) fn check(list: &EngineList, cx: &Context<'_>) -> Result<(), Error> {
     let floor = cx.bundled_seq.max(cx.in_use_seq.unwrap_or(0));
     if list.seq() <= floor {
         return Err(Error::NotNewer {
+            seq: list.seq(),
+            floor,
+        });
+    }
+    if list.seq() > floor.saturating_add(MAX_SEQ_STEP) {
+        return Err(Error::SeqJump {
             seq: list.seq(),
             floor,
         });

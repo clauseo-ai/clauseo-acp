@@ -5,7 +5,8 @@ use base64::engine::general_purpose::STANDARD;
 use clauseo_engines::{Error, MAX_JSON, MAX_SIGNATURE, load_with_key};
 
 use crate::fixtures::{
-    APP_VERSION_SIG, BY_B_SIG, GOOD, KEY_A, KEY_B, NEWER, OTHER_NAME_SIG, bundled, check, context,
+    APP_VERSION_SIG, BAK_NAME_SIG, BY_B_SIG, BY_C_SIG, GOOD, KEY_A, KEY_B, KEY_C, NEWER,
+    NO_DIGITS_SIG, OTHER_NAME_SIG, TRAILING_TAB_SIG, bundled, check, context,
 };
 
 fn load(json: &[u8], sig: &[u8], key: &str) -> Result<(), Error> {
@@ -46,7 +47,7 @@ fn a_good_list_loads() {
     assert_eq!(list.json(), GOOD.json);
     assert_eq!(list.sizes().len(), 12);
     let live: serde_json::Value =
-        serde_json::from_str(include_str!("../../../limits/tests/live/package-lock.json")).unwrap();
+        serde_json::from_str(include_str!("../data/pins/package-lock.json")).unwrap();
     assert_eq!(list.package_lock(), &live);
     assert_eq!(list.package_json(), &bundled());
     assert_eq!(check(&NEWER).unwrap().seq(), 3);
@@ -152,4 +153,18 @@ fn oversize_json_is_refused_before_anything_else() {
     let mut padded = GOOD.json.to_vec();
     padded.resize(MAX_JSON + 1, b' ');
     assert_eq!(load(&padded, GOOD.sig, KEY_A), Err(Error::TooBig));
+}
+
+#[test]
+fn comments_close_to_the_right_one_are_refused() {
+    // The script's own signer, proved by the right comment loading.
+    assert_eq!(load(GOOD.json, BY_C_SIG, KEY_C), Ok(()));
+    assert_eq!(load(GOOD.json, NO_DIGITS_SIG, KEY_C), Err(Error::Comment));
+    assert_eq!(
+        load(GOOD.json, TRAILING_TAB_SIG, KEY_C),
+        Err(Error::Comment)
+    );
+    // Tauri's own, for a file named engines.json.bak.
+    assert!(sig_file(BAK_NAME_SIG).contains("\tfile:engines.json.bak\n"));
+    assert_eq!(load(GOOD.json, BAK_NAME_SIG, KEY_A), Err(Error::Comment));
 }

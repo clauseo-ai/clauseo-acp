@@ -1,29 +1,42 @@
 //! The lock's rules: a v3 `package-lock.json` whose every package is a plain registry tarball
-//! under `node_modules`, locked by one sha512, and whose root and adapters match the pins.
+//! under `node_modules`, locked by one sha512, depending only on registry specs, with no install
+//! script, and whose root, engines and codex packages match the pins at every depth.
+
+use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
 use crate::Error;
+use crate::npm::{installed_name, is_package_name, is_registry_spec, is_sha512, is_version_text};
 
 /// Where every locked package must resolve from.
 pub const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 
-/// npm's longest package name.
-const MAX_NAME: usize = 214;
+/// The codex override's package: its platform builds are installed as aliases of it.
+const CODEX: &str = "@openai/codex";
+
+/// The platforms codex's aliases are published for, as `node_modules/@openai/codex-<platform>`
+/// at version `<pin>-<platform>`.
+const CODEX_PLATFORMS: [&str; 6] = [
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-arm64",
+    "linux-x64",
+    "win32-arm64",
+    "win32-x64",
+];
+
+/// The fields of an entry that hold dependency specs npm resolves while building the tree.
+const SPEC_FIELDS: [&str; 3] = ["dependencies", "optionalDependencies", "peerDependencies"];
 
 /// Checks `lock` against the pins `dependencies` and `overrides` (already checked to be the
 /// official names, each an exact version):
 /// - `lockfileVersion` is 3 and `packages` is an object with a root `""` whose `dependencies`
 ///   equal `dependencies`;
-/// - every other key is `node_modules/<name>(/node_modules/<name>)*`, each `<name>` a valid npm
-///   name, optionally `@scope/`d;
-/// - every other entry has no `link` or `inBundle`, a string `version`, an `integrity` that is
-///   exactly `sha512-` and 86 base64 characters and `==`, and a `resolved` that is exactly
-///   `https://registry.npmjs.org/<pkg>/-/<base>-<version>.tgz`, `<pkg>` being the entry's
-///   `name` when it has one (an alias, such as codex's platform packages) else the key's last
-///   name, and `<base>` `<pkg>` without its scope;
-/// - `node_modules/<dep>` is at each dependency's pinned version, and `node_modules/<name>` at
-///   each override's.
+/// - every other key is `node_modules/<name>(/node_modules/<name>)*` with lower-case npm names,
+///   and no two keys are equal ignoring case;
+/// - every other entry passes [`package`];
+/// - `node_modules/<dep>` exists for each dependency and override.
 pub(crate) fn check(
     lock: &Value,
     dependencies: &Map<String, Value>,
@@ -40,122 +53,109 @@ pub(crate) fn check(
     if root.get("dependencies").and_then(Value::as_object) != Some(dependencies) {
         return Err(Error::LockMismatch);
     }
+    let pins: Vec<(&str, &str)> = dependencies
+        .iter()
+        .chain(overrides)
+        .filter_map(|(name, version)| Some((name.as_str(), version.as_str()?)))
+        .collect();
+    let mut folded = BTreeSet::new();
     for (path, entry) in packages {
         if path.is_empty() {
             continue;
         }
         let last = installed_name(path).ok_or(Error::LockPath)?;
-        package(entry, last)?;
+        if !folded.insert(path.to_ascii_lowercase()) {
+            return Err(Error::LockPath);
+        }
+        package(entry, last, &pins)?;
     }
-    for (name, version) in dependencies.iter().chain(overrides) {
-        let installed = packages
-            .get(&format!("node_modules/{name}"))
-            .and_then(|entry| entry.get("version"));
-        if installed != Some(version) {
+    for (name, _) in &pins {
+        if !packages.contains_key(&format!("node_modules/{name}")) {
             return Err(Error::LockMismatch);
         }
     }
     Ok(())
 }
 
-/// One entry other than the root, installed at a path whose last name is `last`.
-fn package(entry: &Value, last: &str) -> Result<(), Error> {
+/// One entry other than the root, installed at a path whose last name is `last`:
+/// - no `link`, `inBundle` or `hasInstallScript`;
+/// - a `name` only on a codex platform alias (`@openai/codex` at
+///   `node_modules/@openai/codex-<platform>`);
+/// - a string `version`; a package named in `pins` at exactly its pin (`<pin>-<platform>` for a
+///   codex alias), wherever it is installed;
+/// - every spec in `dependencies`, `optionalDependencies` and `peerDependencies` a registry
+///   spec ([`is_registry_spec`]);
+/// - an `integrity` that is exactly one sha512, and a `resolved` that is exactly
+///   `https://registry.npmjs.org/<pkg>/-/<base>-<version>.tgz`, `<pkg>` being the `name` when
+///   there is one else `last`, and `<base>` `<pkg>` without its scope.
+fn package(entry: &Value, last: &str, pins: &[(&str, &str)]) -> Result<(), Error> {
     let entry = entry.as_object().ok_or(Error::LockEntry)?;
-    if entry.contains_key("link") || entry.contains_key("inBundle") {
+    if ["link", "inBundle", "hasInstallScript"]
+        .iter()
+        .any(|field| entry.contains_key(*field))
+    {
         return Err(Error::LockEntry);
     }
     let version = entry
         .get("version")
         .and_then(Value::as_str)
         .ok_or(Error::LockEntry)?;
+    let (pkg, platform) = match entry.get("name") {
+        None => (last, None),
+        Some(name) => {
+            let platform = last
+                .strip_prefix(CODEX)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .filter(|platform| CODEX_PLATFORMS.contains(platform));
+            match (name.as_str(), platform) {
+                (Some(CODEX), Some(platform)) => (CODEX, Some(platform)),
+                _ => return Err(Error::LockEntry),
+            }
+        }
+    };
+    if !is_package_name(pkg) {
+        return Err(Error::LockEntry);
+    }
+    if let Some((_, pin)) = pins.iter().find(|(name, _)| *name == pkg) {
+        let pinned = match platform {
+            None => version == *pin,
+            Some(platform) => {
+                version
+                    .strip_prefix(*pin)
+                    .and_then(|rest| rest.strip_prefix('-'))
+                    == Some(platform)
+            }
+        };
+        if !pinned {
+            return Err(Error::LockMismatch);
+        }
+    } else if [CODEX, crate::DEPENDENCIES[0], crate::DEPENDENCIES[1]].contains(&pkg) {
+        // A pinned name with no pin in this list (codex with no override): nothing to match.
+        return Err(Error::LockMismatch);
+    }
+    for field in SPEC_FIELDS {
+        let Some(specs) = entry.get(field) else {
+            continue;
+        };
+        let specs = specs.as_object().ok_or(Error::LockSpec)?;
+        if specs
+            .values()
+            .any(|spec| !spec.as_str().is_some_and(is_registry_spec))
+        {
+            return Err(Error::LockSpec);
+        }
+    }
     let integrity = entry.get("integrity").and_then(Value::as_str);
     if !integrity.is_some_and(is_sha512) {
         return Err(Error::Integrity);
     }
-    let pkg = match entry.get("name") {
-        None => last,
-        Some(name) => name
-            .as_str()
-            .filter(|name| is_package_name(name))
-            .ok_or(Error::LockEntry)?,
-    };
-    let base = pkg.rsplit('/').next().unwrap_or(pkg);
     if !is_version_text(version) {
         return Err(Error::Resolved);
     }
+    let base = pkg.rsplit('/').next().unwrap_or(pkg);
     let expected = format!("{NPM_REGISTRY}{pkg}/-/{base}-{version}.tgz");
     if entry.get("resolved").and_then(Value::as_str) != Some(expected.as_str()) {
         return Err(Error::Resolved);
     }
     Ok(())
-}
-
-/// The last package name of a lock key `node_modules/<name>(/node_modules/<name>)*`, or `None`
-/// when the key isn't that form.
-fn installed_name(path: &str) -> Option<&str> {
-    let mut rest = path.strip_prefix("node_modules/")?;
-    loop {
-        let (name, after) = split_name(rest)?;
-        if after.is_empty() {
-            return Some(name);
-        }
-        rest = after.strip_prefix("/node_modules/")?;
-    }
-}
-
-/// Splits a leading package name (`name` or `@scope/name`) off `text`: the name and the rest.
-fn split_name(text: &str) -> Option<(&str, &str)> {
-    let first = text.find('/').unwrap_or(text.len());
-    let end = if text.starts_with('@') {
-        let after = text.get(first + 1..)?;
-        first + 1 + after.find('/').unwrap_or(after.len())
-    } else {
-        first
-    };
-    let (name, rest) = text.split_at_checked(end)?;
-    is_package_name(name).then_some((name, rest))
-}
-
-/// npm's rules, as a lock can carry them: `name` or `@scope/name`, at most 214 bytes, each part
-/// non-empty, of ASCII letters, digits, `-`, `.`, `_` and `~`, not starting with `.` or `_`.
-/// So no `..`, no absolute path, no backslash, no `:`.
-fn is_package_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > MAX_NAME {
-        return false;
-    }
-    let part = |part: &str| {
-        !part.is_empty()
-            && !part.starts_with(['.', '_'])
-            && part
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
-    };
-    match name.strip_prefix('@') {
-        Some(scoped) => scoped
-            .split_once('/')
-            .is_some_and(|(scope, rest)| part(scope) && part(rest)),
-        None => part(name),
-    }
-}
-
-/// A version as it appears in a tarball's file name: semver's characters only.
-fn is_version_text(version: &str) -> bool {
-    !version.is_empty()
-        && version
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
-}
-
-/// `sha512-`, then 86 base64 characters and `==`: one 64-byte digest, one token.
-fn is_sha512(text: &str) -> bool {
-    let Some(digest) = text.strip_prefix("sha512-") else {
-        return false;
-    };
-    let Some(body) = digest.strip_suffix("==") else {
-        return false;
-    };
-    body.len() == 86
-        && body
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
 }
