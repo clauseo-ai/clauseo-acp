@@ -4,32 +4,70 @@
 // launched it stood (C2's `call`; Claude's Agent step), else where its own entry arrived (ChatGPT
 // has no launching step). Its steps and words leave the lead's step groups and show on its card. A
 // step or words of a helper the window has no entry for stays flat, never dropped. A helper a
-// helper started (ChatGPT nests) belongs to its top helper's card until H3 draws it on its own.
+// helper started (ChatGPT nests) has its own small card inside its parent's.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, TextOrBlob, ViewEntry } from "../../transport/protocol.ts";
 import { pickables } from "../pickers.ts";
-import { helperEntryId, helperPartOf, type HelperEntry, type HelperId } from "./helper-entries.ts";
+import { turnRunning } from "./live.ts";
+import {
+  HELPER_PREFIX,
+  helperEntryId,
+  helperPartOf,
+  type HelperEntry,
+  type HelperId,
+} from "./helper-entries.ts";
 
-/** How a helper stands. H1 draws these four; H3 adds its own (waiting for the lawyer, refused,
- * still working with no turn open after the lawyer's next message on Claude) to this union. An
- * `unknown` outcome reads as stopped. */
+/** How a helper stands. H1 draws these four; H3 adds its own (waiting for the lawyer, refused) to
+ * this union. An `unknown` outcome reads as stopped. The host ends every helper (C2): failed when
+ * its turn ends by itself, stopped on Stop or at start-up after a crash. A helper outlives its turn
+ * only on Claude, carried into the turn of the lawyer's next message, and never past that turn. One
+ * still open after that (`lapsed`: when its time ran out) reads as stopped, from a log that somehow
+ * has one: no card counts minutes for an answer that is over. */
 export type HelperState = "working" | "done" | "failed" | "stopped";
 
-export const stateOf = (h: HelperEntry): HelperState =>
-  h.outcome === undefined
-    ? "working"
-    : h.outcome === "done" || h.outcome === "failed"
-      ? h.outcome
-      : "stopped";
+export function stateOf(h: HelperEntry, lapsed: number | undefined): HelperState {
+  if (h.outcome === undefined) return lapsed === undefined ? "working" : "stopped";
+  return h.outcome === "done" || h.outcome === "failed" ? h.outcome : "stopped";
+}
 
 export const settled = (s: HelperState): boolean => s !== "working";
 
+const STEP = "step:";
+
+const newestStepOf = new WeakMap<readonly EntryId[], EntryId | null>();
+/** The newest turn's step entry id in the view, kept per id list; null with none. */
+function newestStep(ids: readonly EntryId[]): EntryId | null {
+  let found = newestStepOf.get(ids);
+  if (found === undefined) {
+    found = null;
+    for (let i = ids.length - 1; i >= 0 && found === null; i -= 1)
+      if (ids[i]!.startsWith(STEP)) found = ids[i]!;
+    newestStepOf.set(ids, found);
+  }
+  return found;
+}
+
+/** When an open helper's time ran out: its turn's end (its step entry's time), unless that turn is
+ * the newest to end and a turn runs now (Claude carried it into the lawyer's next message);
+ * undefined while it may still work. */
+export function lapsedOf(
+  h: HelperEntry,
+  v: StreamView | undefined,
+  paged?: ReadonlyMap<EntryId, ViewEntry>,
+): number | undefined {
+  const id = `${STEP}${h.turn}` as EntryId;
+  const ended = paged?.get(id)?.step ?? v?.entries.get(id)?.step;
+  if (ended === undefined) return undefined;
+  const carried = turnRunning(v?.header?.header?.status) && newestStep(v?.ids ?? []) === id;
+  return carried ? undefined : ended.ts;
+}
+
 /** The answer's rows without what belongs to a helper whose entry the window has (`entryOf`: an
  * older page's or the view's), each card at its launching step's place when this answer has that
- * step, else at its own entry's. */
+ * step, else at its own entry's. A helper a helper started stands inside its parent's card. */
 export function leadRows(
   ids: readonly EntryId[],
   entryOf: (id: EntryId) => ViewEntry | undefined,
@@ -69,69 +107,94 @@ export function leadRows(
   return out;
 }
 
-/** A helper's card: its entry, and its steps and words in order, those of the helpers it started
- * among them. */
+/** A helper's card: its entry, its own steps and words in order (a step that launched a helper it
+ * started left out), the entry ids of the helpers it started, and when its time ran out (lapsedOf).
+ * A child's card (`fold`) takes the steps and words of every helper under it and draws no cards. */
 export type HelperContent = {
   readonly helper: HelperEntry | undefined;
   readonly items: readonly (readonly [EntryId, ViewEntry])[];
+  readonly children: readonly EntryId[];
+  readonly lapsed: number | undefined;
 };
 
-const EMPTY: HelperContent = { helper: undefined, items: [] };
+const EMPTY: HelperContent = { helper: undefined, items: [], children: [], lapsed: undefined };
 
-/** The ids of an older page's and the view's entries that belong to `helper` or to a helper it
- * started, in order: any page holding a helper's step also holds its entry (C2), so a card fills in
- * as older pages load. */
-function memberIds(
+/** Of an older page's and the view's entries, in order: `helper`'s own steps and words, and the
+ * helpers it started. Any page holding a helper's step also holds its entry (C2), so a card fills
+ * in as older pages load. */
+function membersOf(
   helper: HelperId,
+  fold: boolean,
   all: readonly EntryId[],
   entryOf: (id: EntryId) => ViewEntry | undefined,
-): EntryId[] {
+): { items: EntryId[]; children: EntryId[] } {
+  const children: EntryId[] = [];
+  const calls = new Set<string>();
   const parents = new Map<HelperId, HelperId | undefined>();
   for (const id of all) {
     const part = helperPartOf(entryOf(id));
-    if (part?.kind === "helper") parents.set(part.entry.helper, part.entry.parent);
+    if (part?.kind !== "helper") continue;
+    parents.set(part.entry.helper, part.entry.parent);
+    if (!fold && part.entry.parent === helper) {
+      children.push(id);
+      if (part.entry.call !== undefined) calls.add(part.entry.call);
+    }
   }
+  // folded: a helper under this one, at any depth, is this one's
   const mine = (h: HelperId | null): boolean => {
-    for (let at: HelperId | undefined = h ?? undefined, n = 0; at !== undefined && n < 16; n += 1) {
+    if (!fold) return h === helper;
+    for (let at = h ?? undefined, n = 0; at !== undefined && n < 16; n += 1) {
       if (at === helper) return true;
       at = parents.get(at);
     }
     return false;
   };
-  return all.filter((id) => {
-    const part = helperPartOf(entryOf(id));
+  const items = all.filter((id) => {
+    const e = entryOf(id);
+    const part = helperPartOf(e);
     if (part?.kind === "text") return mine(part.entry.helper);
-    if (part?.kind === "step") return mine(part.helper);
+    if (part?.kind === "step")
+      return mine(part.helper) && !calls.has(e?.tool_call?.tool_call ?? "");
     return false;
   });
+  return { items, children };
 }
 
 /** A pick of one helper's card content over an older page (`paged`) and the view: the same object
- * while its entry and each of its items are the same. */
-export function contentPick(helper: HelperId, paged: ReadonlyMap<EntryId, ViewEntry>) {
+ * while each part of it is the same. */
+export function contentPick(
+  helper: HelperId,
+  paged: ReadonlyMap<EntryId, ViewEntry>,
+  fold = false,
+) {
   let ids: readonly EntryId[] | null = null;
-  let members: EntryId[] = [];
+  let members: { items: EntryId[]; children: EntryId[] } = { items: [], children: [] };
   let last = EMPTY;
   const self = helperEntryId(helper);
   return (v: StreamView | undefined): HelperContent => {
     const entryOf = (id: EntryId) => paged.get(id) ?? v?.entries.get(id);
     if (v === undefined || v.ids !== ids) {
       ids = v?.ids ?? null;
-      members = memberIds(helper, [...paged.keys(), ...(v?.ids ?? [])], entryOf);
+      members = membersOf(helper, fold, [...paged.keys(), ...(v?.ids ?? [])], entryOf);
     }
     const part = helperPartOf(entryOf(self));
     const entry = part?.kind === "helper" ? part.entry : undefined;
-    const items = members.flatMap((id) => {
+    const lapsed = entry === undefined ? undefined : lapsedOf(entry, v, paged);
+    const items = members.items.flatMap((id) => {
       const e = entryOf(id);
       return e === undefined ? [] : [[id, e] as const];
     });
+    const children = members.children;
     if (
       entry === last.helper &&
+      lapsed === last.lapsed &&
+      children.length === last.children.length &&
+      children.every((c, i) => c === last.children[i]) &&
       items.length === last.items.length &&
       items.every((x, i) => x[1] === last.items[i]![1])
     )
       return last;
-    last = { helper: entry, items };
+    last = { helper: entry, items, children, lapsed };
     return last;
   };
 }
@@ -141,23 +204,22 @@ const helperIdsOf = new WeakMap<readonly EntryId[], readonly EntryId[]>();
 export function helperIds(ids: readonly EntryId[]): readonly EntryId[] {
   let found = helperIdsOf.get(ids);
   if (found === undefined) {
-    found = ids.filter((id) => id.startsWith("helper:"));
+    found = ids.filter((id) => id.startsWith(HELPER_PREFIX));
     helperIdsOf.set(ids, found);
   }
   return found;
 }
 
-/** How many of the view's top helpers still work: the working line waits on them. */
+/** How many top helpers still work in the running turn, those Claude carried into it included
+ * (lapsedOf): the working line waits on them. One left open by an older turn doesn't count. */
 export function workingHelpers(v: StreamView): number {
   let n = 0;
   for (const id of helperIds(v.ids)) {
     const part = helperPartOf(v.entries.get(id));
-    if (
-      part?.kind === "helper" &&
-      part.entry.parent === undefined &&
-      part.entry.outcome === undefined
-    )
-      n += 1;
+    if (part?.kind !== "helper") continue;
+    const h = part.entry;
+    if (h.parent !== undefined || h.outcome !== undefined) continue;
+    if (lapsedOf(h, v) === undefined) n += 1;
   }
   return n;
 }
@@ -237,12 +299,18 @@ export function minutesWords(lang: Lang, ms: number): string {
 /** The card's state on the right: "Working for 3 min" (now: the clock the card last read), "Took 4
  * min", "Failed after less than a minute", "Stopped after 2 min"; "" for an ended helper with no
  * end time. */
-export function stateWords(lang: Lang, h: HelperEntry, now: number): string {
-  const state = stateOf(h);
+export function stateWords(
+  lang: Lang,
+  h: HelperEntry,
+  now: number,
+  lapsed: number | undefined,
+): string {
+  const state = stateOf(h, lapsed);
   if (state === "working")
     return steps(lang, "Working for {time}", { time: minutesWords(lang, now - h.started_at) });
-  if (h.finished_at === undefined) return "";
-  const time = minutesWords(lang, h.finished_at - h.started_at);
+  const end = h.finished_at ?? lapsed;
+  if (end === undefined) return "";
+  const time = minutesWords(lang, end - h.started_at);
   if (state === "done") return steps(lang, "Took {time}", { time });
   if (state === "failed") return steps(lang, "Failed after {time}", { time });
   return steps(lang, "Stopped after {time}", { time });

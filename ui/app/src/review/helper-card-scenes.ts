@@ -11,6 +11,7 @@ import type {
 } from "../transport/protocol.ts";
 import {
   helperPartOf,
+  helperStepViewEntry,
   helperTextViewEntry,
   helperViewEntry,
   type HelperEntry,
@@ -56,7 +57,7 @@ function call(
   over: Partial<ToolCallEntry> & Pick<ToolCallEntry, "title" | "kind">,
   of?: number,
 ): ViewEntry {
-  const entry: ToolCallEntry & { helper?: string } = {
+  const entry: ToolCallEntry = {
     order,
     tool_call: uuid(n, 7),
     turn: TURN,
@@ -65,9 +66,8 @@ function call(
     locations: [],
     content: [],
     ...over,
-    ...(of === undefined ? {} : { helper: hid(of) }),
   };
-  return { tool_call: entry };
+  return helperStepViewEntry(entry, of === undefined ? null : hid(of));
 }
 
 const read = (
@@ -211,7 +211,8 @@ export function claudeHelpers(): ThreadState {
   };
 }
 
-/** ChatGPT's answer: a helper of its own, with a name it chose, no task, working; one done. */
+/** ChatGPT's answer: a helper with a name it chose and no task, working, with a helper of its own
+ * inside its card; another done. */
 export function chatgptHelpers(): ThreadState {
   return {
     status: "running",
@@ -233,13 +234,25 @@ export function chatgptHelpers(): ThreadState {
         finished_at: T0 + 1 * MIN + 30_000,
         summary: {
           inline:
-            "The survey map's Plot 14 matches the 1987 deed's boundaries; the 2011 gift deed takes 40 square yards more on the east.",
+            "**Boundaries:** the survey map's Plot 14 matches Sale_deed_1987.pdf; the 2011 gift deed takes 40 square yards more on the east ([survey rules](https://dlrc.delhigovt.nic.in/)).",
         },
       }),
       call(12, 70, 1, { title: "cat '/matter/Sale deed 1987.pdf'", kind: "execute" }, 1),
       call(13, 71, 1, { title: "cat '/matter/Survey map, Plot 14.pdf'", kind: "execute" }, 2),
-      words(14, 2, 1, "The 1987 deed is clear. Going on to the 1998 deed."),
-      read(15, 72, 3, "Sale deed 1998.pdf", 1, "in_progress"),
+      words(14, 2, 1, "The **1987 deed** is clear. Going on to the 1998 deed."),
+      helper(15, 3, 2, { parent: hid(1), name: "Find the vendor's heirs", model: "gpt-6.2-sol" }),
+      call(
+        16,
+        73,
+        2,
+        {
+          title: "rg -n heirs '/matter/Mutation entries.pdf'",
+          kind: "execute",
+          status: "in_progress",
+        },
+        3,
+      ),
+      read(17, 72, 3, "Sale deed 1998.pdf", 1, "in_progress"),
     ],
   };
 }

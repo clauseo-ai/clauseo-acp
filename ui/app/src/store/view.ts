@@ -20,6 +20,7 @@ import type {
   ViewPosition,
   ViewWindow,
 } from "../transport/protocol.ts";
+import { HELPER_ID_FIELD } from "../room/thread/helper-entries.ts";
 
 /** A stream's view, read-only to its readers. The store changes it only inside a flush. */
 export interface StreamView {
@@ -93,8 +94,8 @@ const ID_FIELD = {
   marker: "event",
   matter_header: "matter",
   version: "checkpoint",
-  // C2's helper kinds (room/thread/helper-entries.ts), a spread until the bindings carry them
-  ...({ helper: "helper", helper_text: "event" } as const),
+  // C2's helper kinds, from the one file that knows their shape
+  ...HELPER_ID_FIELD,
 } as const satisfies { readonly [K in Kind]-?: keyof NonNullable<ViewEntry[K]> };
 
 /** The stream of a thread's view, in protocol's text form. */

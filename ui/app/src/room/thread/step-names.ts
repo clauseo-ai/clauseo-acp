@@ -9,9 +9,9 @@ import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
-import type { ToolCallEntry } from "../../transport/protocol.ts";
+import type { EntryId, ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
-import { helperEntryId, helperPartOf } from "./helper-entries.ts";
+import { helperEntryId, helperPartOf, type HelperPart } from "./helper-entries.ts";
 import { waitingWords, workingHelpers } from "./helper-view.ts";
 import { taskOf } from "./task-words.ts";
 import {
@@ -349,31 +349,40 @@ const TEXT = "agent_text:";
 /** A lead step that launches helpers or waits on them: Claude's Agent (Task) and Yield, ChatGPT's
  * spawnAgent. */
 const LAUNCH = /^(agent|task|yield|spawnAgent)$/i;
+const launches = (call: ToolCallEntry) => LAUNCH.test(call.tool_name ?? call.title);
 
 /** The working line's words while a turn runs: what its newest step is doing ("Reading Lease.pdf."), "Thinking it
  * through." while its newest output is a thought, and null while it writes the answer, has finished its newest step,
- * or nothing runs. A string, so a flush that leaves it the same renders nothing. */
+ * or nothing runs; "Waiting for 2 helpers to finish." while it waits on its helpers. A string, so a
+ * flush that leaves it the same renders nothing. */
 export function doingPick(lang: Lang): (v: StreamView | undefined) => string | null {
   return (v) => {
     if (v === undefined || !turnRunning(v.header?.header?.status)) return null;
-    // while helpers work and the lead's newest is their launch, a Yield or a step done: it waits
     const helpers = workingHelpers(v);
-    const waits = (call: ToolCallEntry) =>
-      helpers > 0 && (LAUNCH.test(call.tool_name ?? call.title) || !unsettled(call));
-    for (let i = v.ids.length - 1; i >= 0; i -= 1) {
-      const id = v.ids[i]!;
+    // a helper's own steps and words are its card's, not the lead's
+    const lead = (id: EntryId): HelperPart | "own" => {
       const part = helperPartOf(v.entries.get(id));
-      // a helper's own steps and words are its card's, not the lead's
       const own =
         part?.kind === "step" ? part.helper : part?.kind === "text" ? part.entry.helper : null;
-      if (own !== null && v.entries.has(helperEntryId(own))) continue;
+      return own !== null && v.entries.has(helperEntryId(own)) ? "own" : part;
+    };
+    // the lead waits on its helpers when its newest is their launch (Claude's Agent step, a Yield,
+    // ChatGPT's helper entry) and no step of its own is in hand
+    let launched = false;
+    for (let i = v.ids.length - 1; i >= 0 && !launched; i -= 1) {
+      const id = v.ids[i]!;
+      const part = lead(id);
+      if (part === "own") continue;
       if (part?.kind === "helper") {
-        if (part.entry.parent === undefined && helpers > 0) return waitingWords(lang, helpers);
+        if (part.entry.parent === undefined && helpers > 0) launched = true;
         continue;
       }
       if (id.startsWith(TOOL)) {
         const call = v.entries.get(id)?.tool_call;
-        if (call !== undefined && waits(call)) return waitingWords(lang, helpers);
+        if (call !== undefined && helpers > 0 && launches(call)) {
+          launched = true;
+          continue;
+        }
         return call !== undefined && unsettled(call) ? doingOf(lang, call) : null;
       }
       if (id.startsWith(TEXT))
@@ -382,7 +391,15 @@ export function doingPick(lang: Lang): (v: StreamView | undefined) => string | n
           : null;
       if (id.startsWith("user_message:") || id.startsWith("step:")) return null;
     }
-    return null;
+    if (!launched) return null;
+    for (let i = v.ids.length - 1; i >= 0; i -= 1) {
+      const id = v.ids[i]!;
+      if (id.startsWith("step:")) break;
+      const call =
+        id.startsWith(TOOL) && lead(id) !== "own" ? v.entries.get(id)?.tool_call : undefined;
+      if (call !== undefined && unsettled(call) && !launches(call)) return doingOf(lang, call);
+    }
+    return waitingWords(lang, helpers);
   };
 }
 

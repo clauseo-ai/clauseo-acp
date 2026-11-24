@@ -2,6 +2,7 @@
 // review pages. Not shipped: only tests and review import it.
 import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../transport/protocol.ts";
 import {
+  helperStepViewEntry,
   helperTextViewEntry,
   helperViewEntry,
   type HelperEntry,
@@ -35,7 +36,7 @@ export function helperStep(
   title = `/matter/Sale deed ${n}.pdf`,
   kind: ToolKind = "read",
 ): ViewEntry {
-  const entry: ToolCallEntry & { helper?: string } = {
+  const entry: ToolCallEntry = {
     order,
     tool_call: uuid(n, 7),
     turn: TURN,
@@ -46,9 +47,8 @@ export function helperStep(
     locations: kind === "read" ? [{ inside: { path: title.replace(/^\/matter\//, "") } }] : [],
     content: [],
     ...(status === "completed" || status === "failed" ? { finished_at: order * 1000 + 500 } : {}),
-    ...(of === null ? {} : { helper: helperId(of) }),
   };
-  return { tool_call: entry };
+  return helperStepViewEntry(entry, of === null ? null : helperId(of));
 }
 
 /** Claude's Agent step `n` that launches a helper, its title the agent's short label. */

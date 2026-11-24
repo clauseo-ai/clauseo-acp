@@ -3,6 +3,7 @@
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { useEntry, useViewStore } from "../../store/hooks.ts";
 import { HelperCard, HelperWordsFlat } from "./helper-card.tsx";
+import { HELPER_PREFIX, HELPER_TEXT_PREFIX } from "./helper-entries.ts";
 import { PagedRow, Row } from "./rows.tsx";
 
 /** Words of a helper the window has no entry for, live: flat. */
@@ -24,9 +25,9 @@ export function RowOf({
   sentNow: boolean;
 }) {
   // a helper's card (helper-card.tsx), live or paged; a helper's words that reach the rows: flat
-  if (id.startsWith("helper:")) return <HelperCard id={id} stream={stream} paged={paged} />;
+  if (id.startsWith(HELPER_PREFIX)) return <HelperCard id={id} stream={stream} paged={paged} />;
   const entry = paged.get(id);
-  if (id.startsWith("helper_text:"))
+  if (id.startsWith(HELPER_TEXT_PREFIX))
     return entry === undefined ? (
       <LiveHelperWords id={id} stream={stream} />
     ) : (
