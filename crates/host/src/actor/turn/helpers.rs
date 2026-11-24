@@ -24,7 +24,7 @@ use clauseo_protocol::{
 
 use super::super::Actor;
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, lost, state, updates};
+use super::{Then, TimerKind, TurnPhase, TurnTimer, current, lost, state, updates};
 use crate::build;
 use crate::coalesce::DURABLE_BATCH;
 use crate::error::Error;
@@ -332,7 +332,8 @@ pub(super) fn on_cancel(
 
 /// The close of `turn` (`close.rs`): with the agent gone (`detached`) every open helper ends
 /// `Stopped`; a cancelled turn's left `Stopped` too; a turn that ended by itself leaves them
-/// `Failed`, since none handed back a report. A turn a send-now cut short leaves them open.
+/// `Failed`, since none handed back a report. A turn a send-now cut short, and a turn whose
+/// prompt never went out, leave them open.
 pub(super) fn on_close(
     actor: &mut Actor,
     out: &mut Out,
@@ -341,13 +342,22 @@ pub(super) fn on_close(
     detached: bool,
 ) -> Result<(), Error> {
     let thread = out.thread();
+    // Only a turn whose prompt went out closes helpers: a queued turn removed, or one that
+    // failed before its prompt, leaves them as they are.
+    let prompted = current(actor, thread).is_some_and(|current| {
+        current.turn == turn
+            && matches!(
+                current.phase,
+                TurnPhase::Prompting | TurnPhase::FallbackStop | TurnPhase::Ending
+            )
+    });
     let Some(helpers) = existing(actor, thread) else {
         return Ok(());
     };
     let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
     let outcome = if detached {
         HelperOutcome::Stopped
-    } else if kept {
+    } else if kept || !prompted {
         return Ok(());
     } else if stop == StopReason::Cancelled {
         HelperOutcome::Stopped
