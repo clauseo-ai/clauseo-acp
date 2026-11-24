@@ -95,7 +95,9 @@ test("SIZES rewrite reproduces embedded.rs byte for byte, rustfmt's layout inclu
   const source = read(w.EMBEDDED);
   const { rows, stamp } = w.parseSizes(source);
   assert.equal(rows.length, 12);
-  assert.deepEqual(rows[0], { agent: "claude-acp", os: "Darwin", arch: "Arm64", download: 112_272_099, unpacked: 284_447_720 });
+  // Today's table, whatever the pins: the first row's place, and whole byte counts everywhere.
+  assert.deepEqual([rows[0].agent, rows[0].os, rows[0].arch], ["claude-acp", "Darwin", "Arm64"]);
+  assert.ok(rows.every((r) => Number.isSafeInteger(r.download) && Number.isSafeInteger(r.unpacked) && r.download > 0 && r.unpacked > r.download));
   assert.equal(w.writeSizes(source, rows, stamp), source);
   const bigger = rows.map((r) => ({ ...r, download: r.download + 1 }));
   const rewritten = w.writeSizes(source, bigger, "0123456789abcdef");
@@ -283,9 +285,10 @@ test("bumpManifest keeps every other field and npm's layout", () => {
   assert.equal(next.description, manifest.description);
 });
 
-test("engines.seq is one decimal line, list 1 on this branch", () => {
-  assert.equal(w.parseSeq(read(`${w.LIVE}/${w.SEQ_FILE}`)), 1);
-  assert.equal(read(`${w.LIVE}/${w.SEQ_FILE}`), "1\n");
+test("engines.seq is one decimal line, at least list 1", () => {
+  const text = read(`${w.LIVE}/${w.SEQ_FILE}`);
+  assert.match(text, /^[1-9]\d*\n$/);
+  assert.equal(`${w.parseSeq(text)}\n`, text);
   assert.throws(() => w.parseSeq("one\n"));
   assert.throws(() => w.parseSeq("1\n2\n"));
 });
@@ -356,6 +359,9 @@ test("LAYOUTS: sac.rs parses and rewrites to itself; the tar reader finds rg.exe
   const moved = w.writeLayouts(source, rows.map((r) => ({ ...r, sha256: "f".repeat(64) })), "9.9.9");
   assert.deepEqual(w.parseLayouts(moved), { rows: rows.map((r) => ({ ...r, sha256: "f".repeat(64) })), codex: "9.9.9" });
   assert.match(moved, /codex-9\.9\.9-win32-x64\.tgz/);
+  assert.match(moved, /`@openai\/codex` 9\.9\.9 ships/);
+  // Other notes in the doc comment (main's "unchanged since <v>") are left as written.
+  assert.equal(/unchanged since [\d.]+/.exec(moved)?.[0], /unchanged since [\d.]+/.exec(source)?.[0]);
   const long = `package/${"d".repeat(90)}/codex-path/rg.exe`;
   const tar = tgz({ "package/a.txt": "a", "package/v/codex-path/rg.exe": "RG", [long]: "LONG" });
   const lock = JSON.stringify({ packages: { "": {}, "node_modules/x": { resolved: "u", integrity: sri(tar) } } });
@@ -402,11 +408,13 @@ function fixture() {
     "node_modules/@openai/codex-win32-x64": { name: w.CODEX, version: `${codex}-win32-x64`, resolved: `${R}x64.tgz`, integrity: sri(tars.x64), os: ["win32"], cpu: ["x64"] },
     "node_modules/@openai/codex-win32-arm64": { name: w.CODEX, version: `${codex}-win32-arm64`, resolved: `${R}arm.tgz`, integrity: sri(tars.arm), os: ["win32"], cpu: ["arm64"] },
   } }, null, 2);
-  put(`${w.LIVE}/package.json`, read(`${w.LIVE}/package.json`));
+  // The pins before the bump the stand-in registry offers, whatever today's are.
+  put(`${w.LIVE}/package.json`, w.bumpManifest(JSON.parse(read(`${w.LIVE}/package.json`)), CURRENT));
   put(`${w.LIVE}/package-lock.json`, lock("0.89.1", "0.3.293", "2.2.2", "0.162.1"));
   put(`${w.LIVE}/${w.SEQ_FILE}`, "1\n");
   put(w.EMBEDDED, `#[cfg(test)]\npub(super) const SIZES_STAMP: &str = "0000000000000000";\n\nconst SIZES: [(&str, Os, Arch, u64, u64); 2] = [\n    ("claude-acp", Os::Win32, Arch::X64, 1, 2),\n    ("codex-acp", Os::Win32, Arch::Arm64, 3, 4),\n];\n`);
-  put(w.SAC, read(w.SAC));
+  const sac = read(w.SAC);
+  put(w.SAC, w.writeLayouts(sac, w.parseLayouts(sac).rows, CURRENT.codex));
   const docs = {
     [w.CLAUDE_ACP]: packument("0.110.1", { "0.89.1": old(), "0.110.1": { hours: 30 } }),
     [w.CODEX_ACP]: packument("2.10.0", { "2.2.2": old(), "2.10.0": { hours: 40, codex: "^0.171.0" } }),

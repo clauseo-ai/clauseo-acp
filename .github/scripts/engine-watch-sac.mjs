@@ -27,11 +27,12 @@ export function parseLayouts(source) {
 }
 
 /**
- * `source` with each row's hash, LAYOUTS_CODEX, and the old codex version in LAYOUTS's doc
- * comment (the tarball names) replaced. Only hashes change inside the block, so its layout stays.
+ * `source` with each row's hash and LAYOUTS_CODEX replaced, and in LAYOUTS's doc comment the
+ * version Codex ships and the tarball names. Only hashes change inside the block, so its layout
+ * stays.
  */
 export function writeLayouts(source, rows, codex) {
-  const { rows: old, codex: oldCodex } = parseLayouts(source);
+  const { rows: old } = parseLayouts(source);
   if (old.length !== rows.length || old.some((row, i) => row.dir !== rows[i].dir)) {
     throw new Error("LAYOUTS's folders changed; rewrite sac.rs by hand");
   }
@@ -42,8 +43,13 @@ export function writeLayouts(source, rows, codex) {
   out = out.replace(CODEX_RE, `const LAYOUTS_CODEX: &str = "${codex}";`);
   const start = out.indexOf("/// Codex's Windows layouts");
   const end = out.indexOf("const LAYOUTS:", start);
-  if (start !== -1 && end !== -1 && oldCodex !== codex) {
-    out = out.slice(0, start) + out.slice(start, end).replaceAll(oldCodex, codex) + out.slice(end);
+  if (start !== -1 && end !== -1) {
+    // Only the version Codex ships and the tarball names follow the pin; other notes stay.
+    const doc = out
+      .slice(start, end)
+      .replace(/(`@openai\/codex` )\d+\.\d+\.\d+( ships)/, `$1${codex}$2`)
+      .replace(/codex-\d+\.\d+\.\d+-win32-/g, `codex-${codex}-win32-`);
+    out = out.slice(0, start) + doc + out.slice(end);
   }
   return out;
 }
