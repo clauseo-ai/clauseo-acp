@@ -526,6 +526,9 @@ mod subscribe;
 #[path = "host/symlink.rs"]
 mod symlink;
 #[cfg(test)]
+#[path = "host/together.rs"]
+mod together;
+#[cfg(test)]
 #[path = "host/tool_switches.rs"]
 mod tool_switches;
 #[cfg(test)]

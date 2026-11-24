@@ -233,6 +233,8 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         std::mem::take(&mut current.case_law_hint) == crate::connectors::hint::TurnLooks::CaseLaw;
     let expiry = end.expiry;
     let paths = std::mem::take(&mut current.tool_paths);
+    // A turn running beside it reads them until it leaves the matter (`together.rs`).
+    current.overlap.ending = Some(paths.clone());
     current.end = Some(end);
     let expired = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
@@ -291,6 +293,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
             meta,
             tool_paths: paths,
             before,
+            overlap: together::overlap_of(actor, matter, thread),
         };
         actor
             .matter_worker(matter)?

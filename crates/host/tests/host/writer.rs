@@ -164,11 +164,22 @@ fn a_running_turns_papers_are_not_the_next_turns_outside_edits() {
         .collect();
     assert_eq!(outside, [["lawyer.txt"]], "{}", log.dump());
 
-    // A's card is not checked here: B's before-turn checkpoint holds notes/a.txt, so A's
-    // after-turn checkpoint sees no change to it; its card waits for the overlap wiring.
+    // notes/a.txt is A's: on its card, measured from A's own start, though B's before-turn
+    // checkpoint already holds it.
     answer_from(&host, &mut t.events_a, t.a, 0, &["allow-once"]);
     let ended_a = t.events_a.until_turn_ended(t.turn_a);
     assert_eq!(ended_a.stop, StopReason::EndTurn, "{}", t.events_a.dump());
+    let changed = t
+        .events_a
+        .files_changed(t.turn_a)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", t.events_a.dump()));
+    let note = changed
+        .files
+        .iter()
+        .find(|file| file.path().as_str() == "notes/a.txt")
+        .unwrap_or_else(|| panic!("notes/a.txt is not A's: {changed:?}"));
+    assert!(!note.may_include_lawyer_edits());
+    assert_eq!(note.also_changed_by(), []);
     t.events_a.assert_no_mismatch();
     host.shutdown();
 }

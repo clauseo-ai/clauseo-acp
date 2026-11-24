@@ -88,6 +88,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
                 meta: meta(4),
                 tool_paths: TurnPaths::default(),
                 before: Some(root_checkpoint),
+                overlap: None,
             },
             3,
         )
@@ -119,6 +120,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
                 meta: meta(5),
                 tool_paths: TurnPaths::default(),
                 before: Some(root_checkpoint),
+                overlap: None,
             },
             4,
         )

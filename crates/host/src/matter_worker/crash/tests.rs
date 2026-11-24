@@ -62,6 +62,7 @@ fn after_turn(n: u32) -> MatterJob {
         meta: meta(n),
         tool_paths: TurnPaths::default(),
         before: None,
+        overlap: None,
     }
 }
 

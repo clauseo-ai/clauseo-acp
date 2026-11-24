@@ -141,6 +141,7 @@ fn own_thread(actor: &Actor, matter: MatterId, thread: Option<ThreadId>) -> Resu
 }
 
 fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
+    const TURN_RUNNING: &str = "a turn is running in this matter; wait for it or cancel it";
     actor.check_matter(matter)?;
     let turns = &mut actor
         .matters
@@ -150,10 +151,9 @@ fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
     let message = match turns.holder {
         Some(Holder::Restore) => "a restore is running in this matter; wait for it",
         Some(Holder::Relocate) => "the matter's folder is being located; wait for it",
-        Some(Holder::Thread(_)) => "an undo is running in this matter; wait for it",
-        None if !turns.running.is_empty() => {
-            "a turn is running in this matter; wait for it or cancel it"
-        }
+        // An undo is worded as a turn, as it was when one writer ran at a time.
+        Some(Holder::Thread(_)) => TURN_RUNNING,
+        None if !turns.running.is_empty() => TURN_RUNNING,
         None if turns.queue.is_empty() => {
             turns.holder = Some(Holder::Restore);
             return Ok(());
