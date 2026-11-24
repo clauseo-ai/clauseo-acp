@@ -1,15 +1,14 @@
 //! `RestoreVersion`: the matter must be free (no turn runs in it, nothing holds it) and is held
-//! alone for the whole restore; the
-//! version must be one of the matter's; R8 first records the folder as it is, which the
-//! matter's stream logs before anything is written (`record.rs`); then R8 restores the version
-//! on the matter's thread; one commit of the matter's stream logs it. A restore belongs to no
-//! thread, so the writer's holder is [`Holder::Restore`]; the same commit records it in the
-//! stream of the conversation it was asked from, when the command names one of the matter's and
-//! that stream is not blocked by an earlier store failure (the conversation's line is
-//! best-effort; the matter's record is not). One that `undoes` an earlier restore also removes
-//! the files that restore added, while they hold what it wrote. The writer and the note wait
-//! until that commit is durable; a failed one is sent once more when the matter's stream
-//! drains, as an undo's is.
+//! alone for the whole restore; the version must be one of the matter's; R8 first records the
+//! folder as it is, which the matter's stream logs before anything is written (`record.rs`);
+//! then R8 restores the version on the matter's thread; one commit of the matter's stream logs
+//! it. A restore belongs to no thread, so the matter's holder is [`Holder::Restore`]; the same
+//! commit records it in the stream of the conversation it was asked from, when the command names
+//! one of the matter's and that stream is not blocked by an earlier store failure (the
+//! conversation's line is best-effort; the matter's record is not). One that `undoes` an earlier
+//! restore also removes the files that restore added, while they hold what it wrote. The hold
+//! and the note wait until that commit is durable; a failed one is sent once more when the
+//! matter's stream drains, as an undo's is.
 
 use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, RefusedBecause, Restored};

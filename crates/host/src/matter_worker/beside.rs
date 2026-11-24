@@ -10,11 +10,13 @@
 //!   from its own before-turn checkpoint, and a paper only the others named is left out of its
 //!   card, one it wrote too kept with `also_changed_by` (`clauseo_matters::Overlap`). A paper
 //!   only the cards of those that ended credit is left out only while it holds what their card
-//!   left it with.
+//!   left it with; one the turn itself names, or one a turn that ended with no card named, never
+//!   is.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use clauseo_matters::Overlap;
 use clauseo_protocol::{ChangeKind, CheckpointId, ContentId, FileChange, MatterPath, ThreadId};
 
 use crate::sent::TurnPaths;
@@ -24,9 +26,12 @@ use crate::sent::TurnPaths;
 pub(crate) struct TurnOverlap {
     /// The turn's own before-turn checkpoint.
     pub(crate) since: CheckpointId,
-    /// The other turns of the matter that ran beside it and run still, or ended with no card,
-    /// with their tool calls' places.
+    /// The other turns of the matter that ran beside it and run still, with their tool calls'
+    /// places.
     pub(crate) running: Vec<(ThreadId, TurnPaths)>,
+    /// The turns that ran beside it and ended with no card (their after-turn checkpoint or its
+    /// events failed), with their tool calls' places: their papers are never left out.
+    pub(crate) failed: Vec<(ThreadId, TurnPaths)>,
     /// The papers the cards of turns that ran beside it and ended meanwhile credit.
     pub(crate) ended: BTreeMap<MatterPath, Ended>,
 }
@@ -41,21 +46,42 @@ pub(crate) struct Ended {
 }
 
 /// What [`others`] makes of a [`TurnOverlap`] for `clauseo_matters::Overlap`.
-pub(super) struct Others {
+pub(super) struct Beside {
+    /// The turn's own before-turn checkpoint.
+    since: CheckpointId,
     /// Each paper the other turns named or were credited, with their threads.
-    pub(super) others: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    others: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
     /// The papers of `others` only the cards of turns that ended credit, with what they left.
-    pub(super) left: BTreeMap<MatterPath, Option<ContentId>>,
+    left: BTreeMap<MatterPath, Option<ContentId>>,
+    /// Each paper the turns that ended with no card named, with their threads.
+    failed: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    /// Each paper the turn itself names.
+    own: BTreeSet<MatterPath>,
+}
+
+impl Beside {
+    /// The overlap R8 measures the turn's after-turn checkpoint with.
+    pub(super) fn overlap(&self) -> Overlap<'_> {
+        Overlap {
+            since: self.since,
+            others: &self.others,
+            left: &self.left,
+            failed: &self.failed,
+            own: &self.own,
+        }
+    }
 }
 
 /// What the start-up repair of a turn left open, which started at checkpoint `before`, needs of
 /// the other turns its matter left open (`open`, with their tool calls' places): `None` when
 /// there are none, or its start is not known.
+/// `own` are the repaired turn's own places.
 pub(super) fn of_open(
     folder: &Path,
     before: Option<CheckpointId>,
     mut open: Vec<(ThreadId, TurnPaths)>,
-) -> Option<(CheckpointId, Others)> {
+    own: &TurnPaths,
+) -> Option<Beside> {
     let since = before.filter(|_| !open.is_empty())?;
     for (_, paths) in &mut open {
         paths.resolve_start();
@@ -63,9 +89,10 @@ pub(super) fn of_open(
     let overlap = TurnOverlap {
         since,
         running: open,
+        failed: Vec::new(),
         ended: BTreeMap::new(),
     };
-    Some((since, others(folder, &overlap)))
+    Some(others(folder, &overlap, own))
 }
 
 /// The papers `paths`, a running turn's, names in `folder`.
@@ -76,9 +103,10 @@ fn named(folder: &Path, paths: &TurnPaths) -> BTreeSet<MatterPath> {
     named
 }
 
-/// The papers the other turns of `overlap` named or were credited, with their threads, and
-/// what the cards of those that ended left on the papers no running one names.
-pub(super) fn others(folder: &Path, overlap: &TurnOverlap) -> Others {
+/// The papers the other turns of `overlap` named or were credited, with their threads, what the
+/// cards of those that ended left on the papers no running one names, and the papers `own`, the
+/// turn's own places, names.
+pub(super) fn others(folder: &Path, overlap: &TurnOverlap, own: &TurnPaths) -> Beside {
     let mut others: BTreeMap<MatterPath, BTreeSet<ThreadId>> = BTreeMap::new();
     let mut left = BTreeMap::new();
     for (path, ended) in &overlap.ended {
@@ -91,7 +119,19 @@ pub(super) fn others(folder: &Path, overlap: &TurnOverlap) -> Others {
             others.entry(path).or_default().insert(*thread);
         }
     }
-    Others { others, left }
+    let mut failed: BTreeMap<MatterPath, BTreeSet<ThreadId>> = BTreeMap::new();
+    for (thread, paths) in &overlap.failed {
+        for path in named(folder, paths) {
+            failed.entry(path).or_default().insert(*thread);
+        }
+    }
+    Beside {
+        since: overlap.since,
+        others,
+        left,
+        failed,
+        own: named(folder, own),
+    }
 }
 
 /// Drops from `changes` each change to a paper one of `running` names in `folder`; a rename

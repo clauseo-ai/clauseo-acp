@@ -24,6 +24,49 @@ fn v7(n: u32) -> Uuid {
     uuid::Builder::from_unix_timestamp_millis(1_790_000_000_000, &random).into_uuid()
 }
 
+/// An after-turn checkpoint `meta` of a turn that ran beside others, reusing `reused_id` with
+/// the folder changed since `root_checkpoint`, the turn's start.
+fn beside_reuse_adds_nothing(
+    worker: &MatterWorker<u32>,
+    rx: &mpsc::Receiver<(u32, MatterReply, Option<String>)>,
+    root_checkpoint: CheckpointId,
+    (meta, reused_id): (TurnMeta, CheckpointId),
+) {
+    // The same reuse for a turn that ran beside others: its changes are measured from its own
+    // start, so none from `before` are added for the reused id.
+    let overlap = super::TurnOverlap {
+        since: root_checkpoint,
+        running: Vec::new(),
+        failed: Vec::new(),
+        ended: std::collections::BTreeMap::new(),
+    };
+    worker
+        .send(
+            MatterJob::AfterTurn {
+                meta,
+                tool_paths: TurnPaths::default(),
+                before: Some(root_checkpoint),
+                overlap: Some(Box::new(overlap)),
+            },
+            5,
+        )
+        .unwrap();
+    let (_, reply, _) = rx.recv().unwrap();
+    let MatterReply::AfterTurn(Ok(beside)) = reply else {
+        panic!("{reply:?}")
+    };
+    let paths: Vec<_> = beside
+        .checkpoint
+        .changes
+        .iter()
+        .map(|c| c.path().as_str())
+        .collect();
+    assert_eq!(paths, ["notes.txt"], "measured from its own start");
+    let reused = beside.reused.unwrap();
+    assert_eq!(reused.entry.map(|entry| entry.id), Some(reused_id));
+    assert!(reused.changes.is_empty(), "{:?}", reused.changes);
+}
+
 #[test]
 fn create_then_checkpoints_on_the_matter_thread() {
     let dir = TempDir::new("matter-worker");
@@ -133,6 +176,8 @@ fn create_then_checkpoints_on_the_matter_thread() {
     assert_eq!(reused.entry.map(|entry| entry.id), Some(meta(4).checkpoint));
     let paths: Vec<_> = reused.changes.iter().map(|c| c.path().as_str()).collect();
     assert_eq!(paths, ["notes.txt"]);
+
+    beside_reuse_adds_nothing(&worker, &rx, root_checkpoint, (meta(6), meta(4).checkpoint));
 
     worker.stop().unwrap();
 }
