@@ -239,8 +239,9 @@ wire_types! {
     host_error::{FileRefusal, HostError, RefusedBecause, WriteFailure},
     event::{
         AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
-        CheckpointRecorded, CommandsAvailable,
-        CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
+        AgentSwitched, CheckpointRecorded, CommandsAvailable,
+        CompactionChanged, ConfigOptionsReplaced, ContentAppended, ContextHandoff, DomainEvent,
+        ElicitationExpired, Endpoint, HandoffSettled, HandoffStatus,
         ElicitationRequested, ElicitationResolved, FilesChanged, HelperEnded, HelperStarted,
         HelperText, MatterCreated, MatterHold, MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
@@ -253,7 +254,8 @@ wire_types! {
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,
         ContentId,
-        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, HelperId, MatterId, MatterPath,
+        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, HandoffId, HelperId, MatterId,
+        MatterPath,
         MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
@@ -328,8 +330,8 @@ wire_types! {
     view::{
         AgentContentEntry, AgentRetry, AgentTextEntry, BackgroundMark, ContextUsage,
         ElicitationEntry, ElicitationState,
-        EntryId, HeaderEntry, HelperEntry, HelperTextEntry, LimitStopEntry, MarkerEntry, MarkerKind,
-        MatterHeaderEntry,
+        EntryId, HandoffEntry, HandoffEntryStatus, HeaderEntry, HelperEntry, HelperTextEntry,
+        LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
         ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,
         VersionEntry, ViewEntry,

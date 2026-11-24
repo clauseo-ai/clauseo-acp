@@ -10,21 +10,21 @@
 
 use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
-    Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
-    HeaderEntry, HelperEntry, HelperOutcome, HelperTextEntry, ImportSummary, LimitStopEntry,
-    LimitStopReason, MarkerEntry, MarkerKind, MatterHeaderEntry, MatterKind, NoticeEntry,
-    NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionEntry,
-    PermissionKind, PermissionOption, PermissionState, Principal, QueueHoldReason, StepEntry,
-    StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage,
-    ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
-    WebResult,
+    Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, Endpoint,
+    ExpiryReason, HandoffEntry, HandoffEntryStatus, HeaderEntry, HelperEntry, HelperOutcome,
+    HelperTextEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
+    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
+    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
+    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
+    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
 };
 
 use crate::examples::helpers::helper_started;
 use crate::examples::{file_changes, tool_call_started};
 use crate::fixtures::{
-    agent, checkpoint_id, count, elicitation_id, event_id, helper_id, matter_id, message_id, path,
-    permission_request_id, raw, seq, short, thread_id, turn_id,
+    agent, checkpoint_id, count, elicitation_id, event_id, handoff_id, helper_id, matter_id,
+    message_id, path, permission_request_id, raw, seq, short, thread_id, turn_id,
 };
 
 /// One example of every `ViewEntry` kind, in declaration order.
@@ -270,7 +270,7 @@ fn turn_entries() -> Vec<ViewEntry> {
     ]
 }
 
-/// A matter's header and one version.
+/// A matter's header and one version, then a handover (declared last, so listed here).
 fn matter_entries() -> Vec<ViewEntry> {
     vec![
         ViewEntry::MatterHeader(MatterHeaderEntry {
@@ -292,6 +292,26 @@ fn matter_entries() -> Vec<ViewEntry> {
             turn: None,
             ts: Timestamp::new(1_760_000_000_000).unwrap(),
             files: file_changes(),
+        }),
+        ViewEntry::Handoff(HandoffEntry {
+            order: seq(3),
+            handoff: handoff_id(19),
+            message: message_id(5),
+            from: Endpoint {
+                agent: agent("claude-acp"),
+                model: Some("Opus".to_owned()),
+                effort: Some("High".to_owned()),
+            },
+            to: Endpoint {
+                agent: agent("codex-acp"),
+                model: None,
+                effort: None,
+            },
+            answers_covered: count(4),
+            items_included: count(9),
+            items_left_out: count(2),
+            status: HandoffEntryStatus::Delivered,
+            ts: Timestamp::new(1_760_000_000_000).unwrap(),
         }),
     ]
 }

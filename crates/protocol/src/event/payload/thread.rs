@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::open_enum::open_unit_enum;
 use crate::{
     AgentCapabilities, AgentId, AgentSessionId, AvailableCommand, CompactString, CompactionStatus,
-    ConfigOption, Cost, Count, DetachReason, DoneBy, MatterId, NoticeKind, NoticeLevel, PlanEntry,
-    RenameSource, SnoozeBy, TextOrBlob, Timestamp, TurnId,
+    ConfigOption, Cost, Count, DetachReason, DoneBy, HandoffId, MatterId, MessageId, NoticeKind,
+    NoticeLevel, PlanEntry, RenameSource, SnoozeBy, TextOrBlob, Timestamp, TurnId,
 };
 
 /// A thread was created in a matter: the first event of its stream.
@@ -14,7 +15,7 @@ use crate::{
 pub struct ThreadCreated {
     /// The matter it belongs to.
     pub matter: MatterId,
-    /// The agent, fixed for the thread's life.
+    /// The agent the thread started with; an `AgentSwitched` changes it.
     pub agent: AgentId,
     /// A title, when one was given.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -198,4 +199,75 @@ pub struct AgentRetrying {
 pub struct AgentRetryEnded {
     /// The turn it waited in.
     pub turn: TurnId,
+}
+
+/// The thread's agent changed, at the start of the turn of a lawyer's message that named
+/// another agent. The thread's next session is the new agent's, started new; the old agent's
+/// session detached `switched` before this.
+/// JSON: `{"agent_switched": {"from": "claude", "to": "codex"}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentSwitched {
+    /// The agent the thread had.
+    pub from: AgentId,
+    /// The agent it has now.
+    pub to: AgentId,
+}
+
+/// One end of a handover: an agent, with the model and effort as the thread showed them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct Endpoint {
+    /// The agent.
+    pub agent: AgentId,
+    /// The model's name as shown, from the thread's config options; left out when not known.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
+    /// The effort's name as shown, from the thread's config options; left out when not known.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<String>,
+}
+
+/// The conversation's earlier items are being handed to the agent a switch moved to, with the
+/// lawyer's `message`; a `HandoffSettled` of the same `handoff` says how it went. The
+/// counts say what the handover holds: items are lawyer messages, answers, commands, errors and
+/// changed papers, each kept whole or left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ContextHandoff {
+    /// The handover.
+    pub handoff: HandoffId,
+    /// The lawyer's message it goes with, which the view shows it before.
+    pub message: MessageId,
+    /// The agent it comes from.
+    pub from: Endpoint,
+    /// The agent it goes to.
+    pub to: Endpoint,
+    /// The earlier answers the conversation holds.
+    pub answers_covered: Count,
+    /// The earlier items the handover holds.
+    pub items_included: Count,
+    /// The earlier items it leaves out, for want of room.
+    pub items_left_out: Count,
+}
+
+/// How a handover went: its prompt went out to the new agent, or the turn failed first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct HandoffSettled {
+    /// The handover.
+    pub handoff: HandoffId,
+    /// How it went.
+    pub status: HandoffStatus,
+}
+
+open_unit_enum! {
+    /// How a handover went.
+    pub enum HandoffStatus {
+        /// The prompt holding it went out to the new agent.
+        Delivered,
+        /// The turn failed before its prompt went out.
+        Failed,
+    }
+    test mod handoff_status;
 }

@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"agent_switched\")"
+---
+{
+  "agent_switched": {
+    "from": "claude-acp",
+    "to": "codex-acp"
+  }
+}

@@ -47,6 +47,7 @@ fn a_helpers_step_held_for_the_next_turn_shows_under_its_card_after_its_end() {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     // The prompt's turn waits for its before checkpoint, so no turn is live.
     let accepted = rig
@@ -161,6 +162,7 @@ fn queued_after_the_stop(test: &str, close_first: bool) {
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     if close_first {
         rig.release_held();

@@ -418,6 +418,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Settings › Tools: the lawyer chose Cancel in the confirm before a program was added or changed, so nothing was saved | `ErrorCode::McpSaveDeclined` | no |
 | Settings › Tools: an import's servers are too long to show whole in one confirm, so nothing was imported | `ErrorCode::McpImportTooLarge` | no |
 | Versions: Restore of one document whose name is now a folder, or whose folder is now a file; nothing was written; the dialog says so when Restore finds it (the band, when the preview does), naming the folder or file in the way (`HostError::files`) | `ErrorCode::MatterFileFolderClash` | no |
+| A message naming another agent while the conversation's agent may still be working in the background (a command it left running, or a call in flight): nothing was sent, the draft is kept, and the line says to send again once that work ends | `ErrorCode::ThreadBackgroundWork` | yes |
+| A message moving the conversation to another agent whose context has no room for any of the earlier conversation: the turn failed before anything was sent, the conversation stays with its agent, and the step card says so | `ErrorCode::PromptHandoffTooLong` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

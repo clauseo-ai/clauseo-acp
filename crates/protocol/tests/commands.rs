@@ -129,6 +129,7 @@ fn send_prompt(content: Vec<PromptBlock>) -> HostCommand {
         content,
         delivery: DeliveryRequest::Queue,
         config: None,
+        agent: None,
     }
 }
 

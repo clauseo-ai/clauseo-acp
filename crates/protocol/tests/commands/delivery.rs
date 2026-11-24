@@ -117,6 +117,7 @@ fn unknown_delivery_refused_on_decode() {
             content: vec![text("hi")],
             delivery: DeliveryRequest::Steer,
             config: None,
+            agent: None,
         },
     );
     let mut packed = packed_raw(&steer);
@@ -144,6 +145,7 @@ fn unknown_delivery_refused_on_decode() {
             content: vec![text("hi")],
             delivery: request,
             config: None,
+            agent: None,
         };
         assert_eq!(command.delivery(), Some(logged));
         round_trips(&command);

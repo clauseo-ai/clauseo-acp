@@ -24,15 +24,15 @@ use crate::open_enum::{UnknownKind, serialize_one_key};
 
 pub use payload::{
     AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
-    CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
-    ContentAppended, CopyOf, ElicitationExpired, ElicitationRequested, ElicitationResolved,
-    FilesChanged, HelperEnded, HelperStarted, HelperText, MatterCreated, MatterHold,
-    MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired,
-    PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved,
-    StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed,
-    ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored, WebResult,
-    WebSearchRecorded,
+    AgentSwitched, CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
+    ContentAppended, ContextHandoff, CopyOf, ElicitationExpired, ElicitationRequested,
+    ElicitationResolved, Endpoint, FilesChanged, HandoffSettled, HandoffStatus, HelperEnded,
+    HelperStarted, HelperText, MatterCreated, MatterHold, MatterRelocated, ModeChanged, Notice,
+    OutsideEdits, PageVisited, PermissionExpired, PermissionRequested, PermissionResolved,
+    PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted, ToolCallUpdated,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage,
+    VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -216,6 +216,12 @@ domain_events! {
     AgentRetrying(AgentRetrying) = "agent_retrying", thread;
     /// The agent's wait to retry is over (host).
     AgentRetryEnded(AgentRetryEnded) = "agent_retry_ended", thread;
+    /// The thread's agent changed (host).
+    AgentSwitched(AgentSwitched) = "agent_switched", thread;
+    /// The earlier items are handed to the new agent (host).
+    ContextHandoff(Box<ContextHandoff>) = "context_handoff", thread;
+    /// How a handover went (host).
+    HandoffSettled(HandoffSettled) = "handoff_settled", thread;
     /// The lawyer's message (host; acp on a `session/load` replay).
     UserMessage(UserMessage) = "user_message", thread;
     /// A turn waits (host).
@@ -307,6 +313,7 @@ macro_rules! from_unboxed {
 
 from_unboxed!(
     ContentAppended,
+    ContextHandoff,
     ToolCallStarted,
     ToolCallUpdated,
     WebSearchRecorded,

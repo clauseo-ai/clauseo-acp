@@ -49,6 +49,7 @@ golden! { HostCommand::name_of {
         ],
         delivery: DeliveryRequest::SendNow,
         config: None,
+        agent: None,
     };
     EditQueuedPrompt => edit_queued_prompt: HostCommand::EditQueuedPrompt {
         thread: thread_id(2),
