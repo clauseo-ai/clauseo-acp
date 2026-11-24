@@ -1,0 +1,16 @@
+{
+  "session_id": "46db3c74-4cae-4b7b-8f27-68eaffe0eae9",
+  "transcript_path": "/home/lawyer/.claude/projects/-m/46db3c74-4cae-4b7b-8f27-68eaffe0eae9.jsonl",
+  "cwd": "{matter}",
+  "prompt_id": "111f6cd7-8791-42b9-a739-188a1b99beb4",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo bash-line >> Contract.docx"
+  },
+  "tool_use_id": "toolu_cc_5596f3cad7af4fa1aa1a988a434309fa"
+}

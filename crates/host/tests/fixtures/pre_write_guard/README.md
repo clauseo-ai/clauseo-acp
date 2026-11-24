@@ -18,6 +18,7 @@ paths into the matter written as `{matter}`), and update the table.
 | Folder | Agent | Version the shapes match | Source |
 |---|---|---|---|
 | `claude/` | Claude Code | CLI 2.1.293, bundled with claude-agent-acp 0.89.1 (the pinned adapter); the `Write` and `Bash` shapes also replayed against CLI 2.1.316 in #162's live check | Hook input fields `session_id`, `transcript_path`, `cwd`, `permission_mode`, `hook_event_name`, `tool_name`, `tool_input`, `tool_use_id` (the CLI's hook schema); each tool's `tool_input` is the tool's own input schema |
+| `claude/code_mode/` | Claude Code | CLI 2.1.330, bundled with claude-agent-acp 0.110.1, Code Mode on | Captured live (24 Nov 2026): the calls a `REPL` script makes reach the hook under their own tool's name (`Write`, `Edit`, `Bash`), with a `toolu_cc_` `tool_use_id` and the fields `prompt_id` and `effort` beside the ones above. `Write` and `Bash` are the captured inputs (the paths and command made to name `Contract.docx`); `Edit` is the same input with `Edit`'s own schema |
 | `codex/` | Codex | `@openai/codex` 0.162.1 (rust-v0.162.1), under codex-acp 2.2.2 | `hooks/src/events/pre_tool_use.rs`, `command_input_json` (fields `session_id`, `turn_id`, `transcript_path`, `cwd`, `hook_event_name`, `model`, `permission_mode`, `tool_name`, `tool_input`, `tool_use_id`); `apply_patch` and `Bash` send `{"command": "<text>"}` (`core/src/hook_runtime.rs`) |
 
 The current files were written from the sources in the table, not captured from a running

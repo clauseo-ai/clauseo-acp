@@ -6,7 +6,7 @@ use super::{Fixture, IGNORED, deny, guard, guard_with};
 
 /// Each fixture: its file, its text, and whether the agent's hook passes `--matter` (Claude
 /// Code's does, Codex's does not).
-const FIXTURES: [(&str, &str, bool); 8] = [
+const FIXTURES: [(&str, &str, bool); 11] = [
     (
         "claude/Write.json",
         include_str!("../../../tests/fixtures/pre_write_guard/claude/Write.json"),
@@ -35,6 +35,23 @@ const FIXTURES: [(&str, &str, bool); 8] = [
     (
         "claude/PowerShell.json",
         include_str!("../../../tests/fixtures/pre_write_guard/claude/PowerShell.json"),
+        true,
+    ),
+    // A call a Code Mode `REPL` script makes reaches the hook under its own tool's name, with
+    // a `toolu_cc_` id (CLI 2.1.330, live).
+    (
+        "claude/code_mode/Write.json",
+        include_str!("../../../tests/fixtures/pre_write_guard/claude/code_mode/Write.json"),
+        true,
+    ),
+    (
+        "claude/code_mode/Edit.json",
+        include_str!("../../../tests/fixtures/pre_write_guard/claude/code_mode/Edit.json"),
+        true,
+    ),
+    (
+        "claude/code_mode/Bash.json",
+        include_str!("../../../tests/fixtures/pre_write_guard/claude/code_mode/Bash.json"),
         true,
     ),
     (
