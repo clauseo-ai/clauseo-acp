@@ -102,12 +102,12 @@ fn a_turn_cancelled_while_it_waits_for_a_hold_clears_it() {
     assert_eq!(header(&state), (ThreadStatus::Idle, None));
 }
 
-/// Schema 14 folds a wait for a hold on the matter to `Queued` with the hold, and its prompt to
-/// `Sent`: a snapshot schema 13 wrote (a build that folded a restore's or a relocate's wait as one
-/// behind the thread's own turn) is refused, so the stream is refolded from its log and shows it.
+/// Schema 14 (and every later one) folds a wait for a hold on the matter to `Queued` with the
+/// hold, and its prompt to `Sent`: a snapshot schema 13 wrote (a build that folded a restore's or
+/// a relocate's wait as one behind the thread's own turn) is refused, so the stream is refolded
+/// from its log and shows it.
 #[test]
 fn a_schema_13_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 14);
     let (mut log, mut state, thread) = created();
     held(&mut log, &mut state, thread, MatterHold::Relocate);
     let old = SnapshotRef {
@@ -120,7 +120,7 @@ fn a_schema_13_snapshot_is_refolded() {
             read,
             Err(Error::SchemaMismatch {
                 found: 13,
-                expected: 14
+                expected: REDUCER_SCHEMA_VERSION
             })
         ),
         "{read:?}"
