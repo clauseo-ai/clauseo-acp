@@ -233,3 +233,65 @@ fn elicitation_carries_the_scope_tool_call_id() {
         futures::executor::block_on(async { futures::join!(driver, calls, script) });
     assert_eq!(driver, Ok(()));
 }
+
+/// Claude's `AskUserQuestion` as claude-agent-acp 0.110.1 builds it for a client that declares
+/// AIR capabilities, as Clauseo does (`elicitation.js` `askUserQuestionsToCreateRequest`): each
+/// `_custom` field and the request carry AIR `_meta`. The form still reaches the host, its
+/// schema kept as read.
+#[test]
+fn an_air_shaped_ask_user_question_form_is_surfaced() {
+    let (client, events, driver, mut agent) = pipes();
+    let calls = async move {
+        handshake(&client).await;
+        loop {
+            if let AcpEvent::ElicitationRequested { key, request, .. } =
+                events.recv().await.unwrap()
+            {
+                let ElicitationRequest::Form { schema, .. } = &request else {
+                    panic!("{request:?}");
+                };
+                assert!(
+                    format!("{schema:?}").contains("question_1_custom"),
+                    "{schema:?}"
+                );
+                client
+                    .answer_elicitation(key, ElicitationResponse::Cancel)
+                    .await
+                    .unwrap();
+                break;
+            }
+        }
+    };
+    let script = async {
+        agent.start().await;
+        let custom = |question: &str| {
+            let answer = json!({"questionId": question, "isCustomAnswer": true});
+            json!({"type": "string", "title": "Other", "_meta": {
+                "_askUserQuestionCustomAnswer": answer,
+                "jetbrains": {"air": {"version": 1, "customAnswer": answer}}}})
+        };
+        let schema = json!({"type": "object", "properties": {
+            "question_0": {"type": "string", "title": "Law", "oneOf": [
+                {"const": "New York", "title": "New York",
+                    "_meta": {"_claude/askUserQuestionOption": {"preview": "Clause 12"}}}]},
+            "question_0_custom": custom("question_0"),
+            "question_1": {"type": "array", "title": "Schedules",
+                "items": {"anyOf": [{"const": "Fees", "title": "Fees"}]}},
+            "question_1_custom": custom("question_1"),
+        }});
+        agent.send(
+            &json!({"jsonrpc": "2.0", "id": "el-air-1", "method": "elicitation/create",
+            "params": {"mode": "form", "sessionId": "s-1", "toolCallId": "toolu_ask_1",
+                "message": "Please answer the following questions.", "requestedSchema": schema,
+                "_meta": {"jetbrains": {"air": {"version": 1,
+                    "customAnswerFields": ["question_0_custom", "question_1_custom"]}}}}}),
+        );
+        let answer = agent.read().await;
+        assert_eq!(answer["id"], "el-air-1");
+        assert_eq!(answer["result"]["action"], "cancel", "{answer}");
+        agent.read_end().await;
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+}
