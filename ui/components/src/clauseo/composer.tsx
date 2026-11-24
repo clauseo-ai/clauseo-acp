@@ -95,7 +95,8 @@ export type ComposerProps<V extends string = string> = {
   took: string | null;
   plan: string;
   hint: ReadyHint | null;
-  /** While Clauseo works, or while an error or a wait stands: the working line, in the status line's place. */
+  /** While Clauseo works, or while an error or a wait stands: the working line, the well's top row. With nothing
+   * running it stands in the status line's place; while an answer runs the status line stays over it. */
   working?: WorkingState | null;
   /** Whether the working line opens with its motion, as it does when Clauseo starts. */
   opening?: boolean;
@@ -381,9 +382,14 @@ export function Composer<V extends string = string>({
         </ul>
       )}
       {acts}
-      {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
+      {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint. While an
+          answer runs it stays over the working line, so the model and effort in use stay named and can be changed
+          for the next message; an error, a wait or a stopped line with nothing running takes its place */}
       {status && (
-        <StatusLine {...{ took, plan, hint, choice, tools, menus }} hidden={working !== null} />
+        <StatusLine
+          {...{ took, plan, hint, choice, tools, menus }}
+          hidden={working !== null && !busy}
+        />
       )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>

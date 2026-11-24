@@ -12,7 +12,7 @@ import { header, reset, THREAD, upsert } from "../testing/stream-script.ts";
 import type { ConfigOption, MatterSummary, ThreadId, ViewEntry } from "../transport/protocol.ts";
 import { fakeNext } from "./fake-next.ts";
 import type { AgentSummary } from "./host-next.ts";
-import { defaultOutcome, mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
+import { defaultOutcome, mountRoom, summary, THE_MATTER, type Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -99,9 +99,13 @@ async function open(id: string) {
 }
 
 /** A header with the agent's options, as the host sends it for the open thread. */
-const headerWith = (config_options: ConfigOption[]): ViewEntry => {
-  const base = header();
-  return { header: { ...base.header!, config_options } };
+const headerWith = (
+  config_options: ConfigOption[],
+  status: "idle" | "running" = "idle",
+  agent = "claude-acp",
+): ViewEntry => {
+  const base = header(status);
+  return { header: { ...base.header!, agent, config_options } };
 };
 
 test("a new conversation shows the model and effort the matter remembers, and a pick goes with create_thread", async () => {
@@ -250,6 +254,68 @@ test("in a conversation: the header's options, the plan fixed, a pick sent as se
   await h.settle();
   expect(said("effort")).toBe("Medium");
 });
+
+test("an option the composer doesn't know (ChatGPT's collaboration_mode, fast mode) draws nothing", async () => {
+  const collaboration = select("collaboration_mode", "Collaboration mode", "mode", "default", [
+    ["default", "Default"],
+    ["plan", "Plan"],
+  ]);
+  const odd = select("fast_mode", "Fast mode", "fast_mode", "off", [
+    ["off", "Off"],
+    ["on", "On"],
+  ]);
+  const options = [collaboration, odd, MODEL, EFFORT];
+  h = await mountRoom({ next: withAgents([claude(options)]) });
+  h.deliver([reset([], headerWith(options))]);
+  await h.settle();
+  expect(said("model")).toBe("Opus");
+  expect(said("effort")).toBe("High");
+  expect(trigger("collaboration_mode")).toBeNull();
+  expect(trigger("fast_mode")).toBeNull();
+  expect(h.host.querySelectorAll(".room-status-menu")).toHaveLength(2);
+  const line = h.host.querySelector(".room-status")?.textContent ?? "";
+  for (const word of ["Collaboration", "Plan", "Fast", "Off"]) expect(line).not.toContain(word);
+});
+
+// issue 11: while an answer runs the status line stays over the working line, naming the model and effort in use,
+// and a pick still goes to the host (it takes set_config_option mid-answer) for the next message
+test.each([
+  ["Claude", "claude-acp", "Uses your Claude plan"],
+  ["ChatGPT", "codex-acp", "Uses your ChatGPT plan"],
+] as const)(
+  "while %s answers, its model and effort stay named over the working line and can still be changed",
+  async (_, agent, plan) => {
+    const thread = { ...summary(), agent };
+    const agents: AgentSummary[] = [
+      claude([MODEL, EFFORT]),
+      { id: "codex-acp", kind: "codex", config_options: [MODEL, EFFORT] },
+    ];
+    h = await mountRoom({ threads: [thread], next: withAgents(agents) });
+    h.deliver([reset([], headerWith([MODEL, EFFORT], "running", agent))]);
+    await h.settle();
+    expect(h.one("cancel")).not.toBeNull();
+    expect(h.one("working")?.textContent).toContain("Answering.");
+    const status = h.host.querySelector<HTMLElement>(".room-status");
+    expect(status?.hidden).toBe(false);
+    expect(status?.querySelector(".room-status-plan")?.textContent).toBe(plan);
+    expect(said("model")).toBe("Opus");
+    expect(said("effort")).toBe("High");
+    expect(trigger("model")?.disabled).toBe(false);
+    await open("effort");
+    await h.click(item("Medium"));
+    await h.settle();
+    expect(h.sent("set_config_option")).toEqual([
+      { thread: THREAD, option_id: "effort", value: { select: "medium" } },
+    ]);
+    expect(said("effort")).toBe("Medium");
+    // the answer done: the line as it always stood
+    h.deliver([upsert(headerWith([MODEL, EFFORT], "idle", agent))]);
+    await h.settle();
+    expect(h.one("cancel")).toBeNull();
+    expect(h.host.querySelector<HTMLElement>(".room-status")?.hidden).toBe(false);
+    expect(said("model")).toBe("Opus");
+  },
+);
 
 test("a pick the host refuses, or the agent replaces, gives way to the options as they are, with no error", async () => {
   let refuse = true;
