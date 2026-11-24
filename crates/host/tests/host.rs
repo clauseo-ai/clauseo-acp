@@ -99,6 +99,9 @@ mod start_refused_log;
 mod web_sources;
 
 #[cfg(test)]
+#[path = "host/code_mode.rs"]
+mod code_mode;
+#[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
 #[cfg(test)]

@@ -70,6 +70,7 @@ pub(in crate::actor::turn) fn end_unstarted(
                 stop: StopReason::Cancelled,
                 usage: None,
                 checkpoint_after: None,
+                code_mode: false,
             },
         )?;
     }

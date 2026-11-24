@@ -70,6 +70,14 @@ pub struct AgentModels {
     pub current_effort: Option<CompactString>,
 }
 
+/// Whether the ACP tool call `id` is a script ("code mode") call: Claude Code's `toolu_cc_`
+/// calls and Codex's `repl_` calls. A turn is in code mode from the first such call it makes
+/// (`TurnEnded::code_mode`, `StepEntry::code_mode`, `HeaderEntry::code_mode`).
+#[must_use]
+pub fn is_code_mode_call(id: &str) -> bool {
+    id.starts_with("toolu_cc_") || id.starts_with("repl_")
+}
+
 impl AgentModels {
     /// The entry of the model `id`.
     #[must_use]
@@ -81,6 +89,14 @@ impl AgentModels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_mode_calls_are_told_by_their_id() {
+        assert!(super::is_code_mode_call("toolu_cc_01abc"));
+        assert!(super::is_code_mode_call("repl_7"));
+        assert!(!super::is_code_mode_call("toolu_01abc"));
+        assert!(!super::is_code_mode_call("call_repl_1"));
+    }
 
     #[test]
     fn missing_optional_fields_read_as_empty() {

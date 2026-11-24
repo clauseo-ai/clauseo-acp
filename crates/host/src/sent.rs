@@ -306,6 +306,14 @@ impl SentView {
             .map(|(id, _)| *id)
     }
 
+    /// Whether `turn` made a script call (`clauseo_protocol::is_code_mode_call`), as sent.
+    pub(crate) fn code_mode(&self, turn: TurnId) -> bool {
+        self.sent
+            .tools
+            .values()
+            .any(|tool| tool.turn == turn && clauseo_protocol::is_code_mode_call(&tool.acp_id))
+    }
+
     /// The message ACP knows as `acp_message_id` in `session`.
     pub(crate) fn message(
         &self,

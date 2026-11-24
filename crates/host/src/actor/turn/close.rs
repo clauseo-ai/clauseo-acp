@@ -167,11 +167,15 @@ impl TurnClose {
                 },
             )?;
         }
+        let code_mode = actor
+            .loaded(StreamId::Thread(out.thread()))
+            .is_some_and(|loaded| loaded.sent.code_mode(turn));
         let ended = TurnEnded {
             turn,
             stop: self.stop,
             usage: None,
             checkpoint_after: self.checkpoint_after,
+            code_mode,
         };
         out.push(actor, ended)?;
         if let (Some(limit), StopReason::AtLimit) = (&self.limit, self.stop) {

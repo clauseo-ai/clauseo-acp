@@ -200,6 +200,7 @@ fn turn_entries() -> Vec<ViewEntry> {
             undone: false,
             usage: None,
             ts: Timestamp::new(1_760_000_003_000).unwrap(),
+            code_mode: false,
         }),
         ViewEntry::LimitStop(LimitStopEntry {
             order: seq(9),

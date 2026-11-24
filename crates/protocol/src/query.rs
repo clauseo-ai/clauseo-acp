@@ -573,8 +573,11 @@ pub struct ThreadSummary {
     /// The effort its latest turn ran with, as `model`; `None` too for a model with no effort.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub effort: Option<NamedChoice>,
-    /// Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
-    /// as `false`, and `false` is left out.
+    /// Whether the running (else the latest) turn is in code mode: set by the reducer at the
+    /// turn's first script call (`ToolCallStarted` whose ACP id passes
+    /// [`is_code_mode_call`](crate::is_code_mode_call)), cleared by the next `TurnStarted`. Each
+    /// ended turn keeps its own mark on its step (`StepEntry::code_mode`). Missing reads as
+    /// `false`, and `false` is left out.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub code_mode: bool,
 }

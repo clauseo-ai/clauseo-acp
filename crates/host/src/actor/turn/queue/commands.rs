@@ -186,6 +186,7 @@ fn remove_loaded(
         stop: StopReason::Cancelled,
         usage: None,
         checkpoint_after: None,
+        code_mode: false,
     };
     out.push(actor, ended)?;
     let stream = Some(StreamId::Thread(thread));

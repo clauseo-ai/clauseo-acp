@@ -208,16 +208,20 @@ pub(super) fn turn_started(state: &mut ThreadState, event: &TurnStarted, out: &m
     state.after_turn = None;
     let status = running_status(state);
     set_status(state, "turn_started", out, status);
-    // The model and effort the turn runs with; an event logged before them changes neither.
-    if event.model.is_some() || event.effort.is_some() {
-        let (model, effort) = (event.model.clone(), event.effort.clone());
-        super::update_header(state, "turn_started", out, |header| {
-            let changed = header.model != model || header.effort != effort;
+    // The model and effort the turn runs with; an event logged before them changes neither. A
+    // new turn is not in code mode until its first script call.
+    let named = event.model.is_some() || event.effort.is_some();
+    let (model, effort) = (event.model.clone(), event.effort.clone());
+    super::update_header(state, "turn_started", out, |header| {
+        let changed =
+            header.code_mode || (named && (header.model != model || header.effort != effort));
+        if named {
             header.model = model;
             header.effort = effort;
-            changed
-        });
-    }
+        }
+        header.code_mode = false;
+        changed
+    });
 }
 
 /// Keeps the turn's files for its step, or updates the step when the turn has ended. A file
@@ -351,6 +355,7 @@ pub(super) fn turn_ended(
         undone: false,
         usage: event.usage,
         ts,
+        code_mode: event.code_mode,
     };
     state.index.steps.insert(event.turn, seq);
     insert_new(state, seq, ViewEntry::Step(entry), out);

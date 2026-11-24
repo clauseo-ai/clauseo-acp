@@ -307,6 +307,7 @@ fn none_fields_are_omitted() {
         stop: StopReason::Cancelled,
         usage: None,
         checkpoint_after: None,
+        code_mode: false,
     };
     let mut quiet = envelope(ended.into());
     quiet.command_id = None;
@@ -549,6 +550,7 @@ fn newer_optional_field_is_ignored() {
         stop: StopReason::EndTurn,
         usage: None,
         checkpoint_after: None,
+        code_mode: false,
     });
     assert_eq!(read.event, expected);
     // In MessagePack: what `to_vec_named` writes, plus keys this version does not know.

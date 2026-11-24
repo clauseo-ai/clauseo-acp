@@ -59,6 +59,7 @@ fn log(actor: &mut Actor, thread: ThreadId, ended: TurnId, queued: &Queued) -> R
             stop: StopReason::Cancelled,
             usage: None,
             checkpoint_after: None,
+            code_mode: false,
         },
     )?;
     out.push(

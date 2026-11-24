@@ -510,6 +510,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             stop: StopReason::NotAllowed,
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
+            code_mode: false,
         }
         .into(),
         TurnEnded {
@@ -517,6 +518,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             stop: StopReason::OutsideMatter,
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
+            code_mode: false,
         }
         .into(),
         TurnEnded {
@@ -524,6 +526,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             stop: StopReason::TooLong,
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
+            code_mode: false,
         }
         .into(),
     ]
