@@ -91,7 +91,7 @@ const FAMILIES: [
   ],
   [
     "case law",
-    "search",
+    "read",
     "case-law",
     "read_document",
     { docid: 1 },
@@ -101,7 +101,7 @@ const FAMILIES: [
   ],
   [
     "case law",
-    "search",
+    "cite",
     "case-law",
     "citator",
     { docid: 1 },
@@ -111,7 +111,7 @@ const FAMILIES: [
   ],
   [
     "case law",
-    "search",
+    "check",
     "case-law",
     "check_citations",
     { text: "AIR 1973 SC 1461" },
