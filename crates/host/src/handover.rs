@@ -84,16 +84,21 @@ pub(crate) fn budget(window: Option<u64>, native_used: u64, request_bytes: u64) 
     room.min(TOKEN_CAP).min(BYTE_CAP)
 }
 
-/// The handover for a new agent called `from`: the items [`build`] keeps within `budget`, or
-/// `None` when the header and one item do not fit. The budget is capped at 64,000 bytes here
-/// too, whatever the caller passes.
+/// The handover for a new agent called `from`: the items [`build`] keeps within `budget`. When
+/// items exist and not one fits, the header alone, which says they are all left out (T3 sends
+/// its header with no items then too). `None` when there are no items, or not even the header
+/// fits. The budget is capped at 64,000 bytes here too, whatever the caller passes.
 pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover> {
     let total = items.len();
+    if total == 0 {
+        return None;
+    }
+    let budget = budget.min(BYTE_CAP);
     // The header at its widest, so the counts it gives later never outgrow the reserve.
     let header_reserve = size(&header(from, total, total, total));
     let rendered: Vec<String> = items.iter().map(render).collect();
     let mut kept = vec![false; total];
-    let mut remaining = budget.min(BYTE_CAP).saturating_sub(header_reserve);
+    let mut remaining = budget.saturating_sub(header_reserve);
     let priority = [
         items.iter().rposition(is_lawyer),
         items.iter().rposition(is_answer),
@@ -110,10 +115,10 @@ pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover>
         }
     }
     let included = kept.iter().filter(|taken| **taken).count();
-    if included == 0 {
+    let mut text = header(from, included, total, total - included);
+    if included == 0 && size(&text) > budget {
         return None;
     }
-    let mut text = header(from, included, total, total - included);
     for (item, _) in rendered.iter().zip(&kept).filter(|(_, taken)| **taken) {
         text.push_str("\n\n");
         text.push_str(item);
@@ -126,7 +131,15 @@ pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover>
 }
 
 /// The header: what the items are, how many of how many are here, and that they are background.
+/// With none here, it says that all of them are left out.
 fn header(from: &str, included: usize, total: usize, left_out: usize) -> String {
+    if included == 0 {
+        return format!(
+            "Earlier in this conversation the lawyer worked with {from}. The {total} earlier \
+             items are left out: not one fits in the room this request leaves. Files, tool state \
+             and reasoning are not included either."
+        );
+    }
     let left = if left_out > 0 {
         format!(" {left_out} earlier items are left out.")
     } else {
@@ -284,9 +297,12 @@ impl Reader<'_> {
                 parts.errors.push(detail.clone());
             }
         } else if let DomainEvent::StepUndone(event) = event {
-            // The undone step's answers and commands stay; its files do not.
+            // The undone step's answers and commands stay; the files it put back do not, and
+            // a partial undo leaves the files it kept.
             let parts = self.turns.entry(event.turn).or_default();
-            parts.papers.clear();
+            parts
+                .papers
+                .retain(|path| !event.restored.iter().any(|put| put.as_str() == path));
             parts
                 .undone
                 .extend(event.restored.iter().map(|path| path.as_str().to_owned()));

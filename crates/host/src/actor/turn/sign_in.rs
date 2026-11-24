@@ -192,6 +192,26 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     None
 }
 
+/// Why a launch of `agent` would be refused now for its sign-in, as [`launch_refusal`] refuses
+/// one: `stop_agents` holds it (`agent.auth_required`), or desktop refuses its new launches with
+/// a code a launch does not wait out ([`keys_wait`]). A message switching a thread to `agent` is
+/// refused with it before it is taken (`switch.rs`).
+pub(super) fn refusal_of(actor: &Actor, agent: &AgentId) -> Option<Error> {
+    if actor.wiring.sign_in.held.contains_key(agent) {
+        return Some(Error::refused(
+            ErrorCode::AgentAuthRequired,
+            "the agent starts again once its sign-in has changed",
+        ));
+    }
+    let code = actor
+        .wiring
+        .sign_in
+        .refused
+        .in_force(agent, actor.clock.now().mono)?;
+    (!WAITED_OUT.contains(&code))
+        .then(|| Error::refused(code, "Clauseo is not starting this agent for now"))
+}
+
 /// Whether `thread`'s launch waits for its agent's `agent.keys_loading`, `agent.key_unreadable`
 /// or `agent.key_denied` refusal: when it is the refusal in force (no `stop_agents` hold), the
 /// wait, at most [`KEYS_WAIT`] on the host clock and woken when the refusal lifts or changes.

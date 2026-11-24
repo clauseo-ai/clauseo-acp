@@ -13,7 +13,7 @@ use crate::actor::turn::{TurnPhase, queue, steps, switch};
 use crate::pipeline::tests::support::TempDir;
 
 /// The agent's steps after its handshake: one prompt, answered `end_turn`.
-const PROMPT_ENDS: &str = concat!(
+pub(super) const PROMPT_ENDS: &str = concat!(
     r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}"#,
     "\n",
     r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#,
@@ -21,25 +21,49 @@ const PROMPT_ENDS: &str = concat!(
 );
 
 /// The agent a message switches to, in the settings beside `fake-agent`.
-const OTHER: &str = "other-agent";
+pub(super) const OTHER: &str = "other-agent";
 
 /// A rig whose settings hold `fake-agent` and [`OTHER`], both playing [`PROMPT_ENDS`].
 fn rig(test: &str) -> Rig {
+    two_agents(test, None)
+}
+
+/// A rig whose settings hold `fake-agent`, playing [`PROMPT_ENDS`], and [`OTHER`]: with
+/// `other`, its own scenario, whose session is `sess-2` and whose steps after the handshake are
+/// `other`, so a test sees which agent a call reached; else the same as `fake-agent`'s.
+pub(super) fn two_agents(test: &str, other: Option<&str>) -> Rig {
     let dir = TempDir::new(test);
     Rig::prepare(dir.path(), test, PROMPT_ENDS, None);
     let path = dir.path().join("data").join("settings.json");
     let mut settings: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     settings["agents"][OTHER] = settings["agents"]["fake-agent"].clone();
+    if let Some(steps) = other {
+        let scenario = dir.path().join(format!("{test}-other.jsonl"));
+        let header = format!(
+            "{{\"scenario\":\"{test}-other\",\"description\":\"a unit test\",\
+             \"on_stdin_close\":\"exit\"}}\n"
+        );
+        let handshake = super::rig::HANDSHAKE.replace("sess-1", "sess-2");
+        let text = format!("{header}{handshake}{steps}");
+        crate::write::write_file(&scenario, text.as_bytes()).unwrap();
+        let scenario = scenario.display().to_string();
+        settings["agents"][OTHER]["args"] = serde_json::json!(["--scenario", scenario]);
+    }
     crate::write::write_file(&path, settings.to_string().as_bytes()).unwrap();
     Rig::open(dir, 0, None)
 }
 
-fn send(thread: ThreadId, agent: Option<&str>) -> HostCommand {
+pub(super) fn send(thread: ThreadId, agent: Option<&str>) -> HostCommand {
+    send_text(thread, agent, "And clause 5?")
+}
+
+/// `SendPrompt` of `text` to `thread`, queued, naming `agent`.
+pub(super) fn send_text(thread: ThreadId, agent: Option<&str>, text: &str) -> HostCommand {
     HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
-            text: "And clause 5?".to_owned(),
+            text: text.to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
         config: None,
@@ -48,7 +72,7 @@ fn send(thread: ThreadId, agent: Option<&str>) -> HostCommand {
 }
 
 /// Runs one turn of `thread` to its end, as command `n`.
-fn one_turn(rig: &mut Rig, n: u128, thread: ThreadId) {
+pub(super) fn one_turn(rig: &mut Rig, n: u128, thread: ThreadId) {
     let sent = rig.dispatch(n, send(thread, None));
     assert!(
         matches!(sent, Ok(CommandOutcome::PromptAccepted { .. })),
@@ -57,10 +81,13 @@ fn one_turn(rig: &mut Rig, n: u128, thread: ThreadId) {
     until_idle(rig, thread);
 }
 
-fn until_idle(rig: &mut Rig, thread: ThreadId) {
-    rig.run_until("the turn ended", |actor| {
+/// Handles inputs until `thread` has no turn and nothing queued, and no commit is in flight.
+pub(super) fn until_idle(rig: &mut Rig, thread: ThreadId) {
+    rig.run_until("the turns ended", |actor| {
         let state = &actor.threads[&thread].turn;
-        state.current.is_none() && state.closing.is_none()
+        state.current.is_none()
+            && state.closing.is_none()
+            && queue::queued_turns(actor, thread).is_empty()
     });
     rig.settle_commits();
 }
@@ -78,7 +105,7 @@ fn background_now(rig: &mut Rig, thread: ThreadId) {
         .steered_end = Some(now);
 }
 
-fn count(log: &[DomainEvent], pick: impl Fn(&DomainEvent) -> bool) -> usize {
+pub(super) fn count(log: &[DomainEvent], pick: impl Fn(&DomainEvent) -> bool) -> usize {
     log.iter().filter(|event| pick(event)).count()
 }
 

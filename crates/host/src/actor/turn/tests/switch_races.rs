@@ -1,0 +1,392 @@
+//! A switch's interleavings (`switch.rs`): a `SetMode` that comes while the switch runs, at
+//! each of the three points where it once relaunched the old agent, waits on the switch and
+//! runs on the new agent; a cancel while the switch's commit is in flight leaves the handover
+//! owed to the next turn; and the handover settles `Delivered` only once its prompt goes out.
+//! The new agent plays its own scenario (session `sess-2`), so the sessions attached show which
+//! agent each call reached.
+
+use clauseo_protocol::{
+    AgentChoiceId, AgentId, CommandEnvelope, CommandOutcome, DetachReason, DomainEvent, ErrorCode,
+    HandoffStatus, HostCommand, NoticeKind, ThreadId,
+};
+use futures::channel::oneshot;
+
+use super::super::super::Actor;
+use super::super::super::input::{Input, Request};
+use super::rig::{Rig, command_id};
+use super::switch::{OTHER, count, one_turn, send, two_agents, until_idle};
+use crate::actor::turn::{AgentReply, LogFor, TurnInput, agents, switch};
+use crate::agent::AgentInput;
+use crate::error::Error;
+
+/// The new agent's steps: a mode change to `plan`, then one prompt, answered `end_turn`.
+const MODE_THEN_PROMPT: &str = concat!(
+    r#"{"expect":{"method":"session/set_mode","as":"m1","params":{"sessionId":"sess-2","modeId":"plan"}}}"#,
+    "\n",
+    r#"{"respond":{"to":"m1","result":{}}}"#,
+    "\n",
+    r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-2"}}}"#,
+    "\n",
+    r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#,
+    "\n",
+);
+
+/// The new agent's steps: prompts, each answered `end_turn`.
+const PROMPTS_END: &str = concat!(
+    r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-2"}}}"#,
+    "\n",
+    r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#,
+    "\n",
+    r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-2"}}}"#,
+    "\n",
+    r#"{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}"#,
+    "\n",
+);
+
+/// An agent's `Ended`.
+fn ended(_: &Actor, input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Agent {
+            input: AgentInput::Ended(_),
+            ..
+        }
+    )
+}
+
+/// The whole-log read of a switch.
+fn switch_log(_: &Actor, input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Turn(TurnInput::Log {
+            why: LogFor::Switch(_),
+            ..
+        })
+    )
+}
+
+/// The result of the commit logging `AgentSwitched`.
+fn switch_commit(actor: &Actor, input: &Input) -> bool {
+    matches!(input, Input::Committed { ticket, .. }
+        if actor.pipeline.events(*ticket).iter()
+            .any(|e| matches!(e.event, DomainEvent::AgentSwitched(_))))
+}
+
+/// The note that a prompt carrying a handover goes out.
+fn prompt_out(_: &Actor, input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Turn(TurnInput::Agent {
+            reply: AgentReply::PromptOut { .. },
+            ..
+        })
+    )
+}
+
+/// Dispatches `command` as command `n` and holds back the first input `hold` picks, whether it
+/// comes before the command's answer or after.
+fn dispatch_then_hold(
+    rig: &mut Rig,
+    n: u128,
+    command: HostCommand,
+    what: &str,
+    hold: fn(&Actor, &Input) -> bool,
+) {
+    let sent = rig.dispatch_holding(n, command, hold);
+    assert!(
+        matches!(sent, Ok(CommandOutcome::PromptAccepted { .. })),
+        "{sent:?}"
+    );
+    if rig.held.is_empty() {
+        rig.hold_next(what, hold);
+    }
+    assert_eq!(rig.held.len(), 1, "one input held");
+}
+
+/// `SetMode { plan }` as command `n`, not waited for: a switch may hold it.
+fn set_mode(
+    rig: &mut Rig,
+    n: u128,
+    thread: ThreadId,
+) -> oneshot::Receiver<Result<CommandOutcome, Error>> {
+    let (reply, answer) = oneshot::channel();
+    let command = CommandEnvelope {
+        command_id: command_id(n),
+        command: HostCommand::SetMode {
+            thread,
+            mode_id: AgentChoiceId::new("plan").unwrap(),
+        },
+    };
+    rig.actor.on_request(Request::Dispatch { command, reply });
+    answer
+}
+
+/// Handles inputs, holding back those `hold` picks, until `thread`'s switch holds a change.
+fn held_on_the_switch(rig: &mut Rig, thread: ThreadId, hold: fn(&Actor, &Input) -> bool) {
+    rig.run_holding("the change held on the switch", hold, |actor| {
+        switch::seen(actor, thread)
+            .0
+            .is_some_and(|(_, held)| held > 0)
+    });
+}
+
+/// The sessions attached in `log`, in order.
+fn attached(log: &[DomainEvent]) -> Vec<String> {
+    log.iter()
+        .filter_map(|event| {
+            if let DomainEvent::AgentSessionAttached(attached) = event {
+                Some(attached.session.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn detaches(log: &[DomainEvent]) -> Vec<DetachReason> {
+    log.iter()
+        .filter_map(|event| {
+            if let DomainEvent::AgentSessionDetached(detached) = event {
+                Some(detached.reason.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn settled(log: &[DomainEvent]) -> Vec<HandoffStatus> {
+    log.iter()
+        .filter_map(|event| {
+            if let DomainEvent::HandoffSettled(settled) = event {
+                Some(settled.status)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// The switch ran on the new agent alone: one switch, the old session detached `Switched`
+/// once, only the new session attached after it, the mode change answered and the thread on
+/// the new agent.
+fn ran_on_the_new_agent(
+    rig: &mut Rig,
+    thread: ThreadId,
+    mut mode: oneshot::Receiver<Result<CommandOutcome, Error>>,
+) {
+    until_idle(rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(attached(&log), ["sess-1", "sess-2"], "{log:?}");
+    assert_eq!(detaches(&log), [DetachReason::Switched], "{log:?}");
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        1
+    );
+    assert_eq!(settled(&log), [HandoffStatus::Delivered]);
+    assert!(
+        matches!(mode.try_recv(), Ok(Some(Ok(_)))),
+        "the mode change was answered"
+    );
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), OTHER);
+}
+
+/// Trigger A: the mode change comes while the old agent stops.
+#[test]
+fn a_mode_change_while_the_old_agent_stops_runs_on_the_new_one() {
+    let mut rig = two_agents("switch-mode-stopping", Some(MODE_THEN_PROMPT));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the old agent's end",
+        ended,
+    );
+    let mode = set_mode(&mut rig, 12, thread);
+    held_on_the_switch(&mut rig, thread, ended);
+    let (switch, _) = switch::seen(&rig.actor, thread);
+    assert_eq!(
+        switch,
+        Some(("Stopping".to_owned(), 1)),
+        "held on the switch"
+    );
+    rig.release_held();
+    ran_on_the_new_agent(&mut rig, thread, mode);
+    rig.finish();
+}
+
+/// Trigger B: the mode change comes while the switch reads the log.
+#[test]
+fn a_mode_change_while_the_log_is_read_runs_on_the_new_one() {
+    let mut rig = two_agents("switch-mode-reading", Some(MODE_THEN_PROMPT));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the switch's log",
+        switch_log,
+    );
+    let mode = set_mode(&mut rig, 12, thread);
+    held_on_the_switch(&mut rig, thread, switch_log);
+    let (switch, _) = switch::seen(&rig.actor, thread);
+    assert_eq!(
+        switch,
+        Some(("Reading".to_owned(), 1)),
+        "held on the switch"
+    );
+    assert!(
+        rig.actor.threads[&thread].turn.agent.is_none(),
+        "no agent launched"
+    );
+    assert!(rig.actor.threads[&thread].turn.preparing.is_none());
+    rig.release_held();
+    ran_on_the_new_agent(&mut rig, thread, mode);
+    rig.finish();
+}
+
+/// Trigger C: an idle stop was under way, with the mode change waiting for the agent after it.
+#[test]
+fn a_mode_change_waiting_for_an_idle_stop_runs_on_the_new_one() {
+    let mut rig = two_agents("switch-mode-idle", Some(MODE_THEN_PROMPT));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    agents::idle_stop(&mut rig.actor, thread);
+    rig.hold_next("the idle stop's end", ended);
+    let mode = set_mode(&mut rig, 12, thread);
+    let sent = rig.dispatch(11, send(thread, Some(OTHER)));
+    assert!(
+        matches!(sent, Ok(CommandOutcome::PromptAccepted { .. })),
+        "{sent:?}"
+    );
+    let (switch, _) = switch::seen(&rig.actor, thread);
+    assert_eq!(
+        switch,
+        Some(("Stopping".to_owned(), 1)),
+        "taken from the stopping agent"
+    );
+    rig.release_held();
+    ran_on_the_new_agent(&mut rig, thread, mode);
+    rig.finish();
+}
+
+/// A cancel while the switch's commit is in flight: the commit is durable all the same, so the
+/// thread is on the new agent, the handover settles `Failed` and is owed, and the next turn
+/// carries it, with no "context not restored" notice.
+#[test]
+fn a_cancel_during_the_switch_commit_owes_the_handover() {
+    let mut rig = two_agents("switch-cancel-commit", Some(PROMPTS_END));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the switch's commit",
+        switch_commit,
+    );
+    let (reply, _cancelled) = oneshot::channel();
+    let command = CommandEnvelope {
+        command_id: command_id(12),
+        command: HostCommand::Cancel { thread },
+    };
+    rig.actor.on_request(Request::Dispatch { command, reply });
+    rig.run_holding("the cancel", switch_commit, |actor| {
+        actor.threads[&thread].turn.current.is_none()
+    });
+    rig.release_held();
+    until_idle(&mut rig, thread);
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), OTHER);
+    let (_, owed) = switch::seen(&rig.actor, thread);
+    assert_eq!(owed.as_ref().map(AgentId::as_str), Some("fake-agent"));
+    let log = rig.log(thread);
+    assert_eq!(settled(&log), [HandoffStatus::Failed], "{log:?}");
+    assert_eq!(detaches(&log), [DetachReason::Switched], "{log:?}");
+
+    one_turn(&mut rig, 13, thread);
+    let log = rig.log(thread);
+    let handoffs = count(&log, |e| matches!(e, DomainEvent::ContextHandoff(_)));
+    assert_eq!(handoffs, 2, "the next turn logs its own: {log:?}");
+    assert_eq!(
+        settled(&log),
+        [HandoffStatus::Failed, HandoffStatus::Delivered]
+    );
+    let notices = count(
+        &log,
+        |e| matches!(e, DomainEvent::Notice(n) if n.kind == Some(NoticeKind::ContextNotRestored)),
+    );
+    assert_eq!(notices, 0, "{log:?}");
+    assert_eq!(
+        switch::seen(&rig.actor, thread).1,
+        None,
+        "nothing owed any more"
+    );
+    rig.finish();
+}
+
+/// `HandoffSettled { Delivered }` waits for the prompt to go out, past the Codex recheck.
+#[test]
+fn the_handover_is_delivered_only_once_its_prompt_goes_out() {
+    let mut rig = two_agents("switch-prompt-out", Some(PROMPTS_END));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the prompt going out",
+        prompt_out,
+    );
+    rig.settle_commits();
+    let log = rig.log(thread);
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::ContextHandoff(_))),
+        1
+    );
+    assert_eq!(settled(&log), [], "pending until the prompt goes out");
+    rig.release_held();
+    until_idle(&mut rig, thread);
+    assert_eq!(settled(&rig.log(thread)), [HandoffStatus::Delivered]);
+    rig.finish();
+}
+
+/// A prompt the Codex recheck refuses never went out: the handover settles `Failed` and stays
+/// owed. The refusal is put in place of the note that the prompt goes out, as the recheck
+/// sends it.
+#[test]
+fn a_refused_prompt_leaves_the_handover_owed() {
+    let mut rig = two_agents("switch-prompt-refused", Some(PROMPTS_END));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the prompt going out",
+        prompt_out,
+    );
+    let Some(Input::Turn(TurnInput::Agent {
+        agent,
+        reply: AgentReply::PromptOut { turn },
+        ..
+    })) = rig.held.pop()
+    else {
+        panic!("not the prompt going out");
+    };
+    let error = Error::refused(ErrorCode::CommandInvalid, "the folder has a .codex");
+    let reply = AgentReply::PromptRefused { turn, error };
+    rig.actor.on_input(Input::Turn(TurnInput::Agent {
+        thread,
+        agent,
+        reply,
+    }));
+    until_idle(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(settled(&log), [HandoffStatus::Failed], "{log:?}");
+    let (_, owed) = switch::seen(&rig.actor, thread);
+    assert_eq!(owed.as_ref().map(AgentId::as_str), Some("fake-agent"));
+    rig.finish();
+}

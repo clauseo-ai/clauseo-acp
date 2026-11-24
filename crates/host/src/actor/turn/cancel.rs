@@ -444,10 +444,13 @@ pub(super) fn shutdown(actor: &mut Actor) {
                 }
             }
             Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, _)) => {
+                let held = super::switch::ends(actor, thread);
                 let dropped = state(actor, thread).and_then(|state| state.current.take());
                 if let Some(reason) = dropped.and_then(|current| current.detach) {
                     agents::log_detach(actor, thread, reason);
                 }
+                // The host stops: what a switch held fails as closed.
+                super::switch::release(actor, thread, held);
                 if let Ok(matter) = matter_of(actor, thread) {
                     end::release_writer(actor, matter, thread);
                 }

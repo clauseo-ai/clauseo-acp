@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use clauseo_protocol::{
     AgentId, AgentKind, ConfigCategory, ConfigOption, ConfigOptionKind, ContentBlock, Count,
-    DomainEvent, Endpoint, Envelope, HeaderEntry, StreamId, ThreadId, TurnId,
+    DomainEvent, Endpoint, Envelope, HeaderEntry, NamedChoice, StreamId, ThreadId, TurnId,
 };
 
 use super::super::super::Actor;
@@ -20,14 +20,24 @@ pub(super) fn display_name(agent: &AgentId) -> String {
     }
 }
 
-/// What a switch hands over: the text (`None` when not even one item fits) and the counts its
-/// `ContextHandoff` logs.
+/// What a switch hands over, and the counts its `ContextHandoff` logs.
 #[derive(Debug)]
 pub(super) struct Built {
-    pub(super) text: Option<String>,
+    pub(super) fit: Fit,
     pub(super) answers: Count,
     pub(super) included: Count,
     pub(super) left_out: Count,
+}
+
+/// The handover's text, if any.
+#[derive(Debug)]
+pub(super) enum Fit {
+    /// No earlier finished turn: nothing to hand over, and no `ContextHandoff`.
+    Nothing,
+    /// The text: the items that fit, or the header alone saying they are all left out.
+    Text(String),
+    /// Not even the header fits.
+    TooLong,
 }
 
 /// The handover of `log`, the thread's whole log, from `from` to a new agent, for a prompt of
@@ -49,13 +59,13 @@ pub(super) fn build(log: &[Envelope], from: &AgentId, prompt: &[ContentBlock]) -
         .iter()
         .filter(|item| matches!(item, Item::Answer { .. }))
         .count();
-    let built = handover::build(&items, &fallback, budget);
-    let (text, included, left_out) = match built {
-        Some(built) => (Some(built.text), built.included, built.left_out),
-        None => (None, 0, items.len()),
+    let (fit, included, left_out) = match handover::build(&items, &fallback, budget) {
+        Some(built) => (Fit::Text(built.text), built.included, built.left_out),
+        None if items.is_empty() => (Fit::Nothing, 0, 0),
+        None => (Fit::TooLong, 0, items.len()),
     };
     Built {
-        text,
+        fit,
         answers: count(answers),
         included: count(included),
         left_out: count(left_out),
@@ -109,8 +119,8 @@ pub(super) fn endpoint(actor: &Actor, thread: ThreadId, agent: &AgentId, shown: 
         .unwrap_or_default();
     Endpoint {
         agent: agent.clone(),
-        model: current_name(options, ConfigCategory::Model),
-        effort: current_name(options, ConfigCategory::ThoughtLevel),
+        model: current_choice(options, ConfigCategory::Model),
+        effort: current_choice(options, ConfigCategory::ThoughtLevel),
     }
 }
 
@@ -123,8 +133,8 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
         .or(actor.threads.get(&thread)?.header.as_ref())
 }
 
-/// The shown name of the current value of the select option of `category`.
-fn current_name(options: &[ConfigOption], category: ConfigCategory) -> Option<String> {
+/// The current value of the select option of `category`: its id and its shown name.
+fn current_choice(options: &[ConfigOption], category: ConfigCategory) -> Option<NamedChoice> {
     let option = options.iter().find(|option| option.category == category)?;
     let ConfigOptionKind::Select {
         current_value,
@@ -136,7 +146,10 @@ fn current_name(options: &[ConfigOption], category: ConfigCategory) -> Option<St
     options
         .iter()
         .find(|choice| choice.value == *current_value)
-        .map(|choice| choice.name.to_string())
+        .map(|choice| NamedChoice {
+            id: choice.value.as_str().into(),
+            name: choice.name.as_str().into(),
+        })
 }
 
 /// The prompt the new agent gets: the handover, then the lawyer's own words after

@@ -2,12 +2,12 @@
 //! stops the thread's agent (`Switched`), logs `AgentSwitched` and `ContextHandoff`, and the new
 //! agent's first prompt carries the handover before the lawyer's words, which the log keeps as
 //! typed. Each new agent expects its prompt exactly, so a handover left out or changed is a
-//! mismatch. A handover that does not fit fails the turn and keeps the agent; a message naming
-//! the thread's own agent changes nothing. The refusal while background work may run is a unit
-//! test (`actor/turn/tests/switch.rs`).
+//! mismatch. Earlier items none of which fits hand over the header alone; a message naming the
+//! thread's own agent changes nothing. The refusals, the interleavings and a request too big
+//! even for the header are unit tests (`actor/turn/tests/switch*.rs`).
 
 use clauseo_protocol::{
-    AgentId, CommandOutcome, ContentBlock, DeliveryRequest, DetachReason, DomainEvent, ErrorCode,
+    AgentId, CommandOutcome, ContentBlock, DeliveryRequest, DetachReason, DomainEvent,
     HandoffStatus, HostCommand, NoticeKind, PromptBlock, StopReason, StreamId, ThreadId, TurnId,
 };
 use serde_json::{Value, json};
@@ -169,10 +169,11 @@ fn parts(
     )
 }
 
+/// Every earlier item is over the handover's 16,000-token cap, so not one fits: the new agent
+/// gets the handover's header alone, which says how many earlier items are left out.
 #[test]
-fn a_conversation_too_big_for_the_budget_fails_the_turn_and_keeps_the_agent() {
-    let dir = Dir::new("agent_switch_too_long", &[]);
-    // Every earlier item is over the handover's 16,000-token cap, so not one fits.
+fn a_conversation_none_of_which_fits_hands_over_its_header_alone() {
+    let dir = Dir::new("agent_switch_header_only", &[]);
     let big_question = "Q".repeat(20_000);
     let big_answer = "A".repeat(20_000);
     let first = vec![
@@ -182,10 +183,17 @@ fn a_conversation_too_big_for_the_budget_fails_the_turn_and_keeps_the_agent() {
         end_turn("p1"),
     ];
     let claude = written(&dir, "switch-big", "claude-handshake.jsonl", first);
-    dir.set_agents(&[
-        (CLAUDE, claude),
-        (CODEX, Scenario::Bundled("codex-handshake")),
-    ]);
+    let header = "Earlier in this conversation the lawyer worked with Claude. The 2 earlier items \
+                  are left out: not one fits in the room this request leaves. Files, tool state \
+                  and reasoning are not included either.";
+    let wrapped = format!("{header}\n\nUser message:\n{SECOND}");
+    let codex = written(
+        &dir,
+        "switch-header-codex",
+        "codex-handshake.jsonl",
+        answered("p1", &[&wrapped]).to_vec(),
+    );
+    dir.set_agents(&[(CLAUDE, claude), (CODEX, codex)]);
     let host = dir.start(0);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));
@@ -197,42 +205,19 @@ fn a_conversation_too_big_for_the_budget_fails_the_turn_and_keeps_the_agent() {
     host.settle();
     events.drain_ready();
     events.assert_no_mismatch();
-    assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
-    let failed = events
-        .events()
-        .find_map(|event| match event {
-            DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.clone()),
-            _ => None,
-        })
-        .expect("a TurnFailed");
-    assert_eq!(failed.code, ErrorCode::PromptHandoffTooLong);
-    assert_eq!(
-        failed.detail.as_deref(),
-        Some(
-            "The request leaves too little room for the earlier conversation. Shorten the \
-             request or choose a model with a larger context; your message was not shortened."
-        )
-    );
-    assert_eq!(events.count(switched), 0, "the thread keeps its agent");
-    let handoffs: Vec<_> = events
-        .events()
-        .filter_map(|event| match event {
-            DomainEvent::ContextHandoff(handoff) => Some((**handoff).clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(handoffs.len(), 1, "{}", events.dump());
-    assert_eq!(handoffs[0].items_included.get(), 0);
-    assert_eq!(handoffs[0].items_left_out.get(), 2);
-    let settled = parts_settled(&events);
-    assert_eq!(settled, vec![(handoffs[0].handoff, HandoffStatus::Failed)]);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let (switch, handoff, settled) = parts(&events);
+    assert_eq!((switch.from.as_str(), switch.to.as_str()), (CLAUDE, CODEX));
+    let counts = (handoff.items_included.get(), handoff.items_left_out.get());
+    assert_eq!(counts, (0, 2));
+    assert_eq!(settled, vec![(handoff.handoff, HandoffStatus::Delivered)]);
     assert_eq!(
         logged_message(&events, turn),
         [ContentBlock::Text {
             text: SECOND.to_owned()
         }]
     );
-    assert_eq!(host.threads(matter)[0].agent.as_str(), CLAUDE);
+    assert_eq!(host.threads(matter)[0].agent.as_str(), CODEX);
     host.shutdown();
 }
 

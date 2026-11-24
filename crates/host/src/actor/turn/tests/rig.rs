@@ -368,6 +368,7 @@ impl Rig {
                 delivery: Delivery::Queue,
                 config: std::collections::BTreeMap::new(),
                 copy_of: None,
+                agent: None,
             }
             .into(),
             TurnStarted {

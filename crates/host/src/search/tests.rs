@@ -71,6 +71,7 @@ fn turn_events() -> Vec<DomainEvent> {
             delivery: Delivery::Queue,
             config: std::collections::BTreeMap::new(),
             copy_of: None,
+            agent: None,
         }),
         DomainEvent::TurnStarted(TurnStarted {
             model: None,
@@ -282,6 +283,7 @@ fn review_a_requeued_steer_belongs_to_its_new_turn() {
             delivery: Delivery::Steer,
             config: std::collections::BTreeMap::new(),
             copy_of: None,
+            agent: None,
         }),
     );
     events.insert(
@@ -339,6 +341,7 @@ fn a_queued_prompt_taken_back_leaves_and_a_cancelled_running_turn_keeps_its_prom
             delivery: Delivery::Queue,
             config: std::collections::BTreeMap::new(),
             copy_of: None,
+            agent: None,
         })
     };
     let cancelled = |turn: TurnId| {
