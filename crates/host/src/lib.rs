@@ -259,6 +259,7 @@ mod encode;
 mod error;
 mod file_link;
 mod handle;
+mod handover;
 mod ids;
 pub mod log_file;
 mod matter_marker;

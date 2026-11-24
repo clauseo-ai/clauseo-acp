@@ -748,3 +748,4 @@ crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
 # The pre-write guard's panic test runs the test binary itself as the panicking guard.
 crates/host/src/pre_write_guard/tests/panics.rs a_panic_in_the_guard_exits_2_with_the_plain_line clippy::disallowed_methods
+crates/host/src/handover.rs - dead_code
