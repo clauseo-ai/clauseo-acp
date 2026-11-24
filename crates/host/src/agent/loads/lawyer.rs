@@ -66,6 +66,9 @@ pub(crate) type Resolve = crate::config::mcp::McpResolver;
 pub(crate) struct McpSecrets {
     values: BTreeMap<String, Zeroizing<String>>,
     unreadable: BTreeSet<String>,
+    /// Of `unreadable`, the accounts whose read the keychain refused (an error that is not "no
+    /// item", such as a read it may not ask about now): the item may well be there.
+    refused: BTreeSet<String>,
     commands: BTreeMap<String, PathBuf>,
     /// What the run's servers are made from ([`ToolsKey`]), taken with the reads.
     pub(crate) key: ToolsKey,
@@ -76,6 +79,7 @@ impl fmt::Debug for McpSecrets {
         f.debug_struct("McpSecrets")
             .field("values", &self.values.len())
             .field("unreadable", &self.unreadable.len())
+            .field("refused", &self.refused.len())
             .field("commands", &self.commands.len())
             .field("key", &self.key)
             .finish()
@@ -97,6 +101,11 @@ impl McpSecrets {
         self.values.get(account).map(|value| value.as_str())
     }
 
+    /// The accounts whose read the keychain refused (not "no item").
+    pub(crate) fn refused(&self) -> &BTreeSet<String> {
+        &self.refused
+    }
+
     /// The same, with `accounts` read and found missing or unreadable (tests).
     #[cfg(test)]
     pub(crate) fn with_unreadable(mut self, accounts: &[&str]) -> Self {
@@ -116,6 +125,7 @@ impl McpSecrets {
                 })
                 .collect(),
             unreadable: BTreeSet::new(),
+            refused: BTreeSet::new(),
             key: ToolsKey::default(),
             commands: commands
                 .iter()
@@ -203,7 +213,8 @@ impl Reads {
 /// Reads `wanted`'s accounts from `store` and resolves its commands with `resolve`: blocking
 /// keychain and file system calls, so on the launch-prep thread. A missing item, a keychain
 /// error, an item that is not UTF-8 or holds NUL is unreadable (its bytes zeroed); with no
-/// store every account is.
+/// store every account is. A keychain error is also kept apart as refused: the item may be
+/// there, and `KeychainReadAgain` reads only those again (`actor/mcp/read_again.rs`).
 pub(crate) fn read(
     store: Option<&dyn SecretStore>,
     resolve: &Resolve,
@@ -222,6 +233,7 @@ pub(crate) fn read(
             Err(error) => {
                 // The store's error names its kind, never the item.
                 tracing::warn!(%error, "an MCP server's keychain value could not be read");
+                secrets.refused.insert(account.clone());
                 None
             }
         });

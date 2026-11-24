@@ -25,6 +25,9 @@ mod money;
 use money::GrossRate;
 pub(crate) use money::paise;
 
+/// The state's line while the keychain refuses to read the saved sign-in.
+pub(crate) const UNREADABLE: &str = "the saved sign-in could not be read from the keychain";
+
 /// The balance is low under this many search pages' worth of credits.
 const LOW_SEARCH_PAGES: i64 = 10;
 
@@ -132,7 +135,8 @@ impl CaseLaw {
                 return AddonStatus::NeedsCredit;
             }
             Some(CredentialStatus::SignedIn(_)) => return AddonStatus::Ready,
-            None | Some(CredentialStatus::NotAdded) => {}
+            // The list leaves an unreadable credential out (`recheck::status`).
+            None | Some(CredentialStatus::NotAdded | CredentialStatus::Unreadable) => {}
         }
         if self.error.is_some() {
             return AddonStatus::NeedsSetup;
@@ -281,6 +285,12 @@ impl CaseLaw {
             None | Some(CredentialStatus::NotAdded) => ConnectorStatus::NotAdded,
             Some(CredentialStatus::SignedOut) => ConnectorStatus::SignedOut,
             Some(CredentialStatus::KeyRevoked) => ConnectorStatus::KeyRevoked,
+            // No status of its own on the wire: the sign-in could not be read, and the app
+            // points the lawyer to the keychain's Allow by that row's own state.
+            Some(CredentialStatus::Unreadable) => ConnectorStatus::Error {
+                message: UNREADABLE.to_owned(),
+                kind: Some(ConnectorErrorKind::SignInFailed),
+            },
             Some(CredentialStatus::SignedIn(kind)) => match &self.out_of_credit {
                 Some(OutOfCredit { pay_url }) => ConnectorStatus::OutOfCredit {
                     pay_url: pay_url.as_ref().map(|url| url.as_str().to_owned()),

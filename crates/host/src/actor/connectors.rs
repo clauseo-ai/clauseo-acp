@@ -180,6 +180,18 @@ pub(super) fn start(actor: &mut Actor) {
     }
 }
 
+/// `KeychainReadAgain`: a credential the keychain refused to read is read again, off the actor;
+/// the state goes out when it changed. Nothing for one already read: its status is memory.
+pub(super) fn read_again(actor: &mut Actor) {
+    let unreadable = matches!(
+        actor.connectors.state.credential,
+        Some(CredentialStatus::Unreadable)
+    );
+    if unreadable && let Err(error) = spawn(actor, None, Job::Status) {
+        tracing::warn!(error = %crate::log_file::Cause(&error), "the connector's state was not read again");
+    }
+}
+
 /// Whether `command` under `id` is a reuse a connector command forbids: a connector command
 /// whose id is pending or was used, or any command whose id a connector command used.
 pub(super) fn reused(actor: &Actor, id: CommandId, command: &HostCommand) -> bool {

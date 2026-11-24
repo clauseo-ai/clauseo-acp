@@ -156,7 +156,8 @@ impl CaseLawPrep {
             CredentialStatus::SignedIn(_) => {}
             CredentialStatus::NotAdded
             | CredentialStatus::SignedOut
-            | CredentialStatus::KeyRevoked => return CaseLaw::Absent,
+            | CredentialStatus::KeyRevoked
+            | CredentialStatus::Unreadable => return CaseLaw::Absent,
         }
         match open_relay(&relays, run) {
             Ok(relay) => CaseLaw::Open(Arc::new(relay)),

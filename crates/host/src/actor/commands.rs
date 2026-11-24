@@ -330,6 +330,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         }
         HostCommand::DecideRevisions(decide) => super::revisions::decide(actor, *ctx, decide),
         HostCommand::SetNetwork { online } => turn::set_network(actor, ctx, online),
+        // Desktop's own, after the keychain's Allow: no receipt, answered at once.
+        HostCommand::KeychainReadAgain {} => super::keychain::read_again(actor, ctx),
     }
 }
 

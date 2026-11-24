@@ -11,6 +11,10 @@
 //!   refusal (a Keychain "Deny") or any other error means no allows for the run, logged once,
 //!   and the run writes nothing. No item while the file exists, or a mismatch, means no allows.
 //!   No file is no allows, whatever the item; a rejected file is left on disk.
+//! - A read the store refused (any error, which is not "no item") leaves the hash never read:
+//!   nothing in the store is known, so nothing there is deleted on its strength (no
+//!   [`Writer::void`]). `KeychainReadAgain` asks for the read again ([`Ask::Reopen`]); once it
+//!   reads, the run starts writing as a clean start would, and the actor saves its allows.
 //! - Each save sets the new hash first, then writes the file. A hash that is not set writes
 //!   nothing, and the run writes nothing more: the old pair stays as it was. A file that is not
 //!   written after its hash was leaves a mismatch, as does a crash between the two: the next
@@ -63,6 +67,17 @@ pub(crate) enum Report {
     Opened(Opened),
     /// One save's outcome, in the order they were asked.
     Wrote(Wrote),
+    /// An [`Ask::Reopen`]'s read: `None` when it was not made or refused again.
+    Reopened(Option<Opened>),
+}
+
+/// What the actor asks of the thread, in order.
+#[derive(Debug)]
+pub(crate) enum Ask {
+    /// One save.
+    Save(Job),
+    /// Read the hash again, if the start-up read was refused.
+    Reopen,
 }
 
 /// The allows a run starts with.
@@ -72,6 +87,9 @@ pub(crate) struct Opened {
     /// What the next start would honour now, when known: `stored` when the file was trusted,
     /// none when there is no file or it was rejected; unknown (`None`) when the store failed.
     pub(crate) persisted: Option<Stored>,
+    /// The store refused the read (an error, not "no item"): nothing there is known, so
+    /// nothing there may be deleted; [`Ask::Reopen`] reads it again.
+    pub(crate) never_read: bool,
 }
 
 /// One save to make: the whole state after an allow or a revoke.
@@ -93,20 +111,23 @@ pub(crate) enum Wrote {
     NotSaved { voided: bool },
 }
 
-/// The thread's body: the start-up read, posted, then each job's save, posted, until `jobs`
+/// The thread's body: the start-up read, posted, then each ask's answer, posted, until `jobs`
 /// closes (the host stopped, or gave up waiting for the read). Once `abandoned` (the host's
 /// stop gave up on the queue) it writes nothing more, hash or file.
 pub(crate) fn run(
     path: &Path,
     secrets: Option<Arc<dyn SecretStore>>,
     abandoned: Arc<AtomicBool>,
-    jobs: &mpsc::Receiver<Job>,
+    jobs: &mpsc::Receiver<Ask>,
     post: impl Fn(Report),
 ) {
     let (opened, mut writer) = open(path, secrets, abandoned);
     post(Report::Opened(opened));
-    for job in jobs {
-        post(Report::Wrote(writer.save(&job)));
+    for ask in jobs {
+        post(match ask {
+            Ask::Save(job) => Report::Wrote(writer.save(&job)),
+            Ask::Reopen => Report::Reopened(writer.reopen()),
+        });
     }
 }
 
@@ -120,6 +141,8 @@ struct Writer {
     set_aside: Option<&'static str>,
     /// Whether a delete of the hash was tried while not writing (once per run).
     void_tried: bool,
+    /// The store refused the read: nothing there is known, so nothing there is deleted.
+    never_read: bool,
     /// Set by the host's stop once it gives up on the queue.
     abandoned: Arc<AtomicBool>,
 }
@@ -137,63 +160,83 @@ fn open(
         writing: false,
         set_aside: None,
         void_tried: false,
+        never_read: false,
         abandoned,
     };
-    let unknown = Opened {
-        stored: Stored::default(),
-        persisted: None,
-    };
-    let in_memory = |why: &str| {
-        tracing::warn!(
-            why,
-            "blocklist: no secret store for allowed.json's hash; no allows, and allows made \
-             now apply until Clauseo stops"
-        );
-    };
-    let Some(store) = &writer.store else {
-        in_memory("none");
-        // Without a store no start honours an allow, so nothing on disk can come back.
-        let nothing = Opened {
-            stored: Stored::default(),
-            persisted: Some(Stored::default()),
-        };
-        return (nothing, writer);
-    };
-    let expected = match store.get(ACCOUNT) {
-        Ok(expected) => expected,
-        Err(error) => {
-            in_memory(&error.to_string());
-            return (unknown, writer);
-        }
-    };
-    let (stored, set_aside) = match (file::body(path), expected) {
-        (Body::Missing, _) => (Stored::default(), None),
-        (Body::Unusable(reason), _) => (Stored::default(), Some(reason)),
-        (Body::Read(_), None) => {
-            tracing::warn!("blocklist: allowed.json has no stored hash; no allows");
-            (Stored::default(), Some("no stored hash"))
-        }
-        (Body::Read(body), Some(expected)) if expected == digest(&body).as_bytes() => {
-            match file::parse(&body) {
-                Some(stored) => (stored, None),
-                None => (Stored::default(), Some("unparsable")),
-            }
-        }
-        (Body::Read(_), Some(_)) => {
-            tracing::warn!("blocklist: allowed.json does not match its stored hash; no allows");
-            (Stored::default(), Some("hash mismatch"))
-        }
-    };
-    writer.writing = true;
-    writer.set_aside = set_aside;
-    let opened = Opened {
-        persisted: Some(stored.clone()),
-        stored,
-    };
+    let opened = writer.read();
     (opened, writer)
 }
 
 impl Writer {
+    /// [`Ask::Reopen`]: the read again, only while the start-up read is refused and the stop
+    /// has not given up; `None` when it is not made or refused again.
+    fn reopen(&mut self) -> Option<Opened> {
+        if !self.never_read || self.store.is_none() || self.abandoned.load(Ordering::SeqCst) {
+            return None;
+        }
+        let opened = self.read();
+        (!opened.never_read).then_some(opened)
+    }
+
+    /// The store's hash and the file, as [`open`] says; sets whether the run writes.
+    fn read(&mut self) -> Opened {
+        let unknown = Opened {
+            stored: Stored::default(),
+            persisted: None,
+            never_read: true,
+        };
+        let in_memory = |why: &str| {
+            tracing::warn!(
+                why,
+                "blocklist: no secret store for allowed.json's hash; no allows, and allows made \
+                 now apply until Clauseo stops"
+            );
+        };
+        let Some(store) = self.store.clone() else {
+            in_memory("none");
+            // Without a store no start honours an allow, so nothing on disk can come back.
+            return Opened {
+                stored: Stored::default(),
+                persisted: Some(Stored::default()),
+                never_read: false,
+            };
+        };
+        let expected = match store.get(ACCOUNT) {
+            Ok(expected) => expected,
+            Err(error) => {
+                in_memory(&error.to_string());
+                self.never_read = true;
+                return unknown;
+            }
+        };
+        let (stored, set_aside) = match (file::body(&self.path), expected) {
+            (Body::Missing, _) => (Stored::default(), None),
+            (Body::Unusable(reason), _) => (Stored::default(), Some(reason)),
+            (Body::Read(_), None) => {
+                tracing::warn!("blocklist: allowed.json has no stored hash; no allows");
+                (Stored::default(), Some("no stored hash"))
+            }
+            (Body::Read(body), Some(expected)) if expected == digest(&body).as_bytes() => {
+                match file::parse(&body) {
+                    Some(stored) => (stored, None),
+                    None => (Stored::default(), Some("unparsable")),
+                }
+            }
+            (Body::Read(_), Some(_)) => {
+                tracing::warn!("blocklist: allowed.json does not match its stored hash; no allows");
+                (Stored::default(), Some("hash mismatch"))
+            }
+        };
+        self.writing = true;
+        self.never_read = false;
+        self.set_aside = set_aside;
+        Opened {
+            persisted: Some(stored.clone()),
+            stored,
+            never_read: false,
+        }
+    }
+
     /// Saves `job`, or says why not; a revoke not saved voids the stored pair if it can.
     fn save(&mut self, job: &Job) -> Wrote {
         let voided = match self.try_save(job) {
@@ -269,9 +312,10 @@ impl Writer {
     }
 
     /// Deletes the stored hash so the next start honours no allows; true when it is gone.
-    /// While not writing, tried once per run (a denied store would prompt again).
+    /// While not writing, tried once per run (a denied store would prompt again). Never while
+    /// the hash was never read: what the store holds is not known.
     fn void(&mut self) -> bool {
-        let Some(store) = &self.store else {
+        let Some(store) = self.store.as_ref().filter(|_| !self.never_read) else {
             return false;
         };
         if !self.writing {

@@ -82,13 +82,17 @@ impl Recheck {
 
 /// Case law's status in the list now: `not_offered` on an install with no data connectors;
 /// `None`, left out of the list, until the credential has been read once (start-up, or a
-/// keychain prompt still open), so a signed-in lawyer never sees it flash `needs_setup`.
+/// keychain prompt still open) or while the keychain refuses its read, so a signed-in lawyer
+/// never sees it flash `needs_setup` or `signed_out`.
 pub(in crate::actor) fn status(actor: &Actor) -> Option<AddonStatus> {
     if actor.connectors.wired.is_none() {
         return Some(AddonStatus::NotOffered);
     }
     let state = &actor.connectors.state;
-    state.credential.is_some().then(|| state.addon_status())
+    match state.credential {
+        None | Some(CredentialStatus::Unreadable) => None,
+        Some(_) => Some(state.addon_status()),
+    }
 }
 
 /// The list is being read: notes the status it shows and starts the check that is due, if any.
@@ -103,7 +107,8 @@ pub(in crate::actor) fn on_listed(actor: &mut Actor) {
         // Not read yet: the read that lists it starts the check.
         None => return,
         _ if state.signing_in => return,
-        Some(CredentialStatus::SignedIn(_)) => Kind::Account,
+        // Unreadable: the check reads the keychain item again, so it keeps running.
+        Some(CredentialStatus::SignedIn(_) | CredentialStatus::Unreadable) => Kind::Account,
         Some(CredentialStatus::SignedOut | CredentialStatus::KeyRevoked) => return,
         Some(CredentialStatus::NotAdded) if state.live() => return,
         Some(CredentialStatus::NotAdded) => Kind::Liveness,

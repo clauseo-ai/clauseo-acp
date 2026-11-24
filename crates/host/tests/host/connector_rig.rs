@@ -155,11 +155,28 @@ impl Rig {
         )
     }
 
+    /// Signed in on an earlier run (the key in the keychain and the state file), the host
+    /// started with the keychain refusing every read (`MemoryStore::refuse_reads`) until the
+    /// test allows it, as macOS does before the lawyer presses Allow.
+    pub(crate) fn start_refused(dir: &Dir) -> Self {
+        Self::build_with(dir, Start::default(), Arc::new(dir.launcher()), None, true)
+    }
+
     fn build(
         dir: &Dir,
         start: Start,
         launcher: Arc<dyn clauseo_process::Launcher>,
         held: Option<Arc<Gate>>,
+    ) -> Self {
+        Self::build_with(dir, start, launcher, held, false)
+    }
+
+    fn build_with(
+        dir: &Dir,
+        start: Start,
+        launcher: Arc<dyn clauseo_process::Launcher>,
+        held: Option<Arc<Gate>>,
+        refused: bool,
     ) -> Self {
         let fake = FakeConnector::start(FakeOptions::default()).unwrap();
         let scratch = ScratchDir::new("host-connector-state").unwrap();
@@ -170,7 +187,7 @@ impl Rig {
         let mut keys = Vec::new();
         let store = Arc::new(MemoryStore::new());
         let plain: Arc<dyn SecretStore> = Arc::<MemoryStore>::clone(&store);
-        let earlier = held.is_some();
+        let earlier = held.is_some() || refused;
         let keychain: Arc<dyn SecretStore> = match held {
             None => Arc::clone(&plain),
             Some(gate) => Arc::new(Held {
@@ -187,6 +204,9 @@ impl Rig {
                     let key = fake.new_api_key();
                     before.get(CASE_LAW).unwrap().add_api_key(&key).unwrap();
                     keys.push(key);
+                }
+                if refused {
+                    store.refuse_reads(true);
                 }
                 let mut connector_config = fake.config(scratch.state_file());
                 connector_config.clock = Arc::new(HostTime(clock.clone()));

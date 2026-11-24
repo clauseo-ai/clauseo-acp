@@ -278,7 +278,7 @@ pub(super) fn session_loads(
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
     let mut servers = lawyer_sent;
-    super::super::mcp::left_out(actor, left_out);
+    super::super::mcp::left_out(actor, left_out, run.mcp_secrets.refused());
     note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
     servers.extend(case_law_entry);

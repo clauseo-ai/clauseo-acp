@@ -17,6 +17,11 @@
 //!   write nothing more first, so a save it finishes later cannot make a matching pair again.
 //! - `persisted` follows what the next start would honour (each entry's `saved`): a saved
 //!   job's state, nothing once the pair is voided, unknown while the store has not answered.
+//! - A start-up read the store refused (an error, not "no item") leaves the hash never read:
+//!   the run's changes apply in memory and are kept in order (`AllowState::unread`), and the
+//!   stop deletes nothing. `KeychainReadAgain` asks the thread to read again ([`read_again`]);
+//!   once it reads, the run's changes are laid over the allows it trusts and that is saved, so
+//!   the allows of earlier runs are kept and this run's are saved too.
 
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -24,11 +29,11 @@ use std::time::Duration;
 use clauseo_connectors::SecretStore;
 use clauseo_protocol::{CommandId, CommandOutcome, ErrorCode};
 
-use super::{Actor, Change, Held, refresh, run_allow, run_revoke};
+use super::{Actor, Change, Held, Op, refresh, run_allow, run_revoke};
 use crate::actor::input::Input;
 use crate::blocklist::AllowedSites;
 use crate::blocklist::allowed::file::Stored;
-use crate::blocklist::allowed::integrity::{self, Job, Opened, Report, Wrote};
+use crate::blocklist::allowed::integrity::{self, Ask, Job, Opened, Report, Wrote};
 use crate::error::Error;
 
 /// The thread's name.
@@ -94,7 +99,7 @@ pub(crate) fn start(
     let post = actor.post.clone();
     actor.allowed.store = secrets.clone().map(Secrets);
     let abandoned = Arc::clone(&actor.allowed.abandoned);
-    let (jobs, queue) = mpsc::channel::<Job>();
+    let (jobs, queue) = mpsc::channel::<Ask>();
     let started = std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
@@ -131,6 +136,7 @@ pub(crate) fn on_input(actor: &mut Actor, input: AllowedInput) {
     match input {
         AllowedInput::Report(Report::Opened(opened)) => on_opened(actor, opened),
         AllowedInput::Report(Report::Wrote(wrote)) => on_wrote(actor, wrote),
+        AllowedInput::Report(Report::Reopened(opened)) => on_reopened(actor, opened),
         AllowedInput::StopWaited => on_stop_waited(actor),
         AllowedInput::StopVoided(gone) => {
             match gone {
@@ -164,6 +170,7 @@ pub(crate) fn on_input(actor: &mut Actor, input: AllowedInput) {
             let unknown = Opened {
                 stored: Stored::default(),
                 persisted: None,
+                never_read: false,
             };
             apply(actor, unknown);
         }
@@ -183,6 +190,7 @@ fn apply(actor: &mut Actor, opened: Opened) {
     actor.allowed.read_deadline = None;
     actor.allowed.stored = opened.stored;
     actor.allowed.persisted = opened.persisted;
+    actor.allowed.unread = opened.never_read.then(Vec::new);
     refresh(actor);
     actor.allowed.sites.mark_loaded();
     for command in held {
@@ -205,17 +213,23 @@ fn apply(actor: &mut Actor, opened: Opened) {
 /// Sends the state now as a job for command `id`, answered when the thread reports; at once,
 /// not saved, without a thread.
 pub(super) fn save(actor: &mut Actor, id: CommandId, change: Change) {
-    let stored = actor.allowed.stored.clone();
     let job = Job {
-        stored: stored.clone(),
+        stored: actor.allowed.stored.clone(),
         revoke: matches!(change, Change::Revoke { .. }),
         now: actor.now().wall,
     };
+    send(actor, Some(id), change, job);
+}
+
+/// Queues `job` for `id` (none for the save after a read again); at once, not saved, without
+/// a thread.
+fn send(actor: &mut Actor, id: Option<CommandId>, change: Change, job: Job) {
+    let stored = job.stored.clone();
     let sent = actor
         .allowed
         .writer
         .as_ref()
-        .is_some_and(|writer| writer.send(job).is_ok());
+        .is_some_and(|writer| writer.send(Ask::Save(job)).is_ok());
     if !sent {
         actor.allowed.writer = None;
         answer(
@@ -228,6 +242,67 @@ pub(super) fn save(actor: &mut Actor, id: CommandId, change: Change) {
         return;
     }
     actor.allowed.waiting.push_back((id, change, stored));
+}
+
+/// `KeychainReadAgain`: while the hash was never read, the thread reads it again. Nothing
+/// otherwise: a read that worked, failed for want of a store, or was given up on stays so.
+pub(crate) fn read_again(actor: &mut Actor) {
+    if actor.allowed.unread.is_none() {
+        return;
+    }
+    let sent = actor
+        .allowed
+        .writer
+        .as_ref()
+        .is_some_and(|writer| writer.send(Ask::Reopen).is_ok());
+    if !sent {
+        actor.allowed.writer = None;
+    }
+}
+
+/// A read again is back. Read: this run's changes are laid over the allows the store now
+/// vouches for, in order, and the result is saved. Refused again: nothing changes.
+fn on_reopened(actor: &mut Actor, opened: Option<Opened>) {
+    let Some(opened) = opened else {
+        return;
+    };
+    let Some(changes) = actor.allowed.unread.take() else {
+        return;
+    };
+    let mut stored = opened.stored;
+    for change in changes {
+        match change {
+            Op::Allow {
+                host,
+                scope,
+                matter,
+                at,
+            } => {
+                stored.allow(&host, scope, matter, at);
+            }
+            Op::Revoke {
+                host,
+                scope,
+                matter,
+            } => {
+                stored.revoke(&host, scope, matter);
+            }
+        }
+    }
+    tracing::info!(
+        allows = stored.count(),
+        "blocklist: allowed.json's hash read again; this run's allows are saved"
+    );
+    actor.allowed.persisted = opened.persisted;
+    actor.allowed.stored = stored.clone();
+    refresh(actor);
+    let job = Job {
+        stored,
+        revoke: false,
+        now: actor.now().wall,
+    };
+    // No command waits on it; `Allow` stands for a save that may add.
+    send(actor, None, Change::Allow, job);
 }
 
 /// The oldest job's outcome; the stop's wait ends once the queue is empty.
@@ -277,7 +352,13 @@ fn on_stop_waited(actor: &mut Actor) {
         .waiting
         .iter()
         .any(|(_, change, _)| matches!(change, Change::Revoke { .. }));
-    let store = actor.allowed.store.clone().filter(|_| revoke);
+    // Never while the hash was never read: what the store holds is not known.
+    let never_read = actor.allowed.unread.is_some();
+    let store = actor
+        .allowed
+        .store
+        .clone()
+        .filter(|_| revoke && !never_read);
     let Some(store) = store else {
         tracing::warn!(
             left = actor.allowed.waiting.len(),
@@ -308,8 +389,9 @@ fn on_stop_waited(actor: &mut Actor) {
     });
 }
 
-/// Answers command `id` for `wrote` of its job's state `saved`, and keeps `persisted` in step.
-fn answer(actor: &mut Actor, id: CommandId, change: &Change, wrote: Wrote, saved: Stored) {
+/// Answers command `id` (if any) for `wrote` of its job's state `saved`, and keeps
+/// `persisted` in step.
+fn answer(actor: &mut Actor, id: Option<CommandId>, change: &Change, wrote: Wrote, saved: Stored) {
     let allowed = &mut actor.allowed;
     let result = match wrote {
         Wrote::Saved => {
@@ -346,5 +428,7 @@ fn answer(actor: &mut Actor, id: CommandId, change: &Change, wrote: Wrote, saved
             }
         }
     };
-    actor.finish_command(id, result);
+    if let Some(id) = id {
+        actor.finish_command(id, result);
+    }
 }

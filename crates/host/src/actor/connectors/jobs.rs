@@ -24,7 +24,9 @@ use crate::actor::input::Input;
 use crate::connectors::ConnectorOpener;
 use crate::error::Error;
 pub(super) use failures::kind;
-use failures::{recharge_outcome, refusal, sign_in_kind};
+use failures::{
+    KEYCHAIN_REFUSED, recharge_outcome, refusal, sign_in_kind, sign_in_unreadable, unreadable,
+};
 pub(crate) use finished::{Change, Finished, Refusal};
 
 /// The job threads' name.
@@ -359,6 +361,19 @@ fn sign_in(
     let ended = |error| Change::SignInEnded { generation, error };
     let pending = match handle.begin_sign_in(None) {
         Ok(pending) => pending,
+        // The saved credential could not be read: refused before the browser opens. The
+        // connector's own state already says it could not be read, so no sign-in error shows.
+        Err(error) if sign_in_unreadable(&error) => {
+            tracing::warn!(
+                connector = "case-law",
+                "the sign-in was refused: the saved sign-in could not be read"
+            );
+            let refusal = Refusal::new(ErrorCode::ConnectorKeychainRefused, KEYCHAIN_REFUSED);
+            return Finished {
+                change: ended(None),
+                ..Finished::refused(command, refusal)
+            };
+        }
         Err(error) => {
             tracing::warn!(
                 connector = "case-law",
@@ -417,6 +432,8 @@ fn api_key(reach: &Reach, command: Option<CommandId>, key: &str) -> Finished {
             read_into(handle, &mut finished, epoch);
             finished
         }
+        // Refused before any request: the connector's own state says why.
+        Err(error) if unreadable(&error) => Finished::refused(command, refusal(&error)),
         Err(Failed::Cancelled) => {
             tracing::info!(
                 connector = "case-law",
@@ -524,7 +541,8 @@ fn watch(reach: &Reach, recharge: String, cancel: &CancelFlag) -> Option<Finishe
     Some(finished)
 }
 
-/// `SignOut` and `Remove`: the keychain item goes whether or not the revoke worked.
+/// `SignOut` and `Remove`: the keychain item goes whether or not the revoke worked. A saved
+/// credential the keychain refuses to read refuses the command first, changing nothing.
 fn sign_out(handle: &ConnectorHandle, command: Option<CommandId>, remove: bool) -> Finished {
     let result = if remove {
         handle.remove()
@@ -538,6 +556,16 @@ fn sign_out(handle: &ConnectorHandle, command: Option<CommandId>, remove: bool) 
             }
         })
     };
+    if let Err(error) = &result
+        && unreadable(error)
+    {
+        tracing::warn!(
+            connector = "case-law",
+            remove,
+            "signing out was refused: the saved sign-in could not be read"
+        );
+        return Finished::refused(command, refusal(error));
+    }
     let reply = result.map_err(|error| {
         tracing::warn!(
             connector = "case-law",

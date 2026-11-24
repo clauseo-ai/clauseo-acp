@@ -198,13 +198,27 @@ fn reads_keep_only_usable_values() {
     let debug = format!("{secrets:?}");
     assert_eq!(
         debug,
-        "McpSecrets { values: 1, unreadable: 3, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
+        "McpSecrets { values: 1, unreadable: 3, refused: 0, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
     );
     assert!(!debug.contains("s3cr3t"));
+    // A keychain that refuses the reads (a platform failure, not "no item"): each is unreadable
+    // as before, and also kept apart as refused, for `KeychainReadAgain`.
+    store.refuse_reads(true);
+    let refused = lawyer::read(Some(&store as &dyn SecretStore), &resolve, wanted.clone());
+    assert_eq!(
+        format!("{refused:?}"),
+        "McpSecrets { values: 0, unreadable: 4, refused: 4, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
+    );
+    assert!(refused.refused().contains("s/env/GONE"));
+    assert!(
+        secrets.refused().is_empty(),
+        "a missing item is not refused"
+    );
+    store.refuse_reads(false);
     let none = lawyer::read(None, &resolve, wanted);
     assert_eq!(
         format!("{none:?}"),
-        "McpSecrets { values: 0, unreadable: 4, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
+        "McpSecrets { values: 0, unreadable: 4, refused: 0, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
     );
 }
 

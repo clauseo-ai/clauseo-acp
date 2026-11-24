@@ -40,14 +40,14 @@ use super::commands::CommandCtx;
 use super::input::Reply;
 use crate::blocklist::AllowedSites;
 use crate::blocklist::allowed::file::{self, Stored};
-use crate::blocklist::allowed::integrity::Job;
+use crate::blocklist::allowed::integrity::Ask;
 use crate::error::Error;
 
 mod saving;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use saving::{AllowedInput, busy, on_input, shutdown, start};
+pub(crate) use saving::{AllowedInput, busy, on_input, read_again, shutdown, start};
 
 /// How many of each thread's latest notices an allow can name.
 pub(crate) const MAX_NOTICES_PER_THREAD: usize = 64;
@@ -81,9 +81,13 @@ pub(crate) struct AllowState {
     /// What the next start would honour, when known (`saving.rs`).
     persisted: Option<Stored>,
     /// The thread's job queue; `None` without a thread, or after giving up on its read.
-    writer: Option<mpsc::Sender<Job>>,
-    /// The commands whose saves are out, in the order they were sent.
-    waiting: VecDeque<(CommandId, Change, Stored)>,
+    writer: Option<mpsc::Sender<Ask>>,
+    /// The saves out, in the order they were sent, each with its command (none for the save
+    /// after a read again, `saving.rs`).
+    waiting: VecDeque<(Option<CommandId>, Change, Stored)>,
+    /// While the store refused the start-up read of the hash (never read): this run's allows
+    /// and revokes, in order, to lay over what a read again finds (`saving.rs`).
+    unread: Option<Vec<Op>>,
     /// While the start-up read is out: the commands sent meanwhile, in order.
     opening: Option<Vec<Held>>,
     /// Dropped to end the read's deadline early (`saving.rs`).
@@ -102,6 +106,22 @@ pub(crate) struct AllowState {
 #[derive(Debug)]
 enum Change {
     Allow,
+    Revoke {
+        host: String,
+        scope: AllowScope,
+        matter: Option<MatterId>,
+    },
+}
+
+/// One change of this run made while the hash was never read.
+#[derive(Debug, Clone)]
+enum Op {
+    Allow {
+        host: String,
+        scope: AllowScope,
+        matter: MatterId,
+        at: clauseo_protocol::Timestamp,
+    },
     Revoke {
         host: String,
         scope: AllowScope,
@@ -141,6 +161,7 @@ impl AllowState {
             persisted: None,
             writer: None,
             waiting: VecDeque::new(),
+            unread: None,
             opening: None,
             read_deadline: None,
             store: None,
@@ -250,7 +271,16 @@ fn try_allow(actor: &mut Actor, block_id: BlockedSiteId, scope: AllowScope) -> R
         ));
     };
     let mut stored = actor.allowed.stored.clone();
-    if stored.allow(&notice.host, scope, notice.matter, actor.now().wall) {
+    let at = actor.now().wall;
+    if let Some(unread) = &mut actor.allowed.unread {
+        unread.push(Op::Allow {
+            host: notice.host.clone(),
+            scope,
+            matter: notice.matter,
+            at,
+        });
+    }
+    if stored.allow(&notice.host, scope, notice.matter, at) {
         if stored.count() > file::MAX_HOSTS {
             return Err(Error::refused(ErrorCode::CommandInvalid, TOO_MANY));
         }
@@ -294,6 +324,13 @@ fn run_revoke(
     scope: AllowScope,
     matter: Option<MatterId>,
 ) {
+    if let Some(unread) = &mut actor.allowed.unread {
+        unread.push(Op::Revoke {
+            host: host.to_owned(),
+            scope,
+            matter,
+        });
+    }
     let removed = actor.allowed.stored.revoke(host, scope, matter);
     if removed {
         refresh(actor);
