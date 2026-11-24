@@ -4,7 +4,6 @@
 import type { FolderChoice } from "@clauseo/components/clauseo/first-launch/folder-choice.tsx";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import {
-  HAS_SET_DEFAULT_LOCATION,
   askPermissionCommand,
   permissionsCommand,
   setDefaultLocationCommand,
@@ -24,8 +23,8 @@ export type PermissionsHost = {
   list(): Promise<PermissionRow[]>;
   /** Asks for one row; resolves with the row after, once the lawyer has answered macOS. */
   ask(id: PermissionId): Promise<PermissionRow>;
-  /** Picks a folder and makes it where new matters go (stage E's set_default_location, still to come): its outcome, or
-   * null when the lawyer cancels the picker. Absent until the command exists, and every button for it is hidden. */
+  /** Picks a folder and makes it where new matters go (set_default_location): its outcome, or null when the lawyer
+   * cancels the picker. Absent where nothing can set it (no desktop, no fake), and every button for it is hidden. */
   chooseMattersFolder?: (() => Promise<FolderChoice | null>) | undefined;
 };
 
@@ -61,11 +60,11 @@ const NONE: PermissionsHost = {
   ask: () => Promise.reject(new Error("no permissions here")),
 };
 
-/** The desktop's: its two commands, and the matters-folder choice once set_default_location exists. */
+/** The desktop's: its two commands, and the matters-folder choice (set_default_location). */
 const desktop = (transport: HostTransport): PermissionsHost => ({
   list: permissionsCommand,
   ask: askPermissionCommand,
-  ...(HAS_SET_DEFAULT_LOCATION ? { chooseMattersFolder: () => chooseOver(transport) } : {}),
+  chooseMattersFolder: () => chooseOver(transport),
 });
 
 /** The step's host for the window's transport. A list that fails rejects: the step keeps the rows it had, and a

@@ -4,8 +4,8 @@
 // words, and the way that works today: move the folder out of the protected folder it is in (Documents, Desktop or
 // Pictures) in File Explorer (Show in File Explorer), then
 // choose it here (Locate folder's flow, matters.locate, relocate_matter). Where the host can set where new matters go
-// (permissions-host.ts's chooseMattersFolder, set_default_location, still to come), its choice joins; hidden until
-// then. It moves nothing: this matter stays until the lawyer moves its folder. The rows are read
+// (permissions-host.ts's chooseMattersFolder, set_default_location: the desktop), its choice joins; hidden where it
+// cannot. It moves nothing: this matter stays until the lawyer moves its folder. The rows are read
 // once per window (the desktop's permissions(), silent), so opening another matter asks nothing again.
 import { useEffect, useState } from "react";
 import { WINDOWS } from "@clauseo/components/clauseo/first-launch/windows-words.ts";

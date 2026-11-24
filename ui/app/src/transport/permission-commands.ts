@@ -1,10 +1,10 @@
 // The desktop's permissions commands for the first screen's step and Settings' Permissions block (issue 5): stage E's
-// permissions() and ask_permission(id) in the desktop crate, through the generated bindings. Granted to the main and
-// Settings windows alike (crates/desktop/capabilities/settings.json). Here because Tauri APIs are imported only under
-// src/transport/.
+// permissions() and ask_permission(id) in the desktop crate, through the generated bindings, and the matters-folder
+// choice's set_default_location host command. Granted to the main and Settings windows alike
+// (crates/desktop/capabilities/settings.json). Here because Tauri APIs are imported only under src/transport/.
 import { commands, type PermissionId, type PermissionRow } from "./bindings.ts";
 import { toHostError, type HostTransport } from "./host-transport.ts";
-import type { CommandEnvelope, FolderRefId } from "./protocol.ts";
+import type { FolderRefId } from "./protocol.ts";
 
 export type { OsPermissionState, PermissionId, PermissionRow } from "./bindings.ts";
 
@@ -33,10 +33,6 @@ export function askPermissionCommand(id: PermissionId): Promise<PermissionRow> {
   return settled(commands.askPermission(id, null));
 }
 
-/** TODO(set_default_location): true once bindings.ts has the command (stage E's small PR after #1279). Until then
- * every "matters folder" choice that uses it stays hidden. */
-export const HAS_SET_DEFAULT_LOCATION = false;
-
 /** `{"set_default_location": {"folder"}}`: new matters go in `folder` (a pick_folder ref) from now on. Existing
  * matters stay, and nothing on disk is made or moved. Refusals: settings.locked, command.invalid, store.io. */
 export async function setDefaultLocationCommand(
@@ -46,5 +42,5 @@ export async function setDefaultLocationCommand(
   await transport.dispatch({
     command_id: crypto.randomUUID(),
     command: { set_default_location: { folder } },
-  } as unknown as CommandEnvelope);
+  });
 }
