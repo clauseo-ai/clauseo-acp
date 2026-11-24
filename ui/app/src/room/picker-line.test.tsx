@@ -148,7 +148,7 @@ test("Existing folder: the line shows from 300 ms, and goes when the pick is pic
   await expectLineThrough(async () =>
     picker.answer({ folder: "ref-existing", display: "Documents/Mehta" }),
   );
-  expect(dialog()?.textContent).toContain("Documents/Mehta");
+  expect(dialog()?.textContent).toContain("Documents › Mehta");
 });
 
 test("Existing folder: the line goes when the pick is cancelled", async () => {
@@ -179,5 +179,5 @@ test("Existing folder: a pick answered inside 300 ms never shows the line, even 
   await flush();
   await advance(500);
   expect(line()).toBeNull();
-  expect(dialog()?.textContent).toContain("Documents/Mehta");
+  expect(dialog()?.textContent).toContain("Documents › Mehta");
 });

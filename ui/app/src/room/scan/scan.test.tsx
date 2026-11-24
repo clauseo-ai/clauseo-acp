@@ -297,7 +297,8 @@ test("Create while a synced folder's notice shows: the press reads it, and the m
   expect(named(transport, "create_matter")).toEqual([
     { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
   ]);
-  expect(byId("synced-got-it")?.hasAttribute("data-focus-moved")).toBe(false);
+  // made: the dialog closed with the note, no focus moved to Got it on the way
+  expect(byId("synced-got-it")).toBeNull();
 });
 
 test("Create after Got it creates, once", async () => {

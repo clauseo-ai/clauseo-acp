@@ -129,7 +129,7 @@ test("Change opens the chooser over New matter at the last place; choosing resol
   await press(byId("chooser-choose"));
   expect(sessionCalls(transport).at(-1)).toEqual({ call: "chooser_choose", chooser: 1 });
   expect(chooser()).toBeNull();
-  expect(newMatter()?.textContent).toContain("Documents\\Matters\\Rathi Steels");
+  expect(newMatter()?.textContent).toContain("Documents › Matters › Rathi Steels");
   // the name is the folder's last part, to type over
   expect(byId<HTMLInputElement>("matter-name")?.value).toBe("Rathi Steels");
   // the pick went the transport's one way, and the folder registered is the one the form holds
@@ -272,7 +272,7 @@ test("a declined confirm keeps the chooser open where it was; the next confirm c
   confirm = true;
   await press(byId("chooser-choose"));
   expect(chooser()).toBeNull();
-  expect(newMatter()?.textContent).toContain("Documents\\Matters");
+  expect(newMatter()?.textContent).toContain("Documents › Matters");
 });
 
 test("while the confirm is up, the chooser waits and says so", async () => {

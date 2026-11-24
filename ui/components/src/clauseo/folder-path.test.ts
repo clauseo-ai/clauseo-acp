@@ -7,6 +7,7 @@ test("the folder's own name, whatever the path is written with", () => {
   expect(folderName("Documents\\Clients\\Rao v. Union")).toBe("Rao v. Union");
   expect(folderName("/Volumes/Work/Acme/")).toBe("Acme");
   expect(folderName("D:\\Cases")).toBe("Cases");
+  expect(folderName("D:\\")).toBe("");
 });
 
 test("controls and bidi marks are dropped, the name trimmed and cut to 200 characters", () => {
