@@ -19,14 +19,15 @@ export type Wait = Hold | "other" | "unknown";
 
 const HOLDS: readonly string[] = ["undo", "restore", "relocate"];
 
-/** What the open thread's view says its message waits for; null when its header isn't queued. An unknown hold reads
- * as none. */
+/** What the open thread's view says its message waits for; null when its header isn't queued. A hold the app does
+ * not know names no reason: "unknown", whatever it is behind. */
 export function waitOf(v: StreamView | undefined): Wait | null {
   const head = v?.header?.header;
   const s = head?.status;
   if (head === undefined || typeof s !== "object" || s.queued === undefined) return null;
   const hold: unknown = head.hold;
   if (typeof hold === "string" && HOLDS.includes(hold)) return hold as Hold;
+  if (hold !== undefined && hold !== null) return "unknown";
   return s.queued.behind !== head.thread ? "other" : "unknown";
 }
 
