@@ -65,6 +65,12 @@ const LAYOUTS: [(&str, &str); 2] = [
     ),
 ];
 
+/// The `@openai/codex` version [`LAYOUTS`]' hashes were taken from. A test fails when G16's pins
+/// override another Codex, since a stale hash quietly turns SAC's protection off: re-hash both
+/// `rg.exe` (`.github/scripts/engine-watch.mjs` does, with every bump) and update both.
+#[cfg(test)]
+const LAYOUTS_CODEX: &str = "0.162.1";
+
 /// Smart App Control's state: `VerifiedAndReputablePolicyState` under
 /// `HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

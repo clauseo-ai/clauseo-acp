@@ -233,3 +233,18 @@ fn each_step_logs_its_state_and_action_on_the_lifecycle_target() {
         assert!(!line.contains("codex-path"), "{line}");
     }
 }
+
+/// LAYOUTS' hashes are for the Codex G16's pins override to: a Codex bump without a re-hash
+/// would leave a stale pin, and SAC's protection would quietly stop.
+#[test]
+fn layouts_are_hashed_for_the_pinned_codex() {
+    let live = Path::new(env!("CARGO_MANIFEST_DIR")).join("../limits/tests/live/package.json");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(live).unwrap()).unwrap();
+    assert_eq!(
+        manifest["overrides"]["@openai/codex"].as_str(),
+        Some(LAYOUTS_CODEX),
+        "G16's pins override another @openai/codex: re-hash rg.exe in sac.rs LAYOUTS \
+         (node .github/scripts/engine-watch.mjs does) and set LAYOUTS_CODEX"
+    );
+}
