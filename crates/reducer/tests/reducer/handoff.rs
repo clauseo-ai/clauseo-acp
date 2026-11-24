@@ -5,7 +5,7 @@ use clauseo_protocol::{
     AgentNamed, AgentSwitched, AvailableCommand, CommandsAvailable, ConfigCategory, ConfigOption,
     ConfigOptionKind, ConfigOptionsReplaced, ContextHandoff, Count, DomainEvent, Endpoint, EntryId,
     HandoffEntry, HandoffEntryStatus, HandoffId, HandoffSettled, HandoffStatus, HeaderEntry,
-    MessageId, ModeChanged, Seq, Timestamp, ViewEntry,
+    MessageId, ModeChanged, NamedChoice, Seq, Timestamp, ViewEntry,
 };
 use clauseo_reducer::{Anomaly, Applied, StreamState, ViewChange, apply};
 
@@ -20,8 +20,14 @@ pub(crate) fn handoff_event(handoff: HandoffId, message: MessageId) -> DomainEve
         message,
         from: Endpoint {
             agent: "claude-acp".parse().unwrap(),
-            model: Some("Opus".to_owned()),
-            effort: Some("High".to_owned()),
+            model: Some(NamedChoice {
+                id: "opus".into(),
+                name: "Opus".into(),
+            }),
+            effort: Some(NamedChoice {
+                id: "high".into(),
+                name: "High".into(),
+            }),
         },
         to: Endpoint {
             agent: "codex-acp".parse().unwrap(),
@@ -167,8 +173,14 @@ fn a_handoff_makes_a_pending_entry_at_its_seq_that_settles_delivered() {
         message,
         from: Endpoint {
             agent: "claude-acp".parse().unwrap(),
-            model: Some("Opus".to_owned()),
-            effort: Some("High".to_owned()),
+            model: Some(NamedChoice {
+                id: "opus".into(),
+                name: "Opus".into(),
+            }),
+            effort: Some(NamedChoice {
+                id: "high".into(),
+                name: "High".into(),
+            }),
         },
         to: Endpoint {
             agent: "codex-acp".parse().unwrap(),

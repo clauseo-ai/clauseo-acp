@@ -14,14 +14,14 @@ use clauseo_protocol::{
     CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, ContentId, ContextHandoff,
     Cost, Delivery, DetachReason, DomainEvent, DoneBy, Endpoint, ErrorCode, FileChange,
     FilesChanged, HandoffSettled, HandoffStatus, HelperOutcome, ImportSummary, LimitStopReason,
-    MatterCreated, MatterKind, MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia,
-    PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
-    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
-    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
-    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
-    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
-    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
-    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    MatterCreated, MatterKind, MatterRelocated, MessageId, NamedChoice, Notice, NoticeLevel,
+    OutsideEdits, PageVia, PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom,
+    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy,
+    SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended,
+    TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+    Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated,
+    ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
+    TurnUsage, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -262,7 +262,7 @@ fn thread_events() -> Vec<DomainEvent> {
             idle_fallback_to_host: false,
         }),
     };
-    vec![
+    let mut events: Vec<DomainEvent> = vec![
         ThreadCreated {
             matter: matter_id(1),
             agent: AgentId::new("claude-acp").unwrap(),
@@ -309,34 +309,9 @@ fn thread_events() -> Vec<DomainEvent> {
         }
         .into(),
         AgentRetryEnded { turn: turn_id(3) }.into(),
-        AgentSwitched {
-            from: agent("claude-acp"),
-            to: agent("codex-acp"),
-        }
-        .into(),
-        ContextHandoff {
-            handoff: handoff_id(19),
-            message,
-            from: Endpoint {
-                agent: agent("claude-acp"),
-                model: Some("Opus".to_owned()),
-                effort: Some("High".to_owned()),
-            },
-            to: Endpoint {
-                agent: agent("codex-acp"),
-                model: None,
-                effort: None,
-            },
-            answers_covered: count(4),
-            items_included: count(9),
-            items_left_out: count(2),
-        }
-        .into(),
-        HandoffSettled {
-            handoff: handoff_id(19),
-            status: HandoffStatus::Delivered,
-        }
-        .into(),
+    ];
+    events.extend(switch_events(message));
+    events.extend([
         UserMessage {
             turn,
             message,
@@ -346,6 +321,7 @@ fn thread_events() -> Vec<DomainEvent> {
             }],
             delivery: Delivery::Steer,
             config: std::collections::BTreeMap::new(),
+            agent: None,
         }
         .into(),
         TurnQueued::new(thread_id(2), turn, thread_id(2), Some(turn_id(6)))
@@ -361,6 +337,47 @@ fn thread_events() -> Vec<DomainEvent> {
             message,
             outcome: SteerOutcome::Injected { turn },
             aside: vec![tool_call_id(4)],
+        }
+        .into(),
+    ]);
+    events
+}
+
+/// The agent switch's events, in `DomainEvent::KINDS` order, for the lawyer's `message`.
+fn switch_events(message: MessageId) -> Vec<DomainEvent> {
+    vec![
+        AgentSwitched {
+            from: agent("claude-acp"),
+            to: agent("codex-acp"),
+        }
+        .into(),
+        ContextHandoff {
+            handoff: handoff_id(19),
+            message,
+            from: Endpoint {
+                agent: agent("claude-acp"),
+                model: Some(NamedChoice {
+                    id: "opus".into(),
+                    name: "Opus".into(),
+                }),
+                effort: Some(NamedChoice {
+                    id: "high".into(),
+                    name: "High".into(),
+                }),
+            },
+            to: Endpoint {
+                agent: agent("codex-acp"),
+                model: None,
+                effort: None,
+            },
+            answers_covered: count(4),
+            items_included: count(9),
+            items_left_out: count(2),
+        }
+        .into(),
+        HandoffSettled {
+            handoff: handoff_id(19),
+            status: HandoffStatus::Delivered,
         }
         .into(),
     ]

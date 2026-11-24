@@ -1,16 +1,16 @@
 //! The agent switch: `AgentSwitched`, `ContextHandoff` and `HandoffSettled` with its open
-//! enum `HandoffStatus`, `DetachReason::Switched`, the view's `HandoffEntryStatus`, and
-//! `SendPrompt`'s `agent`: wire forms, round trips in JSON and `MessagePack`, and values from
-//! a newer Clauseo.
+//! enum `HandoffStatus`, `DetachReason::Switched`, the view's `HandoffEntryStatus`,
+//! `SendPrompt`'s and `UserMessage`'s `agent`, and `NamedChoice` in `Endpoint`: wire forms,
+//! round trips in JSON and `MessagePack`, and values from a newer Clauseo.
 
 use clauseo_protocol::{
-    AgentSessionDetached, AgentSwitched, CommandEnvelope, ContextHandoff, DeliveryRequest,
-    DetachReason, DomainEvent, Endpoint, HandoffEntryStatus, HandoffSettled, HandoffStatus,
-    HostCommand, PromptBlock,
+    AgentSessionDetached, AgentSwitched, CommandEnvelope, ContextHandoff, Delivery,
+    DeliveryRequest, DetachReason, DomainEvent, Endpoint, HandoffEntryStatus, HandoffSettled,
+    HandoffStatus, HostCommand, NamedChoice, PromptBlock, UserMessage,
 };
 use serde_json::json;
 
-use crate::fixtures::{agent, count, handoff_id, message_id, thread_id};
+use crate::fixtures::{agent, count, handoff_id, message_id, thread_id, turn_id};
 
 fn round_trips(event: &DomainEvent) -> serde_json::Value {
     let json = serde_json::to_value(event).unwrap();
@@ -49,8 +49,14 @@ fn a_handoff_writes_its_counts_and_leaves_out_an_unknown_model_and_effort() {
         message: message_id(5),
         from: Endpoint {
             agent: agent("claude-acp"),
-            model: Some("Opus".to_owned()),
-            effort: Some("High".to_owned()),
+            model: Some(NamedChoice {
+                id: "opus".into(),
+                name: "Opus".into(),
+            }),
+            effort: Some(NamedChoice {
+                id: "high".into(),
+                name: "High".into(),
+            }),
         },
         to: Endpoint {
             agent: agent("codex-acp"),
@@ -70,7 +76,11 @@ fn a_handoff_writes_its_counts_and_leaves_out_an_unknown_model_and_effort() {
         json!({"context_handoff": {
             "handoff": handoff_text,
             "message": message_text,
-            "from": {"agent": "claude-acp", "model": "Opus", "effort": "High"},
+            "from": {
+                "agent": "claude-acp",
+                "model": {"id": "opus", "name": "Opus"},
+                "effort": {"id": "high", "name": "High"},
+            },
             "to": {"agent": "codex-acp"},
             "answers_covered": 4,
             "items_included": 9,
@@ -181,5 +191,32 @@ fn send_prompt_names_its_agent_only_when_it_has_one() {
         assert_eq!(envelope.command, command);
         assert_eq!(serde_json::to_value(&command).unwrap(), wire);
         assert!(envelope.validate().is_ok());
+    }
+}
+
+#[test]
+fn a_user_message_names_its_agent_only_when_it_has_one() {
+    let turn = serde_json::to_value(turn_id(3)).unwrap();
+    let message = serde_json::to_value(message_id(5)).unwrap();
+    for named in [Some(agent("codex-acp")), None] {
+        let event: DomainEvent = UserMessage {
+            turn: turn_id(3),
+            message: message_id(5),
+            acp_message_id: None,
+            content: Vec::new(),
+            delivery: Delivery::Queue,
+            config: std::collections::BTreeMap::new(),
+            agent: named.clone(),
+        }
+        .into();
+        let mut wire = json!({"user_message": {"turn": turn, "message": message, "content": []}});
+        if named.is_some() {
+            wire["user_message"]["agent"] = json!("codex-acp");
+        }
+        assert_eq!(
+            round_trips(&event),
+            wire,
+            "missing when none, so older entries read"
+        );
     }
 }

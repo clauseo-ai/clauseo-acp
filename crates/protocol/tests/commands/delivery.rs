@@ -62,6 +62,7 @@ fn queue_has_one_wire_form() {
         }],
         delivery,
         config: std::collections::BTreeMap::new(),
+        agent: None,
     };
     let entry = |delivery: Delivery| UserMessageEntry {
         order: Seq::FIRST,

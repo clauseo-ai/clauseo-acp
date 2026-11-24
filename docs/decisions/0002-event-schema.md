@@ -102,9 +102,9 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_retrying` | turn, title?, details? (the agent's own words as it waits mid-turn to retry its service, each at most 300 characters; no delay is read from them) | host, from acp | yes | T |
 | `agent_retry_ended` | turn (the agent sent something else; the turn's end ends a wait with no event) | host | yes | T |
 | `agent_switched` | from, to (agent ids): the thread's agent changed at the start of the turn of a message that named another agent | host | yes | T |
-| `context_handoff` | handoff, message, from and to (`Endpoint`: agent, model?, effort?), answers_covered, items_included, items_left_out | host | yes | T |
+| `context_handoff` | handoff, message, from and to (`Endpoint`: agent, model?, effort?, each a `NamedChoice` {id, name}), answers_covered, items_included, items_left_out | host | yes | T |
 | `handoff_settled` | handoff, status (`HandoffStatus`: delivered or failed) | host | yes | T |
-| `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
+| `user_message` | turn, message, acp_message_id?, content, delivery?, agent? (the agent the lawyer named; a restart keeps a queued switch) | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |
 | `steer_resolved` | message, outcome (`SteerOutcome`), aside? (tool call ids) | host | yes | T |
@@ -388,7 +388,7 @@ Every limit and rule, with its constant:
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
 | `EditQueuedPrompt.text` | at most 6 MiB, JSON-escaped bytes (`prompt.too_long`); it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
-| `SendPrompt.agent` | optional agent id; another agent than the thread's moves the conversation to it when the message's turn starts (`agent_switched`, `context_handoff`); missing or the thread's own agent is no switch; an agent not in the settings is `command.invalid`, and `thread.background_work` while the thread's agent may still be working | |
+| `SendPrompt.agent` | optional agent id, kept on the message (`user_message.agent`); the message's turn moves the conversation to it when it starts on another agent (`agent_switched`, `context_handoff`); missing, or the thread's agent then, is no switch; naming another agent than the thread's now is refused before the message is taken: not in the settings `command.invalid`, a sign-in that refuses its launch with that launch's code, and `thread.background_work` while the thread may still be working | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |
 | same | a visible character: not only whitespace, `Default_Ignorable_Code_Point` characters, U+2800 and combining marks (a heuristic) | |
 | same | no control character, bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069), or line or paragraph separator; the bidi marks U+200E, U+200F, U+061C are allowed | |
