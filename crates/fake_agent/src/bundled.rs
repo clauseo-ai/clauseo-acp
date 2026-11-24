@@ -71,6 +71,8 @@ bundled! {
         "codex-permission",
         "codex-plan",
         "codex-resume",
+        "delete-then-wait",
+        "edit-p-then-wait",
         "elicitation-echo-path",
         "elicitation-echo-residuals",
         "elicitation-echo-unscoped",

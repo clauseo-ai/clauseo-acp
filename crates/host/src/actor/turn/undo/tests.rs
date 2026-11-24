@@ -1,5 +1,5 @@
 //! The step `UndoStep` and `PreviewUndo` read from a thread's log: the answer's card is its
-//! `only`, change by change.
+//! `only`, change by change, with the papers it left off as other answers' (its `beside`).
 
 use clauseo_protocol::{
     ChangeKind, CheckpointId, ContentId, Count, DomainEvent, Envelope, EventId, FileChange,
@@ -7,6 +7,7 @@ use clauseo_protocol::{
 };
 
 use super::step_of;
+use crate::matter_worker::TurnCard;
 use crate::pipeline::tests::support::{id, thread_stream, ts};
 
 fn path(text: &str) -> MatterPath {
@@ -20,6 +21,15 @@ fn content(hex: &str) -> ContentId {
 /// A turn's log: started at checkpoint 5, ended at checkpoint 6, with `files` as its
 /// `FilesChanged` when given.
 fn log(turn: TurnId, files: Option<Vec<FileChange>>) -> Vec<Envelope> {
+    log_beside(turn, files, Vec::new())
+}
+
+/// [`log`], the `FilesChanged` naming `beside` as other answers' papers.
+fn log_beside(
+    turn: TurnId,
+    files: Option<Vec<FileChange>>,
+    beside: Vec<MatterPath>,
+) -> Vec<Envelope> {
     let mut events = vec![DomainEvent::TurnStarted(TurnStarted {
         turn,
         checkpoint_before: id::<CheckpointId>(5),
@@ -29,7 +39,7 @@ fn log(turn: TurnId, files: Option<Vec<FileChange>>) -> Vec<Envelope> {
             turn,
             files,
             skipped: Vec::new(),
-            beside: Vec::new(),
+            beside,
         }));
     }
     events.push(DomainEvent::TurnEnded(TurnEnded {
@@ -76,7 +86,23 @@ fn the_card_in_the_log_is_the_steps_only() {
     let step = step_of(&log(turn, Some(files.clone())), turn).unwrap();
     assert_eq!(step.before, id::<CheckpointId>(5));
     assert_eq!(step.after, id::<CheckpointId>(6));
-    assert_eq!(step.only, Some(files));
+    let card = TurnCard {
+        changes: files,
+        others: std::collections::BTreeSet::new(),
+    };
+    assert_eq!(step.only, Some(card));
+}
+
+#[test]
+fn the_papers_left_off_the_card_as_other_answers_are_its_others() {
+    let turn = id::<TurnId>(3);
+    let beside = vec![path("notes/b.txt"), path("notes/c.txt")];
+    let step = step_of(&log_beside(turn, Some(Vec::new()), beside.clone()), turn).unwrap();
+    let card = TurnCard {
+        changes: Vec::new(),
+        others: beside.into_iter().collect(),
+    };
+    assert_eq!(step.only, Some(card));
 }
 
 #[test]
