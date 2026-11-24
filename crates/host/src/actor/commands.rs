@@ -440,6 +440,7 @@ fn create_thread(
         created: now.wall,
         updated: now.wall,
         seen_seq: None,
+        own_picks: None,
     };
     let event = DomainEvent::ThreadCreated(ThreadCreated {
         matter,

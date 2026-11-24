@@ -336,7 +336,11 @@ pub(in crate::actor::turn) fn on_picked(
     let answer = picked.answer.filter(|_| same);
     if let Some(options) = &answer {
         let options = options.clone();
+        let taken = taken(actor, thread, turn, &options);
         let logged = Out::new(actor, thread, None).and_then(|mut out| {
+            if let Some(row) = super::super::picks::own::keep(actor, thread, &taken) {
+                out.draft.thread_row(row);
+            }
             out.push(actor, ConfigOptionsReplaced { options })?;
             out.send(actor, Then::Nothing)
         });
@@ -356,6 +360,27 @@ pub(in crate::actor::turn) fn on_picked(
         waiting: None,
     };
     went_on(actor, thread, turn, ran);
+}
+
+/// The picks of `turn`'s own that the agent's answer `options` holds: they become the thread's
+/// kept values (`picks/own.rs`). Values set back from `kept_due` are kept already.
+pub(super) fn taken(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    options: &[ConfigOption],
+) -> Vec<Pick> {
+    let Some(own) = state(actor, thread).and_then(|state| state.prompt_picks.by_turn.get(&turn))
+    else {
+        return Vec::new();
+    };
+    (own.as_map().iter())
+        .filter(|(option, value)| {
+            select(options, option.as_str())
+                .is_some_and(|(_, current, _)| current == value.as_str())
+        })
+        .map(|(option, value)| (option.clone(), value.clone()))
+        .collect()
 }
 
 /// `turn` goes on with `ran`, what its picks did: kept for its `TurnStarted`, and its

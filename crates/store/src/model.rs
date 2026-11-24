@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AddonSwitches, AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId,
-    ClientName, CommandId, CommandOutcome, Count, Date, Envelope, InterruptedKind, MatterId,
-    MatterKind, PackList, RenameSource, Seq, StreamId, ThreadId, Timestamp,
+    ClientName, CommandId, CommandOutcome, ConfigPicks, Count, Date, Envelope, InterruptedKind,
+    MatterId, MatterKind, PackList, RenameSource, Seq, StreamId, ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -214,6 +214,9 @@ pub struct ThreadRow {
     /// The thread's last `seq` when the lawyer last saw it (`MarkSeen`); `None` before the
     /// first (schema 3; a thread from before schema 3 starts seen up to its last `seq` then).
     pub seen_seq: Option<Seq>,
+    /// The model and effort the lawyer last chose in this thread, kept through sessions that
+    /// could not use them; `None` before the first (schema 9; `NULL` before). Stored as JSON.
+    pub own_picks: Option<ConfigPicks>,
 }
 
 /// A checkpoint: the git commit behind a `CheckpointRecorded` event.

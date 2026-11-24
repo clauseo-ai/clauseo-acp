@@ -1,0 +1,150 @@
+//! A thread's kept model and effort (`actor/turn/picks/own.rs`) through fallback model lists,
+//! with the stand-in agent as Codex: a relaunch whose list lacks the kept model runs on what it
+//! offers with one notice, and a second turn of that session gets none; the matter's prefs keep
+//! the model; after a host restart, a list that has it again gets it set back with no notice
+//! (`pickers-kept-fallback`, then `pickers-kept-restored`). A model the lawyer picks on the
+//! fallback list becomes the kept one (`pickers-kept-fallback-pick`, then
+//! `pickers-kept-picked-restored`).
+
+use std::collections::BTreeMap;
+
+use clauseo_protocol::{
+    AgentId, AgentKind, AgentPrefs, CommandOutcome, FieldChange, HostCommand, MatterId, NoticeKind,
+    StopReason, StreamId, ThreadId, TurnId,
+};
+
+use crate::codex::CODEX;
+use crate::idle_stop::{LIMIT, idle_stopped};
+use crate::matters::summary;
+use crate::observe::Events;
+use crate::pickers::{picks, set};
+use crate::pickers_idle::started_and_notices;
+use crate::support::{Dir, Running, Scenario};
+
+const LUNA_LOW: [(&str, &str); 2] = [("model", "gpt-6-luna"), ("reasoning_effort", "low")];
+
+fn codex_prefs() -> AgentPrefs {
+    AgentPrefs(BTreeMap::from([(AgentKind::Codex, picks(&LUNA_LOW))]))
+}
+
+fn names(model: &str, effort: &str) -> (Option<String>, Option<String>) {
+    (Some(model.to_owned()), Some(effort.to_owned()))
+}
+
+/// The one notice a fallback session gives, naming what it ran.
+fn told(model: &str) -> NoticeKind {
+    NoticeKind::PickNotUsed {
+        model: Some(model.to_owned()),
+        effort: Some("Low".to_owned()),
+    }
+}
+
+/// Runs `text` on `thread` to its end, with no mismatch against the scenario.
+fn run(host: &Running, events: &mut Events, thread: ThreadId, text: &str) -> TurnId {
+    let (turn, _) = host.prompt(thread, text);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    turn
+}
+
+/// A Codex thread (`config` its `CreateThread` config) that ran one prompt and stopped idle.
+fn idle_thread(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>) -> ThreadId {
+    let outcome = host.ok(HostCommand::CreateThread {
+        matter,
+        agent: AgentId::new(CODEX).unwrap(),
+        config: config.map(picks),
+    });
+    let CommandOutcome::ThreadCreated { thread } = outcome else {
+        panic!("CreateThread answered {outcome:?}");
+    };
+    let mut events = host.events(StreamId::Thread(thread));
+    run(host, &mut events, thread, "Summarise clause 4.");
+    host.wait_armed(LIMIT);
+    host.clock.advance(LIMIT);
+    events.until("the idle stop", |events| {
+        events.position(idle_stopped).is_some()
+    });
+    host.settle();
+    thread
+}
+
+/// The thread's matter's prefs hold gpt-6-luna and low; the thread has no config of its own,
+/// so its kept values come from its logged options at the relaunch (a thread from before them).
+/// The fallback relaunch drops neither from the prefs, tells once, and the third turn nothing;
+/// after a restart the list has gpt-6-luna again, and it is set back with no notice.
+#[test]
+fn a_fallback_relaunch_tells_once_keeps_the_values_and_a_restored_list_gets_them_back() {
+    let dir = Dir::new(
+        "pickers_kept_fallback",
+        &[(CODEX, Scenario::Local("pickers-kept-fallback"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    host.ok(HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
+        pinned: None,
+        agent_prefs: FieldChange::Set(codex_prefs()),
+    });
+    let thread = idle_thread(&host, matter, None);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6", "Low"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6")], "{}", events.dump());
+    assert_eq!(started_and_notices(&events, third).0, names("GPT-6", "Low"));
+    assert_eq!(summary(&host, matter).agent_prefs, Some(codex_prefs()));
+    host.shutdown();
+
+    dir.set_agents(&[(CODEX, Scenario::Local("pickers-kept-restored"))]);
+    let host = dir.start_with(1, |config| config.with_live_agents(2));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let fourth = run(&host, &mut events, thread, "And clause 7?");
+    let (started, notices) = started_and_notices(&events, fourth);
+    assert_eq!(started, names("GPT-6 Luna", "Low"), "{}", events.dump());
+    // Only the fallback session's notice.
+    assert_eq!(notices, [told("GPT-6")], "{}", events.dump());
+    assert_eq!(summary(&host, matter).agent_prefs, Some(codex_prefs()));
+    host.shutdown();
+}
+
+/// On the fallback list the lawyer picks gpt-6-astra: it becomes the thread's kept model, so
+/// the next session, whose list has gpt-6-luna again, gets gpt-6-astra.
+#[test]
+fn a_model_picked_on_a_fallback_list_becomes_the_kept_one() {
+    let dir = Dir::new(
+        "pickers_kept_pick",
+        &[(CODEX, Scenario::Local("pickers-kept-fallback-pick"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    assert_eq!(started_and_notices(&events, second).1, [told("GPT-6")]);
+    host.ok(set(thread, "model", "gpt-6-astra"));
+    host.shutdown();
+
+    dir.set_agents(&[(CODEX, Scenario::Local("pickers-kept-picked-restored"))]);
+    let host = dir.start_with(1, |config| config.with_live_agents(2));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, third);
+    assert_eq!(started, names("GPT-6 Astra", "Low"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6")], "{}", events.dump());
+    host.shutdown();
+}

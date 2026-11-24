@@ -367,13 +367,20 @@ pub(super) fn finished(
 
 /// The model and effort `turn` runs with, and the notice owed when a pick of its could not be
 /// used: those of the agent's last answer to its picks, else of the thread's options
-/// (`options`), the session's own (module doc).
+/// (`options`), the session's own (module doc). With them, the thread row to write when the
+/// turn's own picks that those options hold became the thread's kept values (`picks/own.rs`),
+/// a pick the session held already included.
 pub(super) fn started_with(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     options: Vec<ConfigOption>,
-) -> (Option<NamedChoice>, Option<NamedChoice>, Option<Notice>) {
+) -> (
+    Option<NamedChoice>,
+    Option<NamedChoice>,
+    Option<Notice>,
+    Option<clauseo_store::ThreadRow>,
+) {
     let (ran, lost, start, hide) = state(actor, thread).map_or_else(Default::default, |state| {
         let picks = &mut state.prompt_picks;
         let ran = picks.ran.remove(&turn).unwrap_or_default();
@@ -393,6 +400,8 @@ pub(super) fn started_with(
     });
     let mut options = ran.answer.or(start).unwrap_or(options);
     options.retain(|option| hide.iter().all(|id| option.id != id.as_str()));
+    let taken = send::taken(actor, thread, turn, &options);
+    let row = super::picks::own::keep(actor, thread, &taken);
     let agent = actor
         .threads
         .get(&thread)
@@ -403,7 +412,7 @@ pub(super) fn started_with(
     if let (Some(_), Some(state)) = (&notice, state(actor, thread)) {
         state.prompt_picks.kept_told = true;
     }
-    (model, effort, notice)
+    (model, effort, notice, row)
 }
 
 /// [`started_with`] over plain values.

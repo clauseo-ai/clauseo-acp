@@ -215,6 +215,11 @@ fn candidates(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> 
             })
             .unwrap_or_default(),
     };
+    // The thread's kept values over what its last session ran with (`own.rs`).
+    for pick in own::own(actor, thread) {
+        picks.retain(|(id, _)| *id != pick.0);
+        picks.push(pick);
+    }
     for pick in waiting(actor, thread, options) {
         picks.retain(|(id, _)| *id != pick.0);
         picks.push(pick);
@@ -394,6 +399,7 @@ pub(super) fn after(
         .threads
         .get(&thread)
         .map_or_else(String::new, |entry| entry.row.agent.as_str().to_owned());
+    own::keep_created(actor, thread, options);
     if !picked.set.is_empty() {
         let held: Vec<Pick> = candidates(actor, thread, options)
             .into_iter()
@@ -406,11 +412,9 @@ pub(super) fn after(
         drop_held(actor, thread, "a pick was set since");
     }
     answer_waiting(actor, thread, &picked.set);
-    // The thread's own values (a session of it attached before): those the session does not
-    // report yet wait for its list at step 4 (`prompt_picks/send.rs`); those it lost are told.
-    let own: Vec<Pick> = logged(actor, thread)
-        .map(|own| own.iter().filter_map(current_pick).collect())
-        .unwrap_or_default();
+    // The thread's kept values (`own.rs`): those the session does not report yet wait for its
+    // list at step 4 (`prompt_picks/send.rs`); those it lost are told.
+    let own = own::own(actor, thread);
     let due: Vec<Pick> = (own.iter())
         .filter(|pick| offer(options, pick) == Offer::Absent)
         .cloned()
@@ -438,10 +442,12 @@ pub(super) fn after(
         .map(|(option, _)| option.clone())
         .collect();
     super::prompt_picks::session_started(actor, thread, options, (lost, due));
+    // A kept value stays, in the prefs and `CreateThread`'s config too: later starts try it.
     let drop_stale = |picks: &mut ConfigPicks| {
         let mut changed = false;
         for (option, value) in &picked.stale {
-            if picks.as_map().get(option) == Some(value) {
+            let pick = (option.clone(), value.clone());
+            if picks.as_map().get(option) == Some(value) && !own::is_kept(&own, &pick) {
                 changed |= picks.remove(option.as_str());
             }
         }
@@ -504,6 +510,11 @@ fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick]) {
             continue;
         };
         let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
+            if let ConfigValue::Select(choice) = &value
+                && let Some(row) = own::keep(actor, thread, &[(option.clone(), choice.clone())])
+            {
+                out.draft.thread_row(row);
+            }
             if let Some(row) = remember(actor, thread, &(option, value)) {
                 out.draft.matter_row(row);
             }
@@ -593,5 +604,6 @@ fn prefs_row(
 
 pub(super) mod alias;
 mod log;
+pub(super) mod own;
 #[cfg(test)]
 mod tests;

@@ -208,6 +208,7 @@ fn thread_row(n: u64, matter: MatterId, updated: i64) -> ThreadRow {
         created: ts(1),
         updated: ts(updated),
         seen_seq: None,
+        own_picks: None,
     }
 }
 
