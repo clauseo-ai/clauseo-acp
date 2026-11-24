@@ -137,16 +137,16 @@ pub(in crate::actor::turn) fn launched(
     )
 }
 
-/// A helper's handback call (\`SubagentHandback\`): kept until its update says whether the
-/// report landed; never logged as a step.
+/// A helper's handback call (`SubagentHandback`): kept until its update says whether the
+/// report landed; never logged as a step. Its report is its input's `message`, from the call or,
+/// when the call has none yet, from a later update.
 pub(super) fn handback_started(
     actor: &mut Actor,
     thread: ThreadId,
     helper: &CompactString,
     call: &ToolCall,
 ) {
-    let message = object_of(call.raw_input.as_ref())
-        .and_then(|input| text(&input, "message").map(str::to_owned));
+    let message = report_of(call.raw_input.as_ref());
     if let Some(helpers) = existing(actor, thread) {
         helpers.handbacks.insert(
             call.acp_id.clone(),
@@ -161,7 +161,7 @@ pub(super) fn handback_started(
 }
 
 /// What the update of the step ACP knows as `acp_id` means for a helper. A handback's final
-/// update ends its helper `Done` with its report, unless it says \`success: false\`.
+/// update ends its helper `Done` with its report, unless it says `success: false`.
 pub(in crate::actor::turn) fn before_update(
     actor: &mut Actor,
     thread: ThreadId,
@@ -171,7 +171,11 @@ pub(in crate::actor::turn) fn before_update(
     let Some(helpers) = existing(actor, thread) else {
         return Ok(Before::Plain);
     };
-    if helpers.handbacks.contains_key(acp_id) {
+    if let Some(handback) = helpers.handbacks.get_mut(acp_id) {
+        // The report may come in an update, as an `Agent` call's input does.
+        if handback.message.is_none() {
+            handback.message = report_of(patch.raw_input.as_ref());
+        }
         if !patch.status.is_some_and(is_final) {
             return Ok(Before::Swallow);
         }
@@ -255,6 +259,11 @@ fn start_of(acp_id: CompactString, launch: Launch, input: Option<Input>) -> Star
         model,
         background,
     }
+}
+
+/// A handback's report: its input's `message`, when it is a string.
+fn report_of(raw: Option<&TextOrBlob>) -> Option<String> {
+    object_of(raw).and_then(|input| text(&input, "message").map(str::to_owned))
 }
 
 /// What a launch step's input says, each field when it is a string.
