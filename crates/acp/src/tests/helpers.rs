@@ -34,7 +34,7 @@ fn with_meta(update: &Value, meta: Value) -> Value {
 }
 
 /// The meta claude-agent-acp writes on a helper's tool call: its tool name and the launch.
-fn stamp(parent: Value) -> Value {
+fn stamp(parent: &Value) -> Value {
     json!({"claudeCode": {"toolName": "Read", "parentToolUseId": parent}})
 }
 
@@ -79,7 +79,7 @@ fn stamped_updates_of_each_kind_name_their_helper() {
     let plain = helpers_and_updates(events_for(&kinds()));
     let stamped: Vec<Value> = kinds()
         .iter()
-        .map(|update| with_meta(update, stamp(json!(LAUNCH))))
+        .map(|update| with_meta(update, stamp(&json!(LAUNCH))))
         .collect();
     let stamped = helpers_and_updates(events_for(&stamped));
     assert_eq!(plain.len(), 4);
@@ -98,7 +98,7 @@ fn stamped_updates_of_each_kind_name_their_helper() {
 #[test]
 fn a_helper_update_keeps_the_lead_session_and_origin() {
     let [call, ..] = kinds();
-    let events = events_for(&[with_meta(&call, stamp(json!(LAUNCH)))]);
+    let events = events_for(&[with_meta(&call, stamp(&json!(LAUNCH)))]);
     let [
         AcpEvent::HelperUpdate {
             session, origin, ..
@@ -119,10 +119,10 @@ fn a_helper_update_keeps_the_lead_session_and_origin() {
 fn a_stamp_that_is_not_a_non_empty_string_names_no_helper() {
     let [call, ..] = kinds();
     let metas = [
-        stamp(json!("")),
-        stamp(json!(7)),
-        stamp(Value::Null),
-        stamp(json!({"id": LAUNCH})),
+        stamp(&json!("")),
+        stamp(&json!(7)),
+        stamp(&Value::Null),
+        stamp(&json!({"id": LAUNCH})),
         json!({"claudeCode": {"toolName": "Read"}}),
         json!({"parentToolUseId": LAUNCH}),
         json!(LAUNCH),
@@ -143,7 +143,7 @@ fn a_stamp_that_is_not_a_non_empty_string_names_no_helper() {
 fn a_stamped_update_that_does_not_decode_stays_a_warning() {
     let broken = json!({"sessionUpdate": "tool_call", "toolCallId": "toolu_02Read", "title": 5});
     let plain = events_for(std::slice::from_ref(&broken));
-    let stamped = events_for(&[with_meta(&broken, stamp(json!(LAUNCH)))]);
+    let stamped = events_for(&[with_meta(&broken, stamp(&json!(LAUNCH)))]);
     assert!(
         matches!(
             plain.as_slice(),
@@ -158,7 +158,7 @@ fn a_stamped_update_that_does_not_decode_stays_a_warning() {
 }
 
 /// The launch's update that says the helper runs in the background, as 0.110.1 sent it.
-fn launched_async(is_async: Value) -> Value {
+fn launched_async(is_async: &Value) -> Value {
     json!({"_meta": {"claudeCode": {"toolResponse": {"status": "async_launched", "isAsync": is_async}}},
         "toolCallId": LAUNCH, "sessionUpdate": "tool_call_update"})
 }
@@ -167,8 +167,8 @@ fn launched_async(is_async: Value) -> Value {
 /// the update's own event, unchanged.
 #[test]
 fn an_async_launch_says_the_helper_runs_in_the_background() {
-    let plain = events_for(&[launched_async(json!(false))]);
-    let events = events_for(&[launched_async(json!(true))]);
+    let plain = events_for(&[launched_async(&json!(false))]);
+    let events = events_for(&[launched_async(&json!(true))]);
     let [first, rest @ ..] = events.as_slice() else {
         panic!("expected events, got {events:?}");
     };
@@ -187,13 +187,13 @@ fn an_async_launch_says_the_helper_runs_in_the_background() {
 /// nothing.
 #[test]
 fn no_async_flag_adds_nothing() {
-    let mut missing = launched_async(json!(true));
+    let mut missing = launched_async(&json!(true));
     missing["_meta"]["claudeCode"]["toolResponse"] = json!({"status": "completed"});
     let mut on_a_call = with_meta(&kinds()[0], json!({}));
-    on_a_call["_meta"] = launched_async(json!(true))["_meta"].clone();
+    on_a_call["_meta"] = launched_async(&json!(true))["_meta"].clone();
     let updates = [
-        launched_async(json!(false)),
-        launched_async(json!("true")),
+        launched_async(&json!(false)),
+        launched_async(&json!("true")),
         missing,
         on_a_call,
     ];
