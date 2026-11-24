@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::open_enum::open_unit_enum;
 use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
@@ -61,17 +62,18 @@ pub struct TurnQueued {
     hold: Option<MatterHold>,
 }
 
-/// What holds a matter while a turn waits for it ([`TurnQueued::hold`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum MatterHold {
-    /// Another conversation's undo puts the matter's papers back.
-    Undo,
-    /// A version of a paper is being restored.
-    Restore,
-    /// The matter's folder is moving.
-    Relocate,
+open_unit_enum! {
+    /// What holds a matter while a turn waits for it ([`TurnQueued::hold`]). A hold a newer
+    /// Clauseo names that this version does not know reads as `Unknown`, still a hold.
+    pub enum MatterHold {
+        /// Another conversation's undo puts the matter's papers back.
+        Undo,
+        /// A version of a paper is being restored.
+        Restore,
+        /// The matter's folder is moving.
+        Relocate,
+    }
+    test mod matter_hold;
 }
 
 impl TurnQueued {

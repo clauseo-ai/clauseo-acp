@@ -325,7 +325,8 @@ is ignored, and the reducer keeps at most 50 pages per call. The new view types 
 and each thread's log is folded once at its next reopen, as for the bumps above.
 
 A turn waiting for a hold on the whole matter (#1286) logs `TurnQueued.hold` (`MatterHold`:
-`undo`, `restore` or `relocate`, left out when none). The fold gives any `TurnQueued` with a
+`undo`, `restore` or `relocate`, left out when none; an open unit enum, so a hold a newer
+host names reads as `Unknown`, still a hold). The fold gives any `TurnQueued` with a
 hold `Queued { behind }`, whatever `behind` says, with its prompt `Sent`, and the header
 carries the hold (`HeaderEntry.hold`) while the status is `Queued`. A restore's or a relocate's
 wait used to fold as a wait behind the thread's own turn, so `REDUCER_SCHEMA_VERSION` goes from
@@ -587,7 +588,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `MatterHold` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
