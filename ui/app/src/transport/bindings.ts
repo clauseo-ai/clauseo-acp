@@ -8195,6 +8195,13 @@ export type UserMessage = {
 	 *  missing field reads as queue.
 	 */
 	delivery?: Delivery,
+	/**
+	 *  The prompt's own model and effort picks (`SendPrompt::config`): under each config
+	 *  option's id, the value to set just before the prompt, kept in the log so a turn queued
+	 *  across a restart still runs with them. The agent's plain text, as `ConfigOption` keeps
+	 *  ids. Empty is written as a missing field, and a missing field reads as empty.
+	 */
+	config?: { [key in string]: string },
 };
 
 /**  A prompt the lawyer sent. Entry id `user_message:<message>`. */

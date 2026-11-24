@@ -3,8 +3,9 @@
 //!
 //! - The picks belong to the turn the `SendPrompt` makes: [`send_prompt`] holds them while the
 //!   command is routed, and the step that mints the turn (`steps::accept`, `queued::log_queued`)
-//!   takes them for it ([`claim`]). A steer that joins the running turn makes none, so its picks
-//!   go. They are in memory only: a turn queued across a restart runs without them.
+//!   takes them for it ([`claim`]) and logs them on its `UserMessage` (`config`). A steer that
+//!   joins the running turn makes none, so its picks go. A turn queued across a restart gets them
+//!   back from its `UserMessage` (`queue/restore.rs`, [`restored`]).
 //! - While the thread has no session yet, they also become its `CreateThread` config, so its
 //!   first session starts with them (`picks.rs`).
 //! - At step 5, just before its prompt, the session gets each pick the thread's options offer
@@ -19,7 +20,7 @@
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
-    AgentChoiceId, AgentModels, ConfigCategory, ConfigOption, ConfigOptionKind,
+    AgentChoiceId, AgentModels, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind,
     ConfigOptionsReplaced, ConfigPicks, NamedChoice, ThreadId, TurnId,
 };
 
@@ -75,10 +76,49 @@ fn before_session(actor: &mut Actor, thread: ThreadId, config: &ConfigPicks) {
     entry.picks = Some(picks);
 }
 
-/// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks.
-pub(super) fn claim(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    if let Some(state) = state(actor, thread)
-        && let Some(picks) = state.prompt_picks.next.take()
+/// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks, and
+/// answers them as its `UserMessage::config` logs them (empty for none), so a restart finds
+/// them again ([`restored`]).
+pub(super) fn claim(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+) -> BTreeMap<CompactString, CompactString> {
+    let Some(state) = state(actor, thread) else {
+        return BTreeMap::new();
+    };
+    let Some(picks) = state.prompt_picks.next.take() else {
+        return BTreeMap::new();
+    };
+    let logged = picks
+        .as_map()
+        .iter()
+        .map(|(option, value)| (option.as_str().into(), value.as_str().into()))
+        .collect();
+    state.prompt_picks.by_turn.insert(turn, picks);
+    logged
+}
+
+/// A queued turn restored at start-up gets back the picks its `UserMessage` logged; a pick
+/// whose id no command could name is left out.
+pub(super) fn restored(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    logged: &BTreeMap<CompactString, CompactString>,
+) {
+    let map = logged
+        .iter()
+        .filter_map(|(option, value)| {
+            let option = AgentChoiceId::new(option.as_str()).ok()?;
+            Some((option, AgentChoiceId::new(value.as_str()).ok()?))
+        })
+        .collect();
+    let Ok(picks) = ConfigPicks::new(map) else {
+        return;
+    };
+    if !picks.is_empty()
+        && let Some(state) = state(actor, thread)
     {
         state.prompt_picks.by_turn.insert(turn, picks);
     }

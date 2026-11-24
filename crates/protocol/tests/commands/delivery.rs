@@ -61,6 +61,7 @@ fn queue_has_one_wire_form() {
             text: "hi".to_owned(),
         }],
         delivery,
+        config: std::collections::BTreeMap::new(),
     };
     let entry = |delivery: Delivery| UserMessageEntry {
         order: Seq::FIRST,

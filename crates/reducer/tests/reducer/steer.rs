@@ -194,6 +194,7 @@ fn injected_steer_marks_tools_aside_with_their_finish_time() {
                 text: "Focus on clause 4".to_owned(),
             }],
             delivery: clauseo_protocol::Delivery::Steer,
+            config: std::collections::BTreeMap::new(),
         },
     );
     assert_eq!(
@@ -251,6 +252,7 @@ fn requeued_steer_waits_as_its_new_turn() {
                 text: "Focus on clause 4".to_owned(),
             }],
             delivery: clauseo_protocol::Delivery::Steer,
+            config: std::collections::BTreeMap::new(),
         },
     );
     let turn: TurnId = log.fresh().unwrap();
@@ -299,6 +301,7 @@ fn not_sent_steer_keeps_its_turn() {
                 text: "Focus on clause 4".to_owned(),
             }],
             delivery: clauseo_protocol::Delivery::Steer,
+            config: std::collections::BTreeMap::new(),
         },
     );
     let checkpoint = log.fresh().unwrap();

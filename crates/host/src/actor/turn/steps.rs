@@ -113,9 +113,10 @@ pub(super) fn accept(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
-    super::prompt_picks::claim(actor, thread, turn);
+    let config = super::prompt_picks::claim(actor, thread, turn);
     let message = actor.ids.mint(now)?;
-    let built = build::user_message(turn, message, None, blocks.clone(), delivery);
+    let mut built = build::user_message(turn, message, None, blocks.clone(), delivery);
+    built.value.config = config;
     let outcome = CommandOutcome::PromptAccepted { turn, message };
     let stream = StreamId::Thread(thread);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;

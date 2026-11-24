@@ -32,6 +32,7 @@ fn opening(turn: TurnId) -> Vec<DomainEvent> {
             acp_message_id: None,
             content: Vec::new(),
             delivery: Delivery::Queue,
+            config: std::collections::BTreeMap::new(),
         }),
         DomainEvent::TurnStarted(TurnStarted {
             model: None,
