@@ -2484,6 +2484,13 @@ export type HeaderEntry = {
 	 */
 	queue_held_reason?: QueueHoldReason,
 	/**
+	 *  What holds the whole matter while `status` is `Queued`: another conversation's undo, a
+	 *  restore or a relocate, from the turn's `TurnQueued`, so the app can say what the turn
+	 *  waits for. Set by the reducer only; cleared when the status leaves `Queued`. Missing
+	 *  reads as `None`, and `None` is left out.
+	 */
+	hold?: MatterHold,
+	/**
 	 *  Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
 	 *  true only for an agent whose steer adds to the answer, which needs both of
 	 *  [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False
@@ -4004,6 +4011,15 @@ export type MatterHeaderEntry = {
 	/**  What the import found, for a folder matter. */
 	import?: ImportSummary,
 };
+
+/**  What holds a matter while a turn waits for it ([`TurnQueued::hold`]). */
+export type MatterHold = 
+/**  Another conversation's undo puts the matter's papers back. */
+"undo" | 
+/**  A version of a paper is being restored. */
+"restore" | 
+/**  The matter's folder is moving. */
+"relocate";
 
 /**
  *  A matter: a folder or a scratch space the lawyer works in.
@@ -7497,6 +7513,14 @@ export type TurnQueued = {
 	 *  field, and a missing field reads as false, so an older entry restores in log order.
 	 */
 	at_head?: boolean,
+	/**
+	 *  What holds the whole matter while the turn waits: an undo another conversation asked
+	 *  for, a restore or a relocate. The turn waits for it to end, then starts with the other
+	 *  turns that waited. None is written as a missing field, and a missing field reads as
+	 *  none: an agent-started turn, a turn held at start-up or put back for its sign-in or a
+	 *  steer, or an entry written before the field.
+	 */
+	hold?: MatterHold,
 };
 
 /**  A turn started, after its before-turn checkpoint. */

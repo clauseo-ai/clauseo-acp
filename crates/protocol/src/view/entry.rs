@@ -8,11 +8,11 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
-    RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
-    Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
-    TurnUsage, WebResult,
+    LimitStopReason, MatterHold, MatterId, MatterKind, MatterPath, MessageId, NoticeKind,
+    NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId,
+    PlanEntry, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind,
+    TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind,
+    ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -55,6 +55,12 @@ pub struct HeaderEntry {
     /// written before the field still decodes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub queue_held_reason: Option<QueueHoldReason>,
+    /// What holds the whole matter while `status` is `Queued`: another conversation's undo, a
+    /// restore or a relocate, from the turn's `TurnQueued`, so the app can say what the turn
+    /// waits for. Set by the reducer only; cleared when the status leaves `Queued`. Missing
+    /// reads as `None`, and `None` is left out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub hold: Option<MatterHold>,
     /// Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
     /// true only for an agent whose steer adds to the answer, which needs both of
     /// [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False

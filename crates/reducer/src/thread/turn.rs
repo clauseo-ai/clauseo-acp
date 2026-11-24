@@ -136,25 +136,27 @@ pub(super) fn user_message(
 /// `TurnStarted` or `TurnEnded` then moves it; otherwise it settles (to `Idle` unless the lawyer
 /// is asked), but for an agent-started turn's, which has no prompt: it is `Starting` (`NeedsYou`
 /// while asked) and the thread's last turn, so its `TurnStarted` or its `TurnEnded` before it
-/// starts settles it.
+/// starts settles it. A turn waiting for a hold on the whole matter (`TurnQueued::hold`: an undo
+/// from another thread, a restore, a relocate) folds as one behind another thread's writer,
+/// whatever `behind` says, and the header keeps the hold while the status is `Queued`.
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
-    let status = if behind == state.thread {
-        UserMessageStatus::Queued
-    } else {
-        UserMessageStatus::Sent
-    };
-    if behind == state.thread && event.is_at_head() {
-        mark_put_back(state, event.turn(), out);
-    } else {
-        mark_prompt(state, event.turn(), status, out);
-    }
-    if behind != state.thread {
+    if event.hold().is_some() || behind != state.thread {
+        mark_prompt(state, event.turn(), UserMessageStatus::Sent, out);
         if state.running.is_none() {
             state.turn = Some(event.turn());
         }
-        set_status(state, "turn_queued", out, ThreadStatus::Queued { behind });
+        let to = ThreadStatus::Queued { behind };
+        update_header(state, "turn_queued", out, |h| {
+            let cleared = set(&mut h.resuming_since, None);
+            set(&mut h.status, to) | set(&mut h.hold, event.hold()) | cleared
+        });
         return;
+    }
+    if event.is_at_head() {
+        mark_put_back(state, event.turn(), out);
+    } else {
+        mark_prompt(state, event.turn(), UserMessageStatus::Queued, out);
     }
     if state.running.is_none() {
         if event.behind_turn().is_some() && event.behind_turn() == state.turn && on_its_way(state) {

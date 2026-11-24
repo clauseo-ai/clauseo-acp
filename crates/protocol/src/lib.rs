@@ -234,7 +234,8 @@ wire_types! {
     event::{
         AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
-        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
+        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterHold,
+        MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
         PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone,
         TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,

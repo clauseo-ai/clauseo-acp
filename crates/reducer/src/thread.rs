@@ -227,7 +227,8 @@ pub(super) fn update_header(
 }
 
 /// Sets the status, and clears `resuming_since` when the status leaves `Starting`: the resume
-/// cue lasts only while the thread is starting. One `Upsert` when either changed.
+/// cue lasts only while the thread is starting. Clears `hold` when the status leaves `Queued`.
+/// One `Upsert` when any of them changed.
 pub(super) fn set_status(
     state: &mut ThreadState,
     event: &'static str,
@@ -237,7 +238,9 @@ pub(super) fn set_status(
     update_header(state, event, out, |h| {
         let left_starting = to != ThreadStatus::Starting;
         let cleared = left_starting && set(&mut h.resuming_since, None);
-        set(&mut h.status, to) | cleared
+        let left_queued = !matches!(to, ThreadStatus::Queued { .. });
+        let unheld = left_queued && set(&mut h.hold, None);
+        set(&mut h.status, to) | cleared | unheld
     });
 }
 
@@ -260,6 +263,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         resuming_since: None,
         queue_held: false,
         queue_held_reason: None,
+        hold: None,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
         tools: Vec::new(),
         snoozed_until: None,
