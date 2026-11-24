@@ -12,9 +12,12 @@
 //!
 //! One that fails or times out keeps whatever was kept, and the next good read probes again, up
 //! to [`TRIES`] probes since the start or the last sign-in (a first start of Claude Code can
-//! pass the probe's limit). While no probe has answered and nothing is kept for the agent, its
-//! `AgentSummary::models_unread` says so ([`unread`]), so the composer can say the list could
-//! not be read instead of waiting on it; a probe or a session that fills its models clears it.
+//! pass the probe's limit). Once a probe has failed or timed out and nothing is kept for the
+//! agent, its `AgentSummary::models_unread` says so ([`unread`]), and stays set through the
+//! retries, so the composer can say the list could not be read instead of waiting on it; a
+//! probe or a session that fills its models clears it, and so does a sign-in, which starts the
+//! tries over. Before a first probe has failed it is false, whether a probe is running or none
+//! has started yet (no read has found the agent signed in).
 
 use std::collections::{BTreeMap, BTreeSet};
 
