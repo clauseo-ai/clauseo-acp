@@ -10,9 +10,9 @@ use std::collections::HashMap;
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, ToolCall};
 use clauseo_protocol::{
-    AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HostCommand, StreamId,
-    TextOrBlob, ThreadId, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind,
-    TurnId, ViewEntry,
+    AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HelperOutcome, HostCommand,
+    StreamId, TextOrBlob, ThreadId, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus,
+    ToolKind, TurnId, ViewEntry,
 };
 
 use super::agents::send_prompt;
@@ -20,7 +20,7 @@ use super::failures::until_ended;
 use super::rig::Rig;
 use crate::actor::Actor;
 use crate::actor::input::Input;
-use crate::actor::turn::{AgentReply, TurnInput};
+use crate::actor::turn::{AgentReply, TurnInput, helpers};
 use crate::agent::AgentInput;
 
 const PROMPT: &str =
@@ -585,6 +585,47 @@ fn a_reopened_conversation_shows_the_same_helper() {
     let mut rig = rig.restart(2);
     let after = helper_entries(&mut rig, thread);
     assert_eq!(after, before);
+    rig.finish();
+}
+
+/// A helper still open when the host stopped mid-turn (a crash or a quit: nothing ended the turn
+/// and the memory of its helpers went with the run) ends `Stopped` in start-up's repair of
+/// that turn, so its card does not spin after the reopen.
+#[test]
+fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
+    let mut rig = Rig::start("helpers-crash", "");
+    let thread = rig.thread();
+    let turn = rig.running_turn(thread);
+    let start = helpers::Start {
+        id: None,
+        acp_id: "toolu_A".into(),
+        parent: None,
+        call: None,
+        name: "paper-reader".into(),
+        label: None,
+        task: Some("Read.".to_owned()),
+        model: None,
+        background: true,
+    };
+    helpers::start(&mut rig.actor, thread, turn, start).unwrap();
+    rig.settle_commits();
+    let state = &mut rig.actor.threads.get_mut(&thread).unwrap().turn;
+    state.current = None;
+    state.helpers = None;
+    let mut rig = rig.restart(1);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "start paper-reader call= model=- label=- task=true",
+            "end paper-reader Stopped -",
+            "turn_ended Failed",
+        ]
+    );
+    let entries = helper_entries(&mut rig, thread);
+    let [ViewEntry::Helper(entry)] = entries.as_slice() else {
+        panic!("{entries:?}");
+    };
+    assert_eq!(entry.outcome, Some(HelperOutcome::Stopped));
     rig.finish();
 }
 
