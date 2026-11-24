@@ -112,13 +112,10 @@ test("the list: Case Law not yet listed by the host reads needs_setup, and a too
   expect(rows.find((a) => a.id === "case-law")?.status).toBe("needs_setup");
   const tool = item({ kind: "tool", id: "court-diary", name: "court-diary", description: "" });
   const joined = listed([...HOST_ITEMS, tool], [SERVER]).find((a) => a.id === "court-diary");
-  expect(joined?.server).toEqual({
-    command: "npx",
-    args: ["-y", "court-diary-mcp"],
-    env: [{ name: "DIARY_TOKEN", saved: true }],
-    headers: [],
-    enabled: true,
-  });
+  expect(joined?.server).toEqual(SERVER);
+  const own = { ...SERVER, args: ["court-diary-mcp"] };
+  const kept = listed([{ ...tool, server: own }], [SERVER]).find((a) => a.id === "court-diary");
+  expect(kept?.server).toBe(own);
   expect(listed([...HOST_ITEMS, tool], []).find((a) => a.id === "court-diary")?.server).toBe(
     undefined,
   );

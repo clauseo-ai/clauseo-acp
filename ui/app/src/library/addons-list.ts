@@ -1,14 +1,14 @@
 // The list from stage D's list_addons (D1): read when the source is made (at the room's start), again
 // on each `addons_changed` app event and each time the place opens; each read also checks Clauseo
-// Case Law's reach again on the host when it was out of reach. Two things D2a will carry come from
-// the older reads until then: an added tool's server (`mcp_tools_changed`, names only) is joined to
-// its row by name. Case Law is listed even before the host has read its credential once (the host
-// leaves it out until then): "needs_setup", as the host words "not yet checked".
+// Case Law's reach again on the host when it was out of reach. An added tool's server comes on its
+// row (D2a); a row without one takes Settings' view (`mcp_tools_changed`) by name. Case Law is
+// listed even before the host has read its credential once (the host leaves it out until then):
+// "needs_setup", as the host words "not yet checked".
 import { nextHostOf } from "../room/host-next.ts";
 import { CASE_LAW, connectorsStoreOf } from "../store/connectors.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { McpServerView } from "../transport/protocol.ts";
-import type { AddonServer, AddonView } from "./addons.ts";
+import type { AddonView } from "./addons.ts";
 import type { ListReader, ListState } from "./addons-source.ts";
 
 /** Case Law's row while the host lists none yet: not yet checked. */
@@ -25,25 +25,16 @@ const NOT_CHECKED: AddonView = {
   locked: false,
 };
 
-const serverOf = (s: McpServerView): AddonServer => ({
-  ...(s.command === undefined ? {} : { command: s.command }),
-  args: s.args,
-  ...(s.url === undefined ? {} : { url: s.url }),
-  env: s.env.map((v) => ({ name: v.name, saved: v.saved })),
-  headers: s.headers.map((v) => ({ name: v.name, saved: v.saved })),
-  enabled: s.enabled,
-});
-
 /** The host's rows as the place lists them: Case Law at the head of the tools when the host left it
- * out, and each added tool with its server from Settings' view when it is there. */
+ * out, and an added tool without a server on its row given Settings' view of it when it is there. */
 export function listed(
   items: readonly AddonView[],
   servers: readonly McpServerView[],
 ): AddonView[] {
   const rows = items.map((a) => {
-    if (a.kind !== "tool" || a.source !== "added") return a;
+    if (a.kind !== "tool" || a.source !== "added" || a.server !== undefined) return a;
     const s = servers.find((v) => v.name === a.id);
-    return s === undefined ? a : { ...a, server: serverOf(s) };
+    return s === undefined ? a : { ...a, server: s };
   });
   if (rows.some((a) => a.id === CASE_LAW && a.source === "built_in")) return rows;
   const at = rows.findIndex((a) => a.kind === "tool");
