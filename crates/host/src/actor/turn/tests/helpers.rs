@@ -426,6 +426,52 @@ fn two_foreground_helpers_interleave_and_end_with_their_calls() {
 /// ends.
 #[test]
 fn a_stop_ends_every_open_helper_stopped() {
+    let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
+    let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n");
+    let mut rig = Rig::start("helpers-stop", &steps);
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
+    let at = Origin::Turn(turn);
+    let input = r#"{"subagent_type":"paper-reader","prompt":"Read."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(input)),
+    );
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_B", "Agent", Some(input)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    in_background(&mut rig, thread, turn, "toolu_B");
+    stamped(&mut rig, thread, at, "toolu_B", words("Half"));
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=- task=true",
+            "step toolu_B -",
+            "start paper-reader call=toolu_B model=haiku label=- task=true",
+            "words paper-reader: Half",
+            "end paper-reader Stopped -",
+            "end paper-reader Stopped -",
+            "turn_ended Cancelled",
+        ]
+    );
+    rig.finish();
+}
+
+/// A turn that ends by itself with a helper that never handed back ends it `Failed`, with no
+/// summary.
+#[test]
+fn a_turn_that_ends_with_a_helper_open_ends_it_failed() {
     let mut rig = Rig::start("helpers-open-at-end", &one_turn("end_turn"));
     let thread = rig.thread();
     let turn = live_turn(&mut rig, thread);
