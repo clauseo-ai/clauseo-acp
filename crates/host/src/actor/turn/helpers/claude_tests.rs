@@ -1,5 +1,5 @@
 //! Claude's launch input, handback and end reading (`claude.rs`), on the frames of the recorded
-//! run (issue 13, fixture S1, paths moved under /Users/lawyer).
+//! run (crates/acp's fixture `claude-agent-acp-0.110.1-helper.jsonl`).
 
 use clauseo_protocol::{ContentBlock, TextOrBlob, ToolCallContent, ToolCallPatch, ToolCallStatus};
 
@@ -27,10 +27,10 @@ fn the_agent_and_task_tools_launch_and_the_handback_ends() {
     assert!(!is_handback(Some("Agent")));
 }
 
-/// S1.jsonl line 33's `rawInput`.
+/// The recorded launch's `rawInput`, its folder left out.
 #[test]
 fn a_launch_input_gives_the_name_label_and_task() {
-    let raw = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory /Users/lawyer/matter and return one short digest covering both documents."}"#;
+    let raw = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
     let input = input_of(inline(raw).as_ref()).unwrap();
     assert_eq!(input.name.as_deref(), Some("paper-reader"));
     assert_eq!(input.label.as_deref(), Some("Digest lease and notice"));
@@ -80,7 +80,7 @@ fn the_profiles_helpers_have_their_model() {
     assert_eq!(defined_model("no-such-helper"), None);
 }
 
-/// S1.jsonl line 60: the handback's update says the report landed.
+/// The recorded handback's update says the report landed.
 #[test]
 fn a_handback_lands_unless_it_says_success_false() {
     let landed = ToolCallPatch {
