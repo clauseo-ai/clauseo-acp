@@ -12,8 +12,9 @@ use crate::change::{Anomaly, ViewChange};
 use crate::state::ThreadState;
 
 /// The thread's agent is now `to`: what the old session reported (its name, mode, options,
-/// commands, usage and tools) is cleared until the new session reports its own, and whether a
-/// steer joins the running turn falls back to what the new agent's kind says. One `Upsert`.
+/// commands, usage and tools) and the model and effort its last turn ran with are cleared until
+/// the new session reports its own and the next `TurnStarted` names them, and whether a steer
+/// joins the running turn falls back to what the new agent's kind says. One `Upsert`.
 pub(super) fn agent_switched(state: &mut ThreadState, event: &AgentSwitched, out: &mut Applied) {
     update_header(state, "agent_switched", out, |h| {
         let mut changed = set_clone(&mut h.agent, &event.to);
@@ -23,6 +24,8 @@ pub(super) fn agent_switched(state: &mut ThreadState, event: &AgentSwitched, out
         changed |= set(&mut h.commands, Vec::new());
         changed |= set(&mut h.usage, None);
         changed |= set(&mut h.tools, Vec::new());
+        changed |= set(&mut h.model, None);
+        changed |= set(&mut h.effort, None);
         changed |= set(
             &mut h.steer_joins_turn,
             queue::steer_joins_by_kind(&event.to),
