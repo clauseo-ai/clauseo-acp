@@ -69,6 +69,7 @@ fn the_local_reads_go_on_unasked() {
         "TodoWrite",
         "Task",
         "ToolSearch",
+        "Yield",
     ] {
         assert_eq!(guard(&args, tool), (0, String::new()), "{tool}");
     }
