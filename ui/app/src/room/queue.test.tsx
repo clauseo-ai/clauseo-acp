@@ -356,9 +356,7 @@ test("the only message removed, with no removal from the host: no new draft open
   h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
   await h.settle();
   expect(openTitle()).toBe("Lease notice");
-  expect(h.all("conversation").some((b) => b.textContent?.includes("New conversation"))).toBe(
-    false,
-  );
+  expect(h.all("conversation").some((b) => b.textContent?.includes("Not started yet"))).toBe(false);
 });
 
 test("the only message stopped, then the host's removal: a new draft holds its words, with the focus and the line, and its row goes", async () => {
@@ -370,7 +368,7 @@ test("the only message stopped, then the host's removal: a new draft holds its w
   await h.settle();
   await leaves(THREAD);
   await h.settle();
-  expect(openTitle()).toBe("New conversation");
+  expect(openTitle()).toBe("Not started yet");
   expect(field().value).toBe(QUESTION);
   expect(document.activeElement).toBe(field());
   expect(line()).toBe(STOPPED);
@@ -385,7 +383,7 @@ test("the host's removal before the stream says the message was removed: the wor
   await h.click(h.one("cancel"));
   await leaves(THREAD);
   await h.settle();
-  expect(openTitle()).toBe("New conversation");
+  expect(openTitle()).toBe("Not started yet");
   expect(field().value).toBe(QUESTION);
   expect(line()).toBe(STOPPED);
 });
@@ -401,7 +399,7 @@ test("Stop, then switching to another conversation before the host's removal: th
   await h.settle();
   // the lawyer stays where they went; the draft row holds the words
   expect(openTitle()).toBe(TITLE);
-  const draft = h.all("conversation").find((b) => b.textContent?.includes("New conversation"));
+  const draft = h.all("conversation").find((b) => b.textContent?.includes("Not started yet"));
   expect(draft).not.toBeUndefined();
   await h.click(draft);
   expect(field().value).toBe(QUESTION);
@@ -436,7 +434,7 @@ test("a message already removed when the conversation opens stays as it is: noth
 const newDraft = () =>
   h!.click(h!.host.querySelector<HTMLButtonElement>('[data-testid="new-conversation"]'));
 const draftRow = () =>
-  h!.all("conversation").find((b) => b.textContent?.includes("New conversation"));
+  h!.all("conversation").find((b) => b.textContent?.includes("Not started yet"));
 /** The only message of THREAD waiting for an undo, and this window's Stop pressed on it. */
 async function stoppedOnly() {
   h!.deliver([reset([asked(1, 2, QUESTION, "sent")], heldHeader("undo"))]);
@@ -448,7 +446,7 @@ test("typing in the matter's draft as the host removes the stopped conversation:
   h = await mountWith("idle");
   await stoppedOnly();
   await newDraft();
-  expect(openTitle()).toBe("New conversation");
+  expect(openTitle()).toBe("Not started yet");
   await h.type("My own note.");
   await leaves(THREAD);
   await h.settle();
