@@ -1,7 +1,7 @@
-//! A helper after it was stopped (ended `cancelled`, `failed` or `disconnected`): what it sends
-//! afterwards, in the turn it was stopped in and in the root's next turn, and a running helper's
-//! elicitation. Recorded codex-acp sends nothing of a helper after a cancel (x3), so these frames
-//! are made up, in the shapes of x8's permission request and of codex-acp's elicitation
+//! A helper after its end (`cancelled`, `failed`, `completed`): what it sends afterwards, in
+//! the turn it ended in and in the root's next turn, and a running helper's elicitation.
+//! Recorded codex-acp sends nothing on a helper's session after its end, so these frames are
+//! made up, in the shapes of x8's permission request and of codex-acp's elicitation
 //! (`dist/index.js:42102-42115`: `sessionId` is the asking thread's id, a helper's for a
 //! helper).
 
@@ -148,9 +148,9 @@ fn with_origins(events: &[AcpEvent]) -> Vec<(String, Option<Origin>)> {
         .collect()
 }
 
-/// What a stopped helper's refused request warns.
+/// What an ended helper's refused request warns.
 fn refused(method: &str) -> (String, Option<Origin>) {
-    let error = "a request of a helper that was stopped, answered cancelled";
+    let error = "a request of a helper that has ended, answered cancelled";
     (warned(HELPER, method, error), None)
 }
 
@@ -262,18 +262,40 @@ fn a_failed_helper_is_stopped_as_a_cancelled_one() {
     asked_nothing(&played);
 }
 
-/// Only a stop cuts a helper off: after `completed`, its update in the next turn has the root's
-/// origin, as before.
+/// A completed helper is ended as a cancelled one: in the next turn its update is late with
+/// the turn it completed in, and its permission request and elicitation are answered here.
 #[test]
-fn a_completed_helper_is_not_stopped() {
-    let played = stop_then(false, "completed", &[], &[usage_on(HELPER)]);
+fn a_completed_helper_is_ended_as_a_cancelled_one() {
+    let next = [
+        usage_on(HELPER),
+        permission(HELPER, "ask-1"),
+        elicitation(HELPER, "ask-2"),
+    ];
+    let played = stop_then(false, "completed", &[], &next);
     assert_eq!(
         with_origins(&played.steps[2]),
-        [(
-            "root-a helper helper-a: usage 7".to_owned(),
-            Some(Origin::Turn(turn(2)))
-        )]
+        [
+            (
+                "root-a helper helper-a: usage 7".to_owned(),
+                Some(Origin::Late(turn(1)))
+            ),
+            refused("session/request_permission"),
+            refused("elicitation/create"),
+        ]
     );
+    let answers: Vec<_> = played
+        .answers
+        .iter()
+        .map(|answer| &answer["result"])
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            &json!({"outcome": {"outcome": "cancelled"}}),
+            &json!({"action": "cancel"}),
+        ]
+    );
+    asked_nothing(&played);
 }
 
 /// A running helper's elicitation (codex-acp sends it under the helper's session id) comes as

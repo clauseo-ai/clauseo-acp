@@ -101,10 +101,10 @@ pub enum AcpEvent {
     /// codex-acp says helper `helper` ended (`subagent_state_update`). Comes once per
     /// announced helper, and only for a helper [`AcpEvent::HelperSpawned`] announced under the
     /// same root; any other end, and one with an unknown state, is a
-    /// [`ProtocolWarning::InvalidUpdate`]. After `Cancelled`, `Failed` or `Disconnected`
-    /// the helper's updates come [`Origin::Late`] with the turn it ended in, or are dropped
-    /// with a warning when it ended outside a turn, and its requests are answered `cancelled`
-    /// with a warning, never sent to the host.
+    /// [`ProtocolWarning::InvalidUpdate`]. After it, whatever the state, the helper's updates
+    /// come [`Origin::Late`] with the turn it ended in, or are dropped with a warning when it
+    /// ended outside a turn; its requests are answered `cancelled` with a warning, never sent to
+    /// the host; and a helper it announces is refused with a warning.
     HelperEnded {
         /// The root session.
         session: AgentSessionId,
@@ -453,7 +453,7 @@ pub enum ProtocolWarning {
     },
     /// A `session/update` or another notification that failed to decode: no `update`, no
     /// `sessionUpdate` name, a known update whose fields do not decode, or an id no command
-    /// could name. Also a helper's `subagent_*` update this crate refused, and a stopped
+    /// could name. Also a helper's `subagent_*` update this crate refused, and an ended
     /// helper's update or request it dropped or answered itself (see [`AcpEvent::HelperEnded`]).
     InvalidUpdate {
         /// The `sessionUpdate` name, or the notification's method when it is not a
