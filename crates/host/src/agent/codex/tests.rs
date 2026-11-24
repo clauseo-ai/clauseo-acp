@@ -191,7 +191,7 @@ fn hooks_go_in_whole() {
 /// `install/codex_patch.rs`): in codex-acp 2.10.0 a session starts in the profile Codex's config
 /// names unless this variable picks a mode (`dist/index.js:43397-43401`), and Clauseo's own
 /// `clauseo` profile would become a permission-profile mode, whose turns send `permissions:`
-/// instead of the patched `sandboxPolicy` (`:43374`, `:45116-45125`), so ChatGPT's shell would be
+/// instead of the patched `sandboxPolicy` (`:43374`, `:45116-45125`), so the shell would be
 /// offline with web search on. Keep the variable set, and this assertion with it.
 #[test]
 fn launch_env_forces_mode_home_config_and_no_filtering() {
