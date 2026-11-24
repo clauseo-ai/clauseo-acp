@@ -444,13 +444,15 @@ error_codes! {
         Clauseo's own: it cannot be removed or given another scope (a built-in tool can be \
         switched off in one matter); nothing changed.";
     ThreadBackgroundWork = "thread.background_work", retryable: true, meaning: "The message \
-        names another agent while the thread's agent may still be working in the background (a \
-        command it left running, or a call in flight), so the message was not taken; the draft is \
+        names another agent while the thread may still be working in the background (a command \
+        its agent left running, a call in flight, an open permission or question, agent output \
+        waiting for a turn, or an agent starting), so the message was not taken; the draft is \
         kept. Sending again once that work ends can work.";
     PromptHandoffTooLong = "prompt.handoff_too_long", retryable: false, meaning: "The message \
-        moves the conversation to another agent, and it leaves too little room in that agent's \
-        context for any of the earlier conversation, so its turn failed before anything was sent \
-        and the conversation stayed with its agent. The message itself was not shortened.";
+        goes to an agent the conversation moves to, and it leaves too little room in that \
+        agent's context even for a note on the earlier conversation, so its turn failed before \
+        anything was sent. A move this message asked for did not happen; a move made earlier, \
+        whose handover this message was to carry, stays. The message itself was not shortened.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

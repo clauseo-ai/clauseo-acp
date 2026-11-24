@@ -228,6 +228,7 @@ fn long_text_split_at_inline_limit() {
         delivery: Delivery::Queue,
         config: std::collections::BTreeMap::new(),
         copy_of: None,
+        agent: None,
     };
     let out = apply(&mut state, &log.push(event).unwrap()).unwrap();
     let ViewEntry::UserMessage(sent) = first_upsert(&out.changes) else {

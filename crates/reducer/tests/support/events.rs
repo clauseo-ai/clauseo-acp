@@ -49,6 +49,7 @@ pub fn user_message(turn: TurnId, message: MessageId, text: &str) -> DomainEvent
         delivery: Delivery::Queue,
         config: std::collections::BTreeMap::new(),
         copy_of: None,
+        agent: None,
     }
     .into()
 }

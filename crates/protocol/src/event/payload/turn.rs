@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::open_enum::open_unit_enum;
 use crate::serde_util::BorrowedStr;
 use crate::{
-    CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
+    AgentId, CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
     LimitStopReason, MatterPath, MessageId, NamedChoice, SkippedFile, SteerOutcome, StopReason,
     TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage, UnsentCause,
 };
@@ -56,6 +56,12 @@ pub struct UserMessage {
     /// cancel queued again; `None` for the lawyer's own message, and in logs before the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy_of: Option<CopyOf>,
+    /// The agent the lawyer named for it (issue 4a): its turn switches the thread to that agent
+    /// when it starts, unless the thread has that agent by then. A restart reads it back for a
+    /// message still queued. None is written as a missing field, and a missing field reads as
+    /// none, so an older entry decodes as before.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent: Option<AgentId>,
 }
 
 /// A turn waits: behind its own thread's running turn, or behind another thread's writer.
