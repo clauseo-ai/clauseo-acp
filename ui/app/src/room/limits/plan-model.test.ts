@@ -252,11 +252,16 @@ describe("the warning before sending", () => {
     });
   });
 
-  test("without a reset only the first sentence; Hindi shows its English until it comes", () => {
+  test("never 100% below the limit: 99.5% used says 99%", () => {
+    expect(words(entry(99.5))?.lead).toBe("You've used 99% of your 5-hour Claude limit.");
+    expect(words(entry(99.99))?.lead).toBe("You've used 99% of your 5-hour Claude limit.");
+  });
+
+  test("without a reset the pause with no time; Hindi shows its English until it comes", () => {
     const { resets_at: _, ...bare } = row(97);
     expect(words(entry(97, { windows: [bare] }))).toEqual({
       lead: "You've used 97% of your 5-hour Claude limit.",
-      until: null,
+      until: { text: "If it runs out mid-answer, the answer pauses until it resets.", at: null },
     });
     expect(warningWords("hi", warningKey(entry(97)), "Claude", NOW)?.until?.text).toBe(
       limThread(
@@ -295,11 +300,15 @@ describe("the meter's colour as the plan runs short", () => {
     [74, undefined],
     [75, "amber"],
     [94, "amber"],
-    [94.9, "amber"],
+    [94.4, "amber"],
+    // 94.5% used shows "5% left" (rounded down): red, as the figure says
+    [94.5, "red"],
+    [94.9, "red"],
     [95, "red"],
     [100, "red"],
   ] as const)("%s%% used: %s", (used, level) => {
     expect(levelOf(meter(used))).toBe(level);
+    if (level === "red") expect(shareLeft(used)).toBeLessThanOrEqual(5);
     expect(planLine("en", "claude", entry(used), NOW)?.level).toBe(level);
   });
 

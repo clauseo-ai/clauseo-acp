@@ -6,6 +6,60 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New: composer note above the field, before sending, from 90% of the weekly window (and less left than the 5-hour window); {name} is Claude or ChatGPT. Followed by U12-25/U12-26. Before, the weekly window never warned in the composer."
+    "note": "New: composer note above the field, before sending, from 90% of the weekly window (and less left than the 5-hour window); {name} is Claude or ChatGPT, {n} the share used as the plan card counts it, at most 99. Before, the weekly window never warned in the composer."
+  },
+  "UC-1171": {
+    "en": "You've used {n}% of your 5-hour {name} limit.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: composer note's first sentence, before sending, from 75% of the 5-hour window; {name} Claude or ChatGPT, {n} the share used, at most 99. Replaces U12-24 \"Close to your 5-hour limit.\" (shown only from 95%). 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one."
+  },
+  "UC-1172": {
+    "en": "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: composer note's second sentence, the reset today, in a <time>. Replaces U12-25 \"Long tasks may pause until {time}.\" 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one."
+  },
+  "UC-1173": {
+    "en": "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: composer note's second sentence, the reset on another day, in a <time>. Replaces U12-26 \"Long tasks may pause until {day} {time}.\" 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one."
+  },
+  "UC-1174": {
+    "en": "If it runs out mid-answer, the answer pauses until it resets.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: composer note's second sentence when the host gives no reset time. Before, the note had no second sentence then."
+  },
+  "UC-1175": {
+    "en": "{name}: {n}% left",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: Settings side list, beside Plan and usage: each plan named, joined with \" · \" (\"Claude: 17% left · ChatGPT: 60% left\"); {n} the share left of its 5-hour limit. Replaces U12-38 \"{n}% of the 5-hour limit left\", which named no plan: a Windows tester with ChatGPT chosen read Claude's figure as ChatGPT's."
+  },
+  "UC-1176": {
+    "en": "{name}: pay as you go",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New: Settings side list, an agent billed by use, named, joined with \" · \" as UC-1175. Replaces U12-39 \"Pay as you go\"."
   }
 }
