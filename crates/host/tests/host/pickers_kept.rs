@@ -4,13 +4,15 @@
 //! the model; after a host restart, a list that has it again gets it set back with no notice
 //! (`pickers-kept-fallback`, then `pickers-kept-restored`). A model the lawyer picks on the
 //! fallback list becomes the kept one (`pickers-kept-fallback-pick`, then
-//! `pickers-kept-picked-restored`).
+//! `pickers-kept-picked-restored`). A `CreateThread` config the first session holds or sets, and
+//! a prompt's own pick the session already holds, are kept too (`pickers-kept-created`,
+//! `pickers-kept-own-pick`).
 
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
-    AgentId, AgentKind, AgentPrefs, CommandOutcome, FieldChange, HostCommand, MatterId, NoticeKind,
-    StopReason, StreamId, ThreadId, TurnId,
+    AgentId, AgentKind, AgentPrefs, CommandOutcome, DeliveryRequest, FieldChange, HostCommand,
+    MatterId, NoticeKind, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use crate::codex::CODEX;
@@ -19,15 +21,16 @@ use crate::matters::summary;
 use crate::observe::Events;
 use crate::pickers::{picks, set};
 use crate::pickers_idle::started_and_notices;
-use crate::support::{Dir, Running, Scenario};
+use crate::support::{Dir, Running, Scenario, text};
 
-const LUNA_LOW: [(&str, &str); 2] = [("model", "gpt-6-luna"), ("reasoning_effort", "low")];
+pub(crate) const LUNA_LOW: [(&str, &str); 2] =
+    [("model", "gpt-6-luna"), ("reasoning_effort", "low")];
 
 fn codex_prefs() -> AgentPrefs {
     AgentPrefs(BTreeMap::from([(AgentKind::Codex, picks(&LUNA_LOW))]))
 }
 
-fn names(model: &str, effort: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn names(model: &str, effort: &str) -> (Option<String>, Option<String>) {
     (Some(model.to_owned()), Some(effort.to_owned()))
 }
 
@@ -40,7 +43,7 @@ fn told(model: &str) -> NoticeKind {
 }
 
 /// Runs `text` on `thread` to its end, with no mismatch against the scenario.
-fn run(host: &Running, events: &mut Events, thread: ThreadId, text: &str) -> TurnId {
+pub(crate) fn run(host: &Running, events: &mut Events, thread: ThreadId, text: &str) -> TurnId {
     let (turn, _) = host.prompt(thread, text);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
@@ -48,8 +51,32 @@ fn run(host: &Running, events: &mut Events, thread: ThreadId, text: &str) -> Tur
     turn
 }
 
-/// A Codex thread (`config` its `CreateThread` config) that ran one prompt and stopped idle.
-fn idle_thread(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>) -> ThreadId {
+/// [`run`] with `config` as the prompt's own picks.
+fn run_with(
+    host: &Running,
+    events: &mut Events,
+    thread: ThreadId,
+    prompt: &str,
+    config: &[(&str, &str)],
+) -> TurnId {
+    let outcome = host.ok(HostCommand::SendPrompt {
+        thread,
+        content: text(prompt),
+        delivery: DeliveryRequest::Queue,
+        config: Some(picks(config)),
+        agent: None,
+    });
+    let CommandOutcome::PromptAccepted { turn, .. } = outcome else {
+        panic!("SendPrompt answered {outcome:?}");
+    };
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    turn
+}
+
+/// A Codex thread of `matter` (`config` its `CreateThread` config).
+fn created(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>) -> ThreadId {
     let outcome = host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(CODEX).unwrap(),
@@ -58,14 +85,33 @@ fn idle_thread(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>
     let CommandOutcome::ThreadCreated { thread } = outcome else {
         panic!("CreateThread answered {outcome:?}");
     };
-    let mut events = host.events(StreamId::Thread(thread));
-    run(host, &mut events, thread, "Summarise clause 4.");
+    thread
+}
+
+/// `thread`'s session stops idle: the idle limit passes with no prompt.
+fn stop_idle(host: &Running, events: &mut Events) {
     host.wait_armed(LIMIT);
+    // That may be the deadline an earlier turn's end armed: the clock answers every arming in
+    // order. The `TurnEnded` read last is published before the host arms its own deadline, so
+    // the round trip lets the host finish that input, and arm it, before the clock moves.
+    host.settle();
     host.clock.advance(LIMIT);
     events.until("the idle stop", |events| {
         events.position(idle_stopped).is_some()
     });
     host.settle();
+}
+
+/// A Codex thread (`config` its `CreateThread` config) that ran one prompt and stopped idle.
+pub(crate) fn idle_thread(
+    host: &Running,
+    matter: MatterId,
+    config: Option<&[(&str, &str)]>,
+) -> ThreadId {
+    let thread = created(host, matter, config);
+    let mut events = host.events(StreamId::Thread(thread));
+    run(host, &mut events, thread, "Summarise clause 4.");
+    stop_idle(host, &mut events);
     thread
 }
 
@@ -146,5 +192,68 @@ fn a_model_picked_on_a_fallback_list_becomes_the_kept_one() {
     let (started, notices) = started_and_notices(&events, third);
     assert_eq!(started, names("GPT-6 Astra", "Low"), "{}", events.dump());
     assert_eq!(notices, [told("GPT-6")], "{}", events.dump());
+    host.shutdown();
+}
+
+/// A `CreateThread` config the first session holds (model) or sets (effort) is the thread's kept
+/// values: after the agent's own update reports gpt-6 and medium, the relaunch after the idle
+/// stop sets gpt-6-luna and low back, with no notice (`pickers-kept-created`).
+#[test]
+fn a_create_thread_config_is_kept_for_the_relaunch() {
+    let dir = Dir::new(
+        "pickers_kept_created",
+        &[(CODEX, Scenario::Local("pickers-kept-created"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6 Luna", "Low"), "{}", events.dump());
+    assert_eq!(notices, [], "{}", events.dump());
+    host.shutdown();
+}
+
+/// A prompt's own pick the session already holds (no set goes out) is the thread's kept value
+/// too. The agent's update reports gpt-6-astra; the second turn picks it; after the idle stop the
+/// relaunch sets gpt-6-astra and low back, not the older kept gpt-6-luna, with no notice
+/// (`pickers-kept-own-pick`).
+#[test]
+fn a_prompts_own_pick_the_session_holds_is_kept_over_the_older_one() {
+    let dir = Dir::new(
+        "pickers_kept_own_pick",
+        &[(CODEX, Scenario::Local("pickers-kept-own-pick"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = created(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    run(&host, &mut events, thread, "Summarise clause 4.");
+    let second = run_with(
+        &host,
+        &mut events,
+        thread,
+        "And clause 5?",
+        &[("model", "gpt-6-astra")],
+    );
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6 Astra", "Low"), "{}", events.dump());
+    assert_eq!(notices, [], "{}", events.dump());
+    stop_idle(&host, &mut events);
+
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, third);
+    assert_eq!(started, names("GPT-6 Astra", "Low"), "{}", events.dump());
+    assert_eq!(notices, [], "{}", events.dump());
     host.shutdown();
 }
