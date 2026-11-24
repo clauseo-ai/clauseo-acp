@@ -1,5 +1,6 @@
 //! How Claude (claude-agent-acp 0.110.1 on Claude Code 2.1.330) says a helper starts and ends,
-//! from a recorded run (issue 13, fixture S1) and the adapter's code.
+//! from a recorded run (crates/acp's fixture `claude-agent-acp-0.110.1-helper.jsonl`) and the
+//! adapter's code.
 //!
 //! - Launch: the lead's tool call named `Agent` (`Task` before Claude Code renamed it). Its input
 //!   (`subagent_type`, `description`, `prompt`, optional `model`, `run_in_background`) usually
