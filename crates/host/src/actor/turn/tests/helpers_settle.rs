@@ -4,8 +4,9 @@
 //! put as `{{cwd}}`, ids, paths and `init` put neutral and short, a long report cut to its
 //! start): a helper that hands back, then settles; under code mode a helper with no handback
 //! that settles, a helper stopped by a cancel and a shell command's frames. And by hand: a
-//! terminal `task_updated` alone, a handback after a settle, a settle of no helper, and a
-//! background helper past its turn that settles in the agent's own turn.
+//! terminal `task_updated` alone, a handback after a settle, a settle while a handback waits
+//! for its update, a settle of no helper, and a background helper past its turn that settles in
+//! the agent's own turn.
 
 use clauseo_acp::{AcpEvent, Origin};
 use clauseo_protocol::{
@@ -242,6 +243,76 @@ fn a_handback_after_a_settle_changes_nothing() {
     assert_eq!(
         ends(&rig.log(thread)),
         [(HelperOutcome::Done, "Term to 2031.".to_owned())]
+    );
+    rig.finish();
+}
+
+/// A foreground helper `toolu_A` started in `turn`: no background mark, so a turn that ends
+/// by itself ends it `Failed` when nothing else did.
+fn foreground_helper(rig: &mut Rig, thread: ThreadId, turn: TurnId) {
+    lead(
+        rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
+    );
+}
+
+/// A settle that comes while the helper's handback call waits for its update ends nothing: the
+/// update ends the helper `Done` with the report its `rawInput` carries, not the helper's last
+/// words, as with no settle.
+#[test]
+fn a_settle_while_a_handback_waits_leaves_the_end_to_its_update() {
+    let mut rig = Rig::start("helpers-settle-handback-waits", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    foreground_helper(&mut rig, thread, turn);
+    stamped(&mut rig, thread, at, "toolu_A", words("Handing back now."));
+    let handback = call("toolu_H", "SubagentHandback", None);
+    stamped(&mut rig, thread, at, "toolu_A", handback);
+    settled(&mut rig, thread, at, "toolu_A", HelperOutcome::Done);
+    let report = r#"{"message":"Digest."}"#;
+    let landed = patch("toolu_H", Some(report), COMPLETED, Some(DELIVERED));
+    lead(&mut rig, thread, turn, landed);
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ends(&rig.log(thread)),
+        [(HelperOutcome::Done, "Digest.".to_owned())]
+    );
+    rig.finish();
+}
+
+/// A settle while the helper's handback call waits, then an update that says `success: false`:
+/// the handback's rule ends nothing on a refused handback, so the helper stays open as with no
+/// settle, and the turn that ends by itself ends it `Failed`, with no report.
+#[test]
+fn a_settle_while_a_handback_waits_then_a_refused_update_ends_as_without_the_settle() {
+    let mut rig = Rig::start("helpers-settle-handback-refused", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    let at = Origin::Turn(turn);
+    foreground_helper(&mut rig, thread, turn);
+    let handback = call(
+        "toolu_H",
+        "SubagentHandback",
+        Some(r#"{"message":"Draft."}"#),
+    );
+    stamped(&mut rig, thread, at, "toolu_A", handback);
+    settled(&mut rig, thread, at, "toolu_A", HelperOutcome::Done);
+    let refused = r#"{"success":false,"message":"Nothing was sent."}"#;
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H", None, COMPLETED, Some(refused)),
+    );
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ends(&rig.log(thread)),
+        [(HelperOutcome::Failed, "-".to_owned())]
     );
     rig.finish();
 }

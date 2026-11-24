@@ -8,9 +8,11 @@
 //!   ends a helper once). An ended helper stays ended.
 //! - A settle naming no helper the host started (a helper's own shell command runs as a task
 //!   too, its settle naming the `Bash` step) changes nothing.
-//! - The report of a helper that ends `Done`: the report of its handback when one is waiting
-//!   for its update, else the helper's last words the host holds ([`LastWords`]). Nothing of the
-//!   frames' own text reaches the host.
+//! - A settle that comes while a handback call of the helper waits for its update ends nothing:
+//!   that update ends the helper, by the handback's own rule (its report, `success: false`
+//!   ends nothing). If it never comes, the turn's end, a Stop, a detach or a load ends it.
+//! - The report of a helper that ends `Done` on a settle: the helper's last words the host holds
+//!   ([`LastWords`]). Nothing of the frames' own text reaches the host.
 //! - It ends the helper in whatever turn is live, the agent's own included, or with none live,
 //!   as a handback does. With output waiting for the agent's own turn (`own_turn.rs`) it waits
 //!   behind it, so the helper's words held there come first and make its report.
@@ -91,8 +93,17 @@ pub(in crate::actor::turn) fn on_settled(
     if !known.open {
         return;
     }
+    // Its handback's update ends it, as with no settle.
+    let handing_back = helpers
+        .handbacks
+        .values()
+        .any(|handback| handback.helper() == helper);
+    if handing_back {
+        tracing::debug!(%thread, %helper, "a settle while a handback waits for its update");
+        return;
+    }
     let report = if outcome == HelperOutcome::Done {
-        report(helpers, helper, known.id)
+        last_words(helpers, known.id)
     } else {
         None
     };
@@ -101,19 +112,12 @@ pub(in crate::actor::turn) fn on_settled(
     }
 }
 
-/// The report of the helper `helper` (Clauseo's `id`) as it ends `Done` on a settle: the report
-/// of its handback waiting for its update, else its last words; `None` without either.
-fn report(helpers: &Helpers, helper: &str, id: HelperId) -> Option<String> {
-    let handback = helpers
-        .handbacks
-        .values()
-        .find(|handback| handback.helper() == helper)
-        .and_then(|handback| handback.message().map(str::to_owned));
-    handback.or_else(|| {
-        helpers
-            .last_words
-            .get(&id)
-            .filter(|last| !last.text.is_empty())
-            .map(|last| last.text.clone())
-    })
+/// The report of the helper Clauseo knows as `id` as it ends `Done` on a settle: its last
+/// words; `None` without any.
+fn last_words(helpers: &Helpers, id: HelperId) -> Option<String> {
+    helpers
+        .last_words
+        .get(&id)
+        .filter(|last| !last.text.is_empty())
+        .map(|last| last.text.clone())
 }

@@ -64,11 +64,6 @@ impl Handback {
     pub(super) fn helper(&self) -> &str {
         &self.helper
     }
-
-    /// Its report, when its input carried one.
-    pub(super) fn message(&self) -> Option<&str> {
-        self.message.as_deref()
-    }
 }
 
 /// What a step update means for a helper, read before the update is logged.
