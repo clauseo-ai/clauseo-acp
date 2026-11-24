@@ -1,7 +1,10 @@
 // Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1244; 24 Nov round, issues 6
 // to 8): the real room over library-host.ts, the place opened from the rail's row and pressed to
-// the state that shows each string. Clauseo Case Law's shared words (UC-1090 to UC-1095) are the
-// home card's registry's (registry-uc-kanoon-card.tsx, #1297).
+// the state that shows each string. UC_LIBRARY_CASE_LAW registers Clauseo Case Law's shared words
+// (UC-1090 to UC-1095, carried here in UC-kanoon-card.json) on the library's card, so this branch
+// stands alone; the home card's branch (#1297), stacked on it, drops the spread and registers them
+// through its own export.
+import { cr, type ConnectorsRoomKey } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb, type LibraryKey } from "@clauseo/components/lib/words-library.ts";
 import type { Entry } from "./entry.ts";
 import { libraryHost, type LibraryState } from "./library-host.ts";
@@ -13,6 +16,13 @@ const libWords = (key: LibraryKey): WordsRef => ({
   key,
   text: (lang) => lb(lang, key),
   later: lb.hi[key] === null,
+});
+
+const roomWords = (key: ConnectorsRoomKey): WordsRef => ({
+  file: "lib/words-connectors-room.ts",
+  key,
+  text: (lang) => cr(lang, key),
+  later: cr.hi[key] === null,
 });
 
 const ENTRY = '[data-testid="library-entry"]';
@@ -193,4 +203,25 @@ export const UC_LIBRARY: Entry[] = [
   ),
   e("UC-1239", "the assistant", at({ both: true })),
   e("UC-1240", "The assistant", at({ both: true }, row("pdf"))),
+];
+
+const shared = (id: string, key: ConnectorsRoomKey): Entry => ({
+  id,
+  words: roomWords(key),
+  screen: "room/library",
+  render: CONNECTORS,
+});
+
+/** Clauseo Case Law's agreed words on the library's card: the home card's ids (see the top of this
+ * file). */
+export const UC_LIBRARY_CASE_LAW: Entry[] = [
+  shared(
+    "UC-1090",
+    "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.",
+  ),
+  shared("UC-1091", "Add Clauseo Case Law"),
+  shared("UC-1092", "Clauseo Case Law"),
+  shared("UC-1093", "From {price}, about {n} searches"),
+  shared("UC-1095", "Prepaid, including GST. No subscription."),
+  shared("UC-1094", "Powered by Indian Kanoon"),
 ];
