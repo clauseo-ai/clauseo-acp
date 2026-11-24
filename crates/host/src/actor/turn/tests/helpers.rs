@@ -1,9 +1,10 @@
 //! Helpers through the turn path (`turn/helpers.rs`), with Claude's frames put in as the ACP
 //! reader hands them over (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`), shaped as
-//! the recorded run has them (issue 13, fixture S1): one background helper with two steps and
-//! words that hands back; two foreground helpers interleaved, one failing; a Stop with two open;
-//! a turn that ends with one still open; a step stamped with a helper never started; a replayed
-//! frame; and the same view after the conversation is reopened.
+//! the recorded run has them (fake_agent's `claude-helper-background` scenario): one background
+//! helper with two steps and words that hands back; the recorded frames themselves through the
+//! ACP reader; two foreground helpers interleaved, one failing; a Stop with two open; a turn
+//! that ends with one still open; a step stamped with a helper never started; a replayed frame;
+//! and the same view after the conversation is reopened.
 
 use std::collections::HashMap;
 
@@ -27,10 +28,10 @@ const PROMPT: &str =
 const LEAD_STEP: &str = r#"{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-0","title":"Read","kind":"read","status":"in_progress"}}}"#;
 const CANCEL: &str = r#"{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}"#;
 
-/// The launch input of S1.jsonl line 33, its folder moved under /Users/lawyer.
-const S1_INPUT: &str = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory /Users/lawyer/matter and return one short digest covering both documents."}"#;
+/// The recorded launch input, its folder left out.
+const LAUNCH_INPUT: &str = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
 
-/// The handback's update of S1.jsonl line 60.
+/// The recorded handback's update.
 const DELIVERED: &str = r#"{"success":true,"message":"Report delivered to your caller."}"#;
 
 /// One prompt with one lead step, answered `stop`.
@@ -226,10 +227,10 @@ fn story(log: &[DomainEvent]) -> Vec<String> {
     lines
 }
 
-/// S1's shape: the `Agent` call, its input in an update, the background mark, its launch note,
-/// two stamped steps with words between, the handback and its landed update. The helper ends
-/// `Done` with its report; the handback is no step; the launch note is no summary; a stamped
-/// thought is dropped.
+/// The recorded shape: the `Agent` call, its input in an update, the background mark, its
+/// launch note, two stamped steps with words between, the handback and its landed update. The
+/// helper ends `Done` with its report; the handback is no step; the launch note is no summary;
+/// a stamped thought is dropped.
 #[test]
 fn a_background_helper_shows_its_steps_and_words_and_ends_on_its_handback() {
     let mut rig = Rig::start("helpers-background", &one_turn("end_turn"));
@@ -241,7 +242,7 @@ fn a_background_helper_shows_its_steps_and_words_and_ends_on_its_handback() {
         &mut rig,
         thread,
         turn,
-        patch("toolu_A", Some(S1_INPUT), None, None),
+        patch("toolu_A", Some(LAUNCH_INPUT), None, None),
     );
     in_background(&mut rig, thread, turn, "toolu_A");
     let note = "Async agent launched successfully.";
@@ -310,7 +311,7 @@ fn a_background_helper_shows_its_steps_and_words_and_ends_on_its_handback() {
     rig.finish();
 }
 
-/// The recorded frames themselves (fake_agent's `claude-helper-background` scenario, S1) through
+/// The recorded frames themselves (fake_agent's `claude-helper-background` scenario) through
 /// the ACP reader: the helper starts from the `Agent` call's input, takes both stamped `Read`
 /// steps and ends `Done` with its handback's digest; the handback is no step.
 #[test]
@@ -335,7 +336,7 @@ fn the_recorded_background_helper_ends_on_its_handback() {
              label=Digest lease and notice task=true",
             "step toolu_01WesqZa8jMTM4WMn2ELQNTp paper-reader",
             "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
-            "end paper-reader Done DIGEST: lease.txt and notice.txt (matter-rec)",
+            "end paper-reader Done DIGEST: lease.txt and notice.txt (lease-matter)",
             "turn_ended EndTurn",
         ]
     );
@@ -508,7 +509,7 @@ fn a_reopened_conversation_shows_the_same_helper() {
         &mut rig,
         thread,
         turn,
-        call("toolu_A", "Agent", Some(S1_INPUT)),
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
     );
     in_background(&mut rig, thread, turn, "toolu_A");
     stamped(
