@@ -21,6 +21,35 @@ fn linux() -> Platform {
     Platform::new(Os::Linux, Arch::X64)
 }
 
+/// The version G16's pins file gives `name` under `field` (`dependencies` or `overrides`), so a
+/// bump of the pair needs no edit here.
+fn pinned(field: &str, name: &str) -> String {
+    let manifest: Value = serde_json::from_str(PINS_PACKAGE_JSON).unwrap();
+    manifest[field][name].as_str().unwrap().to_owned()
+}
+
+fn claude_pin() -> String {
+    pinned("dependencies", "@agentclientprotocol/claude-agent-acp")
+}
+
+fn codex_acp_pin() -> String {
+    pinned("dependencies", "@agentclientprotocol/codex-acp")
+}
+
+/// The embedded table's download and unpacked bytes for `agent` on `os`/`arch`, so a re-measure
+/// for new pins needs no edit here.
+fn sizes_row(agent: &AgentId, os: Os, arch: Arch) -> (u64, u64) {
+    let snapshot = Snapshot::embedded();
+    let row = snapshot
+        .agent(agent)
+        .unwrap()
+        .sizes
+        .iter()
+        .find(|row| row.os == os && row.arch == arch)
+        .unwrap();
+    (row.download_bytes, row.unpacked_bytes)
+}
+
 fn lock_paths(pins: &AgentPins) -> BTreeSet<String> {
     let lock: Value = serde_json::from_str(pins.lock()).unwrap();
     lock["packages"]
@@ -53,8 +82,8 @@ fn the_embedded_snapshot_builds() {
         built.agent(&codex()).unwrap().signin_hosts,
         ["auth.openai.com", "chatgpt.com"]
     );
-    assert_eq!(built.pins(&claude()).unwrap().version(), "0.110.1");
-    assert_eq!(built.pins(&codex()).unwrap().version(), "2.10.0");
+    assert_eq!(built.pins(&claude()).unwrap().version(), claude_pin());
+    assert_eq!(built.pins(&codex()).unwrap().version(), codex_acp_pin());
 }
 
 #[test]
@@ -125,7 +154,7 @@ fn no_entry_reachable_only_from_the_other_root_is_in_an_agents_lock() {
     let lock: Value = serde_json::from_str(snapshot.pins(&claude()).unwrap().lock()).unwrap();
     assert_eq!(
         lock["packages"][""]["dependencies"],
-        serde_json::json!({"@agentclientprotocol/claude-agent-acp": "0.110.1"})
+        serde_json::json!({"@agentclientprotocol/claude-agent-acp": claude_pin()})
     );
 }
 
@@ -136,11 +165,11 @@ fn codexs_package_json_has_the_override_and_claudes_does_not() {
         serde_json::from_str(snapshot.pins(&codex()).unwrap().package_json()).unwrap();
     assert_eq!(
         codex_manifest["overrides"],
-        serde_json::json!({"@openai/codex": "0.171.0"})
+        serde_json::json!({"@openai/codex": pinned("overrides", "@openai/codex")})
     );
     assert_eq!(
         codex_manifest["dependencies"],
-        serde_json::json!({"@agentclientprotocol/codex-acp": "2.10.0"})
+        serde_json::json!({"@agentclientprotocol/codex-acp": codex_acp_pin()})
     );
     let claude_json = snapshot.pins(&claude()).unwrap().package_json();
     assert!(!claude_json.contains("overrides"), "{claude_json}");
@@ -272,15 +301,16 @@ fn a_root_not_in_package_json_and_a_foreign_registry_are_refused() {
 fn sizes_follow_the_records_formula() {
     let snapshot = Snapshot::embedded();
     let mac = Platform::new(Os::Darwin, Arch::Arm64);
+    let (download, unpacked) = sizes_row(&claude(), Os::Darwin, Arch::Arm64);
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, false),
-        Some(174_188_051)
+        Some(download)
     );
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, true),
-        Some(174_188_051 + 53_049_576)
+        Some(download + 53_049_576)
     );
-    let base: u64 = 2 * 174_188_051 + 414_940_657;
+    let base: u64 = 2 * download + unpacked;
     assert_eq!(
         snapshot.need_bytes(&claude(), mac, false, false),
         Some(base + base.div_ceil(10))
@@ -294,9 +324,10 @@ fn sizes_follow_the_records_formula() {
         libc: Some(Libc::Musl),
         ..linux()
     };
+    // musl uses the glibc row.
     assert_eq!(
         snapshot.download_bytes(&codex(), musl, false),
-        Some(174_573_329)
+        Some(sizes_row(&codex(), Os::Linux, Arch::X64).0)
     );
     assert_eq!(snapshot.download_bytes(&id("other"), musl, false), None);
 }
@@ -435,11 +466,12 @@ fn the_disk_need_adds_python_and_the_agent_s_download_leaves_it_out() {
     );
     let snapshot = Snapshot::embedded().with_python(python);
     // The agent's download leaves Python out: its own Missing carries it.
+    let (download, unpacked) = sizes_row(&claude(), Os::Darwin, Arch::Arm64);
     assert_eq!(
         snapshot.download_bytes(&claude(), mac, false),
-        Some(174_188_051)
+        Some(download)
     );
-    let base: u64 = 2 * 174_188_051 + 414_940_657 + 70_000_000 + 220_000_000;
+    let base: u64 = 2 * download + unpacked + 70_000_000 + 220_000_000;
     assert_eq!(
         snapshot.need_bytes(&claude(), mac, false, true),
         Some(base + base.div_ceil(10))
