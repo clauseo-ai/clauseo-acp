@@ -1,12 +1,14 @@
 //! Turns of two threads of one matter against a restore holding the matter: both wait for it
 //! with `TurnQueued` behind their own threads, held by the restore, and both start, together,
-//! when it ends; a cancel of one while it waits ends it once; an abort of the host keeps a
-//! waiting turn queued.
+//! when it ends; a cancel of one while it waits ends it once, never started, its message removed;
+//! an abort of the host keeps a waiting turn queued, with a fresh wait no restore holds.
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DomainEvent, HostCommand, MatterHold, PromptBlock,
-    RestoreRequest, StopReason, ThreadId, TurnId,
+    RestoreRequest, StopReason, StreamId, ThreadId, ThreadStatus, TurnId, UserMessageStatus,
+    ViewEntry,
 };
+use clauseo_reducer::{StreamState, ThreadState};
 use futures::channel::oneshot;
 
 use super::rig::{Rig, command_id, kind};
@@ -209,6 +211,12 @@ fn a_turn_cancelled_while_it_waits_for_a_restore_ends_once() {
     let kinds = log.iter().map(kind).collect::<Vec<_>>();
     assert!(!started(&log, turn_b), "{kinds:?}");
     assert_eq!(ends(&log, turn_b), [StopReason::Cancelled], "{kinds:?}");
+    // Its message is removed, and the thread no longer shows a wait for the restore.
+    let view = fold(&mut rig, second);
+    assert_eq!(prompt_statuses(&view, turn_b), [UserMessageStatus::Removed]);
+    let header = view.header().expect("the header");
+    assert_eq!(header.hold, None, "{header:?}");
+    assert_eq!(header.status, ThreadStatus::Idle, "{header:?}");
     assert_eq!(ends(&rig.log(first), turn_a), [StopReason::EndTurn]);
     rig.finish();
 }
@@ -228,8 +236,10 @@ fn a_turn_waiting_for_a_restore_stays_queued_across_a_stop() {
     let log = rig.log(thread);
     let kinds = log.iter().map(kind).collect::<Vec<_>>();
     // As before turns of a matter ran together: still queued behind its own thread, behind no
-    // turn, not started, not ended, and the thread idle.
-    assert_eq!(queued_behind(&log, turn), [thread], "{kinds:?}");
+    // turn, not started, not ended, and the thread idle. The restore is gone, so start-up logs
+    // a fresh wait with no hold.
+    assert_eq!(queued_behind(&log, turn), [thread, thread], "{kinds:?}");
+    assert_eq!(holds(&log, turn), [Some(MatterHold::Restore), None]);
     let last = log.iter().rev().find_map(|event| {
         if let DomainEvent::TurnQueued(queued) = event
             && queued.turn() == turn
@@ -239,6 +249,16 @@ fn a_turn_waiting_for_a_restore_stays_queued_across_a_stop() {
         None
     });
     assert_eq!(last, Some(None), "{kinds:?}");
+    // The view, folded from the log: no wait for a restore, the message queued, so its controls
+    // show.
+    let view = fold(&mut rig, thread);
+    let header = view.header().expect("the header");
+    assert_eq!(header.hold, None, "{header:?}");
+    assert!(
+        !matches!(header.status, ThreadStatus::Queued { .. }),
+        "{header:?}"
+    );
+    assert_eq!(prompt_statuses(&view, turn), [UserMessageStatus::Queued]);
     assert!(!started(&log, turn), "{kinds:?}");
     assert!(
         ends(&log, turn).is_empty(),
@@ -250,5 +270,42 @@ fn a_turn_waiting_for_a_restore_stays_queued_across_a_stop() {
     );
     let turns = &rig.actor.matters[&rig.matter()].turns;
     assert!(turns.holder.is_none() && turns.running.is_empty());
+
+    // The lawyer sends it: it runs.
+    let resumed = rig.dispatch(30, HostCommand::ResumeQueue { thread });
+    assert_eq!(resumed.unwrap(), CommandOutcome::Done);
+    rig.run_until("the turn ended", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none()
+            && state.closing.is_none()
+            && actor.work.commits == 0
+            && actor.work.matter_jobs == 0
+    });
+    let log = rig.log(thread);
+    assert!(started(&log, turn));
+    assert_eq!(ends(&log, turn), [StopReason::EndTurn]);
     rig.finish();
+}
+
+/// The status of each user message of `turn` in `view`.
+fn prompt_statuses(view: &ThreadState, turn: TurnId) -> Vec<UserMessageStatus> {
+    let status = |entry: &ViewEntry| {
+        let ViewEntry::UserMessage(message) = entry else {
+            return None;
+        };
+        (message.turn == turn).then_some(message.status)
+    };
+    view.entries().values().filter_map(status).collect()
+}
+
+/// `thread`'s view, folded from its whole log.
+fn fold(rig: &mut Rig, thread: ThreadId) -> ThreadState {
+    let store = rig.actor.store.clone();
+    let read = crate::actor::streams::read_whole_log(&store, StreamId::Thread(thread));
+    let reopen = rig.run(read).unwrap();
+    let mut state = StreamState::new(StreamId::Thread(thread));
+    for envelope in &reopen.tail {
+        clauseo_reducer::apply(&mut state, envelope).unwrap();
+    }
+    state.as_thread().expect("a thread's state").clone()
 }

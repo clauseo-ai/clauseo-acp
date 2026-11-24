@@ -53,8 +53,8 @@ enum Restored {
 
 /// Rebuilds `thread`'s queue from `log`, held, and pushes into `out` a `TurnQueued` behind
 /// its own thread (behind the thread's previous turn) for each queued turn whose last
-/// `TurnQueued` names another thread or is missing, so the view shows it queued, and a
-/// `SteerResolved { NotSent }` for each steer never settled.
+/// `TurnQueued` names another thread, has a hold, or is missing, so the view shows it queued,
+/// and a `SteerResolved { NotSent }` for each steer never settled.
 pub(in super::super) fn restore(
     actor: &mut Actor,
     thread: ThreadId,
