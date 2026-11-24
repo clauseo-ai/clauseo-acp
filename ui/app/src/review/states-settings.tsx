@@ -10,6 +10,7 @@ import type { FakeSkills } from "../settings/sections/skills-fake.ts";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
+import { providePermissions, type PermissionsHost } from "../room/first-run/permissions-host.ts";
 import type {
   ConnectorsState,
   LimitsView,
@@ -48,6 +49,7 @@ export function SettingsOver({
   matters = [],
   mcpTools,
   skills,
+  permissions,
 }: {
   section: SectionId;
   lang: Lang;
@@ -76,6 +78,8 @@ export function SettingsOver({
   mcpTools?: ToolsCommands;
   /** Settings › Skills' host (skills-fake.ts); none when left out, and Skills doesn't show. */
   skills?: FakeSkills;
+  /** Privacy's Permissions group's host (issue 5); none when left out, and the group doesn't show. */
+  permissions?: PermissionsHost;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -121,6 +125,7 @@ export function SettingsOver({
     });
     if (limits !== undefined) transport.limitsChanged(limits);
     if (mcpTools !== undefined) provideTools(transport, mcpTools);
+    if (permissions !== undefined) providePermissions(transport, permissions);
     const store = createDisplayStore({
       storage: null,
       matchMedia: null,

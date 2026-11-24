@@ -4,7 +4,7 @@
 // once it stands it stays for the screen, its rows' outcomes in place. Asking never holds the rest of the screen: the
 // ask runs on while the lawyer answers macOS, the row says so, and the other buttons stay pressable. Windows' row is
 // asked by itself as it shows, since its ask opens nothing and only brings back where to allow Clauseo.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PermissionsStep } from "@clauseo/components/clauseo/first-launch/permissions.tsx";
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import type { PermissionId, PermissionRow, PermissionsHost } from "./permissions-host.ts";
@@ -16,10 +16,17 @@ export function Permissions({
   platform,
   onOtherFolder,
   onSettings,
+  titled = true,
+  wrap = (step) => step,
 }: {
   host: PermissionsHost;
   platform: Platform;
-  onOtherFolder: () => void;
+  /** The first screen's Open the folder (Windows); none in Settings, where there is no first matter. */
+  onOtherFolder?: (() => void) | undefined;
+  /** false in Settings, whose Permissions group names it. */
+  titled?: boolean;
+  /** What the step stands in, drawn only while it shows (Settings' group). */
+  wrap?: (step: ReactNode) => ReactNode;
   /** System Settings' Files and Folders pane (the Mac's). */
   onSettings: () => void;
 }) {
@@ -80,15 +87,16 @@ export function Permissions({
   const shown = stepRows(rows, waiting, failed);
   if (shown.length === 0) return null;
   const mac = platform === "mac";
-  return (
+  return wrap(
     <PermissionsStep
       rows={shown}
       platform={mac ? "mac" : "windows"}
+      titled={titled}
       onAsk={ask}
       onSettings={mac ? onSettings : undefined}
       onCheck={read}
       onOtherFolder={mac ? undefined : onOtherFolder}
       onChooseFolder={mac ? undefined : host.chooseMattersFolder}
-    />
+    />,
   );
 }

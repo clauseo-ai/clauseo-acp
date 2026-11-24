@@ -15,6 +15,7 @@
 // Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and
 // the crash report switch.
 //
+// First of all, where the desktop lists one, the Permissions group: the first-start step's rows (permissions.tsx).
 // Last, the sites allowed past the unsafe-site list, each with Remove (allowed-sites.tsx, 0053).
 //
 // The switches are the host's: SettingsView.tools, the effective `web_search` and `browser`, in get_settings and
@@ -34,6 +35,7 @@ import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { AgentKind, ToolsSettingsView } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { AllowedSites } from "./allowed-sites.tsx";
+import { PermissionsGroup } from "./permissions.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
 
@@ -144,6 +146,8 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
   const webOff = tools !== undefined && !tools.web_search && !browserOn;
   return (
     <>
+      {/* what macOS or Windows needs answered (issue 5, #1303): first, since it asks for an act; only with a row */}
+      <PermissionsGroup ctx={ctx} />
       {/* what goes to a plan, said once for every plan, as the group's note */}
       <Group
         title={w.s("What leaves this computer")}

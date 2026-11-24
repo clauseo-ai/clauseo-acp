@@ -44,20 +44,28 @@ export type PermissionStepActs = {
 export function PermissionsStep({
   rows,
   platform,
+  titled = true,
   ...acts
-}: { rows: readonly PermissionStepRow[]; platform: "mac" | "windows" } & PermissionStepActs) {
+}: {
+  rows: readonly PermissionStepRow[];
+  platform: "mac" | "windows";
+  /** false where the place around it names it (Settings' Permissions group): no heading of its own. */
+  titled?: boolean;
+} & PermissionStepActs) {
   const w = useFirstLaunchWords();
   const heading = useId();
   return (
     <section
       className="fl-perms"
-      aria-labelledby={heading}
+      aria-labelledby={titled ? heading : undefined}
       data-testid="permissions-step"
       data-platform={platform}
     >
-      <h2 id={heading} className="fl-perms-head">
-        <Say>{w("Before your first matter")}</Say>
-      </h2>
+      {titled && (
+        <h2 id={heading} className="fl-perms-head">
+          <Say>{w("Before your first matter")}</Say>
+        </h2>
+      )}
       {platform === "mac" && (
         <p className="fl-perms-lead">
           <Say>{w("Answer here first, so macOS doesn't stop you in the middle of a matter.")}</Say>

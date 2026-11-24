@@ -7,7 +7,8 @@ import type { PermissionRow, PermissionsHost } from "../room/first-run/permissio
 import type { SetupEvent } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { render } from "./registry-ud1-scene.tsx";
-import { firstLaunchWords as w, matterWords as m, type WordsRef } from "./words.ts";
+import { SettingsOver } from "./states-settings.tsx";
+import { firstLaunchWords as w, matterWords as m, settingsWords, type WordsRef } from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
 const joined = (parts: readonly WordsRef[]): WordsRef => ({
@@ -221,6 +222,21 @@ export const UC_PERMISSIONS: Entry[] = [
     render: WIN_BLOCKING,
   },
   { id: "UC-1166", words: w("Check again"), screen: SCREEN, render: WIN_BLOCKING },
+  // Settings › Privacy's Permissions group (#1303): the same rows, for a lawyer who already has matters
+  {
+    id: "UC-1260",
+    words: settingsWords("Permissions"),
+    screen: "settings/privacy",
+    width: 960,
+    height: 900,
+    render: (lang) => (
+      <SettingsOver
+        section="privacy"
+        lang={lang}
+        permissions={fakePermissions([{ ...DOCS, state: "granted" }, KEYS])}
+      />
+    ),
+  },
   // the open matter's line (matter-blocked.tsx); its second sentence before these is UC-1162's
   {
     id: "UC-1167",
