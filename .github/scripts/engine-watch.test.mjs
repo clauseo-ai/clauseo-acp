@@ -7,7 +7,7 @@
 // today's lock from the registry and must reproduce embedded.rs's SIZES exactly.
 //
 // engine-watch.yml is read as text: every `uses:` pinned by a 40-character SHA, the job's
-// permissions no more than contents: write and pull-requests: write, the 6-hour schedule plus
+// permissions no more than contents: write, the 6-hour schedule plus
 // workflow_dispatch, the push guarded by a tree comparison, and a refused PR not failing the job.
 
 import assert from "node:assert/strict";
@@ -233,12 +233,12 @@ test("engine-watch.yml: pinned actions, least permissions, schedule, guarded pus
   assert.match(yml, /workflow_dispatch:/);
   assert.match(yml, /^permissions: \{\}$/m);
   const granted = [...yml.matchAll(/^\s+(contents|pull-requests|[a-z-]+): (write|read)$/gm)].map((m) => `${m[1]}: ${m[2]}`);
-  assert.deepEqual(granted.sort(), ["contents: write", "pull-requests: write"]);
+  assert.deepEqual(granted.sort(), ["contents: write"]);
   assert.doesNotMatch(yml, /secrets\.(?!GITHUB_TOKEN)/);
   assert.match(yml, /\bcommit -s\b/);
   assert.doesNotMatch(yml, /--no-verify/);
   assert.match(yml, /ls-remote/);
   assert.match(yml, /\^\{tree\}/);
-  assert.match(yml, /gh pr create --draft/);
+  assert.doesNotMatch(yml, /gh pr create/);
   assert.match(yml, /engine-watch\.mjs/);
 });

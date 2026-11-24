@@ -1,7 +1,7 @@
 # Engine watch: when npm publishes a newer Claude or Codex adapter than G16's pins
-# (crates/limits/tests/live/package.json and its lock), pushes a branch with the complete bump and
-# opens a draft pull request for it. The logic is in .github/scripts/engine-watch.mjs, so it runs
-# locally too; engine-watch.test.mjs tests it and lints this file.
+# (crates/limits/tests/live/package.json and its lock), pushes a branch with the complete bump,
+# which the CI thread opens as a pull request. The logic is in .github/scripts/engine-watch.mjs,
+# so it runs locally too; engine-watch.test.mjs tests it and lints this file.
 #
 # - Runs every 6 hours and by hand (workflow_dispatch), on main. Never on a pull request.
 # - The bump: claude-agent-acp, codex-acp and the @openai/codex override to npm's latest (codex-acp's
@@ -12,11 +12,11 @@
 #   smoke run on the CI thread's own lanes before anyone merges. The job is about one minute.
 # - The branch is engines/claude-acp-<v>_codex-acp-<v>_codex-<v>, committed with a DCO sign-off as
 #   github-actions and force-pushed, but never when the branch already holds the same tree.
-# - The pull request: `gh pr create --draft`, the script's summary as its body. When the
-#   repository refuses Actions creating pull requests, the job still passes and prints the branch,
-#   so a person opens it. A pull request made with GITHUB_TOKEN starts no other workflow.
-# - Permissions: contents: write (the push) and pull-requests: write (the draft); no secret but
-#   the job's own token. Every action is pinned by its full commit SHA.
+# - No pull request from here: the CI thread opens one from the branch as max-clauseo-agent (its
+#   intake takes no other author, and a pull request made with GITHUB_TOKEN would start no other
+#   workflow). The job summary names the branch and holds the script's summary.
+# - Permissions: contents: write (the push); no secret but the job's own token. Every action is
+#   pinned by its full commit SHA.
 
 name: Engine watch
 
@@ -39,7 +39,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,22 +77,12 @@ jobs:
           git push --force origin "HEAD:refs/heads/$BRANCH"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Open a draft pull request (a refusal leaves the branch for a person)
+      - name: Name the branch in the job summary
         if: steps.push.outputs.pushed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           BRANCH: ${{ steps.bump.outputs.branch }}
         run: |
-          set -uo pipefail
-          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
-            echo "A pull request for $BRANCH is open; the push updated it."
-            exit 0
-          fi
-          if gh pr create --draft --base main --head "$BRANCH" \
-              --title "agents: engines ${BRANCH#engines/}" \
-              --body-file "$RUNNER_TEMP/engine-summary.md"; then
-            exit 0
-          fi
-          echo "::notice::Could not open the pull request (the repository may refuse Actions creating them). Open one from branch $BRANCH."
+          set -euo pipefail
+          { echo "Branch pushed: \`$BRANCH\` (the CI thread opens its pull request)."; echo
+            cat "$RUNNER_TEMP/engine-summary.md"; } >> "$GITHUB_STEP_SUMMARY"
           echo "Branch pushed: $BRANCH"
