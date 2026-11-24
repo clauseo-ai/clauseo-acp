@@ -9,7 +9,7 @@
 import type { MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { useRef, useState } from "react";
 import { folderPermissionOf, type FolderPermissionId } from "../transport/folder-permission.ts";
-import type { FolderRefId } from "../transport/protocol.ts";
+import type { FolderRefId, PickedFolder } from "../transport/protocol.ts";
 import type { Matters } from "./matters.ts";
 
 /** Each kind's reason line. */
@@ -38,7 +38,7 @@ export function useFolderPermission(matters: Matters) {
   const [asked, setAsked] = useState<Asked | null>(null);
   // the latest pick's ref: an answer for an earlier pick is dropped
   const latest = useRef<FolderRefId | null>(null);
-  const picked = (pick: { folder: FolderRefId }) => {
+  const picked = (pick: Pick<PickedFolder, "folder" | "permission">) => {
     latest.current = pick.folder;
     const id = folderPermissionOf(pick);
     // no line where this window cannot ask: Allow would do nothing

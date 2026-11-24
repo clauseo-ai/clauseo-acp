@@ -34,7 +34,7 @@ const MADE = uuid(5, 2);
 const REF = "ref-guarded";
 const PATH = "System Settings › Privacy & Security › Files and Folders";
 
-/** A host whose picker gives REF, carrying `permission` as stage E's PickedFolder does. */
+/** A host whose picker gives REF, carrying `permission` as the desktop's PickedFolder does. */
 function guarded(permission: FolderPermissionId | null): FakeHost {
   let list: MatterSummary[] = [A];
   return {
@@ -44,11 +44,7 @@ function guarded(permission: FolderPermissionId | null): FakeHost {
       list = [A, { matter: MADE, name: command.command.create_matter.name, kind: "folder" }];
       return { matter_created: { matter: MADE } };
     },
-    // stage E's field, past this branch's PickedFolder type
-    pickFolder: () => {
-      const picked = { folder: REF, display: "Desktop/Rathi Steels", permission };
-      return picked;
-    },
+    pickFolder: () => ({ folder: REF, display: "Desktop/Rathi Steels", permission }),
   };
 }
 
