@@ -69,6 +69,7 @@ fn turn_events() -> Vec<DomainEvent> {
             acp_message_id: None,
             content: prompt("is clause 4 valid?"),
             delivery: Delivery::Queue,
+            config: std::collections::BTreeMap::new(),
         }),
         DomainEvent::TurnStarted(TurnStarted {
             model: None,
@@ -275,6 +276,7 @@ fn review_a_requeued_steer_belongs_to_its_new_turn() {
             acp_message_id: None,
             content: prompt("steered question"),
             delivery: Delivery::Steer,
+            config: std::collections::BTreeMap::new(),
         }),
     );
     events.insert(
@@ -330,6 +332,7 @@ fn a_queued_prompt_taken_back_leaves_and_a_cancelled_running_turn_keeps_its_prom
             acp_message_id: None,
             content: prompt(text),
             delivery: Delivery::Queue,
+            config: std::collections::BTreeMap::new(),
         })
     };
     let cancelled = |turn: TurnId| {

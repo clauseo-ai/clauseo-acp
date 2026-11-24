@@ -165,6 +165,7 @@ fn event(n: u64) -> DomainEvent {
             acp_message_id: None,
             content: vec![ContentBlock::Text { text: text(n) }],
             delivery: Delivery::default(),
+            config: std::collections::BTreeMap::new(),
         }
         .into(),
         1 => TurnStarted {

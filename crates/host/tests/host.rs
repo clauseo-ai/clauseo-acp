@@ -406,6 +406,9 @@ mod pickers_log;
 #[path = "host/pickers_probe.rs"]
 mod pickers_probe;
 #[cfg(test)]
+#[path = "host/pickers_restart.rs"]
+mod pickers_restart;
+#[cfg(test)]
 #[path = "host/pickers_seed.rs"]
 mod pickers_seed;
 #[cfg(test)]

@@ -48,10 +48,11 @@ pub(super) fn log_queued(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
-    super::super::prompt_picks::claim(actor, thread, turn);
+    let config = super::super::prompt_picks::claim(actor, thread, turn);
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = joins.delivery();
-    let built = build::user_message(turn, message, None, blocks.clone(), delivery.into());
+    let mut built = build::user_message(turn, message, None, blocks.clone(), delivery.into());
+    built.value.config = config;
     let mut waits = TurnQueued::new(thread, turn, thread, ahead)
         .map_err(|error| Error::Internal(error.to_string()))?;
     if joins == Joins::Next {

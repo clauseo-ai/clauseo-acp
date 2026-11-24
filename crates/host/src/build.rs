@@ -188,6 +188,7 @@ pub(crate) fn user_message(
         acp_message_id,
         content,
         delivery,
+        config: std::collections::BTreeMap::new(),
     })
 }
 

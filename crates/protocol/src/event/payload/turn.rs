@@ -29,6 +29,16 @@ pub struct UserMessage {
     /// missing field reads as queue.
     #[serde(default, skip_serializing_if = "Delivery::is_queue")]
     pub delivery: Delivery,
+    /// The prompt's own model and effort picks (`SendPrompt::config`): under each config
+    /// option's id, the value to set just before the prompt, kept in the log so a turn queued
+    /// across a restart still runs with them. The agent's plain text, as `ConfigOption` keeps
+    /// ids. Empty is written as a missing field, and a missing field reads as empty.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[cfg_attr(
+        feature = "specta",
+        specta(type = std::collections::BTreeMap<String, String>)
+    )]
+    pub config: std::collections::BTreeMap<CompactString, CompactString>,
 }
 
 /// A turn waits: behind its own thread's running turn, or behind another thread's writer.
