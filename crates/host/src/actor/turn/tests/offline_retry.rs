@@ -1,10 +1,12 @@
 //! An agent that says it waits to retry its service (`offline/quiet.rs`): an AIR
 //! `sessionFailure` of severity `warning`, category `connection` or `service`, as codex-acp
 //! 2.10.0 and claude-agent-acp 0.110.1 send it. From that word the turn may stay silent 15
-//! minutes, not 5; each new retry restarts the 15; the agent's next frame of another kind ends
-//! the wait and the plain 5 minutes run from it. The view's header shows the wait (`retrying`,
-//! with the agent's title and details) from `AgentRetrying` until `AgentRetryEnded` or the
-//! turn's end. The probe is a fixed answer that gets through: no test here touches the network.
+//! minutes, not 5; each new retry restarts the 15 (a repeat of the last words logs nothing); the
+//! agent's next work (text, a tool call) ends the wait and the plain 5 minutes run from it, while
+//! a frame that does no work (usage, a title) leaves the wait as it is. The view's header shows
+//! the wait (`retrying`, with the agent's title and details) from `AgentRetrying` until
+//! `AgentRetryEnded` or the turn's end. The probe is a fixed answer that gets through: no test
+//! here touches the network.
 
 use std::time::Duration;
 
@@ -15,7 +17,7 @@ use serde_json::{Value, json};
 use super::offline::{answer, ended};
 use super::offline_quiet::{
     CANCELLED, END_TURN, PROMPT, chunk, finish_turn, going, hold, prompting_held, release_one,
-    start, update, wait, wait_steps,
+    start, tool, update, wait, wait_steps,
 };
 use super::rig::Rig;
 use crate::actor::turn::offline::probe::ReachProbe;
@@ -158,10 +160,16 @@ fn a_claude_overload_retry_and_six_silent_minutes_leave_the_turn_going() {
 /// second, and returns the log once the turn has ended.
 fn silent_until(rig: &mut Rig, thread: ThreadId, minutes: u32) -> Vec<DomainEvent> {
     wait_steps(rig, thread, minutes * 2 - 1, QUIET_WAIT);
+    silent_tail(rig, thread)
+}
+
+/// The last second before a limit (asserting it goes on), then the limit's second, and the log
+/// once the turn has ended.
+fn silent_tail(rig: &mut Rig, thread: ThreadId) -> Vec<DomainEvent> {
     wait(rig, thread, ALMOST);
     assert!(
         going(rig, thread),
-        "still going a second short of {minutes} min"
+        "still going a second short of the limit"
     );
     wait(rig, thread, SECOND);
     finish_turn(rig, thread);
@@ -260,11 +268,11 @@ fn a_second_retry_restarts_the_fifteen_minutes() {
     rig.finish();
 }
 
-/// A frame of another kind that is no model output (usage) still ends the wait: the plain 5
-/// minutes run again, from that frame. Retry at 0:00, usage at 6:00, going at 10:59, ended at
-/// 11:00 on the plain limit.
+/// A usage update is no work, so it does not end the wait (a late usage frame carries the failed
+/// response's numbers, and must not cut the 15 short). Retry and usage at 0:00, going and shown
+/// at 6:00, going at 14:59, ended at 15:00 on the retry's limit, with no `AgentRetryEnded`.
 #[test]
-fn any_other_frame_ends_the_wait_and_the_plain_limit_runs_from_it() {
+fn a_usage_frame_does_not_end_the_wait() {
     let lines = [
         PROMPT.to_owned(),
         retry("service", CLAUDE_TITLE, CLAUDE_DETAILS),
@@ -272,14 +280,94 @@ fn any_other_frame_ends_the_wait_and_the_plain_limit_runs_from_it() {
         CANCELLED.to_owned(),
     ];
     let probe = ReachProbe::fixed(true);
-    let (mut rig, thread, _) = start("retry-over", Some(AgentKind::Claude), &lines, probe);
+    let (mut rig, thread, _) = start("retry-usage", Some(AgentKind::Claude), &lines, probe);
     let turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 2);
     release_one(&mut rig);
+    release_one(&mut rig);
+    assert!(
+        retrying(&mut rig, thread).is_some(),
+        "the usage leaves the wait"
+    );
     wait_steps(&mut rig, thread, 12, QUIET_WAIT);
     assert!(going(&rig, thread), "still going at 6:00");
+    assert!(retrying(&mut rig, thread).is_some(), "still shown at 6:00");
+    // 6:00 + 9 min: 14:30, then the last second before 15:00.
+    let log = silent_until(&mut rig, thread, 9);
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    assert!(failure_detail(&log).contains("for 15 min "));
+    assert_eq!(retry_events(&log), [Some(CLAUDE_TITLE.to_owned())]);
+    rig.finish();
+}
+
+/// A retry, a usage update, then 6 silent minutes and the answer: the turn survives, as it
+/// does without the usage between.
+#[test]
+fn a_retry_usage_six_silent_minutes_and_an_answer_leave_the_turn_going() {
+    let lines = [
+        PROMPT.to_owned(),
+        chunk("Clause five says"),
+        retry("service", CLAUDE_TITLE, CLAUDE_DETAILS),
+        usage(),
+        chunk(" the buyer pays."),
+        END_TURN.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, _) = start("retry-usage-answer", Some(AgentKind::Claude), &lines, probe);
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 5);
     release_one(&mut rig);
-    assert_eq!(retrying(&mut rig, thread), None, "the usage ends the wait");
+    assert_eq!(retrying(&mut rig, thread), None, "no wait before the retry");
+    release_one(&mut rig);
+    assert!(retrying(&mut rig, thread).is_some(), "the wait shows");
+    release_one(&mut rig);
+    assert!(
+        retrying(&mut rig, thread).is_some(),
+        "the usage leaves it shown"
+    );
+    wait_steps(&mut rig, thread, 12, QUIET_WAIT);
+    assert!(going(&rig, thread), "still going at 6:00");
+    assert!(retrying(&mut rig, thread).is_some(), "still shown at 6:00");
+    release_one(&mut rig);
+    assert_eq!(retrying(&mut rig, thread), None, "the answer ends the wait");
+    finish_turn(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(ended(&log, turn), (Some(StopReason::EndTurn), None));
+    assert_eq!(answer(&log, turn), "Clause five says the buyer pays.");
+    assert_eq!(retry_events(&log), [Some(CLAUDE_TITLE.to_owned()), None]);
+    rig.finish();
+}
+
+/// Work ends the wait: a tool call and its completion at 0:00, then 5 silent minutes with no
+/// tool open. The plain limit ends the turn at 5:00, not at the 15 the retry set.
+#[test]
+fn a_tool_call_ends_the_wait_and_the_plain_limit_runs_from_it() {
+    let done = update(&json!({
+        "sessionUpdate": "tool_call_update", "toolCallId": "t-9", "status": "completed"
+    }));
+    let lines = [
+        PROMPT.to_owned(),
+        retry("service", CLAUDE_TITLE, CLAUDE_DETAILS),
+        tool(),
+        done,
+        CANCELLED.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, _) = start("retry-tool", Some(AgentKind::Claude), &lines, probe);
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 3);
+    release_one(&mut rig);
+    assert!(retrying(&mut rig, thread).is_some(), "the wait shows");
+    release_one(&mut rig);
+    assert_eq!(
+        retrying(&mut rig, thread),
+        None,
+        "the tool call ends the wait"
+    );
+    release_one(&mut rig);
     let log = silent_until(&mut rig, thread, 5);
     assert_eq!(
         ended(&log, turn),
@@ -287,5 +375,37 @@ fn any_other_frame_ends_the_wait_and_the_plain_limit_runs_from_it() {
     );
     assert!(failure_detail(&log).contains("for 5 min "));
     assert_eq!(retry_events(&log), [Some(CLAUDE_TITLE.to_owned()), None]);
+    rig.finish();
+}
+
+/// (e) A repeat of the last retry's words logs nothing, and still restarts the 15: the repeat at
+/// 10:00 leaves one `AgentRetrying`, and the turn ends at 25:00 (going at 24:59).
+#[test]
+fn an_identical_retry_logs_nothing_and_restarts_the_clock() {
+    let lines = [
+        PROMPT.to_owned(),
+        retry("service", CLAUDE_TITLE, CLAUDE_DETAILS),
+        retry("service", CLAUDE_TITLE, CLAUDE_DETAILS),
+        CANCELLED.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, _) = start("retry-same", Some(AgentKind::Claude), &lines, probe);
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 2);
+    release_one(&mut rig);
+    let first = retrying(&mut rig, thread).expect("the wait shows");
+    wait_steps(&mut rig, thread, 20, QUIET_WAIT);
+    assert!(going(&rig, thread), "still going at 10:00");
+    release_one(&mut rig);
+    let shown = retrying(&mut rig, thread).expect("the wait still shows");
+    assert_eq!(shown, first, "the same words, from the same wait");
+    // 10:00 + 15:00.
+    let log = silent_until(&mut rig, thread, 15);
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    assert!(failure_detail(&log).contains("for 15 min "));
+    assert_eq!(retry_events(&log), [Some(CLAUDE_TITLE.to_owned())]);
     rig.finish();
 }

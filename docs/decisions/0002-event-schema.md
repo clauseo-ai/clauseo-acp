@@ -336,6 +336,10 @@ wait used to fold as a wait behind the thread's own turn, so `REDUCER_SCHEMA_VER
 as for the bumps above. No hold outlives the process: start-up logs a fresh `TurnQueued`
 without one for a turn whose last wait had one, so it shows as an ordinary queued message.
 
+The retry wait (`agent_retrying`, `agent_retry_ended`) adds the header's `retrying` field, a new
+view type with no change to an old one, and `REDUCER_SCHEMA_VERSION` goes from 14 to 15 (after
+#1286's 13 to 14): old snapshots are passed over, as for the bumps above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at

@@ -22,11 +22,15 @@
 //!   service (an AIR `sessionFailure` of severity `warning`, category `connection` or
 //!   `service`): such a wait can be minutes (Codex once waited 346 s with the model at capacity)
 //!   and no field says how long. The clock restarts at each such word, so each new retry gives
-//!   the full 15 minutes; the agent's next frame of any other kind ends the wait, restarting the
-//!   clock once more, and the plain limit holds again. The host logs `AgentRetrying` with the
-//!   agent's words at each retry, and `AgentRetryEnded` when the wait ends before the turn does
-//!   (the turn's end clears it in the view on its own). Probes and a lost connection's watch run
-//!   as they would.
+//!   the full 15 minutes, unless the word repeats the last one logged for the wait (then the
+//!   clock restarts and nothing is logged). The agent's next work (answer or thought text, a tool
+//!   call, a plan, a compaction, a permission request, a limit) ends the wait, restarting the
+//!   clock once more, and the plain limit holds again. A frame that does no work (usage,
+//!   commands, config options, a mode or a title) does not end it: a late title or a usage
+//!   update with the failed response's numbers must not cut the 15 minutes short. The host logs
+//!   `AgentRetrying` with the agent's words at each new retry, and `AgentRetryEnded` when the
+//!   wait ends before the turn does (the turn's end clears it in the view on its own). Probes and
+//!   a lost connection's watch run as they would.
 //!
 //! Off in unit tests unless a test turns it on (`TurnPath::quiet_watch`), like the real probe.
 
@@ -70,9 +74,10 @@ pub(in crate::actor::turn) struct QuietClock {
     /// A compaction of the turn started and has not ended: it holds the backstop off, up to
     /// [`TOOL_LIMIT`] from `last_output`.
     compacting: bool,
-    /// The agent said it waits to retry and has sent nothing else since: the backstop waits
-    /// [`RETRY_LIMIT`] from `last_output`, which that word set.
-    retrying: bool,
+    /// The agent said it waits to retry and has sent no work since: the backstop waits
+    /// [`RETRY_LIMIT`] from `last_output`, which that word set. Holds the words last logged for
+    /// this wait, so a repeat of them logs nothing.
+    retrying: Option<Retrying>,
 }
 
 impl QuietClock {
@@ -82,7 +87,7 @@ impl QuietClock {
         Self {
             last_output: started,
             compacting: false,
-            retrying: false,
+            retrying: None,
         }
     }
 }
@@ -137,8 +142,9 @@ pub(in crate::actor::turn) fn ask_ended(actor: &mut Actor, thread: ThreadId) {
 
 /// The agent of `thread` said it waits to retry its service, with `origin` when the word came
 /// as an update of a known turn (a lost connection), else `None` (a `service` warning, which
-/// names no turn). During the live turn, with no failure yet, the clock restarts, the wait
-/// begins or goes on, and `AgentRetrying` logs the agent's words for the view.
+/// names no turn). During the live turn, with no failure yet, the clock restarts and the wait
+/// begins or goes on. `AgentRetrying` logs the agent's words for the view, unless the wait is
+/// already on with the same title and details as last logged: a repeat says nothing new.
 pub(in crate::actor::turn) fn retrying(
     actor: &mut Actor,
     thread: ThreadId,
@@ -160,7 +166,17 @@ pub(in crate::actor::turn) fn retrying(
         return;
     }
     current.quiet.last_output = now;
-    let again = std::mem::replace(&mut current.quiet.retrying, true);
+    let again = current.quiet.retrying.is_some();
+    if current.quiet.retrying.as_ref() == Some(retry) {
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            by = "retry",
+            "the agent repeats its retry; the clock restarts and nothing new is logged"
+        );
+        return;
+    }
+    current.quiet.retrying = Some(retry.clone());
     let turn = current.turn;
     tracing::info!(
         target: LIFECYCLE,
@@ -177,17 +193,19 @@ pub(in crate::actor::turn) fn retrying(
     log(actor, thread, event.into());
 }
 
-/// The agent of `thread`'s live `turn` sent a frame other than a retry: a wait to retry ends,
-/// the clock restarts (so the plain limit runs from the frame that ended the wait, not from
-/// the last retry), and `AgentRetryEnded` tells the view. With no wait, nothing happens.
+/// The agent of `thread`'s live `turn` sent work (answer or thought text, a tool call, a plan, a
+/// compaction, a permission request, a limit): a wait to retry ends, the clock
+/// restarts (so the plain limit runs from the work that ended the wait, not from the last
+/// retry), and `AgentRetryEnded` tells the view. With no wait, nothing happens. A frame that
+/// does no work (usage, commands, config options, a mode or a title) does not end the wait.
 pub(in crate::actor::turn) fn retry_over(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let now = actor.now().mono;
-    let Some(current) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.live() && current.quiet.retrying)
-    else {
+    let Some(current) = current(actor, thread).filter(|current| {
+        current.turn == turn && current.live() && current.quiet.retrying.is_some()
+    }) else {
         return;
     };
-    current.quiet.retrying = false;
+    current.quiet.retrying = None;
     current.quiet.last_output = now;
     tracing::info!(target: LIFECYCLE, %thread, by = "retry", "the agent's wait to retry is over");
     log(actor, thread, AgentRetryEnded { turn }.into());
@@ -238,7 +256,7 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
     }
     // A wait to retry has its own limit; a compaction in progress holds the backstop (not the
     // probes) off up to the same cap as a tool call.
-    let limit = if current.quiet.retrying {
+    let limit = if current.quiet.retrying.is_some() {
         RETRY_LIMIT
     } else if current.quiet.compacting {
         TOOL_LIMIT
