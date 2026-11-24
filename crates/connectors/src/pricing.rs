@@ -63,6 +63,44 @@ pub struct Pricing {
     /// Credits granted when an account is claimed.
     #[serde(default, deserialize_with = "de::opt_int")]
     pub starter_credits_on_claim: Option<i64>,
+    /// What one research question costs, by the connector's own estimate; `None` from a
+    /// connector that does not send it. Carried as sent: the app computes no estimate.
+    #[serde(default, deserialize_with = "de::opt_object")]
+    pub research_question: Option<ResearchQuestion>,
+}
+
+/// `pricing.json`'s `research_question`: the connector's estimate of one research question.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ResearchQuestion {
+    /// Credits one research question takes.
+    #[serde(default, deserialize_with = "de::int")]
+    pub credits: i64,
+    /// Rupees with GST, as written.
+    #[serde(default, deserialize_with = "de::text")]
+    pub gross_inr: String,
+    /// The actions the estimate assumes; `None` when it is missing or not an object.
+    #[serde(default, deserialize_with = "de::opt_object")]
+    pub basis: Option<ResearchQuestionBasis>,
+}
+
+/// The actions one research question is estimated to take, as the connector counts them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ResearchQuestionBasis {
+    /// Pages of results for new searches.
+    #[serde(default, deserialize_with = "de::int")]
+    pub new_search_pages: i64,
+    /// Pages of results for repeated searches.
+    #[serde(default, deserialize_with = "de::int")]
+    pub repeat_search_pages: i64,
+    /// Judgments opened.
+    #[serde(default, deserialize_with = "de::int")]
+    pub judgment_opens: i64,
+    /// Credits spent reading.
+    #[serde(default, deserialize_with = "de::int")]
+    pub read_credits: i64,
+    /// Pages of citator results.
+    #[serde(default, deserialize_with = "de::int")]
+    pub citator_pages: i64,
 }
 
 /// `pricing.json`'s `status`.
@@ -114,6 +152,13 @@ pub struct Pack {
     /// Rupees with GST, as written.
     #[serde(default, deserialize_with = "de::text")]
     pub gross_inr: String,
+    /// About how many research questions it buys, by the connector's estimate; `None` from a
+    /// connector that does not send it.
+    #[serde(default, deserialize_with = "de::opt_int")]
+    pub research_questions: Option<i64>,
+    /// The same in the connector's words (`about 5 research questions`), shown as written.
+    #[serde(default, deserialize_with = "de::opt_text")]
+    pub research_questions_text: Option<String>,
 }
 
 /// `pricing.json` with the one field kept outside [`Pricing`].

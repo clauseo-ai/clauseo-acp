@@ -34,7 +34,9 @@ fn the_commands_publish_the_state_and_no_token_reaches_the_app() {
         Some(&PackView {
             pack: "200".to_owned(),
             credits: 200,
-            paise: 2_360
+            paise: 2_360,
+            research_questions: None,
+            research_questions_text: None,
         })
     );
     assert!(state.available && !state.locked);
@@ -57,6 +59,7 @@ fn the_commands_publish_the_state_and_no_token_reaches_the_app() {
                 credits,
                 paise,
                 as_of,
+                ..
             }),
         low,
         method,

@@ -5,7 +5,7 @@ use super::*;
 use clauseo_protocol::{
     Balance, ConnectorCommand, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus,
     ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome,
-    RedactedString, Timestamp,
+    RedactedString, ResearchQuestionBasis, ResearchQuestionView, Timestamp,
 };
 use zeroize::Zeroizing;
 
@@ -25,6 +25,8 @@ pub(super) fn connectors_state() -> ConnectorsState {
                 pack: "pack_200".to_owned(),
                 credits: 200,
                 paise: 2_360,
+                research_questions: Some(0),
+                research_questions_text: Some("less than one research question".to_owned()),
             }],
             recent_spend: Some(RecentSpend {
                 today_credits: 40,
@@ -41,6 +43,8 @@ pub(super) fn connectors_state() -> ConnectorsState {
                     credits: 1_180,
                     paise: Some(13_924),
                     as_of: Some(Timestamp::new(1_762_400_000_000).unwrap()),
+                    research_questions: Some(2),
+                    research_questions_text: Some("about 2 research questions".to_owned()),
                 }),
                 low: false,
                 method: Some(ConnectorSignInMethod::Account),
@@ -48,6 +52,17 @@ pub(super) fn connectors_state() -> ConnectorsState {
             pay_url: Some("https://data.clauseo.chat/pay/rch_01".to_owned()),
             last_recharge: Some(RechargeOutcome::Paid),
             left_in_keychain: false,
+            research_question: Some(ResearchQuestionView {
+                credits: 400,
+                paise: Some(4_720),
+                basis: Some(ResearchQuestionBasis {
+                    new_search_pages: 10,
+                    repeat_search_pages: 5,
+                    judgment_opens: 30,
+                    read_credits: 60,
+                    citator_pages: 4,
+                }),
+            }),
         }],
     }
 }

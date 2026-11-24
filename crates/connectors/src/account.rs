@@ -37,6 +37,11 @@ pub struct Account {
     pub claimed: bool,
     /// Credits per action.
     pub prices: BTreeMap<String, i64>,
+    /// About how many research questions the balance buys, by the connector's estimate; `None`
+    /// from a connector that does not send it.
+    pub research_questions: Option<i64>,
+    /// The same in the connector's words (`about 5 research questions`), shown as written.
+    pub research_questions_text: Option<String>,
     /// When this copy was fetched.
     pub fetched_at: SystemTime,
 }
@@ -72,6 +77,10 @@ struct AccountIn {
     claimed: bool,
     #[serde(default, deserialize_with = "de::prices")]
     prices: BTreeMap<String, i64>,
+    #[serde(default, deserialize_with = "de::opt_int")]
+    research_questions: Option<i64>,
+    #[serde(default, deserialize_with = "de::opt_text")]
+    research_questions_text: Option<String>,
 }
 
 /// Parses the account answer, fetched at `fetched_at`.
@@ -102,6 +111,8 @@ pub(crate) fn parse_account(
         open_payment,
         claimed: wire.claimed,
         prices: wire.prices,
+        research_questions: wire.research_questions,
+        research_questions_text: wire.research_questions_text,
         fetched_at,
     })
 }

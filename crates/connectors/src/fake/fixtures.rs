@@ -35,10 +35,18 @@ const FILES: &[(&str, &str)] = &[
         "pricing-preview.json",
         include_str!("../../fixtures/pricing-preview.json"),
     ),
+    (
+        "pricing-research-questions.json",
+        include_str!("../../fixtures/pricing-research-questions.json"),
+    ),
     ("account.json", include_str!("../../fixtures/account.json")),
     (
         "account-open-payment.json",
         include_str!("../../fixtures/account-open-payment.json"),
+    ),
+    (
+        "account-research-questions.json",
+        include_str!("../../fixtures/account-research-questions.json"),
     ),
     (
         "account-unknown-fields.json",

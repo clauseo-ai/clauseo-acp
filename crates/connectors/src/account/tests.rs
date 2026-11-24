@@ -4,6 +4,7 @@ use crate::recharge::RechargeStatus;
 
 const ACCOUNT: &[u8] = include_bytes!("../../fixtures/account.json");
 const UNKNOWN: &[u8] = include_bytes!("../../fixtures/account-unknown-fields.json");
+const QUESTIONS: &[u8] = include_bytes!("../../fixtures/account-research-questions.json");
 const OPEN: &[u8] = include_bytes!("../../fixtures/account-open-payment.json");
 
 fn at() -> SystemTime {
@@ -36,6 +37,8 @@ fn the_account_fixture_parses() {
     assert_eq!(account.prices["search_page"], 20);
     assert_eq!(account.prices["read_per_4000_tokens"], 1);
     assert_eq!(account.prices.len(), 7);
+    assert_eq!(account.research_questions, None);
+    assert_eq!(account.research_questions_text, None);
     assert_eq!(account.fetched_at, at());
 }
 
@@ -77,4 +80,25 @@ fn not_an_object_is_a_parse_error() {
             Err(Error::Parse(_))
         ));
     }
+}
+
+#[test]
+fn the_balance_estimate_parses_as_sent() {
+    let account = parse_account(QUESTIONS, &CASE_LAW, &Origin::Production, at()).unwrap();
+    assert_eq!(account.balance_credits, 2000);
+    assert_eq!(account.research_questions, Some(5));
+    assert_eq!(
+        account.research_questions_text.as_deref(),
+        Some("about 5 research questions")
+    );
+}
+
+#[test]
+fn a_balance_estimate_of_the_wrong_type_is_absent() {
+    let body = br#"{"balance_credits": 2000, "research_questions": [5],
+        "research_questions_text": null}"#;
+    let account = parse_account(body, &CASE_LAW, &Origin::Production, at()).unwrap();
+    assert_eq!(account.balance_credits, 2000);
+    assert_eq!(account.research_questions, None);
+    assert_eq!(account.research_questions_text, None);
 }

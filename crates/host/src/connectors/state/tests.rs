@@ -12,6 +12,8 @@ use clauseo_protocol::{
 
 use super::{CaseLaw, Failure, GrossRate, paise};
 
+mod research;
+
 /// The host's wall time `millis`.
 fn at(millis: i64) -> Timestamp {
     Timestamp::new(millis).unwrap()
@@ -80,6 +82,8 @@ fn account(credits: i64, inr: &str) -> Account {
         open_payment: None,
         claimed: true,
         prices: BTreeMap::new(),
+        research_questions: None,
+        research_questions_text: None,
         fetched_at: SystemTime::UNIX_EPOCH,
     }
 }
@@ -102,12 +106,16 @@ fn the_view_lists_a_live_connector_with_its_prices_in_paise() {
             PackView {
                 pack: "500".to_owned(),
                 credits: 500,
-                paise: 5_900
+                paise: 5_900,
+                research_questions: None,
+                research_questions_text: None,
             },
             PackView {
                 pack: "200".to_owned(),
                 credits: 200,
-                paise: 2_360
+                paise: 2_360,
+                research_questions: None,
+                research_questions_text: None,
             },
         ]
     );
@@ -144,6 +152,8 @@ fn the_view_shows_the_balance_low_and_out_of_credit() {
                 credits: 199,
                 paise: Some(2_348),
                 as_of: Some(at(1_000)),
+                research_questions: None,
+                research_questions_text: None,
             }),
             low: true,
             method: Some(ConnectorSignInMethod::ApiKey),
@@ -158,6 +168,8 @@ fn the_view_shows_the_balance_low_and_out_of_credit() {
                 credits: 200,
                 paise: Some(2_360),
                 as_of: Some(at(2_000)),
+                research_questions: None,
+                research_questions_text: None,
             }),
             low: false,
             method: Some(ConnectorSignInMethod::ApiKey),
@@ -327,6 +339,8 @@ fn the_view_prices_the_spend_and_balance_with_gst() {
             credits: 1_180,
             paise: Some(13_924),
             as_of: Some(at(5_000)),
+            research_questions: None,
+            research_questions_text: None,
         }
     );
     let unpriced = |state: &CaseLaw| {
