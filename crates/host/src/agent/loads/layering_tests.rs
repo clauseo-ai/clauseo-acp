@@ -206,8 +206,9 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
 }
 
 /// Forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, not the host's web rules and
-/// not the hook's own; the guard runs before every tool (`*`, MCP tools included) with
-/// `--ask-all` last. Without it the same inputs keep both as before.
+/// not the hook's own; the guard runs before every tool (MCP tools included: the write tools and
+/// the shell in an entry of their own, every other tool in one before it) with `--ask-all`
+/// last. Without it the same inputs keep both as before.
 #[test]
 fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
     let hook = json!({"claudeCode": {"options": {"allowedTools": ["Bash(git status)"]}}});
@@ -250,12 +251,20 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
         options["settings"]["sandbox"]["autoAllowBashIfSandboxed"],
         json!(false)
     );
-    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
-    assert_eq!(guard["matcher"], json!("*"));
-    assert_eq!(
-        guard["hooks"][0]["args"],
-        json!(["--pre-write-guard", "--matter", "/m", "--ask-all"])
-    );
+    let entries = options["settings"]["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap();
+    assert_eq!(entries.len(), 2, "{options}");
+    assert_eq!(entries[0]["matcher"], json!(super::other_tools_matcher()));
+    assert_eq!(entries[1]["matcher"], json!(super::GUARD_MATCHER));
+    for guard in entries {
+        assert_eq!(
+            guard["hooks"][0]["args"],
+            json!(["--pre-write-guard", "--matter", "/m", "--ask-all"])
+        );
+    }
+    assert_eq!(entries[0]["hooks"][0].get("onFailure"), None);
+    assert_eq!(entries[1]["hooks"][0]["onFailure"], json!("block"));
 
     let plain = meta_for(false);
     let options = &plain["claudeCode"]["options"];
@@ -270,12 +279,17 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
     let allowed = options["allowedTools"].as_array().unwrap();
     assert!(allowed.contains(&json!("Bash(git status)")), "{options}");
     assert!(allowed.contains(&json!("WebSearch")), "{options}");
-    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
+    let entries = options["settings"]["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap();
+    assert_eq!(entries.len(), 1, "{options}");
+    let guard = &entries[0];
     assert_eq!(guard["matcher"], json!(super::GUARD_MATCHER));
     assert_eq!(
         guard["hooks"][0]["args"],
         json!(["--pre-write-guard", "--matter", "/m"])
     );
+    assert_eq!(guard["hooks"][0]["onFailure"], json!("block"));
 }
 
 /// Forced ask keeps the hook's own `permissions` and `sandbox` keys and its ask rules, and adds
@@ -432,7 +446,7 @@ fn a_guard_that_cannot_go_has_a_reason() {
         let bad = Path::new(std::ffi::OsStr::from_bytes(b"/m\xff"));
         assert_eq!(guard_missing(guard(bad, matter)), Some("program_not_utf8"));
         assert_eq!(guard_missing(guard(program, bad)), Some("matter_not_utf8"));
-        assert_eq!(super::guard_entry(guard(program, bad).unwrap()), None);
+        assert_eq!(super::guard_entries(guard(program, bad).unwrap()), None);
     }
 }
 
