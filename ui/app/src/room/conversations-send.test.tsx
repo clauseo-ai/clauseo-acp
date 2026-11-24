@@ -37,7 +37,7 @@ const kinds = () =>
 const newRow = () =>
   h!
     .all("conversation")
-    .find((r) => r.querySelector(".room-conv-title")?.textContent === "New conversation");
+    .find((r) => r.querySelector(".room-conv-title")?.textContent === "Not started yet");
 
 test("create_thread refused: the draft row and the words stay, and nothing else is sent", async () => {
   h = await mountRoom({

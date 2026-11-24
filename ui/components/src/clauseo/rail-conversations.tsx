@@ -28,6 +28,8 @@ export type ConversationRowProps = {
   id: string;
   /** Its title, in the language. */
   title: string;
+  /** Optional: a conversation not started yet, whose title is a placeholder: muted, even while it is open. */
+  draft?: boolean | undefined;
   /** The plan it asks with, fixed after its first message: "Claude" or "ChatGPT". */
   agent: string;
   state?: ConversationState;
@@ -69,6 +71,7 @@ function ConversationRow({
   triage,
   replace,
   done = false,
+  draft = false,
   plan = true,
 }: ConversationRowProps & { plan?: boolean }) {
   const w = useMatterWords();
@@ -116,6 +119,7 @@ function ConversationRow({
         aria-current={current ? "true" : undefined}
         data-state={state}
         data-conversation={id}
+        data-draft={draft ? "" : undefined}
         data-testid={testId}
         title={hint}
         onClick={onOpen}

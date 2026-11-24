@@ -1,0 +1,11 @@
+{
+  "UC-1180": {
+    "en": "Not started yet",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Rail: the row under the open matter for a new conversation before its first message gives it a title; muted, and it stays muted while open. Was \"New conversation\", the same words as the + New conversation button beside it, so two identical labels showed at once (a Windows tester's finding). The button keeps its words; a thread with no title yet still says New conversation."
+  }
+}

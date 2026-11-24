@@ -91,6 +91,12 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   await h.click(h.one("new-conversation"));
   expect(h.transport.calls.slice(before).filter((c) => c.call === "dispatch")).toEqual([]);
   expect(kinds()).toEqual([]);
+  // the label before the first message: the draft's row says Not started yet, muted while it is open (UC-1180); the
+  // button beside the rows keeps its own words
+  const draft = rows().find((r) => r.getAttribute("aria-current") === "true");
+  expect(draft?.querySelector(".room-conv-title")?.textContent).toBe("Not started yet");
+  expect(draft?.hasAttribute("data-draft")).toBe(true);
+  expect(h.one("new-conversation")?.textContent).toBe("New conversation");
   const question = "What does clause nine of the lease say about notice to the bank?";
   await h.type(question);
   await h.key({ key: "Enter", keyCode: 13 });
@@ -108,7 +114,7 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   expect(rows()).toHaveLength(2);
 }, 30_000);
 
-test("the rows under the open matter: the draft says New conversation, a thread its title, the current one marked, the plan only where it differs", async () => {
+test("the rows under the open matter: the draft says Not started yet, a thread its title, the current one marked, the plan only where it differs", async () => {
   h = await mountRoom({
     threads: [thread(T1, { title: "Lease notice" }), thread(T2, { title: "Indemnity" })],
   });
@@ -131,7 +137,7 @@ test("the rows under the open matter: the draft says New conversation, a thread 
   expect(rowOf("Reply to notice")?.querySelector(".room-conv-plan")).toBeNull();
   await h.click(h.one("new-conversation"));
   const [draft, ...rest] = rows();
-  expect(draft?.querySelector(".room-conv-title")?.textContent).toBe("New conversation");
+  expect(draft?.querySelector(".room-conv-title")?.textContent).toBe("Not started yet");
   expect(draft?.getAttribute("aria-current")).toBe("true");
   expect(rest.map((r) => r.querySelector(".room-conv-title")?.textContent)).toEqual([
     "Indemnity",
@@ -202,13 +208,13 @@ test("a row not open says what it's doing: Answering., a question, waiting for i
   expect(rowOf("Indemnity")?.textContent).not.toContain("Lease notice");
 });
 
-test("in Hindi the draft says नई बातचीत", async () => {
+test("in Hindi the draft says Not started yet in English, its Hindi still to come (UC-1180)", async () => {
   h = await mountRoom({
     threads: [thread(T1, { title: "Lease notice" })],
     display: { language: "hi" },
   });
   await h.click(h.one("new-conversation"));
-  expect(rows()[0]?.querySelector(".room-conv-title")?.textContent).toBe("नई बातचीत");
+  expect(rows()[0]?.querySelector(".room-conv-title")?.textContent).toBe("Not started yet");
 });
 
 /* ---------- H13: Retry from here ---------- */
@@ -312,7 +318,7 @@ test("RetryFromHere: a press calls retry(message, at) once, even pressed twice b
 
 const field = () => h!.one("composer") as HTMLTextAreaElement | null;
 const newRow = () =>
-  rows().find((r) => r.querySelector(".room-conv-title")?.textContent === "New conversation");
+  rows().find((r) => r.querySelector(".room-conv-title")?.textContent === "Not started yet");
 
 test("each conversation keeps its own words in the field", async () => {
   h = await mountRoom({

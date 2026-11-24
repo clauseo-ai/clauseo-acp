@@ -38,7 +38,7 @@ const pair = () => h!.host.querySelector(".room-pair button[aria-expanded]");
 const newRow = () =>
   h!
     .all("conversation")
-    .find((r) => r.querySelector(".room-conv-title")?.textContent === "New conversation");
+    .find((r) => r.querySelector(".room-conv-title")?.textContent === "Not started yet");
 
 /** A media query that matches, or not, for the window's width. */
 function stubMedia(matches: boolean) {

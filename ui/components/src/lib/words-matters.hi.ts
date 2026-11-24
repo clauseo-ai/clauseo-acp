@@ -92,6 +92,8 @@ export const HI = {
     "यहाँ पूछा गया हर प्रश्न, अपने संस्करणों के साथ, किसी भी मामले की तरह रखा जाता है।",
   /* ---------- conversations inside a matter ---------- */
   "New conversation": "नई बातचीत",
+  // UC-1180: a draft's row until its first message gives it a title (the button keeps New conversation)
+  "Not started yet": null,
   "Conversations in {name}": "{name} की बातचीत",
   "Actions for {title}": "{title} के विकल्प",
   "Continue with {agent}": "{agent} के साथ जारी रखें",

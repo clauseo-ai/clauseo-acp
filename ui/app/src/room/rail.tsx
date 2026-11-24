@@ -9,11 +9,12 @@
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
 // and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation,
-// in rail-order.ts's order (what needs the lawyer, then what's answering, then the rest): a draft, or a thread with no
-// title yet, says "New conversation"; a row not open says what it's doing. Snooze and Done
-// (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
-// sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
-// or the window came back, so a snooze whose time has come ends at the next render with no timer.
+// in rail-order.ts's order (what needs the lawyer, then what's answering, then the rest): a draft says "Not started
+// yet", muted, and a thread with no title yet says "New conversation"; a row not open says what it's doing.
+// Snooze and Done (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed
+// shelf; the morning sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment
+// the pointer came or went, or the window came back, so a snooze whose time has come ends at the next render with
+// no timer.
 import {
   Suspense,
   useEffect,
@@ -88,7 +89,10 @@ function conversationRows(
   matter?: MatterStatus,
 ): ConversationRowProps[] {
   const untitled = mt(lang, "New conversation");
-  const titleOf = (row: ConversationRow | undefined) => row?.title ?? untitled;
+  // a draft has no title yet: its row says so, not the same words as the button that makes it (New conversation)
+  const notStarted = mt(lang, "Not started yet");
+  const titleOf = (row: ConversationRow | undefined) =>
+    row?.title ?? (row?.thread === null ? notStarted : untitled);
   return talks.rows.map((row) => {
     const words = rowWords(row, matter);
     const stopped = words.state === "stopped" ? clockOf(words.at, now, zone, lang) : null;
@@ -105,6 +109,7 @@ function conversationRows(
     return {
       id: row.key,
       title: titleOf(row),
+      draft: row.thread === null,
       agent: planName(row.agent ?? talks.agent, talks.agents),
       state,
       ...extra,
