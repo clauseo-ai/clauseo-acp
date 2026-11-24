@@ -1,6 +1,7 @@
 //! Agent traffic into `protocol`'s types: one function per thing, no I/O and no state.
 
 mod content;
+mod describe;
 mod limit;
 mod session;
 mod too_long;
@@ -19,6 +20,7 @@ use serde_json::Value;
 use crate::event::{AcpEvent, AgentUpdate, MessageRole, Origin, ProtocolWarning};
 
 pub(crate) use content::{prompt_block, split_text};
+pub use describe::model_line;
 pub(crate) use limit::{Failure, session_failure};
 pub(crate) use session::{agent_info, config_options, modes, stop_reason};
 pub(crate) use too_long::rpc_says_too_long;

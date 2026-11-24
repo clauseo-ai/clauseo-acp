@@ -112,6 +112,7 @@ pub use event::{
     MessageRole, Origin, PendingKey, ProtocolWarning, RawFrame, ToolCall,
 };
 pub use line::{ReadMark, ReadProgress};
+pub use map::model_line;
 pub use types::{
     AgentInfo, AuthKind, AuthMethod, ConnectOptions, LoadSession, McpServer, NewSession, PromptEnd,
     SessionMode, SessionModes, SessionStart, SteerResult, TooLong,
