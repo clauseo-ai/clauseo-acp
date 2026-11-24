@@ -8,7 +8,8 @@
 //! - a write call another answer made that was refused does not name it on a card;
 //! - a paper a failed turn's end logged as an outside edit is off the cards of the turns still
 //!   running beside it while it holds what was logged;
-//! - those outside edits keep the ones the lawyer made, already logged on that checkpoint;
+//! - those outside edits keep the ones the lawyer made, already logged on that checkpoint, even
+//!   when the end waited for a limits read while another answer's checkpoint took them;
 //! - a paper no answer named that changes while two run is on both cards, flagged (ADR 0011).
 
 use clauseo_protocol::{
@@ -20,7 +21,7 @@ use clauseo_reducer::StreamState;
 use super::rig::Rig;
 use super::together_order::{WRITES, card, prompt_answer_of, send_prompt};
 use crate::actor::input::{Input, MatterTag};
-use crate::actor::turn::{JobKind, TurnJob, TurnPhase};
+use crate::actor::turn::{JobKind, TurnJob, TurnPhase, end};
 use crate::error::Error;
 use crate::matter_worker::{MatterReply, hook};
 
@@ -247,6 +248,97 @@ fn a_failed_answers_outside_edits_keep_the_lawyers_on_that_version() {
 
     // B's after-turn checkpoint fails: b.txt joins memo.txt on A's start, the lawyer's edit kept.
     fail_b(&mut rig, second, turn_b);
+    assert_eq!(
+        version_files(&mut rig, a_before),
+        ["memo.txt", "notes/b.txt"]
+    );
+    rig.finish();
+}
+
+/// Whether `input` answers a `kind` checkpoint of `thread`'s turn.
+fn checkpoint_answer_of(thread: ThreadId, before: bool, input: &Input) -> bool {
+    let Input::Matter {
+        tag: MatterTag::Turn(job),
+        ..
+    } = input
+    else {
+        return false;
+    };
+    job.thread == thread && matches!(job.kind, JobKind::Before(_)) == before
+}
+
+#[test]
+fn outside_edits_logged_after_a_limits_read_keep_the_lawyers_on_that_version() {
+    let mut rig = Rig::start("together-absorbed-read", WRITES);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    rig.write_file("brief.txt", "The lease ends in May.");
+    // B writes notes/b.txt; its prompt's answer is held, so B runs on.
+    let turn_b = send_prompt(&mut rig, 10, second, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| {
+        prompt_answer_of(second, input)
+    });
+    let prompt_b = rig.held.pop().expect("B's prompt answer");
+    // The lawyer edits memo.txt; A starts beside B. Its before-turn checkpoint (taken before B's
+    // after-turn one) holds b.txt and memo.txt; its answer is held.
+    rig.write_file("memo.txt", "Call the landlord.");
+    let start_a = HostCommand::SendPrompt {
+        thread: first,
+        content: vec![clauseo_protocol::PromptBlock::Text {
+            text: "Write A.".to_owned(),
+        }],
+        delivery: clauseo_protocol::DeliveryRequest::Queue,
+    };
+    rig.dispatch_holding(11, start_a, |_, input| {
+        checkpoint_answer_of(first, true, input)
+    })
+    .unwrap();
+    if rig.held.is_empty() {
+        rig.hold_next("A's before-turn checkpoint", |_, input| {
+            checkpoint_answer_of(first, true, input)
+        });
+    }
+    let before_a = rig.held.pop().expect("A's before-turn answer");
+    // B's end waits for a limits read (the Codex fallback). Its after-turn checkpoint fails and
+    // the answer is held for the read; nothing is absorbed yet, so no log is read for it.
+    let current = rig.actor.threads.get_mut(&second).unwrap();
+    current.turn.current.as_mut().unwrap().limit_read = Some(end::LimitRead::default());
+    rig.actor.on_input(prompt_b);
+    rig.hold_next("B's after-turn checkpoint", |_, input| {
+        checkpoint_answer_of(second, false, input)
+    });
+    let Some(Input::Matter { matter, tag, .. }) = rig.held.pop() else {
+        panic!("B's after-turn checkpoint is not held");
+    };
+    let failed = Err(Error::Internal("a test fails this checkpoint".to_owned()));
+    rig.actor.on_input(Input::Matter {
+        matter,
+        tag,
+        reply: MatterReply::AfterTurn(failed),
+    });
+    rig.run_until("B's answer held for its read", |actor| {
+        let current = actor.threads[&second].turn.current.as_deref();
+        let read = current.and_then(|current| current.limit_read.as_ref());
+        read.is_some_and(end::LimitRead::holds_checkpoint)
+    });
+    // A's start logs memo.txt as an outside edit on its before-turn checkpoint and leaves b.txt
+    // to B, absorbed: B's to log should it end with no card.
+    rig.actor.on_input(before_a);
+    until_ended(&mut rig, &[first]);
+    let a_before = rig
+        .log(first)
+        .iter()
+        .find_map(|event| {
+            let DomainEvent::TurnStarted(started) = event else {
+                return None;
+            };
+            (started.turn != turn_b).then_some(started.checkpoint_before)
+        })
+        .expect("A started");
+    assert_eq!(version_files(&mut rig, a_before), ["memo.txt"]);
+
+    // The read is over: B ends with no card, b.txt joins memo.txt on A's start.
+    end::on_limit_read_timer(&mut rig.actor, second, turn_b);
+    until_ended(&mut rig, &[second]);
     assert_eq!(
         version_files(&mut rig, a_before),
         ["memo.txt", "notes/b.txt"]
