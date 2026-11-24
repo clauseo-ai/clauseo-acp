@@ -2,7 +2,9 @@
 //! Codex: a new thread's prefs that its first list lacks are kept and told once
 //! (`pickers-kept-created-unlisted`); a model pick keeps the effort the agent answered with,
 //! picked at once (`pickers-kept-effort-picked`) or while the session starts
-//! (`pickers-kept-effort-waiting`), then `pickers-kept-effort-restored`.
+//! (`pickers-kept-effort-waiting`), then `pickers-kept-effort-restored`; and a set-back that
+//! fails with another error than -32602 is told once, with codex-acp's resume warning left out
+//! (`pickers-kept-setback-failed`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -18,7 +20,7 @@ use crate::matters::summary;
 use crate::pickers::{picks, set};
 use crate::pickers_early::{Gate, sent};
 use crate::pickers_idle::started_and_notices;
-use crate::pickers_kept::{created, idle_thread, names, run, stop_idle};
+use crate::pickers_kept::{LUNA_LOW, created, idle_thread, names, notice_texts, run, stop_idle};
 use crate::support::{Dir, Running, Scenario, send_prompt, wait};
 
 /// The matter's prefs for Codex: `pairs`.
@@ -160,4 +162,32 @@ fn a_model_pick_waiting_for_the_session_keeps_the_effort_the_agent_answered_with
     assert_eq!(notices, [], "{}", events.dump());
     host.shutdown();
     restored_on_luna_and_high(&dir, thread);
+}
+
+/// The relaunch's set of the kept gpt-6-luna fails with an internal error (-32603), not a
+/// refusal: the second answer says once that it runs GPT-6, the third nothing, codex-acp's
+/// resume warning is left out (ours says it).
+#[test]
+fn a_set_back_that_fails_otherwise_is_told_once() {
+    let dir = Dir::new(
+        "pickers_kept_setback_failed",
+        &[(CODEX, Scenario::Local("pickers-kept-setback-failed"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    host.settle();
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6", "Low"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "Low")], "{}", events.dump());
+    assert_eq!(started_and_notices(&events, third).0, names("GPT-6", "Low"));
+    assert_eq!(notice_texts(&events).len(), 1, "{}", events.dump());
+    host.shutdown();
 }

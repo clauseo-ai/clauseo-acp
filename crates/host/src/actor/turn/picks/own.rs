@@ -18,7 +18,8 @@
 //!   ([`seed_first`]), what the lawyer saw in the header at its first answer.
 //! - A drop ("not listed" or "refused") never touches them, and leaves them in the matter's
 //!   prefs (`picks::after`), so each session start tries them again and a list that has them
-//!   again gets them back without a notice.
+//!   again gets them back without a notice. A start that fails to set one back, for whatever
+//!   reason, tells it once (`pick_not_used`).
 //! - codex-acp's warning that a resumed session runs on another model than it was recorded with
 //!   is left out for a thread that keeps a model ([`drops_resume_warning`]): the start sets the
 //!   kept model back, or Clauseo's own notice says it could not, so the lawyer gets one notice
