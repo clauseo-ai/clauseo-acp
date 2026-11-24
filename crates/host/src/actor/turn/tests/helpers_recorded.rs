@@ -1,4 +1,4 @@
-//! Helpers from recorded frames played through the ACP reader (fake_agent and the files in
+//! Helpers from recorded frames played through the ACP reader (`fake_agent` and the files in
 //! `recorded/`, taken from live runs of claude-agent-acp 0.110.1 on Claude Code 2.1.330, the
 //! matter folder put as `{{cwd}}`): a background helper that hands back; two foreground helpers
 //! at once, each handing back while its launch call only points at the handback; a helper cut at
@@ -31,19 +31,15 @@ fn steps_by_helper(log: &[DomainEvent]) -> Vec<(String, String)> {
     let mut helpers: HashMap<HelperId, CompactString> = HashMap::new();
     let mut steps = Vec::new();
     for event in log {
-        match event {
-            DomainEvent::HelperStarted(started) => {
-                helpers.insert(started.helper, started.acp_id.clone());
-            }
-            DomainEvent::ToolCallStarted(started) => {
-                let helper = started
-                    .helper
-                    .and_then(|helper| helpers.get(&helper))
-                    .map(ToString::to_string)
-                    .unwrap_or_default();
-                steps.push((started.acp_id.to_string(), helper));
-            }
-            _ => {}
+        if let DomainEvent::HelperStarted(started) = event {
+            helpers.insert(started.helper, started.acp_id.clone());
+        } else if let DomainEvent::ToolCallStarted(started) = event {
+            let helper = started
+                .helper
+                .and_then(|helper| helpers.get(&helper))
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            steps.push((started.acp_id.to_string(), helper));
         }
     }
     steps
@@ -52,21 +48,21 @@ fn steps_by_helper(log: &[DomainEvent]) -> Vec<(String, String)> {
 /// Each helper end's outcome and summary text (`<blob>` for a blob), in log order.
 fn ends(log: &[DomainEvent]) -> Vec<String> {
     log.iter()
-        .filter_map(|event| match event {
-            DomainEvent::HelperEnded(ended) => {
-                let summary = match &ended.summary {
-                    Some(TextOrBlob::Inline(text)) => text.clone(),
-                    Some(TextOrBlob::Blob(_)) => "<blob>".to_owned(),
-                    None => "-".to_owned(),
-                };
-                Some(format!("{:?} {summary}", ended.outcome))
-            }
-            _ => None,
+        .filter_map(|event| {
+            let DomainEvent::HelperEnded(ended) = event else {
+                return None;
+            };
+            let summary = match &ended.summary {
+                Some(TextOrBlob::Inline(text)) => text.clone(),
+                Some(TextOrBlob::Blob(_)) => "<blob>".to_owned(),
+                None => "-".to_owned(),
+            };
+            Some(format!("{:?} {summary}", ended.outcome))
         })
         .collect()
 }
 
-/// The recorded frames themselves (fake_agent's `claude-helper-background` scenario) through
+/// The recorded frames themselves (`fake_agent`'s `claude-helper-background` scenario) through
 /// the ACP reader: the helper starts from the `Agent` call's input, takes both stamped `Read`
 /// steps and ends `Done` with its handback's digest; the handback is no step.
 #[test]
@@ -77,7 +73,7 @@ fn the_recorded_background_helper_ends_on_its_handback() {
     let steps: String = scenario
         .lines()
         .skip(2)
-        .map(|line| format!("{line}\n"))
+        .flat_map(|line| [line, "\n"])
         .collect();
     let mut rig = Rig::start("helpers-recorded", &steps);
     let thread = rig.thread();
@@ -105,24 +101,25 @@ fn order(log: &[DomainEvent]) -> Vec<String> {
     let mut seen = Vec::new();
     let mut lines = Vec::new();
     for event in log {
-        match event {
-            DomainEvent::ToolCallStarted(started) => {
-                let mark = if started.helper.is_some() {
-                    "helper"
-                } else {
-                    "-"
-                };
-                lines.push(format!("step {} {mark}", started.acp_id));
-            }
-            DomainEvent::HelperStarted(started) => lines.push(format!("start {}", started.name)),
-            DomainEvent::HelperEnded(ended) => lines.push(format!("end {:?}", ended.outcome)),
-            DomainEvent::TextAppended(text) if !seen.contains(&text.message) => {
-                seen.push(text.message);
-                let first: String = text.text.chars().take(14).collect();
-                lines.push(format!("text {first}"));
-            }
-            DomainEvent::TurnEnded(ended) => lines.push(format!("turn_ended {:?}", ended.stop)),
-            _ => {}
+        if let DomainEvent::ToolCallStarted(started) = event {
+            let mark = if started.helper.is_some() {
+                "helper"
+            } else {
+                "-"
+            };
+            lines.push(format!("step {} {mark}", started.acp_id));
+        } else if let DomainEvent::HelperStarted(started) = event {
+            lines.push(format!("start {}", started.name));
+        } else if let DomainEvent::HelperEnded(ended) = event {
+            lines.push(format!("end {:?}", ended.outcome));
+        } else if let DomainEvent::TextAppended(text) = event
+            && !seen.contains(&text.message)
+        {
+            seen.push(text.message);
+            let first: String = text.text.chars().take(14).collect();
+            lines.push(format!("text {first}"));
+        } else if let DomainEvent::TurnEnded(ended) = event {
+            lines.push(format!("turn_ended {:?}", ended.stop));
         }
     }
     lines

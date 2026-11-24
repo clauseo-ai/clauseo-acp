@@ -5,8 +5,8 @@ use clauseo_protocol::{ContentBlock, TextOrBlob, ToolCallContent, ToolCallPatch,
 
 use super::{Input, defined_model, delivered, input_of, is_handback, is_launch, text_of};
 
-fn inline(text: &str) -> Option<TextOrBlob> {
-    Some(TextOrBlob::Inline(text.to_owned()))
+fn inline(text: &str) -> TextOrBlob {
+    TextOrBlob::Inline(text.to_owned())
 }
 
 fn text_content(text: &str) -> Vec<ToolCallContent> {
@@ -31,7 +31,7 @@ fn the_agent_and_task_tools_launch_and_the_handback_ends() {
 #[test]
 fn a_launch_input_gives_the_name_label_and_task() {
     let raw = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
-    let input = input_of(inline(raw).as_ref()).unwrap();
+    let input = input_of(Some(&inline(raw))).unwrap();
     assert_eq!(input.name.as_deref(), Some("paper-reader"));
     assert_eq!(input.label.as_deref(), Some("Digest lease and notice"));
     assert!(
@@ -49,7 +49,7 @@ fn a_launch_input_gives_the_name_label_and_task() {
 fn a_launch_input_without_a_type_takes_its_name_and_model() {
     let raw =
         r#"{"name":"checker","prompt":"Check it.","model":"sonnet","run_in_background":true}"#;
-    let input = input_of(inline(raw).as_ref()).unwrap();
+    let input = input_of(Some(&inline(raw))).unwrap();
     assert_eq!(
         input,
         Input {
@@ -64,9 +64,9 @@ fn a_launch_input_without_a_type_takes_its_name_and_model() {
 
 #[test]
 fn an_input_that_names_no_helper_nor_task_is_not_a_launch_input() {
-    assert_eq!(input_of(inline("{}").as_ref()), None);
-    assert_eq!(input_of(inline(r#"{"description":"x"}"#).as_ref()), None);
-    assert_eq!(input_of(inline("not json").as_ref()), None);
+    assert_eq!(input_of(Some(&inline("{}"))), None);
+    assert_eq!(input_of(Some(&inline(r#"{"description":"x"}"#))), None);
+    assert_eq!(input_of(Some(&inline("not json"))), None);
     assert_eq!(input_of(None), None);
 }
 

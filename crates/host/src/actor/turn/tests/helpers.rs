@@ -1,6 +1,6 @@
 //! Helpers through the turn path (`turn/helpers.rs`), with Claude's frames put in as the ACP
 //! reader hands them over (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`), shaped as
-//! the recorded run has them (fake_agent's `claude-helper-background` scenario): one background
+//! the recorded run has them (`fake_agent`'s `claude-helper-background` scenario): one background
 //! helper with two steps and words that hands back; a refused handback, then one that lands; two
 //! foreground helpers interleaved, one failing; a Stop with two open; a turn that ends with one
 //! still open; a step stamped with a helper never started; a replayed frame. The ends a run's
@@ -206,41 +206,36 @@ pub(super) fn story(log: &[DomainEvent]) -> Vec<String> {
     };
     let mut lines = Vec::new();
     for event in log {
-        match event {
-            DomainEvent::ToolCallStarted(started) => {
-                steps.insert(started.tool_call, started.acp_id.to_string());
-                let helper = name(&names, started.helper);
-                lines.push(format!("step {} {helper}", started.acp_id));
-            }
-            DomainEvent::HelperStarted(started) => {
-                names.insert(started.helper, started.name.to_string());
-                let call = started
-                    .call
-                    .and_then(|call| steps.get(&call).cloned())
-                    .unwrap_or_default();
-                let model = started.model.as_deref().unwrap_or("-");
-                let label = started.label.as_deref().unwrap_or("-");
-                let task = started.task.is_some();
-                lines.push(format!(
-                    "start {} call={call} model={model} label={label} task={task}",
-                    started.name
-                ));
-            }
-            DomainEvent::HelperText(text) => {
-                let helper = name(&names, Some(text.helper));
-                lines.push(format!("words {helper}: {}", text.text));
-            }
-            DomainEvent::HelperEnded(ended) => {
-                let helper = name(&names, Some(ended.helper));
-                let summary = match &ended.summary {
-                    Some(TextOrBlob::Inline(text)) => text.lines().next().unwrap_or("").to_owned(),
-                    Some(TextOrBlob::Blob(_)) => "<blob>".to_owned(),
-                    None => "-".to_owned(),
-                };
-                lines.push(format!("end {helper} {:?} {summary}", ended.outcome));
-            }
-            DomainEvent::TurnEnded(ended) => lines.push(format!("turn_ended {:?}", ended.stop)),
-            _ => {}
+        if let DomainEvent::ToolCallStarted(started) = event {
+            steps.insert(started.tool_call, started.acp_id.to_string());
+            let helper = name(&names, started.helper);
+            lines.push(format!("step {} {helper}", started.acp_id));
+        } else if let DomainEvent::HelperStarted(started) = event {
+            names.insert(started.helper, started.name.to_string());
+            let call = started
+                .call
+                .and_then(|call| steps.get(&call).cloned())
+                .unwrap_or_default();
+            let model = started.model.as_deref().unwrap_or("-");
+            let label = started.label.as_deref().unwrap_or("-");
+            let task = started.task.is_some();
+            lines.push(format!(
+                "start {} call={call} model={model} label={label} task={task}",
+                started.name
+            ));
+        } else if let DomainEvent::HelperText(text) = event {
+            let helper = name(&names, Some(text.helper));
+            lines.push(format!("words {helper}: {}", text.text));
+        } else if let DomainEvent::HelperEnded(ended) = event {
+            let helper = name(&names, Some(ended.helper));
+            let summary = match &ended.summary {
+                Some(TextOrBlob::Inline(text)) => text.lines().next().unwrap_or("").to_owned(),
+                Some(TextOrBlob::Blob(_)) => "<blob>".to_owned(),
+                None => "-".to_owned(),
+            };
+            lines.push(format!("end {helper} {:?} {summary}", ended.outcome));
+        } else if let DomainEvent::TurnEnded(ended) = event {
+            lines.push(format!("turn_ended {:?}", ended.stop));
         }
     }
     lines
