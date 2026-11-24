@@ -226,9 +226,12 @@ test("a path with a right-to-left override is isolated: the folder line in <bdi>
   );
 });
 
-test("a cancelled picker goes back to the two choices and sends nothing", async () => {
+test("a cancelled picker goes back to the two choices, focus still on Existing folder, and sends nothing", async () => {
   const transport = await mount({ ...today(), pickFolder: () => null });
-  await existing();
+  await ask();
+  byId("matter-existing")?.focus();
+  await press("matter-existing");
+  expect(document.activeElement).toBe(byId("matter-existing"));
   expect(transport.only("pick_folder")).toHaveLength(1);
   expect(byId("matter-name")).toBeNull();
   expect(byId("matter-existing")).not.toBeNull();

@@ -195,9 +195,10 @@ export function NewMatterForm({
 }: NewMatterFormProps) {
   const w = useMatterFormWords();
   const { lang } = useDisplay();
-  const [name, setName] = useState(
-    branch === "existing" && name0 === "" && folder0 != null ? folderName(folder0) : name0,
-  );
+  const prefilled = branch === "existing" && name0 === "" && folder0 != null;
+  const [name, setName] = useState(prefilled ? folderName(folder0 ?? "") : name0);
+  // the folder the name was last filled from: a new pick renames the matter while the name is still that folder's
+  const filledFrom = useRef<string | null>(prefilled ? (folder0 ?? null) : null);
   const nameField = useRef<HTMLInputElement>(null);
   // a branch's form opens in place of the question: focus on the name, an existing folder's name selected to type over
   useEffect(() => {
@@ -222,7 +223,8 @@ export function NewMatterForm({
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState(false);
   // Create tried before the form was ready: the missing field says so under it, until it's filled
-  const [tried, setTried] = useState(false);
+  // a folder whose own name gives no name (a drive's top, "D:\\"): the field says so at once
+  const [tried, setTried] = useState(prefilled && folderName(folder0 ?? "") === "");
   const errorId = useId();
   // a promise that settles after the form has gone sets nothing
   const live = useRef(true);
@@ -254,9 +256,14 @@ export function NewMatterForm({
         setChoice({ kind: "under", display: chosen });
         return;
       }
-      // the name still the last folder's own: it follows the folder picked now
-      if (branch === "existing" && choice?.kind === "picked" && name === folderName(choice.display))
-        setName(folderName(chosen));
+      // the name still the last folder's own (the scan's Stop may have dropped that folder since): it follows
+      if (
+        branch === "existing" &&
+        (filledFrom.current === null || name === folderName(filledFrom.current))
+      ) {
+        if (filledFrom.current !== null || name === "") setName(folderName(chosen));
+        filledFrom.current = chosen;
+      }
       setChoice({ kind: "picked", display: chosen });
     } catch {
       // the picker failed: the folder stays as it was

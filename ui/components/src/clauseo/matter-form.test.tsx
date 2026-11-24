@@ -397,3 +397,28 @@ test("while the folder picker opens, a polite status line says so under the fold
   expect(line?.closest("button")).toBeNull();
   expect(line?.closest(".matter-form-folder")).toBeNull();
 });
+
+test("an existing folder whose own name gives no name (a drive's top): the field says so at once, and Create waits", async () => {
+  await mount(<NewMatterForm branch="existing" folder={"D:\\"} onCreate={() => {}} />);
+  expect(document.querySelector<HTMLInputElement>("input")?.value).toBe("");
+  expect(document.body.textContent).toContain("Name the matter.");
+  expect(create()?.disabled).toBe(true);
+});
+
+test("an existing folder's name is filled from it and selected, and follows a new pick while untouched", async () => {
+  const pick = held<string | null>();
+  await mount(
+    <NewMatterForm
+      branch="existing"
+      folder="Documents/Health Insurance"
+      pickFolder={() => pick.promise}
+      onCreate={() => {}}
+    />,
+  );
+  const field = document.querySelector<HTMLInputElement>("input");
+  expect(field?.value).toBe("Health Insurance");
+  expect([field?.selectionStart, field?.selectionEnd]).toEqual([0, "Health Insurance".length]);
+  await act(async () => button("Change…")?.click());
+  await act(async () => pick.resolve("Documents/Rao claim"));
+  expect(field?.value).toBe("Rao claim");
+});

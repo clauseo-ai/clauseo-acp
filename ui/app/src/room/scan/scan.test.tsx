@@ -322,3 +322,25 @@ test("keyboard Enter on Create while the notice shows creates, as a press does",
     { create_matter: { name: NAME, source: { existing_folder: { folder: REF } } } },
   ]);
 });
+
+test("Stop, then another folder: the matter takes the new folder's name while it still had the first's", async () => {
+  let picks = 0;
+  const transport = await mount({
+    ...scanning([scanned(), scanned({ folder: "ref-b", done: true })]),
+    pickFolder: () =>
+      (picks += 1) === 1
+        ? { folder: REF, display: "/Users/rm/Matters/Rathi Steels" }
+        : { folder: "ref-b", display: "/Users/rm/Matters/Kumar v. State" },
+  });
+  await act(async () => byId("new-matter")?.click());
+  await act(async () => settled());
+  await press("matter-existing");
+  expect(byId<HTMLInputElement>("matter-name")?.value).toBe("Rathi Steels");
+  await press("scan-stop");
+  await press("folder-change");
+  expect(byId<HTMLInputElement>("matter-name")?.value).toBe("Kumar v. State");
+  await press("create-matter");
+  expect(named(transport, "create_matter")).toEqual([
+    { create_matter: { name: "Kumar v. State", source: { existing_folder: { folder: "ref-b" } } } },
+  ]);
+});

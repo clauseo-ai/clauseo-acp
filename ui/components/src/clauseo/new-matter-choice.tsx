@@ -55,10 +55,13 @@ export function NewMatterChoice({
         ref={existing}
         type="button"
         className="matter-choice-card"
-        disabled={picking}
+        // aria-disabled, not disabled: a disabled button would drop focus, and a cancelled picker leaves it here
+        aria-disabled={picking ? true : undefined}
         aria-busy={picking ? true : undefined}
         data-testid={testIds?.existing}
-        onClick={() => onChoose("existing")}
+        onClick={() => {
+          if (!picking) onChoose("existing");
+        }}
       >
         <IconFolder size={20} className="matter-choice-icon" />
         <span className="matter-choice-name">
