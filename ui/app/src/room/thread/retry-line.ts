@@ -1,6 +1,6 @@
 // The working line while the agent waits to retry its service (host #1335): the thread header's retrying is set by
 // the host's reducer from the agent's AgentRetrying and cleared by AgentRetryEnded, the turn's end, a new turn's start
-// and a detach. While it is set the line says, in Clauseo's own words, that the plan's servers are busy (UC-1377):
+// and a detach. While it is set the line says, in Clauseo's own words, that the plan can't reach its service (UC-1377):
 // no countdown, no number, and never the agent's title or details, which the line has no "more" to fold under. A
 // reload reads the same header, so a retry under way shows again at once. This file says only whether.
 import { useCallback, useSyncExternalStore } from "react";

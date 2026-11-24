@@ -175,7 +175,8 @@ export const HI = {
   "Sends when {name} finishes": "{name} के पूरा करने पर जाएगा",
   // UC-1377: the working line while the agent waits to retry its service (the header's retrying; the plan's name
   // fills {name}: Claude, ChatGPT). No countdown, no number. Hindi provisional
-  "{name}'s servers are busy. It's trying again.": "{name} के सर्वर व्यस्त हैं। वह फिर से कोशिश कर रहा है।",
+  "{name} isn't getting through to its service. It's trying again.":
+    "{name} अपनी सेवा तक नहीं पहुँच पा रहा है। वह फिर से कोशिश कर रहा है।",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   // the composer's hint: an agent that takes words mid-answer, and any other (the plan's name fills {name}). Hindi
   // provisional

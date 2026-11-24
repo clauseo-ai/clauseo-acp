@@ -216,7 +216,7 @@ export function WorkComposer({
   const emptyNow = useRef(empty);
   // U7: what the host queued this conversation's message for, from its header (queue-model.ts)
   const holdWait = useMatterHeld(store, stream);
-  // the agent waits to retry its service (retry-line.ts): the plan's servers are busy, in place of what it was doing
+  // the agent waits to retry its service (retry-line.ts): it says so, in place of what it was doing
   const retrying = useRetrying(store, stream);
   // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send, or until
   // the thread moves on (its status, or the agent's latest output: the drained turn has started), when it says
@@ -388,7 +388,7 @@ export function WorkComposer({
       : retrying
         ? {
             kind: "wait",
-            words: mt(w.lang, "{name}'s servers are busy. It's trying again.", {
+            words: mt(w.lang, "{name} isn't getting through to its service. It's trying again.", {
               name: planNameOf(agentPlan),
             }),
             pill: null,
