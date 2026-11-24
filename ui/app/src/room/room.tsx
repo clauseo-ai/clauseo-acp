@@ -407,6 +407,7 @@ function RoomFrame({
     transport,
     names,
     plan: kindOf(talks.agent, talks.agents),
+    here: open !== null && !scratch ? open.matter : null,
     onShow: () => setRailOpen(false),
   });
   const title =

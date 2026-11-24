@@ -1,9 +1,9 @@
 // Clauseo Case Law, at the head of Connectors: its card and the blocks its detail adds, by
 // case-law-model.ts's caseLawShown. Not added, the card offers it in the agreed words (shared with
 // the home card, UC-1090 to UC-1095) and its one button opens today's add flow, Settings at
-// Connectors. Added, it shows the credits left. Out of reach, it keeps its name and line, says so
-// with a yellow dot, and offers Retry (the list read again checks again). Not offered yet, it says
-// so with no button. With
+// Connectors. Added, it shows the credits left and its switch for the head's lens (L2). Out of
+// reach, it keeps its name and line, says so with a yellow dot, and offers Retry (the list read
+// again checks again). Not offered yet, it says so with no button. With
 // connectors turned off it says so and opens Settings; before the connectors' state arrives it
 // waits, so a lawyer who holds credits is never offered them again.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
@@ -19,6 +19,7 @@ import type { CaseLawFacts, Recheck } from "./addons-source.ts";
 import { caseLawShown, type CaseLawShown, creditLines, priceLines } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
+import { RowSwitch, type SwitchActs } from "./switches.tsx";
 
 export type CaseLawActs = {
   facts: CaseLawFacts;
@@ -112,12 +113,15 @@ export function CaseLawCard({
   names,
   selected,
   onSelect,
+  switches,
 }: {
   a: AddonView;
   acts: CaseLawActs;
   names: Names;
   selected: boolean;
   onSelect: () => void;
+  /** Its switch, once added. */
+  switches: SwitchActs;
 }) {
   const { lang } = useDisplay();
   const shown = caseLawShown(a, acts.facts);
@@ -135,6 +139,8 @@ export function CaseLawCard({
     </Button>
   ) : shown === "unreachable" ? (
     <RecheckButton recheck={acts.recheck} />
+  ) : shown === "added" ? (
+    <RowSwitch a={a} acts={switches} />
   ) : null;
   return (
     <div

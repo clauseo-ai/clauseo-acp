@@ -31,7 +31,7 @@ const item = (patch: Partial<AddonView>): AddonView => ({
   ...patch,
 });
 
-test("where it is on: every matter, only the matters switched on, or turned off", () => {
+test("where it is on: every matter (but some), only the matters switched on, or turned off", () => {
   expect(scopeTag("en", item({}), NAMES)).toBe("Every matter");
   expect(scopeTag("en", item({ on: false }), NAMES)).toBe("Turned off");
   expect(scopeTag("en", item({ scope: { matter: "sharma" }, switched: ["sharma"] }), NAMES)).toBe(
@@ -39,9 +39,13 @@ test("where it is on: every matter, only the matters switched on, or turned off"
   );
   expect(
     scopeTag("en", item({ scope: { matter: "sharma" }, switched: ["sharma", "mehta"] }), NAMES),
-  ).toBe("Only Sharma v. State of Delhi and Mehta Textiles arbitration");
-  // without the host's list of matters, nothing rather than a guess
-  expect(scopeTag("en", item({ scope: { matter: "sharma" } }), NAMES)).toBe("");
+  ).toBe("Only 2 matters");
+  expect(scopeTag("en", item({ switched: ["mehta"] }), NAMES)).toBe("Every matter but 1");
+  // on in no matter: scope matter with none switched on
+  expect(scopeTag("en", item({ scope: { matter: "sharma" } }), NAMES)).toBe("Turned off");
+  // a matter the room no longer knows is not counted; under the firm's lock, every matter
+  expect(scopeTag("en", item({ switched: ["gone"] }), NAMES)).toBe("Every matter");
+  expect(scopeTag("en", item({ switched: ["mehta"], locked: true }), NAMES)).toBe("Every matter");
 });
 
 test("where it came from, MCP server said for the lawyer's own connectors", () => {

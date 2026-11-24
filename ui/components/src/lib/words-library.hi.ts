@@ -1,7 +1,8 @@
-// The Hindi of words-library.ts, keyed by its English: none yet (hi: later), so a Hindi display
-// shows the English. Loaded only for a Hindi display: words-hi.ts gathers every words file's Hindi
-// into one lazy chunk, and words-library.ts imports this file's type alone. {who} and {Who} are the
-// assistant: "Claude", "ChatGPT", or "the assistant" when both plans are signed in.
+// The Hindi of words-library.ts, keyed by its English: L1's none yet (hi: later), so a Hindi
+// display shows the English; L2's provisional. Loaded only for a Hindi display: words-hi.ts
+// gathers every words file's Hindi into one lazy chunk, and words-library.ts imports this file's
+// type alone. {who} and {Who} are the assistant: "Claude", "ChatGPT", or "the assistant" when both
+// plans are signed in.
 
 export const HI = {
   // UC-1050 to UC-1052: the rail's row (its name is also the place's title), its count, and its tag
@@ -111,4 +112,53 @@ export const HI = {
   // UC-1248: Clauseo Case Law's card and detail when it answered but isn't offered yet, or this
   // install has no connectors: no button
   "Not available yet.": null,
+  // Library L2 (UC-1301 to UC-1326), with provisional Hindi. UC-1301 to UC-1303: the head's lens,
+  // "Switches for [matter | Every matter]", and each row switch's accessible name
+  "Switches for": "स्विच इसके लिए",
+  "{name}, on in {matter}": "{name}, {matter} में चालू",
+  "{name}, on in every matter": "{name}, हर मामले में चालू",
+  // UC-1304, UC-1305: where an item is on, beside "Every matter" and "Only {matters}"
+  "Every matter but {n}": "{n} को छोड़कर हर मामला",
+  "Only {n} matters": "सिर्फ़ {n} मामले",
+  // UC-1306 to UC-1310: the detail's "Where {who} uses it": the two choices, the tick boxes' note
+  // on the matter open last, and when a change applies
+  "Only the matters you tick": "सिर्फ़ वे मामले जिन पर आप निशान लगाएँ",
+  "New matters too. Untick a matter to leave it out.":
+    "नए मामले भी। किसी मामले को छोड़ने के लिए उसका निशान हटाएँ।",
+  "New matters start without it.": "नए मामले इसके बिना शुरू होते हैं।",
+  "open last": "आख़िरी बार खुला",
+  "Changes apply from each conversation's next message.": "बदलाव हर बातचीत के अगले संदेश से लागू होते हैं।",
+  // UC-1311 to UC-1315: Remove and its confirmation
+  Remove: "हटाएँ",
+  "Remove {name}?": "{name} हटाएँ?",
+  "Clauseo deletes its files from this computer and turns it off in every matter. To use it again, add it again.":
+    "Clauseo इसकी फ़ाइलें इस कंप्यूटर से मिटा देता है और इसे हर मामले में बंद कर देता है। इसे फिर से इस्तेमाल करने के लिए दोबारा जोड़ें।",
+  "Clauseo removes it and its saved keys from this computer, and turns it off in every matter.":
+    "Clauseo इसे और इसकी सहेजी गई कुंजियाँ इस कंप्यूटर से हटा देता है, और इसे हर मामले में बंद कर देता है।",
+  Cancel: "रद्द करें",
+  // UC-1316 to UC-1319: a built-in's line in place of Remove (a tool, then a skill), and the firm's
+  // word on a row and in the detail
+  "Comes with Clauseo, so it stays. Turn it off where you don't want it.":
+    "Clauseo के साथ आता है, इसलिए यह रहता है। जहाँ न चाहिए, वहाँ इसे बंद करें।",
+  "Comes with Clauseo, so it stays on in every matter.":
+    "Clauseo के साथ आता है, इसलिए यह हर मामले में चालू रहता है।",
+  "Set by your firm": "आपकी फ़र्म ने तय किया",
+  "Your firm decides where this is used and whether it stays.":
+    "यह कहाँ इस्तेमाल हो और रहे या नहीं, यह आपकी फ़र्म तय करती है।",
+  // UC-1320 to UC-1323: a refused change, one line each: addon.unknown, addon.built_in,
+  // settings.locked, and any other refusal
+  "Clauseo couldn't find {name} on this computer, so nothing changed.":
+    "Clauseo को इस कंप्यूटर पर {name} नहीं मिला, इसलिए कुछ नहीं बदला।",
+  "{name} comes with Clauseo, so this can't be changed.":
+    "{name} Clauseo के साथ आता है, इसलिए इसे बदला नहीं जा सकता।",
+  "Your firm decides this for {name}, so nothing changed.":
+    "{name} के लिए यह आपकी फ़र्म तय करती है, इसलिए कुछ नहीं बदला।",
+  "Clauseo couldn't make that change to {name}. Try again.":
+    "Clauseo {name} में वह बदलाव नहीं कर सका। फिर से कोशिश करें।",
+  // UC-1324 to UC-1326: the explainer on what the switches do, by the lens
+  "Every matter, or some": "हर मामला, या कुछ",
+  "The switch on each row is for {matter}, the matter you had open. Choose Every matter above to change what new matters start with.":
+    "हर पंक्ति का स्विच {matter} के लिए है, वह मामला जो आपने खोला था। नए मामले किसके साथ शुरू हों, यह बदलने के लिए ऊपर हर मामला चुनें।",
+  "The switch on each row turns it on or off in every matter. Choose a matter above to change only that matter.":
+    "हर पंक्ति का स्विच उसे हर मामले में चालू या बंद करता है। सिर्फ़ एक मामला बदलने के लिए ऊपर वह मामला चुनें।",
 } as const;
