@@ -1,7 +1,7 @@
 //! The cause a turn that never started ends with (`TurnEnded.cause`), by the path that ends it:
-//! a Stop on a turn waiting to start, a removal, a send now over a waiting turn, a sign-in's
-//! stop and an install that cancels a waiting message, whose copy is queued again, held. A
-//! started turn ends with no cause.
+//! a Stop on a turn waiting to start or checkpointing, a removal, a send now over a waiting
+//! turn, a sign-in's stop and an install that cancels a waiting message (or one checkpointing),
+//! whose copy is queued again, held. A started turn ends with no cause.
 
 use clauseo_protocol::{
     CommandOutcome, ContentBlock, DeliveryRequest, DomainEvent, HostCommand, PromptBlock,
@@ -74,11 +74,9 @@ fn a_stop_on_a_turn_waiting_to_start_ends_stopped() {
     rig.finish();
 }
 
-#[test]
-fn a_stop_during_the_checkpoint_before_the_turn_ends_stopped() {
-    let mut rig = Rig::start("unsent-checkpoint-stop", PROMPT_ENDS);
-    let thread = rig.thread();
-    // The before-turn checkpoint's answer is held: the turn is checkpointing when the Stop comes.
+/// Sends a prompt to `thread` as command `n`, and runs the turn until its before-turn
+/// checkpoint is asked for, with that answer held: the turn is checkpointing. Returns the turn.
+fn checkpointing_send(rig: &mut Rig, thread: ThreadId, n: u128) -> TurnId {
     let held = |_: &crate::actor::Actor, input: &Input| {
         matches!(
             input,
@@ -96,16 +94,22 @@ fn a_stop_during_the_checkpoint_before_the_turn_ends_stopped() {
         delivery: DeliveryRequest::Queue,
         config: None,
     };
-    let turn = match rig.dispatch_holding(30, sent, held) {
+    let turn = match rig.dispatch_holding(n, sent, held) {
         Ok(CommandOutcome::PromptAccepted { turn, .. }) => turn,
         other => panic!("SendPrompt answered {other:?}"),
     };
-    // The launch ends, and the checkpoint is asked for: its answer is held there.
     rig.run_holding("the turn checkpointing", held, |actor| {
         let current = actor.threads[&thread].turn.current.as_ref();
         current.is_some_and(|current| current.phase == TurnPhase::Checkpointing)
     });
+    turn
+}
 
+#[test]
+fn a_stop_during_the_checkpoint_before_the_turn_ends_stopped() {
+    let mut rig = Rig::start("unsent-checkpoint-stop", PROMPT_ENDS);
+    let thread = rig.thread();
+    let turn = checkpointing_send(&mut rig, thread, 30);
     assert_eq!(
         rig.dispatch(31, HostCommand::Cancel { thread }).unwrap(),
         CommandOutcome::Done
@@ -118,6 +122,65 @@ fn a_stop_during_the_checkpoint_before_the_turn_ends_stopped() {
     assert_eq!(event.stop, StopReason::Cancelled);
     assert_eq!(event.cause, Some(UnsentCause::Stopped));
     assert!(!started(&mut rig, thread, turn));
+    rig.finish();
+}
+
+#[test]
+fn a_sign_in_stop_during_the_checkpoint_ends_sign_in_and_its_copy_waits_for_the_sign_in() {
+    let mut rig = Rig::start("unsent-checkpoint-sign-in", PROMPT_ENDS);
+    let thread = rig.thread();
+    let turn = checkpointing_send(&mut rig, thread, 30);
+    // What `stop_agents` does to the turn it cancels (`sign_in.rs`).
+    rig.actor
+        .threads
+        .get_mut(&thread)
+        .unwrap()
+        .turn
+        .stopped_for_sign_in = Some(turn);
+    cancel::cancel_current(&mut rig.actor, thread, cancel::why::SIGN_IN);
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    rig.settle_commits();
+
+    let event = ended(&mut rig, thread, turn);
+    assert_eq!(event.stop, StopReason::Cancelled);
+    assert_eq!(event.cause, Some(UnsentCause::SignIn));
+    assert!(!started(&mut rig, thread, turn));
+    assert_eq!(queue::queued_turns(&rig.actor, thread).len(), 1);
+    assert_eq!(
+        queue::queue_hold(&rig.actor, thread),
+        Some(QueueHoldReason::SignIn)
+    );
+    rig.finish();
+}
+
+#[test]
+fn an_install_cancel_during_the_checkpoint_ends_update_and_its_copy_is_held() {
+    let mut rig = Rig::start("unsent-checkpoint-install", PROMPT_ENDS);
+    let thread = rig.thread();
+    let turn = checkpointing_send(&mut rig, thread, 30);
+    cancel_all(&mut rig.actor);
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    rig.settle_commits();
+
+    let event = ended(&mut rig, thread, turn);
+    assert_eq!(event.stop, StopReason::Cancelled);
+    assert_eq!(event.cause, Some(UnsentCause::Update));
+    assert!(!started(&mut rig, thread, turn));
+    let copies = queue::queued_turns(&rig.actor, thread);
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    let text = vec![ContentBlock::Text {
+        text: "Then clause 5?".to_owned(),
+    }];
+    let copied = rig.log(thread).into_iter().any(|event| {
+        matches!(event, DomainEvent::UserMessage(m) if m.turn == copies[0] && m.content == text)
+    });
+    assert!(copied, "no copy of the message was logged");
+    assert_eq!(
+        queue::queue_hold(&rig.actor, thread),
+        Some(QueueHoldReason::Paused)
+    );
     rig.finish();
 }
 

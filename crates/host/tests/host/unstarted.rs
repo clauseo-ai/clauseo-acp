@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use clauseo_host::Clock as _;
 use clauseo_protocol::{
-    CommandOutcome, HostCommand, HostEvent, LastStop, MatterId, StopReason, StreamId, ThreadId,
-    ThreadSummary,
+    CommandOutcome, DomainEvent, HostCommand, HostEvent, LastStop, MatterId, StopReason, StreamId,
+    ThreadId, ThreadSummary, UnsentCause,
 };
 
 use crate::observe::started;
@@ -218,5 +218,40 @@ fn an_unstarted_failed_turn_is_a_stop() {
         "{}",
         events.dump()
     );
+    host.shutdown();
+}
+
+/// (6) A Stop while the first turn is launching: its agent never answers `initialize` (the
+/// bundled `idle` scenario), so the turn waits in its launch. It ends `Cancelled` with cause
+/// `stopped`, and it never starts.
+#[test]
+fn a_stop_while_the_agent_launches_ends_stopped() {
+    let dir = Dir::new(
+        "unstarted_stop_launching",
+        &[(FAKE, Scenario::Bundled("idle"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Summarise the clause.");
+    host.settle();
+    let begun = events.count(|event| match event {
+        DomainEvent::TurnStarted(s) => s.turn == turn,
+        DomainEvent::TurnEnded(e) => e.turn == turn,
+        _ => false,
+    });
+    assert_eq!(begun, 0, "the turn is not launched yet: {}", events.dump());
+
+    assert_eq!(
+        host.ok(HostCommand::Cancel { thread }),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::Cancelled);
+    assert_eq!(ended.cause, Some(UnsentCause::Stopped), "{}", events.dump());
+    let started = events
+        .events()
+        .any(|event| matches!(event, DomainEvent::TurnStarted(s) if s.turn == turn));
+    assert!(!started, "{}", events.dump());
     host.shutdown();
 }
