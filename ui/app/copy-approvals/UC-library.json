@@ -486,13 +486,13 @@
     "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1229": {
-    "en": "Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.",
+    "en": "Clauseo can't reach Clauseo Case Law right now, so {who} can't search judgments.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Clauseo Case Law's card and detail when it can't be reached (Retry asks again) or once added (credits from the connectors' state) (library/case-law.tsx). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "note": "Clauseo Case Law's detail when the host lists it nowhere (its check failed), above the button that checks again (library/model.ts troubleLine). Was \"Can't reach it right now. Your credits are safe. Clauseo checks again each time you open this page.\"; reworded in review (#1298): Clauseo doesn't check on each opening yet, and a lawyer with no credits must not read \"your credits are safe\". Words are provisional"
   },
   "UC-1230": {
     "en": "{credits} credits left",
@@ -592,5 +592,23 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "{who} or {Who} in the place's words when both plans are signed in (library/assistant.ts); with one, the plan's name (Claude or ChatGPT). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+  },
+  "UC-1241": {
+    "en": "Open Settings to check",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's button on its card and in its detail while it can't be reached, until stage D's list_addons checks again itself (then it reads Retry, UC-1228): it opens Settings at Connectors, whose opening runs the host's check (library/case-law.tsx RecheckButton). New, in place of Retry (review #1298). Words are provisional"
+  },
+  "UC-1242": {
+    "en": "Connectors are turned off. You can turn them on in Settings, under Connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's detail while the lawyer has turned connectors off in Settings, above Open Settings (UET-15, reused); the card says Turned off (UC-1071) in place of the offer, so a lawyer with credits is never offered them (library/case-law.tsx). New (review #1298). Words are provisional"
   }
 }

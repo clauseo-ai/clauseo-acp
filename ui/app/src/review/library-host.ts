@@ -14,7 +14,7 @@ import type {
   SetupEvent,
 } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "../library/addons.ts";
-import { fixedAddons, provideAddons } from "../library/addons-source.ts";
+import { caseLawFacts, fixedAddons, provideAddons } from "../library/addons-source.ts";
 
 const matter = (n: number, name: string): MatterSummary => ({
   matter: uuid(n, 3),
@@ -198,17 +198,18 @@ export function libraryItems(caseLaw: AddonStatus, added = true): AddonView[] {
   ];
 }
 
-type CaseLawState = "needs_setup" | "ready" | "out" | "unreachable";
+type CaseLawState = "needs_setup" | "ready" | "out" | "unreachable" | "off";
 
 const CONNECTOR: Record<CaseLawState, ConnectorStatus | null> = {
   needs_setup: "not_added",
   ready: { signed_in: { low: false, balance: { credits: 1_240 } } },
   out: { out_of_credit: {} },
   unreachable: null,
+  off: "not_added",
 };
 
-const connectorsOf = (status: ConnectorStatus | null): ConnectorsState => ({
-  available: true,
+const connectorsOf = (status: ConnectorStatus | null, available = true): ConnectorsState => ({
+  available,
   locked: false,
   connectors:
     status === null
@@ -234,25 +235,34 @@ export type LibraryState = {
   caseLaw?: CaseLawState;
   added?: boolean;
   both?: boolean;
+  /** Retry as it will be once list_addons checks again itself. */
+  again?: boolean;
 };
 
 /** The room over the library's host, its list given before the room mounts. */
 export function libraryHost(state: LibraryState = {}): FakeTransport {
   const caseLaw = state.caseLaw ?? "needs_setup";
+  const connectors = connectorsOf(CONNECTOR[caseLaw], caseLaw !== "off");
   const transport: FakeTransport = new FakeTransport({
     next: {
       ...fakeNext({
         matters: () => LIBRARY_MATTERS.map((m, i) => detailed(m, { last_opened: 4 - i })),
         papers: PAPERS,
       }),
-      first: () => [{ connectors_changed: connectorsOf(CONNECTOR[caseLaw]) }],
+      first: () => [{ connectors_changed: connectors }],
     },
     ...(state.both === true ? { setup: { first: () => BOTH } } : {}),
     openSettings: () => {},
   });
+  const status: AddonStatus =
+    caseLaw === "out" ? "ready" : caseLaw === "off" ? "needs_setup" : caseLaw;
   provideAddons(
     transport,
-    fixedAddons(libraryItems(caseLaw === "out" ? "ready" : caseLaw, state.added ?? true), () => {}),
+    fixedAddons(
+      libraryItems(status, state.added ?? true),
+      caseLawFacts(connectors, true),
+      state.again === true ? "again" : "settings",
+    ),
   );
   return transport;
 }

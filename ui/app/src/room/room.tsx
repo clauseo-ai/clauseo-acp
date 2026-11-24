@@ -102,6 +102,7 @@ import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
 import { useSacNote } from "./sac/use-sac-note.ts";
 import { useLibraryPlace } from "../library/room-place.tsx";
+import { OpenLibraryContext } from "../library/open-library.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -508,106 +509,109 @@ function RoomFrame({
       {shield.note}
       <LocateWarningHost held={matters.located} />
       <LocateFolderContext value={locate}>
-        <main className="room-centre" ref={nodes.slot("centre")}>
-          {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
+        {/* parts in the centre (the home card's Case Law link) open Skills and connectors */}
+        <OpenLibraryContext value={library.show}>
+          <main className="room-centre" ref={nodes.slot("centre")}>
+            {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
               300 ms reveal throttle (FALLBACK_THROTTLE_MS), however soon its chunk landed */}
-          {place === "work" && <div className="room-notices">{notice}</div>}
-          {/* what the desktop needs answered, for a lawyer with matters (issue 5): the band over the work, once
+            {place === "work" && <div className="room-notices">{notice}</div>}
+            {/* what the desktop needs answered, for a lawyer with matters (issue 5): the band over the work, once
               the list says room (while it loads, welcome is still false, and the band would read and go) */}
-          {view.phase === "ready" && !welcome && <PermissionsBand transport={transport} />}
-          {setup && (
-            <FirstRun
-              transport={transport}
-              matters={matters}
-              conversations={conversations}
-              talks={talks}
-              zone={view.zone}
-              welcome={welcome}
-            />
-          )}
-          {library.shown ? (
-            library.centre
-          ) : welcome ? null : open !== null && view.folderMissing ? (
-            // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
-            <>
-              <LocatedFolder
+            {view.phase === "ready" && !welcome && <PermissionsBand transport={transport} />}
+            {setup && (
+              <FirstRun
+                transport={transport}
                 matters={matters}
-                onLocate={() => void matters.locate(open.matter, locating.track)}
+                conversations={conversations}
+                talks={talks}
+                zone={view.zone}
+                welcome={welcome}
               />
-              {locating.opening && <PickerLine />}
-              <LocateGate onLocate={() => void matters.locate(open.matter, locating.track)} />
-            </>
-          ) : (
-            <StoreContext value={store}>
-              {versions.centre}
-              {sac.show && (
-                <Suspense fallback={null}>
-                  <SacNote transport={transport} onGotIt={sac.dismiss} />
-                </Suspense>
-              )}
-              {scratch && <ScratchLine />}
-              {/* Windows' Controlled folder access over this matter's folder (issue 5) */}
-              {open !== null && !scratch && (
-                <MatterBlockedLine
-                  transport={transport}
-                  matter={open.matter}
-                  folder={open.folder_display}
-                  onReveal={() => void matters.reveal(open.matter)}
+            )}
+            {library.shown ? (
+              library.centre
+            ) : welcome ? null : open !== null && view.folderMissing ? (
+              // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
+              <>
+                <LocatedFolder
+                  matters={matters}
                   onLocate={() => void matters.locate(open.matter, locating.track)}
                 />
-              )}
-              {retried !== null && (
-                <Suspense fallback={null}>
-                  <RetriedLine
-                    time={clockOf(retried.at, view.now, view.zone, w.lang).time}
-                    title={retried.title ?? mt(w.lang, "New conversation")}
-                    onOpen={() => conversations.open(retried.from)}
+                {locating.opening && <PickerLine />}
+                <LocateGate onLocate={() => void matters.locate(open.matter, locating.track)} />
+              </>
+            ) : (
+              <StoreContext value={store}>
+                {versions.centre}
+                {sac.show && (
+                  <Suspense fallback={null}>
+                    <SacNote transport={transport} onGotIt={sac.dismiss} />
+                  </Suspense>
+                )}
+                {scratch && <ScratchLine />}
+                {/* Windows' Controlled folder access over this matter's folder (issue 5) */}
+                {open !== null && !scratch && (
+                  <MatterBlockedLine
+                    transport={transport}
+                    matter={open.matter}
+                    folder={open.folder_display}
+                    onReveal={() => void matters.reveal(open.matter)}
+                    onLocate={() => void matters.locate(open.matter, locating.track)}
                   />
-                </Suspense>
-              )}
-              {/* a new conversation, before its first question: what it reads, once the papers are counted (a matter
+                )}
+                {retried !== null && (
+                  <Suspense fallback={null}>
+                    <RetriedLine
+                      time={clockOf(retried.at, view.now, view.zone, w.lang).time}
+                      title={retried.title ?? mt(w.lang, "New conversation")}
+                      onOpen={() => conversations.open(retried.from)}
+                    />
+                  </Suspense>
+                )}
+                {/* a new conversation, before its first question: what it reads, once the papers are counted (a matter
                 with no conversation yet too, or one with nothing to read: wall-away.ts), then the first read's offer
                 (D-015), with a paper to read. Not yet the design's FirstQuestion */}
-              {talks.drafting && !scratch && papers !== null && hasLine(papers) && (
-                <>
-                  <NewConversationLine papers={papers} />
-                  {papers.papers.length > 0 && <OfferSlot transport={transport} />}
-                </>
-              )}
-              {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
-              <MarkdownHostContext value={answers}>
-                <PaperLinksContext value={paperLinks}>
-                  <WordOpenContext value={word}>
-                    <FolderPlaceContext value={papers?.place}>
-                      <AgentPlanContext value={agentPlan}>
-                        <ToolLineContext value={toolRoom}>
-                          <ProtectionContext value={shield.composer}>
-                            <Work
-                              key={talks.open ?? open?.matter ?? "none"}
-                              transport={transport}
-                              matter={open}
-                              drafts={drafts}
-                              draftKey={talks.open}
-                              conversation={link}
-                              choice={choice}
-                              menus={draftMenus}
-                              plan={plan}
-                              focus={talks.focus?.n ?? null}
-                              archived={talks.archived}
-                              onThread={matters.onThread}
-                              folderShut={folderShut}
-                              openRefused={opened?.act === "open" ? opened.code : null}
-                            />
-                          </ProtectionContext>
-                        </ToolLineContext>
-                      </AgentPlanContext>
-                    </FolderPlaceContext>
-                  </WordOpenContext>
-                </PaperLinksContext>
-              </MarkdownHostContext>
-            </StoreContext>
-          )}
-        </main>
+                {talks.drafting && !scratch && papers !== null && hasLine(papers) && (
+                  <>
+                    <NewConversationLine papers={papers} />
+                    {papers.papers.length > 0 && <OfferSlot transport={transport} />}
+                  </>
+                )}
+                {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
+                <MarkdownHostContext value={answers}>
+                  <PaperLinksContext value={paperLinks}>
+                    <WordOpenContext value={word}>
+                      <FolderPlaceContext value={papers?.place}>
+                        <AgentPlanContext value={agentPlan}>
+                          <ToolLineContext value={toolRoom}>
+                            <ProtectionContext value={shield.composer}>
+                              <Work
+                                key={talks.open ?? open?.matter ?? "none"}
+                                transport={transport}
+                                matter={open}
+                                drafts={drafts}
+                                draftKey={talks.open}
+                                conversation={link}
+                                choice={choice}
+                                menus={draftMenus}
+                                plan={plan}
+                                focus={talks.focus?.n ?? null}
+                                archived={talks.archived}
+                                onThread={matters.onThread}
+                                folderShut={folderShut}
+                                openRefused={opened?.act === "open" ? opened.code : null}
+                              />
+                            </ProtectionContext>
+                          </ToolLineContext>
+                        </AgentPlanContext>
+                      </FolderPlaceContext>
+                    </WordOpenContext>
+                  </PaperLinksContext>
+                </MarkdownHostContext>
+              </StoreContext>
+            )}
+          </main>
+        </OpenLibraryContext>
         <aside className="room-pane" id={room.id("pane")} ref={nodes.slot("pane")}>
           {place === "wall" && notice}
           {papers !== null &&

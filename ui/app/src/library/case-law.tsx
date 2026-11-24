@@ -1,33 +1,63 @@
-// Clauseo Case Law, at the head of Connectors: its card and the blocks its detail adds. Not added,
-// the card offers it in the agreed words (shared with the home card, UC-1090 to UC-1095) and its
-// one button opens today's add flow, Settings at Connectors. Added, it shows the credits left. When
-// stage D can't reach it (`unreachable`), it keeps its name and line, says so with a yellow dot,
-// and offers Retry. The price and credits are the connectors' state's.
+// Clauseo Case Law, at the head of Connectors: its card and the blocks its detail adds, by
+// case-law-model.ts's caseLawShown. Not added, the card offers it in the agreed words (shared with
+// the home card, UC-1090 to UC-1095) and its one button opens today's add flow, Settings at
+// Connectors. Added, it shows the credits left. Out of reach (the host lists it nowhere), it keeps
+// its name and line, says so with a yellow dot, and offers the check the source can make. With
+// connectors turned off it says so and opens Settings; before the connectors' state arrives it
+// waits, so a lawyer who holds credits is never offered them again.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
+import { tw } from "@clauseo/components/lib/words-tools.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import type { ConnectorView, MatterId } from "../transport/protocol.ts";
+import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
-import { creditLines, creditsOf, priceLine } from "./case-law-model.ts";
+import type { CaseLawFacts, Recheck } from "./addons-source.ts";
+import { caseLawShown, creditLines, priceLine } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
 
 export type CaseLawActs = {
-  /** The connector as the connectors' state lists it, for its price and credits. */
-  view: ConnectorView | undefined;
-  /** Today's add flow (Settings at Connectors); null where there is no settings window. */
-  onAdd: (() => void) | null;
+  facts: CaseLawFacts;
+  /** Today's add flow and the connectors' switch, Settings at Connectors; null without it. */
+  openConnectors: (() => void) | null;
   /** Its reach checked again; null where it can't be. */
-  onRetry: (() => void) | null;
+  recheck: Recheck | null;
 };
 
 type Names = ReadonlyMap<MatterId, string>;
 
+/** The recheck's button, worded for what it does. */
+export function RecheckButton({ recheck, small }: { recheck: Recheck | null; small?: boolean }) {
+  const { lang } = useDisplay();
+  if (recheck === null) return null;
+  return (
+    <Button
+      kind="tone"
+      {...(small === true ? { size: "small" as const } : { className: "lib-feature-add" })}
+      onClick={recheck.run}
+    >
+      {recheck.how === "again" ? lb(lang, "Retry") : lb(lang, "Open Settings to check")}
+    </Button>
+  );
+}
+
+function Tag({ text }: { text: string }) {
+  return (
+    <span className="lib-feature-meta">
+      <span className="lib-row-tag" data-trouble="" data-testid="case-law-trouble">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Names }) {
   const { lang } = useDisplay();
-  if (a.status === "needs_setup") {
-    const price = priceLine(lang, acts.view);
+  const shown = caseLawShown(a, acts.facts);
+  if (shown === "waiting") return null;
+  if (shown === "offer") {
+    const price = priceLine(lang, acts.facts.pack);
     return (
       <span className="lib-feature-meta">
         {price !== null && <span className="lib-credits">{price}</span>}
@@ -35,17 +65,11 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
       </span>
     );
   }
-  const trouble =
-    a.status === "unreachable" ? lb(lang, "Can't reach it right now") : troubleTag(lang, a.status);
-  if (trouble !== null)
-    return (
-      <span className="lib-feature-meta">
-        <span className="lib-row-tag" data-trouble="" data-testid="case-law-trouble">
-          {trouble}
-        </span>
-      </span>
-    );
-  const credits = creditsOf(acts.view);
+  if (shown === "unreachable") return <Tag text={lb(lang, "Can't reach it right now")} />;
+  if (shown === "off") return <Tag text={lb(lang, "Turned off")} />;
+  if (shown === "trouble")
+    return <Tag text={troubleTag(lang, acts.facts.off === "firm" ? "blocked" : a.status) ?? ""} />;
+  const credits = acts.facts.credits;
   return (
     <span className="lib-feature-meta">
       {credits !== null &&
@@ -73,23 +97,27 @@ export function CaseLawCard({
   onSelect: () => void;
 }) {
   const { lang } = useDisplay();
-  const offer = a.status === "needs_setup";
+  const shown = caseLawShown(a, acts.facts);
+  const open = acts.openConnectors;
   const action =
-    offer && acts.onAdd !== null ? (
-      <Button kind="primary" className="lib-feature-add" onClick={acts.onAdd}>
+    shown === "offer" && open !== null ? (
+      <Button kind="primary" className="lib-feature-add" onClick={open}>
         {cr(lang, "Add Clauseo Case Law")}
       </Button>
-    ) : a.status === "unreachable" && acts.onRetry !== null ? (
-      <Button kind="tone" className="lib-feature-add" onClick={acts.onRetry}>
-        {lb(lang, "Retry")}
+    ) : shown === "off" && open !== null ? (
+      <Button kind="tone" className="lib-feature-add" onClick={open}>
+        {tw(lang, "Open Settings")}
       </Button>
+    ) : shown === "unreachable" ? (
+      <RecheckButton recheck={acts.recheck} />
     ) : null;
   return (
     <div
       className="lib-feature"
       data-act={action === null ? undefined : ""}
       data-testid="case-law-card"
-      data-status={a.status}
+      data-shown={shown}
+      aria-busy={shown === "waiting" ? true : undefined}
       aria-current={selected ? "true" : undefined}
     >
       <button type="button" className="lib-feature-hit" onClick={onSelect}>
@@ -107,16 +135,35 @@ export function CaseLawCard({
 }
 
 /** What the detail adds for Clauseo Case Law: before it is added, what it covers and costs, and Add
- * again; added, its credits and Add credits (today's flow, in Settings). */
+ * again; added, its credits and Add credits (today's flow, in Settings); turned off, how to turn
+ * connectors on. */
 export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawActs; who: string }) {
   const { lang } = useDisplay();
+  const shown = caseLawShown(a, acts.facts);
+  const open = acts.openConnectors;
   const cost = lb(
     lang,
     "A page of search results is 20 credits. Opening a judgment is 3 credits, plus 1 for each 4,000 tokens {who} reads (about 3,000 words).",
     { who },
   );
-  if (a.status === "needs_setup") {
-    const price = priceLine(lang, acts.view);
+  if (shown === "off")
+    return (
+      <div className="lib-trouble" role="status">
+        <p>
+          {lb(
+            lang,
+            "Connectors are turned off. You can turn them on in Settings, under Connectors.",
+          )}
+        </p>
+        {open !== null && (
+          <Button kind="tone" size="small" onClick={open}>
+            {tw(lang, "Open Settings")}
+          </Button>
+        )}
+      </div>
+    );
+  if (shown === "offer") {
+    const price = priceLine(lang, acts.facts.pack);
     return (
       <section className="lib-detail-block">
         <h4 className="lib-detail-label">{lb(lang, "What it covers")}</h4>
@@ -133,9 +180,9 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
           {cr(lang, "Prepaid, including GST. No subscription.")}
         </p>
         <p className="text-small text-muted">{cost}</p>
-        {acts.onAdd !== null && (
+        {open !== null && (
           <div className="lib-detail-acts">
-            <Button kind="primary" onClick={acts.onAdd}>
+            <Button kind="primary" onClick={open}>
               {cr(lang, "Add Clauseo Case Law")}
             </Button>
           </div>
@@ -143,8 +190,8 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
       </section>
     );
   }
-  if (a.status !== "ready") return null;
-  const credits = creditsOf(acts.view);
+  if (shown !== "added") return null;
+  const credits = acts.facts.credits;
   return (
     <section className="lib-detail-block">
       {credits !== null && (
@@ -153,9 +200,9 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
         </p>
       )}
       <p className="text-small text-muted">{cost}</p>
-      {acts.onAdd !== null && (
+      {open !== null && (
         <div className="lib-detail-acts">
-          <Button kind="tone" size="small" onClick={acts.onAdd}>
+          <Button kind="tone" size="small" onClick={open}>
             {cr(lang, "Add credits")}
           </Button>
         </div>
