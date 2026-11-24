@@ -17,17 +17,17 @@ export type Hold = MatterHold;
  * given. */
 export type Wait = Hold | "other" | "unknown";
 
-const HOLDS: readonly string[] = ["undo", "restore", "relocate"];
+/** The holds the app names a reason for; "unknown" (a newer host's hold) names none. */
+const NAMED: readonly MatterHold[] = ["undo", "restore", "relocate"];
 
-/** What the open thread's view says its message waits for; null when its header isn't queued. A hold the app does
- * not know names no reason: "unknown", whatever it is behind. */
+/** What the open thread's view says its message waits for; null when its header isn't queued. A hold "unknown" (from
+ * a newer host) names no reason, whatever it is behind. */
 export function waitOf(v: StreamView | undefined): Wait | null {
   const head = v?.header?.header;
   const s = head?.status;
   if (head === undefined || typeof s !== "object" || s.queued === undefined) return null;
-  const hold: unknown = head.hold;
-  if (typeof hold === "string" && HOLDS.includes(hold)) return hold as Hold;
-  if (hold !== undefined && hold !== null) return "unknown";
+  const hold = head.hold;
+  if (hold !== undefined) return NAMED.includes(hold) ? hold : "unknown";
   return s.queued.behind !== head.thread ? "other" : "unknown";
 }
 

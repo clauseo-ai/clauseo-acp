@@ -196,10 +196,7 @@ test("an older host's log: queued behind another conversation with no hold says 
 });
 
 test("a missing or unknown hold behind its own thread: the working line alone, no card that names a reason", async () => {
-  for (const head of [
-    headerOf(THREAD, { queued: { behind: THREAD } }),
-    heldHeader("something_new" as MatterHold),
-  ]) {
+  for (const head of [headerOf(THREAD, { queued: { behind: THREAD } }), heldHeader("unknown")]) {
     h = await mountWith("idle");
     h.deliver([reset([], head)]);
     await h.settle();
@@ -213,7 +210,7 @@ test("a missing or unknown hold behind its own thread: the working line alone, n
 test("an unknown hold behind another conversation: the working line alone, never another answer in the matter", async () => {
   h = await mountWith("idle");
   const e = headerOf(THREAD, { queued: { behind: OTHER } });
-  h.deliver([reset([], { header: { ...e.header!, hold: "something_new" as MatterHold } })]);
+  h.deliver([reset([], { header: { ...e.header!, hold: "unknown" } })]);
   await h.settle();
   expect(working()).toBe("Waiting to answer.");
   expect(wait()).toBeNull();
