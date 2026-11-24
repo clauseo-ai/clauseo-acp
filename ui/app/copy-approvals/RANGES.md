@@ -41,27 +41,27 @@ When a thread runs out of its block, it asks the app track, which hands out a su
 
 The app track's block for Rohan's 15 issues of 24 Nov and the Windows tester's findings, one sub-range per writer.
 
-| Part                                                                         | UC ids             | Handed out |
-| ---------------------------------------------------------------------------- | ------------------ | ---------- |
-| composer: model and effort (issues 1, 2, 11, the model menus)                | UC-1000 to UC-1019 | 2026-11-24 |
-| sign-in line (issue 14)                                                      | UC-1020 to UC-1024 | 2026-11-24 |
-| sidebar buttons (issue 10)                                                   | UC-1025 to UC-1029 | 2026-11-24 |
-| New matter (issue 9)                                                         | UC-1030 to UC-1049 | 2026-11-24 |
-| Skills and connectors (issues 6, 7, 8)                                       | UC-1050 to UC-1089 | 2026-11-24 |
-| home card for Clauseo Case Law (issue 8)                                     | UC-1090 to UC-1095 | 2026-11-24 |
-| step lines (issues 12, 13; pages that couldn't open)                         | UC-1100 to UC-1114 | 2026-11-24 |
-| helpers and code mode (issues 12, 13)                                        | UC-1115 to UC-1129 | 2026-11-24 |
-| switching agent: dividers and refusals (issue 4)                             | UC-1130 to UC-1144 | 2026-11-24 |
-| answers at the same time (issue 15)                                          | UC-1145 to UC-1149 | 2026-11-24 |
-| first-start permissions (issue 5)                                            | UC-1150 to UC-1169 | 2026-11-24 |
-| plan running low                                                             | UC-1170 to UC-1179 | 2026-11-24 |
-| conversation row label, paper tile names                                     | UC-1180 to UC-1184 | 2026-11-24 |
-| step lines, second block (pages that couldn't open, the safety check)        | UC-1185 to UC-1199 | 2026-11-24 |
-| agents' instructions (UC-claude-files.json)                                  | UC-1200 to UC-1201 | 2026-11-24 |
-| step lines' wait (Yield)                                                     | UC-1202 to UC-1204 | 2026-11-24 |
-| open each paper in its own program                                           | UC-1205 to UC-1214 | 2026-11-24 |
-| Skills and connectors, second block (L1 to L5)                               | UC-1215 to UC-1259 | 2026-11-24 |
-| not yet handed out                                                           | UC-1260 to UC-1299 | 2026-11-24 |
+| Part                                                                  | UC ids             | Handed out |
+| --------------------------------------------------------------------- | ------------------ | ---------- |
+| composer: model and effort (issues 1, 2, 11, the model menus)         | UC-1000 to UC-1019 | 2026-11-24 |
+| sign-in line (issue 14)                                               | UC-1020 to UC-1024 | 2026-11-24 |
+| sidebar buttons (issue 10)                                            | UC-1025 to UC-1029 | 2026-11-24 |
+| New matter (issue 9)                                                  | UC-1030 to UC-1049 | 2026-11-24 |
+| Skills and connectors (issues 6, 7, 8)                                | UC-1050 to UC-1089 | 2026-11-24 |
+| home card for Clauseo Case Law (issue 8)                              | UC-1090 to UC-1095 | 2026-11-24 |
+| step lines (issues 12, 13; pages that couldn't open)                  | UC-1100 to UC-1114 | 2026-11-24 |
+| helpers and code mode (issues 12, 13)                                 | UC-1115 to UC-1129 | 2026-11-24 |
+| switching agent: dividers and refusals (issue 4)                      | UC-1130 to UC-1144 | 2026-11-24 |
+| answers at the same time (issue 15)                                   | UC-1145 to UC-1149 | 2026-11-24 |
+| first-start permissions (issue 5)                                     | UC-1150 to UC-1169 | 2026-11-24 |
+| plan running low                                                      | UC-1170 to UC-1179 | 2026-11-24 |
+| conversation row label, paper tile names                              | UC-1180 to UC-1184 | 2026-11-24 |
+| step lines, second block (pages that couldn't open, the safety check) | UC-1185 to UC-1199 | 2026-11-24 |
+| agents' instructions (UC-claude-files.json)                           | UC-1200 to UC-1201 | 2026-11-24 |
+| step lines' wait (Yield)                                              | UC-1202 to UC-1204 | 2026-11-24 |
+| open each paper in its own program                                    | UC-1205 to UC-1214 | 2026-11-24 |
+| Skills and connectors, second block (L1 to L5)                        | UC-1215 to UC-1259 | 2026-11-24 |
+| not yet handed out                                                    | UC-1260 to UC-1299 | 2026-11-24 |
 
 ## Other prefixes: closed to new ids
 
