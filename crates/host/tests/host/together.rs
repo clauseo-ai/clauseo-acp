@@ -27,6 +27,10 @@ const B_SAME: &str = "b-same-agent";
 const B_WAITS: &str = "b-waits-agent";
 /// Moves `notes/p.txt` to `notes/q.txt`, then waits on `perm-1`.
 const A_RENAMES: &str = "a-renames-agent";
+/// Deletes `notes/p.txt`, then waits on `perm-1`.
+const A_DELETES: &str = "a-deletes-agent";
+/// Rewrites `notes/p.txt` ("Pea, edited"), then waits on `perm-1`.
+const B_EDITS_P: &str = "b-edits-p-agent";
 
 fn dir(test: &str) -> Dir {
     Dir::new(
@@ -37,6 +41,8 @@ fn dir(test: &str) -> Dir {
             (B_SAME, Scenario::Bundled("rewrite-note-a")),
             (B_WAITS, Scenario::Bundled("write-b-then-wait")),
             (A_RENAMES, Scenario::Bundled("rename-then-wait")),
+            (A_DELETES, Scenario::Bundled("delete-then-wait")),
+            (B_EDITS_P, Scenario::Bundled("edit-p-then-wait")),
         ],
     )
 }
@@ -281,6 +287,103 @@ fn a_rename_beside_another_answer_is_on_its_card_and_undone_alone() {
     assert_eq!(read(&m.folder, "notes/p.txt").as_deref(), Some("Pea\n"));
     assert_eq!(read(&m.folder, "notes/q.txt"), None);
     assert_eq!(read(&m.folder, "notes/b.txt").as_deref(), Some("Beta\n"));
+    m.events_a.assert_no_mismatch();
+    m.events_b.assert_no_mismatch();
+    host.shutdown();
+}
+
+#[test]
+fn a_deletion_beside_another_answer_is_on_its_card_and_undone_alone() {
+    let dir = dir("together_delete");
+    let host = dir.start(0);
+    let mut m = matter_with(&dir, &host, (A_DELETES, B_OWN), &[("notes/p.txt", "Pea\n")]);
+    let (turn_a, turn_b) = overlapping(&host, &mut m);
+    assert_eq!(read(&m.folder, "notes/p.txt"), None);
+
+    let changed = m
+        .events_a
+        .files_changed(turn_a)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", m.events_a.dump()));
+    assert_eq!(
+        card(&m.events_a, turn_a),
+        [("notes/p.txt".to_owned(), false, vec![])]
+    );
+    assert_eq!(changed.files[0].change(), &ChangeKind::Deleted);
+    assert_eq!(changed.beside, [MatterPath::new("notes/b.txt").unwrap()]);
+    // B started after the deletion: it is not on B's card.
+    assert_eq!(
+        card(&m.events_b, turn_b),
+        [("notes/b.txt".to_owned(), false, vec![])]
+    );
+
+    // Undo of A puts notes/p.txt back; B's note stays.
+    undo(&host, m.a, turn_a, "notes/p.txt");
+    assert_eq!(read(&m.folder, "notes/p.txt").as_deref(), Some("Pea\n"));
+    assert_eq!(read(&m.folder, "notes/b.txt").as_deref(), Some("Beta\n"));
+    m.events_a.assert_no_mismatch();
+    m.events_b.assert_no_mismatch();
+    host.shutdown();
+}
+
+#[test]
+fn a_rename_of_a_paper_the_other_answer_edited_first_names_it_on_both_cards() {
+    let dir = dir("together_rename_edited");
+    let host = dir.start(0);
+    let mut m = matter_with(
+        &dir,
+        &host,
+        (A_RENAMES, B_EDITS_P),
+        &[("notes/p.txt", "Pea\n")],
+    );
+    // B edits notes/p.txt and waits; then A moves it to notes/q.txt and waits.
+    let (turn_b, _) = host.prompt(m.b, "Edit the note.");
+    until_first_request(&mut m.events_b);
+    let (turn_a, _) = host.prompt(m.a, "Rename the note.");
+    until_first_request(&mut m.events_a);
+    // A ends, then B.
+    answer_from(&host, &mut m.events_a, m.a, 0, &["allow-once"]);
+    m.events_a.until_turn_ended(turn_a);
+    host.settle();
+    answer_from(&host, &mut m.events_b, m.b, 0, &["allow-once"]);
+    m.events_b.until_turn_ended(turn_b);
+    host.settle();
+    assert_eq!(read(&m.folder, "notes/p.txt"), None);
+    assert_eq!(
+        read(&m.folder, "notes/q.txt").as_deref(),
+        Some("Pea, edited\n")
+    );
+
+    // A's card: the rename, naming B, which edited the paper first.
+    let changed_a = m
+        .events_a
+        .files_changed(turn_a)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", m.events_a.dump()));
+    assert_eq!(
+        card(&m.events_a, turn_a),
+        [("notes/q.txt".to_owned(), false, vec![m.b])]
+    );
+    let from = MatterPath::new("notes/p.txt").unwrap();
+    assert_eq!(changed_a.files[0].change(), &ChangeKind::Renamed { from });
+    // B's card: its paper as it is now from B's start, gone, naming A; notes/q.txt, as A's card
+    // left it, is A's.
+    let changed_b = m
+        .events_b
+        .files_changed(turn_b)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", m.events_b.dump()));
+    assert_eq!(
+        card(&m.events_b, turn_b),
+        [("notes/p.txt".to_owned(), false, vec![m.a])]
+    );
+    assert_eq!(changed_b.files[0].change(), &ChangeKind::Deleted);
+    assert_eq!(changed_b.beside, [MatterPath::new("notes/q.txt").unwrap()]);
+
+    // Undo of B puts notes/p.txt back as B found it, and leaves A's notes/q.txt.
+    undo(&host, m.b, turn_b, "notes/p.txt");
+    assert_eq!(read(&m.folder, "notes/p.txt").as_deref(), Some("Pea\n"));
+    assert_eq!(
+        read(&m.folder, "notes/q.txt").as_deref(),
+        Some("Pea, edited\n")
+    );
     m.events_a.assert_no_mismatch();
     m.events_b.assert_no_mismatch();
     host.shutdown();

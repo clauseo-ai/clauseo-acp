@@ -1,22 +1,45 @@
 //! The undo and restore requests that cross to the matter thread, each owning what it names, and
 //! a restore's two jobs as the matter thread runs them.
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, Matter, Restore, Restored, TimelineEntry};
+use std::collections::BTreeSet;
+
+use clauseo_matters::{
+    Card, Checkpoint, CheckpointOutcome, Matter, Restore, Restored, TimelineEntry,
+};
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, MatterPath, RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use super::MatterReply;
 use super::checkpoints::timeline_entry;
 use crate::error::Error;
 
+/// An answer's card as an undo takes it, owned so it can cross to the matter thread: the changes
+/// of the turn's `FilesChanged`, and the papers it left off them as other answers' (its
+/// `beside`). R8's `Card`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TurnCard {
+    pub(crate) changes: Vec<FileChange>,
+    pub(crate) others: BTreeSet<MatterPath>,
+}
+
+impl TurnCard {
+    /// R8's card.
+    pub(crate) fn card(&self) -> Card<'_> {
+        Card {
+            changes: &self.changes,
+            others: &self.others,
+        }
+    }
+}
+
 /// An undo request that owns its decisions, so it can cross to the matter thread.
 #[derive(Debug, Clone)]
 pub(crate) struct UndoJob {
     pub(crate) before: CheckpointId,
     pub(crate) after: CheckpointId,
-    /// The changes on the turn's card, when the log holds it: `UndoRequest::only`.
-    pub(crate) only: Option<Vec<FileChange>>,
+    /// The turn's card, when the log holds it: `UndoRequest::only`.
+    pub(crate) only: Option<TurnCard>,
     pub(crate) decisions: Vec<FileDecision>,
     pub(crate) thread: Option<ThreadId>,
     pub(crate) turn: Option<TurnId>,

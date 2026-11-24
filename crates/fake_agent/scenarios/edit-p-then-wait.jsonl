@@ -1,0 +1,9 @@
+{"scenario":"edit-p-then-wait","description":"One turn that rewrites notes/p.txt (which the test made) beside a completed edit tool_call naming it, then asks perm-1 (allow once only) and ends its turn once the client answers it","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/p.txt","content":"Pea, edited\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit-p","title":"Edit notes/p.txt","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/p.txt","newText":"Pea, edited\n","oldText":"Pea\n"}],"locations":[{"path":"{{cwd}}/notes/p.txt"}]}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 1","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Edited the note."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

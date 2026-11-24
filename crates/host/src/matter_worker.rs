@@ -11,9 +11,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Card, Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe,
-    Overlap, PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta,
-    UndoRequest, Undone, matter_path_of_resolved,
+    Checkpoint, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter, OsProbe, Overlap,
+    PaperList, Place, RestorePlan, Retention, Settings, TimelineEntry, TurnMeta, UndoRequest,
+    Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest, ThreadId,
@@ -29,16 +29,7 @@ use crate::network_paths::{self, NetEnv};
 use crate::sent::{Places, TurnPaths};
 use crate::shell_writes;
 
-pub(crate) use jobs::{RecordDone, RestoreDone, RestoreJob, UndoJob};
-
-/// R8's card for an undo of a turn whose `FilesChanged` the log holds. `others` is empty:
-/// turns in one matter run one at a time, so no other answer explains a change off the card.
-fn card<'a>(
-    changes: Option<&'a [FileChange]>,
-    others: &'a BTreeSet<MatterPath>,
-) -> Option<Card<'a>> {
-    changes.map(|changes| Card { changes, others })
-}
+pub(crate) use jobs::{RecordDone, RestoreDone, RestoreJob, TurnCard, UndoJob};
 
 /// The matter paths a turn's tool calls wrote ([`TurnPaths::written`]), in `folder`: those
 /// `acp` placed inside the session folder by text, and each `outside` path that the network-safe
@@ -225,8 +216,8 @@ pub(crate) enum MatterJob {
     EditedSince {
         before: CheckpointId,
         after: CheckpointId,
-        /// The changes on the turn's card, when the log holds it.
-        only: Option<Vec<FileChange>>,
+        /// The turn's card, when the log holds it.
+        only: Option<TurnCard>,
     },
     /// `Matter::still_gone`: which of `paths`, files an undo deleted, are in the folder again.
     /// Stats only; writes nothing.
@@ -518,11 +509,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             repair(matter, &meta, &named, before, last, overlap.as_ref())
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
-            let none = BTreeSet::new();
             let request = UndoRequest {
                 before: job.before,
                 after: job.after,
-                only: card(job.only.as_deref(), &none),
+                only: job.only.as_ref().map(TurnCard::card),
                 decisions: &job.decisions,
                 thread: job.thread,
                 turn: job.turn,
@@ -565,8 +555,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             after,
             only,
         } => MatterReply::EditedSince(open(settings, slot).and_then(|matter| {
-            let none = BTreeSet::new();
-            let only = card(only.as_deref(), &none);
+            let only = only.as_ref().map(TurnCard::card);
             Ok(matter.edited_since(before, after, only)?)
         })),
         MatterJob::StillGone { paths } => {
