@@ -2,7 +2,13 @@
 //! Documents ask), and the macOS and Windows reads (`mac.rs`, `windows.rs`, the latter in this
 //! process), with nothing to read elsewhere.
 
-use std::ffi::OsStr;
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
+use std::sync::Mutex;
+
+use futures::channel::oneshot;
+
+use crate::bridge::lock;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -15,20 +21,32 @@ use super::pick::{Mount, parse_mounts};
 use super::{Cfa, KeychainCheck, KeychainItem, Platform, Probe, cfa_from_layers};
 
 /// A child's exit code and stdout; `None` when it outlasted its limit.
-type Ran = Option<(Option<i32>, Vec<u8>)>;
+pub(super) type Ran = Option<(Option<i32>, Vec<u8>)>;
 
 /// The most of a child's stdout kept; the rest is read and dropped, so the child never stalls.
 const OUTPUT_MAX: u64 = 1024 * 1024;
 
+/// A child's environment and how it may be ended early, beyond its program and arguments.
+#[derive(Default)]
+pub(super) struct ChildOpts<'a> {
+    /// Written to its stdin, which is then closed.
+    pub(super) input: &'a [u8],
+    /// Its whole environment, when set; else it inherits this process's.
+    pub(super) env: Option<BTreeMap<OsString, OsString>>,
+    /// The longest it may run.
+    pub(super) limit: Option<Duration>,
+    /// Ends it at once when it fires (or its sender drops): the quit's ([`AskStop`]).
+    pub(super) stop: Option<oneshot::Receiver<()>>,
+}
+
 /// Runs `program args` through the process crate (its tree, `CREATE_NO_WINDOW` on Windows),
-/// writes `input` to its stdin and closes it, and answers its exit code and stdout; `Ok(None)`
-/// when it outlasts `limit` (its tree is killed). Blocks: called on the commands' blocking
-/// thread. The handle kills the tree when it drops, and desktop's exit stops every live tree.
+/// as `opts` says, and answers its exit code and stdout; `Ok(None)` when it outlasts its limit
+/// or its stop fires (its tree is killed: the handle kills it when it drops). Blocks: called on
+/// the commands' blocking thread.
 pub(super) fn run(
     program: &Path,
     args: &[&std::ffi::OsStr],
-    input: &[u8],
-    limit: Option<Duration>,
+    opts: ChildOpts<'_>,
 ) -> Result<Ran, clauseo_process::Error> {
     use std::pin::pin;
 
@@ -36,13 +54,23 @@ pub(super) fn run(
     use futures::future::{Either, join4, select};
     use futures::{AsyncReadExt as _, AsyncWriteExt as _};
 
+    let ChildOpts {
+        input,
+        env,
+        limit,
+        stop,
+    } = opts;
+    let spawn = match env {
+        Some(_) => clauseo_process::SpawnOptions::new().clear_env(),
+        None => clauseo_process::SpawnOptions::new(),
+    };
     let spec = clauseo_process::LaunchSpec::new(
         program.to_owned(),
         args.iter().map(|arg| (*arg).to_owned()).collect(),
-        std::collections::BTreeMap::new(),
+        env.unwrap_or_default(),
         std::env::temp_dir(),
     )?;
-    let launcher = clauseo_process::PassthroughLauncher::new(clauseo_process::SpawnOptions::new());
+    let launcher = clauseo_process::PassthroughLauncher::new(spawn);
     let clauseo_process::Launched {
         mut stdin,
         mut stdout,
@@ -74,6 +102,13 @@ pub(super) fn run(
                 None => futures::future::pending().await,
             }
         };
+        let stopped = async {
+            match stop {
+                Some(stop) => drop(stop.await),
+                None => futures::future::pending().await,
+            }
+        };
+        let timeout = async { select(pin!(timeout), pin!(stopped)).await.factor_first().0 };
         match select(work, pin!(timeout)).await {
             Either::Left(((out, code), _)) => Some((code, out)),
             Either::Right(((), _)) => None,
@@ -140,7 +175,11 @@ const MOUNT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Empty when it fails, exits non-zero or outlasts [`MOUNT_TIMEOUT`] (logged), so a pick then
 /// asks for no permission.
 fn mount_table() -> Vec<Mount> {
-    match run(Path::new("/sbin/mount"), &[], &[], Some(MOUNT_TIMEOUT)) {
+    let opts = ChildOpts {
+        limit: Some(MOUNT_TIMEOUT),
+        ..ChildOpts::default()
+    };
+    match run(Path::new("/sbin/mount"), &[], opts) {
         Ok(Some((Some(0), listing))) => parse_mounts(&String::from_utf8_lossy(&listing)),
         Ok(_) => {
             tracing::warn!("permissions: /sbin/mount gave no mount table");
@@ -151,6 +190,66 @@ fn mount_table() -> Vec<Mount> {
             Vec::new()
         }
     }
+}
+
+/// The longest the keychain Ask's child may wait on macOS's dialog: past it its tree is killed
+/// and the row answers denied, so `asking` never lasts for ever.
+const ASK_LIMIT: Duration = Duration::from_mins(5);
+
+/// The quit's way to end the keychain Ask's child ([`end_keychain_ask`]).
+static ASK_STOP: AskStop = AskStop::new();
+
+/// Ends the keychain Ask's child, if one runs, and any started after: the quit calls it, so the
+/// child and its dialog never outlive the app (`quit.rs`).
+pub(crate) fn end_keychain_ask() {
+    ASK_STOP.stop();
+}
+
+/// The quit's stop for the running Ask's child: one registered at a time (one Ask runs at a
+/// time), fired by [`AskStop::stop`]; once stopped, a child registered later is stopped at once.
+pub(super) struct AskStop {
+    state: Mutex<(Option<oneshot::Sender<()>>, bool)>,
+}
+
+impl AskStop {
+    pub(super) const fn new() -> Self {
+        Self {
+            state: Mutex::new((None, false)),
+        }
+    }
+
+    /// The stop for a child about to start; it fires when [`AskStop::stop`] runs.
+    pub(super) fn register(&self) -> oneshot::Receiver<()> {
+        let (fire, fired) = oneshot::channel();
+        let mut state = lock(&self.state);
+        if !state.1 {
+            // An earlier child's sender, if any, is replaced: that child has ended (one Ask
+            // runs at a time).
+            state.0 = Some(fire);
+        }
+        // Stopped already: `fire` drops here, so `fired` resolves at once.
+        fired
+    }
+
+    /// Stops the registered child, and every one registered after.
+    pub(super) fn stop(&self) {
+        let mut state = lock(&self.state);
+        state.1 = true;
+        if let Some(fire) = state.0.take() {
+            // The child may have ended already; nothing left to stop then.
+            let _ended = fire.send(());
+        }
+    }
+}
+
+/// The Ask child's whole environment: `HOME` and nothing else. security-framework finds the
+/// login keychain from the home folder, so the child reads the same keychain as this process;
+/// nothing else of this process's environment (a `DYLD_` variable, a proxy) reaches it.
+pub(super) fn child_env() -> BTreeMap<OsString, OsString> {
+    std::env::var_os("HOME")
+        .map(|home| (OsString::from("HOME"), home))
+        .into_iter()
+        .collect()
 }
 
 /// Whether the keychain Ask's child runs now (`keychain.rs`).
@@ -212,7 +311,12 @@ impl Probe for SystemProbe {
     }
 
     fn list_folder(&self, folder: &Path) -> Result<bool, HostError> {
-        let ran = run(Path::new("/bin/ls"), &[folder.as_os_str()], &[], None).map_err(|error| {
+        let ran = run(
+            Path::new("/bin/ls"),
+            &[folder.as_os_str()],
+            ChildOpts::default(),
+        )
+        .map_err(|error| {
             HostError::new(
                 ErrorCode::Internal,
                 format!("the folder's listing did not start: {error}"),
@@ -228,11 +332,18 @@ impl Probe for SystemProbe {
         let exe =
             std::env::current_exe().map_err(|error| failed(format!("found no app: {error}")))?;
         let input = request_lines(items);
-        // No limit: macOS's dialog may stay up as long as the lawyer leaves it.
-        let ran = run(&exe, &[OsStr::new(FLAG)], input.as_bytes(), None)
+        let opts = ChildOpts {
+            input: input.as_bytes(),
+            env: Some(child_env()),
+            limit: Some(ASK_LIMIT),
+            stop: Some(ASK_STOP.register()),
+        };
+        let ran = run(&exe, &[OsStr::new(FLAG)], opts)
             .map_err(|error| failed(format!("did not start: {error}")))?;
         let Some((code, output)) = ran else {
-            return Err(failed("did not end".to_owned()));
+            // Past the limit, or the quit: killed. No answer, so what still asks reads denied.
+            tracing::info!("permissions: keychain Ask ended by its limit or the quit");
+            return Ok(Vec::new());
         };
         let answers = results(&String::from_utf8_lossy(&output));
         tracing::info!(
