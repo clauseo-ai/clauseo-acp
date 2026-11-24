@@ -51,14 +51,40 @@ const good = () => ({
   sizes: structuredClone(sizes),
 });
 
-// The variants carry the root entry and the first two packages of the lock only, to stay small.
+// The variants carry only the lock's root and the three pinned packages, to stay small.
+const KEPT = [
+  "",
+  "node_modules/@agentclientprotocol/claude-agent-acp",
+  "node_modules/@agentclientprotocol/codex-acp",
+  "node_modules/@openai/codex",
+];
 const small = () => {
   const list = good();
-  const entries = Object.entries(list.package_lock.packages).slice(0, 3);
-  list.package_lock.packages = Object.fromEntries(entries);
+  const all = list.package_lock.packages;
+  list.package_lock.packages = Object.fromEntries(KEPT.map((key) => [key, all[key]]));
   return list;
 };
 const firstPackage = (list) => Object.keys(list.package_lock.packages)[1];
+// Moves the locked package at node_modules/<name> to `version`, its tarball with it.
+const lockAt = (list, name, version) => {
+  const entry = list.package_lock.packages[`node_modules/${name}`];
+  entry.version = version;
+  entry.resolved = `https://registry.npmjs.org/${name}/-/${name.split("/").pop()}-${version}.tgz`;
+};
+// Pins dependency `name` at `version` everywhere: package.json, the lock's root and its entry.
+const pin = (list, name, version) => {
+  list.package_json.dependencies[name] = version;
+  list.package_lock.packages[""].dependencies[name] = version;
+  lockAt(list, name, version);
+};
+// Adds a copy of the first package's entry under `key`, changed by `change`.
+const extraEntry = (list, key, change = () => {}) => {
+  const entry = structuredClone(list.package_lock.packages[firstPackage(list)]);
+  change(entry);
+  list.package_lock.packages[key] = entry;
+};
+const CLAUDE = "@agentclientprotocol/claude-agent-acp";
+const CODEX = "@agentclientprotocol/codex-acp";
 
 const variants = {
   "unknown-field": (l) => { l.extra = true; },
@@ -80,12 +106,40 @@ const variants = {
   "sha1-integrity": (l) => {
     l.package_lock.packages[firstPackage(l)].integrity = "sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=";
   },
-  "not-semver": (l) => { l.package_json.dependencies["@agentclientprotocol/codex-acp"] = "^2.2.2"; },
-  "older": (l) => { l.package_json.overrides["@openai/codex"] = "0.162.0"; },
+  "not-semver": (l) => { l.package_json.dependencies[CODEX] = "^2.2.2"; },
+  "older": (l) => {
+    l.package_json.overrides["@openai/codex"] = "0.162.0";
+    lockAt(l, "@openai/codex", "0.162.0");
+  },
   "newer": (l) => {
     l.seq = 3;
-    l.package_json.dependencies["@agentclientprotocol/claude-agent-acp"] = "0.90.0";
+    pin(l, CLAUDE, "0.90.0");
   },
+  "seq-huge": (l) => { l.seq = 2 ** 32 + 1; },
+  "dotdot-key": (l) => extraEntry(l, "node_modules/../../evil"),
+  "absolute-key": (l) => extraEntry(l, "/etc/evil"),
+  "backslash-key": (l) => extraEntry(l, "node_modules/evil\\..\\x"),
+  "missing-resolved": (l) => { delete l.package_lock.packages[firstPackage(l)].resolved; },
+  "link": (l) => extraEntry(l, "node_modules/evil", (e) => {
+    e.link = true;
+    e.resolved = "../evil";
+  }),
+  "in-bundle": (l) => { l.package_lock.packages[firstPackage(l)].inBundle = true; },
+  "other-resolved": (l) => {
+    l.package_lock.packages[firstPackage(l)].resolved =
+      "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz";
+  },
+  "two-integrity": (l) => {
+    const entry = l.package_lock.packages[firstPackage(l)];
+    entry.integrity = `${entry.integrity} ${entry.integrity}`;
+  },
+  "override-alias": (l) => { l.package_json.overrides["@openai/codex"] = "npm:evil@1.0.0"; },
+  "override-git": (l) => {
+    l.package_json.overrides["@openai/codex"] = "git+https://evil.example/codex.git";
+  },
+  "override-ref": (l) => { l.package_json.overrides["@openai/codex"] = `$${CODEX}`; },
+  "root-mismatch": (l) => { l.package_lock.packages[""].dependencies[CLAUDE] = "0.89.0"; },
+  "installed-mismatch": (l) => { lockAt(l, CODEX, "2.2.1"); },
 };
 
 const scratch = mkdtempSync(join(tmpdir(), "engines-fixtures-"));

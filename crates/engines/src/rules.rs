@@ -16,9 +16,6 @@ pub const DEPENDENCIES: [&str; 2] = [
 /// The overrides `package_json.overrides` may have: codex-acp's native binary.
 pub const OVERRIDES: [&str; 1] = ["@openai/codex"];
 
-/// Where every locked package must resolve from.
-pub const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
-
 /// The fields an engines pin file has (those of `crates/limits/tests/live/package.json`). Any
 /// other, such as `scripts`, which `npm ci` would run, is refused.
 const PACKAGE_JSON_FIELDS: [&str; 7] = [
@@ -65,7 +62,19 @@ pub(crate) fn check(list: &EngineList, cx: &Context<'_>) -> Result<(), Error> {
     {
         return Err(Error::Overrides);
     }
-    lock(list.package_lock())?;
+    // Every pin is one exact version: no range, tag, `npm:` alias, git or file spec, `$ref`.
+    if dependencies
+        .values()
+        .chain(overrides.values())
+        .any(|value| {
+            value
+                .as_str()
+                .is_none_or(|text| Version::parse(text).is_err())
+        })
+    {
+        return Err(Error::Version);
+    }
+    crate::lock::check(list.package_lock(), dependencies, overrides)?;
     if !list.apps().iter().any(|app| app == cx.app_version) {
         return Err(Error::AppNotListed);
     }
@@ -77,34 +86,6 @@ pub(crate) fn check(list: &EngineList, cx: &Context<'_>) -> Result<(), Error> {
         });
     }
     not_older(dependencies, overrides, cx.bundled_package_json)
-}
-
-/// `lockfileVersion` 3, and every package but the root locked to the registry by sha512.
-fn lock(lock: &Value) -> Result<(), Error> {
-    if lock.get("lockfileVersion").and_then(Value::as_u64) != Some(3) {
-        return Err(Error::Lockfile);
-    }
-    let packages = lock
-        .get("packages")
-        .and_then(Value::as_object)
-        .ok_or(Error::Lockfile)?;
-    for (path, entry) in packages {
-        if path.is_empty() {
-            continue;
-        }
-        let integrity = entry.get("integrity").and_then(Value::as_str);
-        if !integrity.is_some_and(|text| text.starts_with("sha512-")) {
-            return Err(Error::Integrity);
-        }
-        if let Some(resolved) = entry.get("resolved")
-            && !resolved
-                .as_str()
-                .is_some_and(|text| text.starts_with(NPM_REGISTRY))
-        {
-            return Err(Error::Resolved);
-        }
-    }
-    Ok(())
 }
 
 /// Each dependency, and each override the bundle pins, at or above the bundled version.

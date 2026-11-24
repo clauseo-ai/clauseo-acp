@@ -73,7 +73,7 @@ fn a_seq_not_above_the_bundled_one_is_refused() {
 
 #[test]
 fn a_version_older_than_the_bundled_one_is_refused() {
-    // The list's codex override is 0.162.0; the bundle pins 0.162.1.
+    // The list's codex override (and its lock) is 0.162.0; the bundle pins 0.162.1.
     assert_eq!(refusal(&OLDER), Some(Error::OlderThanBundled));
     // A bundle newer than the good list's claude-agent-acp.
     let mut newer_bundle = bundled();
