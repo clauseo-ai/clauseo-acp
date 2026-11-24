@@ -1,5 +1,6 @@
 //! The values a store call takes and returns: options, a commit and its parts, and the rows.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clauseo_protocol::{
@@ -214,9 +215,22 @@ pub struct ThreadRow {
     /// The thread's last `seq` when the lawyer last saw it (`MarkSeen`); `None` before the
     /// first (schema 3; a thread from before schema 3 starts seen up to its last `seq` then).
     pub seen_seq: Option<Seq>,
-    /// The model and effort the lawyer last chose in this thread, kept through sessions that
-    /// could not use them; `None` before the first (schema 9; `NULL` before). Stored as JSON.
-    pub own_picks: Option<ConfigPicks>,
+    /// The model and effort the lawyer last chose in this thread, per agent, kept through
+    /// sessions that could not use them; `None` on a row from before schema 9 (`NULL`), and
+    /// for a stored value that does not decode. Stored as JSON.
+    pub own_picks: Option<OwnPicks>,
+}
+
+/// A thread's own picks ([`ThreadRow::own_picks`]), per agent: a thread whose agent changes
+/// keeps each agent's apart, so one agent's model id is never set on another.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnPicks(pub BTreeMap<AgentId, ConfigPicks>);
+
+impl OwnPicks {
+    /// `agent`'s picks, once it has any.
+    pub fn of(&self, agent: &AgentId) -> Option<&ConfigPicks> {
+        self.0.get(agent)
+    }
 }
 
 /// A checkpoint: the git commit behind a `CheckpointRecorded` event.

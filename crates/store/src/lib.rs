@@ -95,8 +95,8 @@ use futures::channel::oneshot;
 pub use blob::blob_ref;
 pub use error::{Error, IoError};
 pub use model::{
-    BlobIn, CheckpointRow, Commit, Committed, MatterRow, PendingAction, RawFrameRetention, Receipt,
-    Reopen, Snapshot, SnapshotIn, StoreOptions, ThreadRow,
+    BlobIn, CheckpointRow, Commit, Committed, MatterRow, OwnPicks, PendingAction,
+    RawFrameRetention, Receipt, Reopen, Snapshot, SnapshotIn, StoreOptions, ThreadRow,
 };
 pub use open::{DB_FILE, LOCK_FILE, SCHEMA};
 pub use read::READ_PAGE_MAX;

@@ -76,7 +76,11 @@ fn run_with(
 }
 
 /// A Codex thread of `matter` (`config` its `CreateThread` config).
-fn created(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>) -> ThreadId {
+pub(crate) fn created(
+    host: &Running,
+    matter: MatterId,
+    config: Option<&[(&str, &str)]>,
+) -> ThreadId {
     let outcome = host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(CODEX).unwrap(),
@@ -89,7 +93,7 @@ fn created(host: &Running, matter: MatterId, config: Option<&[(&str, &str)]>) ->
 }
 
 /// `thread`'s session stops idle: the idle limit passes with no prompt.
-fn stop_idle(host: &Running, events: &mut Events) {
+pub(crate) fn stop_idle(host: &Running, events: &mut Events) {
     host.wait_armed(LIMIT);
     // That may be the deadline an earlier turn's end armed: the clock answers every arming in
     // order. The `TurnEnded` read last is published before the host arms its own deadline, so
@@ -116,7 +120,7 @@ pub(crate) fn idle_thread(
 }
 
 /// The thread's matter's prefs hold gpt-6-luna and low; the thread has no config of its own,
-/// so its kept values come from its logged options at the relaunch (a thread from before them).
+/// so its first session keeps them (`pickers_kept_rows.rs` has a row from before them).
 /// The fallback relaunch drops neither from the prefs, tells once, and the third turn nothing;
 /// after a restart the list has gpt-6-luna again, and it is set back with no notice.
 #[test]
@@ -287,7 +291,7 @@ fn a_new_threads_first_session_seeds_its_kept_values() {
 }
 
 /// The text of every notice logged on the thread, Clauseo's and the agent's.
-fn notice_texts(events: &Events) -> Vec<String> {
+pub(crate) fn notice_texts(events: &Events) -> Vec<String> {
     (events.events())
         .filter_map(|event| match event {
             clauseo_protocol::DomainEvent::Notice(notice) => Some(notice.text.clone()),

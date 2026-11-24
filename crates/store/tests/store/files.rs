@@ -131,7 +131,7 @@ fn newer_user_version_is_refused() {
     let own: String = conn
         .query_row("SELECT own_picks FROM threads", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(own, r#"{"model":"gpt-6-luna"}"#);
+    assert_eq!(own, r#"{"codex-acp":{"model":"gpt-6-luna"}}"#);
 }
 
 #[test]

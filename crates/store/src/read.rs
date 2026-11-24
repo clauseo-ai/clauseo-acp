@@ -5,12 +5,14 @@ use std::collections::HashMap;
 
 use clauseo_protocol::{
     AccountLimits, CheckpointId, CommandId, CommandOutcome, Count, Envelope, InterruptedKind,
-    MatterId, Seq, StreamId, Timestamp,
+    MatterId, Seq, StreamId, ThreadId, Timestamp,
 };
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::codec::{self, first_key, key_seq};
-use crate::{CheckpointRow, Error, MatterRow, PendingAction, Receipt, Reopen, Snapshot, ThreadRow};
+use crate::{
+    CheckpointRow, Error, MatterRow, OwnPicks, PendingAction, Receipt, Reopen, Snapshot, ThreadRow,
+};
 
 /// The most envelopes one `read_after` returns.
 pub const READ_PAGE_MAX: u32 = 500;
@@ -316,6 +318,20 @@ fn saved_or_default<T>(
     None
 }
 
+/// A thread's stored own picks, a hint only (`turn/picks/own.rs` in the host): a value that
+/// does not decode reads as none, which seeds them again, and an entry that does not (a key that
+/// is no agent id, picks that do not decode) is left out; each with a warning naming the thread,
+/// the stored value left as it is.
+fn own_picks(thread: ThreadId, text: &str) -> Option<OwnPicks> {
+    let (picks, left_out) = codec::own_picks(text);
+    if picks.is_none() {
+        tracing::warn!(%thread, "a thread's own picks do not decode; read as none, so they are seeded again");
+    } else if left_out > 0 {
+        tracing::warn!(%thread, left_out, "entries of a thread's own picks do not decode; left out");
+    }
+    picks
+}
+
 /// The time of the last event of every stream that has one, by one lookup of each stream's last
 /// key; only the envelope's `ts` is decoded.
 pub(crate) fn tail_times(conn: &Connection) -> Result<Vec<(StreamId, Timestamp)>, Error> {
@@ -345,8 +361,10 @@ pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadR
     while let Some(row) = rows.next()? {
         let session: Option<String> = row.get(4)?;
         let source: Option<String> = row.get(9)?;
+        let id: ThreadId = codec::parse(row.get_ref(0)?.as_str()?, "a thread id")?;
+        let own = row.get_ref(10)?.as_str_or_null()?;
         out.push(ThreadRow {
-            id: codec::parse(row.get_ref(0)?.as_str()?, "a thread id")?,
+            id,
             matter: codec::parse(row.get_ref(1)?.as_str()?, "a matter id")?,
             agent: codec::parse(row.get_ref(2)?.as_str()?, "an agent id")?,
             title: row.get(3)?,
@@ -358,11 +376,7 @@ pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadR
             created: timestamp(row, 6)?,
             updated: timestamp(row, 7)?,
             seen_seq: seen_seq(row, 8)?,
-            own_picks: row
-                .get_ref(10)?
-                .as_str_or_null()?
-                .map(codec::own_picks)
-                .transpose()?,
+            own_picks: own.and_then(|text| own_picks(id, text)),
         });
     }
     Ok(out)

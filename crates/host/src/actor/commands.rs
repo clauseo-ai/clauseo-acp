@@ -454,7 +454,7 @@ fn create_thread(
         updated: now.wall,
         seen_seq: None,
         // None only for a row from before schema 9 (`turn/picks/own.rs`).
-        own_picks: Some(clauseo_protocol::ConfigPicks::default()),
+        own_picks: Some(clauseo_store::OwnPicks::default()),
     };
     let event = DomainEvent::ThreadCreated(ThreadCreated {
         matter,
