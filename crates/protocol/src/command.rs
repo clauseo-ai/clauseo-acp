@@ -558,4 +558,12 @@ pub enum HostCommand {
     /// value it carries encodes as `[redacted]`.
     /// JSON: `{"mcp": {"remove_server": {"name": "github"}}}`.
     Mcp(McpCommand),
+    /// Read the keychain again: desktop's own step once the lawyer allowed Clauseo to use it,
+    /// never a window's (the desktop bridge refuses it from every window). The host reads again
+    /// what the keychain refused before (an error, not "no item"): case law's saved sign-in
+    /// (then `HostEvent::ConnectorsChanged`), each MCP server value a launch was refused (then
+    /// `HostEvent::McpToolsChanged` and `HostEvent::AddonsChanged`), and the unsafe-site allow
+    /// list's integrity hash, saving this run's allows once it reads. Answers `Done` at once,
+    /// with no receipt; the events follow the reads. JSON: `{"keychain_read_again": {}}`.
+    KeychainReadAgain {},
 }

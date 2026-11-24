@@ -243,8 +243,8 @@ impl HostCommand {
             | Self::CancelScheduledUpdate {}
             // No fields; whether this computer has a set-up to retry or remove is state.
             | Self::RetryProtection {} | Self::RemoveSandboxSetup {}
-            // A flag; the host keeps the last one.
-            | Self::SetNetwork { online: _ } => Ok(()),
+            // A flag the host keeps the last of; and desktop's own, with no fields.
+            | Self::SetNetwork { online: _ } | Self::KeychainReadAgain {} => Ok(()),
             Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
                 validate_allowed_sites(self)
             }
