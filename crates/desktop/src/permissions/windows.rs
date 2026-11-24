@@ -13,10 +13,9 @@ use windows::Win32::UI::Shell::{
 
 use super::system::{PROBE_TIMEOUT, run};
 
-/// The preference's three fields, as JSON.
+/// The preference's two fields, as JSON.
 const QUERY: &str = "Get-MpPreference | Select-Object EnableControlledFolderAccess,\
-                     ControlledFolderAccessProtectedFolders,\
-                     ControlledFolderAccessAllowedApplications | ConvertTo-Json";
+                     ControlledFolderAccessProtectedFolders | ConvertTo-Json";
 
 /// `Get-MpPreference`'s JSON, from Windows' own PowerShell (by its full path, no profile, no
 /// prompt, no console window), or `None` when it does not start, fails or outlasts
