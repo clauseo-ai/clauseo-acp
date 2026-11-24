@@ -213,6 +213,32 @@ impl ReadLimits for SwappableReaders {
             readers.read(agent).await
         })
     }
+
+    /// The model probe, behind the same key wait and blocks as a read; a blocked agent or a
+    /// locked keychain gives none.
+    fn probe_models(
+        &self,
+        agent: AgentKind,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<clauseo_protocol::AgentModels>> + Send>,
+    > {
+        let readers = Arc::clone(&self.readers);
+        let keys = Arc::clone(&self.keys);
+        let plans = Arc::clone(&self.plans);
+        let blocked = Arc::clone(&self.blocked);
+        let keychain_locked = Arc::clone(&self.keychain_locked);
+        Box::pin(async move {
+            let ready = keys_ready(&keys, &plans, agent).await;
+            if ready
+                .and_then(|()| refuse_blocked(&blocked, agent))
+                .is_err()
+                || (agent == AgentKind::Claude && keychain_locked())
+            {
+                return None;
+            }
+            readers.probe_models(agent).await
+        })
+    }
 }
 
 impl LeaveReaders for SwappableReaders {

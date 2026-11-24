@@ -23,6 +23,8 @@ fn two_queued() -> (Log, StreamState, ThreadId, TurnId, [MessageId; 2]) {
     let (first, _) = prompt(&mut log, &mut state, "One");
     let checkpoint_before = log.fresh().unwrap();
     let started = TurnStarted {
+        model: None,
+        effort: None,
         turn: first,
         checkpoint_before,
     };

@@ -36,6 +36,7 @@ mod own_turn;
 mod picks;
 mod profile_loads;
 mod prompt;
+mod prompt_picks;
 mod queue;
 mod reconcile;
 mod restore;
@@ -147,6 +148,8 @@ pub(crate) struct TurnState {
     title: state::TitleWindow,
     /// Agent output that came outside any turn, waiting for one (`own_turn.rs`).
     own_held: own_turn::Held,
+    /// The prompts' own model and effort picks (`prompt_picks.rs`).
+    prompt_picks: prompt_picks::PromptPicks,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.

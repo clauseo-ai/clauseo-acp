@@ -279,6 +279,9 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         commands: Vec::new(),
         plan: Vec::new(),
         usage: None,
+        model: None,
+        effort: None,
+        code_mode: false,
     };
     out.changes
         .push(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(

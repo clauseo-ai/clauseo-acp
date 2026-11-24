@@ -56,6 +56,8 @@ fn start(log: &mut Log, state: &mut StreamState, turn: TurnId) -> Applied {
         log,
         state,
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         },

@@ -110,6 +110,7 @@ bundled! {
         "pickers-load",
         "pickers-load-early",
         "pickers-picked",
+        "pickers-probed",
         "pickers-recommended",
         "pickers-released",
         "pickers-resume",

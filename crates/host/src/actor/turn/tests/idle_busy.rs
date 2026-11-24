@@ -66,6 +66,7 @@ fn send(rig: &mut Rig, n: u128, thread: ThreadId, text: &str, delivery: Delivery
         thread,
         content,
         delivery,
+        config: None,
     };
     let outcome = rig.dispatch(n, command).unwrap();
     let CommandOutcome::PromptAccepted { turn, .. } = outcome else {

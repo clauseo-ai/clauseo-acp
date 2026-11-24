@@ -37,6 +37,9 @@ fn matter() -> MatterSummary {
 
 fn thread() -> ThreadSummary {
     ThreadSummary {
+        model: None,
+        effort: None,
+        code_mode: false,
         thread: ThreadId::new(id(2)).unwrap(),
         matter: MatterId::new(id(1)).unwrap(),
         title: None,

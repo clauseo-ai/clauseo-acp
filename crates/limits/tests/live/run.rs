@@ -18,9 +18,9 @@ use crate::redact::Redactor;
 use crate::write;
 
 /// The variable naming the folder `npm ci` filled from the pins file.
-const INSTALL: &str = "CLAUSEO_G16_INSTALL";
+pub(crate) const INSTALL: &str = "CLAUSEO_G16_INSTALL";
 /// The variable naming the absolute path of `node`.
-const NODE: &str = "CLAUSEO_G16_NODE";
+pub(crate) const NODE: &str = "CLAUSEO_G16_NODE";
 /// claude-agent-acp's bin script under the install.
 const CLAUDE_SCRIPT: &str = "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
 /// codex-acp's bin script under the install.
@@ -51,7 +51,7 @@ pub(crate) enum Kind {
 
 impl Kind {
     /// The test's name, which names its recording.
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Kind::ClaudePro => "claude_pro",
             Kind::ClaudeTeam => "claude_team",
@@ -63,11 +63,11 @@ impl Kind {
     }
 
     /// The variable naming its login folder.
-    fn var(self) -> String {
+    pub(crate) fn var(self) -> String {
         format!("CLAUSEO_G16_{}", self.name().to_ascii_uppercase())
     }
 
-    fn agent(self) -> AgentKind {
+    pub(crate) fn agent(self) -> AgentKind {
         match self {
             Kind::ClaudePro | Kind::ClaudeTeam | Kind::ClaudeApi => AgentKind::Claude,
             Kind::CodexPlus | Kind::CodexGo | Kind::CodexApi => AgentKind::Codex,
@@ -181,14 +181,14 @@ fn known(values: &[&OsString], scratch: &Path) -> Vec<String> {
 }
 
 /// The value of `var`, which a live run needs once its login variable is set.
-fn required(var: &str) -> OsString {
+pub(crate) fn required(var: &str) -> OsString {
     std::env::var_os(var)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| panic!("{var} is unset; a live run needs it (G16's runbook)"))
 }
 
 /// `settings.json`: the agent's entry running its bin script under `install` with `node`.
-fn settings(
+pub(crate) fn settings(
     kind: Kind,
     install: &OsString,
     node: &OsString,
@@ -400,10 +400,10 @@ fn shape(limits: &AccountLimits) -> String {
 }
 
 /// A temp folder of the test's own, removed at the end.
-struct Scratch(PathBuf);
+pub(crate) struct Scratch(pub(crate) PathBuf);
 
 impl Scratch {
-    fn new(name: &str) -> Scratch {
+    pub(crate) fn new(name: &str) -> Scratch {
         let root =
             std::env::temp_dir().join(format!("clauseo-limits-live-{}-{name}", std::process::id()));
         drop(write::remove_dir_all(&root));

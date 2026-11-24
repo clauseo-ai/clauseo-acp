@@ -131,6 +131,11 @@ pub(crate) enum LimitsInput {
     Drained { id: SubId },
     /// A limits subscription was dropped.
     Unsubscribed { id: SubId },
+    /// `agent`'s model probe answered (`agent_options/probe.rs`); `None` when it failed.
+    Probed {
+        agent: AgentKind,
+        models: Option<clauseo_protocol::AgentModels>,
+    },
 }
 
 impl LimitsHost {
@@ -206,6 +211,7 @@ pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
         } => {
             let failed = matches!(outcome, ReadOutcome::Failed(_));
             let word = plans::outcome_word(&outcome);
+            super::agent_options::probe::after_read(actor, agent, &outcome);
             feed(actor, ModelInput::ReadDone { agent, outcome });
             plans::log_read_done(actor, agent, word);
             stops::read_done(actor, agent, failed, number);
@@ -220,6 +226,9 @@ pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
         }
         LimitsInput::StopWait { thread, turn } => stops::on_wait_over(actor, thread, turn),
         LimitsInput::Drained { id } => on_drained(actor, id),
+        LimitsInput::Probed { agent, models } => {
+            super::agent_options::probe::on_probed(actor, agent, models);
+        }
         LimitsInput::Unsubscribed { id } => {
             actor.limits.subs.retain(|sub| sub.id() != id);
             let now = actor.now().wall;
@@ -270,6 +279,7 @@ pub(crate) fn refresh(actor: &mut Actor, agent: Option<AgentKind>, why: RefreshW
 /// `HostHandle::limits_login_changed`: one `Input::LoginChanged`, a read at once past any age
 /// or back-off (a read in flight is followed by another), the deadlines left as they were.
 pub(crate) fn login_changed(actor: &mut Actor, agent: AgentKind) {
+    super::agent_options::probe::login_changed(actor, agent);
     feed(actor, ModelInput::LoginChanged { agent });
 }
 
@@ -437,6 +447,13 @@ fn start_read(actor: &mut Actor, agent: AgentKind) {
             number,
         })
     });
+}
+
+impl Actor {
+    /// The limits reader, which probes the agents' models too.
+    pub(crate) fn limits_reader(&self) -> std::sync::Arc<dyn ReadLimits> {
+        std::sync::Arc::clone(&self.limits.reader)
+    }
 }
 
 /// Keeps `limits` as the last value for its account, off the loop.

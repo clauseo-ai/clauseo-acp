@@ -377,6 +377,8 @@ fn every_id_round_trips_in_both_formats() {
     round_trips(&BlockedSiteId::new(v7).unwrap());
 
     let started = DomainEvent::from(TurnStarted {
+        model: None,
+        effort: None,
         turn: TurnId::new(v7).unwrap(),
         checkpoint_before: CheckpointId::new(v7).unwrap(),
     });

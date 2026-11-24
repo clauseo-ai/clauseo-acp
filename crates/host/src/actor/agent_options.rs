@@ -17,11 +17,11 @@
 //! another's draft default. An option the report drops goes; one with no kept current takes the
 //! report's.
 //!
-//! An agent with no session yet has none kept: a Claude or Codex agent then gives its seed
-//! (`seed.rs`, the agent's own default, never sent), so its first conversation's draft shows the
-//! pickers too; any other agent gives none. The seed is only ever shown, never kept: what is
-//! kept comes from a session's reports alone, so the first session's start replaces it whole,
-//! and [`merged`] never carries its value over.
+//! The host's model probe (`probe.rs`) also fills it, at start and after a sign-in, before any
+//! session: the agent's models and per-model efforts by name (`AgentModels`, kept under
+//! `"models"` beside `"agents"`), and its model and effort options as a session would report
+//! them (`models.rs`). An agent that neither a probe nor a session has reached has nothing kept:
+//! no options and no models, so the window shows no pickers until the probe answers.
 //!
 //! Read once, at the first need. A file that is missing, does not read, is over [`CAP`] or is of
 //! another version counts as none (logged): the worst a damaged file does is hide the pickers
@@ -32,13 +32,15 @@ use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{ConfigOption, ConfigOptionKind, HostEvent, ThreadId};
+use clauseo_protocol::{AgentModels, ConfigOption, ConfigOptionKind, HostEvent, ThreadId};
 use serde::{Deserialize, Serialize};
 
 use super::Actor;
 use crate::log_file::Cause;
 
 pub(crate) mod efforts;
+mod models;
+pub(crate) mod probe;
 
 /// The file's name in the data folder.
 pub(crate) const FILE: &str = "agent-options.json";
@@ -53,16 +55,28 @@ struct OnDisk {
     v: u32,
     #[serde(default)]
     agents: BTreeMap<String, Vec<ConfigOption>>,
+    /// Each agent's models as its last probe found them; missing in a file written before them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    models: BTreeMap<String, AgentModels>,
+}
+
+/// What is kept: each agent's options and its probed models.
+#[derive(Debug, Default)]
+struct Kept {
+    options: BTreeMap<String, Vec<ConfigOption>>,
+    models: BTreeMap<String, AgentModels>,
 }
 
 /// The kept options, read at the first need.
 #[derive(Debug)]
 pub(crate) struct AgentOptions {
     path: PathBuf,
-    kept: Option<BTreeMap<String, Vec<ConfigOption>>>,
+    kept: Option<Kept>,
     /// The options each thread's session started with, until its next durable options report
     /// ([`note`]); empty when the start reported none, so that report is the start's.
     starting: BTreeMap<ThreadId, Vec<ConfigOption>>,
+    /// The model probes run since the start (`probe.rs`).
+    pub(crate) probes: probe::Probes,
 }
 
 impl AgentOptions {
@@ -72,6 +86,7 @@ impl AgentOptions {
             path: data_dir.join(FILE),
             kept: None,
             starting: BTreeMap::new(),
+            probes: probe::Probes::default(),
         }
     }
 
@@ -81,17 +96,32 @@ impl AgentOptions {
         self.starting.insert(thread, options.to_vec());
     }
 
-    /// `agent`'s options as its latest session reported them; before any, its kind's seed
-    /// ([`seed::of`]: the model and effort at the agent's own default), else none.
+    /// `agent`'s options as its latest session (or probe) reported them; none before either.
     pub(crate) fn of(&mut self, agent: &str) -> &[ConfigOption] {
-        self.kept()
-            .get(agent)
-            .map_or_else(|| seed::of(agent), Vec::as_slice)
+        self.kept().options.get(agent).map_or(&[], Vec::as_slice)
     }
 
-    /// `agent`'s options as its sessions reported them, with no seed: empty before any.
-    fn stored(&mut self, agent: &str) -> &[ConfigOption] {
-        self.kept().get(agent).map_or(&[], Vec::as_slice)
+    /// `agent`'s models by name, for `AgentSummary::models`: its kept options' model and effort,
+    /// with each model's efforts from its last probe (`models::view`); `None` before either.
+    pub(crate) fn models_of(&mut self, agent: &str) -> Option<AgentModels> {
+        let kept = self.kept();
+        let options = kept.options.get(agent).map_or(&[][..], Vec::as_slice);
+        models::view(options, kept.models.get(agent))
+    }
+
+    /// Keeps `models`, a probe's answer, as `agent`'s, with its model and effort options over
+    /// the kept ones (`models::probed_options`); true when that changed anything.
+    pub(crate) fn keep_probed(&mut self, agent: &str, models: AgentModels) -> io::Result<bool> {
+        let kept = self.kept();
+        let old = kept.options.get(agent).map_or(&[][..], Vec::as_slice);
+        let options = models::probed_options(old, &models);
+        let same_models = kept.models.get(agent) == Some(&models);
+        if same_models && kept.options.get(agent) == Some(&options) {
+            return Ok(false);
+        }
+        kept.models.insert(agent.to_owned(), models);
+        kept.options.insert(agent.to_owned(), options);
+        self.write().map(|()| true)
     }
 
     /// Keeps `options` as `agent`'s and writes the file when they differ from the kept ones;
@@ -99,22 +129,29 @@ impl AgentOptions {
     /// returned for the log).
     pub(crate) fn keep(&mut self, agent: &str, options: &[ConfigOption]) -> io::Result<bool> {
         let kept = self.kept();
-        if kept.get(agent).is_some_and(|old| old == options) {
+        if kept.options.get(agent).is_some_and(|old| old == options) {
             return Ok(false);
         }
-        kept.insert(agent.to_owned(), options.to_vec());
+        kept.options.insert(agent.to_owned(), options.to_vec());
+        self.write().map(|()| true)
+    }
+
+    /// Writes the file whole.
+    fn write(&mut self) -> io::Result<()> {
+        let kept = self.kept();
         let disk = OnDisk {
             v: VERSION,
-            agents: kept.clone(),
+            agents: kept.options.clone(),
+            models: kept.models.clone(),
         };
         let bytes = serde_json::to_vec(&disk).map_err(io::Error::other)?;
         let folder = self.path.parent().unwrap_or(&self.path);
         crate::write::create_dir_all(folder)?;
         crate::write::replace_private_file(&self.path, &bytes)?;
-        Ok(true)
+        Ok(())
     }
 
-    fn kept(&mut self) -> &mut BTreeMap<String, Vec<ConfigOption>> {
+    fn kept(&mut self) -> &mut Kept {
         let path = &self.path;
         self.kept.get_or_insert_with(|| read(path))
     }
@@ -138,10 +175,17 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
     let mut options = match actor.agent_options.starting.remove(&thread) {
         Some(start) if !start.is_empty() => start,
         Some(_) => options.to_vec(),
-        None => merged(actor.agent_options.stored(agent.as_str()), options),
+        None => merged(actor.agent_options.of(agent.as_str()), options),
     };
     efforts::carry(&mut options, reported);
-    let changed = match actor.agent_options.keep(agent.as_str(), &options) {
+    let kept = actor.agent_options.keep(agent.as_str(), &options);
+    told(actor, kept);
+}
+
+/// Every app subscriber gets `SettingsChanged` when a keep changed the kept options (or failed
+/// to write them, which still changed them in memory).
+pub(super) fn told(actor: &mut Actor, kept: io::Result<bool>) {
+    let changed = match kept {
         Ok(changed) => changed,
         Err(error) => {
             tracing::warn!(error = %Cause(&error), "agent-options.json was not written");
@@ -156,18 +200,12 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
 
 /// `reported`, a session's later options, with each current value from `kept` that `reported`
 /// still offers; an option whose kept current it no longer offers (the efforts of a picked
-/// model) stays as kept, and one with none kept, or of another kind, is as reported. `kept`
-/// holds no seed (`AgentOptions::stored`); a kept option at the seed's value counts as none
-/// kept all the same ([`seed::is_seed`]), so [`seed::AGENT_DEFAULT`] is never kept over a
-/// session's report.
+/// model) stays as kept, and one with none kept, or of another kind, is as reported.
 fn merged(kept: &[ConfigOption], reported: &[ConfigOption]) -> Vec<ConfigOption> {
     reported
         .iter()
         .map(|option| {
-            let Some(old) = kept
-                .iter()
-                .find(|old| old.id == option.id && !seed::is_seed(old))
-            else {
+            let Some(old) = kept.iter().find(|old| old.id == option.id) else {
                 return option.clone();
             };
             let mut option = option.clone();
@@ -196,38 +234,40 @@ fn merged(kept: &[ConfigOption], reported: &[ConfigOption]) -> Vec<ConfigOption>
 }
 
 /// The kept options on disk; none when the file is missing or unusable.
-fn read(path: &Path) -> BTreeMap<String, Vec<ConfigOption>> {
+fn read(path: &Path) -> Kept {
     let mut bytes = Vec::new();
     let read =
         std::fs::File::open(path).and_then(|file| file.take(CAP + 1).read_to_end(&mut bytes));
     match read {
         Ok(_) if bytes.len() as u64 > CAP => {
             tracing::warn!("agent-options.json is over its cap; no options");
-            return BTreeMap::new();
+            return Kept::default();
         }
         Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return BTreeMap::new(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Kept::default(),
         Err(error) => {
             tracing::warn!(error = %Cause(&error), "agent-options.json does not read; no options");
-            return BTreeMap::new();
+            return Kept::default();
         }
     }
     match serde_json::from_slice::<OnDisk>(&bytes) {
-        Ok(disk) if disk.v == VERSION => disk.agents,
+        Ok(disk) if disk.v == VERSION => Kept {
+            options: disk.agents,
+            models: disk.models,
+        },
         Ok(disk) => {
             tracing::warn!(
                 version = disk.v,
                 "agent-options.json is of another version; no options"
             );
-            BTreeMap::new()
+            Kept::default()
         }
         Err(_unsaid) => {
             tracing::warn!("agent-options.json does not parse; no options");
-            BTreeMap::new()
+            Kept::default()
         }
     }
 }
 
-pub(crate) mod seed;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

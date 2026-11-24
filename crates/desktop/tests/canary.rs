@@ -138,6 +138,7 @@ fn turn(host: &HostHandle, thread: ThreadId, text: &str) -> StopReason {
                 text: text.to_owned(),
             }],
             delivery: DeliveryRequest::Queue,
+            config: None,
         },
     );
     let CommandOutcome::PromptAccepted { turn, .. } = outcome else {

@@ -350,6 +350,9 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         done,
         last_stop,
         last_activity: _,
+        model,
+        effort,
+        code_mode,
     } = a;
     *thread == b.thread
         && *matter == b.matter
@@ -362,6 +365,9 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         && *snoozed_until == b.snoozed_until
         && *done == b.done
         && *last_stop == b.last_stop
+        && *model == b.model
+        && *effort == b.effort
+        && *code_mode == b.code_mode
 }
 
 #[cfg(test)]

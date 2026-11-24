@@ -1,0 +1,71 @@
+//! Claude's model probe against `fake_agent`: `initialize`, then `session/options` with the
+//! data folder as `cwd` and no MCP servers, mapped to the models and their efforts; a refused
+//! answer gives none. Codex's `model/list` is played over in-memory pipes in
+//! `clauseo-codex_appserver`'s `tests/client/models.rs`.
+
+use std::ffi::OsString;
+
+use clauseo_limits::ReadLimits;
+use clauseo_protocol::AgentKind;
+use futures::executor::block_on;
+
+use crate::harness::{Play, Setup, SharedTimer, TestLauncher};
+
+fn probe_once(setup: &Setup, scenario: &'static str) -> Option<clauseo_protocol::AgentModels> {
+    let launcher = TestLauncher::new(Play::Scenario(scenario));
+    let reader = setup.readers(&launcher, &SharedTimer::default());
+    let models = block_on(reader.probe_models(AgentKind::Claude));
+    let spec = launcher.specs().pop().expect("one launch");
+    assert_eq!(
+        spec.cwd(),
+        setup.run_dir(),
+        "it runs in the readers' run folder"
+    );
+    let args: Vec<OsString> = vec![setup.script().into_os_string()];
+    assert_eq!(
+        spec.args(),
+        args.as_slice(),
+        "the adapter itself, no helper"
+    );
+    models
+}
+
+#[test]
+fn session_options_give_every_model_its_names_and_efforts() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    let models = probe_once(&setup, "claude-session-options").expect("the probe answered");
+    assert_eq!(models.current_model, "opus");
+    assert_eq!(models.current_effort.as_deref(), Some("medium"));
+    let names: Vec<&str> = models
+        .models
+        .iter()
+        .map(|model| model.name.as_str())
+        .collect();
+    assert_eq!(names, ["Opus 5.5", "Fable 5.2", "Haiku 5.5"]);
+    let opus = models.model("opus").unwrap();
+    let efforts: Vec<&str> = opus
+        .efforts
+        .iter()
+        .map(|effort| effort.name.as_str())
+        .collect();
+    assert_eq!(efforts, ["Low", "Medium", "High", "Xhigh", "Max"]);
+    assert_eq!(models.model("fable").unwrap().efforts.len(), 3);
+    assert!(models.model("haiku").unwrap().efforts.is_empty());
+}
+
+#[test]
+fn a_refused_session_options_gives_none() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    assert_eq!(probe_once(&setup, "claude-session-options-refused"), None);
+}
+
+#[test]
+fn an_agent_with_no_entry_is_not_probed() {
+    let setup = Setup::new();
+    let launcher = TestLauncher::new(Play::Scenario("claude-session-options"));
+    let reader = setup.readers(&launcher, &SharedTimer::default());
+    assert_eq!(block_on(reader.probe_models(AgentKind::Claude)), None);
+    assert_eq!(launcher.launches(), 0);
+}

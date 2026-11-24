@@ -208,6 +208,16 @@ pub(super) fn turn_started(state: &mut ThreadState, event: &TurnStarted, out: &m
     state.after_turn = None;
     let status = running_status(state);
     set_status(state, "turn_started", out, status);
+    // The model and effort the turn runs with; an event logged before them changes neither.
+    if event.model.is_some() || event.effort.is_some() {
+        let (model, effort) = (event.model.clone(), event.effort.clone());
+        super::update_header(state, "turn_started", out, |header| {
+            let changed = header.model != model || header.effort != effort;
+            header.model = model;
+            header.effort = effort;
+            changed
+        });
+    }
 }
 
 /// Keeps the turn's files for its step, or updates the step when the turn has ended. A file

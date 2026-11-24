@@ -115,6 +115,7 @@ fn an_agent_summary_carries_its_cached_options() {
         },
     };
     let summary = AgentSummary {
+        models: None,
         id: AgentId::new("claude-acp").unwrap(),
         kind: Some(AgentKind::Claude),
         config_options: vec![option],

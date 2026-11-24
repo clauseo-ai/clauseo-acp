@@ -42,7 +42,23 @@ mod redact;
 mod run;
 
 #[cfg(test)]
+#[path = "live/models.rs"]
+mod models;
+
+#[cfg(test)]
 use run::{Kind, live};
+
+#[test]
+#[ignore = "live: probes a real Claude Pro login's models, no prompt (CLAUSEO_G16_CLAUDE_PRO)"]
+fn claude_pro_models() {
+    models::live_models(Kind::ClaudePro);
+}
+
+#[test]
+#[ignore = "live: probes a real ChatGPT Plus login's models, no prompt (CLAUSEO_G16_CODEX_PLUS)"]
+fn codex_plus_models() {
+    models::live_models(Kind::CodexPlus);
+}
 
 #[test]
 #[ignore = "live: reads a real Claude Pro login (CLAUSEO_G16_CLAUDE_PRO)"]

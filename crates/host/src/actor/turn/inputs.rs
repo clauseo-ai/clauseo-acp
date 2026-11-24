@@ -51,6 +51,9 @@ pub(crate) enum TurnInput {
 #[derive(Debug)]
 pub(crate) enum AgentReply {
     Initialized(Result<AgentInfo, clauseo_acp::Error>),
+    /// A prompt's own picks were set just before it (`prompt_picks.rs`): the agent's last
+    /// answer.
+    PromptPicked(Vec<clauseo_protocol::ConfigOption>),
     /// `session/load`, `session/resume` or `session/new` returned; `loaded` for the first
     /// two, which continue the stored session.
     Session {

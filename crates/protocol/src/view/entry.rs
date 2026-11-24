@@ -8,11 +8,11 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterHold, MatterId, MatterKind, MatterPath, MessageId, NoticeKind,
-    NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId,
-    PlanEntry, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind,
-    TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind,
-    ToolLocation, TurnId, TurnUsage, WebResult,
+    LimitStopReason, MatterHold, MatterId, MatterKind, MatterPath, MessageId, NamedChoice,
+    NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
+    PermissionRequestId, PlanEntry, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome,
+    StopReason, TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId,
+    ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// The agent's wait to retry its service, as the header shows it ([`HeaderEntry::retrying`]).
@@ -120,6 +120,17 @@ pub struct HeaderEntry {
     /// Context and cost, once reported.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<ContextUsage>,
+    /// The model its latest turn ran with (or runs with, while it runs), from that turn's
+    /// `TurnStarted`; missing reads as `None`: no turn yet, or one logged before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<NamedChoice>,
+    /// The effort its latest turn ran with, as `model`; `None` too for a model with no effort.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<NamedChoice>,
+    /// Whether the thread runs in code mode. Carried only: nothing sets it yet. Missing reads
+    /// as `false`, and `false` is left out.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub code_mode: bool,
 }
 
 /// Where a prompt stands in its thread's queue.

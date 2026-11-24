@@ -287,6 +287,7 @@ fn outside_edits_logged_after_a_limits_read_keep_the_lawyers_on_that_version() {
             text: "Write A.".to_owned(),
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
+        config: None,
     };
     rig.dispatch_holding(11, start_a, |_, input| {
         checkpoint_answer_of(first, true, input)

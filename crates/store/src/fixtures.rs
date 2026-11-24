@@ -168,6 +168,8 @@ fn event(n: u64) -> DomainEvent {
         }
         .into(),
         1 => TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before: id::<CheckpointId>(40_000 + 2 * turn_index),
         }

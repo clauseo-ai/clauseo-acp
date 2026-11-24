@@ -29,6 +29,7 @@ fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
             text: "Read the brief.".to_owned(),
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
+        config: None,
     };
     let accepted = rig.dispatch(n, command).unwrap();
     let CommandOutcome::PromptAccepted { turn, .. } = accepted else {

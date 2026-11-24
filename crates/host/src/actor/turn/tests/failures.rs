@@ -213,6 +213,7 @@ fn prompt(thread: ThreadId) -> HostCommand {
             text: "Summarise the lease.".to_owned(),
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
+        config: None,
     }
 }
 

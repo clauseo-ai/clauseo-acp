@@ -36,3 +36,7 @@ mod agents_layout;
 #[cfg(test)]
 #[path = "readers/stored_key.rs"]
 mod stored_key;
+
+#[cfg(test)]
+#[path = "readers/models.rs"]
+mod models;

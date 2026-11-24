@@ -121,6 +121,7 @@ pub(crate) fn ask(handle: &HostHandle, work: &Path, wanted: Wanted) -> Asked {
         thread,
         content,
         delivery: DeliveryRequest::Queue,
+        config: None,
     }) {
         CommandOutcome::PromptAccepted { turn, .. } => turn,
         other => panic!("SendPrompt answered {other:?}"),

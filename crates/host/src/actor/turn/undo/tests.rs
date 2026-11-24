@@ -34,6 +34,8 @@ fn log_beside(
     let mut events = vec![DomainEvent::TurnStarted(TurnStarted {
         turn,
         checkpoint_before: id::<CheckpointId>(5),
+        model: None,
+        effort: None,
     })];
     if let Some(files) = files {
         events.push(DomainEvent::FilesChanged(FilesChanged {

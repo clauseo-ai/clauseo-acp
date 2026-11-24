@@ -35,6 +35,7 @@ pub(crate) fn send(
         thread,
         content,
         delivery,
+        config: None,
     });
     match outcome {
         CommandOutcome::PromptAccepted { turn, message } => (turn, message),

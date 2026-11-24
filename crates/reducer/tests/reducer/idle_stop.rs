@@ -157,6 +157,8 @@ fn resume_after_idle_stop_reads_like_the_fold_without_it() {
             &mut log,
             &mut state,
             TurnStarted {
+                model: None,
+                effort: None,
                 turn,
                 checkpoint_before,
             },

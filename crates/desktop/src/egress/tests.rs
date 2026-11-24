@@ -298,6 +298,7 @@ fn prompt_until_done(
             text: "Look it up.".to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     });
     loop {
         let text = messages.next_text();

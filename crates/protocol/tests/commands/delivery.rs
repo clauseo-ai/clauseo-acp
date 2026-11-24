@@ -23,6 +23,7 @@ fn send_prompt_without_delivery_is_queue() {
             command,
             HostCommand::SendPrompt {
                 delivery: DeliveryRequest::Queue,
+                config: None,
                 ..
             }
         ));
@@ -111,6 +112,7 @@ fn unknown_delivery_refused_on_decode() {
             thread: thread_id(1),
             content: vec![text("hi")],
             delivery: DeliveryRequest::Steer,
+            config: None,
         },
     );
     let mut packed = packed_raw(&steer);
@@ -137,6 +139,7 @@ fn unknown_delivery_refused_on_decode() {
             thread: thread_id(1),
             content: vec![text("hi")],
             delivery: request,
+            config: None,
         };
         assert_eq!(command.delivery(), Some(logged));
         round_trips(&command);

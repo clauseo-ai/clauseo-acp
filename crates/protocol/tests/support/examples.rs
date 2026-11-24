@@ -341,6 +341,8 @@ fn streaming_events() -> Vec<DomainEvent> {
     };
     vec![
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before: checkpoint_id(8),
         }

@@ -348,6 +348,7 @@ fn send(rig: &mut Rig, n: u128, thread: ThreadId, delivery: DeliveryRequest) -> 
             text: "Read clause 9.".to_owned(),
         }],
         delivery,
+        config: None,
     };
     match rig.dispatch(n, command) {
         Ok(CommandOutcome::PromptAccepted { turn, .. }) => turn,

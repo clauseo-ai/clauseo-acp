@@ -234,6 +234,9 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
             at: stop.at,
         }),
         last_activity: actor.tails.get(&StreamId::Thread(thread.row.id)).copied(),
+        model: read.header.and_then(|header| header.model.clone()),
+        effort: read.header.and_then(|header| header.effort.clone()),
+        code_mode: read.header.is_some_and(|header| header.code_mode),
     };
     (summary, read.permission_pending)
 }

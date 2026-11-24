@@ -39,6 +39,8 @@ fn a_decoded_unknown_writes_back_as_its_kind() {
 fn turn_started_envelope() -> Envelope {
     envelope(
         TurnStarted {
+            model: None,
+            effort: None,
             turn: turn_id(3),
             checkpoint_before: checkpoint_id(8),
         }

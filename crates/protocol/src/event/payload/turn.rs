@@ -6,8 +6,8 @@ use crate::open_enum::open_unit_enum;
 use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
-    LimitStopReason, MatterPath, MessageId, SkippedFile, SteerOutcome, StopReason, TextKind,
-    ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
+    LimitStopReason, MatterPath, MessageId, NamedChoice, SkippedFile, SteerOutcome, StopReason,
+    TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
 };
 
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
@@ -178,13 +178,21 @@ pub struct SteerResolved {
 }
 
 /// A turn started, after its before-turn checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TurnStarted {
     /// The turn.
     pub turn: TurnId,
     /// The checkpoint taken before it; a turn never runs without one.
     pub checkpoint_before: CheckpointId,
+    /// The model it runs with, as the session's options and the prompt's picks
+    /// (`SendPrompt::config`) name it; `None` when the agent reports no model option, and in
+    /// an event logged before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<NamedChoice>,
+    /// The effort it runs with, as `model`; `None` too for a model that takes none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<NamedChoice>,
 }
 
 /// Text appended to an agent's answer or thought.

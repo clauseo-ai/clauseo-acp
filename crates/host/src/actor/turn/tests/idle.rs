@@ -278,6 +278,7 @@ fn a_deadline_that_fires_as_a_prompt_arrives_stops_nothing() {
             text: "One more thing.".to_owned(),
         }],
         delivery: DeliveryRequest::Queue,
+        config: None,
     };
     let command = CommandEnvelope {
         command_id: command_id(11),

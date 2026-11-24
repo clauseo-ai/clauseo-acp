@@ -390,6 +390,7 @@ pub(crate) fn send_prompt(thread: ThreadId, prompt: &str) -> HostCommand {
         thread,
         content: text(prompt),
         delivery: DeliveryRequest::Queue,
+        config: None,
     }
 }
 

@@ -119,6 +119,8 @@ fn an_attach_clears_it_and_the_turn_start_carries_on() {
         &mut log,
         &mut state,
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         },
@@ -250,6 +252,8 @@ fn a_prompt_sent_during_the_stop_stays_starting_and_resumes_from_the_detach() {
         &mut log,
         &mut state,
         TurnStarted {
+            model: None,
+            effort: None,
             turn,
             checkpoint_before,
         },
