@@ -3,7 +3,7 @@
 // entries hold the host's case_law_out_of_credit notice after the lawyer's last message (met-refusal.ts), and the
 // credit is back. The notice arrives after the refused step, as the host logs it; the next message clears the line by
 // itself; it holds for a conversation opened later and after a reload; it never shows while out, 0 → some → 0 included.
-// The notice's own row says the rule's words while out and what happened once credit is back.
+// The notice's own row says what happened, past tense, and stays as history.
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
@@ -104,13 +104,19 @@ test("the mark after the refused step, then credit back: the line; the next mess
   h!.deliver([upsert(marked(3))]);
   await h!.settle();
   expect(line()).toBeNull();
+  // the row says what happened; the strip carries the action, so no sentence shows twice
   expect(h!.one("case-law-notice")?.textContent).toBe(
+    "Clauseo Case Law couldn't search here: out of credits.",
+  );
+  expect(h!.one("out-of-credit")?.textContent).toContain(
     "Not enough credits for a search. Add credits to keep searching.",
   );
+  expect(h!.one("case-law-notice")?.querySelector("button")).toBeNull();
   await status(PAID);
   expect(line()).toBe(LINE);
+  // the row stays as history
   expect(h!.one("case-law-notice")?.textContent).toBe(
-    "Clauseo Case Law had no credits for this search.",
+    "Clauseo Case Law couldn't search here: out of credits.",
   );
   expect(h!.sent("send_prompt")).toEqual([]);
   h!.deliver([upsert(userMessage(6, 2, "Search again."))]);
@@ -139,6 +145,20 @@ test("0 → some → 0: never the line while out", async () => {
   await status({ signed_in: { low: true, balance: { credits: 0 } } });
   expect(line()).toBeNull();
   expect(h!.all("out-of-credit")).toHaveLength(1);
+});
+
+test("a turn written while out, with no mark in it, is not marked", async () => {
+  await mount([userMessage(1, 1, "Hello."), agentText(2, 1, "Hi."), step(3)]);
+  await status(OUT);
+  h!.deliver([
+    upsert(userMessage(4, 2, "Draft the reply to the notice.")),
+    upsert(agentText(5, 2, "Here is the draft.")),
+    upsert(step(6)),
+  ]);
+  await h!.settle();
+  await status(PAID);
+  expect(line()).toBeNull();
+  expect(h!.all("case-law-notice")).toHaveLength(0);
 });
 
 test("a conversation without the mark shows nothing when credit comes back", async () => {
