@@ -2,7 +2,8 @@
 //!
 //! `@openai/codex`'s Windows package ships the official ripgrep's `rg.exe`, which is unsigned,
 //! in `vendor/<triple>/codex-path/`. codex.exe puts that folder first on its own `PATH` as it
-//! starts (openai/codex `codex-rs/arg0/src/lib.rs:161-172`), so the model's shell `rg` runs it.
+//! starts (openai/codex `codex-rs/arg0/src/lib.rs:440-448`, `path_env_with_package_path_dir`, at
+//! `rust-v0.171.0`), so the model's shell `rg` runs it.
 //! With SAC On Windows refuses to start it (error 4551) and may show the
 //! lawyer a notification for each try. When the folder is gone, codex prepends nothing: the
 //! model's `rg` finds the user's own ripgrep, or none, and Codex's prompt tells it to use
@@ -47,10 +48,10 @@ const RG: &str = "rg.exe";
 const LIFECYCLE: &str = "clauseo_agents::lifecycle";
 
 /// Codex's Windows layouts in an install folder, each with its `rg.exe`'s SHA-256. Both are the
-/// official ripgrep 15.2.0, as `@openai/codex` 0.162.1 ships it (the tarballs
-/// `codex-0.162.1-win32-x64.tgz` and `codex-0.162.1-win32-arm64.tgz` from registry.npmjs.org,
-/// whose integrity is the lock's), byte for byte the `rg.exe` of BurntSushi/ripgrep's release
-/// zips `ripgrep-15.2.0-x86_64-pc-windows-msvc.zip` and
+/// official ripgrep 15.2.0, as `@openai/codex` 0.171.0 ships it, unchanged since 0.162.1 (the
+/// tarballs `codex-0.171.0-win32-x64.tgz` and `codex-0.171.0-win32-arm64.tgz` from
+/// registry.npmjs.org, whose integrity is the lock's), byte for byte the `rg.exe` of
+/// BurntSushi/ripgrep's release zips `ripgrep-15.2.0-x86_64-pc-windows-msvc.zip` and
 /// `ripgrep-15.2.0-aarch64-pc-windows-msvc.zip`. Update them with every Codex bump.
 #[cfg(any(windows, test))]
 const LAYOUTS: [(&str, &str); 2] = [

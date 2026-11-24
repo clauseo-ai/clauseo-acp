@@ -22,7 +22,7 @@ fn found(code: &str) -> Vec<(String, String)> {
 
 #[test]
 fn the_device_url_and_code_are_read_from_codex_s_coloured_prompt() {
-    // Codex 0.162.1's prompt, colours included.
+    // Codex 0.162.1's prompt (0.171.0's is the same), colours included.
     let lines = [
         "Follow these steps to sign in with ChatGPT using device code authorization:",
         "1. Open this link in your browser and sign in to your account",
