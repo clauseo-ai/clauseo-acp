@@ -95,19 +95,17 @@ fn logged(name: &str, events: impl Fn(Origin) -> Vec<AcpEvent>) -> Seen {
     let kinds = log.iter().map(std::mem::discriminant).collect();
     let mut calls = Vec::new();
     for event in &log {
-        match event {
-            DomainEvent::ToolCallStarted(started) => calls.push((
+        if let DomainEvent::ToolCallStarted(started) = event {
+            calls.push((
                 started.acp_id.to_string(),
                 started.title.to_string(),
                 started.tool_name.as_ref().map(ToString::to_string),
                 vec![started.status],
-            )),
-            DomainEvent::ToolCallUpdated(updated) => {
-                if let (Some(call), Some(status)) = (calls.last_mut(), updated.patch.status) {
-                    call.3.push(status);
-                }
-            }
-            _ => {}
+            ));
+        } else if let DomainEvent::ToolCallUpdated(updated) = event
+            && let (Some(call), Some(status)) = (calls.last_mut(), updated.patch.status)
+        {
+            call.3.push(status);
         }
     }
     (kinds, calls)

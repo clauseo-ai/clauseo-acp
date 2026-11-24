@@ -8,17 +8,23 @@ use crate::harness::{self, Ctx, sess1, text, turn};
 /// The lead's `Agent` call that launched the helper.
 const AGENT_CALL: &str = "toolu_01Gr3CDaJEng8pyzihUmv3Cq";
 
+/// The tool call `update` is about, if any.
+fn tool_id(update: &AgentUpdate) -> Option<&str> {
+    if let AgentUpdate::ToolCall(call) = update {
+        return Some(call.acp_id.as_str());
+    }
+    if let AgentUpdate::ToolCallUpdate { acp_id, .. } = update {
+        return Some(acp_id.as_str());
+    }
+    None
+}
+
 /// What an event is, the helper it names and the tool call it is about.
 fn shape(event: &AcpEvent) -> (&'static str, Option<&str>, Option<&str>) {
-    let tool = |update: &AgentUpdate| match update {
-        AgentUpdate::ToolCall(call) => Some(call.acp_id.as_str()),
-        AgentUpdate::ToolCallUpdate { acp_id, .. } => Some(acp_id.as_str()),
-        _ => None,
-    };
     match event {
-        AcpEvent::Update { update, .. } => ("update", None, tool(update)),
+        AcpEvent::Update { update, .. } => ("update", None, tool_id(update)),
         AcpEvent::HelperUpdate { helper, update, .. } => {
-            ("helper update", Some(helper.as_str()), tool(update))
+            ("helper update", Some(helper.as_str()), tool_id(update))
         }
         AcpEvent::HelperInBackground { helper, .. } => {
             ("in background", Some(helper.as_str()), None)

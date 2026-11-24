@@ -1,6 +1,8 @@
 //! A helper's updates: claude-agent-acp stamps each with `_meta.claudeCode.parentToolUseId`
 //! (`dist/sdk-to-acp.js:9-17`), and the host gets them as `AcpEvent::HelperUpdate`.
 
+use clauseo_protocol::CompactString;
+
 use super::*;
 use crate::event::ProtocolWarning;
 
@@ -57,7 +59,15 @@ fn helpers_and_updates(events: Vec<AcpEvent>) -> Vec<(Option<CompactString>, Age
         .map(|event| match event {
             AcpEvent::Update { update, .. } => (None, update),
             AcpEvent::HelperUpdate { helper, update, .. } => (Some(helper), update),
-            other => panic!("expected an update, got {other:?}"),
+            other @ (AcpEvent::HelperInBackground { .. }
+            | AcpEvent::PermissionRequested { .. }
+            | AcpEvent::ElicitationRequested { .. }
+            | AcpEvent::ElicitationCompleted { .. }
+            | AcpEvent::Limit { .. }
+            | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. }) => panic!("expected an update, got {other:?}"),
         })
         .collect()
 }
@@ -204,22 +214,35 @@ fn no_async_flag_adds_nothing() {
 /// helper's `SubagentHandback` call and its update, then a chunk of the lead's answer.
 const RECORDED: &str = include_str!("fixtures/claude-agent-acp-0.110.1-helper.jsonl");
 
+/// The tool call `update` is about, if any.
+fn tool_id(update: &AgentUpdate) -> Option<&str> {
+    if let AgentUpdate::ToolCall(call) = update {
+        return Some(call.acp_id.as_str());
+    }
+    if let AgentUpdate::ToolCallUpdate { acp_id, .. } = update {
+        return Some(acp_id.as_str());
+    }
+    None
+}
+
 /// What an event is, the helper it names and the tool call it is about, for comparing.
 fn shape(event: &AcpEvent) -> (&'static str, Option<&str>, Option<&str>) {
-    let tool = |update: &AgentUpdate| match update {
-        AgentUpdate::ToolCall(call) => Some(call.acp_id.as_str()),
-        AgentUpdate::ToolCallUpdate { acp_id, .. } => Some(acp_id.as_str()),
-        _ => None,
-    };
     match event {
-        AcpEvent::Update { update, .. } => ("update", None, tool(update)),
+        AcpEvent::Update { update, .. } => ("update", None, tool_id(update)),
         AcpEvent::HelperUpdate { helper, update, .. } => {
-            ("helper update", Some(helper.as_str()), tool(update))
+            ("helper update", Some(helper.as_str()), tool_id(update))
         }
         AcpEvent::HelperInBackground { helper, .. } => {
             ("in background", Some(helper.as_str()), None)
         }
-        other => panic!("unexpected {other:?}"),
+        other @ (AcpEvent::PermissionRequested { .. }
+        | AcpEvent::ElicitationRequested { .. }
+        | AcpEvent::ElicitationCompleted { .. }
+        | AcpEvent::Limit { .. }
+        | AcpEvent::TooLong { .. }
+        | AcpEvent::ConnectionLost { .. }
+        | AcpEvent::Warning { .. }
+        | AcpEvent::UpdateSkipped { .. }) => panic!("unexpected {other:?}"),
     }
 }
 
