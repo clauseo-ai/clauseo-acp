@@ -15,6 +15,7 @@ import { ActRefusals } from "./act-refusals.ts";
 import { LocateHeld } from "./locate-held.ts";
 import { LocateRefusals } from "./locate-refusal.ts";
 import { toHostError, type HostTransport } from "../transport/host-transport.ts";
+import { folderPermissionAskOf, type AskFolderPermission } from "../transport/folder-permission.ts";
 import type {
   FolderRefId,
   FolderScanned,
@@ -387,6 +388,12 @@ export class Matters {
   /** The folder picker, for the form: the folder and how it reads, or null when the lawyer cancelled. */
   pickFolder(): Promise<{ folder: FolderRefId; display: string } | null> {
     return this.#transport.pickFolder();
+  }
+
+  /** macOS's own dialog for a guarded folder picked (transport/folder-permission.ts), or null where this window has no
+   * way to ask. */
+  get askFolderPermission(): AskFolderPermission | null {
+    return folderPermissionAskOf(this.#transport);
   }
 
   /** R20a: the scan of a folder the picker gave, before it becomes a matter; its progress comes as `folder_scanned`

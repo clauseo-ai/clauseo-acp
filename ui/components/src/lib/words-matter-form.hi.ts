@@ -35,6 +35,17 @@ export const HI = {
   "The folder stays where it is. Nothing is moved or copied.": null,
   // the new folder's row where the host has no place for new matters: Choose folder… picks where it goes
   "Choose where it goes.": null,
+  // UC-1250 to UC-1254 (provisional; Hindi later): New matter, after a pick macOS guards apart from Documents, the
+  // reason line beside Allow, one per kind (stage E's PickedFolder.permission)
+  "Clauseo needs macOS's permission to read and save papers in your Desktop folder.": null,
+  "Clauseo needs macOS's permission to read and save papers in your Downloads folder.": null,
+  "Clauseo needs macOS's permission to read and save papers on this external drive.": null,
+  "Clauseo needs macOS's permission to read and save papers on this network drive.": null,
+  "Clauseo needs macOS's permission to read and save papers in this cloud folder.": null,
+  // UC-1255 (provisional; Hindi later): Allow turned down or dismissed; Create still works. {path}: where in System
+  // Settings, as the desktop answers it ("System Settings › Privacy & Security › Files and Folders")
+  "Without it, Clauseo can't open or save papers in this folder. You can allow it later in {path}.":
+    null,
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */
