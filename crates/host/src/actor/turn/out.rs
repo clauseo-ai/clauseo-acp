@@ -105,8 +105,9 @@ impl Out {
 }
 
 /// Moves `thread`'s held text into `draft` as `TextAppended` events, after showing what the
-/// display has not shown yet, then its helpers' held words as `HelperText` events. Every commit of a thread stream runs it first. While the stream
-/// is blocked it fails and keeps the text.
+/// display has not shown yet, then its helpers' held words as `HelperText` events. Every
+/// commit of a thread stream runs it first. While the stream is blocked it fails and keeps the
+/// text.
 pub(crate) fn flush_text(
     actor: &mut Actor,
     thread: ThreadId,
