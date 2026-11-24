@@ -62,7 +62,7 @@ const unreachable = () =>
 const slow = () =>
   fetchOf("ChatGPT", "https://www.barandbench.com/", "failed", "timeout of 60000ms exceeded");
 
-export const UC_PAGE_MISSES: Entry[] = [
+const UC_PAGE_MISSES: Entry[] = [
   opened("UC-1185", "Couldn't open {site}: {reason}.", testerCard()),
   opened("UC-1186", "Couldn't open {site}.", [fetchOf("Claude", LIVELAW, "failed", "")]),
   opened("UC-1187", "Couldn't open a page: {reason}.", [

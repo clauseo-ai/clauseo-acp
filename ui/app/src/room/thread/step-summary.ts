@@ -130,6 +130,9 @@ function sortOf(c: ToolCallEntry): { sort: Sort; name: string | null } {
 /** Claude's own tools' sorts (tool-names.ts, ownToolOf). */
 const OWN_SORT: Record<OwnAs, Sort> = { plan: "think", worked: "worked", stop: "stop", ask: "ask" };
 
+/** The sorts said once however often they ran. */
+const ONCE: ReadonlySet<Sort> = new Set<Sort>(["wait", "worked"]);
+
 /** The words of a sort counted, one and many. */
 const COUNTED: Partial<Record<Sort, [one: StepKey, many: StepKey]>> = {
   read: ["read 1 paper", "read {n} papers"],
@@ -209,7 +212,11 @@ export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
     else if (by.size > 1) by.delete("read");
   }
   // Map keeps the order each sort came; sort is stable
-  const parts = [...by].sort((a, b) => b[1].n - a[1].n).map(([sort, g]) => phraseOf(lang, sort, g));
+  // a part said once however often it ran (a wait, work with a helper) weighs as one in the order
+  const weight = ([sort, g]: [Sort, Gathered]) => (ONCE.has(sort) ? 1 : g.n);
+  const parts = [...by]
+    .sort((a, b) => weight(b) - weight(a))
+    .map(([sort, g]) => phraseOf(lang, sort, g));
   return partsLine(lang, parts);
 }
 

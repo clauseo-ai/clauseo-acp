@@ -191,7 +191,8 @@ test("in Hindi with three kinds, and in English with a background note, the line
     // the chevron never stands alone at a line's start: it shares a no-wrap span with the last word
     const chev = line.querySelector(".step-group-chev")!;
     expect(chev.parentElement?.classList.contains("glued")).toBe(true);
-    expect(chev.parentElement?.textContent).toBe(language === "en" ? "background." : "काम।");
+    // the Hindi line's parts fall back to English (hi: later), so its last word is English too
+    expect(chev.parentElement?.textContent).toBe(language === "en" ? "background." : "paper.");
     await h.unmount();
     h = null;
     document.body.replaceChildren();

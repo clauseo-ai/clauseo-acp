@@ -115,9 +115,9 @@ test("a chained command is counted, not named by its first program; its command 
     "Ran Remove-Item.",
   );
   expect(taskOf(task({ command: "grep -c 'a|b' notes.txt || true" })).count).toBe(2);
-  // the agent's own words still lead
+  // the agent's own words still lead, after "Ran:"
   expect(doneOf("en", task({ ...ps, description: "Copy the notice into drafts" }))).toBe(
-    "Copy the notice into drafts.",
+    "Ran: copy the notice into drafts.",
   );
 });
 

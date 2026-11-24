@@ -304,7 +304,9 @@ describe("the folded line", () => {
       return `${r.line} ${r.trouble}`;
     };
     expect(sentence("en")).toBe("Read 1 paper. 2 failed.");
-    expect(sentence("hi")).toBe("1 दस्तावेज़ पढ़ा गया। 2 विफल रहे।");
+    // the summary part's English changed ("1 paper read." to "read 1 paper"), so its Hindi is still to come; the
+    // trouble's English did not, and its approved Hindi still shows
+    expect(sentence("hi")).toBe("Read 1 paper. 2 विफल रहे।");
     expect(sentence("en")).not.toContain("of them");
     expect(sentence("hi")).not.toContain("उनमें से");
     expect(troubleOf("en", [call("read")])).toBe("");
