@@ -132,4 +132,5 @@ export type ErrorCode =
   | "matter.file_write_failed"
   | "agent.key_denied"
   | "agent.start_unreachable"
+  | "connector.keychain_refused"
   | "unknown";

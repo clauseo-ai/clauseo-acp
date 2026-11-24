@@ -150,6 +150,7 @@ golden! { HostCommand::name_of {
     SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
     RetryProtection => retry_protection: HostCommand::RetryProtection {};
     RemoveSandboxSetup => remove_sandbox_setup: HostCommand::RemoveSandboxSetup {};
+    KeychainReadAgain => keychain_read_again: HostCommand::KeychainReadAgain {};
     AllowBlockedSite => allow_blocked_site: HostCommand::AllowBlockedSite {
         block_id: blocked_site_id(3),
         scope: AllowScope::Matter,

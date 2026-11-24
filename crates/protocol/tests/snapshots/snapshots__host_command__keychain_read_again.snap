@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::KeychainReadAgain {}"
+---
+{
+  "keychain_read_again": {}
+}

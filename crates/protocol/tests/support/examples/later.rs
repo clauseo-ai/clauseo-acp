@@ -206,6 +206,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentStartUnreachable,
             "a start request failed on its connection; online, the probe did not get through",
         ),
+        failed(
+            ErrorCode::ConnectorKeychainRefused,
+            "the saved sign-in could not be read from the keychain",
+        ),
     ]
 }
 
