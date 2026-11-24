@@ -352,6 +352,9 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         match event {
             AcpEvent::Update {
                 session, update, ..
+            }
+            | AcpEvent::HelperUpdate {
+                session, update, ..
             } => {
                 let ends = ends_turn(&update);
                 updates::log_live(actor, thread, turn, &session, update);
@@ -366,7 +369,8 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }
-            | AcpEvent::UpdateSkipped { .. }) => updates::handle(actor, thread, event),
+            | AcpEvent::UpdateSkipped { .. }
+            | AcpEvent::HelperInBackground { .. }) => updates::handle(actor, thread, event),
         }
     }
 }

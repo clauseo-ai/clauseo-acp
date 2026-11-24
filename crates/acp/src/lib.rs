@@ -11,6 +11,10 @@
 //!   check, and the refusal of `fs/*` and `terminal/*` (-32601).
 //! - Steering: the capability `initialize` gives (`steering.rs`) and `steer()`, which sends
 //!   `_session/steering` while a prompt may run (`driver/steer.rs`).
+//! - Helpers (subagents the lead agent launches): Clauseo advertises no `subagents`, so
+//!   claude-agent-acp sends a helper's steps on the lead's session, stamped with the launching
+//!   call's id; this crate reads the stamp from the raw JSON and tags those updates
+//!   ([`AcpEvent::HelperUpdate`], [`AcpEvent::HelperInBackground`]).
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
 //!   typed plan limit signals ([`LimitSignal`]), and the stdout line filter with its caps
 //!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB, at most 64 updates read
@@ -42,7 +46,10 @@
 //!   (`session/resume` replays nothing, so it never tags `Replay`).
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`),
-//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response), and
+//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response),
+//!   `claudeCode.parentToolUseId` (on any update: [`AcpEvent::HelperUpdate`]),
+//!   `claudeCode.toolResponse.isAsync` (on `tool_call_update`:
+//!   [`AcpEvent::HelperInBackground`]), and
 //!   `initialize`'s steering capability (`steering.rs`: `_meta.steering.supported` and
 //!   `agentCapabilities._meta.claudeCode.promptQueueing`). A `session/new`, `session/load` or
 //!   `session/resume` `_meta` is sent verbatim and never read.

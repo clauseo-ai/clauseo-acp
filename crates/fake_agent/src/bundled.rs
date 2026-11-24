@@ -41,6 +41,7 @@ bundled! {
         "claude-exit-mid-turn",
         "claude-exit-mid-turn-then-load",
         "claude-files-one-turn",
+        "claude-helper-background",
         "claude-hindi-answer",
         "claude-limit-rejected",
         "claude-limit-warning",

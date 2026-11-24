@@ -36,6 +36,10 @@ mod limits;
 mod tools;
 
 #[cfg(test)]
+#[path = "stdio/helpers.rs"]
+mod helpers;
+
+#[cfg(test)]
 #[path = "stdio/steer.rs"]
 mod steer;
 

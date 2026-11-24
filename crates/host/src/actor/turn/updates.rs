@@ -46,7 +46,26 @@ pub(super) fn agent(actor: &mut Actor, thread: ThreadId) -> Option<&mut Agent> {
 }
 
 /// One event from `thread`'s agent, through the session's rate cap.
-pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>) {
+pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEvent>) {
+    // Every agent event enters here. Until the host's helper cards land, a helper's update is
+    // handled as the lead's, with the helper id dropped, and a helper in the background is
+    // dropped: the launching call's own update still follows it.
+    if let AcpEvent::HelperInBackground { .. } = *event {
+        return;
+    }
+    if let AcpEvent::HelperUpdate {
+        session,
+        origin,
+        update,
+        ..
+    } = *event
+    {
+        *event = AcpEvent::Update {
+            session,
+            origin,
+            update,
+        };
+    }
     let now = actor.now().mono;
     let Some(agent) = agent(actor, thread) else {
         tracing::debug!(%thread, "an event from an agent the thread no longer has");
@@ -63,11 +82,19 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
                 origin: Origin::Replay,
                 ..
             }
+            | AcpEvent::HelperUpdate {
+                origin: Origin::Replay,
+                ..
+            }
             | AcpEvent::Update {
                 update: AgentUpdate::ConfigOptions(_),
                 ..
+            }
+            | AcpEvent::HelperUpdate {
+                update: AgentUpdate::ConfigOptions(_),
+                ..
             } => true,
-            AcpEvent::Update { .. } => agent.preparing,
+            AcpEvent::Update { .. } | AcpEvent::HelperUpdate { .. } => agent.preparing,
             AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
@@ -75,7 +102,8 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }
-            | AcpEvent::UpdateSkipped { .. } => false,
+            | AcpEvent::UpdateSkipped { .. }
+            | AcpEvent::HelperInBackground { .. } => false,
         }
     {
         agent.replayed.push(*event);
@@ -140,6 +168,12 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             session,
             origin,
             update,
+        }
+        | AcpEvent::HelperUpdate {
+            session,
+            origin,
+            update,
+            ..
         } => on_update(actor, thread, &session, origin, update),
         event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
@@ -188,6 +222,8 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             acp_tool_call_id,
         } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
+        // `on_event` drops it before the rate cap; nothing reads it until the helper cards land.
+        AcpEvent::HelperInBackground { .. } => {}
     }
 }
 

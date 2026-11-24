@@ -27,6 +27,35 @@ pub enum AcpEvent {
         /// What it says.
         update: AgentUpdate,
     },
+    /// The same as [`AcpEvent::Update`], for an update that belongs to the helper (a subagent
+    /// the lead agent launched) the agent names `helper`. claude-agent-acp stamps a helper's
+    /// updates with `_meta.claudeCode.parentToolUseId` (`dist/sdk-to-acp.js:9-17`); that stamp,
+    /// when it is a non-empty string, is `helper`. A recorded 0.110.1 run stamped each of the
+    /// helper's `tool_call`s but none of their `tool_call_update`s, which therefore come as
+    /// `Update`: the host names a step's helper from its `tool_call`.
+    HelperUpdate {
+        /// The agent's session: the lead's, which carries the helper's updates.
+        session: AgentSessionId,
+        /// When it came, relative to the session's turns.
+        origin: Origin,
+        /// The helper: for Claude, the `toolCallId` of the lead's `Agent` call that launched it.
+        helper: CompactString,
+        /// What it says.
+        update: AgentUpdate,
+    },
+    /// The agent says the call that launched helper `helper` returns at once and the helper
+    /// keeps working: the call's completion is not the helper's end. claude-agent-acp says so
+    /// with `_meta.claudeCode.toolResponse.isAsync: true` on a `tool_call_update` of the launch
+    /// (`dist/tool-calls/content.js:198-208`, `dist/tool-calls/renderer.js:425-436`). Comes
+    /// before the event that same update maps to.
+    HelperInBackground {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came, relative to the session's turns.
+        origin: Origin,
+        /// The helper: the update's `toolCallId`, the launching call's.
+        helper: CompactString,
+    },
     /// The agent asks for permission. Answer with `AcpClient::answer_permission`.
     PermissionRequested {
         /// The agent's session.
