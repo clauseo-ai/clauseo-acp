@@ -1,6 +1,6 @@
 // The permissions step where a lawyer who already has matters lands (issue 5, #1303): a band at the head of the room's
 // work, over the open matter or the room with none open, whenever the desktop lists a row not asked yet (a new build's
-// keychain read, the Documents folder). The same rows, words and acts as the first screen's step
+// keychain read, the Documents folder), or a keychain row refused at an earlier start. The same rows, words and acts as the first screen's step
 // (first-run/permissions.tsx), headed "Before you go on". Never a wall: the room under it stays usable, and the band
 // stays where it is as the lawyer moves between matters. It stays while a row waits or was refused, so a refused row
 // can be allowed from it (or from Settings › Privacy), and leaves once every row is allowed.
@@ -19,7 +19,13 @@ export function PermissionsBand({ transport }: { transport: HostTransport }) {
       host={host}
       platform={platform}
       heading="Before you go on"
-      opens={(listed) => listed.some(unasked)}
+      // also macOS asking already, and a keychain refused at an earlier start (its saved keys read as unreadable)
+      opens={(listed) =>
+        listed.some(
+          (r) =>
+            unasked(r) || r.state === "asking" || (r.id === "keychain" && r.state === "denied"),
+        )
+      }
       leavesWhenAllowed
       onSettings={() => void transport.openPrivacySettings().catch(() => {})}
       wrap={(step) => (

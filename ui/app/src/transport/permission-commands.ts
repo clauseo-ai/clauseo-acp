@@ -2,11 +2,26 @@
 // permissions() and ask_permission(id) in the desktop crate, through the generated bindings, and the matters-folder
 // choice's set_default_location host command. Granted to the main and Settings windows alike
 // (crates/desktop/capabilities/settings.json). Here because Tauri APIs are imported only under src/transport/.
-import { commands, type PermissionId, type PermissionRow } from "./bindings.ts";
+import {
+  commands,
+  type OsPermissionState as BoundState,
+  type PermissionId,
+  type PermissionRow as BoundRow,
+} from "./bindings.ts";
 import { toHostError, type HostTransport } from "./host-transport.ts";
 import type { FolderRefId } from "./protocol.ts";
 
-export type { OsPermissionState, PermissionId, PermissionRow } from "./bindings.ts";
+export type { PermissionId } from "./bindings.ts";
+
+// TODO(#1344): stage E's bindings add "asking" and `asked` (6b23a56c7); then re-export the bindings' own two types
+// in place of these and delete them.
+/** Where a permission stands; "asking" while the OS's dialog may be up (the keychain Ask's child runs). Not
+ * `PermissionState`: protocol's (an agent's permission request) has that name. */
+export type OsPermissionState = BoundState | "asking";
+
+/** One row of the step. `asked`: this build has asked for it, so a keychain row that would still ask is worded
+ * "choose Always Allow"; optional here only, so the UI's fixtures stay valid. */
+export type PermissionRow = Omit<BoundRow, "state"> & { state: OsPermissionState; asked?: boolean };
 
 /** One command's answer as its data; an error rejects as a HostError. */
 async function settled<T>(

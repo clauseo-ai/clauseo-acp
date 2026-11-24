@@ -43,6 +43,7 @@ export function Permissions({
   const [rows, setRows] = useState<PermissionRow[] | null>(null);
   const [waiting, setWaiting] = useState<PermissionId | null>(null);
   const [failed, setFailed] = useState<PermissionId | null>(null);
+  const [once, setOnce] = useState(false);
   // the first read's rows: the step stands when they open it (`opens`), and stays
   const [first, setFirst] = useState<PermissionRow[] | null>(null);
   const asking = useRef(false);
@@ -67,6 +68,16 @@ export function Permissions({
       () => {},
     );
   useEffect(read, [host]);
+  // an ask pressed elsewhere in the window (keychain-pointer.tsx) puts its row in place here too
+  useEffect(
+    () =>
+      host.watch?.((listed, allowedOnce) => {
+        if (!live.current) return;
+        setRows([...listed]);
+        setOnce(allowedOnce);
+      }),
+    [host],
+  );
   const stands = first !== null && opens(first);
   if (!stands || rows === null || (platform !== "mac" && platform !== "windows")) return null;
   const ask = (id: PermissionId) => {
@@ -90,7 +101,7 @@ export function Permissions({
       },
     );
   };
-  const shown = stepRows(rows, waiting, failed);
+  const shown = stepRows(rows, waiting, failed, once);
   if (shown.length === 0) return null;
   if (leavesWhenAllowed && shown.every((r) => r.shows === "granted")) return null;
   const mac = platform === "mac";

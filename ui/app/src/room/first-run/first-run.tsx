@@ -56,6 +56,7 @@ import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, queuedView, refusalView } from "./views.ts";
 import { footActs, welcomeFoot } from "./welcome-foot.tsx";
+import { GateKeyLine } from "./keychain-pointer.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -284,6 +285,7 @@ function holdOf(
           keys={keys}
           onAct={actsFor(store, transport, agent, device)}
           refused={refusalView(setup)}
+          keyLine={(own, code) => <GateKeyLine transport={transport} own={own} code={code} />}
           testIds={IDS.gate}
         />
       ),

@@ -141,9 +141,9 @@ export const HI = {
     "Clauseo अभी शुरू हो रहा है। थोड़ी देर में फिर से प्रयास करें।",
   "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.":
     "Clauseo समय पर सहेजी गई API key की जाँच नहीं कर सका। अगर यह कंप्यूटर अनुमति माँगे, तो अनुमति दें, फिर दोबारा प्रयास करें।",
-  // agent.key_denied: the keychain refused the saved key's read. Provisional English; hi: later
-  "Clauseo couldn't read the saved API key on this computer. Try again, and if this computer asks for permission, choose Allow. If it keeps happening, show this to whoever looks after this computer.":
-    null,
+  // agent.key_denied: the keychain refused the saved key's read, save or removal (UC-1443, provisional)
+  "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.":
+    "इस कंप्यूटर के कीचेन ने Clauseo को सहेजी गई API कुंजी का उपयोग नहीं करने दिया। Mac पर, Your keychain पर Allow दबाएँ, फिर Always Allow चुनें।",
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":

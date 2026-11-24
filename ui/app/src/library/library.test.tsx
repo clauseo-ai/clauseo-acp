@@ -19,6 +19,11 @@ import type {
 import type { AddonView } from "./addons.ts";
 import { mountRoom, type Harness } from "../room/thread/harness.ts";
 import { SEEN_KEY } from "./seen.ts";
+import {
+  permissionsHostOf,
+  providePermissions,
+  type PermissionRow,
+} from "../room/first-run/permissions-host.ts";
 
 let h: Harness | null = null;
 beforeEach(() => localStorage.removeItem(SEEN_KEY));
@@ -522,4 +527,76 @@ test("Clauseo Case Law not added, with no price listed: the terms alone, no coun
     "Prepaid credits. No subscription.",
   );
   expect(card.textContent).not.toMatch(/searches/);
+});
+
+// stage E (Mac keychain prompting off): while the window's one permissions read lists the keychain row as would_ask, a
+// signed-out Case Law and a tool's missing key may be only unreadable, so they point at the row's Allow
+const KEYS: PermissionRow = {
+  id: "keychain",
+  state: "would_ask",
+  folder: null,
+  settings_path: null,
+  note: null,
+};
+const POINTER = "Clauseo needs your Mac's permission to read its saved keys.";
+
+/** The window's read (the band's, as it would make it) listing `rows`; each ask answers granted. */
+async function heard(rows: PermissionRow[]) {
+  const ask = vi.fn(async () => ({ ...KEYS, state: "granted" as const }));
+  providePermissions(h!.transport, { list: async () => rows, ask });
+  await act(async () => void (await permissionsHostOf(h!.transport).list()));
+  await h!.settle();
+  return ask;
+}
+
+test("keychain would_ask: Case Law signed out points at the keychain's Allow, never Signed out or Sign in again", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw("signed_out") });
+  const ask = await heard([KEYS]);
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(text("case-law-trouble")).toBe("Needs your Mac's permission");
+  expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Allow");
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  const detail = text("library-detail")!;
+  expect(detail).toContain(POINTER);
+  expect(detail).not.toContain("Sign in again in Settings, under Connectors.");
+  await h!.click(h!.one("library-detail")!.querySelector('[data-testid="keychain-allow"]'));
+  expect(ask).toHaveBeenCalledWith("keychain");
+  expect(settings).not.toHaveBeenCalled();
+});
+
+test("keychain would_ask: a tool's missing key points at the keychain's Allow, never Key missing", async () => {
+  await mount();
+  await play({ mcp_tools_changed: TOOLS });
+  const ask = await heard([KEYS]);
+  await open();
+  await tab("Connectors");
+  expect(row("firm-precedents")?.querySelector(".lib-row-tag")?.textContent).toBe(
+    "Needs your Mac's permission",
+  );
+  await h!.click(row("firm-precedents"));
+  const detail = text("library-detail")!;
+  expect(detail).toContain(POINTER);
+  expect(detail).not.toContain("Its saved key is missing");
+  await h!.click(h!.one("library-detail")!.querySelector('[data-testid="keychain-allow"]'));
+  expect(ask).toHaveBeenCalledWith("keychain");
+});
+
+test.each([
+  ["granted", [{ ...KEYS, state: "granted" as const }]],
+  ["not listed", []],
+] as const)("keychain %s: Case Law and the tool keep today's words", async (_, rows) => {
+  await mount();
+  await play({ mcp_tools_changed: TOOLS });
+  await play({ connectors_changed: caseLaw("signed_out") });
+  await heard([...rows]);
+  await open();
+  await tab("Connectors");
+  expect(text("case-law-trouble")).toBe("Signed out");
+  expect(row("firm-precedents")?.querySelector(".lib-row-tag")?.textContent).toBe("Key missing");
+  await h!.click(row("firm-precedents"));
+  expect(text("library-detail")).toContain("Its saved key is missing");
+  expect(h!.host.textContent).not.toContain(POINTER);
 });

@@ -10,6 +10,7 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { Assistant } from "./assistant.ts";
 import { CaseLawBlocks, RecheckButton, type CaseLawActs } from "./case-law.tsx";
+import { KeychainAllow } from "../room/first-run/keychain-pointer.tsx";
 import { caseLawShown } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import type { Part } from "./model.ts";
@@ -126,8 +127,11 @@ export function ItemDetail({
       : shown === "unreachable"
         ? "unreachable"
         : a.status;
-  const trouble =
-    shown === "off" || shown === "ended" || shown === "waiting" || shown === "added"
+  // a tool's missing key, while the keychain row needs allowing: the row's line and Allow
+  const keychain = status === "needs_secret" ? (caseLaw.keychain ?? null) : null;
+  const trouble = keychain
+    ? keychain.line
+    : shown === "off" || shown === "ended" || shown === "waiting" || shown === "added"
       ? null
       : troubleLine(lang, status, assistant.who);
   const description = descriptionOf(lang, a);
@@ -152,6 +156,7 @@ export function ItemDetail({
         <div className="lib-trouble" role="status">
           <p>{trouble}</p>
           {shown === "unreachable" && <RecheckButton recheck={caseLaw.recheck} small />}
+          {keychain && <KeychainAllow k={keychain} />}
         </div>
       )}
       {a.has_scripts === true && (

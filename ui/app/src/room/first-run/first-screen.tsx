@@ -39,6 +39,7 @@ import { readyPlan, toolsView } from "./views.ts";
 import { browserNote, footActs, welcomeFoot } from "./welcome-foot.tsx";
 import { Permissions } from "./permissions.tsx";
 import { permissionsHostOf } from "./permissions-host.ts";
+import { useKeychain } from "./keychain-state.ts";
 
 /** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
  * first screen needs them. */
@@ -91,6 +92,7 @@ export function FirstScreen({
 }) {
   const { lang, platform } = useDisplay();
   const online = useOnline();
+  const keychain = useKeychain(transport);
   // desktop says nothing of either plan until the saved keys' first load is over, up to 10 s while a keychain prompt
   // waits (setup/start.rs: the pump that publishes the installs and sign-ins starts after wait_for_keys, for both plans
   // at once), and the screen stood empty: until then, once setup_info has come, each plan shows the sign-in check's
@@ -115,7 +117,7 @@ export function FirstScreen({
           setup,
           state,
           online,
-          footActs(store, agent, state),
+          { ...footActs(store, agent, state), keychain: keychain ?? undefined },
           IDS.install,
         );
     const install = unnoted(row);

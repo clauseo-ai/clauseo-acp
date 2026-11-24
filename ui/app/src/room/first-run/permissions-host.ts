@@ -7,6 +7,7 @@ import {
   askPermissionCommand,
   permissionsCommand,
   setDefaultLocationCommand,
+  type OsPermissionState,
   type PermissionId,
   type PermissionRow,
 } from "../../transport/permission-commands.ts";
@@ -17,6 +18,20 @@ export type {
   PermissionRow,
 } from "../../transport/permission-commands.ts";
 
+const KNOWN: readonly string[] = [
+  "not_asked",
+  "would_ask",
+  "asking",
+  "granted",
+  "denied",
+  "blocking",
+  "unknown",
+] satisfies OsPermissionState[];
+
+/** A state from a newer desktop reads as "unknown", so the step never breaks on it. */
+const known = (row: PermissionRow): PermissionRow =>
+  KNOWN.includes(row.state) ? row : { ...row, state: "unknown" };
+
 /** The step's host. */
 export type PermissionsHost = {
   /** The rows needed on this build; rejects when the desktop couldn't say (a caller keeps what it had). */
@@ -26,6 +41,10 @@ export type PermissionsHost = {
   /** Picks a folder and makes it where new matters go (set_default_location): its outcome, or null when the lawyer
    * cancels the picker. Absent where nothing can set it (no desktop, no fake), and every button for it is hidden. */
   chooseMattersFolder?: (() => Promise<FolderChoice | null>) | undefined;
+  /** Every later list or ask through this window's hosts, with the rows after: a step that stands follows them. */
+  watch?:
+    | ((then: (rows: readonly PermissionRow[], once: boolean) => void) => () => void)
+    | undefined;
 };
 
 export type { FolderChoice } from "@clauseo/components/clauseo/first-launch/folder-choice.tsx";
@@ -67,13 +86,88 @@ const desktop = (transport: HostTransport): PermissionsHost => ({
   chooseMattersFolder: () => chooseOver(transport),
 });
 
+/** The rows the window last heard, from any list or ask through permissionsHostOf: the band's or the first screen's
+ * one read, shared with what points at the keychain row (keychain-pointer.tsx), which makes no read of its own. */
+type Heard = {
+  rows: readonly PermissionRow[] | null;
+  /** The keychain was allowed once only (allowedOnce). */
+  once: boolean;
+  /** The ask under way, one at a time per row. */
+  asking: { id: PermissionId; answer: Promise<PermissionRow> } | null;
+  subscribe: (then: () => void) => () => void;
+  tell: (rows: readonly PermissionRow[]) => void;
+};
+const heard = new WeakMap<HostTransport, Heard>();
+
+export function heardOf(transport: HostTransport): Heard {
+  const had = heard.get(transport);
+  if (had !== undefined) return had;
+  const subs = new Set<() => void>();
+  const made: Heard = {
+    rows: null,
+    once: false,
+    asking: null,
+    subscribe: (then) => {
+      subs.add(then);
+      return () => void subs.delete(then);
+    },
+    tell: (rows) => {
+      made.rows = rows;
+      for (const then of subs) then();
+    },
+  };
+  heard.set(transport, made);
+  return made;
+}
+
+/** The keychain row listed and not allowed (prompting is off, so its items read as unreadable): it would ask, macOS is
+ * asking, or the lawyer refused it. Granted, or no row (Windows, no host): false. */
+export const keychainRow = (rows: readonly PermissionRow[] | null): PermissionRow | null =>
+  rows?.find(
+    (r) =>
+      r.id === "keychain" &&
+      (r.state === "would_ask" || r.state === "asking" || r.state === "denied"),
+  ) ?? null;
+
+/** The keychain row still would ask after the lawyer answered macOS: a plain Allow let one read through, not Always
+ * Allow. The one place that says so, for the band's row and every pointer (UC-1442).
+ * Reads the desktop's `asked` (#1344); without it, whether this window's own ask just answered so. */
+export const allowedOnce = (row: PermissionRow, justAsked: boolean): boolean =>
+  row.id === "keychain" && row.state === "would_ask" && (row.asked ?? justAsked);
+
 /** The step's host for the window's transport. A list that fails rejects: the step keeps the rows it had, and a
  * first read that fails shows nothing. */
 export function permissionsHostOf(transport: HostTransport): PermissionsHost {
   const host = provided.get(transport) ?? (transport.kind === "tauri" ? desktop(transport) : NONE);
+  const h = heardOf(transport);
+  const ask = (id: PermissionId) => {
+    if (h.asking?.id === id) return h.asking.answer;
+    const answer = host.ask(id).then(
+      (bound) => {
+        const row = known(bound);
+        h.asking = null;
+        if (row.id === "keychain") h.once = allowedOnce(row, true);
+        h.tell((h.rows ?? [row]).map((r) => (r.id === row.id ? row : r)));
+        return row;
+      },
+      (error: unknown) => {
+        h.asking = null;
+        throw error;
+      },
+    );
+    h.asking = { id, answer };
+    return answer;
+  };
   return {
-    list: () => host.list(),
-    ask: (id) => host.ask(id),
+    list: () =>
+      host.list().then((bound) => {
+        const rows = bound.map(known);
+        h.once = rows.some((r) => allowedOnce(r, h.once));
+        h.tell(rows);
+        return rows;
+      }),
+    ask,
+    watch: (then) => h.subscribe(() => then(h.rows ?? [], h.once)),
     ...(host.chooseMattersFolder === undefined
       ? {}
       : { chooseMattersFolder: host.chooseMattersFolder }),

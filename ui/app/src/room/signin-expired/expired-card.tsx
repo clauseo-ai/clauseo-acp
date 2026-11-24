@@ -30,6 +30,8 @@ import type { AgentId, SignIn, Timestamp } from "../../transport/protocol.ts";
 import { againLine, expiredOf } from "./expired-state.ts";
 import type { NoticeFrame } from "../first-run/hold.ts";
 import { gateView, refusalView } from "../first-run/views.ts";
+import { GateKeyLine } from "../first-run/keychain-pointer.tsx";
+import { useKeychain } from "../first-run/keychain-state.ts";
 import { clockOf, localZone } from "../when.ts";
 import { roomCommand, roomSend } from "./setup-commands.ts";
 
@@ -106,6 +108,7 @@ export function ExpiredCard({
   const kept = sx(lang, "Your question is kept.");
   const acts = actsFor(store, agent, deviceOf(setup?.signIn));
   const refusal = refusalView(setup);
+  const keychain = useKeychain(transport as HostTransport);
   const button = (label: string, a: GateAct) => (
     <Button kind="tone" size="small" data-testid="signin-again" onClick={() => void acts(a)}>
       <span className="deva-nudge">{label}</span>
@@ -119,6 +122,9 @@ export function ExpiredCard({
         keys={null}
         onAct={acts}
         refused={refusal}
+        keyLine={(own, code) => (
+          <GateKeyLine transport={transport as HostTransport} own={own} code={code} />
+        )}
         testIds={{
           cancel: "signin-cancel",
           paste: "signin-paste",
@@ -137,7 +143,7 @@ export function ExpiredCard({
   // a saved API key the keychain didn't give is no sign-in that expired: the card is named by the key's words
   const keyCode = typeof setup?.signIn === "object" ? setup.signIn.failed?.code : undefined;
   const label = isKeyNotRead(keyCode)
-    ? `${errorWords(lang, keyCode)} ${kept}`
+    ? `${keychain?.line ?? errorWords(lang, keyCode)} ${kept}`
     : sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
   let card;
   switch (e.kind) {

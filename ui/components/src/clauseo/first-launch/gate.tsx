@@ -109,6 +109,7 @@ export function Gate({
   keys,
   onAct,
   refused,
+  keyLine,
   testIds = {},
 }: {
   plan: Plan;
@@ -120,6 +121,8 @@ export function Gate({
   /** A press. For a code or a key, the promise of whether desktop took it: its field keeps the words until then, and
    * after a refusal. */
   onAct: (act: GateAct) => void | Promise<boolean>;
+  /** A failure's line in the app's place (the keychain row's pointer, by its code), given the gate's own. */
+  keyLine?: ((own: ReactNode, code: string) => ReactNode) | undefined;
   testIds?: GateTestIds;
 }) {
   const { lang } = useDisplay();
@@ -498,8 +501,8 @@ export function Gate({
         </>
       );
       break;
-    case "failed":
-      body = (
+    case "failed": {
+      const own = (
         <Failed
           plan={plan}
           view={view}
@@ -510,7 +513,9 @@ export function Gate({
           onAct={onAct}
         />
       );
+      body = keyLine === undefined ? own : keyLine(own, view.code);
       break;
+    }
   }
   return (
     <div ref={root} className="fl-gate" data-testid={testIds.root} data-agent={plan}>

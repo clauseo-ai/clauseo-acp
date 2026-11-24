@@ -24,6 +24,8 @@ export function stepRows(
   rows: readonly PermissionRow[],
   waiting: PermissionId | null,
   failed: PermissionId | null,
+  /** The keychain was allowed once only (permissions-host.ts's allowedOnce): its row says so, with its Allow. */
+  once = false,
 ): PermissionStepRow[] {
   const sorted = rows.filter(listed).sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
   let turn = false;
@@ -33,9 +35,17 @@ export function stepRows(
       ...(row.settings_path === null ? {} : { path: row.settings_path }),
       ...(row.note === null ? {} : { note: row.note }),
     };
-    if (row.id === waiting) return { id: row.id, shows: "waiting", ...given };
+    // macOS's dialog open, asked from here or before this window read (#1344): waiting, no second Allow
+    if (row.id === waiting || row.state === "asking")
+      return { id: row.id, shows: "waiting", ...given };
     if (unasked(row)) {
-      const shows = turn ? "later" : row.id === failed ? "failed" : "ask";
+      const shows = turn
+        ? "later"
+        : row.id === failed
+          ? "failed"
+          : once && row.id === "keychain"
+            ? "once"
+            : "ask";
       turn = true;
       return { id: row.id, shows, ...given };
     }

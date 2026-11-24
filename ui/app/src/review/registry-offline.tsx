@@ -26,6 +26,8 @@ export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KE
   code === "agent.folder_inaccessible" ||
   code === "matter.file_refused" ||
   code === "matter.file_write_failed" ||
+  // UC-1443 (auto/registry-uc-keychain-pointer.tsx) in place of the retired U3-err-agent.key_denied
+  code === "agent.key_denied" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */

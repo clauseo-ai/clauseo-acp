@@ -34,6 +34,7 @@ import {
   type SetupStore,
 } from "../../store/setup.ts";
 import { installActs, planOf } from "./acts.ts";
+import { pointsToKeychain, type Keychain } from "./keychain-state.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
 /** The line's presses: the install's, the room gate's Sign in, a found login's Use it, an unreadable key's Try again,
@@ -44,6 +45,8 @@ export type FootActs = InstallActs & {
   retryKey: () => void;
   cancel: () => void;
   cancelAhead: () => void;
+  /** The keychain row's pointer while it needs allowing (keychain-pointer.tsx): an unreadable key says it instead. */
+  keychain?: Keychain | undefined;
 };
 
 /** A plan's line's presses: its install's, its "Sign in with {name}" (through the store's queue), Cancel, which stops
@@ -230,6 +233,12 @@ export function welcomeFoot(
       // and reads the key again. The note says where the key can be changed; no tick, since the
       // plan can't be used until the key reads. Try again refused in another code says that code's
       // words after it, as the gate's refused line does (the same code is said once)
+      // while the keychain row needs allowing (stage E), the key is unreadable for that: the row's Allow, no Try again
+      if (pointsToKeychain(view.code) && acts.keychain !== undefined) {
+        const k = acts.keychain;
+        const allow = { words: fl(lang, "Allow"), press: k.allow, testId: "keychain-allow" };
+        return named(line(k.line, "keychain", allow), lang, name, null, "none");
+      }
       if (isKeyNotRead(view.code)) {
         const key = errorWords(lang, view.code);
         const plans = sx(lang, "To change it, open Settings, then Plans.");

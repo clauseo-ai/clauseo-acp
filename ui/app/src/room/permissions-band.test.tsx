@@ -59,9 +59,25 @@ test("a row refused in this session keeps the band, with its Allow", async () =>
   expect(byId("permission-allow")).not.toBeNull();
 });
 
-test("no band when every row was asked already, or there is none", async () => {
-  await mountFirstRun({ matters: [A], permissions: host([{ ...KEYS, state: "denied" }]) });
+test("no band when every row was asked already and none is a refused keychain", async () => {
+  await mountFirstRun({
+    matters: [A],
+    permissions: host([
+      { ...DOCS, state: "denied" },
+      { ...KEYS, state: "granted" },
+    ]),
+  });
   expect(byId("matter")).not.toBeNull();
+  expect(byId("permissions-band")).toBeNull();
+});
+
+test("a keychain refused at an earlier start raises the band, with its Allow", async () => {
+  const fake = host([{ ...KEYS, state: "denied" }]);
+  await mountFirstRun({ matters: [A], permissions: fake });
+  expect(byId("permissions-band")).not.toBeNull();
+  expect(byId("permission-denied")).not.toBeNull();
+  await press(byId("permission-allow"));
+  expect(fake.ask).toHaveBeenCalledWith("keychain");
   expect(byId("permissions-band")).toBeNull();
 });
 
@@ -69,4 +85,48 @@ test("no band with no rows", async () => {
   await mountFirstRun({ matters: [A], permissions: host([]) });
   expect(byId("matter")).not.toBeNull();
   expect(byId("permissions-band")).toBeNull();
+});
+
+test("the band's Allow answered with a plain Allow (still would_ask): the row says allowed once only, with its Allow", async () => {
+  await mountFirstRun({
+    matters: [A],
+    permissions: { list: async () => [KEYS], ask: async () => KEYS },
+  });
+  await press(byId("permission-allow"));
+  expect(byId("permission-once")?.textContent).toBe(
+    "macOS allowed it once only. Press Allow again and choose Always Allow.",
+  );
+  expect(byId("permission-allow")).not.toBeNull();
+});
+
+// #1344's states: "asking" while macOS's dialog is open, and `asked` once this build asked for the row
+test("keychain asking (macOS's dialog open): the band shows it waiting, with no second Allow", async () => {
+  await mountFirstRun({ matters: [A], permissions: host([{ ...KEYS, state: "asking" }]) });
+  expect(byId("permission-waiting")?.textContent).toBe(
+    "macOS is asking. Type your Mac's login password, then choose Always Allow.",
+  );
+  expect(byId("permission-allow")).toBeNull();
+});
+
+test("keychain would_ask with asked: the row says allowed once only, with its Allow", async () => {
+  await mountFirstRun({ matters: [A], permissions: host([{ ...KEYS, asked: true }]) });
+  expect(byId("permission-once")?.textContent).toBe(
+    "macOS allowed it once only. Press Allow again and choose Always Allow.",
+  );
+  expect(byId("permission-allow")).not.toBeNull();
+});
+
+test("keychain would_ask, not asked yet: the first ask, its reason saying to choose Always Allow", async () => {
+  await mountFirstRun({ matters: [A], permissions: host([KEYS]) });
+  expect(byId("permission-once")).toBeNull();
+  expect(byId("permissions-band")?.textContent).toContain("Choose Always Allow.");
+  expect(byId("permission-allow")).not.toBeNull();
+});
+
+test("a state from a newer desktop reads as unknown: the keychain row keeps its Allow", async () => {
+  await mountFirstRun({
+    matters: [A],
+    permissions: host([{ ...KEYS, state: "something_new" as never }]),
+  });
+  expect(byId("permission-allow")).not.toBeNull();
 });
