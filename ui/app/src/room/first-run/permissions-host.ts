@@ -92,6 +92,8 @@ type Heard = {
   rows: readonly PermissionRow[] | null;
   /** The keychain was allowed once only (allowedOnce). */
   once: boolean;
+  /** The list under way: a second caller shares it. */
+  listing: Promise<PermissionRow[]> | null;
   /** The ask under way, one at a time per row. */
   asking: { id: PermissionId; answer: Promise<PermissionRow> } | null;
   subscribe: (then: () => void) => () => void;
@@ -106,6 +108,7 @@ export function heardOf(transport: HostTransport): Heard {
   const made: Heard = {
     rows: null,
     once: false,
+    listing: null,
     asking: null,
     subscribe: (then) => {
       subs.add(then);
@@ -160,12 +163,15 @@ export function permissionsHostOf(transport: HostTransport): PermissionsHost {
   };
   return {
     list: () =>
-      host.list().then((bound) => {
-        const rows = bound.map(known);
-        h.once = rows.some((r) => allowedOnce(r, h.once));
-        h.tell(rows);
-        return rows;
-      }),
+      (h.listing ??= host
+        .list()
+        .then((bound) => {
+          const rows = bound.map(known);
+          h.once = rows.some((r) => allowedOnce(r, h.once));
+          h.tell(rows);
+          return rows;
+        })
+        .finally(() => (h.listing = null))),
     ask,
     watch: (then) => h.subscribe(() => then(h.rows ?? [], h.once)),
     ...(host.chooseMattersFolder === undefined

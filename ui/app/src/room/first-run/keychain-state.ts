@@ -1,6 +1,6 @@
 // The keychain row's pointer's state (keychain-pointer.tsx): what points at the keychain row, and the hook over the
 // window's one permissions read (permissions-host.ts's heardOf).
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
@@ -24,6 +24,13 @@ export function useKeychain(transport: HostTransport): Keychain | null {
   const h = heardOf(transport);
   const row = keychainRow(useSyncExternalStore(h.subscribe, () => h.rows));
   const [state, setState] = useState<"idle" | "asking" | "failed">("idle");
+  // a window with no read yet (Settings, where Privacy may not be open) makes the one read, shared with the step's
+  useEffect(() => {
+    if (h.rows === null)
+      permissionsHostOf(transport)
+        .list()
+        .catch(() => {});
+  }, [h, transport]);
   if (row === null) return null;
   const asking = state === "asking" || row.state === "asking";
   const allow = () => {

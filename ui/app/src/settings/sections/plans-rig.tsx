@@ -16,6 +16,7 @@ import type {
   SignIn,
 } from "../../transport/protocol.ts";
 import { SettingsApp } from "../settings-app.tsx";
+import { providePermissions, type PermissionsHost } from "../../room/first-run/permissions-host.ts";
 
 export const CLAUDE: AgentId = "claude-acp";
 export const CODEX: AgentId = "codex-acp";
@@ -63,6 +64,8 @@ export type PlansRig = {
   plans?: SettingsView["plans"];
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void;
+  /** The window's permissions host (permissions-host.ts); none lists no rows. */
+  permissions?: PermissionsHost;
 };
 
 /** The settings window at Plans over a fake host with the setup wire. */
@@ -107,6 +110,7 @@ export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
       ...(o.command === undefined ? {} : { command: o.command }),
     },
   });
+  if (o.permissions !== undefined) providePermissions(transport, o.permissions);
   history.replaceState(null, "", "/settings.html#plans");
   const made = connectDisplay(transport).store;
   store = made;

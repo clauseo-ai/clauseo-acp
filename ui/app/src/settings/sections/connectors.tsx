@@ -36,6 +36,8 @@ import { Packs } from "./connectors-packs.tsx";
 import { Sends } from "./connectors-privacy.tsx";
 import { Spend } from "./connectors-spend.tsx";
 import { Group, PlateRow } from "./parts.tsx";
+import { KeychainAllow } from "../../room/first-run/keychain-pointer.tsx";
+import { useKeychain } from "../../room/first-run/keychain-state.ts";
 
 /** The block's local view: the status, the packs open, or the key field open. */
 type View = "status" | "packs" | "key";
@@ -128,6 +130,8 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   const credit = useCaseLawCredit(connectorsStoreOf(ctx.transport));
   const out = credit?.kind === "out" ? credit : null;
   const [view, setView] = useState<View>("status");
+  // signed out may be only unreadable while the keychain row needs allowing: its Allow, never Sign in or a key
+  const keychain = useKeychain(ctx.transport);
   const [chosen, setChosen] = useState("");
   const [waiting, setWaiting] = useState(false);
   // the pay link this view opened, by itself or by a press
@@ -382,8 +386,14 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   } else if (kind === "signed_out") {
     body = (
       <>
-        <p className="text-ui text-primary">{w("Signed out. Sign in to search case law again.")}</p>
-        {view === "key" ? (
+        <p className="text-ui text-primary">
+          {keychain?.line ?? w("Signed out. Sign in to search case law again.")}
+        </p>
+        {keychain !== null ? (
+          <Actions>
+            <KeychainAllow k={keychain} />
+          </Actions>
+        ) : view === "key" ? (
           keyField
         ) : (
           <Actions>

@@ -115,3 +115,31 @@ test("ChatGPT's card in the same state: Uses your OpenAI API key., the code's wo
   // Claude's card, signed out, keeps its plan line
   expect(line()).toBe("Uses your Claude plan.");
 });
+
+// stage E: while the window's one permissions read lists the keychain row as would_ask, the card points at the
+// keychain row's Allow in place of the key's words and Try again; granted, today's words
+test("keychain would_ask: the keychain line and Allow, which asks for it, never Try again; granted, today's words", async () => {
+  const KEYS = {
+    id: "keychain",
+    state: "would_ask",
+    folder: null,
+    settings_path: null,
+    note: null,
+  } as const;
+  const ask = vi.fn(async () => ({ ...KEYS, state: "granted" as const }));
+  await mountPlans({
+    first: [install(CLAUDE, READY), signIn(CLAUDE, failed("agent.key_unreadable"))],
+    permissions: { list: async () => [KEYS], ask },
+  });
+  expect(words()).toContain("Clauseo needs your Mac's permission to read its saved keys.");
+  expect(words()).not.toContain(TIMED_OUT);
+  expect(block("claude")?.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+  await press(
+    block("claude")?.querySelector<HTMLElement>('[data-testid="keychain-allow"]') ?? null,
+  );
+  expect(ask).toHaveBeenCalledWith("keychain");
+  expect(words()).toContain(TIMED_OUT);
+  expect(block("claude")?.querySelector('[data-testid="plans-sign-in"]')?.textContent).toBe(
+    "Try again",
+  );
+});
