@@ -16,14 +16,16 @@
 //!
 //! Turns of different threads in a matter run at the same time, and a turn whose end ran but
 //! was never logged (it failed twice) left the matter too, so several turns of a matter may be
-//! open, and others may have run since one of them started. The started turns
-//! of a matter are repaired once every thread of the matter that is not archived has been
-//! looked at, and only the one that started last may take a new after-turn checkpoint; each
-//! earlier one takes its own from R8's timeline or an empty step (`MatterJob::Repair`), so no
-//! repair takes another turn's changes, in whatever order the threads load. When a thread of
-//! the matter could not be loaded or its log read, which turn started last is not known, so
-//! none may take a new checkpoint: a lone crashed turn there gets an empty step, and its
-//! changes are logged as outside edits by the next turn's before-turn checkpoint.
+//! open, and others may have run since one of them started. The started turns of a matter are
+//! repaired once every thread of the matter that is not archived has been looked at. Each takes
+//! its own after-turn checkpoint from R8's timeline when there is one. Several open turns ran
+//! beside each other: each takes a new one measured from its own before-turn checkpoint, without
+//! the papers only the others' tool calls named (`MatterJob::Repair`'s `open`), so no repair
+//! takes another turn's changes, in whatever order the threads load. A turn left open alone
+//! takes a new one only when nothing was checkpointed since it started, else an empty step.
+//! When a thread of the matter could not be loaded or its log read, which turn started last is
+//! not known, so a lone crashed turn there gets an empty step, and its changes are logged as
+//! outside edits by the next turn's before-turn checkpoint.
 //!
 //! This holds within one start, not across starts: if a thread fails to load and other turns
 //! then run in the matter, a later start that repairs that thread's turn as the only open one
@@ -326,8 +328,18 @@ pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
     let mut waiting = std::mem::take(&mut repairs.waiting);
     // The turn that started last first.
     waiting.sort_by_key(|repair| Reverse(repair.started));
+    // Each open turn ran beside the others: its card leaves out the papers they named.
+    let open: Vec<(ThreadId, TurnPaths)> = waiting
+        .iter()
+        .map(|repair| (repair.thread, repair.tool_paths.clone()))
+        .collect();
     for (n, repair) in waiting.into_iter().enumerate() {
-        after_turn(actor, repair, complete && n == 0);
+        let others = open
+            .iter()
+            .filter(|(thread, _)| *thread != repair.thread)
+            .cloned()
+            .collect();
+        after_turn(actor, repair, complete && n == 0, others);
     }
 }
 
@@ -357,7 +369,7 @@ fn hold(actor: &mut Actor, thread: ThreadId, turn: TurnId, log: &[Envelope], pen
     };
     match repairs(actor, thread) {
         Some(repairs) => repairs.waiting.push(repair),
-        None => after_turn(actor, repair, true),
+        None => after_turn(actor, repair, true, Vec::new()),
     }
 }
 
@@ -437,8 +449,8 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> TurnPaths {
 }
 
 /// Sends the repair's checkpoint job; `last` when no other open turn of the matter started after
-/// this one.
-fn after_turn(actor: &mut Actor, repair: Waiting, last: bool) {
+/// this one, `open` the other open turns of the matter with their tool calls' places.
+fn after_turn(actor: &mut Actor, repair: Waiting, last: bool, open: Vec<(ThreadId, TurnPaths)>) {
     let Waiting {
         thread,
         turn,
@@ -469,6 +481,7 @@ fn after_turn(actor: &mut Actor, repair: Waiting, last: bool) {
             tool_paths,
             before,
             last,
+            open,
         };
         actor
             .matter_worker(matter)?

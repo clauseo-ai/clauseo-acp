@@ -511,6 +511,7 @@ pub(crate) fn restore(
                 commit: CommitId::of(last_commit),
                 changes: Vec::new(),
                 skipped: Vec::new(),
+                beside: Vec::new(),
             },
             written: restored,
             removed: Vec::new(),

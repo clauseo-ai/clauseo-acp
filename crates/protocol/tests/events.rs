@@ -64,9 +64,9 @@ mod web_urls;
 mod triage;
 
 use clauseo_protocol::{
-    DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,
-    MAX_RAW_ENCODE_DEPTH, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason, StreamId,
-    ToolCallStarted, TurnEnded, TurnStarted,
+    DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, FilesChanged, MAX_RAW_DEPTH,
+    MAX_RAW_ENCODE_DEPTH, MatterPath, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason,
+    StreamId, ToolCallStarted, TurnEnded, TurnStarted,
 };
 
 use examples::{every_event, tool_call_started};
@@ -345,6 +345,37 @@ fn none_fields_are_omitted() {
     ))
     .unwrap();
     assert!(json.contains("\"checkpoint_after\"") && json.contains("\"command_id\""));
+}
+
+/// `FilesChanged.beside` is left out when empty, so a turn that ran alone writes what it always
+/// wrote, and one written before it existed reads back with none; one that holds papers is written
+/// and read back, in JSON and in `MessagePack`.
+#[test]
+fn files_changed_beside_is_written_only_when_it_holds_papers() {
+    let alone = FilesChanged {
+        turn: turn_id(3),
+        files: Vec::new(),
+        skipped: Vec::new(),
+        beside: Vec::new(),
+    };
+    let json = serde_json::to_string(&DomainEvent::from(alone.clone())).unwrap();
+    assert!(!json.contains("\"beside\""), "{json}");
+    let decoded: DomainEvent = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, DomainEvent::from(alone.clone()));
+
+    let beside = FilesChanged {
+        beside: vec![MatterPath::new("notes/b.txt").unwrap()],
+        ..alone
+    };
+    let event = DomainEvent::from(beside);
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains(r#""beside":["notes/b.txt"]"#), "{json}");
+    assert_eq!(serde_json::from_str::<DomainEvent>(&json).unwrap(), event);
+    let packed = rmp_serde::to_vec_named(&event).unwrap();
+    assert_eq!(
+        rmp_serde::from_slice::<DomainEvent>(&packed).unwrap(),
+        event
+    );
 }
 
 #[test]

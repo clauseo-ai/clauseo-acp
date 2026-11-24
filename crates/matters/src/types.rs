@@ -183,6 +183,9 @@ pub struct Checkpoint {
     /// Files not versioned that are new or whose size or modification time changed since the
     /// last checkpoint, sorted by path.
     pub skipped: Vec<SkippedFile>,
+    /// The papers an after-turn checkpoint with an `Overlap` left out of `changes` as other
+    /// answers' (both paths of a rename), sorted; empty for any other checkpoint.
+    pub beside: Vec<MatterPath>,
 }
 
 /// The answer's card an undo is limited to ([`UndoRequest::only`]).

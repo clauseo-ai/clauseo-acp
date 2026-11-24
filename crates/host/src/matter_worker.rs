@@ -16,7 +16,7 @@ use clauseo_matters::{
     UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
+    CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest, ThreadId,
 };
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
@@ -181,15 +181,17 @@ pub(crate) enum MatterJob {
         overlap: Option<Box<beside::TurnOverlap>>,
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
-    /// the turn's own after-turn checkpoint when R8's timeline has one, `before` when another
-    /// turn started after it or anything checkpointed since it started (turns run beside each
-    /// other), a new after-turn checkpoint otherwise (see [`repair`]).
+    /// the turn's own after-turn checkpoint when R8's timeline has one; with other turns of the
+    /// matter left open (`open`, their tool calls' places), a new after-turn checkpoint measured
+    /// from its own `before` without their papers; alone, `before` when anything checkpointed
+    /// since it started, a new after-turn checkpoint otherwise (see [`repair`]).
     Repair {
         meta: TurnMeta,
         tool_paths: TurnPaths,
         before: Option<CheckpointId>,
         /// No other open turn of the matter started after this one.
         last: bool,
+        open: Vec<(ThreadId, TurnPaths)>,
     },
     /// Undo one step.
     Undo(UndoJob),
@@ -490,7 +492,8 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             let overlap = overlap.as_deref().zip(others.as_ref());
             let overlap = overlap.map(|(o, others)| Overlap {
                 since: o.since,
-                others,
+                others: &others.others,
+                left: &others.left,
             });
             let checkpoint =
                 matter.after_turn_named(&meta, &tool_paths, &commands, overlap.as_ref())?;
@@ -501,11 +504,18 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             mut tool_paths,
             before,
             last,
+            open: others,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             tool_paths.resolve_start();
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
             let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
-            repair(matter, &meta, &named, before, last)
+            let others = beside::of_open(matter.folder(), before, others);
+            let overlap = others.as_ref().map(|(since, others)| Overlap {
+                since: *since,
+                others: &others.others,
+                left: &others.left,
+            });
+            repair(matter, &meta, &named, before, last, overlap.as_ref())
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let none = BTreeSet::new();
@@ -620,7 +630,7 @@ mod relocate;
 mod sides;
 mod too_deep;
 
-pub(crate) use beside::TurnOverlap;
+pub(crate) use beside::{Ended, TurnOverlap};
 use checkpoints::{repair, root_commit, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 #[cfg(test)]

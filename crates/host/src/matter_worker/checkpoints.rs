@@ -4,7 +4,9 @@
 
 use std::collections::BTreeSet;
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, CommitId, Matter, TimelineEntry, TurnMeta};
+use clauseo_matters::{
+    Checkpoint, CheckpointOutcome, CommitId, Matter, Overlap, TimelineEntry, TurnMeta,
+};
 use clauseo_protocol::{CheckpointId, CheckpointKind, FileChange, MatterPath};
 
 use super::{Reused, TurnCheckpoint};
@@ -55,14 +57,18 @@ pub(super) fn turn_checkpoint(
 ///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
 ///   from `before` to it; the folder is not looked at, since another turn may have changed it
 ///   since.
-/// - Otherwise, when another open turn of the matter started after this one (`last` is false)
-///   or R8's last checkpoint is not `before`: the step is empty, `before` taken, never a later
-///   checkpoint or the folder. Turns of other threads run beside this one, so a later
-///   checkpoint may be another turn's before- or after-turn checkpoint, and the folder holds
-///   their changes; an undo of this step must never put those back. What this turn changed
-///   after its last checkpoint is not lost: the next before-turn checkpoint logs it as outside
-///   edits, or a later turn's card holds it. (Alone, a later checkpoint also means this turn's
-///   end ran and R8 reused `before` or its after-turn checkpoint failed.)
+/// - Otherwise, when other turns of the matter were left open too (`overlap` is `Some`): they
+///   ran beside this one, so a checkpoint after `before` may be theirs and the folder holds
+///   their changes. A new after-turn checkpoint is taken, its changes measured from `before`,
+///   and a paper only their tool calls named left out, so each open turn's card holds its own
+///   papers and an undo of this step never puts theirs back.
+/// - Otherwise, when another open turn of the matter started after this one (`last` is false;
+///   the other could not be read) or R8's last checkpoint is not `before`: the step is empty,
+///   `before` taken, never a later checkpoint or the folder, which may hold another turn's
+///   changes. Alone, a later checkpoint means this turn's end ran and R8 reused `before` or its
+///   after-turn checkpoint failed, or another turn ran beside it and ended: what this turn
+///   changed after its last checkpoint is then on that turn's card, flagged, or the next
+///   before-turn checkpoint logs it as outside edits.
 /// - Otherwise the crash came before the after-turn checkpoint: one is taken now, as at step 7.
 pub(super) fn repair(
     matter: &mut Matter,
@@ -70,6 +76,7 @@ pub(super) fn repair(
     (tool_paths, commands): &(BTreeSet<MatterPath>, BTreeSet<String>),
     before: Option<CheckpointId>,
     last: bool,
+    overlap: Option<&Overlap<'_>>,
 ) -> Result<TurnCheckpoint, Error> {
     let timeline = matter.timeline();
     let own = timeline
@@ -89,6 +96,7 @@ pub(super) fn repair(
         return reused(matter, entry.id, Some(entry), changes, true);
     }
     if let Some(before) = before
+        && overlap.is_none()
         && (!last || matter.last_checkpoint() != Some(before))
     {
         let entry = timeline
@@ -98,7 +106,7 @@ pub(super) fn repair(
             .copied();
         return reused(matter, before, entry, Vec::new(), false);
     }
-    let checkpoint = matter.after_turn_named(meta, tool_paths, commands, None)?;
+    let checkpoint = matter.after_turn_named(meta, tool_paths, commands, overlap)?;
     turn_checkpoint(matter, checkpoint, before)
 }
 
@@ -120,6 +128,7 @@ fn reused(
             commit,
             changes: Vec::new(),
             skipped: Vec::new(),
+            beside: Vec::new(),
         },
         reused: Some(Reused {
             entry,

@@ -29,6 +29,7 @@ fn log(turn: TurnId, files: Option<Vec<FileChange>>) -> Vec<Envelope> {
             turn,
             files,
             skipped: Vec::new(),
+            beside: Vec::new(),
         }));
     }
     events.push(DomainEvent::TurnEnded(TurnEnded {
