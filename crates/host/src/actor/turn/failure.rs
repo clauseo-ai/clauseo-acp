@@ -152,19 +152,32 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
-/// The commit ending `turn` failed; the unblock that follows retries it.
+/// The commit ending `turn` failed; the unblock that follows retries it. A failed retry gives up
+/// ([`gave_up`]).
 pub(super) fn on_closing_failed(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     failure: &Failure,
 ) {
-    if let Some(closing) = state(actor, thread)
+    let Some(closing) = state(actor, thread)
         .and_then(|state| state.closing.as_mut())
         .filter(|closing| closing.close.turn == turn)
-    {
-        closing.failed.get_or_insert(failure.error.code());
+    else {
+        return;
+    };
+    closing.failed.get_or_insert(failure.error.code());
+    if closing.retried {
+        gave_up(actor, thread, turn);
     }
+}
+
+/// The end of `turn` failed twice. An end that never became durable leaves the turn open, and
+/// start-up repair ends it at the next start; no copy is made for it, so a copy kept for it
+/// (an install's or a sign-in's, `queue::keep_for_sign_in`) is dropped and an install never
+/// waits for it.
+fn gave_up(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    queue::drop_copy(actor, thread, turn);
 }
 
 /// The one retry of a failed end: the same close (the after-turn checkpoint's record, the
@@ -191,5 +204,6 @@ fn retry_closing(actor: &mut Actor, thread: ThreadId) {
             error = %Cause(&error),
             "a turn's end failed twice; the next start ends it"
         );
+        gave_up(actor, thread, close.turn);
     }
 }

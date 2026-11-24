@@ -162,6 +162,15 @@ pub(super) fn copied(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
+/// The end of `turn` failed twice: a copy kept for it is dropped, so an install never waits for
+/// it (`install::any_active`, which does not wait for that end either).
+pub(in crate::actor::turn) fn drop_copy(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if let Some(queue) = queue(actor, thread) {
+        queue.requeue.take_if(|requeue| requeue.turn == turn);
+        queue.copying = None;
+    }
+}
+
 /// Whether `queue` still has a copy to log or one whose commit has not returned.
 pub(super) fn copy_pending(queue: &super::ThreadQueue) -> bool {
     queue.requeue.is_some() || queue.copying.is_some()
