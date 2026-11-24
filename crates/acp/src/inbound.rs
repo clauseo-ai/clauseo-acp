@@ -24,6 +24,8 @@ use crate::event::{AcpEvent, ProtocolWarning};
 use crate::map;
 use crate::state::{PendingElicitation, PendingPermission, Shared};
 
+mod helpers;
+
 /// The SDK handler.
 pub(crate) struct Inbound {
     shared: Arc<Shared>,
@@ -106,7 +108,7 @@ impl Inbound {
     /// call shows how it ended, with no output. One that was or may have been a
     /// `tool_call_update` but showed no status becomes [`AcpEvent::UpdateSkipped`]. Another
     /// kind gives nothing (the reader logged it). Only what the line itself claimed passes on:
-    /// its own session, tool call and status.
+    /// its own session (its root, for an announced helper's), tool call and status.
     async fn skipped_update(&mut self, params: &Value) {
         let text = |key| params.get(key).and_then(Value::as_str);
         let tool_call_update = text("kind").map(|kind| kind == crate::line::TOOL_CALL_UPDATE);
@@ -129,7 +131,10 @@ impl Inbound {
                 self.session_update(update).await;
             }
             (_, session, tool_call, _) => {
-                let session = session.and_then(|session| AgentSessionId::new(session).ok());
+                // A helper's is its root's, as its updates are (`inbound/helpers.rs`).
+                let session = session
+                    .and_then(|session| AgentSessionId::new(session).ok())
+                    .map(|session| self.shared.state().root_of(session));
                 let origin = session
                     .as_ref()
                     .map_or(crate::event::Origin::Idle, |session| {
@@ -160,26 +165,28 @@ impl Inbound {
             Some(Ok(session)) => Some(session),
             Some(Err(_)) | None => None,
         };
-        let update = params.get("update");
-        // Read from the raw JSON: one place for every kind of update (`map::helper`,
-        // `map::helper_in_background`).
-        let helper = update.and_then(map::helper);
-        let in_background = update.and_then(map::helper_in_background);
-        let name = update.map(|update| update.get("sessionUpdate").and_then(Value::as_str));
-        let name: &'static str = match name {
-            None => {
-                let error = "a session/update without an update".to_owned();
-                return self.shared.emit(map::invalid(session, None, error)).await;
-            }
-            Some(None) => {
-                let error = "an update without a sessionUpdate name".to_owned();
-                return self.shared.emit(map::invalid(session, None, error)).await;
-            }
-            Some(Some(name)) => match map::KNOWN_UPDATES.into_iter().find(|known| *known == name) {
-                Some(known) => known,
-                None => return self.shared.emit(map::unknown(session, name)).await,
+        let Some(update) = params.get("update") else {
+            let error = "a session/update without an update".to_owned();
+            return self.shared.emit(map::invalid(session, None, error)).await;
+        };
+        let Some(name) = update.get("sessionUpdate").and_then(Value::as_str) else {
+            let error = "an update without a sessionUpdate name".to_owned();
+            return self.shared.emit(map::invalid(session, None, error)).await;
+        };
+        let name: &'static str = match map::KNOWN_UPDATES.into_iter().find(|known| *known == name) {
+            Some(known) => known,
+            None => match map::helpers::subagent_name(name) {
+                Some(subagent) if self.shared.helper_sessions => {
+                    return self.subagent(session, subagent, update).await;
+                }
+                Some(_) | None => return self.shared.emit(map::unknown(session, name)).await,
             },
         };
+        // Read from the raw JSON: one place for every kind of update (`map::helper`,
+        // `map::helper_in_background`, and for a helper's session `inbound/helpers.rs`).
+        let helper = map::helper(update);
+        let in_background = map::helper_in_background(update);
+        let routed = self.route(session.as_ref(), update);
         let quarantined = params
             .get_mut("update")
             .map(map::quarantine_unknown_blocks)
@@ -200,6 +207,13 @@ impl Inbound {
                 .emit(map::invalid(None, Some(name), error))
                 .await;
         };
+        if let Some(routed) = routed {
+            self.helper_update(&session, routed, notification.update, quarantined);
+            for event in self.events.drain(..) {
+                self.shared.emit(event).await;
+            }
+            return;
+        }
         {
             let mut state = self.shared.state();
             // A session this connection never started still has its plans mapped, with no
@@ -261,9 +275,11 @@ impl Inbound {
             };
             match request {
                 Request::Permission(request) => {
-                    let origin = origin_of(&request.session);
+                    // A helper's request is its root's, so the root's cancel answers it too.
+                    let session = state.root_of(request.session);
+                    let origin = origin_of(&session);
                     let pending = PendingPermission {
-                        session: CompactString::from(request.session.as_str()),
+                        session: CompactString::from(session.as_str()),
                         options: request
                             .options
                             .iter()
@@ -273,7 +289,7 @@ impl Inbound {
                     };
                     state.permissions.insert(key, pending);
                     AcpEvent::PermissionRequested {
-                        session: request.session,
+                        session,
                         origin,
                         key,
                         acp_tool_call_id: request.acp_tool_call_id,
@@ -283,13 +299,14 @@ impl Inbound {
                     }
                 }
                 Request::Elicitation(request) => {
-                    let origin = origin_of(&request.session);
+                    let session = state.root_of(request.session);
+                    let origin = origin_of(&session);
                     let url = matches!(request.request, ElicitationRequest::Url { .. });
                     state
                         .elicitations
                         .insert(key, PendingElicitation { url, responder });
                     AcpEvent::ElicitationRequested {
-                        session: request.session,
+                        session,
                         origin,
                         key,
                         elicitation_id: request.elicitation_id,

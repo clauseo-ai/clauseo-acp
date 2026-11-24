@@ -7,17 +7,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use agent_client_protocol::Responder;
-use clauseo_protocol::{CompactString, PromptCapabilities, SteeringCapability, TurnId};
+use clauseo_protocol::{
+    AgentSessionId, CompactString, PromptCapabilities, SteeringCapability, TurnId,
+};
 
 use crate::Error;
 use crate::event::{AcpEvent, FrameDirection, Origin, PendingKey, RawFrame};
 use crate::line::Gate;
 use crate::types::AuthMethod;
 
+mod helper_sessions;
+
+pub(crate) use helper_sessions::HelperSessions;
+
 /// Shared by the line reader, the inbound handler, the command loop and every `AcpClient`.
 pub(crate) struct Shared {
     events: async_channel::Sender<AcpEvent>,
     pub(crate) gate: Arc<Gate>,
+    /// `ConnectOptions::helper_sessions`, fixed for the connection.
+    pub(crate) helper_sessions: bool,
     frame_tap: Option<async_channel::Sender<RawFrame>>,
     frames_dropped: Arc<AtomicU64>,
     /// Wakes the command loop to end the connection with [`Shared::fatal`].
@@ -37,12 +45,20 @@ impl Shared {
         Self {
             events,
             gate: Arc::default(),
+            helper_sessions: false,
             frame_tap,
             frames_dropped,
             stop,
             state: Mutex::new(State::default()),
             fatal: Mutex::new(None),
         }
+    }
+
+    /// Turns `ConnectOptions::helper_sessions` on or off for this connection.
+    #[must_use]
+    pub(crate) fn with_helper_sessions(mut self, on: bool) -> Self {
+        self.helper_sessions = on;
+        self
     }
 
     /// Sends an event; while the channel is full, the line reader stops. A dropped receiver
@@ -107,6 +123,8 @@ impl Shared {
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) sessions: BTreeMap<CompactString, SessionState>,
+    /// The helpers announced under those sessions (`helper_sessions.rs`).
+    pub(crate) helpers: HelperSessions,
     pub(crate) permissions: BTreeMap<PendingKey, PendingPermission>,
     pub(crate) elicitations: BTreeMap<PendingKey, PendingElicitation>,
     next_key: u64,
@@ -127,6 +145,26 @@ impl State {
     pub(crate) fn next_key(&mut self) -> PendingKey {
         self.next_key += 1;
         PendingKey(self.next_key)
+    }
+
+    /// Starts session `key` afresh, forgetting the helpers announced under it before.
+    pub(crate) fn start_session(&mut self, key: CompactString, entry: SessionState) {
+        self.helpers.forget_root(&key);
+        self.sessions.insert(key, entry);
+    }
+
+    /// `session`, or its root when it is the session of a helper announced on this connection.
+    pub(crate) fn root_of(&self, session: AgentSessionId) -> AgentSessionId {
+        self.helpers
+            .root_of(session.as_str())
+            .cloned()
+            .unwrap_or(session)
+    }
+
+    /// Drops session `key` and the helpers announced under it.
+    pub(crate) fn drop_session(&mut self, key: &str) {
+        self.helpers.forget_root(key);
+        self.sessions.remove(key);
     }
 }
 
