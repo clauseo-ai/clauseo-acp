@@ -20,10 +20,11 @@ macro_rules! signed {
 /// seq 2, apps `0.1.0` and `0.0.0-dev.1a2b3c4`, the pins and lock of
 /// `crates/limits/tests/live`, the 12 sizes rows; signed by key A.
 pub(crate) const GOOD: Signed = signed!("engines");
-/// seq 3, claude-agent-acp 0.90.0, the lock cut to two packages; key A.
+/// seq 3, claude-agent-acp 0.90.0 (in the lock too), the lock cut to the pinned packages; key A.
 pub(crate) const NEWER: Signed = signed!("newer");
 
-/// A one-change variant of `GOOD` (with the lock cut to two packages), signed by key A.
+/// A one-change variant of `GOOD` (its lock cut to the root and the three pinned packages),
+/// signed by key A.
 macro_rules! variant {
     ($($name:ident = $stem:literal;)*) => {
         $(pub(crate) const $name: Signed = signed!($stem);)*
@@ -48,6 +49,20 @@ variant! {
     SHA1_INTEGRITY = "sha1-integrity";
     NOT_SEMVER = "not-semver";
     OLDER = "older";
+    SEQ_HUGE = "seq-huge";
+    DOTDOT_KEY = "dotdot-key";
+    ABSOLUTE_KEY = "absolute-key";
+    BACKSLASH_KEY = "backslash-key";
+    MISSING_RESOLVED = "missing-resolved";
+    LINK = "link";
+    IN_BUNDLE = "in-bundle";
+    OTHER_RESOLVED = "other-resolved";
+    TWO_INTEGRITY = "two-integrity";
+    OVERRIDE_ALIAS = "override-alias";
+    OVERRIDE_GIT = "override-git";
+    OVERRIDE_REF = "override-ref";
+    ROOT_MISMATCH = "root-mismatch";
+    INSTALLED_MISMATCH = "installed-mismatch";
 }
 
 /// `GOOD`'s bytes signed by key B.

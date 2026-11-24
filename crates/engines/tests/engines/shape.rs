@@ -3,8 +3,8 @@
 use clauseo_engines::{Agent, Arch, Error, Os};
 
 use crate::fixtures::{
-    BAD_GENERATED, BAD_SIZE, DUP_SIZE, GOOD, NO_APPS, SEQ_ZERO, UNKNOWN_FIELD, WRONG_FORMAT, check,
-    refusal,
+    BAD_GENERATED, BAD_SIZE, DUP_SIZE, GOOD, NO_APPS, SEQ_HUGE, SEQ_ZERO, UNKNOWN_FIELD,
+    WRONG_FORMAT, check, refusal,
 };
 
 #[test]
@@ -30,6 +30,12 @@ fn empty_apps_are_refused() {
 #[test]
 fn seq_zero_is_refused() {
     assert_eq!(refusal(&SEQ_ZERO), Some(Error::Seq));
+}
+
+#[test]
+fn a_seq_above_2_to_the_32_is_refused() {
+    assert_eq!(clauseo_engines::MAX_SEQ, 1 << 32);
+    assert_eq!(refusal(&SEQ_HUGE), Some(Error::Seq));
 }
 
 #[test]

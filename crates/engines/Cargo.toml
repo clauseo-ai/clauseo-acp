@@ -12,6 +12,11 @@ publish.workspace = true
 test = false
 doctest = false
 
+[features]
+# Tests only: `load_with_key`, the check against a key the caller gives. Only this crate's own
+# dev-dependency below turns it on, so no shipped build has it.
+test-support = []
+
 [dependencies]
 # The list's signature: Tauri's updater signature, minisign (prehashed ed25519) wrapped in base64.
 minisign-verify = { workspace = true }
@@ -22,6 +27,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The "never older than the bundled pins" rule compares by semver precedence.
 semver = { workspace = true }
+
+[dev-dependencies]
+# Itself with test-support, so the tests reach `load_with_key` with no flag.
+clauseo-engines = { path = ".", features = ["test-support"] }
 
 [lints]
 workspace = true

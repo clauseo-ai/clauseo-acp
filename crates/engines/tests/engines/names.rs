@@ -3,9 +3,17 @@
 use clauseo_engines::Error;
 
 use crate::fixtures::{
-    EXTRA_DEP, EXTRA_OVERRIDE, LOCK_V2, MISSING_DEP, MISSING_INTEGRITY, NON_NPM_RESOLVED, SCRIPTS,
-    SHA1_INTEGRITY, refusal,
+    ABSOLUTE_KEY, BACKSLASH_KEY, DOTDOT_KEY, EXTRA_DEP, EXTRA_OVERRIDE, IN_BUNDLE,
+    INSTALLED_MISMATCH, LINK, LOCK_V2, MISSING_DEP, MISSING_INTEGRITY, MISSING_RESOLVED,
+    NON_NPM_RESOLVED, OTHER_RESOLVED, OVERRIDE_ALIAS, OVERRIDE_GIT, OVERRIDE_REF, ROOT_MISMATCH,
+    SCRIPTS, SHA1_INTEGRITY, Signed, TWO_INTEGRITY, refusal,
 };
+
+fn each(cases: &[(&str, &Signed)], expected: &Error) {
+    for (name, signed) in cases {
+        assert_eq!(refusal(signed).as_ref(), Some(expected), "{name}");
+    }
+}
 
 #[test]
 fn an_extra_dependency_is_refused() {
@@ -45,4 +53,64 @@ fn a_package_without_integrity_is_refused() {
 #[test]
 fn a_package_with_a_weaker_integrity_is_refused() {
     assert_eq!(refusal(&SHA1_INTEGRITY), Some(Error::Integrity));
+}
+
+#[test]
+fn a_lock_key_outside_node_modules_is_refused() {
+    each(
+        &[
+            ("../", &DOTDOT_KEY),
+            ("absolute", &ABSOLUTE_KEY),
+            ("backslash", &BACKSLASH_KEY),
+        ],
+        &Error::LockPath,
+    );
+}
+
+#[test]
+fn a_link_or_bundled_entry_is_refused() {
+    each(
+        &[("link", &LINK), ("inBundle", &IN_BUNDLE)],
+        &Error::LockEntry,
+    );
+}
+
+#[test]
+fn a_missing_or_foreign_resolved_is_refused() {
+    each(
+        &[
+            ("missing", &MISSING_RESOLVED),
+            ("another package", &OTHER_RESOLVED),
+            ("another host", &NON_NPM_RESOLVED),
+        ],
+        &Error::Resolved,
+    );
+}
+
+#[test]
+fn an_integrity_of_more_than_one_token_is_refused() {
+    assert_eq!(refusal(&TWO_INTEGRITY), Some(Error::Integrity));
+}
+
+#[test]
+fn an_override_that_is_not_one_version_is_refused() {
+    each(
+        &[
+            ("npm: alias", &OVERRIDE_ALIAS),
+            ("git", &OVERRIDE_GIT),
+            ("$ reference", &OVERRIDE_REF),
+        ],
+        &Error::Version,
+    );
+}
+
+#[test]
+fn a_lock_that_disagrees_with_the_pins_is_refused() {
+    each(
+        &[
+            ("root dependencies", &ROOT_MISMATCH),
+            ("installed version", &INSTALLED_MISMATCH),
+        ],
+        &Error::LockMismatch,
+    );
 }

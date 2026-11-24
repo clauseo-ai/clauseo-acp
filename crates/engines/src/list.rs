@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{Error, FORMAT};
+use crate::{Error, FORMAT, MAX_SEQ};
 
 /// The top-level fields of `clauseo-engines/1`, every one required.
 const FIELDS: [&str; 7] = [
@@ -141,7 +141,7 @@ pub(crate) fn parse(json: &[u8]) -> Result<EngineList, Error> {
     if raw.format != FORMAT {
         return Err(Error::Format);
     }
-    if raw.seq == 0 {
+    if raw.seq == 0 || raw.seq > MAX_SEQ {
         return Err(Error::Seq);
     }
     if !generated_is_rfc3339(&raw.generated) {
