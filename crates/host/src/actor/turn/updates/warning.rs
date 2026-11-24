@@ -1,8 +1,10 @@
 //! An ACP warning, for the log: its kind, and for a `sessionFailure` the host does not act on
 //! its category and severity, never its title (the agent's text). A retry's warning the quiet
-//! clock acts on (`offline/quiet.rs`) is logged by kind alone.
+//! clock acts on (`offline/quiet.rs`) is logged by kind alone. An MCP server that did not
+//! start is logged with its name and why, never the error's text (it can hold a path or a
+//! command).
 
-use clauseo_acp::ProtocolWarning as W;
+use clauseo_acp::{McpStartupReason, ProtocolWarning as W};
 use clauseo_protocol::{AgentSessionId, ThreadId};
 
 /// The `sessionFailure` categories the log takes as they are: codex-acp 2.2.2's
@@ -51,6 +53,17 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
             warning = kind,
             "the agent waits to retry its service"
         );
+    } else if let W::McpServerNotStarted { server, reason } = warning {
+        // The name is one the session sent; quoted, so no character of it can break the line.
+        tracing::warn!(
+            target: TARGET,
+            %thread,
+            ?session,
+            warning = kind,
+            ?server,
+            reason = reason_word(*reason),
+            "an MCP server failed to start: the agent runs without its tools"
+        );
     } else {
         tracing::warn!(
             target: TARGET,
@@ -59,6 +72,16 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
             warning = kind,
             "the agent sent something unreadable"
         );
+    }
+}
+
+/// Why an MCP server did not start, for the log.
+const fn reason_word(reason: McpStartupReason) -> &'static str {
+    match reason {
+        McpStartupReason::Failed => "failed",
+        McpStartupReason::TimedOut => "timed_out",
+        McpStartupReason::Cancelled => "cancelled",
+        McpStartupReason::NameTaken => "name_taken",
     }
 }
 
@@ -76,6 +99,7 @@ const fn kind(warning: &W) -> &'static str {
         W::UnknownLimitStatus { .. } => "unknown_limit_status",
         W::SessionFailure { .. } => "session_failure",
         W::Retrying(_) => "retrying",
+        W::McpServerNotStarted { .. } => "mcp_server_not_started",
     }
 }
 

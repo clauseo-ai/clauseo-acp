@@ -4,6 +4,7 @@ mod content;
 mod describe;
 pub(crate) mod helpers;
 mod limit;
+mod mcp_startup;
 mod session;
 mod too_long;
 mod tool;
@@ -148,12 +149,21 @@ pub(crate) fn update(
             return chunks(session, origin, role, chunk, quarantined.next(), out);
         }
         acp::SessionUpdate::ToolCall(call) => {
+            // codex-acp's report of an MCP server that did not start is no step.
+            if let Some(warning) = mcp_startup::failed_call(&call) {
+                return out.push(warning_event(Some(session), warning));
+            }
             AgentUpdate::ToolCall(tool::tool_call(call, cwd, tool_blocks(quarantined)))
         }
-        acp::SessionUpdate::ToolCallUpdate(update) => AgentUpdate::ToolCallUpdate {
-            acp_id: CompactString::from(&*update.tool_call_id.0),
-            patch: tool::patch(update.fields, cwd, tool_blocks(quarantined)),
-        },
+        acp::SessionUpdate::ToolCallUpdate(update) => {
+            if let Some(warning) = mcp_startup::failed_update(&update) {
+                return out.push(warning_event(Some(session), warning));
+            }
+            AgentUpdate::ToolCallUpdate {
+                acp_id: CompactString::from(&*update.tool_call_id.0),
+                patch: tool::patch(update.fields, cwd, tool_blocks(quarantined)),
+            }
+        }
         acp::SessionUpdate::Plan(plan) => {
             // The whole plan replaces any item plan, so no later removal empties it.
             *shown_plan = None;

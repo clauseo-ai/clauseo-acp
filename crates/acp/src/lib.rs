@@ -121,8 +121,8 @@ pub use driver::Driver;
 pub use error::{Error, RpcData};
 pub use event::{
     AcpEvent, AgentFailed, AgentUpdate, ConnectionLost, FrameDirection, HelperState, LimitSignal,
-    LimitStatus, MessageRole, Origin, PendingKey, ProtocolWarning, RETRY_TEXT_CHARS, RawFrame,
-    Retrying, ToolCall,
+    LimitStatus, McpStartupReason, MessageRole, Origin, PendingKey, ProtocolWarning,
+    RETRY_TEXT_CHARS, RawFrame, Retrying, ToolCall,
 };
 pub use line::{ReadMark, ReadProgress};
 pub use map::model_line;
