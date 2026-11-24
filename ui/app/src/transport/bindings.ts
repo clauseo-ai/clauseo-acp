@@ -2946,13 +2946,15 @@ export type HostCommand =
 	 */
 	delivery?: DeliveryRequest,
 	/**
-	 *  Model and effort for this prompt, set on the agent's session just before the prompt
-	 *  goes out (one the session does not offer is dropped), and before its session starts
-	 *  when the thread has none yet. A steer that joins the running turn ignores it.
-	 *  Missing sets none.
+	 *  Model and effort for this prompt, set on the agent's session before its turn starts
+	 *  (the effort checked against the model's answer), and before its session starts when
+	 *  the thread has none yet. One the session does not offer, or the agent refuses, is not
+	 *  used: the turn runs with what the session holds, and the thread gets one notice
+	 *  (`NoticeKind::PickNotUsed`). A steer cannot change the running answer's model: its
+	 *  config is ignored. Missing sets none.
 	 */
 	config?: ConfigPicks,
-} }) & { add_skill?: never; allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; mcp?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; remove_skill?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_default_location?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } |
+} }) & { add_skill?: never; allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; mcp?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; remove_skill?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_default_location?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Replace a queued prompt's text; the turn keeps its id, its place and its file blocks. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
@@ -4918,7 +4920,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; guard_steps_more?: never; held_open_blocked?: never; pick_not_used?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4928,7 +4930,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; pick_not_used?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the settings or the agent ruled it out, or the model did and the host knows no name
@@ -4947,7 +4949,7 @@ export type NoticeKind =
 	 *  "Haiku 4.5".
 	 */
 	model: string,
-} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; pick_not_used?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's data fence refused a request of the agent's without asking the lawyer: it
  *  reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
@@ -4973,7 +4975,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; pick_not_used?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4991,7 +4993,7 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; held_open_blocked?: never; pick_not_used?: never; skill_pack_not_loaded?: never } | 
 /**
  *  The browser saved a file outside the matter folder, in Clauseo's own folder for this
  *  matter (`<data>/agent-state/<matter id>/downloads`): the matter's drive cannot keep
@@ -5001,7 +5003,7 @@ export type NoticeKind =
 ({ download_outside_matter: {
 	/**  The file's name in that folder: one component, no separator. */
 	name: string,
-} }) & { auto_mode_unavailable_for_model?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { auto_mode_unavailable_for_model?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; pick_not_used?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Claude's sandbox could not be set up for this session on macOS or Linux (a `*` or `?`
  *  in a path, a path that is not UTF-8, no short temp folder), so Claude runs in
@@ -5017,6 +5019,18 @@ export type NoticeKind =
  *  "ask again" once they do.
  */
 "case_law_out_of_credit" | 
+/**
+ *  A prompt's own model or effort pick (`SendPrompt::config`) could not be used: the
+ *  session does not offer it, or the agent refused it. The answer ran with what the
+ *  session holds, named here by display name as the agent's choices name it. Once a
+ *  turn.
+ */
+({ pick_not_used: {
+	/**  The model the answer ran with; left out when the session names none. */
+	model?: string,
+	/**  Its effort; left out when the session names none. */
+	effort?: string,
+} }) & { auto_mode_unavailable_for_model?: never; download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -7891,9 +7905,9 @@ export type TurnStarted = {
 	/**  The checkpoint taken before it; a turn never runs without one. */
 	checkpoint_before: CheckpointId,
 	/**
-	 *  The model it runs with, as the session's options and the prompt's picks
-	 *  (`SendPrompt::config`) name it; `None` when the agent reports no model option, and in
-	 *  an event logged before the field.
+	 *  The model it runs with, as the session holds it once the prompt's picks
+	 *  (`SendPrompt::config`) were set: the agent's answer to them, else the session's options;
+	 *  `None` when the agent reports no model option, and in an event logged before the field.
 	 */
 	model?: NamedChoice,
 	/**  The effort it runs with, as `model`; `None` too for a model that takes none. */
@@ -8221,9 +8235,10 @@ export type UserMessage = {
 	delivery?: Delivery,
 	/**
 	 *  The prompt's own model and effort picks (`SendPrompt::config`): under each config
-	 *  option's id, the value to set just before the prompt, kept in the log so a turn queued
-	 *  across a restart still runs with them. The agent's plain text, as `ConfigOption` keeps
-	 *  ids. Empty is written as a missing field, and a missing field reads as empty.
+	 *  option's id, the value to set before the turn starts, kept in the log so a turn queued
+	 *  across a restart, or put back for a sign-in, still runs with them. The agent's plain
+	 *  text, as `ConfigOption` keeps ids. Empty is written as a missing field, and a missing
+	 *  field reads as empty.
 	 */
 	config?: { [key in string]: string },
 };
