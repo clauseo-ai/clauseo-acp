@@ -198,11 +198,14 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
 
 /// What every Claude run here sets, over any of the same name, as `host`'s Claude launches do
 /// (`agent::loads::CLAUDE_LAUNCH_VARS`, which this crate cannot depend on).
-pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 4] = [
+pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 7] = [
     ("CLAUDE_CODE_DISABLE_CRON", "1"),
     ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
     ("CLAUDE_CODE_HARBOR_KITE", "0"),
     ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"),
+    ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
+    ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
 ];
 
 /// The variable that makes Node trust the OS's certificate store beside its own roots:

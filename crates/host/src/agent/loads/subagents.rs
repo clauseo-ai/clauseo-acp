@@ -13,6 +13,15 @@
 //! nothing here: Claude Code then runs the helper on the newest allowed model of its family, or
 //! the conversation's, and logs a warning.
 //!
+//! **Claude Code's own agent types are off** on every login
+//! (`super::CLAUDE_BUILTIN_AGENTS_OFF_VAR`), so these are the only helpers a session has, and the
+//! lead fetches web pages with its own `WebFetch` (`super::CLAUDE_WEB_FETCH_AGENT_VAR`).
+//!
+//! **Every helper runs on Haiku on Anthropic's own login** ([`helper_model_env`]), whatever its
+//! definition or the lead's per-call `model` says: one question once launched nine helpers of
+//! Claude Code's own web-fetch type, each on the lead's Opus. A cloud login gets neither
+//! variable, for the reason above; it has no helpers to run anyway.
+//!
 //! **The researcher** has only the web's tools and the browser guard's
 //! (`clauseo_profile::subagents::researcher_tools`). With web search off the web's are denied,
 //! and in a session without the browser none of the guard's exist, so Claude Code would refuse to
@@ -23,8 +32,55 @@
 use serde_json::{Map, Value};
 
 use super::profile::Login;
+use super::take_object;
 use clauseo_profile::instructions::{SCALE_RESEARCH, SHIP_RESEARCH_TEXT, claude_scale};
-use clauseo_profile::subagents::RESEARCHER;
+use clauseo_profile::subagents::{PAPER_READER_MODEL, RESEARCHER};
+
+/// The variable naming the model every helper runs on. Claude Code 2.1.x binary, search text
+/// `let e=a.CLAUDE_CODE_SUBAGENT_MODEL;return e&&e!=="inherit"?e:"inherit"` (`s.` in 2.1.330).
+pub(crate) const HELPER_MODEL_VAR: &str = "CLAUDE_CODE_SUBAGENT_MODEL";
+
+/// The variable that makes [`HELPER_MODEL_VAR`] win over a helper's definition and over the
+/// lead's per-call `model`, which Claude Code then leaves out of the `Agent` tool. Without it a
+/// definition whose model is `inherit` (the web-fetch type's) runs on the lead's model before
+/// the variable is looked at. Claude Code 2.1.x binary, search text
+/// `if(!a.CLAUDE_CODE_SUBAGENT_MODEL_FORCE)return[` (`s.` in 2.1.330), read as a yes/no.
+pub(crate) const HELPER_MODEL_FORCE_VAR: &str = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE";
+
+/// The variables that put every helper on Clauseo's helper model (the paper reader's,
+/// `haiku`) on `login`: both on Anthropic's own login, none on a cloud login, where Haiku is
+/// not known to be served (see the module doc).
+pub(crate) fn helper_model_vars(login: Login) -> &'static [(&'static str, &'static str)] {
+    const VARS: [(&str, &str); 2] = [
+        (HELPER_MODEL_VAR, PAPER_READER_MODEL),
+        (HELPER_MODEL_FORCE_VAR, "1"),
+    ];
+    if login == Login::FirstParty {
+        &VARS
+    } else {
+        &[]
+    }
+}
+
+/// Sets [`helper_model_vars`] for `login` in `options.env` (the env the adapter spawns Claude
+/// Code with) and in the flag settings' `env`, over a hook's values. A value that is not an
+/// object at `env`, `settings` or `settings.env` is replaced; on a cloud login nothing changes.
+pub(crate) fn helper_model_env(options: &mut Map<String, Value>, login: Login) {
+    let vars = helper_model_vars(login);
+    if vars.is_empty() {
+        return;
+    }
+    let mut env = take_object(options, "env");
+    let mut settings = take_object(options, "settings");
+    let mut settings_env = take_object(&mut settings, "env");
+    for (name, value) in vars {
+        env.insert((*name).to_owned(), Value::from(*value));
+        settings_env.insert((*name).to_owned(), Value::from(*value));
+    }
+    settings.insert("env".to_owned(), Value::Object(settings_env));
+    options.insert("env".to_owned(), Value::Object(env));
+    options.insert("settings".to_owned(), Value::Object(settings));
+}
 
 /// Sets `options.agents` and the end of `meta`'s `systemPrompt.append` for `login` and
 /// `web_search` (see the module doc), before the host fills the append's tokens.

@@ -34,11 +34,14 @@ const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// What every read sets in the helper's environment, over any of the same name from the entry
 /// or the inherited environment, as `host`'s Claude launches do (`agent::loads::
 /// claude_launch_vars`, which `limits` cannot depend on).
-pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 4] = [
+pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 7] = [
     ("CLAUDE_CODE_DISABLE_CRON", "1"),
     ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
     ("CLAUDE_CODE_HARBOR_KITE", "0"),
     ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"),
+    ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
+    ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
 ];
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(25);

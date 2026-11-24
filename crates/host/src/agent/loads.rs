@@ -149,17 +149,51 @@ pub(crate) const CLAUDE_MESSAGING_OFF_VAR: &str = "CLAUDE_CODE_HARBOR_KITE";
 pub(crate) const CLAUDE_MARKETPLACE_OFF_VAR: &str =
     "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL";
 
+/// A launch variable Clauseo sets to `1` on every Claude launch, every login
+/// ([`CLAUDE_LAUNCH_VARS`]): Claude Code offers none of its own agent types (general-purpose,
+/// Explore, Plan, web-fetch), so the lead can launch only the helpers Clauseo defines
+/// ([`subagents`]). Claude Code 2.1.x binary (2.1.293 and 2.1.330), search text
+/// `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS&&`: the built-in list is empty when this variable is
+/// on and the session is not interactive, which every Agent SDK session is (stdout is a pipe).
+/// It is read as a yes/no (`1`, `true`, `yes`, `on` count as on). It also gives the lead its
+/// own `WebFetch` back: the web-fetch type is withheld from the lead's tools only while built-in
+/// types are on (C0-ENGINE-FACTS.md, part c).
+pub(crate) const CLAUDE_BUILTIN_AGENTS_OFF_VAR: &str = "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS";
+
+/// A launch variable Clauseo sets to `0` on every Claude launch, every login
+/// ([`CLAUDE_LAUNCH_VARS`]): the web-fetch agent stays off whatever Anthropic's flag
+/// `tengu_clever_orbit` says, so the lead keeps its own `WebFetch` tool instead of launching a
+/// helper on its own model for each page. Claude Code 2.1.x binary, search text
+/// `enabled??=a.CLAUDE_CODE_WEB_FETCH_AGENT??` (2.1.293; `s.` in 2.1.330): a value the variable
+/// gives wins over the flag; `0`, `false`, `no` and `off` give off, anything else gives no value.
+pub(crate) const CLAUDE_WEB_FETCH_AGENT_VAR: &str = "CLAUDE_CODE_WEB_FETCH_AGENT";
+
+/// A launch variable Clauseo sets on every Claude launch, every login ([`CLAUDE_LAUNCH_VARS`]):
+/// at most [`CLAUDE_HELPERS_AT_ONCE`] helpers at once, as the instructions ask ("4 to 6 at
+/// once"). Claude Code 2.1.x binary, search text `Concurrent subagent limit reached`: a launch
+/// past the cap is refused with that message; unset, the cap is 20. Read as a whole number of
+/// at least 1, digits only.
+pub(crate) const CLAUDE_HELPERS_AT_ONCE_VAR: &str = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS";
+
+/// The most helpers a Claude session runs at once ([`CLAUDE_HELPERS_AT_ONCE_VAR`]).
+pub(crate) const CLAUDE_HELPERS_AT_ONCE: &str = "6";
+
 // A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
-// and in the limits reader's `CLAUDE_FORCED_VARS`, with a test in `tools_tests.rs`.
+// and in the limits reader's and sign-in's `CLAUDE_FORCED_VARS`, with a test in
+// `tools_tests.rs`. A variable that depends on the login goes in
+// `subagents::helper_model_vars` instead.
 
 /// The variables every Claude launch sets, each in the adapter's own environment
 /// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
 /// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
-pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 4] = [
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 7] = [
     (CLAUDE_CRON_OFF_VAR, "1"),
     (CLAUDE_GIT_STATUS_OFF_VAR, "1"),
     (CLAUDE_MESSAGING_OFF_VAR, "0"),
     (CLAUDE_MARKETPLACE_OFF_VAR, "1"),
+    (CLAUDE_BUILTIN_AGENTS_OFF_VAR, "1"),
+    (CLAUDE_WEB_FETCH_AGENT_VAR, "0"),
+    (CLAUDE_HELPERS_AT_ONCE_VAR, CLAUDE_HELPERS_AT_ONCE),
 ];
 
 /// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
@@ -256,7 +290,9 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
 /// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
 ///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
-///   [`subagents::subagent_meta`], which settles `agents` and the append's last part.
+///   [`subagents::subagent_meta`], which settles `agents` and the append's last part, and
+///   [`subagents::helper_model_env`], which puts every helper on Haiku on Anthropic's own login
+///   (in `claudeCode.options.env` and the flag settings' `env`, over a hook's values).
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
@@ -302,6 +338,7 @@ pub(crate) fn session_meta(
     if let Some(keys) = keys {
         profile::claude_options(&mut options, keys);
         subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
+        subagents::helper_model_env(&mut options, keys.login);
     }
     if let Some(entry) = guard.and_then(guard_entry) {
         let mut settings = take_object(&mut options, "settings");
