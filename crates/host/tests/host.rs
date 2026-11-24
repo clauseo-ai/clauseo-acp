@@ -117,6 +117,12 @@ mod codex_folder;
 #[path = "host/codex_guard.rs"]
 mod codex_guard;
 #[cfg(test)]
+#[path = "host/codex_mcp_startup.rs"]
+mod codex_mcp_startup;
+#[cfg(test)]
+#[path = "host/codex_mcp_startup_log.rs"]
+mod codex_mcp_startup_log;
+#[cfg(test)]
 #[path = "host/codex_options.rs"]
 mod codex_options;
 #[cfg(test)]
