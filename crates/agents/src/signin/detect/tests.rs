@@ -39,7 +39,7 @@ fn a_set_folder_variable_moves_the_login_and_an_empty_one_does_not() {
     ));
 }
 
-/// Claude Code 0.3.293's store rule: `CLAUDE_SECURESTORAGE_CONFIG_DIR` set decides alone (a
+/// Claude Code 0.3.330's store rule: `CLAUDE_SECURESTORAGE_CONFIG_DIR` set decides alone (a
 /// folder moves the store, `""` is the default store); unset, a non-empty `CLAUDE_CONFIG_DIR`
 /// moves it.
 #[test]

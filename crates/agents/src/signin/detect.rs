@@ -94,7 +94,7 @@ pub(crate) async fn claude<T: Timer>(job: &SigninJob<T>, cancel: &Cancel) -> Opt
 }
 
 /// Whether Claude Code keeps the lawyer's login somewhere other than the default store
-/// (`~/.claude` and the unsuffixed Keychain item), by Claude Code 0.3.293's rule: with
+/// (`~/.claude` and the unsuffixed Keychain item), by Claude Code 0.3.330's rule: with
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, a folder moves it (`""` is the default store,
 /// whatever `CLAUDE_CONFIG_DIR` says); unset, a non-empty `CLAUDE_CONFIG_DIR` moves it.
 pub(crate) fn claude_store_moved(env: &BTreeMap<OsString, OsString>, windows: bool) -> bool {

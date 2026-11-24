@@ -6,24 +6,27 @@
 //! - the session's `availableModes` lacks `auto` ([`claude_start`]);
 //! - `session/set_mode auto` answers an error (`session.rs` `checks`): Claude Code refuses auto
 //!   when the account's plan, the settings or fast mode rule it out ("Cannot set permission mode
-//!   to auto: …", CLI 2.1.293), and claude-agent-acp 0.89.1 passes that back as the RPC error
-//!   (`session-mode.js:143-152`);
+//!   to auto: …", CLI 2.1.293), and claude-agent-acp 0.110.1 passes that back as the RPC error
+//!   (`session-mode.js:164-193`);
 //! - the agent reports a `current_mode_update` away from `auto` among the updates held between
-//!   that switch and the attach ([`prepared`]): claude-agent-acp 0.89.1 itself moves a session
-//!   whose model cannot run auto to `acceptEdits` and says so (`session-mode.js:98-102`,
-//!   `:161-162`). The notice then names the model (`NoticeKind::AutoModeUnavailableForModel`),
+//!   that switch and the attach ([`prepared`]): claude-agent-acp 0.110.1 itself moves a session
+//!   whose model cannot run auto to `acceptEdits` and says so (`session-mode.js:83-89`,
+//!   `:164-200`). The notice then names the model (`NoticeKind::AutoModeUnavailableForModel`),
 //!   as the session's model choices name its current one; a refused switch, a session that
 //!   lists no `auto`, or a model the options do not name gets the account's
 //!   (`NoticeKind::AutoModeUnavailable`).
 //!
 //! Mid-conversation, a model pick that cannot run auto moves the session to `acceptEdits`
-//! (claude-agent-acp 0.89.1 `acp-agent.js:6788`, `:6892`); the host keeps that mode
+//! (claude-agent-acp 0.110.1 `v1/acp-agent.js:7231`, `:7286-7291`); the host keeps that mode
 //! (`forced_mode.rs`) and gives no notice there. The adapter never moves it back to `auto`
 //! when a later pick can run it; the host asks for `auto` again at the next session start.
 //!
-//! claude-agent-acp 0.89.1 lists `auto` whatever the account (`session-mode.js:233-258`), and a
+//! claude-agent-acp 0.110.1 lists `auto` whatever the account unless the settings say
+//! `disableAutoMode: "disable"` (`session-mode.js:282-325`, `permissions/modes.js:44-47`), and a
 //! CLI that drops to `default` on its own (its remote kill switch) is never relayed, so the host
-//! cannot see that case.
+//! cannot see that case. A new session with no `defaultMode` now starts in `auto` itself, or in
+//! `default` with no warning when the model cannot run it (`session-mode.js:47-49`, `:76-82`);
+//! the switch below covers both.
 
 use clauseo_acp::{AcpEvent, AgentUpdate, SessionStart};
 use clauseo_protocol::{
@@ -92,13 +95,13 @@ pub(crate) fn hold_auto_back(actor: &mut Actor, thread: ThreadId) {
 
 /// A Claude agent's session started: when it is not in its mode (`auto`, or `default` in forced
 /// ask), `session/set_mode` goes first, before any prompt, through `prepare`, since
-/// claude-agent-acp 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed
-/// transcript's mode) and `_meta` cannot override that (see `agent/loads.rs`). Outside forced
-/// ask a session that offers no `auto` runs in `acceptEdits` instead, and a refused switch to
-/// `auto` falls back to it (`session.rs` `checks`). Any other failed switch fails the launch, so
-/// no prompt runs in the user's mode. One that reports no modes, or offers no mode the host may
-/// run it in, fails the launch ([`no_mode`]). On load and resume this also resets a mode the
-/// lawyer reached in the session.
+/// claude-agent-acp 0.110.1 starts it in the user's own `permissions.defaultMode` (or a resumed
+/// transcript's mode, or `auto` when neither is set) and `_meta` cannot override that (see
+/// `agent/loads.rs`). Outside forced ask a session that offers no `auto` runs in `acceptEdits`
+/// instead, and a refused switch to `auto` falls back to it (`session.rs` `checks`). Any other
+/// failed switch fails the launch, so no prompt runs in the user's mode. One that reports no modes,
+/// or offers no mode the host may run it in, fails the launch ([`no_mode`]). On load and resume
+/// this also resets a mode the lawyer reached in the session.
 pub(super) fn claude_start(
     actor: &mut Actor,
     thread: ThreadId,

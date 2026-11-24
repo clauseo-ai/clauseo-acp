@@ -74,7 +74,7 @@ pub(crate) fn claude_login_present(lawyer_home: &Path) -> bool {
 }
 
 /// Claude Code's Keychain item (a generic password) for its default config on macOS, the item
-/// "Use it" reuses: Claude Code 0.3.293's service rule gives no suffix when neither
+/// "Use it" reuses: Claude Code 0.3.330's service rule gives no suffix when neither
 /// `CLAUDE_CONFIG_DIR` nor `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set (or the latter is `""`).
 pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 

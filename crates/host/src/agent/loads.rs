@@ -91,23 +91,24 @@ pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 /// mode instead cannot tell such a choice from a mode the user's settings started a session in:
 /// both are logged as `ModeChanged`.
 ///
-/// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
-/// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
-/// from the user's, the folder's and managed settings (`acp-agent.js:7215-7219`,
-/// `session-mode.js:22-35`). Its `SettingsManager` calls the SDK's `resolveSettings({cwd})`,
-/// which never sees the `--settings` flag (`settings.js`), and it forces the SDK option
-/// `permissionMode` over `_meta.claudeCode.options` (`acp-agent.js:7338`; `:388` lists the key
-/// as the adapter's own). So neither `_meta` route can set it: the host sends
-/// `session/set_mode` with this mode before the first prompt when the session started in
-/// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
+/// claude-agent-acp 0.110.1 starts a session in the mode it reads itself: an explicit one (only its
+/// own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode` from the
+/// user's, the folder's and managed settings, else `auto` when it lists it
+/// (`v1/acp-agent.js:7580-7588`, `session-mode.js:29-56`). Its `SettingsManager` calls the SDK's
+/// `resolveSettings({cwd})`, which never sees the flag settings (`settings.js:94`), and it forces
+/// the SDK option `permissionMode` over `_meta.claudeCode.options` (`v1/acp-agent.js:7729`, after
+/// the options' spread at `:7713`). So neither `_meta` route can set it: the host sends
+/// `session/set_mode` with this mode before the first prompt when the session started in another
+/// (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
 pub(crate) const CLAUDE_MODE: &str = "auto";
 
 /// The mode a Claude session outside forced ask runs in when [`CLAUDE_MODE`] is not available:
 /// `acceptEdits`. Claude Code 2.1.293 then approves, unasked, `Edit`, `Write` and
 /// `NotebookEdit` and the Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp` and `sed`
 /// whose paths are inside the working directory or `additionalDirectories`; everything else
-/// asks as in `default`. claude-agent-acp 0.89.1 falls back to the same mode itself when the
-/// model cannot run auto (`session-mode.js:46-53`, `:98-102`).
+/// asks as in `default`. claude-agent-acp 0.110.1 falls back to the same mode itself when the
+/// model cannot run auto (`session-mode.js:83-89`; a session that started in `auto` only
+/// because no `defaultMode` was set goes to `default` instead, `:76-82`).
 pub(crate) const CLAUDE_FALLBACK_MODE: &str = "acceptEdits";
 
 /// The mode a Claude session starts in and is switched to before its first prompt:
@@ -229,19 +230,19 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
 /// - [`CLAUDE_SHELL_FOLDER_VAR`] and each of [`CLAUDE_LAUNCH_VARS`], in
-///   `claudeCode.options.env` (claude-agent-acp 0.89.1 spreads it over its own env for the
-///   SDK's spawn of Claude Code, `acp-agent.js:7302-7304`) and, with `keys` (a Claude agent),
+///   `claudeCode.options.env` (claude-agent-acp 0.110.1 spreads it over its own env for the
+///   SDK's spawn of Claude Code, `v1/acp-agent.js:7659-7669`) and, with `keys` (a Claude agent),
 ///   in `claudeCode.options.settings.env` (flag settings, over a user's or project's), with
 ///   [`claude_flag_settings`] beside it. A hook value at `settings` or its `env` that is
 ///   not an object is then replaced.
 /// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
 ///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
-/// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
+/// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.110.1 then
 ///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
 ///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
 ///   resumed transcript's `bypassPermissions` is rejected, falling back to the settings'
-///   `defaultMode`, which may be `acceptEdits` (`acp-agent.js:7212-7219`,
-///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
+///   `defaultMode`, which may be `acceptEdits` (`v1/acp-agent.js:7580-7588`,
+///   `session-mode.js:29-56`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
 ///   then starts in (`default`, `auto`, `plan`, or `acceptEdits` in forced ask) is switched to
 ///   [`claude_mode`] after the start, since `_meta` cannot set it.
 /// - `claudeCode.options.extraArgs`: `setting-sources`, [`MODE_FLAGS`] and [`TOOL_FLAGS`] taken

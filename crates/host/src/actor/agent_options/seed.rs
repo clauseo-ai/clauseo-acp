@@ -10,17 +10,19 @@
 //! in `agent-options.json`, so the pickers move to the model and effort in use as it attaches.
 //!
 //! Only rows that are true for every account at the pinned versions are seeded, and none is:
-//! - claude-agent-acp 0.89.1 lists the SDK's models for the account, cut by its settings'
-//!   allowlist and managed `deniedModels` (`dist/session-model.js:163-200, 241-300`), and
-//!   offers an effort only for a model that supports one, with that model's levels
-//!   (`dist/session-effort.js:61-100`). Under the AIR `recommendedValue` capability Clauseo
-//!   declares (`clauseo_acp::driver::client_capabilities`) its own "default" rows go too.
+//! - claude-agent-acp 0.110.1 lists the SDK's models for the account, cut by its settings'
+//!   allowlist and managed `deniedModels` (`dist/session-model.js:216-300, 421-500`), and offers an
+//!   effort only for a model that supports one, with that model's levels
+//!   (`dist/session-effort.js:88-130`). The SDK's list follows the CLI build: the same Pro login
+//!   got Fable 5.2 under 0.110.1 and only Fable 5.1 under 0.89.1 (2026-11-24). Under the AIR
+//!   `recommendedValue` capability Clauseo declares (`clauseo_acp::driver::client_capabilities`)
+//!   its own "default" rows go too.
 //! - codex-acp 2.2.2 lists the account's models from Codex (`dist/index.js:38286-38310`), the
 //!   default one the model Codex marks `isDefault` (`:35551`), and each model's own efforts
 //!   (`:38311-38327`).
 //!
 //! The option ids are tied to those versions: Claude's `model` and `effort`
-//! (`dist/session-model.js:2`, `dist/session-config-ids.js:4`), Codex's `model` and
+//! (`dist/session-model.js:8`, `dist/session-config-ids.js:5`, 0.110.1), Codex's `model` and
 //! `reasoning_effort` (`dist/index.js:38273-38274`). Re-check them on every agent pin bump
 //! (`docs/decisions/0033-agents-installs.md`, Consequences). A seed id the agent no longer
 //! uses only refuses a `SetConfigOption` made before the first session with `command.invalid`

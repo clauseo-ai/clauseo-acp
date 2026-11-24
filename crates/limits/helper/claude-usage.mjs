@@ -3,7 +3,7 @@
 // Who runs it: the Clauseo Rust side, as `node <adapter install>/clauseo-claude-usage.mjs`, with no
 // arguments, in an empty working folder and the agent's environment. It reads exactly one stdout line
 // and kills the process tree after 25 s. The bare SDK import resolves to the adapter's own SDK
-// (0.3.293), which sits next to this file.
+// (0.3.330 with claude-agent-acp 0.110.1), which sits next to this file.
 //
 // Line contract (stdout: exactly one line; exit code 0 in every case):
 //   {"ok":true,"account":{...}|null,"usage":{"subscription_type","rate_limits_available","rate_limits"}}
