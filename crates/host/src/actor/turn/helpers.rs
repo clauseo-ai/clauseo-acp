@@ -26,6 +26,8 @@ use super::super::Actor;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{Then, TimerKind, TurnPhase, TurnTimer, current, lost, state, updates};
+use clauseo_reducer::ThreadState;
+
 use crate::build;
 use crate::coalesce::DURABLE_BATCH;
 use crate::error::Error;
@@ -371,10 +373,14 @@ pub(super) fn on_cancel(
     end_open(actor, thread, HelperOutcome::Stopped, out)
 }
 
+/// What a turn that ends by itself (a stop reason from the agent, no failure) writes for a
+/// helper still open: it never handed back a report. The one home of that word.
+const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
+
 /// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
-/// `Stopped`; a cancelled turn's left `Stopped` too; a turn that ended by itself leaves them
-/// `Failed`, since none handed back a report. A turn a send-now cut short, and a turn whose
-/// prompt never went out, leave them open. Start-up's repair of a turn a crash or a quit left
+/// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
+/// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
+/// turn a send-now cut short, and a turn whose prompt never went out, leave them open. Start-up's repair of a turn a crash or a quit left
 /// open (its expiries listed from the log) ends `Stopped` every helper the log leaves open, so
 /// no card of the last run stays running.
 pub(super) fn on_close(actor: &mut Actor, out: &mut Out, close: &TurnClose) -> Result<(), Error> {
@@ -396,14 +402,18 @@ pub(super) fn on_close(actor: &mut Actor, out: &mut Out, close: &TurnClose) -> R
         return Ok(());
     };
     let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
+    // The engine gone (its detach, or a failure: the agent exited, the connection was lost)
+    // and a cancel stop every open helper, whoever cut the turn short.
+    let stopped =
+        close.detach.is_some() || close.failure.is_some() || close.stop == StopReason::Cancelled;
     let outcome = if close.detach.is_some() {
         HelperOutcome::Stopped
     } else if kept || !prompted {
         return Ok(());
-    } else if close.stop == StopReason::Cancelled {
+    } else if stopped {
         HelperOutcome::Stopped
     } else {
-        HelperOutcome::Failed
+        ENDED_BY_ITSELF
     };
     end_open(actor, thread, outcome, out)
 }
@@ -430,6 +440,38 @@ fn end_logged_open(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result
         out.push(actor, ended)?;
     }
     Ok(())
+}
+
+/// A thread's stream loaded: the helpers its log leaves open end `Stopped` when no agent of this
+/// run can still be running them (the run that started them crashed or quit, its agent gone),
+/// whether or not a turn was left open. A thread with an open turn, a repair or a close in
+/// progress, or a live agent is left to those paths. Costs one count read for a thread without
+/// open helpers; a second load finds none open.
+pub(crate) fn settle_loaded(actor: &mut Actor, thread: ThreadId) {
+    let stream = StreamId::Thread(thread);
+    let open = actor
+        .loaded(stream)
+        .and_then(|loaded| loaded.state.as_thread())
+        .map_or(0, ThreadState::open_helpers);
+    if open == 0 || actor.pipeline.in_flight(stream) {
+        return;
+    }
+    let busy = state(actor, thread).is_none_or(|state| {
+        state.agent.is_some()
+            || state.current.is_some()
+            || state.closing.is_some()
+            || state.reconciling
+    });
+    if busy {
+        return;
+    }
+    let sent = Out::new(actor, thread, None).and_then(|mut out| {
+        end_logged_open(actor, thread, &mut out)?;
+        out.send(actor, Then::Nothing)
+    });
+    if let Err(error) = sent {
+        tracing::warn!(%thread, error = %Cause(&error), "open helpers of a past run were not ended");
+    }
 }
 
 /// The agent session ended outside a turn: every open helper ends `Stopped`, and the thread

@@ -3,51 +3,50 @@
 //! the recorded run has them (fake_agent's `claude-helper-background` scenario): one background
 //! helper with two steps and words that hands back; the recorded frames themselves through the
 //! ACP reader; two foreground helpers interleaved, one failing; a Stop with two open; a turn
-//! that ends with one still open; a step stamped with a helper never started; a replayed frame;
-//! and the same view after the conversation is reopened.
+//! that ends with one still open; a step stamped with a helper never started; a replayed frame.
+//! The ends a run's stop or a reopen brings are in `helpers_ends.rs`.
 
 use std::collections::HashMap;
 
-use futures::channel::oneshot;
-
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, ToolCall};
 use clauseo_protocol::{
-    AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HelperOutcome, HostCommand,
-    HostQuery, PageLimit, Principal, QueryResult, StreamId, TextOrBlob, ThreadId, ToolCallContent,
-    ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, TurnId, ViewEntry,
+    AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HostCommand, StreamId,
+    TextOrBlob, ThreadId, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind,
+    TurnId,
 };
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::rig::Rig;
 use crate::actor::Actor;
-use crate::actor::input::{Input, Request};
-use crate::actor::turn::{AgentReply, TurnInput, helpers};
+use crate::actor::input::Input;
+use crate::actor::turn::{AgentReply, TurnInput};
 use crate::agent::AgentInput;
 
-const PROMPT: &str =
+pub(super) const PROMPT: &str =
     r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}"#;
 const LEAD_STEP: &str = r#"{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-0","title":"Read","kind":"read","status":"in_progress"}}}"#;
 const CANCEL: &str = r#"{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}"#;
 
 /// The recorded launch input, its folder left out.
-const LAUNCH_INPUT: &str = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
+pub(super) const LAUNCH_INPUT: &str = r#"{"description":"Digest lease and notice","subagent_type":"paper-reader","prompt":"Read the files lease.txt and notice.txt in the working directory and return one short digest covering both documents."}"#;
 
 /// The recorded handback's update.
-const DELIVERED: &str = r#"{"success":true,"message":"Report delivered to your caller."}"#;
+pub(super) const DELIVERED: &str =
+    r#"{"success":true,"message":"Report delivered to your caller."}"#;
 
 /// One prompt with one lead step, answered `stop`.
-fn one_turn(stop: &str) -> String {
+pub(super) fn one_turn(stop: &str) -> String {
     format!(
         "{PROMPT}\n{LEAD_STEP}\n{{\"respond\":{{\"to\":\"p1\",\"result\":{{\"stopReason\":\"{stop}\"}}}}}}\n"
     )
 }
 
-fn session() -> AgentSessionId {
+pub(super) fn session() -> AgentSessionId {
     AgentSessionId::new("sess-1").unwrap()
 }
 
-fn feed(rig: &mut Rig, thread: ThreadId, event: AcpEvent) {
+pub(super) fn feed(rig: &mut Rig, thread: ThreadId, event: AcpEvent) {
     let input = Input::Agent {
         thread,
         input: AgentInput::Event(Box::new(event)),
@@ -56,7 +55,7 @@ fn feed(rig: &mut Rig, thread: ThreadId, event: AcpEvent) {
 }
 
 /// The lead's `update` in `turn`.
-fn lead(rig: &mut Rig, thread: ThreadId, turn: TurnId, update: AgentUpdate) {
+pub(super) fn lead(rig: &mut Rig, thread: ThreadId, turn: TurnId, update: AgentUpdate) {
     let event = AcpEvent::Update {
         session: session(),
         origin: Origin::Turn(turn),
@@ -66,7 +65,13 @@ fn lead(rig: &mut Rig, thread: ThreadId, turn: TurnId, update: AgentUpdate) {
 }
 
 /// `update` stamped with the helper the agent knows as `helper`, coming from `origin`.
-fn stamped(rig: &mut Rig, thread: ThreadId, origin: Origin, helper: &str, update: AgentUpdate) {
+pub(super) fn stamped(
+    rig: &mut Rig,
+    thread: ThreadId,
+    origin: Origin,
+    helper: &str,
+    update: AgentUpdate,
+) {
     let event = AcpEvent::HelperUpdate {
         session: session(),
         origin,
@@ -76,7 +81,7 @@ fn stamped(rig: &mut Rig, thread: ThreadId, origin: Origin, helper: &str, update
     feed(rig, thread, event);
 }
 
-fn in_background(rig: &mut Rig, thread: ThreadId, turn: TurnId, helper: &str) {
+pub(super) fn in_background(rig: &mut Rig, thread: ThreadId, turn: TurnId, helper: &str) {
     let event = AcpEvent::HelperInBackground {
         session: session(),
         origin: Origin::Turn(turn),
@@ -86,7 +91,7 @@ fn in_background(rig: &mut Rig, thread: ThreadId, turn: TurnId, helper: &str) {
 }
 
 /// A new step `acp_id` named `tool`, with `raw` as its input.
-fn call(acp_id: &str, tool: &str, raw: Option<&str>) -> AgentUpdate {
+pub(super) fn call(acp_id: &str, tool: &str, raw: Option<&str>) -> AgentUpdate {
     AgentUpdate::ToolCall(ToolCall {
         acp_id: acp_id.into(),
         title: CompactString::from(tool),
@@ -101,7 +106,7 @@ fn call(acp_id: &str, tool: &str, raw: Option<&str>) -> AgentUpdate {
 }
 
 /// An update of step `acp_id`: its input, status and text, each when given.
-fn patch(
+pub(super) fn patch(
     acp_id: &str,
     raw: Option<&str>,
     status: Option<ToolCallStatus>,
@@ -125,7 +130,7 @@ fn patch(
     }
 }
 
-fn words(text: &str) -> AgentUpdate {
+pub(super) fn words(text: &str) -> AgentUpdate {
     AgentUpdate::MessageChunk {
         role: MessageRole::Answer,
         acp_message_id: None,
@@ -145,7 +150,7 @@ fn thought(text: &str) -> AgentUpdate {
     }
 }
 
-const COMPLETED: Option<ToolCallStatus> = Some(ToolCallStatus::Completed);
+pub(super) const COMPLETED: Option<ToolCallStatus> = Some(ToolCallStatus::Completed);
 
 fn prompt_answer(_: &Actor, input: &Input) -> bool {
     matches!(
@@ -166,7 +171,7 @@ fn lead_step_logged(actor: &mut Actor, thread: ThreadId) -> bool {
 
 /// Sends a prompt and holds its answer once the lead's step is logged: the turn is live until
 /// the test releases it.
-fn live_turn(rig: &mut Rig, thread: ThreadId) -> TurnId {
+pub(super) fn live_turn(rig: &mut Rig, thread: ThreadId) -> TurnId {
     let turn = send_prompt(rig, 10, thread);
     rig.run_holding("the lead's step", prompt_answer, |actor| {
         lead_step_logged(actor, thread)
@@ -179,7 +184,7 @@ fn live_turn(rig: &mut Rig, thread: ThreadId) -> TurnId {
 
 /// The log's helper events and steps after the turn's start, one line each, helpers by name and
 /// steps by ACP id.
-fn story(log: &[DomainEvent]) -> Vec<String> {
+pub(super) fn story(log: &[DomainEvent]) -> Vec<String> {
     let mut names: HashMap<HelperId, String> = HashMap::new();
     let mut steps: HashMap<ToolCallId, String> = HashMap::new();
     let name = |names: &HashMap<HelperId, String>, id: Option<HelperId>| {
@@ -544,127 +549,4 @@ fn an_unknown_stamp_shows_flat_and_a_replayed_frame_is_dropped() {
         ["step tc-0 -", "step toolu_X1 -", "turn_ended EndTurn"]
     );
     rig.finish();
-}
-
-/// The helper's view after a reopen is the view before it: the same `Helper` and `HelperText`
-/// entries, and its steps still name it.
-#[test]
-fn a_reopened_conversation_shows_the_same_helper() {
-    let mut rig = Rig::start("helpers-reopen", &one_turn("end_turn"));
-    let thread = rig.thread();
-    let turn = live_turn(&mut rig, thread);
-    let at = Origin::Turn(turn);
-    lead(
-        &mut rig,
-        thread,
-        turn,
-        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
-    );
-    in_background(&mut rig, thread, turn, "toolu_A");
-    stamped(
-        &mut rig,
-        thread,
-        at,
-        "toolu_A",
-        call("toolu_R1", "Read", None),
-    );
-    stamped(&mut rig, thread, at, "toolu_A", words("Read it."));
-    let handback = call(
-        "toolu_H",
-        "SubagentHandback",
-        Some(r#"{"message":"Digest."}"#),
-    );
-    stamped(&mut rig, thread, at, "toolu_A", handback);
-    lead(
-        &mut rig,
-        thread,
-        turn,
-        patch("toolu_H", None, COMPLETED, Some(DELIVERED)),
-    );
-    rig.release_held();
-    until_ended(&mut rig, thread);
-    let before = helper_entries(&mut rig, thread);
-    assert_eq!(before.len(), 3, "{before:?}");
-    let mut rig = rig.restart(2);
-    let after = helper_entries(&mut rig, thread);
-    assert_eq!(after, before);
-    rig.finish();
-}
-
-/// A helper still open when the host stopped mid-turn (a crash or a quit: nothing ended the turn
-/// and the memory of its helpers went with the run) ends `Stopped` in start-up's repair of
-/// that turn, so its card does not spin after the reopen.
-#[test]
-fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
-    let mut rig = Rig::start("helpers-crash", "");
-    let thread = rig.thread();
-    let turn = rig.running_turn(thread);
-    let start = helpers::Start {
-        id: None,
-        acp_id: "toolu_A".into(),
-        parent: None,
-        call: None,
-        name: "paper-reader".into(),
-        label: None,
-        task: Some("Read.".to_owned()),
-        model: None,
-        background: true,
-    };
-    helpers::start(&mut rig.actor, thread, turn, start).unwrap();
-    rig.settle_commits();
-    let state = &mut rig.actor.threads.get_mut(&thread).unwrap().turn;
-    state.current = None;
-    state.helpers = None;
-    let mut rig = rig.restart(1);
-    assert_eq!(
-        story(&rig.log(thread)),
-        [
-            "start paper-reader call= model=- label=- task=true",
-            "end paper-reader Stopped -",
-            "turn_ended Failed",
-        ]
-    );
-    let entries = helper_entries(&mut rig, thread);
-    let [ViewEntry::Helper(entry)] = entries.as_slice() else {
-        panic!("{entries:?}");
-    };
-    assert_eq!(entry.outcome, Some(HelperOutcome::Stopped));
-    rig.finish();
-}
-
-/// The thread's view entries that belong to a helper (its card, its words, its steps), as a
-/// `PageEntries` query answers them: the view a reopened conversation shows.
-fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
-    let (reply, mut answer) = oneshot::channel();
-    let query = HostQuery::PageEntries {
-        stream: StreamId::Thread(thread),
-        before_order: None,
-        limit: PageLimit::new(200).unwrap(),
-    };
-    let principal = Principal::LocalDesktop;
-    rig.actor.on_request(Request::Query {
-        principal,
-        query,
-        reply,
-    });
-    let mut got = None;
-    rig.run_until("the page", |_| {
-        if got.is_none()
-            && let Ok(Some(result)) = answer.try_recv()
-        {
-            got = Some(result);
-        }
-        got.is_some()
-    });
-    let Some(Ok(QueryResult::Entries(entries))) = got else {
-        panic!("{got:?}");
-    };
-    entries
-        .into_iter()
-        .filter(|entry| match entry {
-            ViewEntry::Helper(_) | ViewEntry::HelperText(_) => true,
-            ViewEntry::ToolCall(call) => call.helper.is_some(),
-            _ => false,
-        })
-        .collect()
 }
