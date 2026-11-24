@@ -1,6 +1,8 @@
 //! The shape of `clauseo-engines/1`: fields, format, seq, generated, apps and sizes.
 
-use clauseo_engines::{Agent, Error};
+use std::collections::BTreeSet;
+
+use clauseo_engines::Error;
 
 use crate::fixtures::{
     BAD_GENERATED, BAD_SIZE, DUP_SIZE, EMPTY_APP, GOOD, MISSING_SIZE, NO_APPS, SEQ_HUGE, SEQ_ZERO,
@@ -49,57 +51,59 @@ fn a_repeated_sizes_row_is_refused() {
     assert_eq!(refusal(&DUP_SIZE), Some(Error::DuplicateSize));
 }
 
-/// `SIZES` in `crates/agents/src/snapshot/embedded.rs`, read from its text: (agent, os, arch,
-/// download, unpacked) per row, `Os::Win32` as `win32` and so on.
-fn embedded_sizes() -> Vec<(String, String, String, u64, u64)> {
+/// The (agent, os, arch) of each row of `SIZES` in `crates/agents/src/snapshot/embedded.rs`,
+/// read from its text, `Os::Win32` as `win32` and so on. Only the combinations: the bump job
+/// re-measures the bytes on every engine bump.
+fn embedded_platforms() -> Vec<(String, String, String)> {
     let text = include_str!("../../../agents/src/snapshot/embedded.rs");
     let table = &text[text.find("const SIZES").unwrap()..];
     let table = &table[table.find("= [").unwrap() + 3..table.find("];").unwrap()];
     let flat: String = table.chars().filter(|c| !c.is_whitespace()).collect();
     flat.split("),")
         .map(|row| {
-            row.trim_start_matches(',')
-                .trim_start_matches('(')
+            row.trim_start_matches([',', '('])
                 .trim_end_matches([')', ','])
         })
         .filter(|row| !row.is_empty())
         .map(|row| {
             let cells: Vec<&str> = row.split(',').collect();
-            let number = |cell: &str| cell.replace('_', "").parse::<u64>().unwrap();
             (
                 cells[0].trim_matches('"').to_owned(),
                 cells[1].trim_start_matches("Os::").to_lowercase(),
                 cells[2].trim_start_matches("Arch::").to_lowercase(),
-                number(cells[3]),
-                number(cells[4]),
             )
         })
         .collect()
 }
 
+/// A value's serde name (`claude-acp`, `win32`, `arm64`).
+fn name<T: serde::Serialize>(value: T) -> String {
+    serde_json::to_value(value)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[test]
-fn the_sizes_rows_mirror_the_embedded_snapshot() {
+fn the_sizes_rows_cover_the_embedded_snapshot_s_platforms() {
     let list = check(&GOOD).unwrap();
-    let ours: Vec<(String, String, String, u64, u64)> = list
+    let ours: BTreeSet<(String, String, String)> = list
         .sizes()
         .iter()
-        .map(|row| {
-            let name = |value: serde_json::Value| value.as_str().unwrap().to_owned();
-            (
-                name(serde_json::to_value(row.agent).unwrap()),
-                name(serde_json::to_value(row.os).unwrap()),
-                name(serde_json::to_value(row.arch).unwrap()),
-                row.download,
-                row.unpacked,
-            )
-        })
+        .map(|row| (name(row.agent), name(row.os), name(row.arch)))
         .collect();
-    let embedded = embedded_sizes();
+    let embedded = embedded_platforms();
     assert_eq!(embedded.len(), 12);
-    assert_eq!(ours, embedded);
-    for agent in [Agent::ClaudeAcp, Agent::CodexAcp] {
-        let rows = list.sizes().iter().filter(|row| row.agent == agent).count();
-        assert_eq!(rows, 6);
+    assert_eq!(ours, embedded.into_iter().collect::<BTreeSet<_>>());
+    // The bytes are the fixture's own, row for row.
+    let raw: serde_json::Value = serde_json::from_slice(GOOD.json).unwrap();
+    let raw = raw["sizes"].as_array().unwrap();
+    assert_eq!(raw.len(), list.sizes().len());
+    for (row, raw) in list.sizes().iter().zip(raw) {
+        assert_eq!(raw["download"].as_u64(), Some(row.download));
+        assert_eq!(raw["unpacked"].as_u64(), Some(row.unpacked));
+        assert!(row.download > 0 && row.unpacked > 0);
     }
 }
 
