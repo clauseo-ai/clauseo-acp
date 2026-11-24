@@ -1,12 +1,14 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
-    AddonSwitches, AgentPrefs, ConfigPicks, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind,
-    PackList, RenameSource, SCHEMA_VERSION, Seq, StreamId, Timestamp,
+    AddonSwitches, AgentId, AgentPrefs, ConfigPicks, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH,
+    MatterKind, PackList, RenameSource, SCHEMA_VERSION, Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
-use crate::Error;
+use crate::{Error, OwnPicks};
 
 /// The largest `stream_id`: 2^31 - 1, so the key `(stream_id << 32) | seq` stays positive.
 pub(crate) const MAX_STREAM_ID: i64 = (1 << 31) - 1;
@@ -160,18 +162,32 @@ pub(crate) fn agent_prefs(text: &str) -> Result<AgentPrefs, Error> {
         .map_err(|error| Error::corrupt(format!("a matter's agent prefs do not parse: {error}")))
 }
 
-/// The `threads.own_picks` text: a JSON object of option id to value id.
-pub(crate) fn own_picks_text(picks: &ConfigPicks) -> Result<String, Error> {
-    serde_json::to_string(picks).map_err(|error| Error::Encode {
+/// The `threads.own_picks` text: a JSON object of agent id to an object of option id to value id.
+pub(crate) fn own_picks_text(picks: &OwnPicks) -> Result<String, Error> {
+    serde_json::to_string(&picks.0).map_err(|error| Error::Encode {
         detail: format!("a thread's own picks: {error}"),
     })
 }
 
-/// A `threads.own_picks` read back: text that is not such an object is corrupt. The error leaves
-/// the text out, as `agent_prefs` does.
-pub(crate) fn own_picks(text: &str) -> Result<ConfigPicks, Error> {
-    serde_json::from_str(text)
-        .map_err(|error| Error::corrupt(format!("a thread's own picks do not parse: {error}")))
+/// A `threads.own_picks` read back, a hint only: `None` for text that is not a JSON object, and
+/// how many entries were left out (a key that is no agent id, picks that do not decode).
+pub(crate) fn own_picks(text: &str) -> (Option<OwnPicks>, usize) {
+    let Ok(entries) = serde_json::from_str::<BTreeMap<String, serde_json::Value>>(text) else {
+        return (None, 0);
+    };
+    let mut picks = OwnPicks::default();
+    let mut left_out = 0;
+    for (agent, value) in entries {
+        let agent = AgentId::new(&agent).ok();
+        let value = serde_json::from_value::<ConfigPicks>(value).ok();
+        match agent.zip(value) {
+            Some((agent, value)) => {
+                picks.0.insert(agent, value);
+            }
+            None => left_out += 1,
+        }
+    }
+    (Some(picks), left_out)
 }
 
 /// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that

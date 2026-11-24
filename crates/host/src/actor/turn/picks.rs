@@ -399,7 +399,7 @@ pub(super) fn after(
         .threads
         .get(&thread)
         .map_or_else(String::new, |entry| entry.row.agent.as_str().to_owned());
-    own::keep_created(actor, thread, options);
+    own::keep_created(actor, thread, options, picked);
     if !picked.set.is_empty() {
         let held: Vec<Pick> = candidates(actor, thread, options)
             .into_iter()

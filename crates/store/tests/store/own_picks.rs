@@ -1,17 +1,16 @@
 //! A thread's own model and effort (schema 9, `ThreadRow::own_picks`): a database from schema 7
-//! opens with no own picks on its threads and takes them after, own picks round-trip through a
-//! reopen, and stored own picks that do not parse are corrupt.
+//! opens with no own picks on its threads and takes them after, own picks (per agent)
+//! round-trip through a reopen, and stored own picks that do not decode read as none, or lose
+//! the entries that do not.
 
-use clauseo_protocol::{
-    AgentChoiceId, AgentId, ConfigPicks, ErrorCode, MatterId, MatterKind, ThreadId,
-};
-use clauseo_store::{Commit, DB_FILE, Error, MatterRow, SCHEMA, ThreadRow};
+use clauseo_protocol::{AgentChoiceId, AgentId, ConfigPicks, MatterId, MatterKind, ThreadId};
+use clauseo_store::{Commit, DB_FILE, MatterRow, OwnPicks, SCHEMA, ThreadRow};
 use futures::executor::block_on;
 use rusqlite::Connection;
 
 use crate::common::{TestDir, id, matter, ts};
 
-fn thread_row(n: u64, matter: MatterId, own_picks: Option<ConfigPicks>) -> ThreadRow {
+fn thread_row(n: u64, matter: MatterId, own_picks: Option<OwnPicks>) -> ThreadRow {
     ThreadRow {
         id: id::<ThreadId>(n),
         matter,
@@ -30,6 +29,11 @@ fn thread_row(n: u64, matter: MatterId, own_picks: Option<ConfigPicks>) -> Threa
 fn picks(pairs: &[(&str, &str)]) -> ConfigPicks {
     let id = |text: &str| AgentChoiceId::new(text).unwrap();
     ConfigPicks::new(pairs.iter().map(|(o, v)| (id(o), id(v))).collect()).unwrap()
+}
+
+/// Own picks of `codex-acp` alone.
+fn codex(pairs: &[(&str, &str)]) -> OwnPicks {
+    OwnPicks([(AgentId::new("codex-acp").unwrap(), picks(pairs))].into())
 }
 
 fn matter_commit() -> Commit {
@@ -61,7 +65,7 @@ pub(crate) fn kept_thread() -> Commit {
         thread: Some(thread_row(
             1,
             matter(1),
-            Some(picks(&[("model", "gpt-6-luna")])),
+            Some(codex(&[("model", "gpt-6-luna")])),
         )),
         ..matter_commit()
     }
@@ -72,9 +76,14 @@ fn own_picks_round_trip_through_a_reopen() {
     let dir = TestDir::new("own_picks_round_trip");
     let store = dir.open();
     block_on(store.commit(matter_commit())).unwrap();
-    let luna = picks(&[("model", "gpt-6-luna"), ("reasoning_effort", "low")]);
+    let mut both = codex(&[("model", "gpt-6-luna"), ("reasoning_effort", "low")]);
+    both.0.insert(
+        AgentId::new("claude-acp").unwrap(),
+        picks(&[("model", "haiku"), ("effort", "low")]),
+    );
     let rows = [
-        thread_row(2, matter(1), Some(luna)),
+        thread_row(3, matter(1), Some(both)),
+        thread_row(2, matter(1), Some(OwnPicks::default())),
         thread_row(1, matter(1), None),
     ];
     for row in &rows {
@@ -90,27 +99,69 @@ fn own_picks_round_trip_through_a_reopen() {
     block_on(store.close()).unwrap();
 }
 
-#[test]
-fn stored_own_picks_that_do_not_parse_are_corrupt() {
-    for (name, value) in [("not_json", "{"), ("not_a_value", r#"{"model":1}"#)] {
-        let dir = TestDir::new(&format!("own_picks_corrupt_{name}"));
-        let store = dir.open();
-        block_on(store.commit(matter_commit())).unwrap();
-        block_on(store.commit(Commit {
-            thread: Some(thread_row(1, matter(1), None)),
-            ..Commit::default()
-        }))
+/// A store holding thread 1 with `value` as its stored own picks, reopened: its rows.
+fn stored(name: &str, value: &str) -> Vec<ThreadRow> {
+    let dir = TestDir::new(&format!("own_picks_stored_{name}"));
+    let store = dir.open();
+    block_on(store.commit(matter_commit())).unwrap();
+    block_on(store.commit(Commit {
+        thread: Some(thread_row(1, matter(1), None)),
+        ..Commit::default()
+    }))
+    .unwrap();
+    block_on(store.close()).unwrap();
+    let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+    conn.execute("UPDATE threads SET own_picks = ?1", [value])
         .unwrap();
-        block_on(store.close()).unwrap();
-        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
-        conn.execute("UPDATE threads SET own_picks = ?1", [value])
-            .unwrap();
-        drop(conn);
-        let store = dir.open();
-        let error = block_on(store.threads(matter(1))).unwrap_err();
-        assert!(matches!(error, Error::Corrupt { .. }), "{name}: {error:?}");
-        assert_eq!(error.code(), ErrorCode::StoreCorrupt, "{name}");
-        block_on(store.close()).unwrap();
+    drop(conn);
+    let store = dir.open();
+    let rows = block_on(store.threads(matter(1))).unwrap();
+    block_on(store.close()).unwrap();
+    rows
+}
+
+#[test]
+fn stored_own_picks_that_do_not_decode_read_as_none() {
+    for (name, value) in [
+        ("not_json", "{"),
+        ("not_an_object", "[1]"),
+        ("a_string", r#""x""#),
+    ] {
+        let rows = stored(name, value);
+        assert_eq!(rows.len(), 1, "{name}");
+        assert_eq!(rows[0].own_picks, None, "{name}");
+    }
+}
+
+#[test]
+fn entries_of_own_picks_that_do_not_decode_are_left_out() {
+    let long = "m".repeat(300);
+    let nine: Vec<String> = (0..9).map(|n| format!(r#""o{n}":"v""#)).collect();
+    for (name, bad) in [
+        (
+            "an_agent_key_that_is_no_id",
+            r#""Not An Agent!":{"model":"x"}"#.to_owned(),
+        ),
+        (
+            "a_value_that_is_no_id",
+            r#""claude-acp":{"model":1}"#.to_owned(),
+        ),
+        (
+            "more_than_eight",
+            format!(r#""claude-acp":{{{}}}"#, nine.join(",")),
+        ),
+        (
+            "an_id_too_long",
+            format!(r#""claude-acp":{{"model":"{long}"}}"#),
+        ),
+    ] {
+        let value = format!(r#"{{{bad},"codex-acp":{{"model":"gpt-6-luna"}}}}"#);
+        let rows = stored(name, &value);
+        assert_eq!(
+            rows[0].own_picks,
+            Some(codex(&[("model", "gpt-6-luna")])),
+            "{name}"
+        );
     }
 }
 
@@ -152,7 +203,7 @@ fn a_schema_7_database_opens_at_9_with_no_own_picks() {
     );
     // The migrated row takes own picks like a new one.
     let kept = ThreadRow {
-        own_picks: Some(picks(&[("model", "gpt-6-luna")])),
+        own_picks: Some(codex(&[("model", "gpt-6-luna")])),
         ..old
     };
     block_on(store.commit(Commit {

@@ -191,13 +191,17 @@ ALTER TABLE matters ADD COLUMN addon_switches TEXT /* JSON {"skill":{id:bool},"t
 ### Schema version 9
 
 `crates/store/src/migrations/0009_thread_own_picks.sql`, verbatim (the same test checks this
-copy too). A thread keeps the model and effort the lawyer last chose in it, such as
-`{"model":"gpt-6-luna","reasoning_effort":"low"}` (protocol's `ConfigPicks`). The log's options
+copy too). A thread keeps the model and effort the lawyer last chose in it, per agent, such as
+`{"codex-acp":{"model":"gpt-6-luna","reasoning_effort":"low"}}` (agent id to protocol's
+`ConfigPicks`): a thread whose agent changes keeps each agent's values apart, so one agent's
+model id is never set on the other. The log's options
 record what each session ran with, which is a fallback when the agent's model list lacked the
 lawyer's model at that start; this column keeps the lawyer's values apart, so every session start
 tries them again. NULL, as on every thread before it, means none yet: the host fills it from the
-thread's logged options at its next session start. A row, not an event: the reducer's view does
-not show it.
+thread's logged options at its next session start, for the thread's agent then. The column is a
+hint: a value that does not decode reads as NULL, with a warning naming the thread, and an entry
+whose key is not an agent id, or whose picks do not decode, is left out the same way. A row, not
+an event: the reducer's view does not show it.
 
 ```sql
 -- Schema version 9: the model and effort the lawyer last chose in each thread, kept apart from
@@ -205,7 +209,7 @@ not show it.
 -- docs/decisions/0006-store-format.md gives the reason for the column and what NULL means.
 -- Frozen: a later change is a new numbered file in this folder, never an edit here.
 
-ALTER TABLE threads ADD COLUMN own_picks TEXT /* JSON object: {option id: value id}; NULL = none yet, and on rows from before schema 9 */;
+ALTER TABLE threads ADD COLUMN own_picks TEXT /* JSON object: {agent id: {option id: value id}}; NULL = none yet, and on rows from before schema 9 */;
 ```
 
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds

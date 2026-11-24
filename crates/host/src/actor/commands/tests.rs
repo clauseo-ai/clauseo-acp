@@ -4,7 +4,7 @@
 use clauseo_protocol::{
     AgentChoiceId, AgentId, AgentSessionId, ConfigPicks, MatterId, ThreadId, Timestamp,
 };
-use clauseo_store::ThreadRow;
+use clauseo_store::{OwnPicks, ThreadRow};
 use uuid::Uuid;
 
 use super::rolled_back;
@@ -22,11 +22,12 @@ fn a_failed_commit_keeps_the_session_id_and_kept_picks_written_since() {
         created: Timestamp::ZERO,
         updated: Timestamp::ZERO,
         seen_seq: None,
-        own_picks: Some(ConfigPicks::default()),
+        own_picks: Some(OwnPicks::default()),
     };
     let mut picks = ConfigPicks::default();
     let id = |text: &str| AgentChoiceId::new(text).unwrap();
     picks.set(id("model"), id("gpt-6-luna")).unwrap();
+    let picks = OwnPicks([(before.agent.clone(), picks)].into());
     let now = ThreadRow {
         title: Some("New".to_owned()),
         archived: true,

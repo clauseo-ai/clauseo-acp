@@ -430,6 +430,12 @@ mod pickers_idle;
 #[path = "host/pickers_kept.rs"]
 mod pickers_kept;
 #[cfg(test)]
+#[path = "host/pickers_kept_picks.rs"]
+mod pickers_kept_picks;
+#[cfg(test)]
+#[path = "host/pickers_kept_rows.rs"]
+mod pickers_kept_rows;
+#[cfg(test)]
 #[path = "host/pickers_log.rs"]
 mod pickers_log;
 #[cfg(test)]
