@@ -6,7 +6,10 @@
  * "on". A browser sentence may follow it. */
 export const WEB_ON = "Web search: on.";
 
-/** The chip of a tool that is on, and of one that is off. */
+/** Web search's name, on the status line beside its glyph. */
+export const WEB = "Web search";
+
+/** The chip of a tool that is on, and of one that is off: on the status line and in the popover's rows. */
 export const ON = "On";
 export const OFF = "Off";
 

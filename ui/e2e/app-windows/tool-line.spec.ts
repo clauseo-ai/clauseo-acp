@@ -2,7 +2,7 @@
 // answers (crates/host/src/actor/header_tools.rs, show_held), and the status line says them after the plan. In an
 // e2e launch the agents are `claude-acp` and `codex-acp`, so each has a kind (AgentKind::of) and gets a web search
 // state; `tools.web_search` is on by default and the fixture sets no `tools.*`, and no CLAUDE_CODE_USE_BEDROCK login
-// is set, so web search is Available for both. The line shows the tools as glyphs only, named in words. The browser's state comes only from a profile hook's `browser` entry;
+// is set, so web search is Available for both. The line shows each tool's glyph, name and On or Off. The browser's state comes only from a profile hook's `browser` entry;
 // the desktop app installs no hook yet, so today there is no Browser row, and when there is one it is one of the
 // browser's reasons (the machine decides: no proxy before stage C, no Chrome, or off by default off macOS).
 
@@ -10,15 +10,17 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { expectTurnEnded, newConversation, openMatter, sendPrompt } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
-import { BROWSER_REASONS, OFF, ON, WEB_ON } from "./tool-line-words.ts";
+import { BROWSER_REASONS, OFF, ON, WEB, WEB_ON } from "./tool-line-words.ts";
 
 /** The status line's glyphs are named with web search on, and the popover's rows say where each tool stands. */
 async function expectWebSearchOn(w: Window, page: Page): Promise<void> {
   // "Web search: on.", and a browser sentence after it where the machine gives the browser
   await expect(w.toolLine).toHaveAttribute("aria-label", /^Web search: on\.(?: Browser: .+\.)?$/);
   expect((await w.toolLine.getAttribute("aria-label"))?.startsWith(WEB_ON)).toBe(true);
-  // glyphs only: no visible words
-  await expect(w.toolLine).toHaveText("");
+  // each tool by its name and On or Off, beside its glyph
+  const webOnLine = w.toolLine.locator('[data-tool="web_search"]');
+  await expect(webOnLine).toContainText(WEB);
+  await expect(webOnLine.locator("[data-on]")).toHaveText(ON);
   await w.toolLine.click();
   await expect(w.toolPopover).toBeVisible();
   const web: Locator = w.toolRow("web_search");
