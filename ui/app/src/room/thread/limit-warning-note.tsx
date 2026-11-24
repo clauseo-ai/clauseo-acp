@@ -28,7 +28,11 @@ export function WarningNote({
       <FieldNotice
         lead={words.lead}
         action={
-          until === null ? null : (
+          until.at === null ? (
+            <span className="lim-field-lead">
+              <Say>{until.text}</Say>
+            </span>
+          ) : (
             <time className="lim-field-lead" dateTime={isoOf(until.at)}>
               <Say>{until.text}</Say>
             </time>

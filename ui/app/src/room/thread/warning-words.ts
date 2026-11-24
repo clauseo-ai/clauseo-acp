@@ -9,13 +9,13 @@ import type { Timestamp } from "../../transport/protocol.ts";
 import { whenOf } from "./clock.ts";
 
 /** The warning's two sentences from its key, `name` the plan's (Claude, ChatGPT): the share used, then the reset
- * with what a pause means (null without a reset); null for no warning. */
+ * with what a pause means (`at` null without a reset: the pause then said with no time); null for no warning. */
 export function warningWords(
   lang: Lang,
   key: string,
   name: string,
   now: number,
-): { lead: string; until: { text: string; at: Timestamp } | null } | null {
+): { lead: string; until: { text: string; at: Timestamp | null } } | null {
   if (key === "") return null;
   const { window, used, resets } = JSON.parse(key) as Warning;
   const lead =
@@ -24,7 +24,14 @@ export function warningWords(
       : window === "weekly"
         ? limThread(lang, "You've used {n}% of your weekly {name} limit.", { n: used, name })
         : lim(lang, "Close to the limit.");
-  if (resets === null) return { lead, until: null };
+  if (resets === null)
+    return {
+      lead,
+      until: {
+        text: limThread(lang, "If it runs out mid-answer, the answer pauses until it resets."),
+        at: null,
+      },
+    };
   const { day, time } = whenOf(lang, resets, now);
   const text =
     day === null

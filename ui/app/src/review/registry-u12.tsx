@@ -34,7 +34,7 @@ const atLocal = (days: number, h: number, m: number) => {
 };
 /** Today's reset, late enough to stay ahead of the reviewer's clock; another day's; the read at 4:29 pm. */
 const RESET = atLocal(0, 23, 50);
-const LATER_RESET = atLocal(2, 9, 0);
+export const LATER_RESET = atLocal(2, 9, 0);
 const READ = atLocal(0, 16, 29);
 const ASKED = atLocal(0, 16, 31);
 const STOPPED = atLocal(0, 16, 52);
@@ -54,7 +54,10 @@ const ENDED = step(9, { ts: atLocal(0, 16, 33) });
 const toneOf = (used: number): MeterTone =>
   used >= 100 ? "at_limit" : used >= 75 ? "near" : "neutral";
 
-const row = (used: number | undefined, over: Partial<LimitWindowView> = {}): LimitWindowView => ({
+export const row = (
+  used: number | undefined,
+  over: Partial<LimitWindowView> = {},
+): LimitWindowView => ({
   id: "five_hour",
   kind: "session",
   label: "5-hour limit",
@@ -115,7 +118,11 @@ const bare = (over: Partial<AgentLimitsView>): AgentLimitsView => {
   return e;
 };
 const NONE = bare({ freshness: "unavailable" });
-const PAYG = bare({ freshness: "not_applicable", billing: "pay_as_you_go", provider: "anthropic" });
+export const PAYG = bare({
+  freshness: "not_applicable",
+  billing: "pay_as_you_go",
+  provider: "anthropic",
+});
 
 /** Every label the card says in its own words, one past its reset (no share, no bar, its reset muted). The per-model
  * windows carry the model as the host names it: a Max plan's scoped Fable window, and the fixed Sonnet one (#236). */
@@ -237,7 +244,7 @@ const stop = (id: string, words: WordsRef, screen: string, state: ThreadState): 
 });
 
 /** The settings window at Plan and usage, 960 by 700 (DESIGN.md). */
-const usage = (id: string, words: WordsRef, limits: LimitsView): Entry => ({
+export const usage = (id: string, words: WordsRef, limits: LimitsView): Entry => ({
   id,
   words,
   screen: "settings/usage",
@@ -247,7 +254,7 @@ const usage = (id: string, words: WordsRef, limits: LimitsView): Entry => ({
 });
 
 /** Claude with figures, ChatGPT with its own. */
-const BOTH: LimitsView = {
+export const BOTH: LimitsView = {
   claude: figures(62),
   codex: figures(30, { plan: "ChatGPT Plus", windows: [row(30), weekly(10)] }),
 };
@@ -304,22 +311,14 @@ export const U12: Entry[] = [
     "limits/plan-payg",
     PAYG,
   ),
-  // the composer's warning before sending: the 5-hour window at 78%, its reset today or another day (24 Nov words;
-  // the weekly one is UC-1170, registry-uc-plan-low.tsx)
-  warning("U12-24", limitThreadWords("You've used {n}% of your 5-hour {name} limit."), figures(78)),
-  warning(
-    "U12-25",
-    limitThreadWords(
-      "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
-    ),
-    figures(78),
-  ),
+  // the composer's warning as it was until 24 Nov (no screen shows these now; the new words are UC-1170 onward,
+  // registry-uc-plan-low.tsx): the 5-hour window at 96%, its reset today or another day
+  warning("U12-24", limitThreadWords("Close to your 5-hour limit."), figures(96)),
+  warning("U12-25", limitThreadWords("Long tasks may pause until {time}."), figures(96)),
   warning(
     "U12-26",
-    limitThreadWords(
-      "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
-    ),
-    figures(78, { windows: [row(78, { resets_at: LATER_RESET }), weekly(20)] }),
+    limitThreadWords("Long tasks may pause until {day} {time}."),
+    figures(96, { windows: [row(96, { resets_at: LATER_RESET }), weekly(20)] }),
   ),
   // the stop: the 5-hour window (hit), the weekly one, a reset not given (unknown); with the stop's time and without
   stop(
@@ -386,8 +385,9 @@ export const U12: Entry[] = [
   ),
   // Settings' Plan and usage, its note in the side list
   usage("U12-37", settingsWords("Plan and usage"), BOTH),
-  usage("U12-38", settingsWords("{name}: {n}% left"), BOTH),
-  usage("U12-39", settingsWords("{name}: pay as you go"), { claude: PAYG }),
+  // the side note as it was until 24 Nov (now UC-1175, UC-1176)
+  usage("U12-38", settingsWords("{n}% of the 5-hour limit left"), BOTH),
+  usage("U12-39", settingsWords("Pay as you go"), { claude: PAYG }),
   usage("U12-40", settingsWords("What each plan has left, and when it resets."), BOTH),
   usage("U12-41", settingsWords("Updated at {time}"), BOTH),
   usage(

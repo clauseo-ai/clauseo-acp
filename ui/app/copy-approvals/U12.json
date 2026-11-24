@@ -154,31 +154,28 @@
     "by": "design"
   },
   "U12-24": {
-    "en": "You've used {n}% of your 5-hour {name} limit.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Composer note above the field, before sending, from 75% of the 5-hour window; {name} is Claude or ChatGPT, {n} the share used as the plan card counts it. Was \"Close to your 5-hour limit.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
+    "en": "Close to your 5-hour limit.",
+    "hi": "आपकी 5 घंटे की सीमा करीब है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
   },
   "U12-25": {
-    "en": "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Composer note's second sentence, the reset today, in a <time>. Was \"Long tasks may pause until {time}.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
+    "en": "Long tasks may pause until {time}.",
+    "hi": "लंबे काम {time} बजे तक रुक सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
   },
   "U12-26": {
-    "en": "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Composer note's second sentence, the reset on another day, in a <time>. Was \"Long tasks may pause until {day} {time}.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
+    "en": "Long tasks may pause until {day} {time}.",
+    "hi": "लंबे काम {day} {time} बजे तक रुक सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
   },
   "U12-27": {
     "en": "{name} plan limit reached at {time}",
@@ -265,22 +262,18 @@
     "by": "design"
   },
   "U12-38": {
-    "en": "{name}: {n}% left",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Settings side list, beside Plan and usage: each agent's plan named and joined with \" · \" (\"Claude: 17% left · ChatGPT: 60% left\"), {name} Claude or ChatGPT, {n} the share left of its 5-hour limit. Was \"{n}% of the 5-hour limit left\" (approved 2026-11-03), which named no plan: a Windows tester with ChatGPT chosen read Claude's figure as ChatGPT's. Hindi to come."
+    "en": "{n}% of the 5-hour limit left",
+    "hi": "5 घंटे की सीमा का {n}% बाकी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
   },
   "U12-39": {
-    "en": "{name}: pay as you go",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "Settings side list, beside Plan and usage: each agent's plan named and joined with \" · \" (\"Claude: 17% left · ChatGPT: 60% left\"), {name} Claude or ChatGPT, {n} the share left of its 5-hour limit. Was \"Pay as you go\" (approved 2026-11-03), which named no plan: a Windows tester with ChatGPT chosen read Claude's figure as ChatGPT's. Hindi to come."
+    "en": "Pay as you go",
+    "hi": "उपयोग के अनुसार भुगतान",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
   },
   "U12-40": {
     "en": "What each plan has left, and when it resets.",

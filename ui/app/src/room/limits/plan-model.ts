@@ -26,11 +26,12 @@ export function bandOf(meter: LimitMeter): Band {
   return meter.used_percent >= 50 ? "half" : "plenty";
 }
 
-/** The meter's fill as the plan runs short (24 Nov ruling): red from 95% used or at the limit, amber from the close
- * band on (75% used, or the agent's own warning); none below. */
+/** The meter's fill as the plan runs short (24 Nov ruling): red at 5% left or less, by the share left the figures
+ * show (shareLeft, rounded down, so 94.5% used, "5% left", is red), or at the limit; amber from the close band on (75%
+ * used, or the agent's own warning); none below. */
 export function levelOf(meter: LimitMeter): PlanLevel | undefined {
   const band = bandOf(meter);
-  if (band === "reached" || meter.used_percent >= 95) return "red";
+  if (band === "reached" || shareLeft(meter.used_percent) <= 5) return "red";
   return band === "close" ? "amber" : undefined;
 }
 
@@ -190,9 +191,13 @@ export function nameOnlyLine(kind: AgentKind, freshness: string): PlanLine {
 export const WARN_FROM = { session: 75, weekly: 90 } as const;
 
 /** What the composer's warning names: the 5-hour window, the weekly one, or another (the agent's own warning, or a
- * session window by another name), with the share used as the card counts it (100 less the share left). */
+ * session window by another name), with the share used as the card counts it (100 less the share left), never more
+ * than 99: below the limit the note never says 100%. */
 export type WarningWindow = "five_hour" | "weekly" | "other";
 export type Warning = { window: WarningWindow; used: number; resets: number | null };
+
+/** The share used the note says: 100 less the share left the card shows, capped at 99 below the limit. */
+const usedShown = (used: number): number => Math.min(99, 100 - shareLeft(used));
 
 /** The composer's warning, as one string so a part renders again only when it changes: JSON of a Warning, "" for none.
  * The 5-hour window from 75% used and the weekly from 90%, below 100; both high, the one with less left (a tie names
@@ -209,7 +214,7 @@ export function warningKey(entry: AgentLimitsView | undefined): string {
     const used = w.used_percent;
     if (used === undefined || used < WARN_FROM[w.kind] || used >= 100 || w.tone === "at_limit")
       continue;
-    const share = 100 - shareLeft(used);
+    const share = usedShown(used);
     // both high: the one with less left; a tie names the 5-hour
     if (hit !== null && (share < hit.used || (share === hit.used && w.kind === "weekly"))) continue;
     const window: WarningWindow =
@@ -219,7 +224,7 @@ export function warningKey(entry: AgentLimitsView | undefined): string {
   if (hit === null && meter !== undefined && meter.tone === "near" && meter.used_percent < 75)
     hit = {
       window: "other",
-      used: 100 - shareLeft(meter.used_percent),
+      used: usedShown(meter.used_percent),
       resets: meter.resets_at ?? null,
     };
   return hit === null ? "" : JSON.stringify(hit);
