@@ -11,3 +11,7 @@ mod peer;
 #[cfg(test)]
 #[path = "client/calls.rs"]
 mod calls;
+
+#[cfg(test)]
+#[path = "client/models.rs"]
+mod models;

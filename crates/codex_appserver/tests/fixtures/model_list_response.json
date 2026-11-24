@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "id": "gpt-6.2-sol",
+      "model": "gpt-6.2-sol",
+      "displayName": "gpt-6.2-sol",
+      "description": "Frontier model for hard work.",
+      "hidden": false,
+      "isDefault": true,
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "low",
+          "description": "Fast"
+        },
+        {
+          "reasoningEffort": "medium",
+          "description": "Balanced"
+        },
+        {
+          "reasoningEffort": "high",
+          "description": "Deep"
+        }
+      ],
+      "defaultReasoningEffort": "medium",
+      "upgrade": null,
+      "inputModalities": [
+        "text",
+        "image"
+      ]
+    },
+    {
+      "id": "gpt-6-luna",
+      "model": "gpt-6-luna",
+      "displayName": "gpt-6-luna",
+      "description": "Small and quick.",
+      "hidden": false,
+      "isDefault": false,
+      "supportedReasoningEfforts": [
+        {
+          "reasoningEffort": "low",
+          "description": "Fast"
+        },
+        {
+          "reasoningEffort": "medium",
+          "description": "Balanced"
+        }
+      ],
+      "defaultReasoningEffort": "low"
+    }
+  ],
+  "nextCursor": null
+}

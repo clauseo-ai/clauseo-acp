@@ -16,6 +16,8 @@ folders `v1/` and `v2/` at that tag; the subfolders here keep upstream's layout.
 | `v2/GetAccountParams.json` | `30b545275f60975b55bd6fbaafd70f15505801d14168ee82d3931b6e93c78aab` |
 | `v2/GetAccountRateLimitsResponse.json` | `9c0def7f8ab2396122af939dffbf01b34b8d66082fe4129dd20917bfd4313fdc` |
 | `v2/GetAccountResponse.json` | `588bac1dacbcf8d0676f2c31d9d5750e8baaee5c3062ef820ae4e6ee68687418` |
+| `v2/ModelListParams.json` | `3f48937b1e0348ede28d539011c571909fd79cb9f05d2343fe484839633cfdf7` |
+| `v2/ModelListResponse.json` | `2fb387a2ed258fc74258828ea342d68f89ce4e8e22cd0329ca59d2b423f9108b` |
 | `v2/NullableGetAccountRateLimitsParams.json` | `072f813ca1c696831a7f2fbd934feaa8cad228a6b3d44a4be8877547c796341b` |
 
 `GetAccountRateLimitsParams` has no file of its own at the tag: it is defined in
@@ -41,6 +43,9 @@ none.
   `jsonrpc` property, and upstream's test `serialize_get_account_rate_limits` (`common.rs`)
   shows the wire form `{"method": "account/rateLimits/read", "id": 1}`. The client writes no
   `jsonrpc` member and reads messages with or without one.
+
+`model/list` (params `ModelListParams`, response `ModelListResponse`) was added for the host's
+model probe on 2026-11-24. It is not experimental at the tag; the probe sends only `cursor`.
 
 ## Refreshing on a pin bump
 
