@@ -203,6 +203,11 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::Mcp(_) => Err(invalid(
             "the MCP servers are changed from the settings window only",
         )),
+        // Desktop's own step once the keychain is allowed (it dispatches it itself, past this
+        // check): no window asks the host to read the keychain again.
+        HostCommand::KeychainReadAgain {} => Err(invalid(
+            "keychain_read_again is sent by the app itself, never by a window",
+        )),
     }
 }
 

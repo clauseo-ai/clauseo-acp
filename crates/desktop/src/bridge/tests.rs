@@ -480,6 +480,7 @@ mod admit;
 mod admit_addons;
 mod admit_browser;
 mod admit_default_location;
+mod admit_keychain;
 mod admit_mcp;
 mod allowed_sites;
 mod app;
