@@ -49,6 +49,10 @@ pub(in crate::actor::turn) fn set_requeue_for_test(
         content: Vec::new(),
         config: std::collections::BTreeMap::new(),
         sign_in: true,
+        copy_of: clauseo_protocol::CopyOf {
+            message: clauseo_protocol::MessageId::new(uuid::Uuid::now_v7()).unwrap(),
+            cause: clauseo_protocol::UnsentCause::SignIn,
+        },
     });
 }
 

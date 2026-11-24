@@ -4,8 +4,8 @@
 //! answer stopped. The view keeps the cause on the message, written only when it is set.
 
 use clauseo_protocol::{
-    DomainEvent, MessageId, StopReason, ThreadStatus, TurnId, UnsentCause, UserMessageStatus,
-    ViewEntry,
+    CopyOf, DomainEvent, MessageId, StopReason, ThreadStatus, TurnId, UnsentCause,
+    UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{Applied, StreamState, ViewChange, apply};
 
@@ -118,4 +118,32 @@ fn a_prompt_sent_now_over_a_running_turn_is_not_sent_and_the_turn_keeps_running(
     );
     assert_eq!(state.as_thread().unwrap().running(), Some(running));
     assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn a_held_copy_entry_names_its_original_and_cause() {
+    let (mut log, turn, message) = queued_prompt();
+    let mut state = fold(log.events());
+    end_before_start(&mut log, &mut state, turn, Some(UnsentCause::Update));
+    // The copy the host logs for the install's cancel: a `UserMessage` naming its original.
+    let (copy_turn, copy): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
+    let mut event = user_message(copy_turn, copy, "Draft the notice.");
+    if let DomainEvent::UserMessage(sent) = &mut event {
+        sent.copy_of = Some(CopyOf {
+            message,
+            cause: UnsentCause::Update,
+        });
+    }
+    log.push(event).unwrap();
+    let state = fold(log.events());
+    let entry = prompt_entry(&state, copy);
+    assert_eq!(
+        entry.copy_of,
+        Some(CopyOf {
+            message,
+            cause: UnsentCause::Update,
+        })
+    );
+    assert_eq!(prompt_entry(&state, message).copy_of, None);
+    assert_eq!(round_trip(&state), state);
 }

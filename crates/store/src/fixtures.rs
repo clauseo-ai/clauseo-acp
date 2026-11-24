@@ -167,6 +167,7 @@ fn event(n: u64) -> DomainEvent {
             content: vec![ContentBlock::Text { text: text(n) }],
             delivery: Delivery::default(),
             config: std::collections::BTreeMap::new(),
+            copy_of: None,
         }
         .into(),
         1 => TurnStarted {

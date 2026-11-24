@@ -44,6 +44,7 @@ fn asked(n: u64, turn: TurnId) -> ViewEntry {
         at_head: false,
         ts: at(0),
         unsent: None,
+        copy_of: None,
     })
 }
 

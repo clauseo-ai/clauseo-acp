@@ -1687,6 +1687,18 @@ export type ContextUsage = {
 	cost?: Cost,
 };
 
+/**
+ *  The original of a held copy: the message it was copied from, and why it was copied (the
+ *  `UnsentCause` its turn ended with, `SignIn` or `Update`). Logged on the copy's `UserMessage`,
+ *  so the app reads the copy as a fact, not by its place in the queue.
+ */
+export type CopyOf = {
+	/**  The message it copies: the one its cancelled turn carried. */
+	message: MessageId,
+	/**  Why it was copied: `SignIn` for a sign-in stop, `Update` for an install's cancel. */
+	cause: UnsentCause,
+};
+
 /**  The session's cost so far, as the agent reports it (an estimate at list prices). */
 export type Cost = {
 	/**  The amount, in `currency`. */
@@ -8530,6 +8542,11 @@ export type UserMessage = {
 	 *  field reads as empty.
 	 */
 	config?: { [key in string]: string },
+	/**
+	 *  The message this one copies, when it is a held copy a sign-in stop or an install's
+	 *  cancel queued again; `None` for the lawyer's own message, and in logs before the field.
+	 */
+	copy_of?: CopyOf,
 };
 
 /**  A prompt the lawyer sent. Entry id `user_message:<message>`. */
@@ -8573,6 +8590,8 @@ export type UserMessageEntry = {
 	 *  it is sent or queued, and in views written before the field.
 	 */
 	unsent?: UnsentCause,
+	/**  The message it copies, when it is a held copy (`CopyOf`); `None` otherwise. */
+	copy_of?: CopyOf,
 };
 
 /**  Where a prompt stands in its thread's queue. */

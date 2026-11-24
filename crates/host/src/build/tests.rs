@@ -325,6 +325,7 @@ fn user_message_and_agent_content_match_view_counts() {
         at_head: false,
         ts: Timestamp::ZERO,
         unsent: None,
+        copy_of: None,
     });
     assert_eq!(entry.inline_len(), 3_000);
 

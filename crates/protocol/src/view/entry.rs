@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::{ContextUsage, QueueHoldReason, ThreadStatus, ToolState};
 use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
-    ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
+    ConfigOption, ContentBlock, CopyOf, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, HelperId, ImportSummary,
     LimitStopReason, MatterHold, MatterId, MatterKind, MatterPath, MessageId, NamedChoice,
     NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
@@ -195,6 +195,9 @@ pub struct UserMessageEntry {
     /// it is sent or queued, and in views written before the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unsent: Option<UnsentCause>,
+    /// The message it copies, when it is a held copy (`CopyOf`); `None` otherwise.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub copy_of: Option<CopyOf>,
 }
 
 /// An answer or a thought, as one text. Entry id `agent_text:<message>`.
