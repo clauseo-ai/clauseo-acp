@@ -14,8 +14,9 @@ export const HI = {
   "{theme}, text size {n}": "{theme}, अक्षरों का आकार {n}",
   "Version {version}": "संस्करण {version}",
   "Released {date}": "{date} को जारी",
-  "{n}% of the 5-hour limit left": "5 घंटे की सीमा का {n}% बाकी",
-  "Pay as you go": "उपयोग के अनुसार भुगतान",
+  // each plan named (24 Nov, Hindi to come): {name} is Claude or ChatGPT, the share left of its 5-hour limit
+  "{name}: {n}% left": null,
+  "{name}: pay as you go": null,
   // a row the firm's policy locks (the old Hindi said "your organisation")
   "Managed by firm": "फ़र्म द्वारा प्रबंधित",
   // each section's one line
