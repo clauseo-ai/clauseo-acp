@@ -1,6 +1,7 @@
-//! `Effective::set_agent_launch` and `Effective::set_plan` (decision record 0048): each writes
-//! its entry, refuses a policy-locked id with `Error::Locked` (`settings.locked` on the wire),
-//! and `set_agent_launch` never replaces an entry that is not Clauseo's own.
+//! `Effective::set_agent_launch`, `Effective::set_plan` and `Effective::set_default_location`
+//! (decision record 0048): each writes its entry, refuses a policy-locked key with
+//! `Error::Locked` (`settings.locked` on the wire), and `set_agent_launch` never replaces an
+//! entry that is not Clauseo's own.
 
 use super::{Effective, EntryWrite};
 use crate::error::Error;
@@ -10,6 +11,7 @@ use crate::policy::PolicyRead;
 use crate::schema::{AgentLaunch, Plan, PlanProvider};
 use crate::testing::{FakeSource, MemFiles, abs, abs_json, abs_str, policy};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// The data folder these tests use, absolute on every OS.
 fn locations() -> Locations {
@@ -280,6 +282,62 @@ fn a_failed_write_changes_nothing_in_memory() {
     ));
     assert_eq!(effective.agent("claude-acp"), None);
     assert_eq!(effective.plan("claude-acp"), None);
+}
+
+#[test]
+fn set_default_location_writes_the_folder_and_a_fresh_load_agrees() {
+    let files = user(r#"{"ui": {"theme": "dark"}}"#);
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    let folder = abs("work/Matters");
+    effective.set_default_location(&files, &folder).unwrap();
+    assert_eq!(effective.default_matters_dir(), Some(folder.as_path()));
+    let fresh = Effective::load(&locations(), &files, &[]);
+    assert_eq!(fresh.default_matters_dir(), Some(folder.as_path()));
+    assert_eq!(fresh.settings().ui.theme, crate::schema::Theme::Dark);
+    let saved: serde_json::Value = serde_json::from_str(&saved(&files).unwrap()).unwrap();
+    assert_eq!(
+        saved["matters"]["default_location"],
+        abs_str("work/Matters")
+    );
+}
+
+#[test]
+fn set_default_location_refuses_a_locked_key_and_a_relative_folder() {
+    let files = user("{}");
+    let firm = policy("firm", r#"{"matters": {"default_location": null}}"#);
+    let mut effective = Effective::load(&locations(), &files, &[&firm]);
+    let before = effective.default_matters_dir().map(Path::to_path_buf);
+    assert!(matches!(
+        effective.set_default_location(&files, &abs("work/Matters")),
+        Err(Error::Locked { key }) if key == "matters.default_location"
+    ));
+    assert_eq!(
+        effective.default_matters_dir().map(Path::to_path_buf),
+        before
+    );
+    assert_eq!(saved(&files).as_deref(), Some("{}"));
+
+    let files = user("{}");
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    assert!(matches!(
+        effective.set_default_location(&files, Path::new("Matters")),
+        Err(Error::Refused { key, .. }) if key == "matters.default_location"
+    ));
+    assert_eq!(saved(&files).as_deref(), Some("{}"));
+}
+
+#[test]
+fn a_failed_default_location_write_changes_nothing_in_memory() {
+    let files = MemFiles {
+        fail_writes: true,
+        ..MemFiles::default()
+    };
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    assert!(matches!(
+        effective.set_default_location(&files, &abs("work/Matters")),
+        Err(Error::Io { .. })
+    ));
+    assert_eq!(effective.settings().matters.default_location, None);
 }
 
 #[test]

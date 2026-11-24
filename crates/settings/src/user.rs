@@ -1,10 +1,11 @@
 //! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
-//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>`, `plans.<id>` or
-//! `skills.enabled` entry. Only [`crate::Effective::apply_ui_patch`],
-//! [`crate::Effective::apply_tools_patch`], [`crate::Effective::apply_privacy_patch`],
-//! [`crate::Effective::apply_update_mode`], [`crate::Effective::set_agent_launch`],
-//! [`crate::Effective::set_plan`] and [`crate::Effective::set_skill_pack`] call those writes,
-//! after they have checked policy locks.
+//! [`PrivacyPatch`] or an [`UpdateChoice`], of `matters.default_location`, or of one
+//! `agents.<id>`, `plans.<id>` or `skills.enabled` entry. Only
+//! [`crate::Effective::apply_ui_patch`], [`crate::Effective::apply_tools_patch`],
+//! [`crate::Effective::apply_privacy_patch`],
+//! [`crate::Effective::apply_update_mode`], [`crate::Effective::set_default_location`],
+//! [`crate::Effective::set_agent_launch`], [`crate::Effective::set_plan`] and
+//! [`crate::Effective::set_skill_pack`] call those writes, after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -119,6 +120,30 @@ pub(crate) fn write_privacy_settings(
     patch: &PrivacyPatch,
 ) -> Result<(), Error> {
     write_section(locations, files, "privacy", patch)
+}
+
+/// Saves `matters.default_location` (the absolute folder `folder`) to the user's `settings.json`,
+/// into its `matters` section, as [`write_user_settings`] does for `ui`. It does not check policy
+/// locks or the folder: [`crate::Effective::set_default_location`] does, before it calls this.
+pub(crate) fn write_default_location(
+    locations: &Locations,
+    files: &dyn Files,
+    folder: &str,
+) -> Result<(), Error> {
+    write_section(
+        locations,
+        files,
+        "matters",
+        &MattersFields {
+            default_location: folder,
+        },
+    )
+}
+
+/// The `matters` section's one field, as [`write_section`] saves it.
+#[derive(Serialize)]
+struct MattersFields<'a> {
+    default_location: &'a str,
 }
 
 /// Saves the lawyer's `update.mode` to the user's `settings.json`, into its `update` section, as

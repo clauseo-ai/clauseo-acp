@@ -154,7 +154,8 @@ pub(crate) fn release_mode(env: Option<&str>, e2e: bool) -> ReleaseMode {
 }
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
-/// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
+/// `CreateMatter` or `SetDefaultLocation` whose folder ref this run's `pick_folder` did not
+/// issue; from the settings
 /// window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
 /// `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
 /// commands but `DismissCaseLawHint`; from `main`, `SetMode`, a `SetConfigOption` that is not

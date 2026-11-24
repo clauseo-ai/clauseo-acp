@@ -170,6 +170,7 @@ impl HostCommand {
                 matter: _,
                 folder: _,
             }
+            | Self::SetDefaultLocation { folder: _ }
             | Self::ScanFolder { folder: _ }
             | Self::CancelScan { folder: _ }
             | Self::RemoveQueuedPrompt { thread: _, turn: _ }

@@ -295,6 +295,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
         HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),
         HostCommand::FirstAct { counts } => first_act(actor, ctx, counts),
+        HostCommand::SetDefaultLocation { folder } => {
+            super::settings::default_location::set_default_location(actor, ctx, folder);
+        }
         // No receipt and no event: a repeated id asks the model again, under its read rules.
         HostCommand::RefreshLimits { agent, why } => {
             super::limits::refresh(actor, agent, why);

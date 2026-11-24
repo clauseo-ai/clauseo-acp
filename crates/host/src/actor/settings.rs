@@ -7,11 +7,13 @@
 //! exhaustive match, so a value added to one side and not the other does not compile; the
 //! mirror test in `tests/host/settings.rs` also holds the keys and the JSON names together.
 //! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code;
-//! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`; desktop's
+//! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`, the default
+//! location (`SetDefaultLocation`) in `default_location.rs`; desktop's
 //! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`;
 //! `SetSkillPack` in `packs.rs`.
 
 pub(in crate::actor) mod add_skill;
+pub(in crate::actor) mod default_location;
 mod entries;
 mod lock_causes;
 pub(in crate::actor) mod packs;
