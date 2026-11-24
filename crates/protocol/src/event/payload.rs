@@ -24,6 +24,6 @@ pub use tool::{
     WebSearchRecorded,
 };
 pub use turn::{
-    ContentAppended, FilesChanged, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UserMessage,
+    ContentAppended, FilesChanged, MatterHold, QueuedPromptEdited, SteerResolved, StepUndone,
+    TextAppended, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UserMessage,
 };

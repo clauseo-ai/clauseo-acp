@@ -4,7 +4,7 @@
 
 use clauseo_protocol::{
     ChangeKind, CheckpointKind, CheckpointRecorded, ContentId, DomainEvent, FileChange,
-    ImportSummary, MatterCreated, MatterKind, TurnQueued,
+    ImportSummary, MatterCreated, MatterHold, MatterKind, TurnQueued,
 };
 
 use serde_json::json;
@@ -159,6 +159,36 @@ fn a_turn_put_back_at_the_head_says_so_and_an_older_entry_reads_as_not() {
     assert_eq!(back, head);
     let packed = rmp_serde::to_vec_named(&head).unwrap();
     assert_eq!(rmp_serde::from_slice::<DomainEvent>(&packed).unwrap(), head);
+}
+
+#[test]
+fn a_turn_held_by_the_matter_says_what_holds_it_and_no_hold_is_left_out() {
+    let thread = thread_id(2);
+    let turn = turn_id(3);
+    let queued = TurnQueued::new(thread, turn, thread, None).unwrap();
+    // No hold: written as before, with no `hold` field, and read back as none.
+    let plain = serde_json::to_value(DomainEvent::TurnQueued(queued)).unwrap();
+    assert_eq!(
+        plain,
+        json!({"turn_queued": {"turn": turn, "behind": thread}})
+    );
+    let DomainEvent::TurnQueued(read) = serde_json::from_value(plain).unwrap() else {
+        panic!("not a TurnQueued");
+    };
+    assert_eq!(read.hold(), None);
+    for (hold, word) in [
+        (MatterHold::Undo, "undo"),
+        (MatterHold::Restore, "restore"),
+        (MatterHold::Relocate, "relocate"),
+    ] {
+        let held = DomainEvent::TurnQueued(queued.held_by(hold));
+        let written = serde_json::to_value(&held).unwrap();
+        assert_eq!(written["turn_queued"]["hold"], json!(word));
+        let back: DomainEvent = serde_json::from_value(written).unwrap();
+        assert_eq!(back, held);
+        let packed = rmp_serde::to_vec_named(&held).unwrap();
+        assert_eq!(rmp_serde::from_slice::<DomainEvent>(&packed).unwrap(), held);
+    }
 }
 
 #[test]

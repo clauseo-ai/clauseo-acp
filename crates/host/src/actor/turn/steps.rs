@@ -9,8 +9,8 @@ use std::path::Path;
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
-    MatterId, OutsideEdits, PromptBlock, SteerOutcome, SteerResolved, StopReason, StreamId,
-    ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted,
+    MatterHold, MatterId, OutsideEdits, PromptBlock, SteerOutcome, SteerResolved, StopReason,
+    StreamId, ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -210,7 +210,7 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             before_turn(actor, thread, turn);
             return Ok(());
         }
-        let holder = match turns.holder {
+        let (holder, hold) = match turns.holder {
             None => {
                 super::together::join(actor, matter, thread);
                 // An agent-started turn shows from now: it has no prompt that would.
@@ -218,17 +218,19 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                 before_turn(actor, thread, turn);
                 return Ok(());
             }
-            Some(Holder::Thread(holder)) => holder,
+            Some(Holder::Thread(holder)) => (holder, MatterHold::Undo),
             // A restore or a relocate belongs to no thread: the turn is logged behind its own
-            // thread, the form start-up reconciliation uses too.
-            Some(Holder::Restore | Holder::Relocate) => thread,
+            // thread, the form start-up reconciliation uses too, and its hold says why it waits.
+            Some(Holder::Restore) => (thread, MatterHold::Restore),
+            Some(Holder::Relocate) => (thread, MatterHold::Relocate),
         };
         turns.queue.push_back(thread);
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Queued;
         }
         let queued = TurnQueued::new(thread, turn, holder, None)
-            .map_err(|error| Error::Internal(error.to_string()))?;
+            .map_err(|error| Error::Internal(error.to_string()))?
+            .held_by(hold);
         let mut out = Out::new(actor, thread, None)?;
         out.push(actor, queued)?;
         out.send(actor, Then::Nothing)

@@ -1,10 +1,10 @@
 //! Turns of two threads of one matter against a restore holding the matter: both wait for it
-//! with `TurnQueued` behind their own threads, and both start, together, when it ends; a cancel
+//! with `TurnQueued` behind their own threads, held by the restore, and both start, together, when it ends; a cancel
 //! of one while it waits ends it once; an abort of the host keeps a waiting turn queued.
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandOutcome, DomainEvent, HostCommand, PromptBlock, RestoreRequest,
-    StopReason, ThreadId, TurnId,
+    CommandEnvelope, CommandOutcome, DomainEvent, HostCommand, MatterHold, PromptBlock,
+    RestoreRequest, StopReason, ThreadId, TurnId,
 };
 use futures::channel::oneshot;
 
@@ -95,6 +95,19 @@ fn queued_behind(log: &[DomainEvent], turn: TurnId) -> Vec<ThreadId> {
     log.iter().filter_map(behind).collect()
 }
 
+/// The hold of each `TurnQueued` of `turn` in `log`, in order.
+fn holds(log: &[DomainEvent], turn: TurnId) -> Vec<Option<MatterHold>> {
+    let hold = |event: &DomainEvent| {
+        if let DomainEvent::TurnQueued(queued) = event
+            && queued.turn() == turn
+        {
+            return Some(queued.hold());
+        }
+        None
+    };
+    log.iter().filter_map(hold).collect()
+}
+
 fn started(log: &[DomainEvent], turn: TurnId) -> bool {
     log.iter()
         .any(|event| matches!(event, DomainEvent::TurnStarted(started) if started.turn == turn))
@@ -124,6 +137,11 @@ fn turns_waiting_for_a_restore_all_start_together_when_it_ends() {
     for (thread, turn) in [(first, turn_a), (second, turn_b)] {
         let log = rig.log(thread);
         assert_eq!(queued_behind(&log, turn), [thread], "behind its own thread");
+        assert_eq!(
+            holds(&log, turn),
+            [Some(MatterHold::Restore)],
+            "held by the restore"
+        );
         assert!(!started(&log, turn));
     }
 

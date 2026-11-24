@@ -52,6 +52,26 @@ pub struct TurnQueued {
     /// field, and a missing field reads as false, so an older entry restores in log order.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     at_head: bool,
+    /// What holds the whole matter while the turn waits: an undo another conversation asked
+    /// for, a restore or a relocate. The turn waits for it to end, then starts with the other
+    /// turns that waited. None is written as a missing field, and a missing field reads as
+    /// none: an agent-started turn, a turn held at start-up or put back for its sign-in or a
+    /// steer, or an entry written before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    hold: Option<MatterHold>,
+}
+
+/// What holds a matter while a turn waits for it ([`TurnQueued::hold`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum MatterHold {
+    /// Another conversation's undo puts the matter's papers back.
+    Undo,
+    /// A version of a paper is being restored.
+    Restore,
+    /// The matter's folder is moving.
+    Relocate,
 }
 
 impl TurnQueued {
@@ -83,6 +103,7 @@ impl TurnQueued {
             behind,
             behind_turn,
             at_head: false,
+            hold: None,
         })
     }
 
@@ -90,6 +111,13 @@ impl TurnQueued {
     #[must_use]
     pub const fn at_head(mut self) -> Self {
         self.at_head = true;
+        self
+    }
+
+    /// The same turn, waiting for `hold` to let go of the matter.
+    #[must_use]
+    pub const fn held_by(mut self, hold: MatterHold) -> Self {
+        self.hold = Some(hold);
         self
     }
 
@@ -111,6 +139,11 @@ impl TurnQueued {
     /// Whether it went back to the head of its thread's queue.
     pub const fn is_at_head(&self) -> bool {
         self.at_head
+    }
+
+    /// What holds the matter while the turn waits, when something does.
+    pub const fn hold(&self) -> Option<MatterHold> {
+        self.hold
     }
 }
 

@@ -49,6 +49,7 @@ pub fn header_entry() -> HeaderEntry {
         resuming_since: None,
         queue_held: true,
         queue_held_reason: Some(QueueHoldReason::Paused),
+        hold: None,
         steer_joins_turn: true,
         tools: vec![],
         snoozed_until: None,
