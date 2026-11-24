@@ -96,6 +96,7 @@ const ID_FIELD = {
   version: "checkpoint",
   // C2's helper kinds, from the one file that knows their shape
   ...HELPER_ID_FIELD,
+  handoff: "handoff",
 } as const satisfies { readonly [K in Kind]-?: keyof NonNullable<ViewEntry[K]> };
 
 /** The stream of a thread's view, in protocol's text form. */
