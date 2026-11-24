@@ -2,7 +2,8 @@
 //! `skills.rs`, the lawyer's MCP servers in `tools.rs`, case law's statuses and the checks a read
 //! starts in `case_law.rs`. The skill packs' own commands' tests are here too
 //! (`skill_packs.rs`, `skill_packs_cap.rs`), and scopes and per-matter switches with what each
-//! matter's launch gets (`scope.rs`, `scope_launch.rs`).
+//! matter's launch gets (`scope.rs`, `scope_launch.rs`), with the review's cases
+//! (`scope_review.rs`, `scope_review_launch.rs`).
 
 use clauseo_host::AppSubscription;
 use clauseo_protocol::{Addon, AddonKind, HostEvent, HostQuery, QueryResult};
@@ -14,6 +15,8 @@ use crate::support::{Running, wait};
 mod case_law;
 pub(crate) mod scope;
 mod scope_launch;
+mod scope_review;
+mod scope_review_launch;
 mod skill_packs;
 mod skill_packs_cap;
 mod skills;

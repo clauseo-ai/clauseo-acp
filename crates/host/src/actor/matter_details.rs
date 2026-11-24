@@ -124,8 +124,11 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
         ));
     }
     let now = actor.now().wall;
+    // Its switches for skills and tools go with it: it comes back with none (decision record
+    // 0040). A commit that fails leaves them in the store; this run reads them back at restart.
     let row = MatterRow {
         forgotten: Some(now),
+        addon_switches: None,
         ..before
     };
     let draft = row_draft(ctx, row.clone(), now);

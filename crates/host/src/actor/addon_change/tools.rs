@@ -61,14 +61,18 @@ fn added(actor: &mut Actor, ctx: &CommandCtx, id: &str, change: Change) -> Resul
     let Some(server) = actor.effective.mcp_servers().get(id) else {
         return Err(unknown(AddonKind::Tool, id));
     };
-    let enabled = server.enabled;
+    let (enabled, scoped) = (server.enabled, server.matter_scoped());
     if crate::actor::mcp::view::managed(actor) {
         return Err(Error::refused(
             ErrorCode::SettingsLocked,
             "the firm runs MCP on this computer (managed-mcp.json)",
         ));
     }
-    if actor.effective.mcp_locked() {
+    // While policy sets the list, the firm decides the set and each server's scope (decision
+    // record 0040): a server it enables with scope `matter` takes a matter's switch either way;
+    // any other change is `settings.locked`.
+    let switch = matches!(change, Change::On { .. });
+    if actor.effective.mcp_locked() && !(switch && enabled && scoped) {
         return Err(locked("mcp.servers"));
     }
     if let Some(matter) = change.matter() {

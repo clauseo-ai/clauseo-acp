@@ -107,7 +107,7 @@ fn case_law_server() -> McpServer {
 /// value; the token file is the session's own. On Windows it also carries `SystemRoot` and
 /// `windir`, then `TEMP`, `TMP` and `PATHEXT` when this process has them (the host runs in it,
 /// so it reads the same environment; `windows_env`).
-fn filled_case_law() -> Value {
+pub(crate) fn filled_case_law() -> Value {
     let mut env = vec![
         json!({"name": "CLAUSEO_RELAY", "value": "{{any}}"}),
         json!({"name": "CLAUSEO_RELAY_TOKEN_FILE",
@@ -165,7 +165,7 @@ fn lawyer(dir: &Dir, extra: &Value) -> (Value, Value) {
 /// Claude's `session/new` or `session/load` params with `servers`, the allow rule of each of the
 /// lawyer's servers among them (`agent/mcp_trust.rs`), when it got case law the pre-allow and
 /// the paragraph, and `mcp__browser` last when it got the browser entry.
-fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
+pub(crate) fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
     let mut allowed: Vec<String> = servers
         .iter()
         .filter_map(|server| server["name"].as_str())
@@ -195,7 +195,7 @@ fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
 }
 
 /// The relay token file of `seen`'s session, if it holds one.
-fn token_of(seen: &Seen) -> Option<String> {
+pub(crate) fn token_of(seen: &Seen) -> Option<String> {
     let file = seen.run.as_ref()?.join("relay-token");
     std::fs::read_to_string(file)
         .ok()

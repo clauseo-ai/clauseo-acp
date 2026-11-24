@@ -116,7 +116,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
     let claims = Claims {
         egress: egress_prep(actor, &row.agent, &browser),
         browser,
-        case_law: relay::case_law_prep(actor, &row.agent),
+        case_law: relay::case_law_prep(actor, &row.agent, row.matter),
         held: actor.wiring.held.clone(),
         path: PathPrep {
             prepend: actor.wiring.path_prepend.clone(),

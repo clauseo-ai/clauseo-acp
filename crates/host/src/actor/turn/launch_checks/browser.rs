@@ -328,6 +328,10 @@ pub(super) fn browser_prep(
     key: SessionKey,
 ) -> BrowserPrep {
     let settings = actor.effective.settings();
+    // Off too in a matter that switches the browser off (`addon_rules.rs`): no search, no proxy.
+    let browser_on = settings.tools.browser
+        && crate::actor::addon_rules::Placed::of(actor, key.matter)
+            .builtin_on(crate::actor::addon_rules::BROWSER);
     let skip = BrowserPrep {
         sidecars: Vec::new(),
         chrome: ChromeSearch::Skip,
@@ -351,7 +355,7 @@ pub(super) fn browser_prep(
     // Claude never gets the shell tool (its browser is the guarded entry or none).
     let claude = kind == Some(clauseo_protocol::AgentKind::Claude);
     if let (None, Some(tools), false) = (&entry, actor.profile.browser_tool(), claude) {
-        if !settings.tools.browser {
+        if !browser_on {
             return skip;
         }
         let command = tools.join(format!(
@@ -373,7 +377,7 @@ pub(super) fn browser_prep(
     let clauseo_acp::McpServer::Stdio { command, args, .. } = entry else {
         return skip;
     };
-    if !settings.tools.browser
+    if !browser_on
         || (proxy && actor.wiring.proxy.is_none())
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
     {
