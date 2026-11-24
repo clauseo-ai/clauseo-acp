@@ -20,7 +20,7 @@ import { MATTER } from "./hosts.ts";
 import { heldHost, OTHER } from "./registry-u7.tsx";
 import { state } from "./registry-u8.tsx";
 import { RoomOver, RoomPressing } from "./states.tsx";
-import { matterWords, versionWords } from "./words.ts";
+import { matterWords, threadWords, versionWords } from "./words.ts";
 
 /** A queued status with the host's hold, as the bindings don't carry it yet. */
 const heldBy = (hold: "undo" | "restore" | "relocate"): ThreadStatus =>
@@ -167,7 +167,7 @@ export const UC_PARALLEL: Entry[] = [
   ),
   state(
     "UC-1149",
-    versionWords(
+    threadWords(
       "Another conversation also changed {papers}. Undoing this takes its change away too.",
     ),
     SHARED,

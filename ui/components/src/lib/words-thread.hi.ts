@@ -269,4 +269,7 @@ export const HI = {
   // a question past eight lines, folded, and open (UC-142, UC-143)
   "Show all": "सभी दिखाएँ",
   "Show less": "कम दिखाएँ",
+  // FileChange.also_changed_by (parallel answers): the changed-paper card's line under its papers. Here, not in the
+  // versions' words, so the thread's chunk carries it alone. hi: later
+  "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
 } as const;

@@ -4,6 +4,7 @@
 // says undoing takes the other conversation's change away too, and it is kept (unticked) unless the lawyer says
 // otherwise, as a paper that may hold the lawyer's own edits is. Once undone, the card's line goes.
 import { act } from "react";
+import { th } from "@clauseo/components/lib/words-thread.ts";
 import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { afterEach, expect, test } from "vitest";
 import { reset, step, uuid } from "../../testing/stream-script.ts";
@@ -42,7 +43,7 @@ test("the card says another conversation also changed the paper, naming it", asy
   h.deliver([reset([changed([paper("Notice.docx", true), paper("Reply.docx", false)])])]);
   await h.settle();
   expect(h.one("also-changed")?.textContent).toBe(
-    vt(
+    th(
       "en",
       "Another conversation also changed {papers}. Undoing this takes its change away too.",
       {
