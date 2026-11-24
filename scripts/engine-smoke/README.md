@@ -13,14 +13,15 @@ cp crates/limits/tests/live/package.json crates/limits/tests/live/package-lock.j
 (cd "$DIR" && npm ci --ignore-scripts --no-audit --no-fund)
 node scripts/engine-smoke/smoke.mjs "$DIR/node_modules" \
   --expect-model claude:opus --expect-model codex:gpt-6.1-sol \
-  --prompt-model claude:haiku --prompt-effort claude:low \
+  --prompt-model claude:haiku \
   --prompt-model codex:gpt-5.6-luna --prompt-effort codex:low
 ```
 
-The prompt runs on the cheapest model and the lowest effort each adapter lists, because each run
+The prompt runs on the cheapest model each adapter lists (for Codex, at its lowest effort), because each run
 is real usage on a real person's plan: left alone, the adapters start on the account's default,
 which can be the costliest model. `gpt-5.6-luna` is the model Codex itself uses to name a
-conversation (see `scripts/codex-launch-probe/README.md`). CI passes, as `--expect-model`, the
+conversation (see `scripts/codex-launch-probe/README.md`). Claude's command sets no effort: Haiku
+may take none, and an effort it doesn't list fails the run before the prompt. CI passes, as `--expect-model`, the
 model id the bump is for; the ids above are examples. All options: `[--agent claude|codex|both]
 [--expect-model [claude:|codex:]<id>]... [--prompt-model [claude:|codex:]<id>]
 [--prompt-effort [claude:|codex:]<level>] [--timeout 180] [--mock-codex]`.
