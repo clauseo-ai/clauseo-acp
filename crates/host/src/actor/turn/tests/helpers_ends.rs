@@ -1,8 +1,11 @@
 //! Helpers across a run's end and a reopen (`turn/helpers.rs`): the same view after a reopen;
 //! a helper a crash left open in an open turn, or past its turn, ends `Stopped` at the next
 //! start, once; a helper whose engine dies mid-turn, a send-now, a failed write's retry and a
-//! detach end it `Stopped`; a failed write of its handback is written again as it was; its step
-//! and words held with no turn live land in the prompted turn that starts.
+//! detach end it `Stopped`; a handback whose write fails, once or twice, is written again as it
+//! was; its step and words held with no turn live land in the prompted turn that starts.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use futures::channel::oneshot;
 
@@ -381,9 +384,22 @@ fn a_close_whose_write_cannot_be_sent_ends_its_helper_on_the_retry() {
 /// writes the end that write lost, `Done` with the helper's report, not `Stopped`.
 #[test]
 fn a_handback_whose_write_fails_ends_its_helper_done_with_its_report_on_the_retry() {
+    handback_write_fails("helpers-handback-fails", 1);
+}
+
+/// A handback whose write fails, and the retry's write too: the retry after that still writes
+/// the helper's own end, `Done` with its report.
+#[test]
+fn a_handback_whose_write_fails_twice_still_ends_its_helper_done_with_its_report() {
+    handback_write_fails("helpers-handback-fails-twice", 2);
+}
+
+/// The store refuses the first `times` writes holding a helper's end, the handback's first;
+/// the helper ends once, `Done` with its report.
+fn handback_write_fails(name: &str, times: usize) {
     let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
     let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n");
-    let mut rig = Rig::start("helpers-handback-fails", &steps);
+    let mut rig = Rig::start(name, &steps);
     let thread = rig.thread();
     let turn = send_prompt(&mut rig, 10, thread);
     rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
@@ -400,7 +416,16 @@ fn a_handback_whose_write_fails_ends_its_helper_done_with_its_report_on_the_retr
         Some(r#"{"message":"Digest."}"#),
     );
     stamped(&mut rig, thread, Origin::Turn(turn), "toolu_A", handback);
-    rig.fail(1, |event| matches!(event, DomainEvent::HelperEnded(_)));
+    // The store is asked only while refusals are left, so this counts the refused writes.
+    let refused = Rc::new(Cell::new(0));
+    let counted = Rc::clone(&refused);
+    rig.fail(times, move |event| {
+        let end = matches!(event, DomainEvent::HelperEnded(_));
+        if end {
+            counted.set(counted.get() + 1);
+        }
+        end
+    });
     lead(
         &mut rig,
         thread,
@@ -408,6 +433,7 @@ fn a_handback_whose_write_fails_ends_its_helper_done_with_its_report_on_the_retr
         patch("toolu_H", None, COMPLETED, Some(DELIVERED)),
     );
     until_ended(&mut rig, thread);
+    assert_eq!(refused.get(), times, "writes refused");
     let story = story(&rig.log(thread));
     let ends: Vec<&String> = story
         .iter()

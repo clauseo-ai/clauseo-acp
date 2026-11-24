@@ -59,8 +59,9 @@ pub(super) struct Helpers {
     words: words::Held,
     /// The helper's own ends ([`end`]) this run sent and the log may not hold yet: the outcome
     /// and report of each, so a retry after a failed write writes that same end (`ends.rs`).
-    /// Each goes once the retry writes it, once the view shows it landed, or once a turn's end
-    /// is durable (every commit before it is then).
+    /// Each stays through retries whose writes fail too, and goes once the view after a drained
+    /// stream shows it landed, once a turn's end is durable (every commit before it is then), or
+    /// with the helpers at a detach.
     sent_ends: BTreeMap<HelperId, (HelperOutcome, Option<String>)>,
 }
 
