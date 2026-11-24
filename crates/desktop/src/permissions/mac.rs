@@ -23,6 +23,8 @@ use super::codes::{ITEM_NOT_FOUND, silent_answer};
 
 /// The attribute key of an item's account (`kSecAttrAccount`).
 const ACCOUNT_KEY: &str = "acct";
+/// The log target of the check's support lines: host.log keeps INFO from `::lifecycle` targets.
+const LIFECYCLE: &str = "clauseo_desktop::permissions::lifecycle";
 
 /// The accounts of `service`'s generic passwords, by attributes only; none when it has none or
 /// the search fails (logged by code).
@@ -73,12 +75,22 @@ pub(super) fn silent_read(service: &str, account: &str) -> Option<bool> {
         Err(error) => Err(error.code()),
     };
     let answer = silent_answer(read);
-    if answer.is_none() {
-        tracing::warn!(
+    // On the lifecycle target, so host.log keeps it: the service and the OS's code, never the
+    // account or a value, so support and the Mac test runs can tell what the row was built on.
+    match answer {
+        Some(false) => tracing::info!(
+            target: LIFECYCLE,
+            service,
+            code = read.err(),
+            "permissions: a keychain item would ask"
+        ),
+        None => tracing::warn!(
+            target: LIFECYCLE,
             service,
             code = read.err(),
             "permissions: keychain check failed"
-        );
+        ),
+        Some(true) => {}
     }
     answer
 }
