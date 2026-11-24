@@ -3,9 +3,6 @@
 import type { Hindi } from "./words-core.ts";
 
 export const HI = {
-  // each row's state chip
-  On: "चालू",
-  Off: "बंद",
   // the popover's foot when a tool is off in Settings, and its tooltip: a change never reaches the open conversation
   "Open Settings": "सेटिंग्स खोलें",
   "Changes apply to new conversations.": "बदलाव नई बातचीत पर लागू होते हैं।",

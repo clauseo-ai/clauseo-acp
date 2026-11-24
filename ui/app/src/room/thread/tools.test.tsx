@@ -72,10 +72,13 @@ const openPopover = async () => {
 const described = (el: HTMLElement | null) =>
   document.getElementById(el?.getAttribute("aria-describedby") ?? "")?.textContent ?? null;
 
-test("a header with tools shows their glyphs after the plan, parted by a dot, named in words and no visible words", async () => {
+test("each tool after the plan, parted by a dot: its glyph, its name and On or Off", async () => {
   h = await open([web("available"), browser(off("browser_not_installed"))]);
   expect(line()?.getAttribute("aria-label")).toBe("Web search: on. Browser: off, install Chrome.");
-  expect(line()?.textContent).toBe("");
+  // issue 4 of 24 Nov: what each glyph is and where it stands, in words a lawyer reads
+  const shown = [...(line()?.querySelectorAll<HTMLElement>("[data-tool]") ?? [])];
+  expect(shown.map((t) => t.textContent)).toEqual(["Web searchOn", "BrowserOff"]);
+  expect(shown.map((t) => t.querySelector("[data-on]")?.textContent)).toEqual(["On", "Off"]);
   expect(line()?.querySelectorAll("[data-tool] > svg")).toHaveLength(2);
   for (const svg of line()?.querySelectorAll("[data-tool] > svg") ?? [])
     expect(svg.getAttribute("width")).toBe("14");

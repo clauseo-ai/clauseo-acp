@@ -6,6 +6,9 @@ export const HI = {
   // each tool's name
   "Web search": "वेब खोज",
   Browser: "ब्राउज़र",
+  // each tool's state, after its name on the status line and in the popover's chip
+  On: "चालू",
+  Off: "बंद",
   // the tool line's name and tooltip, one sentence per tool: "Web search: on. Browser: off, install Chrome."
   "{tool}: {state}.": "{tool}: {state}।",
   on: "चालू",
