@@ -274,6 +274,7 @@ mod search;
 mod sent;
 mod shell_writes;
 pub mod shown;
+mod skill_source;
 mod snapshot;
 mod sources;
 mod stetdoc_args;

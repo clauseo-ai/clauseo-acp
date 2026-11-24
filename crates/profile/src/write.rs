@@ -8,7 +8,8 @@
 //! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`;
 //! and the agents' shell commands in `<data>/tools` ([`crate::tools`]); and a skill added on this
 //! computer, written under `<data>/skill-packs.adding` then renamed into `<data>/skill-packs`
-//! ([`crate::packs::added`]).
+//! ([`crate::packs::added`]), and a preview's staging folder there, `<token>/`, with the archive
+//! it unpacked ([`crate::packs::source`]).
 
 #![expect(
     clippy::disallowed_methods,

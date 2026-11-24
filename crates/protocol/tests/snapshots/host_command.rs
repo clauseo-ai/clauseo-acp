@@ -126,6 +126,11 @@ golden! { HostCommand::name_of {
     AddSkill => add_skill: HostCommand::AddSkill {
         path: "/Users/lawyer/Skills/nda-review".to_owned(),
     };
+    AddSkills => add_skills: HostCommand::AddSkills {
+        token: "t1".to_owned(),
+        pick: vec!["pdf".to_owned()],
+        scope: clauseo_protocol::AddonScope::All,
+    };
     RemoveSkill => remove_skill: HostCommand::RemoveSkill {
         id: PackId::new("nda-review").unwrap(),
     };

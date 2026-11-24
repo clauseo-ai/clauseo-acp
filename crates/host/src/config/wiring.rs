@@ -98,6 +98,9 @@ pub(crate) struct LaunchWiring {
     /// The stetdoc the Word blackline and tracked changes run (`HostConfig::with_stetdoc`);
     /// `None`: refused.
     pub(crate) stetdoc: Option<Stetdoc>,
+    /// The fake server skill downloads and searches go to, for tests
+    /// (`HostConfig::with_skill_server`); `None`: GitHub and skills.sh over https.
+    pub(crate) skill_server: Option<String>,
 }
 
 impl Default for LaunchWiring {
@@ -128,6 +131,7 @@ impl Default for LaunchWiring {
             held: HeldRuns::default(),
             blocklist: None,
             stetdoc: None,
+            skill_server: None,
         }
     }
 }

@@ -535,6 +535,7 @@ impl Actor {
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::SkillDone(done) => settings::add_skill::on_done(self, *done),
             Input::Addon(back) => addon_change::on_back(self, *back),
+            Input::SkillsAdded(added) => settings::add_skills::on_added(self, *added),
             Input::Update(input) => update::on_input(self, input),
             Input::Recorded(recorded) => last_exit::on_recorded(self, *recorded),
             Input::Connector(input) => connectors::on_input(self, *input),

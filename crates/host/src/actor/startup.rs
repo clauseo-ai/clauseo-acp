@@ -52,6 +52,12 @@ pub(super) async fn open(
     crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     // Once the store is open this host is the data folder's only one.
     super::query::blackline::sweep_leftovers(parts.effective.data_dir(), parts.clock.now().wall);
+    // Skill previews never outlive a run (decision record 0040, "Adding from a link").
+    let adding = parts
+        .effective
+        .data_dir()
+        .join(clauseo_profile::packs::source::ADDING_DIR);
+    clauseo_profile::packs::source::sweep(&adding, None);
     let heads = store.heads().await?;
     let allowed = Box::new(super::allowed::AllowState::new(parts.effective.data_dir()));
     let agent_options = super::agent_options::AgentOptions::new(parts.effective.data_dir());

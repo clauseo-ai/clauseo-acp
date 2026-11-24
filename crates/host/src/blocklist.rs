@@ -48,7 +48,7 @@ use crate::clock::Clock;
 
 pub(crate) mod allowed;
 mod disk;
-mod fetch;
+pub(crate) mod fetch;
 mod first_load;
 mod live;
 mod timing;
@@ -351,4 +351,4 @@ fn run(updater: &Updater, stopped: &mpsc::Receiver<()>, mut on_round: impl FnMut
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -175,6 +175,7 @@ mod serde_util;
 mod session;
 mod settings;
 mod setup;
+mod skill_add;
 mod skill_packs;
 mod stream;
 #[cfg(test)]
@@ -307,6 +308,7 @@ wire_types! {
         Language, Lite, Motion, PlanProvider, PlanView, PrivacyPatch, PrivacySettings,
         SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
     },
+    skill_add::{CatalogueItem, PreviewedSkill, SkillFrom, SkillPreview, SkillSearch},
     skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
     addons::{
         Addon, AddonFrom, AddonFromKind, AddonKind, AddonList, AddonScope, AddonSource,

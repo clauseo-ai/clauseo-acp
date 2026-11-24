@@ -13,6 +13,7 @@
 //! `SetSkillPack` in `packs.rs`.
 
 pub(in crate::actor) mod add_skill;
+pub(in crate::actor) mod add_skills;
 pub(in crate::actor) mod default_location;
 mod entries;
 mod lock_causes;

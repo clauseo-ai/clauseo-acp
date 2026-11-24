@@ -514,6 +514,79 @@ Clauseo's own Claude home (`<data>/agents/claude-acp/home/settings.json`, G11), 
 other key there, so the account's claude.ai skills are neither synced nor loaded beside the
 packs. There is no switch for it.
 
+### Adding from a link (D3; amends "Clauseo never fetches it")
+
+A lawyer adds a skill from where they find it: a folder, a `SKILL.md`, a `.zip`, a GitHub
+repository or link, or a skills.sh name. This amends "Clauseo never fetches it" above for this
+one case. A pack's `source_url` is still never fetched.
+
+- **Only on the lawyer's own action.** Clauseo downloads only when the lawyer asks for a preview
+  (and searches the skills.sh catalogue only when they search), never in the background. The
+  preview shows each skill found and where it comes from (`from`) before anything is added.
+- **What is fetched.** A GitHub link (`/tree/<ref>/<path>` and `/blob/<ref>/<path>/SKILL.md`
+  narrow it) and a skills.sh name (`owner/repo`, `owner/repo/skill`, `owner/repo@ref`) both
+  fetch GitHub's zip archive, `https://codeload.github.com/<owner>/<repo>/zip/<ref or HEAD>`. Any
+  other `https` link must end in `.zip`. There is no git, no npx and no call to skills.sh's
+  download API. Nothing is sent to skills.sh beyond a search's own terms: no telemetry, no
+  install count. The skills.sh mapping is one function, `skills_sh_repo`
+  (`profile/src/packs/source/remote.rs`).
+- **The client** is the block list's (0053): clauseo-connectors' `HttpsClient`, rustls with the
+  OS trust store (which holds a firm CA installed in the OS), routed through
+  `network.upstream_proxy` when it is set and otherwise the system's proxy. `https` only, with no
+  port and no user info. Redirects are followed by hand, at most 5, and each hop is checked again.
+  A download is at most 10 MiB and 90 s; a search is at most 1 MiB and 15 s, cut to 30 items.
+- **The archive** is unpacked into `<data>/skill-packs.adding/<token>/tree`, under the skills.sh
+  CLI's caps: 25 MiB unpacked and 1,000 entries, counted as the bytes come out. It refuses
+  any entry outside the folder (`..`, an absolute path, a drive letter, `\\`), a symlink, an
+  entry that is neither a file nor a folder, an encrypted entry, two names equal but for case, and
+  a name no OS can hold. A refusal leaves nothing behind.
+- **Discovery** follows the skills.sh CLI. A top-level `SKILL.md` is a skill on its own;
+  otherwise Clauseo looks in the top's folders, `skills/` (with `.curated`, `.experimental` and
+  `.system`), `.agents/skills/`, `.claude/skills/` and the folders `skills.sh.json` lists in
+  `paths`, up to 3 levels down. A shallower skill shadows deeper ones. When none of these holds a
+  skill, it searches every folder down to 5 levels. `.git`, `node_modules`, `dist`, `build`
+  and `__pycache__` are skipped, and links are never followed. A skill needs `name` and
+  `description` in its frontmatter; `metadata.internal: true` hides it unless it is asked for
+  by name. Each skill is read and built as a pack in memory at preview time. A skill too big or
+  breaking a pack rule is listed with its refusal and is never dropped silently. A skill's copy
+  leaves out hidden names, `metadata.json`, `__pycache__` and `__pypackages__`.
+- **Caps.** The per-skill caps of a skill added here stay as they are: 5,000,000 bytes and 200
+  files.
+- **The token** is 32 hex characters, so it never names a pack. A preview's folder goes after its
+  install, after 30 minutes, and on every start.
+- **Install** goes through the same path as a folder's (`added::read_source`, `free_id`, the
+  firm's admission, `build`, `install`). The manifest records where the skill came from:
+  `source_url` (`https`: the skills.sh page, the GitHub link or the `.zip` link), now allowed in
+  a manifest marked `added_here`, and a new optional key `added_from` (`skills_sh`, `github`,
+  `url` or `zip`; left out for a folder). Every manifest written before this change reads as
+  added from a folder. This is the manifest change the format rule below asks a record for. The
+  format stays `1`, because an older Clauseo refuses only packs added by a newer one.
+- **The wire** (D3): `search_skills {q}` answers `skill_search {items}` (at most 30, each with its
+  skills.sh `page`); `preview_skill {from: {skills_sh} | {url} | {path}}` answers `skill_preview
+  {token, from, skills}`, listing only the skills that can be added (none left: `skill.too_big` or
+  `skill.invalid`); `add_skills {token, pick, scope}` installs each picked skill as its own pack and
+  answers `done`, then `addons_changed`. A scope `{matter: X}` puts each in X only, as
+  `set_addon_scope` does (`command.unknown_matter` for a matter the host does not know,
+  `settings.locked` while the firm locks `skills.scope`). Both windows send all three; a `path` preview needs a path this run's
+  `pick_skill` returned (it now picks a `.zip` or a `SKILL.md` as well as a folder). New codes:
+  `skill.download_failed` (retryable), `skill.not_found`, `skill.too_big`, `skill.preview_expired`.
+- **The search sends only `q`:** no cookie (the client keeps none), no header beyond the client's
+  own `User-Agent: Clauseo`, nothing from the matters, no telemetry.
+- **Icon.** For a skill from skills.sh or GitHub, at add time only, the host fetches the owner's
+  picture, `https://github.com/<owner>.png`, through the same client and proxy: at most 64 KB, a
+  PNG, never retried; the request names the owner alone. It is kept as
+  `<data>/skill-icons/<pack id>.png` (a pack's own folder holds only its layout's files), sent in
+  `list_addons` as `icon: "data:image/png;base64,…"`, and removed with the skill. Any failure, or
+  any other source, leaves the field out.
+- **Scripts.** A skill added here may carry scripts, as skills.sh skills do. They run under the
+  agent's normal rules (its shell, its jail, its permission prompts). A pack added here (from
+  a folder too) loads, turns on and lists with its scripts while `skills.allow_scripts` is off,
+  unless a firm's policy decides `skills.allow_scripts` (`added_scripts`,
+  `host/src/actor/settings/packs.rs`; `PackEntry::scripts_if_added` at launch), in the same way
+  the `added_here` marker already gets past the lawyer's own `skills.extra` but never past a
+  firm. The preview and the list say which skills hold scripts (`has_scripts`). A firm's
+  `skills.extra`, `skills.curated` and `skills.allow_scripts` work as before.
+
 ### Windows
 
 Beyond the rules above: any reparse point is refused, the link count and final path are read from

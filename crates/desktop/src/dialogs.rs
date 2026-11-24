@@ -342,18 +342,19 @@ impl<R: Runtime> Picker for NativePicker<'_, R> {
     }
 }
 
-/// The native folder dialog for "Add a skill", over the Settings window when it is open. It
-/// picks folders only: the dialog plugin draws a folder dialog or a file dialog, never one for
-/// both, so a lone `SKILL.md` is added by picking the folder that holds it. It keeps no last
-/// pick, so the matter picker's start folder stays the matters'.
+/// The native dialog for "Add a skill", over the Settings window when it is open: a folder
+/// dialog, or with `files` a file dialog for a `.zip` or a `SKILL.md` (the dialog plugin
+/// draws one or the other, never one for both). It keeps no last pick, so the matter picker's
+/// start folder stays the matters'.
 pub(crate) struct SkillPicker<R: Runtime> {
     app: AppHandle<R>,
+    files: bool,
 }
 
 impl<R: Runtime> SkillPicker<R> {
-    /// A picker drawing on `app`.
-    pub(crate) fn new(app: AppHandle<R>) -> Self {
-        Self { app }
+    /// A picker drawing on `app`: files (`.zip`, `.md`) with `files`, else folders.
+    pub(crate) fn new(app: AppHandle<R>, files: bool) -> Self {
+        Self { app, files }
     }
 }
 
@@ -368,10 +369,15 @@ impl<R: Runtime> Picker for SkillPicker<R> {
         if let Some(parent) = self.app.get_webview_window(label) {
             dialog = dialog.set_parent(&parent);
         }
-        dialog.pick_folder(move |picked| {
+        let send = move |picked: Option<tauri_plugin_dialog::FilePath>| {
             // The command may have gone; then nobody reads the answer.
             let _gone = tx.send(picked.and_then(|path| path.into_path().ok()));
-        });
+        };
+        if self.files {
+            dialog.add_filter("Skill", &["zip", "md"]).pick_file(send);
+        } else {
+            dialog.pick_folder(send);
+        }
         Box::pin(async move { rx.await.ok().flatten() })
     }
 }

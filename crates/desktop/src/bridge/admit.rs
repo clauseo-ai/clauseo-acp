@@ -65,6 +65,8 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::RemoveSandboxSetup {}
             // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
             | HostCommand::RevokeAllowedSite { .. }
+            // Adding what a preview staged: the host reads only its own staging folder.
+            | HostCommand::AddSkills { .. }
             // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
             | HostCommand::Mcp(_)
             // Skills and tools: scope, a matter's switch, removal (D2a), as from main.
@@ -78,7 +80,8 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             HostCommand::AddSkill { path } => picked_skill(bridge, path),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, set_skill_pack, add_skill, remove_skill, refresh_limits, set_update_mode, \
+                 set_privacy_settings, set_skill_pack, add_skill, add_skills, remove_skill, \
+                 refresh_limits, set_update_mode, \
                  check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
                  set_addon_scope, set_addon_on, remove_addon, the MCP server commands and the \
                  connector commands",
@@ -170,7 +173,11 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // refuses a built-in, an unknown id and what the firm locks.
         | HostCommand::SetAddonScope(_)
         | HostCommand::SetAddonOn(_)
-        | HostCommand::RemoveAddon(_) => Ok(()),
+        | HostCommand::RemoveAddon(_)
+        // The Skills and Connectors place adds what its preview staged (0040, "Adding from a
+        // link"): the host reads only its own staging folder, and the lawyer saw the skills
+        // and where they come from first.
+        | HostCommand::AddSkills { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
@@ -280,7 +287,7 @@ pub(super) fn picked_source(bridge: &Bridge, source: &MatterSource) -> Result<()
 /// Whether this run's `pick_folder` issued `folder`: `command.invalid` when it did not.
 /// Admits an `AddSkill` whose `path` this run's `pick_skill` returned. The message names no
 /// path (it may hold the lawyer's name).
-fn picked_skill(bridge: &Bridge, path: &str) -> Result<(), HostError> {
+pub(super) fn picked_skill(bridge: &Bridge, path: &str) -> Result<(), HostError> {
     if lock(&bridge.skills_picked).contains(path) {
         Ok(())
     } else {

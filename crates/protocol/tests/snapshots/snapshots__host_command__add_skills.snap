@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::AddSkills\n{\n    token: \"t1\".to_owned(), pick:\n    vec![\"pdf\".to_owned()], scope: clauseo_protocol::AddonScope::All,\n}"
+---
+{
+  "add_skills": {
+    "token": "t1",
+    "pick": [
+      "pdf"
+    ],
+    "scope": "all"
+  }
+}

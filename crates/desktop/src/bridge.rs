@@ -19,7 +19,7 @@ use clauseo_host::HostHandle;
 use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
     HostCommand, HostError, HostQuery, Language, PermissionEntry, PermissionRequestId, Principal,
-    QueryResult, RefreshWhy, SetupCommand, StreamId, ThreadId, ViewPosition,
+    QueryResult, RefreshWhy, SetupCommand, SkillFrom, StreamId, ThreadId, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -278,13 +278,16 @@ impl Bridge {
                         | HostQuery::GetUpdate
                         | HostQuery::ListSkillPacks
                         | HostQuery::ListAddons { .. }
+                        | HostQuery::SearchSkills { .. }
+                        | HostQuery::PreviewSkill { .. }
                         | HostQuery::Protection
                         | HostQuery::AllowedSites
                 ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
                     "the settings window reads only the settings, the update state, the skill \
-                     packs, the skills and tools list, the protection view and the allowed sites",
+                     packs, the skills and tools list, the skill search and preview, the \
+                     protection view and the allowed sites",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -316,6 +319,14 @@ impl Bridge {
             // Every skill and tool in one list (the main window's Skills and Connectors place
             // and Settings): reads the packs folder and the settings, writes nothing.
             | HostQuery::ListAddons { .. }
+            // The skills.sh catalogue's search (0040, "Adding from a link"): the host sends
+            // the words to skills.sh only, and writes nothing but its log.
+            | HostQuery::SearchSkills { .. }
+            // A preview of a skills.sh name or an https link: the host downloads it into its
+            // own staging folder, nothing else (0040, "Adding from a link").
+            | HostQuery::PreviewSkill {
+                from: SkillFrom::SkillsSh(_) | SkillFrom::Url(_),
+            }
             // The sandbox's view (0051): the host's cache, read only. Both windows show it.
             | HostQuery::Protection
             // The sites allowed despite the block list (0053, PR 2): stored state, no paths.
@@ -327,6 +338,11 @@ impl Bridge {
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.
             HostQuery::FolderSupport { source } => admit::picked_source(self, source)?,
+            // A preview of a path reads it: only one this run's `pick_skill` returned, as for
+            // `AddSkill`.
+            HostQuery::PreviewSkill {
+                from: SkillFrom::Path(path),
+            } => admit::picked_skill(self, path)?,
         }
         self.host().await?.query(PRINCIPAL, query).await
     }
@@ -567,10 +583,10 @@ impl Bridge {
         }))
     }
 
-    /// Asks `picker` for a skill's folder and records its path, with Windows' short names spelt
-    /// out (`picked::long_name`), so `AddSkill` admits it; `None` when the lawyer cancelled, or
-    /// for a path that is not UTF-8 (the wire carries text; logged without the path). Whether it
-    /// holds a skill is the host's rule (`AddSkill`).
+    /// Asks `picker` for a skill's folder or file and records its path, with Windows' short names
+    /// spelt out (`picked::long_name`), so `AddSkill` and a `path` preview admit it; `None` when
+    /// the lawyer cancelled, or for a path that is not UTF-8 (the wire carries text; logged
+    /// without the path). Whether it holds a skill is the host's rule.
     pub(crate) async fn pick_skill(&self, picker: &dyn Picker) -> Option<String> {
         let path = picked::long_name(&picker.pick().await?);
         let Some(path) = path.to_str().map(str::to_owned) else {

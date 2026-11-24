@@ -59,6 +59,7 @@ fn a_missing_matter_list_uses_skills_enabled() {
             id: "nda-kit".to_owned(),
             hash: PackHash::parse(&hash('1')).unwrap(),
             added_only: false,
+            scripts_if_added: false,
         }
     );
     assert!(request.skipped.is_empty(), "{:?}", request.skipped);
@@ -295,6 +296,7 @@ fn prep(root: &Path) -> PackPrep {
         id: "nda-kit".to_owned(),
         hash: pack.hash().clone(),
         added_only: false,
+        scripts_if_added: false,
     }];
     PackPrep {
         write: profile(root).pack_write(Some(AgentKind::Claude), entries, false),

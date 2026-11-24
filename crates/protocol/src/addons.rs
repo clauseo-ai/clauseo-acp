@@ -78,6 +78,11 @@ pub struct Addon {
     /// value. Left out for a skill and a built-in tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<McpServerView>,
+    /// Added items only, when one was kept: a `data:image/png;base64,` URL of its icon (for a
+    /// skill from skills.sh or GitHub, its owner's GitHub picture, fetched once as it was
+    /// added). Left out otherwise: the app shows its own glyph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A skill, or a tool (an MCP server).

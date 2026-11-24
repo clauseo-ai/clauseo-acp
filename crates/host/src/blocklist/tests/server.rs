@@ -1,7 +1,7 @@
-//! A fake HTTP server for the block list's tests: 127.0.0.1, canned answers by path, one
-//! connection at a time, each answer closing its connection. As a proxy ([`Server::proxy`]) it
-//! takes a `CONNECT`, answers 200 and then serves the tunnelled request from its own routes,
-//! which are the target server's.
+//! A fake HTTP server for the block list's tests and the skill downloads' (`skill_source`):
+//! 127.0.0.1, canned answers by path, one connection at a time, each answer closing its
+//! connection. As a proxy ([`Server::proxy`]) it takes a `CONNECT`, answers 200 and then serves
+//! the tunnelled request from its own routes, which are the target server's.
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -11,7 +11,7 @@ use std::thread;
 
 /// One canned answer.
 #[derive(Clone)]
-pub(super) enum Reply {
+pub(crate) enum Reply {
     /// 200 with this body.
     Body(Vec<u8>),
     /// A 302 to this `Location`.
@@ -24,7 +24,7 @@ pub(super) enum Reply {
 type Routes = Arc<Mutex<HashMap<String, Reply>>>;
 
 /// The server: its port, its answers and every request line's target it saw.
-pub(super) struct Server {
+pub(crate) struct Server {
     port: u16,
     routes: Routes,
     hits: Arc<Mutex<Vec<String>>>,
@@ -32,12 +32,12 @@ pub(super) struct Server {
 
 impl Server {
     /// Starts serving on a free port of 127.0.0.1, on a thread that ends with the test's process.
-    pub(super) fn start() -> Server {
+    pub(crate) fn start() -> Server {
         Self::serving(Arc::new(Mutex::new(HashMap::new())))
     }
 
     /// A proxy in front of `target`: it sees the `CONNECT`, then serves `target`'s routes.
-    pub(super) fn proxy(target: &Server) -> Server {
+    pub(crate) fn proxy(target: &Server) -> Server {
         Self::serving(Arc::clone(&target.routes))
     }
 
@@ -55,22 +55,22 @@ impl Server {
     }
 
     /// The URL of `path` on this server.
-    pub(super) fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("http://127.0.0.1:{}{path}", self.port)
     }
 
     /// The port.
-    pub(super) fn port(&self) -> u16 {
+    pub(crate) fn port(&self) -> u16 {
         self.port
     }
 
     /// Answers `path` with `reply` from now on.
-    pub(super) fn set(&self, path: &str, reply: Reply) {
+    pub(crate) fn set(&self, path: &str, reply: Reply) {
         self.routes.lock().unwrap().insert(path.to_owned(), reply);
     }
 
     /// Each request's method and target so far (`GET /list.gz`, `CONNECT 127.0.0.1:1234`).
-    pub(super) fn hits(&self) -> Vec<String> {
+    pub(crate) fn hits(&self) -> Vec<String> {
         self.hits.lock().unwrap().clone()
     }
 }

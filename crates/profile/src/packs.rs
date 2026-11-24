@@ -26,6 +26,7 @@ pub mod plugin;
 pub mod read;
 pub mod render;
 pub mod scripts;
+pub mod source;
 pub mod status;
 #[cfg(unix)]
 mod unix;
@@ -257,6 +258,10 @@ pub struct PackEntry {
     /// Whether it loads only as a pack added on this computer (`added_here`): the lawyer's own
     /// `skills.extra` does not admit it otherwise.
     pub added_only: bool,
+    /// Whether it may carry scripts while `skills.allow_scripts` is off, when it was added on
+    /// this computer (no firm's policy decides `skills.allow_scripts`; decision record 0040,
+    /// "Adding from a link").
+    pub scripts_if_added: bool,
 }
 
 /// What a launch's packs came to: those loaded, in the order asked, and those skipped.
@@ -344,7 +349,11 @@ pub fn load(packs_root: &Path, entries: &[PackEntry], allow_scripts: bool) -> Lo
 
 /// [`load`] for one pack.
 fn load_one(packs_root: &Path, entry: &PackEntry, allow_scripts: bool) -> Result<Pack, Skip> {
-    let pack = inspect(packs_root, &entry.id, allow_scripts).map_err(Skip::Refused)?;
+    let read_scripts = allow_scripts || entry.scripts_if_added;
+    let pack = inspect(packs_root, &entry.id, read_scripts).map_err(Skip::Refused)?;
+    if !scripts_allowed(&pack, allow_scripts, entry.scripts_if_added) {
+        return Err(Skip::Refused(Refusal::Script));
+    }
     if *pack.hash() != entry.hash {
         return Err(Skip::Changed);
     }
@@ -352,6 +361,12 @@ fn load_one(packs_root: &Path, entry: &PackEntry, allow_scripts: bool) -> Result
         return Err(Skip::NotAdmitted);
     }
     Ok(pack)
+}
+
+/// Whether `pack`, read with scripts allowed, may keep them: it holds none, or
+/// `allow_scripts`, or it was added on this computer and `if_added`.
+pub fn scripts_allowed(pack: &Pack, allow_scripts: bool, if_added: bool) -> bool {
+    !pack.has_scripts() || allow_scripts || (if_added && pack.manifest().added_here)
 }
 
 #[cfg(test)]

@@ -162,6 +162,12 @@ pub(super) fn query(
         HostQuery::LastExit => super::last_exit::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
         HostQuery::ListAddons { matter } => addons::list(actor, matter, reply),
+        HostQuery::SearchSkills { ref q } => {
+            super::settings::add_skills::search(actor, q.clone(), reply);
+        }
+        HostQuery::PreviewSkill { ref from } => {
+            super::settings::add_skills::preview(actor, from.clone(), reply);
+        }
         // From the cache (decision record 0051): never detected here.
         HostQuery::Protection => {
             let view = super::protection::view(actor);

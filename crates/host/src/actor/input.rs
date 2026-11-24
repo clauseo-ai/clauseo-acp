@@ -280,6 +280,8 @@ pub(crate) enum Input {
     SkillDone(Box<super::settings::add_skill::SkillDone>),
     /// A skill's read or removal for an add-on command, from its thread (`addon_change`).
     Addon(Box<super::addon_change::SkillBack>),
+    /// An `AddSkills` back from its thread (`settings/add_skills.rs`).
+    SkillsAdded(Box<super::settings::add_skills::SkillsAdded>),
     /// A file action's record was put or cleared (`last_exit.rs`).
     Recorded(Box<super::last_exit::Recorded>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
@@ -346,6 +348,7 @@ impl std::fmt::Debug for Input {
             Self::SkillPack(_) => "SkillPack",
             Self::SkillDone(_) => "SkillDone",
             Self::Addon(_) => "Addon",
+            Self::SkillsAdded(_) => "SkillsAdded",
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",
             Self::Mcp(_) => "Mcp",

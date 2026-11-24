@@ -135,7 +135,9 @@ fn start_on(actor: &Actor, ctx: &CommandCtx, id: &PackId, generation: u64) -> Re
     // this computer (admitted whatever it says).
     check_firm(&actor.effective, id)?;
     let root: PathBuf = actor.effective.data_dir().join(packs::PACKS_DIR);
-    let allow_scripts = actor.effective.settings().skills.allow_scripts;
+    // Read with scripts whenever a pack added here may keep them; `recheck` refuses the rest.
+    let allow_scripts =
+        actor.effective.settings().skills.allow_scripts || added_scripts(&actor.effective);
     let hook = actor.wiring.pack_read_hook.clone();
     let clock = Arc::clone(&actor.clock);
     let (ctx, id) = (*ctx, id.clone());
@@ -243,14 +245,15 @@ pub(in crate::actor) fn on_read(actor: &mut Actor, answer: PackRead) {
 
 /// The checks after the read, against the settings in force now: [`check_on`], and a pack with
 /// a script while `skills.allow_scripts` is off is refused as the read would have refused it
-/// (`settings.refused`, `script`).
+/// (`settings.refused`, `script`), unless it was added here and [`added_scripts`].
 pub(in crate::actor) fn recheck(
     effective: &Effective,
     id: &PackId,
     hashed: &Hashed,
 ) -> Result<(), Error> {
     check_on(effective, id, hashed.added_here)?;
-    if hashed.scripts && !effective.settings().skills.allow_scripts {
+    let if_added = hashed.added_here && added_scripts(effective);
+    if hashed.scripts && !effective.settings().skills.allow_scripts && !if_added {
         let code = packs::Refusal::Script.code();
         return Err(Error::refused(
             ErrorCode::SettingsRefused,
@@ -258,6 +261,13 @@ pub(in crate::actor) fn recheck(
         ));
     }
     Ok(())
+}
+
+/// Whether a pack added on this computer may carry scripts while `skills.allow_scripts` is off:
+/// when no firm's policy decides `skills.allow_scripts` (decision record 0040, "Adding from a
+/// link"). The `added_here` marker gets past the lawyer's own setting, never past a firm's.
+pub(in crate::actor) fn added_scripts(effective: &Effective) -> bool {
+    !effective.is_locked("skills.allow_scripts")
 }
 
 /// [`check_on`]'s firm half: `settings.locked` while policy locks `skills.enabled` or a firm

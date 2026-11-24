@@ -102,6 +102,9 @@ impl CommandEnvelope {
     /// [`HostError::invalid_command`](crate::HostError::invalid_command).
     pub fn validate(self) -> Result<ValidatedCommand, Error> {
         self.command.validate()?;
+        if let HostCommand::AddSkills { token, pick, .. } = &self.command {
+            crate::skill_add::check_add(token, pick)?;
+        }
         Ok(ValidatedCommand {
             command_id: self.command_id,
             command: self.command,
@@ -239,6 +242,8 @@ impl HostCommand {
             | Self::CancelScheduledUpdate {}
             // No fields; whether this computer has a set-up to retry or remove is state.
             | Self::RetryProtection {} | Self::RemoveSandboxSetup {}
+            // Checked in `CommandEnvelope::validate` (`skill_add::check_add`).
+            | Self::AddSkills { .. }
             // A flag the host keeps the last of; and desktop's own, with no fields.
             | Self::SetNetwork { online: _ } | Self::KeychainReadAgain {} => Ok(()),
             Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => sites(self),

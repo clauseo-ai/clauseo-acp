@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_profile::packs::added::{self, AddError};
+use clauseo_profile::packs::source::ADDING_DIR;
 use clauseo_profile::packs::{self, Refusal};
 use clauseo_protocol::{AddonKind, Date, ErrorCode, HostEvent, PackId};
 use clauseo_settings::{ItemScope, SystemFiles};
@@ -26,12 +27,10 @@ use clauseo_settings::{ItemScope, SystemFiles};
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
-use super::packs::{Admission, READ_JOB, check_firm, write};
+use super::packs::{Admission, READ_JOB, added_scripts, check_firm, write};
 use crate::agent::codex::prepare::off_actor;
 use crate::error::Error;
-
-/// The folder beside the packs folder a skill is written into before it is renamed in place.
-const STAGING_DIR: &str = "skill-packs.adding";
+use crate::skill_source::icon::ICONS_DIR;
 
 /// An `AddSkill` or `RemoveSkill` back from its thread.
 pub(crate) struct SkillDone {
@@ -65,8 +64,9 @@ pub(in crate::actor) fn add_skill(actor: &mut Actor, ctx: &CommandCtx, path: Str
         return;
     }
     let data = effective.data_dir();
-    let (root, staging) = (data.join(packs::PACKS_DIR), data.join(STAGING_DIR));
-    let allow_scripts = effective.settings().skills.allow_scripts;
+    let (root, staging) = (data.join(packs::PACKS_DIR), data.join(ADDING_DIR));
+    // A skill added here may carry scripts unless a firm's policy decides (0040, D3).
+    let allow_scripts = effective.settings().skills.allow_scripts || added_scripts(effective);
     let admission = Admission::of(effective);
     let today = added::utc_date(actor.clock.now().wall.as_millis());
     let clock = Arc::clone(&actor.clock);
@@ -109,6 +109,8 @@ fn add(
     }
     let (files, pack) = added::build(&source, &id, today, allow_scripts).map_err(Refused::Add)?;
     added::install(root, staging, &id, &files).map_err(Refused::Add)?;
+    // A skill from this computer has no icon; one kept for the id before goes.
+    crate::skill_source::icon::remove(&root.with_file_name(ICONS_DIR), &id);
     Ok((pack_id, pack.hash().as_str().to_owned()))
 }
 
@@ -119,7 +121,15 @@ pub(in crate::actor) fn remove_skill(actor: &mut Actor, ctx: &CommandCtx, id: Pa
     let ctx = *ctx;
     actor.spawn_post(async move {
         let text = id.as_str().to_owned();
-        let done = off_actor(clock, READ_JOB, move || Ok(added::remove(&root, &text))).await;
+        let done = off_actor(clock, READ_JOB, move || {
+            let removed = added::remove(&root, &text);
+            if matches!(removed, Ok(true)) {
+                let icons = root.with_file_name(ICONS_DIR);
+                crate::skill_source::icon::remove(&icons, &text);
+            }
+            Ok(removed)
+        })
+        .await;
         Input::SkillDone(Box::new(SkillDone {
             ctx,
             what: Done::Removed(id, done),

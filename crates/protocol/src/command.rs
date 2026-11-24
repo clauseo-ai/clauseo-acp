@@ -15,11 +15,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, AgentPrefs, AllowScope, BlockedSiteId, CheckpointId,
-    ClientName, CommandId, ConfigPicks, Date, DecideRevisions, Delivery, ElicitationId,
-    ElicitationResponse, FieldChange, FileDecision, FolderRefId, InstallWhen, MatterId, PackId,
-    PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RemoveAddon, SetAddonOn,
-    SetAddonScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch, UpdateMode,
+    AddonScope, AgentChoiceId, AgentId, AgentKind, AgentPrefs, AllowScope, BlockedSiteId,
+    CheckpointId, ClientName, CommandId, ConfigPicks, Date, DecideRevisions, Delivery,
+    ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, InstallWhen,
+    MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RemoveAddon,
+    SetAddonOn, SetAddonScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch, UpdateMode,
 };
 #[cfg(doc)]
 use crate::{FileChoice, MatterPath, RawPayload};
@@ -398,6 +398,21 @@ pub enum HostCommand {
     AddSkill {
         /// The folder or `SKILL.md` file, as `pick_skill` returned it.
         path: String,
+    },
+    /// Add the skills `pick` names (each a `SkillPreview` skill's `name`) from the preview
+    /// `token`, each as its own skill pack added on this computer and turned on, with `scope`
+    /// (decision record 0040, "Adding from a link"). Off the host thread. Adding a name added
+    /// before replaces it. Answers `Done`, then `HostEvent::AddonsChanged`. Refused with
+    /// `skill.preview_expired` (preview again), `skill.invalid`, `settings.locked`,
+    /// `command.unknown_matter` for a scope's matter the host does not know, and
+    /// `command.invalid` for an empty `pick` or a name the preview does not hold.
+    AddSkills {
+        /// The preview's token.
+        token: String,
+        /// The skills to add, by name.
+        pick: Vec<String>,
+        /// Where they are on: `{"matter": X}` puts each in X only, as `SetAddonScope` does.
+        scope: AddonScope,
     },
     /// Remove the skill pack `id` added on this computer: deletes its folder and its
     /// `skills.enabled` entry. Answers `Done`, and every app subscriber gets

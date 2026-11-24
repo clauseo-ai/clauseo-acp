@@ -108,4 +108,15 @@ impl HostConfig {
         self.wiring.mcp_find = Some(find);
         self
     }
+
+    /// Sends every skill download, icon fetch and catalogue search to the fake server at
+    /// `origin` (`http://127.0.0.1:<port>`): GitHub's archives and pictures at their paths there,
+    /// the search at `/api/search`, plain http and no proxy (`skill_source`). For tests, as the
+    /// MCP seams above are; unset, GitHub and skills.sh over https.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn with_skill_server(mut self, origin: &str) -> Self {
+        self.wiring.skill_server = Some(origin.to_owned());
+        self
+    }
 }

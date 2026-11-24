@@ -413,6 +413,18 @@ error_codes! {
         made a skill pack: it could not be read, it is over 5,000,000 bytes or 200 files, or it \
         breaks a skill pack rule (no name or description in its `SKILL.md`, a script while \
         scripts are off, and the like); nothing was added.";
+    SkillDownloadFailed = "skill.download_failed", retryable: true, meaning: "The skill could \
+        not be downloaded: the computer is offline, a proxy refused it, or the site failed or \
+        timed out; nothing was added. Asking again can work.";
+    SkillNotFound = "skill.not_found", retryable: false, meaning: "That skills.sh name or link \
+        has no skill: the site answered not found, or what it holds has no skill (or none by the \
+        name asked); nothing was added.";
+    SkillTooBig = "skill.too_big", retryable: false, meaning: "The skill source is over a size \
+        cap: a download or archive over 10 MiB, over 25 MiB or 1,000 files unpacked, or each skill \
+        in it over 5,000,000 bytes or 200 files; nothing was added.";
+    SkillPreviewExpired = "skill.preview_expired", retryable: false, meaning: "The preview \
+        `AddSkills` names is unknown or over 30 minutes old (or Clauseo restarted since); preview \
+        the skill again.";
     MatterFileFolderClash = "matter.file_folder_clash", retryable: false, meaning: "A restore \
         of chosen files names a file whose name is now a folder, or one of whose folders is now \
         a file, so nothing was restored or written.";

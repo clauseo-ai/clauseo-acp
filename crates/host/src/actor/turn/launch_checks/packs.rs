@@ -29,7 +29,7 @@ use clauseo_settings::{SkillsExtra, SkillsSettings};
 
 use super::super::super::Actor;
 use super::super::super::addon_rules::Placed;
-use super::super::super::settings::packs::Admission;
+use super::super::super::settings::packs::{Admission, added_scripts};
 use super::super::state;
 use crate::log_file::Cause;
 
@@ -156,6 +156,7 @@ impl PackRequest {
                     id: id.clone(),
                     hash,
                     added_only: !admitted,
+                    scripts_if_added: false,
                 }),
                 // The settings keep only `sha256:<64 hex>`, so this is never reached.
                 None => skipped.push((id.clone(), PackSkip::NotTurnedOn)),
@@ -171,6 +172,16 @@ impl PackRequest {
             allow_scripts: skills.allow_scripts,
             skipped,
         }
+    }
+
+    /// With `on` (no firm's policy decides `skills.allow_scripts`), a pack added on this
+    /// computer loads with its scripts while `skills.allow_scripts` is off
+    /// (`PackEntry::scripts_if_added`; decision record 0040, "Adding from a link").
+    pub fn with_added_scripts(mut self, on: bool) -> Self {
+        for entry in &mut self.entries {
+            entry.scripts_if_added = on;
+        }
+        self
     }
 
     /// The packs to load, each with its recorded hash, in `skills.enabled` order.
@@ -208,7 +219,8 @@ pub(super) fn pack_prep(
     let placed = Placed::of(actor, matter);
     let mut skills = actor.effective.settings().skills.clone();
     skills.enabled.retain(|id, _| placed.skill_on(id));
-    let request = PackRequest::new(&skills, list, lawyer_decides);
+    let request = PackRequest::new(&skills, list, lawyer_decides)
+        .with_added_scripts(added_scripts(&actor.effective));
     PackPrep {
         write: actor.profile.pack_write(agent, &request),
         skipped: request.skipped,

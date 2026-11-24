@@ -294,6 +294,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),
         HostCommand::AddSkill { path } => super::settings::add_skill::add_skill(actor, ctx, path),
+        HostCommand::AddSkills { token, pick, scope } => {
+            super::settings::add_skills::add_skills(actor, ctx, (token, pick, scope));
+        }
         HostCommand::RemoveSkill { id } => {
             super::settings::add_skill::remove_skill(actor, ctx, id);
         }
