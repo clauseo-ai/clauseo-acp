@@ -326,7 +326,9 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
 
     /// Holds `agent`'s reads from this call on, and answers a future that resolves to the
     /// hold's [`HoldGuard`] once none is running. A read asked for meanwhile waits, unlaunched,
-    /// until every guard of that agent is dropped: two overlapping holds need two drops. The
+    /// until every guard of that agent is dropped: two overlapping holds need two drops. A model
+    /// probe of that agent running at the call ends with no answer, and none starts until then.
+    /// The
     /// host keeps the guard around a sign-in, a sign-out and a key change, drops it, then sends
     /// `Input::LoginChanged`.
     pub fn hold(&self, agent: AgentKind) -> impl Future<Output = HoldGuard> + Send + 'static {
@@ -406,24 +408,37 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
         let claude_home = self.claude_home.clone();
         let gate = Arc::clone(self.gate(agent));
         Box::pin(async move {
-            // Past any hold, the entry is taken as a read takes it; the probe then runs outside
-            // the gate, so its process (up to 25 s for Claude) never keeps a login change, or a
-            // read queued behind one (a limit stop may wait on it), waiting. A probe that races
-            // a login change reads the old login or fails; the change probes again.
-            let running = gate.enter().await;
+            // The probe runs outside the gate, so its process (up to 25 s for Claude) never
+            // keeps a login change, or a read queued behind one (a limit stop may wait on it),
+            // waiting. None starts under a hold, and a hold taken while it runs ends it
+            // (`hold.rs`); the change that follows probes again.
+            let taken = gate.probe_start()?;
             let launch = entry_now(&entries, launch_env.as_ref(), agent);
-            drop(running);
+            if gate.probe_start() != Some(taken) {
+                return None;
+            }
             let launch = launch?;
-            match agent {
-                AgentKind::Claude => {
-                    // The data folder: the run folder is `<data_dir>/limits/run`.
-                    let data_dir = run_dir.parent().and_then(std::path::Path::parent)?;
-                    let home = claude_home.as_deref();
-                    models::claude_probe(&*launcher, &timer, &launch, &run_dir, data_dir, home)
-                        .await
+            let probe = async move {
+                match agent {
+                    AgentKind::Claude => {
+                        // The data folder: the run folder is `<data_dir>/limits/run`.
+                        let data_dir = run_dir.parent().and_then(std::path::Path::parent)?;
+                        let home = claude_home.as_deref();
+                        models::claude_probe(&*launcher, &timer, &launch, &run_dir, data_dir, home)
+                            .await
+                    }
+                    AgentKind::Codex => {
+                        models::codex_probe(&*launcher, &timer, &launch, &run_dir, &codex_home)
+                            .await
+                    }
                 }
-                AgentKind::Codex => {
-                    models::codex_probe(&*launcher, &timer, &launch, &run_dir, &codex_home).await
+            };
+            let held = gate.held_since(taken);
+            match futures::future::select(Box::pin(probe), Box::pin(held)).await {
+                futures::future::Either::Left((models, _)) => models,
+                futures::future::Either::Right(((), _)) => {
+                    tracing::info!(?agent, "a login change ended the model probe");
+                    None
                 }
             }
         })

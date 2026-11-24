@@ -3,6 +3,11 @@
 //!
 //! A hold is a [`HoldGuard`]: the reads stay held until every guard taken is dropped, so a hold
 //! cannot be left on by a forgotten call, and two overlapping holds need two drops.
+//!
+//! A model probe runs outside the gate (it can take 25 s, which no login change should wait
+//! for), but no probe starts while a hold is in force, and a hold taken while one runs ends it
+//! ([`Gate::probe_start`], [`Gate::held_since`]): the probe's process tree goes with its
+//! dropped future.
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +31,10 @@ struct Inner {
     running: usize,
     /// Every task waiting on a change: a held read, or a hold waiting for reads to end.
     waiting: Vec<Waker>,
+    /// Holds taken since the gate was made, so a probe can tell one came since it started.
+    taken: u64,
+    /// Every running probe, woken by the next hold.
+    probes: Vec<Waker>,
 }
 
 impl Gate {
@@ -38,7 +47,13 @@ impl Gate {
     /// wait until every guard is dropped. Dropping the future before it resolves drops the
     /// hold with it.
     pub(crate) fn hold(self: &Arc<Self>) -> impl Future<Output = HoldGuard> + Send + 'static {
-        self.lock().holds += 1;
+        let probes = {
+            let mut inner = self.lock();
+            inner.holds += 1;
+            inner.taken = inner.taken.wrapping_add(1);
+            std::mem::take(&mut inner.probes)
+        };
+        probes.into_iter().for_each(Waker::wake);
         let guard = HoldGuard(Arc::clone(self));
         async move {
             poll_fn(|cx| {
@@ -53,6 +68,26 @@ impl Gate {
             .await;
             guard
         }
+    }
+
+    /// A probe may start: `None` while a hold is in force, else the count of holds taken so
+    /// far, for [`Self::held_since`].
+    pub(crate) fn probe_start(&self) -> Option<u64> {
+        let inner = self.lock();
+        (inner.holds == 0).then_some(inner.taken)
+    }
+
+    /// Resolves once a hold is taken after [`Self::probe_start`] answered `taken`.
+    pub(crate) fn held_since(self: Arc<Self>, taken: u64) -> impl Future<Output = ()> + Send {
+        poll_fn(move |cx| {
+            let mut inner = self.lock();
+            if inner.taken == taken {
+                inner.probes.push(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
     }
 
     /// Waits while the reads are held, then counts one read running until the answer drops.

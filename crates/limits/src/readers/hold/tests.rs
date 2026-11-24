@@ -57,3 +57,18 @@ fn the_hold_starts_at_the_call_not_at_the_first_poll() {
     drop(hold);
     assert!(Arc::clone(&gate).enter().now_or_never().is_some());
 }
+
+#[test]
+fn no_probe_starts_under_a_hold_and_a_hold_ends_a_running_one() {
+    let gate = Arc::new(Gate::default());
+    let taken = gate.probe_start().expect("no hold");
+    let mut held = Box::pin(Arc::clone(&gate).held_since(taken));
+    assert!((&mut held).now_or_never().is_none(), "no hold yet");
+    // A probe does not keep a hold waiting.
+    let guard = gate.hold().now_or_never().expect("no read ran");
+    assert!(held.now_or_never().is_some(), "the hold ends the probe");
+    assert_eq!(gate.probe_start(), None, "none starts while held");
+    drop(guard);
+    let again = gate.probe_start().expect("the hold dropped");
+    assert_ne!(again, taken);
+}

@@ -7,7 +7,9 @@ use std::ffi::OsString;
 
 use clauseo_limits::ReadLimits;
 use clauseo_protocol::AgentKind;
+use futures::FutureExt as _;
 use futures::executor::block_on;
+use futures::future::join;
 
 use crate::harness::{Play, Setup, SharedTimer, TestLauncher};
 
@@ -68,4 +70,37 @@ fn an_agent_with_no_entry_is_not_probed() {
     let reader = setup.readers(&launcher, &SharedTimer::default());
     assert_eq!(block_on(reader.probe_models(AgentKind::Claude)), None);
     assert_eq!(launcher.launches(), 0);
+}
+
+#[test]
+fn a_hold_ends_a_running_probe_and_its_process() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    let launcher = TestLauncher::new(Play::Hold);
+    let timer = SharedTimer::default();
+    let reader = setup.readers(&launcher, &timer);
+    let (models, guard) = block_on(join(reader.probe_models(AgentKind::Claude), async {
+        // The probe's process runs, waiting on its limit.
+        timer.0.next_armed().await;
+        reader.hold(AgentKind::Claude).await
+    }));
+    assert_eq!(models, None);
+    assert_eq!(launcher.launches(), 1);
+    launcher.wait_stdout_closed();
+    drop(guard);
+}
+
+#[test]
+fn a_probe_asked_for_under_a_hold_launches_nothing() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    let launcher = TestLauncher::new(Play::Scenario("claude-session-options"));
+    let reader = setup.readers(&launcher, &SharedTimer::default());
+    let guard = reader
+        .hold(AgentKind::Claude)
+        .now_or_never()
+        .expect("nothing runs");
+    assert_eq!(block_on(reader.probe_models(AgentKind::Claude)), None);
+    assert_eq!(launcher.launches(), 0);
+    drop(guard);
 }

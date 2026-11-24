@@ -132,8 +132,10 @@ pub(crate) enum LimitsInput {
     /// A limits subscription was dropped.
     Unsubscribed { id: SubId },
     /// `agent`'s model probe answered (`agent_options/probe.rs`); `None` when it failed.
+    /// `generation` is the agent's when the probe started.
     Probed {
         agent: AgentKind,
+        generation: u64,
         models: Option<clauseo_protocol::AgentModels>,
     },
 }
@@ -226,8 +228,12 @@ pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
         }
         LimitsInput::StopWait { thread, turn } => stops::on_wait_over(actor, thread, turn),
         LimitsInput::Drained { id } => on_drained(actor, id),
-        LimitsInput::Probed { agent, models } => {
-            super::agent_options::probe::on_probed(actor, agent, models);
+        LimitsInput::Probed {
+            agent,
+            generation,
+            models,
+        } => {
+            super::agent_options::probe::on_probed(actor, agent, generation, models);
         }
         LimitsInput::Unsubscribed { id } => {
             actor.limits.subs.retain(|sub| sub.id() != id);
