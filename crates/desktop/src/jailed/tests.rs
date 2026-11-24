@@ -55,6 +55,7 @@ impl SandboxProbe for Fired {
 struct Counted {
     guards: Vec<Vec<OsString>>,
     deletes: Vec<Vec<OsString>>,
+    keychain_asks: u32,
     apps: u32,
 }
 
@@ -67,6 +68,11 @@ impl Stages for Counted {
     fn delete_app_data(&mut self, args: &[OsString]) -> i32 {
         self.deletes.push(args.to_vec());
         3
+    }
+
+    fn keychain_ask(&mut self) -> i32 {
+        self.keychain_asks += 1;
+        4
     }
 
     fn app(&mut self) -> tauri::Result<()> {
@@ -241,6 +247,41 @@ fn the_deletion_flag_anywhere_but_first_starts_the_app() {
         assert!(matches!(launched, Launched::App(Ok(()))), "{launched:?}");
         assert_eq!((stages.deletes.len(), stages.apps), (0, 1), "{args:?}");
     }
+}
+
+#[test]
+fn the_keychain_ask_runs_outside_the_sandbox_only_and_fails_closed() {
+    let probe = Probe::new(|| Ok(None));
+    let (launched, stderr, stages) = start(&["--keychain-ask"], &probe);
+    assert!(matches!(launched, Launched::Exit(4)), "{launched:?}");
+    assert_eq!(stderr, "");
+    assert_eq!((stages.keychain_asks, stages.apps), (1, 0));
+
+    // A jailed agent can never raise a keychain dialog.
+    let (launched, stderr, stages) = start(&["--keychain-ask"], &Fired(Signal::Seatbelt));
+    assert!(
+        matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
+        "{launched:?}"
+    );
+    assert_eq!(stderr, format!("{}\n", refusal(Signal::Seatbelt)));
+    assert_eq!((stages.keychain_asks, stages.apps), (0, 0));
+
+    let probe = Probe::new(|| Err(io::Error::other("access denied")));
+    let (launched, stderr, stages) = start(&["--keychain-ask"], &probe);
+    assert!(
+        matches!(launched, Launched::Exit(super::KEYCHAIN_ASK_FAILED)),
+        "{launched:?}"
+    );
+    assert!(stderr.ends_with("nothing read.\n"), "{stderr}");
+    assert_eq!((stages.keychain_asks, stages.apps), (0, 0));
+
+    // Anywhere but first, the app starts.
+    let (launched, _, stages) = start(
+        &["clauseo://open", "--keychain-ask"],
+        &Probe::new(|| Ok(None)),
+    );
+    assert!(matches!(launched, Launched::App(Ok(()))), "{launched:?}");
+    assert_eq!((stages.keychain_asks, stages.apps), (0, 1));
 }
 
 /// The real calls run on each CI OS (on Windows and macOS this is the only run of the FFI). Only

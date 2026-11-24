@@ -3,7 +3,7 @@
 // unix-paths-ok: the macOS paths are only compared, both sides resolved alike
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
@@ -26,6 +26,10 @@ pub(super) struct Fake {
     pub(super) listed: bool,
     /// The accounts whose read is refused.
     pub(super) refused: Vec<&'static str>,
+    /// What the silent check finds once the keychain was asked; none: as before.
+    pub(super) after_ask: Option<KeychainCheck>,
+    /// Whether the keychain Ask's child runs.
+    pub(super) asking: AtomicBool,
     /// The mount table.
     pub(super) mounts: Vec<Mount>,
     /// Every folder listed and keychain account read, in order.
@@ -47,6 +51,8 @@ impl Fake {
             protected: Vec::new(),
             listed: true,
             refused: Vec::new(),
+            after_ask: None,
+            asking: AtomicBool::new(false),
             mounts: Vec::new(),
             asked: Mutex::new(Vec::new()),
             cfa_reads: AtomicUsize::new(0),
@@ -82,7 +88,14 @@ impl Probe for Fake {
         self.documents.clone()
     }
     fn keychain(&self) -> KeychainCheck {
-        self.keychain.clone()
+        let asked = self
+            .asked()
+            .iter()
+            .any(|asked| asked.starts_with("keychain:"));
+        match &self.after_ask {
+            Some(after) if asked => after.clone(),
+            _ => self.keychain.clone(),
+        }
     }
     fn controlled_folder_access(&self) -> Option<Cfa> {
         self.cfa_reads.fetch_add(1, Ordering::SeqCst);
@@ -103,9 +116,22 @@ impl Probe for Fake {
             .push(folder.display().to_string());
         Ok(self.listed)
     }
-    fn read_keychain(&self, item: &KeychainItem) -> bool {
-        self.asked.lock().unwrap().push(item.account.clone());
-        !self.refused.contains(&item.account.as_str())
+    fn ask_keychain(&self, items: &[KeychainItem]) -> Result<Vec<AskResult>, HostError> {
+        let mut asked = self.asked.lock().unwrap();
+        asked.push("keychain:".to_owned());
+        let answers = items.iter().map(|item| {
+            asked.push(item.account.clone());
+            let ask = ask_child::AskItem {
+                service: item.service.clone(),
+                account: item.account.clone(),
+            };
+            let refused = self.refused.contains(&item.account.as_str());
+            AskResult::of(ask, if refused { Err(-128) } else { Ok(true) })
+        });
+        Ok(answers.collect())
+    }
+    fn keychain_asking(&self) -> &AtomicBool {
+        &self.asking
     }
     fn mounts(&self) -> Vec<Mount> {
         self.mounts.clone()
@@ -164,6 +190,7 @@ fn documents_is_listed_only_for_a_matters_folder_inside_documents() {
             ),
             settings_path: None,
             note: None,
+            asked: false,
         }]
     );
     for (matters, listed) in [
@@ -242,6 +269,7 @@ fn controlled_folder_access_is_listed_only_when_it_blocks_the_matters_folder() {
         folder: None,
         settings_path: Some(CFA_SETTINGS.to_owned()),
         note: Some(CFA_NOTE.to_owned()),
+        asked: false,
     };
     assert_eq!(
         rows(&Fake::windows(true), &store),
@@ -496,6 +524,7 @@ fn controlled_folder_access_counts_a_folder_added_with_a_variable() {
         folder: None,
         settings_path: Some(CFA_SETTINGS.to_owned()),
         note: Some(CFA_NOTE.to_owned()),
+        asked: false,
     };
     let home = |name: &str| {
         name.eq_ignore_ascii_case("USERPROFILE")
@@ -522,6 +551,7 @@ fn rows_go_on_the_wire_in_snake_case() {
         folder: None,
         settings_path: Some("x".into()),
         note: None,
+        asked: true,
     };
     assert_eq!(
         serde_json::to_value(&row).unwrap(),
@@ -530,9 +560,12 @@ fn rows_go_on_the_wire_in_snake_case() {
             "state": "would_ask",
             "folder": null,
             "settings_path": "x",
-            "note": null
+            "note": null,
+            "asked": true
         })
     );
+    let asking = serde_json::to_value(OsPermissionState::Asking).unwrap();
+    assert_eq!(asking, json!("asking"));
     let id: PermissionId = serde_json::from_value(json!("files_documents")).unwrap();
     assert_eq!(id, PermissionId::FilesDocuments);
 }

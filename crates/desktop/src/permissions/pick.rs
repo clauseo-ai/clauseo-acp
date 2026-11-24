@@ -142,6 +142,7 @@ pub(crate) fn ask_at_pick(
         folder: Some(folder.display().to_string()),
         settings_path: (state == OsPermissionState::Denied).then(|| FILES_SETTINGS.to_owned()),
         note: None,
+        asked: true,
     })
 }
 

@@ -4976,7 +4976,9 @@ export type OsPermissionState =
 /**  It blocks Clauseo, and only an administrator can change that. */
 "blocking" | 
 /**  Could not tell: a silent check failed in a way that says neither. */
-"unknown";
+"unknown" | 
+/**  Clauseo is asking now: the OS's dialog may be up (the keychain Ask's child runs). */
+"asking";
 
 /**
  *  Files changed outside Clauseo between turns (the lawyer, Word, a sync client), captured in
@@ -5406,6 +5408,12 @@ export type PermissionRow = {
 	settings_path: string | null,
 	/**  More words: the keychain items concerned (service and account), or what else helps. */
 	note: string | null,
+	/**
+	 *  Whether this build has asked for it (the store): a keychain row that would ask after an
+	 *  Ask is worded "choose Always Allow". Optional in the TypeScript types only, so the UI's
+	 *  fixtures stay valid; the wire always carries it.
+	 */
+	asked?: boolean,
 };
 
 /**  Where a permission request or an elicitation stands. */

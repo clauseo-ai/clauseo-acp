@@ -9,6 +9,12 @@
 //!   the sandbox by design, so it never asks. `--delete-app-data` (the uninstaller's,
 //!   `delete_app_data.rs`) asks next and runs only on a plain `Ok(None)`: sandboxed, it refuses
 //!   as below; a failed probe refuses it with `delete_app_data::FAILED` and deletes nothing.
+//!   `--keychain-ask` (the permissions step's keychain Ask, `permissions/ask_child.rs`) is
+//!   answered the same way: only on a plain `Ok(None)`, else refused (a failed probe with
+//!   [`KEYCHAIN_ASK_FAILED`]), so a jailed agent can never raise a keychain dialog. Like the
+//!   deletion it runs before logging, settings, the window and the single-instance plugin: the
+//!   app's own process started it and is running, so it must neither forward to that instance
+//!   nor open a window.
 //!   Every other start asks the [`SandboxProbe`] next, before logging, settings, the Tauri
 //!   builder and its single-instance plugin: a jailed start must not forward its arguments (deep
 //!   links included) to a running window.
@@ -53,6 +59,9 @@ use crate::{delete_app_data, guard_requested};
 /// The exit code of a start refused inside the agent sandbox: sysexits' `EX_NOPERM`, apart from
 /// the guard's own codes (0, and `clauseo_host::pre_write_guard::DENY`).
 pub const SANDBOXED_EXIT: i32 = 77;
+
+/// The exit code of a keychain Ask whose sandbox check failed: nothing read.
+pub(crate) const KEYCHAIN_ASK_FAILED: i32 = 1;
 
 /// The fixed text of a refused start's stderr line; [`refusal`] adds the signal before its
 /// period.
@@ -125,6 +134,8 @@ pub trait Stages {
     fn guard(&mut self, args: &[OsString]) -> i32;
     /// Runs the uninstaller's deletion with the arguments after its flag; returns its exit code.
     fn delete_app_data(&mut self, args: &[OsString]) -> i32;
+    /// Runs the keychain Ask's child on stdin and stdout; returns its exit code.
+    fn keychain_ask(&mut self) -> i32;
     /// Builds and runs the app until it exits.
     fn app(&mut self) -> tauri::Result<()>;
 }
@@ -142,6 +153,10 @@ impl Stages for AppStages {
         delete_app_data::run(args, &mut io::stderr())
     }
 
+    fn keychain_ask(&mut self) -> i32 {
+        crate::permissions::ask_child::run()
+    }
+
     fn app(&mut self) -> tauri::Result<()> {
         crate::run()
     }
@@ -157,8 +172,8 @@ pub enum Launched {
 }
 
 /// The start: the guard when `args` (the arguments after the program) ask for it, else the
-/// sandbox check, then the uninstaller's deletion when they ask for it and the probe said no, or
-/// the app unless the probe said sandboxed. Lines go to `stderr`.
+/// sandbox check, then the uninstaller's deletion or the keychain Ask's child when they ask for
+/// it and the probe said no, or the app unless the probe said sandboxed. Lines go to `stderr`.
 pub fn launch(
     args: &[OsString],
     probe: &dyn SandboxProbe,
@@ -188,6 +203,27 @@ pub fn launch(
                     ),
                 );
                 delete_app_data::FAILED
+            }
+        });
+    }
+    if let Some(first) = args.first()
+        && crate::permissions::ask_child::requested(first)
+    {
+        return Launched::Exit(match probe.sandboxed() {
+            Ok(None) => stages.keychain_ask(),
+            Ok(Some(signal)) => {
+                say(stderr, &refusal(signal));
+                SANDBOXED_EXIT
+            }
+            Err(error) => {
+                say(
+                    stderr,
+                    &format!(
+                        "Clauseo could not tell whether it runs in the agent sandbox ({error}); \
+                         nothing read."
+                    ),
+                );
+                KEYCHAIN_ASK_FAILED
             }
         });
     }

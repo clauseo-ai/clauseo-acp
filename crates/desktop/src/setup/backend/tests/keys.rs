@@ -86,7 +86,8 @@ fn a_failed_read_refuses_main_s_first_key_and_stores_nothing_on_the_real_backend
     let rig = rig(true);
     rig.keychain.fail_reads(true);
     let refused = block_on(rig.setup().run(MAIN, set_key(MAIN_KEY))).unwrap_err();
-    assert_eq!(refused.code(), ErrorCode::Internal);
+    // A refused keychain (`NoAccess`) is the keychain-needs-OK case, not "could not save".
+    assert_eq!(refused.code(), ErrorCode::AgentKeyDenied);
     assert!(!refused.message().contains(MAIN_KEY));
     rig.keychain.fail_reads(false);
     assert_eq!(stored(&rig), None, "a failed read is not \"absent\"");
