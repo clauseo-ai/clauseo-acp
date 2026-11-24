@@ -174,6 +174,14 @@ pub(super) fn hold(
     }
 }
 
+/// A helper's update that came with no turn live (`Idle`) waits for one with the rest
+/// (`helpers.rs`), unless it is a cancelled turn's tail.
+pub(super) fn hold_helper(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+    if !hold_event(actor, thread, event) {
+        tracing::debug!(%thread, "a helper's output after a cancelled turn was dropped");
+    }
+}
+
 /// A permission request or an elicitation that came with no prompt in flight (`Idle`) waits for a
 /// turn, unless the agent-started turn is live (it is that turn's) or it is a cancelled turn's
 /// tail: then it is handed back, for `asks.rs` to ask it, or answer it cancelled. A prompted turn
