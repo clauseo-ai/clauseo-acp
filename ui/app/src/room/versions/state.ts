@@ -13,6 +13,7 @@ import type {
   Timestamp,
 } from "../../transport/protocol.ts";
 import type { OneFile } from "../matter-stream.ts";
+import { alsoChanged } from "./also-changed.ts";
 import type { Timeline } from "./timeline.ts";
 
 /** Where the room stands: at now (id: the newest version, a turn's, picked on the timeline for its Undo), or looking
@@ -239,7 +240,7 @@ export function defaultChoices(
   return new Map(
     step.files.map((f) => [
       f.path,
-      f.may_include_lawyer_edits || since.has(f.path) ? "keep" : "undo",
+      f.may_include_lawyer_edits || alsoChanged(f) || since.has(f.path) ? "keep" : "undo",
     ]),
   );
 }

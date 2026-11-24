@@ -26,6 +26,7 @@ import type {
 import type { OneFile } from "../matter-stream.ts";
 import { serviceName } from "../sync-services.ts";
 import { clockOf } from "../when.ts";
+import { alsoChanged } from "./also-changed.ts";
 import {
   changedSince,
   type Ask,
@@ -251,10 +252,10 @@ export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
   // edited: the host says the folder's copy differs from the version's now, though no newer version shows it
   const later = (path: string) => since.has(path) || edited.has(path);
   // the rows: each file kept by default, a file changed again since saying by whom and when (or since when, where only
-  // the host saw it), one that may hold the lawyer's own edits saying so
-  const rows = files.filter((f) => f.may_include_lawyer_edits || later(f.path));
+  // the host saw it), one another conversation also changed saying so, one that may hold the lawyer's own edits too
+  const rows = files.filter((f) => f.may_include_lawyer_edits || alsoChanged(f) || later(f.path));
   const sinceOnly = rows.every((f) => later(f.path));
-  const mayOnly = rows.every((f) => !later(f.path));
+  const mayOnly = rows.every((f) => !later(f.path) && !alsoChanged(f));
   const n = rows.length;
   const papers = listOf(lang, back);
   return {
@@ -307,7 +308,15 @@ export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
                     time: timeOf(lang, v),
                     date: cal.words(lang, v.day, "date"),
                   })
-              : vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
+              : alsoChanged(f)
+                ? vt(
+                    lang,
+                    "Another conversation also changed this paper; undoing takes its change away too.",
+                  )
+                : vt(
+                    lang,
+                    "Changed during the answer, though Clauseo didn't say it was changing it.",
+                  )
             : newer.who.kind === "clauseo"
               ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, newer) })
               : vt(lang, "Changed by you, outside Clauseo, at {time}", {
