@@ -269,6 +269,7 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
                     row: thread,
                     header: None,
                     last_stop: None,
+                    blank: false,
                     turn: turn::TurnState::default(),
                     came_back: turn::CameBackWatches::default(),
                     picks: None,

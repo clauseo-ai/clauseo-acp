@@ -238,12 +238,13 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
     (summary, read.permission_pending)
 }
 
-/// The threads of `matter`, in `ListThreads`' order (by id, which is by creation).
+/// The threads of `matter`, in `ListThreads`' order (by id, which is by creation), blank ones
+/// left out (`blank`).
 pub(crate) fn thread_summaries(actor: &Actor, matter: MatterId) -> Vec<ThreadSummary> {
     actor
         .threads
         .values()
-        .filter(|thread| thread.row.matter == matter)
+        .filter(|thread| thread.row.matter == matter && !thread.blank)
         .map(|thread| thread_summary(actor, thread).0)
         .collect()
 }
@@ -344,9 +345,11 @@ pub(crate) fn summaries(actor: &Actor) -> Vec<MatterSummary> {
         .collect()
 }
 
-/// Keeps what the rail needs from durable envelopes: each stream's newest time, and each
-/// thread's last `TurnEnded` (every turn ends with one, at the limit and failed ones too); and
-/// marks each thread touched, for `app_lists.rs`.
+/// Keeps what the rail needs from durable envelopes: each stream's newest time; and marks each
+/// thread touched, for `app_lists.rs`. How a thread's last turn ended is read once the commit is
+/// folded (`note_folded`); a `TurnEnded` of a thread whose stream is not loaded can only be of a
+/// turn that never started (a running turn keeps it loaded), which ends with a step only when it
+/// failed.
 pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
     for envelope in envelopes {
         let newest = actor.tails.entry(envelope.stream).or_insert(envelope.ts);
@@ -360,6 +363,8 @@ pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
             super::agent_options::note(actor, thread, &replaced.options);
         }
         if let DomainEvent::TurnEnded(ended) = &envelope.event
+            && ended.stop == StopReason::Failed
+            && actor.loaded(envelope.stream).is_none()
             && let Some(entry) = actor.threads.get_mut(&thread)
         {
             entry.last_stop = Some(Stop {
@@ -369,6 +374,67 @@ pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
             });
         }
     }
+}
+
+/// After a commit is folded into `thread`'s loaded `state`: each `TurnEnded` that made a step
+/// (the step's order is its `seq`) is the thread's last stop. One of a turn that never started
+/// and did not fail (a prompt stopped or removed before its turn) makes none, and leaves the
+/// last stop as it was. A `UserMessage` or a `TurnEnded` also settles whether the thread is
+/// blank.
+pub(crate) fn note_folded(
+    entry: &mut ThreadEntry,
+    state: &clauseo_reducer::ThreadState,
+    envelopes: &[Envelope],
+) {
+    let mut settle = false;
+    for envelope in envelopes {
+        if envelope.stream != StreamId::Thread(entry.row.id) {
+            continue;
+        }
+        if let DomainEvent::TurnEnded(ended) = &envelope.event {
+            settle = true;
+            if let Some(clauseo_protocol::ViewEntry::Step(_)) = state.entries().get(&envelope.seq) {
+                entry.last_stop = Some(Stop {
+                    reason: ended.stop,
+                    at: envelope.ts,
+                    seq: envelope.seq,
+                });
+            }
+        } else if matches!(envelope.event, DomainEvent::UserMessage(_)) {
+            settle = true;
+        }
+    }
+    if settle {
+        entry.blank = blank(state);
+    }
+}
+
+/// Keeps what the rail reads of `thread`'s folded `state` while it is not loaded (on a load and
+/// an unload): its last step's ending, and whether it is blank.
+pub(crate) fn keep_from_state(entry: &mut ThreadEntry, state: &clauseo_reducer::ThreadState) {
+    if let Some(stop) = last_step(state) {
+        entry.last_stop = Some(stop);
+    }
+    entry.blank = blank(state);
+}
+
+/// Whether a thread has nothing to show: it had a message, every message it had was removed
+/// before its turn started, and no turn ended with a step. A thread with no message yet is not
+/// blank: the app creates a thread and sends its first prompt at once, and its row stays.
+pub(crate) fn blank(state: &clauseo_reducer::ThreadState) -> bool {
+    let mut removed = false;
+    for entry in state.entries().values() {
+        if matches!(entry, clauseo_protocol::ViewEntry::Step(_)) {
+            return false;
+        }
+        if let clauseo_protocol::ViewEntry::UserMessage(message) = entry {
+            if message.status != clauseo_protocol::UserMessageStatus::Removed {
+                return false;
+            }
+            removed = true;
+        }
+    }
+    removed
 }
 
 /// How and when the last turn in a thread's folded state ended: its newest step.

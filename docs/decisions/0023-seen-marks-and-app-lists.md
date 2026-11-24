@@ -46,9 +46,10 @@ must land before or with the first partial row.
   what it holds. Every app subscriber gets every thread's row; a window drops those of threads it
   has open, as 0017 decided.
 - **Removals.** A forgotten matter goes out once in `MattersChanged::removed`, its threads with
-  it and with no `ThreadsChanged`. A thread never leaves its matter's list (an archived thread
-  stays with the `archived` status), so `ThreadsChanged::removed` is always empty today; the
-  field is there so a later removal needs no new shape. A matter brought back goes out as a
+  it and with no `ThreadsChanged`. An archived thread stays in its matter's list with the
+  `archived` status. A thread with nothing to show (every message it had was stopped before
+  its turn started, and it has no answer) leaves the list in `ThreadsChanged::removed`, and
+  comes back as a new row if a message to it starts or waits (24 Nov 2026). A matter brought back goes out as a
   changed row, then its threads as one `ThreadsChanged` of new rows.
 - **First frames and catch-up.** Every app subscription starts with the whole state: one
   `SettingsChanged`, one `MattersChanged { all: true }`, and one `ThreadsChanged { all: true }`

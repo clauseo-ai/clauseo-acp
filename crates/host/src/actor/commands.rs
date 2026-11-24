@@ -446,6 +446,7 @@ fn create_thread(
         row,
         header: None,
         last_stop: None,
+        blank: false,
         turn: turn::TurnState::default(),
         came_back: turn::CameBackWatches::default(),
         picks: config,
