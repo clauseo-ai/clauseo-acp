@@ -210,6 +210,16 @@ test("a missing or unknown hold behind its own thread: the working line alone, n
   }
 });
 
+test("an unknown hold behind another conversation: the working line alone, never another answer in the matter", async () => {
+  h = await mountWith("idle");
+  const e = headerOf(THREAD, { queued: { behind: OTHER } });
+  h.deliver([reset([], { header: { ...e.header!, hold: "something_new" as MatterHold } })]);
+  await h.settle();
+  expect(working()).toBe("Waiting to answer.");
+  expect(wait()).toBeNull();
+  expect(composerSaid()).not.toContain(OTHER_ANSWER);
+});
+
 test("a row queued for the matter says Waiting to answer. on the rail, naming no conversation", async () => {
   h = await mountWith({ queued: { behind: OTHER } });
   expect(rowTitled(TITLE)?.dataset["state"]).toBe("waiting");
