@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"helper_text\")"
+---
+{
+  "helper_text": {
+    "order": 31,
+    "event": "01900000-0000-7000-8000-00000000001f",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "helper": "01900000-0000-7000-8000-000000000005",
+    "text": "The lease runs to 2031."
+  }
+}

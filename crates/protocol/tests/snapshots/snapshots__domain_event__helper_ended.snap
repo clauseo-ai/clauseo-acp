@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"helper_ended\")"
+---
+{
+  "helper_ended": {
+    "helper": "01900000-0000-7000-8000-000000000005",
+    "outcome": "done",
+    "summary": {
+      "inline": "Two break clauses: 2027 and 2029."
+    }
+  }
+}
