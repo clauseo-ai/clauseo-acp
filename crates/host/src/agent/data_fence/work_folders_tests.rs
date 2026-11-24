@@ -129,3 +129,136 @@ fn five_hundred_conversations_in_a_matter_stay_under_the_settings_file_cap() {
     assert!(five_one - none_one < 500 * 100, "{sizes:?}");
     assert!(five_two - none_two < 500 * 100, "{sizes:?}");
 }
+
+/// The own project's folder in the big folder: matter 0's Claude project (`launch.rs`).
+fn own_project() -> String {
+    let key = super::claude_project_key(&matter_folder(0));
+    format!("agents/claude-acp/home/projects/{key}")
+}
+
+/// The big folder under `root` with `files` written into it, and its launch enumerated again:
+/// the session's own folders left out and its project as `claude_projects` finds it.
+fn enumerate(big: &big_folder::Big, files: &[String]) -> LaunchDeny {
+    for file in files {
+        let path = big.data.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, b"x").unwrap();
+    }
+    let home = big.data.join("agents/claude-acp/home");
+    let own = [
+        big.run.clone(),
+        big.work.clone(),
+        big.notes.clone(),
+        home.join("plans"),
+    ];
+    let projects = claude_projects(&home, &[Path::new(&matter_folder(0))]);
+    launch_deny(vec![big.data.clone()], &big.data, &own, &projects)
+}
+
+/// Six other conversations in the own project: each a transcript, a subagent's transcript and a
+/// tool result, as Claude Code keeps them.
+fn sessions(count: usize) -> Vec<String> {
+    let project = own_project();
+    threads(count)
+        .iter()
+        .flat_map(|id| {
+            [
+                format!("{project}/{id}.jsonl"),
+                format!("{project}/{id}/subagents/a.jsonl"),
+                format!("{project}/{id}/tool-results/x"),
+            ]
+        })
+        .collect()
+}
+
+/// The own project's other conversations are covered by the fixed patterns (`DENIED`: each
+/// transcript, subagent folder and memory folder), so a launch names none of them and its rules
+/// are the same size, and as many, as with none.
+#[test]
+fn other_conversations_in_the_own_project_add_no_rules() {
+    let (none_dir, six_dir) = (
+        TempDir::new("work-folders-own-project-none"),
+        TempDir::new("work-folders-own-project-six"),
+    );
+    let none = enumerate(&big_folder::big(none_dir.path()), &[]);
+    let six_big = big_folder::big(six_dir.path());
+    let six = enumerate(&six_big, &sessions(6));
+    let project = own_project();
+    for id in threads(6) {
+        for target in [
+            format!("{project}/{id}.jsonl"),
+            format!("{project}/{id}/subagents/**"),
+        ] {
+            assert!(
+                !six.targets.contains(&target),
+                "{target}: {:?}",
+                six.targets
+            );
+        }
+    }
+    assert_eq!(six.targets, none.targets);
+    let spellings = [PathBuf::from(VM_DATA)];
+    let (none_size, six_size) = (size(&none, &spellings), size(&six, &spellings));
+    eprintln!(
+        "0 sessions: {} targets, {none_size} bytes; 6 sessions: {} targets, {six_size} bytes",
+        none.targets.len(),
+        six.targets.len(),
+    );
+    assert_eq!(six_size, none_size);
+}
+
+/// An entry in the own project that no fixed pattern covers is still named: a file beside the
+/// transcripts, and a folder in a conversation's folder beside its subagents and tool results.
+#[test]
+fn an_own_project_entry_no_pattern_covers_is_named() {
+    let dir = TempDir::new("work-folders-own-project-named");
+    let big = big_folder::big(dir.path());
+    let project = own_project();
+    let id = &threads(1)[0];
+    let deny = enumerate(
+        &big,
+        &[
+            format!("{project}/notes.txt"),
+            format!("{project}/{id}/other-folder/x"),
+        ],
+    );
+    for target in [
+        format!("{project}/notes.txt"),
+        format!("{project}/{id}/other-folder/**"),
+    ] {
+        assert!(
+            deny.targets.contains(&target),
+            "{target}: {:?}",
+            deny.targets
+        );
+    }
+}
+
+/// A name that only looks like a covered one is still named: `<id>.jsonl.bak` is no transcript
+/// (`*.jsonl` ends the name), and `<id>/subagents-old/a.jsonl` is no subagent folder.
+#[test]
+fn a_name_that_only_looks_covered_is_named() {
+    let dir = TempDir::new("work-folders-own-project-similar");
+    let big = big_folder::big(dir.path());
+    let project = own_project();
+    let id = &threads(1)[0];
+    let backup = format!("{project}/{id}.jsonl.bak");
+    let folder = format!("{project}/{id}/subagents-old");
+    // `subagents/**` covers what is in such a folder, never a file of that name.
+    let file = format!("{project}/{}/subagents", threads(2)[1]);
+    let hidden = format!("{project}/.{id}.jsonl");
+    let made = [
+        backup.clone(),
+        format!("{folder}/a.jsonl"),
+        file.clone(),
+        hidden.clone(),
+    ];
+    let deny = enumerate(&big, &made);
+    for target in [backup, format!("{folder}/**"), file, hidden] {
+        assert!(
+            deny.targets.contains(&target),
+            "{target}: {:?}",
+            deny.targets
+        );
+    }
+}
