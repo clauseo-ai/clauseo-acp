@@ -74,6 +74,14 @@ pub struct ConnectorView {
     /// failed). Additive (R24's wire-gaps follow-up): an older host leaves it out.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_recharge: Option<RechargeOutcome>,
+    /// Whether the last `ConnectorCommand::Remove` (which answered `Done`) left the saved
+    /// sign-in in the keychain: the keychain refused its read (on a Mac nothing was then revoked
+    /// or deleted) or its delete. The connector is forgotten on this computer either way, and
+    /// listed while this is set; a later Add reads that sign-in again. It lasts until the next
+    /// `Add`, `AddApiKey`, `SignOut` or `Remove`. False is written as a missing field, and a
+    /// missing field reads as false (additive: an older host leaves it out).
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub left_in_keychain: bool,
 }
 
 /// How a watched recharge ended. Closed: the host and the app are one version.

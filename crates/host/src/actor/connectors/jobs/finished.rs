@@ -89,8 +89,12 @@ pub(crate) enum Change {
     },
     /// An API key failed: the state shows it until the next command.
     Failed(&'static str),
-    /// Signed out or removed: the account, out of credit and the pay link go.
+    /// Signed out: the account, out of credit and the pay link go.
     Reset,
+    /// Removed, as `Reset`; and whether the saved sign-in stays in the keychain.
+    Removed {
+        left_in_keychain: bool,
+    },
     /// A recharge settled: how, when the host can tell (`None` when the watch failed), and the
     /// balance its answer carried, shown when no account read came with it.
     Recharge {

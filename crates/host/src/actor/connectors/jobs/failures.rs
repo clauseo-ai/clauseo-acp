@@ -10,10 +10,15 @@ use super::Refusal;
 pub(super) const KEYCHAIN_REFUSED: &str =
     "the saved sign-in could not be read from the keychain, so nothing was changed";
 
-/// Whether `error` is the keychain refusing to read the saved credential (not "no item"): the
-/// command was refused before anything was revoked, deleted or replaced.
+/// Whether `error` is the keychain refusing the saved credential (not "no item"): the command
+/// was refused before anything was revoked, deleted or replaced, or a call found the credential
+/// unreadable (`AuthError::Store`, which the connectors crate gives only as `Refused`).
 pub(super) fn unreadable(error: &Failed) -> bool {
-    matches!(error, Failed::Store(StoreError::Refused(_)))
+    matches!(
+        error,
+        Failed::Store(StoreError::Refused(_))
+            | Failed::Auth(AuthError::Store(StoreError::Refused(_)))
+    )
 }
 
 /// The same, for a sign-in.
@@ -24,13 +29,15 @@ pub(super) fn sign_in_unreadable(error: &SignInError) -> bool {
 /// A refusal for a failed call, in fixed words.
 pub(super) fn refusal(error: &Failed) -> Refusal {
     match error {
-        Failed::Store(StoreError::Refused(_)) => {
+        Failed::Store(StoreError::Refused(_))
+        | Failed::Auth(AuthError::Store(StoreError::Refused(_))) => {
             Refusal::new(ErrorCode::ConnectorKeychainRefused, KEYCHAIN_REFUSED)
         }
         Failed::BadKeyFormat => Refusal::new(ErrorCode::CommandInvalid, "not a connector API key"),
         Failed::Auth(AuthError::KeyRevoked) => {
             Refusal::new(ErrorCode::SigninFailed, "the connector refused the API key")
         }
+        // Not `Store(Refused)` (above): the keychain refusing to read is not a sign-in that ended.
         Failed::Auth(_) => Refusal::new(ErrorCode::SigninFailed, "the connector's sign-in ended"),
         Failed::Network(_) => {
             Refusal::new(ErrorCode::Internal, "the connector could not be reached")

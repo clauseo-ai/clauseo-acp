@@ -47,6 +47,7 @@ pub(super) fn connectors_state() -> ConnectorsState {
             },
             pay_url: Some("https://data.clauseo.chat/pay/rch_01".to_owned()),
             last_recharge: Some(RechargeOutcome::Paid),
+            left_in_keychain: false,
         }],
     }
 }

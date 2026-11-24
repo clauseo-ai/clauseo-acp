@@ -1,9 +1,13 @@
 //! A keychain that refuses to read case law's saved sign-in (macOS's errSecInteractionNotAllowed
 //! before the lawyer presses Allow, a platform failure, not "no item"): the host never shows it
-//! signed out, the list's checks keep reading it, Sign out, Remove, Sign in and a new key are
-//! refused with `connector.keychain_refused` before the item is touched, and `KeychainReadAgain`
-//! reads it again once allowed. A delete or a write the keychain refuses keeps the old item and
-//! the state file, `connector.keychain_refused` for the command.
+//! signed out, the list's checks keep reading it, Sign out, Sign in and a new key are refused
+//! with `connector.keychain_refused` before the item is touched, Remove forgets case law here
+//! and says the sign-in stays in the keychain (`left_in_keychain`), and `KeychainReadAgain`
+//! reads it again once allowed. A write the keychain refuses keeps the old item and the state
+//! file, `connector.keychain_refused`, as does a delete refused at Sign out of a key (no revoke;
+//! one refused after an OAuth revoke is the connectors crate's own error, `internal` here).
+//! These run under macOS's rules (the fake's config); the connectors crate's own tests pin the
+//! other OSes'.
 
 use std::time::Duration;
 
@@ -14,7 +18,9 @@ use clauseo_protocol::{
 use crate::addons::addons;
 use clauseo_connectors::StoreError;
 
-use crate::connector_rig::{CASE_LAW, Rig, Start, add, add_key, remove, sign_out, status};
+use crate::connector_rig::{
+    CASE_LAW, Rig, Start, add, add_key, case_law, remove, sign_out, status,
+};
 use crate::support::{Dir, wait};
 
 /// The state's line while the saved sign-in can't be read.
@@ -77,26 +83,47 @@ fn a_refused_read_is_never_signed_out_and_reads_again_once_allowed() {
     rig.finish();
 }
 
-/// Sign out and Remove while refused: `connector.keychain_refused`, the item and the state file
-/// as they were, nothing revoked.
+/// Whether the state lists case law with its sign-in left in the keychain.
+fn left_in_keychain(state: &ConnectorsState) -> bool {
+    case_law(state).is_some_and(|view| view.left_in_keychain)
+}
+
+/// Sign out while refused: `connector.keychain_refused`, the item and the state file as they
+/// were, nothing revoked. Remove, the way out without Allow: `Done`, case law forgotten here
+/// with no revoke and no delete, listed with `left_in_keychain` until it is added again.
 #[test]
-fn sign_out_and_remove_while_refused_delete_nothing() {
+fn sign_out_while_refused_deletes_nothing_and_remove_leaves_the_item() {
     let (_dir, mut rig) = refused("connector_keychain_sign_out");
     let state_file = std::fs::read(rig.scratch().join("connectors").join("state.json")).unwrap();
     let item = rig.store.peek(CASE_LAW).unwrap();
-    for command in [sign_out(), remove()] {
-        let refused = rig.dispatch(command).unwrap_err();
-        assert_eq!(
-            refused.code(),
-            ErrorCode::ConnectorKeychainRefused,
-            "{refused}"
-        );
-    }
+    let refused = rig.dispatch(sign_out()).unwrap_err();
+    assert_eq!(
+        refused.code(),
+        ErrorCode::ConnectorKeychainRefused,
+        "{refused}"
+    );
+    let after = std::fs::read(rig.scratch().join("connectors").join("state.json")).unwrap();
+    assert_eq!(after, state_file);
+
+    assert_eq!(rig.dispatch(remove()), Ok(CommandOutcome::Done));
+    rig.state_until("removed, left in the keychain", |state| {
+        left_in_keychain(state) && status(state) == Some(&ConnectorStatus::NotAdded)
+    });
     assert_eq!(rig.store.peek(CASE_LAW).unwrap(), item);
     assert_eq!(rig.store.deletes(), 0);
     assert_eq!(rig.fake.requests_to("/revoke").len(), 0);
-    let after = std::fs::read(rig.scratch().join("connectors").join("state.json")).unwrap();
-    assert_eq!(after, state_file);
+    let after = std::fs::read_to_string(rig.scratch().join("connectors").join("state.json"))
+        .unwrap_or_default();
+    assert!(!after.contains(CASE_LAW), "{after}");
+
+    // Added again: the flag goes (the add is refused, the item still unreadable).
+    let refused = rig.dispatch(add()).unwrap_err();
+    assert_eq!(
+        refused.code(),
+        ErrorCode::ConnectorKeychainRefused,
+        "{refused}"
+    );
+    rig.state_until("the flag cleared", |state| !left_in_keychain(state));
     rig.finish();
 }
 
@@ -129,11 +156,13 @@ fn sign_in_and_a_new_key_while_refused_overwrite_nothing() {
     rig.finish();
 }
 
-/// Signed in, then the keychain refuses deletes (errSecNoAccessForItem on another build's item)
-/// and reads: Sign out revokes but its delete is refused, so `connector.keychain_refused`, the
-/// item and the state file as they were, and the connector shows it could not be read.
+/// Signed in with a key, then the keychain refuses deletes (errSecNoAccessForItem on another
+/// build's item) and reads: Sign out's delete is refused, and with no revoke asked for (a key)
+/// nothing was changed: `connector.keychain_refused`, the item and the state file as they were,
+/// and the connector shows it could not be read. Remove then forgets case law here and says the
+/// item stays in the keychain.
 #[test]
-fn a_refused_delete_at_sign_out_is_keychain_refused_and_keeps_the_item() {
+fn a_refused_delete_at_sign_out_is_keychain_refused_and_remove_leaves_the_item() {
     let dir = Dir::new("connector_keychain_delete", &[]);
     let mut rig = Rig::start(&dir, Start { signed_in: true });
     let state_file = std::fs::read(rig.scratch().join("connectors").join("state.json")).unwrap();
@@ -148,10 +177,14 @@ fn a_refused_delete_at_sign_out_is_keychain_refused_and_keeps_the_item() {
         ErrorCode::ConnectorKeychainRefused,
         "{refused}"
     );
+    assert_eq!(rig.fake.requests_to("/revoke").len(), 0);
     assert_eq!(rig.store.peek(CASE_LAW).unwrap(), item);
     let after = std::fs::read(rig.scratch().join("connectors").join("state.json")).unwrap();
     assert_eq!(after, state_file);
     rig.state_until("unreadable", unreadable);
+    assert_eq!(rig.dispatch(remove()), Ok(CommandOutcome::Done));
+    rig.state_until("removed, left in the keychain", left_in_keychain);
+    assert_eq!(rig.store.peek(CASE_LAW).unwrap(), item);
     rig.finish();
 }
 

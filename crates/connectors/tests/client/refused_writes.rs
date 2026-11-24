@@ -8,7 +8,9 @@
 
 use std::time::Duration;
 
-use clauseo_connectors::{AuthError, CredentialStatus, Error, SignInError, StoreError};
+use clauseo_connectors::{
+    AuthError, CredentialStatus, Error, RemoveReport, SignInError, StoreError,
+};
 
 use crate::support::*;
 
@@ -67,11 +69,15 @@ fn each_refusal_on_a_read_is_unreadable_never_signed_out() {
 
 /// The automatic delete after `invalid_grant` does not run while the re-read before the refresh
 /// was refused: the item may hold a newer chain. The item and the state file stay, and the
-/// credential reads `Unreadable` until a read works.
+/// credential reads `Unreadable` until a read works. On every OS.
 #[test]
 fn invalid_grant_after_a_refused_reread_deletes_nothing() {
-    for (code, error) in refusals() {
-        let rig = manual_rig();
+    for (os, (code, error)) in BOTH_OSES
+        .into_iter()
+        .flat_map(|os| refusals().map(|refusal| (os, refusal)))
+    {
+        let code = format!("{os:?} {code}");
+        let rig = manual_rig_as(os);
         sign_in(&rig);
         rig.handle.bearer().unwrap();
         let stored = rig.store.peek("case-law").unwrap();
@@ -112,7 +118,9 @@ fn a_refused_delete_of_an_unparsable_item_records_nothing() {
 }
 
 /// A sign-out whose delete is refused: the token was revoked, but nothing records a sign-out
-/// that did not happen; the item stays, `Refused`, and the next look reads it again.
+/// that did not happen; the item stays, and the next look reads it again. The error is the
+/// keychain's own, not `Refused` ("nothing was changed" would be untrue after the revoke). A
+/// remove then forgets the connector here and says the item stays in the keychain.
 #[test]
 fn a_refused_delete_at_sign_out_keeps_the_item_and_the_state() {
     for (code, error) in refusals() {
@@ -121,8 +129,37 @@ fn a_refused_delete_at_sign_out_keeps_the_item_and_the_state() {
         rig.handle.status();
         let stored = rig.store.peek("case-law").unwrap();
         let state = state_file(&rig);
+        rig.fake.clear_requests();
         rig.store.fail_deletes_with(Some(error.clone()));
+        let out = rig.handle.sign_out().unwrap_err();
+        assert_eq!(out, Error::Store(error.clone()), "{code}");
+        assert_eq!(rig.fake.requests_to("/revoke").len(), 1, "{code}");
+        assert_eq!(rig.store.peek("case-law").unwrap(), stored, "{code}");
+        assert_eq!(state_file(&rig), state, "{code}");
         rig.store.fail_reads_with(Some(error));
+        assert_eq!(rig.handle.status(), CredentialStatus::Unreadable, "{code}");
+        assert_eq!(
+            rig.handle.remove().unwrap(),
+            RemoveReport {
+                left_in_keychain: true
+            },
+            "{code}"
+        );
+        assert_eq!(rig.store.peek("case-law").unwrap(), stored, "{code}");
+        assert!(!state_file(&rig).contains("case-law"), "{code}");
+    }
+}
+
+/// A key's sign-out (no revoke call) whose delete is refused changed nothing: `Refused`.
+#[test]
+fn a_refused_delete_at_a_keys_sign_out_is_refused() {
+    for (code, error) in refusals() {
+        let rig = rig();
+        let key = rig.fake.new_api_key();
+        rig.handle.add_api_key(&key).unwrap();
+        let stored = rig.store.peek("case-law").unwrap();
+        let state = state_file(&rig);
+        rig.store.fail_deletes_with(Some(error));
         let out = rig.handle.sign_out().unwrap_err();
         assert!(
             matches!(&out, Error::Store(e) if refused(e)),
@@ -130,16 +167,19 @@ fn a_refused_delete_at_sign_out_keeps_the_item_and_the_state() {
         );
         assert_eq!(rig.store.peek("case-law").unwrap(), stored, "{code}");
         assert_eq!(state_file(&rig), state, "{code}");
-        assert_eq!(rig.handle.status(), CredentialStatus::Unreadable, "{code}");
     }
 }
 
 /// An API key's 401 deletes it, unless the keychain refuses the delete: then the item and the
-/// state file stay.
+/// state file stay. On every OS.
 #[test]
 fn a_refused_delete_after_a_revoked_key_records_nothing() {
-    for (code, error) in refusals() {
-        let rig = manual_rig();
+    for (os, (code, error)) in BOTH_OSES
+        .into_iter()
+        .flat_map(|os| refusals().map(|refusal| (os, refusal)))
+    {
+        let code = format!("{os:?} {code}");
+        let rig = manual_rig_as(os);
         let key = rig.fake.new_api_key();
         rig.handle.add_api_key(&key).unwrap();
         let stored = rig.store.peek("case-law").unwrap();

@@ -270,8 +270,12 @@ fn on_reopened(actor: &mut Actor, opened: Option<Opened>) {
         return;
     };
     let mut stored = opened.stored;
-    for change in changes {
-        match change {
+    // The save stands for this run's last revoke when there is one: unsaved, it voids the
+    // stored pair (now, or at the stop) so the revoked site is not allowed again after a
+    // restart. Else `Allow`, a save that may add.
+    let mut change = Change::Allow;
+    for op in changes {
+        match op {
             Op::Allow {
                 host,
                 scope,
@@ -286,6 +290,11 @@ fn on_reopened(actor: &mut Actor, opened: Option<Opened>) {
                 matter,
             } => {
                 stored.revoke(&host, scope, matter);
+                change = Change::Revoke {
+                    host,
+                    scope,
+                    matter,
+                };
             }
         }
     }
@@ -298,11 +307,11 @@ fn on_reopened(actor: &mut Actor, opened: Option<Opened>) {
     refresh(actor);
     let job = Job {
         stored,
-        revoke: false,
+        revoke: matches!(change, Change::Revoke { .. }),
         now: actor.now().wall,
     };
-    // No command waits on it; `Allow` stands for a save that may add.
-    send(actor, None, Change::Allow, job);
+    // No command waits on it.
+    send(actor, None, change, job);
 }
 
 /// The oldest job's outcome; the stop's wait ends once the queue is empty.

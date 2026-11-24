@@ -55,6 +55,30 @@ fn after_a_revoke_the_agent_gets_signed_out_and_nothing_more_is_sent() {
     assert!(rig.fake.requests().is_empty(), "nothing reached the fake");
 }
 
+/// A saved sign-in the keychain refuses to read (here at the re-read before a refresh, the
+/// token then refused) is not signed out: the agent hears case law can't be reached now and the
+/// lawyer should allow Clauseo to read its saved keys, never "sign in again", and no credential
+/// ends.
+#[test]
+fn an_unreadable_sign_in_tells_the_agent_to_have_it_allowed_not_signed_in_again() {
+    let rig = rig();
+    rig.sign_in();
+    let mut agent = rig.agent();
+    rig.fake.revoke_all();
+    rig.store.refuse_reads(true);
+    agent.send_value(&call(1, "search_law"));
+    let reply = agent.recv();
+    assert_eq!(error_text(&reply), texts::UNREADABLE);
+    assert!(
+        !texts::UNREADABLE.contains("sign in"),
+        "{}",
+        texts::UNREADABLE
+    );
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    assert_eq!(rig.events.take(), Vec::new());
+    assert_eq!(rig.handle.status(), CredentialStatus::Unreadable);
+}
+
 #[test]
 fn a_revoked_api_key_gives_key_revoked() {
     let rig = rig();

@@ -15,7 +15,9 @@ use zeroize::Zeroizing;
 use crate::account::Account;
 use crate::cancel::CancelFlag;
 use crate::config::{Config, ConnectorUrls, Origin};
-use crate::credential::{Credential, CredentialKind, CredentialStatus, SignOutReport};
+use crate::credential::{
+    Credential, CredentialKind, CredentialStatus, RemoveReport, SignOutReport,
+};
 use crate::error::{AuthError, Error, SignInError, StoreError};
 use crate::http;
 use crate::known::{CASE_LAW, KNOWN, KnownConnector};
@@ -369,66 +371,25 @@ impl ConnectorHandle {
 
     /// Signs out: revokes the refresh token (`POST /revoke`; an API key has no revoke call),
     /// then deletes the keychain item, then clears the credential in memory. The item is
-    /// deleted whether or not the revoke worked. A keychain that refuses to read the item (an
-    /// error that is not "no item") refuses the sign-out with `StoreError::Refused`, before
-    /// anything is revoked, deleted or recorded: its refresh token could not be revoked. A
-    /// delete it refuses records nothing either: `StoreError::Refused`, the item kept.
+    /// deleted whether or not the revoke worked.
+    ///
+    /// On macOS ([`KeychainOs::refuses_unreadable`](crate::KeychainOs::refuses_unreadable)) a
+    /// keychain that refuses to read the item (an error that is not "no item") refuses the
+    /// sign-out with `StoreError::Refused`, before anything is revoked, deleted or recorded:
+    /// its refresh token could not be revoked. Elsewhere what can't be read is not revoked and
+    /// the delete goes ahead. A delete the keychain refuses records nothing and keeps the item:
+    /// `Refused` when no revoke was asked for (an API key), else the keychain's own error, since
+    /// the revoke may have ended the sign-in.
     pub fn sign_out(&self) -> Result<SignOutReport, Error> {
-        if let Some((_, pending)) = lock(&self.inner.pending).take() {
-            pending.cancel();
-        }
-        // Asked before the lock: a slow proxy lookup never holds the credential.
-        let route = self.inner.shared.agent.route();
-        let mut slot = lock(&self.inner.slot);
-        let credential = self
-            .load(&mut slot)
-            .map_err(|err| self.unreadable(&err))?
-            .cloned();
-        // A later read of the item was refused (before a refresh, say): it is read again first,
-        // and its own refresh token is revoked too when it holds another one.
-        let stored = if self.inner.read_refused.load(Ordering::SeqCst) {
-            self.read_stored().map_err(|err| self.unreadable(&err))?
-        } else {
-            None
-        };
-        let mut tokens: Vec<&Secret> = Vec::new();
-        for held in [&credential, &stored].into_iter().flatten() {
-            if let Credential::OAuth(oauth) = held
-                && !tokens.contains(&&oauth.refresh_token)
-            {
-                tokens.push(&oauth.refresh_token);
-            }
-        }
-        let mut revoked = false;
-        for token in tokens {
-            revoked |= crate::refresh::revoke_on(self, token, &route);
-        }
-        if let Err(err) = self.inner.shared.store.delete(self.id()) {
-            // The item stays and the state file says what it said: nothing records a sign-out
-            // that did not happen. The next look reads the item again.
-            if !self.persist_failed() {
-                self.forget_unread(&mut slot);
-            }
-            return Err(self.unreadable(&err).into());
-        }
-        *slot = Slot::Read(None);
-        self.inner.generation.fetch_add(1, Ordering::SeqCst);
-        self.inner.persist_failed.store(false, Ordering::Relaxed);
-        self.save_state(|state| state.end(self.id(), Ended::SignedOut))?;
-        Ok(SignOutReport { revoked })
+        crate::sign_out::sign_out(self)
     }
 
-    /// Signs out, then forgets the connector on this install. A sign-out refused because the
-    /// item could not be read (`StoreError::Refused`) forgets nothing either.
-    pub fn remove(&self) -> Result<(), Error> {
-        let signed_out = self.sign_out();
-        if let Err(err @ Error::Store(StoreError::Refused(_))) = signed_out {
-            return Err(err);
-        }
-        // The entry goes even when the keychain refused the delete.
-        let _guard = lock(&self.inner.slot);
-        self.save_state(|state| state.remove(self.id()))?;
-        signed_out.map(|_| ())
+    /// Signs out, then forgets the connector on this install. A sign-out that left the item in
+    /// the keychain (its read refused on macOS, so nothing was revoked or deleted; or its delete
+    /// refused) still forgets the connector here, and says so: `left_in_keychain`. A later Add
+    /// reads that item again.
+    pub fn remove(&self) -> Result<RemoveReport, Error> {
+        crate::sign_out::remove(self)
     }
 
     pub(crate) fn id(&self) -> &'static str {
@@ -444,14 +405,23 @@ impl ConnectorHandle {
         }
     }
 
-    /// Reads the item now if it was not read yet (memory only after that), so a sign-in or a
-    /// new key is refused with `StoreError::Refused` before it starts while the keychain
-    /// refuses the read: the credential it would replace could not be revoked.
+    /// On macOS, reads the item now if it was not read yet (memory only after that), so a
+    /// sign-in or a new key is refused with `StoreError::Refused` before it starts while the
+    /// keychain refuses the read: the credential it would replace could not be revoked.
+    /// Elsewhere nothing is read here (`KeychainOs::refuses_unreadable`).
     pub(crate) fn check_readable(&self) -> Result<(), StoreError> {
+        if !self.refuses_unreadable() {
+            return Ok(());
+        }
         let mut slot = lock(&self.inner.slot);
         self.load(&mut slot)
             .map(drop)
             .map_err(|err| self.unreadable(&err))
+    }
+
+    /// Whether the lawyer's own commands are refused while the item can't be read: on macOS.
+    pub(crate) fn refuses_unreadable(&self) -> bool {
+        self.inner.shared.config.keychain_os.refuses_unreadable()
     }
 
     pub(crate) fn account_url(&self) -> String {
@@ -529,7 +499,12 @@ impl ConnectorHandle {
         if !self.is_added() {
             return Err(AuthError::NotAdded);
         }
-        if let Some(credential) = self.load(slot)? {
+        // Any keychain error here is a refusal, never "no item": `Refused`, as every caller
+        // tells it apart from a sign-in that ended.
+        if let Some(credential) = self
+            .load(slot)
+            .map_err(|err| AuthError::Store(self.unreadable(&err)))?
+        {
             return Ok(credential);
         }
         match lock(&self.inner.shared.state).status(self.id(), None) {
@@ -598,8 +573,8 @@ impl ConnectorHandle {
     /// logged without the token. The new credential's own token is never revoked.
     ///
     /// `still` is asked under the slot's lock first: `false` stores nothing and answers
-    /// `Ok(false)` (the caller's credential ended while it was being made). A keychain that
-    /// refuses to read the credential being replaced stores nothing and answers
+    /// `Ok(false)` (the caller's credential ended while it was being made). On macOS a keychain
+    /// that refuses to read the credential being replaced stores nothing and answers
     /// `StoreError::Refused`: its refresh token could not be revoked. A write it refuses
     /// answers the same, the old item and the state file as they were.
     pub(crate) fn store_new(
@@ -642,8 +617,8 @@ impl ConnectorHandle {
     }
 
     /// The OAuth refresh tokens `new` replaces: the one in memory and the one in the keychain,
-    /// without duplicates and never `new`'s own. The slot is locked by the caller. Either read
-    /// refused (an error that is not "no item") is `StoreError::Refused`.
+    /// without duplicates and never `new`'s own. The slot is locked by the caller. On macOS
+    /// either read refused (an error that is not "no item") is `StoreError::Refused`.
     fn replaced_refresh_tokens(
         &self,
         slot: &mut Slot,
@@ -659,15 +634,24 @@ impl ConnectorHandle {
                 old.push(token);
             }
         };
-        if let Some(Credential::OAuth(tokens)) =
-            self.load(slot).map_err(|err| self.unreadable(&err))?
-        {
-            keep(tokens.refresh_token.clone());
+        // On macOS a refused read stores nothing (`Refused`); elsewhere the write goes ahead
+        // and what could not be read is not revoked.
+        let refuses = self.refuses_unreadable();
+        match self.load(slot) {
+            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token.clone()),
+            Ok(_) => {}
+            Err(err) if refuses => return Err(self.unreadable(&err)),
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced credential could not be read");
+            }
         }
-        if let Some(Credential::OAuth(tokens)) =
-            self.read_stored().map_err(|err| self.unreadable(&err))?
-        {
-            keep(tokens.refresh_token);
+        match self.read_stored() {
+            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token),
+            Ok(_) => {}
+            Err(err) if refuses => return Err(self.unreadable(&err)),
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced keychain item could not be read");
+            }
         }
         Ok(old)
     }

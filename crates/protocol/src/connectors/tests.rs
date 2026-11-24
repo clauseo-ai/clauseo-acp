@@ -176,6 +176,7 @@ fn the_state_and_the_hint_read_back() {
             },
             pay_url: None,
             last_recharge: None,
+            left_in_keychain: false,
         }],
     };
     let event = HostEvent::ConnectorsChanged(state);
@@ -186,8 +187,38 @@ fn the_state_and_the_hint_read_back() {
             && !json.contains("account_label")
             && !json.contains("as_of")
             && !json.contains("method")
-            && !json.contains("last_recharge"),
+            && !json.contains("last_recharge")
+            && !json.contains("left_in_keychain"),
         "{json}"
+    );
+}
+
+/// `left_in_keychain` is additive: false is left out, a missing field reads as false, and true
+/// is written and read back.
+#[test]
+fn left_in_keychain_is_left_out_when_false() {
+    let view = |left_in_keychain| ConnectorView {
+        id: "case-law".to_owned(),
+        name: "Indian case law".to_owned(),
+        price_paise: None,
+        packs: Vec::new(),
+        recent_spend: None,
+        status: ConnectorStatus::NotAdded,
+        pay_url: None,
+        last_recharge: None,
+        left_in_keychain,
+    };
+    let json = serde_json::to_string(&view(false)).unwrap();
+    assert!(!json.contains("left_in_keychain"), "{json}");
+    assert_eq!(
+        serde_json::from_str::<ConnectorView>(&json).unwrap(),
+        view(false)
+    );
+    let json = serde_json::to_string(&view(true)).unwrap();
+    assert!(json.contains(r#""left_in_keychain":true"#), "{json}");
+    assert_eq!(
+        serde_json::from_str::<ConnectorView>(&json).unwrap(),
+        view(true)
     );
 }
 

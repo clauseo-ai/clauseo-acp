@@ -39,7 +39,7 @@ pub use crate::write::ScratchDir;
 
 use crate::cancel::CancelFlag;
 use crate::config::{
-    Clock, Config, Origin, ProxyChoice, RECHARGE_DEADLINE, SIGNIN_TIMEOUT, SystemClock,
+    Clock, Config, KeychainOs, Origin, ProxyChoice, RECHARGE_DEADLINE, SIGNIN_TIMEOUT, SystemClock,
 };
 
 /// How the fake starts.
@@ -282,7 +282,8 @@ impl FakeHandle {
 
     /// A [`Config`] for this fake: `Origin::Fake`, user agent `Clauseo/0.0.0-test`, no proxy,
     /// the default timeouts, recharge polls [`FAKE_RECHARGE_INTERVAL`] apart, the fake's own
-    /// clock, and `state_file` (a [`ScratchDir`]'s `state_file()`). Change any field after.
+    /// clock, `state_file` (a [`ScratchDir`]'s `state_file()`) and macOS's keychain rules, the
+    /// strictest, on any OS. Change any field after.
     pub fn config(&self, state_file: PathBuf) -> Config {
         Config {
             origin: Origin::Fake(self.base_url()),
@@ -293,6 +294,7 @@ impl FakeHandle {
             recharge_interval: FAKE_RECHARGE_INTERVAL,
             clock: Arc::clone(&self.shared.clock),
             state_file,
+            keychain_os: KeychainOs::Mac,
         }
     }
 

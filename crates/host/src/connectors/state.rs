@@ -89,6 +89,9 @@ pub(crate) struct CaseLaw {
     /// How the last watched recharge ended, until the next one is watched or the credential
     /// ends (`ConnectorView::last_recharge`).
     pub(crate) last_recharge: Option<RechargeOutcome>,
+    /// The last remove left the saved sign-in in the keychain (`ConnectorView::left_in_keychain`),
+    /// until the next add, sign-out or remove.
+    pub(crate) left_in_keychain: bool,
 }
 
 impl CaseLaw {
@@ -206,7 +209,8 @@ impl CaseLaw {
     }
 
     /// The app's view, under the switch as it took effect. The connector is listed when it is
-    /// live, or added (so it can be signed out or removed), or signing in.
+    /// live, or added (so it can be signed out or removed), or signing in, or just removed with
+    /// its sign-in left in the keychain (so the app can say so).
     pub(crate) fn view(
         &self,
         known: &KnownConnector,
@@ -214,7 +218,7 @@ impl CaseLaw {
         locked: bool,
     ) -> ConnectorsState {
         let added = !matches!(self.credential, None | Some(CredentialStatus::NotAdded));
-        let listed = self.live() || added || self.signing_in;
+        let listed = self.live() || added || self.signing_in || self.left_in_keychain;
         ConnectorsState {
             available,
             locked,
@@ -241,6 +245,7 @@ impl CaseLaw {
             status: self.status(rate),
             pay_url: self.pay_url.as_ref().map(|url| url.as_str().to_owned()),
             last_recharge: self.last_recharge,
+            left_in_keychain: self.left_in_keychain,
         }
     }
 

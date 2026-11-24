@@ -39,6 +39,7 @@ mod pricing;
 mod recharge;
 mod refresh;
 mod secret;
+mod sign_out;
 mod state;
 mod store;
 mod write;
@@ -51,11 +52,13 @@ pub use calls::ACCOUNT_MIN_INTERVAL;
 pub use cancel::CancelFlag;
 #[cfg(feature = "test-support")]
 pub use config::ManualClock;
-pub use config::{Clock, Config, Origin, ProxyChoice, ProxyRefused, ProxyResolver, SystemClock};
+pub use config::{
+    Clock, Config, KeychainOs, Origin, ProxyChoice, ProxyRefused, ProxyResolver, SystemClock,
+};
 #[cfg(feature = "test-support")]
 pub use connectors::ListenerLoad;
 pub use connectors::{ConnectorHandle, Connectors};
-pub use credential::{CredentialKind, CredentialStatus, SignOutReport};
+pub use credential::{CredentialKind, CredentialStatus, RemoveReport, SignOutReport};
 pub use error::{AuthError, Error, SignInError, StoreError};
 pub use https_client::{Got, HttpsClient};
 #[cfg(feature = "local")]
