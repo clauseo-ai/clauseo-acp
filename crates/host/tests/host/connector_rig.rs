@@ -64,6 +64,49 @@ pub(crate) struct Start {
     pub(crate) signed_in: bool,
 }
 
+/// A gate a test opens once: until then [`Held`] keychain reads wait.
+#[derive(Default)]
+pub(crate) struct Gate {
+    open: Mutex<bool>,
+    opened: std::sync::Condvar,
+}
+
+impl Gate {
+    pub(crate) fn open(&self) {
+        *self.open.lock().unwrap() = true;
+        self.opened.notify_all();
+    }
+
+    fn wait(&self) {
+        let open = self.open.lock().unwrap();
+        let (_open, _timed_out) = self
+            .opened
+            .wait_timeout_while(open, Duration::from_secs(30), |open| !*open)
+            .unwrap();
+    }
+}
+
+/// A keychain whose reads wait for the gate; writes and deletes do not.
+struct Held {
+    inner: Arc<MemoryStore>,
+    gate: Arc<Gate>,
+}
+
+impl SecretStore for Held {
+    fn get(&self, account: &str) -> Result<Option<Vec<u8>>, clauseo_connectors::StoreError> {
+        self.gate.wait();
+        self.inner.get(account)
+    }
+
+    fn set(&self, account: &str, secret: &[u8]) -> Result<(), clauseo_connectors::StoreError> {
+        self.inner.set(account, secret)
+    }
+
+    fn delete(&self, account: &str) -> Result<(), clauseo_connectors::StoreError> {
+        self.inner.delete(account)
+    }
+}
+
 /// The fake, the app's connectors, the relays and a running host wired with them.
 pub(crate) struct Rig {
     pub(crate) fake: FakeHandle,
@@ -97,6 +140,27 @@ impl Rig {
         start: Start,
         launcher: Arc<dyn clauseo_process::Launcher>,
     ) -> Self {
+        Self::build(dir, start, launcher, None)
+    }
+
+    /// Signed in on an earlier run (the key in the keychain and the connectors' state file), the
+    /// host started with every keychain read held until `gate` opens: the start-up's credential
+    /// read waits, as behind an open keychain prompt.
+    pub(crate) fn start_held(dir: &Dir, gate: &Arc<Gate>) -> Self {
+        Self::build(
+            dir,
+            Start::default(),
+            Arc::new(dir.launcher()),
+            Some(Arc::clone(gate)),
+        )
+    }
+
+    fn build(
+        dir: &Dir,
+        start: Start,
+        launcher: Arc<dyn clauseo_process::Launcher>,
+        held: Option<Arc<Gate>>,
+    ) -> Self {
         let fake = FakeConnector::start(FakeOptions::default()).unwrap();
         let scratch = ScratchDir::new("host-connector-state").unwrap();
         let (send, pages) = mpsc::channel();
@@ -105,9 +169,25 @@ impl Rig {
         let mut made = None;
         let mut keys = Vec::new();
         let store = Arc::new(MemoryStore::new());
-        let keychain: Arc<dyn SecretStore> = Arc::<MemoryStore>::clone(&store);
+        let plain: Arc<dyn SecretStore> = Arc::<MemoryStore>::clone(&store);
+        let earlier = held.is_some();
+        let keychain: Arc<dyn SecretStore> = match held {
+            None => Arc::clone(&plain),
+            Some(gate) => Arc::new(Held {
+                inner: Arc::clone(&store),
+                gate,
+            }),
+        };
         let host =
             dir.start_clocked_launching(0, launcher, |config: HostConfig, clock: &ManualClock| {
+                if earlier {
+                    let before =
+                        Connectors::new(fake.config(scratch.state_file()), Arc::clone(&plain))
+                            .unwrap();
+                    let key = fake.new_api_key();
+                    before.get(CASE_LAW).unwrap().add_api_key(&key).unwrap();
+                    keys.push(key);
+                }
                 let mut connector_config = fake.config(scratch.state_file());
                 connector_config.clock = Arc::new(HostTime(clock.clone()));
                 let connectors = Arc::new(Connectors::new(connector_config, keychain).unwrap());

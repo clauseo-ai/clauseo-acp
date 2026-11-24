@@ -3,7 +3,8 @@
 //!
 //! - Under the firm's `managed-mcp.json` Settings › Tools shows no server; here the lawyer's
 //!   own are listed `blocked`, off and locked, so they do not vanish.
-//! - A remote server's address is shown without its query or fragment, which may hold a token.
+//! - A remote server's address is shown as its scheme and host (and a port that is not the
+//!   default) only, as Settings › Tools' list shows it: a path or a query may hold a token.
 //!   Settings › Tools' `McpServerView.url` keeps it whole: its Edit form saves that field back.
 
 use clauseo_protocol::{
@@ -18,26 +19,26 @@ use crate::actor::Actor;
 pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
     let effective = &actor.effective;
     let tools = &effective.settings().tools;
-    let mut rows = vec![
-        Addon {
-            description: "Searches Indian judgments and statutes on Indian Kanoon.".to_owned(),
-            on: tools.connectors,
-            status: crate::actor::connectors::recheck::status(actor),
-            locked: effective.is_locked("tools.connectors"),
-            ..row(
-                AddonKind::Tool,
-                "case-law",
-                "Case law (Indian Kanoon)",
-                AddonSource::BuiltIn,
-            )
-        },
-        Addon {
-            description: "Opens and reads web pages in a browser on this computer.".to_owned(),
-            on: tools.browser,
-            locked: effective.is_locked("tools.browser"),
-            ..row(AddonKind::Tool, "browser", "Browser", AddonSource::BuiltIn)
-        },
-    ];
+    // Case law is left out until its credential has been read once (`recheck::status`).
+    let case_law = crate::actor::connectors::recheck::status(actor).map(|status| Addon {
+        description: "Searches Indian judgments and statutes on Indian Kanoon.".to_owned(),
+        on: tools.connectors,
+        status,
+        locked: effective.is_locked("tools.connectors"),
+        ..row(
+            AddonKind::Tool,
+            "case-law",
+            "Case law (Indian Kanoon)",
+            AddonSource::BuiltIn,
+        )
+    });
+    let mut rows: Vec<Addon> = case_law.into_iter().collect();
+    rows.extend([Addon {
+        description: "Opens and reads web pages in a browser on this computer.".to_owned(),
+        on: tools.browser,
+        locked: effective.is_locked("tools.browser"),
+        ..row(AddonKind::Tool, "browser", "Browser", AddonSource::BuiltIn)
+    }]);
     let view = crate::actor::mcp::view::view(actor);
     if view.control == McpControl::FirmManaged {
         let servers = effective.mcp_servers().iter();
@@ -56,9 +57,13 @@ pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
     rows
 }
 
-/// `url` without its query or fragment.
-fn without_query(url: &str) -> String {
-    url.split(['?', '#']).next().unwrap_or(url).to_owned()
+/// `url`'s origin: scheme, host, and the port when it is not the scheme's default; `None` when
+/// it does not parse (settings check every address they keep).
+fn origin(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    url.host()
+        .is_some()
+        .then(|| url.origin().ascii_serialization())
 }
 
 /// A server's row. `lawyer`: the lawyer decides the list, so the row can be removed and is not
@@ -69,10 +74,14 @@ fn added(server: &McpServerView, lawyer: bool) -> Addon {
             kind: AddonFromKind::Program,
             text,
         }),
-        McpServerKind::Remote => server.url.as_deref().map(|url| AddonFrom {
-            kind: AddonFromKind::Address,
-            text: without_query(url),
-        }),
+        McpServerKind::Remote => server
+            .url
+            .as_deref()
+            .and_then(origin)
+            .map(|text| AddonFrom {
+                kind: AddonFromKind::Address,
+                text,
+            }),
     };
     let unsaved = server
         .env

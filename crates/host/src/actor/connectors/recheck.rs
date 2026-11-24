@@ -1,6 +1,7 @@
 //! Case law in the skills and tools list (`ListAddons`): its status there
 //! (`CaseLaw::addon_status`), the checks a read of the list starts in the background, and
-//! `AddonsChanged` when that status moves.
+//! `AddonsChanged` when that status moves. Case law is left out until its credential has been
+//! read once ([`status`]).
 //!
 //! The list never waits on the network: a read answers with the state as it is and, with
 //! connectors on and wired, may start one check ([`Job::Recheck`]):
@@ -63,8 +64,11 @@ impl Pace {
 pub(crate) struct Recheck {
     liveness: Pace,
     account: Pace,
-    /// Case law's status when `AddonsChanged` last went out for it, or the list last read it.
+    /// Case law's status (`None`: left out) when `AddonsChanged` last went out for it, or the
+    /// list last read it.
     shown: Option<AddonStatus>,
+    /// Whether `shown` has been set at all.
+    seen: bool,
 }
 
 impl Recheck {
@@ -76,27 +80,33 @@ impl Recheck {
     }
 }
 
-/// Case law's status in the list now: `not_offered` on an install with no data connectors.
-pub(in crate::actor) fn status(actor: &Actor) -> AddonStatus {
+/// Case law's status in the list now: `not_offered` on an install with no data connectors;
+/// `None`, left out of the list, until the credential has been read once (start-up, or a
+/// keychain prompt still open), so a signed-in lawyer never sees it flash `needs_setup`.
+pub(in crate::actor) fn status(actor: &Actor) -> Option<AddonStatus> {
     if actor.connectors.wired.is_none() {
-        return AddonStatus::NotOffered;
+        return Some(AddonStatus::NotOffered);
     }
-    actor.connectors.state.addon_status()
+    let state = &actor.connectors.state;
+    state.credential.is_some().then(|| state.addon_status())
 }
 
 /// The list is being read: notes the status it shows and starts the check that is due, if any.
 pub(in crate::actor) fn on_listed(actor: &mut Actor) {
-    actor.connectors.recheck.shown = Some(status(actor));
+    actor.connectors.recheck.shown = status(actor);
+    actor.connectors.recheck.seen = true;
     if !actor.effective.settings().tools.connectors || actor.connectors.wired.is_none() {
         return;
     }
     let state = &actor.connectors.state;
     let kind = match state.credential {
+        // Not read yet: the read that lists it starts the check.
+        None => return,
         _ if state.signing_in => return,
         Some(CredentialStatus::SignedIn(_)) => Kind::Account,
         Some(CredentialStatus::SignedOut | CredentialStatus::KeyRevoked) => return,
-        None | Some(CredentialStatus::NotAdded) if state.live() => return,
-        None | Some(CredentialStatus::NotAdded) => Kind::Liveness,
+        Some(CredentialStatus::NotAdded) if state.live() => return,
+        Some(CredentialStatus::NotAdded) => Kind::Liveness,
     };
     let now = actor.now().mono;
     let interval = match kind {
@@ -125,11 +135,13 @@ pub(super) fn ended(actor: &mut Actor, kind: Kind) {
 }
 
 /// The connector state may have changed: `AddonsChanged` when case law's status differs from
-/// the one last shown. Before the first (none shown), no app holds a list to read again.
+/// the one last shown, or case law joins or leaves the list. Before the first (none shown), no
+/// app holds a list to read again.
 pub(super) fn changed(actor: &mut Actor) {
     let now = status(actor);
-    let was = actor.connectors.recheck.shown.replace(now);
-    if was.is_some_and(|was| was != now) {
+    let recheck = &mut actor.connectors.recheck;
+    let was = std::mem::replace(&mut recheck.shown, now);
+    if std::mem::replace(&mut recheck.seen, true) && was != now {
         crate::actor::query::addons::changed(actor);
     }
 }
