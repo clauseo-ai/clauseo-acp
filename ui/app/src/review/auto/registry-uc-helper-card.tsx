@@ -1,17 +1,17 @@
 // UC's entries for a helper's card in the answer (H1 of the helpers design, round 24;
 // helper-card.tsx): the card's time in whole minutes, how it ended, its name, and the working line
 // while the lead waits on its helpers. The real room over FakeTransport on a matter with nine
-// papers (helper-card-scenes.ts).
-import type { Entry } from "./entry.ts";
-import { threadHost, type ThreadState } from "./hosts.ts";
+// papers (../helper-card-scenes.ts).
+import type { Entry } from "../entry.ts";
+import { threadHost, type ThreadState } from "../hosts.ts";
 import {
   chatgptHelpers,
   claudeHelpers,
   settledHelpers,
   unnamedHelper,
-} from "./helper-card-scenes.ts";
-import { RoomClicking, RoomOver } from "./states.tsx";
-import { stepLiveWords, stepWords } from "./words.ts";
+} from "../helper-card-scenes.ts";
+import { RoomClicking, RoomOver } from "../states.tsx";
+import { stepLiveWords, stepWords } from "../words.ts";
 
 const over = (state: () => ThreadState) => () => <RoomOver host={() => threadHost(state())} />;
 /** The settled answer with the first card opened in place. */
@@ -22,7 +22,7 @@ const opened = () => (
   />
 );
 
-export const UC_HELPER_CARD: Entry[] = [
+const UC_HELPER_CARD: Entry[] = [
   {
     id: "UC-1115",
     words: stepWords("Working for {time}"),
@@ -109,3 +109,5 @@ export const UC_HELPER_CARD: Entry[] = [
     render: over(unnamedHelper),
   },
 ];
+
+export default UC_HELPER_CARD;
