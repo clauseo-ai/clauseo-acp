@@ -6,7 +6,9 @@
 //   host's #1282): into a new draft of its matter (takeStopped, in conversations.ts), for every removed conversation,
 //   open or not. The composer never opens that draft itself: an empty conversation alone is no removal.
 // The line the composer shows says "because you stopped it" only after a Stop pressed in this window for that
-// conversation (markStopped); otherwise it says plainly that the message wasn't sent.
+// conversation while it had a message not answered (markStopped); otherwise it says plainly that the message wasn't
+// sent.
+import { useEffect, useRef } from "react";
 import type { ViewStore } from "../../store/store.ts";
 import { entryId, type StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId } from "../../transport/protocol.ts";
@@ -19,17 +21,49 @@ const USER = "user_message:";
  * this window knows). */
 export type Why = "stopped" | "neutral";
 
-/** Messages seen sent, and messages given back: by entry id, for the app's life. */
-const seenSent = new Set<EntryId>();
+/** Messages seen sent and not answered (no step for their turn), each with its conversation's stream and its words:
+ * kept until given back or answered, so a removal that comes once the store has dropped the view still has the words.
+ * Filled only while a composer watches the conversation (or its Stop is pressed): a conversation never opened in this
+ * window since the last reload isn't here. For the app's life. */
+const seenSent = new Map<EntryId, { stream: StreamId; text: string }>();
+/** Messages given back, by entry id. */
 const given = new Set<EntryId>();
-/** The conversations (their streams) whose Stop was pressed in this window, until their words come back, each with
- * the words of its messages not yet answered as the Stop was pressed: the removal may come once the lawyer has left
- * the conversation and the store no longer holds its view. */
-const stoppedHere = new Map<StreamId, Map<EntryId, string>>();
+/** The conversations (their streams) whose Stop was pressed in this window while they had a message not answered;
+ * cleared once its words come back, or once none is left unanswered (the turn ended: a Stop of a running answer). */
+const stoppedHere = new Set<StreamId>();
 
 /** The conversation keys whose field or draft holds words given back, and why: their composers say so until their
  * next send. For the app's life. */
 export const unsentDrafts = new Map<string, Why>();
+
+/** The mounted composers, by conversation key, that take words given back into their field. */
+const takers = new Map<string, (text: string, why: Why) => void>();
+
+/** Gives `text` to the mounted composer of the conversation `key`, after the words typed there: true when one took
+ * them; false when none is mounted, when the caller keeps them in the draft store for the composer's mount. A draft
+ * being typed in reads that store only as it mounts, and its next keystroke would save the field over it. */
+export function giveToComposer(key: string, text: string, why: Why): boolean {
+  const take = takers.get(key);
+  if (take === undefined) return false;
+  take(text, why);
+  return true;
+}
+
+/** The composer of the conversation `key` takes words given back (giveToComposer) while mounted. */
+export function useComposerTaker(key: string | null, take: (text: string, why: Why) => void): void {
+  const latest = useRef(take);
+  useEffect(() => {
+    latest.current = take;
+  });
+  useEffect(() => {
+    if (key === null) return;
+    const taker = (text: string, why: Why) => latest.current(text, why);
+    takers.set(key, taker);
+    return () => {
+      if (takers.get(key) === taker) takers.delete(key);
+    };
+  }, [key]);
+}
 
 /** For the tests: forgets every message seen and given back, and every Stop. */
 export function forgetUnsent(): void {
@@ -39,18 +73,24 @@ export function forgetUnsent(): void {
   unsentDrafts.clear();
 }
 
-/** The lawyer pressed Stop (or its key) in this window for the conversation of `stream`, whose view is `v`. */
-export function markStopped(stream: StreamId | null, v: StreamView | undefined): void {
-  if (stream === null) return;
-  const words = new Map<EntryId, string>();
-  for (const id of v?.ids ?? []) {
-    const m = v?.entries.get(id)?.user_message;
-    if (v === undefined || m === undefined || m.delivery === "steer" || m.status !== "sent")
-      continue;
-    if (given.has(id) || v.entries.has(entryId("step", m.turn))) continue;
-    words.set(id, questionText(id, m, v.texts));
+/** Notes the view's messages sent and not answered, and forgets those answered since; whether any is left. */
+function noteSent(v: StreamView, stream: StreamId): void {
+  for (const id of v.ids) {
+    if (!id.startsWith(USER)) continue;
+    const m = v.entries.get(id)?.user_message;
+    if (m === undefined || m.delivery === "steer" || given.has(id)) continue;
+    if (v.entries.has(entryId("step", m.turn))) seenSent.delete(id);
+    else if (m.status === "sent") seenSent.set(id, { stream, text: questionText(id, m, v.texts) });
   }
-  stoppedHere.set(stream, words);
+  if (![...seenSent.values()].some((s) => s.stream === stream)) stoppedHere.delete(stream);
+}
+
+/** The lawyer pressed Stop (or its key) in this window for the conversation of `stream`, whose view is `v`: noted
+ * only while it has a message not answered, so a Stop of an answer that then ends says nothing of a later removal. */
+export function markStopped(stream: StreamId | null, v: StreamView | undefined): void {
+  if (stream === null || v === undefined) return;
+  stoppedHere.add(stream);
+  noteSent(v, stream);
 }
 
 const whyOf = (stream: StreamId): Why => (stoppedHere.has(stream) ? "stopped" : "neutral");
@@ -62,45 +102,15 @@ const onlyRemoved = (v: StreamView): boolean =>
 /** A later message given back: its words and why. */
 export type Unsent = { text: string; why: Why };
 
-/** Each message of `stream`'s view that has just gone from sent to removed, in order, each once; and notes every
- * message still sent. When the view then shows nothing else, none: the host's removal of the conversation takes them
- * (takeStopped), so they aren't given back here into a conversation about to go. */
-export function newlyUnsent(v: StreamView, stream: StreamId): Unsent[] {
-  const ids: EntryId[] = [];
-  for (const id of v.ids) {
-    if (!id.startsWith(USER)) continue;
-    const m = v.entries.get(id)?.user_message;
-    if (m === undefined || m.delivery === "steer") continue;
-    if (m.status === "sent") seenSent.add(id);
-    else if (m.status === "removed" && seenSent.has(id) && !given.has(id)) ids.push(id);
-  }
-  if (ids.length === 0 || onlyRemoved(v)) return [];
-  const why = whyOf(stream);
-  stoppedHere.delete(stream);
-  return ids.map((id) => {
-    given.add(id);
-    seenSent.delete(id);
-    return { text: questionText(id, v.entries.get(id)!.user_message!, v.texts), why };
-  });
-}
-
-/** The words of a conversation the host has stopped listing (ThreadsChanged's removed): each message not given back
- * yet, sent or removed, joined with blank lines, and why; null when there is none, or the view shows an answer (it
- * isn't that removal), or the store holds no view of it. Marks them given back. */
-export function takeStopped(
-  v: StreamView | undefined,
-  stream: StreamId,
-): { text: string; why: Why } | null {
-  if (v === undefined) return takeKept(stream);
-  if (v.ids.some((id) => !id.startsWith(USER))) return null;
+/** Marks `ids` given back, with their words, and the conversation's Stop as heard. */
+function give(stream: StreamId, ids: readonly EntryId[]): { text: string; why: Why } | null {
   const words: string[] = [];
-  for (const id of v.ids) {
-    const m = v.entries.get(id)?.user_message;
-    if (m === undefined || m.delivery === "steer" || given.has(id)) continue;
-    if (m.status !== "sent" && m.status !== "removed") continue;
+  for (const id of ids) {
+    const seen = seenSent.get(id);
+    if (seen === undefined || given.has(id)) continue;
     given.add(id);
     seenSent.delete(id);
-    words.push(questionText(id, m, v.texts));
+    words.push(seen.text);
   }
   if (words.length === 0) return null;
   const why = whyOf(stream);
@@ -108,13 +118,43 @@ export function takeStopped(
   return { text: words.join("\n\n"), why };
 }
 
-/** With no view of `stream`: the words kept as this window's Stop was pressed, not given back yet. */
-function takeKept(stream: StreamId): { text: string; why: Why } | null {
-  const kept = stoppedHere.get(stream);
-  stoppedHere.delete(stream);
-  const words = [...(kept ?? [])].filter(([id]) => !given.has(id));
-  for (const [id] of words) given.add(id);
-  return words.length === 0 ? null : { text: words.map(([, t]) => t).join("\n\n"), why: "stopped" };
+/** Each message of `stream`'s view that has just gone from sent to removed, in order, each once; and notes every
+ * message still sent. When the view then shows nothing else, none: the host's removal of the conversation takes them
+ * (takeStopped), so they aren't given back here into a conversation about to go. */
+export function newlyUnsent(v: StreamView, stream: StreamId): Unsent[] {
+  noteSent(v, stream);
+  const ids = v.ids.filter(
+    (id) =>
+      v.entries.get(id)?.user_message?.status === "removed" && seenSent.has(id) && !given.has(id),
+  );
+  if (ids.length === 0 || onlyRemoved(v)) return [];
+  const why = whyOf(stream);
+  const out = ids.map((id) => ({ text: seenSent.get(id)!.text, why }));
+  give(stream, ids);
+  return out;
+}
+
+/** The words of a conversation the host has stopped listing (ThreadsChanged's removed): each message not given back
+ * yet, sent or removed, joined with blank lines, and why; null when there is none, or the view shows an answer (it
+ * isn't that removal). With no view in the store, the words seen while it was watched. Marks them given back. */
+export function takeStopped(
+  v: StreamView | undefined,
+  stream: StreamId,
+): { text: string; why: Why } | null {
+  if (v === undefined) {
+    const ids = [...seenSent].filter(([, s]) => s.stream === stream).map(([id]) => id);
+    return give(stream, ids);
+  }
+  if (v.ids.some((id) => !id.startsWith(USER))) return null;
+  const ids: EntryId[] = [];
+  for (const id of v.ids) {
+    const m = v.entries.get(id)?.user_message;
+    if (m === undefined || m.delivery === "steer" || given.has(id)) continue;
+    if (m.status !== "sent" && m.status !== "removed") continue;
+    if (!seenSent.has(id)) seenSent.set(id, { stream, text: questionText(id, m, v.texts) });
+    ids.push(id);
+  }
+  return give(stream, ids);
 }
 
 /** Watches the open thread's stream and hands each later message stopped before its turn started to `restore`. */

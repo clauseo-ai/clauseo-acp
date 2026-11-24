@@ -32,7 +32,7 @@ import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { rememberPlan } from "./plan-default.ts";
 import type { Drafts } from "./thread/session.ts";
-import { takeStopped, unsentDrafts, type Why } from "./thread/unsent-restore.ts";
+import { giveToComposer, takeStopped, unsentDrafts, type Why } from "./thread/unsent-restore.ts";
 import {
   applyChange,
   freshState,
@@ -428,10 +428,15 @@ export class Conversations {
     m.draft ??= { key: this.#key(), shown: true, chosen: null };
     m.draft.shown = true;
     const key = m.draft.key;
-    const back = draftOf(words.join("\n\n"));
-    const there = this.#drafts.get(key);
-    this.#drafts.set(key, there === undefined ? back : joinDrafts(there, back, "\n\n"));
+    const text = words.join("\n\n");
     unsentDrafts.set(key, why);
+    // the draft's composer, mounted (the lawyer typing in it), takes them into its field; else its store, read as it
+    // mounts
+    if (!giveToComposer(key, text, why)) {
+      const back = draftOf(text);
+      const there = this.#drafts.get(key);
+      this.#drafts.set(key, there === undefined ? back : joinDrafts(there, back, "\n\n"));
+    }
     if (!wasOpen) return;
     m.open = key;
     this.#focusOn(key);
