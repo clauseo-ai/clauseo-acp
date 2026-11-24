@@ -81,6 +81,8 @@ import {
 import { tooLong } from "./prompt-cost.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
+import { planNameOf } from "./limit-words.ts";
+import { useRetrying } from "./retry-line.ts";
 import { holdLine, useHold } from "../first-run/hold.ts";
 import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
@@ -214,6 +216,8 @@ export function WorkComposer({
   const emptyNow = useRef(empty);
   // U7: what the host queued this conversation's message for, from its header (queue-model.ts)
   const holdWait = useMatterHeld(store, stream);
+  // the agent waits to retry its service (retry-line.ts): the plan's servers are busy, in place of what it was doing
+  const retrying = useRetrying(store, stream);
   // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send, or until
   // the thread moves on (its status, or the agent's latest output: the drained turn has started), when it says
   // "Answering." again. `lost` holds the thread's mark as the edit was lost, null for none; each clear checks it first,
@@ -377,11 +381,19 @@ export function WorkComposer({
   }, [refillKey, refillText]);
   // while the turn runs the pen writes after the words (working-line.tsx); the line is gone, and the pen with it,
   // once the turn ends. A single read stays a wait in its own words: check and series say "Checking" and "judgments",
-  // which a plain read isn't
+  // which a plain read isn't. While the agent waits to retry, nothing is being written: the still wait icon, no pen
   const answering: WorkingState =
-    asks === null
-      ? { kind: "wait", words: doing ?? frame(w.lang, "Answering."), pill: null, working: true }
-      : { kind: "wait", words: asksWords(w.lang, asks), pill: null, asks };
+    asks !== null
+      ? { kind: "wait", words: asksWords(w.lang, asks), pill: null, asks }
+      : retrying
+        ? {
+            kind: "wait",
+            words: mt(w.lang, "{name}'s servers are busy. It's trying again.", {
+              name: planNameOf(agentPlan),
+            }),
+            pill: null,
+          }
+        : { kind: "wait", words: doing ?? frame(w.lang, "Answering."), pill: null, working: true };
   const line: BreakLine | null =
     failed ??
     (refused !== null

@@ -9,6 +9,7 @@ import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/st
 import type {
   ConfigOption,
   AgentId,
+  AgentRetry,
   AvailableCommand,
   CommandOutcome,
   ConnectorsState,
@@ -75,6 +76,8 @@ export type ThreadState = {
   /** The thread's agent, as its list row and header name it; claude-acp by default. */
   agent?: AgentId;
   status?: ThreadStatus;
+  /** The header's retrying: the agent of the running turn waits to retry its service (host #1335). */
+  retrying?: AgentRetry;
   /** send_prompt is refused with this code. */
   refuse?: ErrorCode;
   /** The stream is lost with this code once its view has arrived. */
@@ -191,6 +194,7 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.commands = state.commands ?? [];
   head.header!.agent = agent;
   if (state.options !== undefined) head.header!.config_options = state.options;
+  if (state.retrying !== undefined) head.header!.retrying = state.retrying;
   const transport: FakeTransport = new FakeTransport({
     ...(state.platform === undefined ? {} : { platform: state.platform }),
     ...(state.limits === undefined ? {} : { setup: { first: () => SIGNED_IN } }),
