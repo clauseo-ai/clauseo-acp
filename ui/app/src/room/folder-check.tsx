@@ -18,6 +18,8 @@ import type { FolderRefId, HostError } from "../transport/protocol.ts";
 import type { NextMatterSource } from "./host-next.ts";
 import { backslashAt } from "./folder-backslash.ts";
 import { FolderWarning, type Warned } from "./folder-warning.tsx";
+import { useFolderPermission } from "./folder-permission.ts";
+import { FolderPermissionLine } from "./folder-permission-line.tsx";
 import type { Matters } from "./matters.ts";
 import { focusGotIt } from "./scan/focus-got-it.ts";
 import { ScanLines } from "./scan/scan-lines.tsx";
@@ -65,6 +67,8 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   // undefined while the check runs
   const [answer, setAnswer] = useState<Answer | undefined>(null);
   const scan = useScan(matters);
+  // a guarded folder's line and Allow, for the latest pick of either kind (folder-permission.tsx)
+  const permission = useFolderPermission(matters);
   // the synced notice's Got it: Create's press moves focus there while the notice waits
   const gotIt = useRef<HTMLButtonElement>(null);
   // the picker's line while a pick is slow
@@ -92,6 +96,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   const reset = () => {
     forget();
     scan.clear();
+    permission.clear();
     setExisting(null);
   };
   /** The scan's Stop: the scan cancelled and the pick dropped, the form as it was before the pick. */
@@ -105,13 +110,18 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return null;
     setExisting(picked);
+    permission.picked(picked);
     check({ existing_folder: { folder: picked.folder } });
     scan.start(picked.folder);
     return picked.display;
   };
   /** Change… in New matter's new folder: the folder to make the matter's folder in, or null when the lawyer
    * cancelled. No check and no scan: create_matter says any refusal. */
-  const pickParent = (): Promise<Picked | null> => wait.track(() => matters.pickFolder());
+  const pickParent = async (): Promise<Picked | null> => {
+    const picked = await wait.track(() => matters.pickFolder());
+    if (picked !== null) permission.picked(picked);
+    return picked;
+  };
   const backslash = existing === null ? null : backslashAt(existing.display, platform);
   /** Where Create goes, once the check has answered: the existing folder picked, else the default location when
    * `useDefault`. Null stops the create: no folder chosen, a refused existing folder (its line shows), a warning that
@@ -157,8 +167,15 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     refused: existing === null ? null : (checkRefused ?? scanned?.refused ?? null),
     /** The scan's lines under the folder line, for the existing folder picked. */
     scan:
-      scanned === null ? undefined : (
-        <ScanLines scan={scanned} onStop={stop} onGotIt={scan.gotIt} gotItRef={gotIt} />
+      scanned === null && permission.asked === null ? undefined : (
+        <>
+          {scanned !== null && (
+            <ScanLines scan={scanned} onStop={stop} onGotIt={scan.gotIt} gotItRef={gotIt} />
+          )}
+          {permission.asked !== null && (
+            <FolderPermissionLine asked={permission.asked} onAllow={permission.allow} />
+          )}
+        </>
       ),
     unpick,
     opening: wait.opening,
