@@ -240,6 +240,17 @@ test("a cancelled picker goes back to the two choices, focus still on Existing f
   expect(dialog()).not.toBeNull();
 });
 
+test("Existing folder opens the picker in Documents the first time, and where the last pick was after", async () => {
+  const transport = await mount({ ...today(), pickFolder: () => null });
+  await ask();
+  await press("matter-existing");
+  await press("matter-existing");
+  expect(transport.only("pick_folder")).toEqual([
+    { call: "pick_folder", start: "documents" },
+    { call: "pick_folder", start: "last" },
+  ]);
+});
+
 test("with a NextHost: New folder makes it in the default location, and create_matter takes it with the client, no picker", async () => {
   let list = [detailed(A)];
   const sent: NextCommand[] = [];

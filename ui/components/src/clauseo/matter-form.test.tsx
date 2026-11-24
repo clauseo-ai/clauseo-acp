@@ -422,3 +422,21 @@ test("an existing folder's name is filled from it and selected, and follows a ne
   await act(async () => pick.resolve("Documents/Rao claim"));
   expect(field?.value).toBe("Rao claim");
 });
+
+test("a drive's top picked through Change… on an untouched name: the field says so at once, and Create waits", async () => {
+  const pick = held<string | null>();
+  await mount(
+    <NewMatterForm
+      branch="existing"
+      folder="Documents/Health Insurance"
+      pickFolder={() => pick.promise}
+      onCreate={() => {}}
+    />,
+  );
+  expect(document.body.textContent).not.toContain("Name the matter.");
+  await act(async () => button("Change…")?.click());
+  await act(async () => pick.resolve("D:\\"));
+  expect(document.querySelector<HTMLInputElement>("input")?.value).toBe("");
+  expect(document.body.textContent).toContain("Name the matter.");
+  expect(create()?.disabled).toBe(true);
+});

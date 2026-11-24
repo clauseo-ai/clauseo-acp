@@ -22,6 +22,7 @@ import {
   type HostTransport,
 } from "./host-transport.ts";
 import type {
+  StartHint,
   AgentChoiceId,
   LimitsView,
   CommandEnvelope,
@@ -409,10 +410,10 @@ export class TauriTransport
     await call(commands.answerPermission(thread, request, option));
   }
   /** The native folder dialog, or Clauseo's own chooser where Windows' would stall (chooser.ts): either way the
-   * folder picked, or null. */
-  async pickFolder(): Promise<PickedFolder | null> {
+   * folder picked, or null. `start` is where the native dialog opens; absent, the last pick's folder. */
+  async pickFolder(start?: StartHint): Promise<PickedFolder | null> {
     const clicked = performance.now();
-    const answer = await call(commands.pickFolderOrChoose(null));
+    const answer = await call(commands.pickFolderOrChoose(start ?? null));
     if (answer.kind === "picked") return answer.folder;
     if (answer.kind === "cancelled") return null;
     const answered = performance.now();
