@@ -233,6 +233,8 @@ export const HI = {
   "Not sent, because the answer it was for stopped.": null,
   // the queue's line when a message's copy waits because Clauseo was updating (#1314's update cause). hi: later
   "This waits because Clauseo was updating. It goes once Clauseo is ready.": null,
+  // the same for a copy held for the agent's sign-in (#1314's copy_of.cause sign_in); {agent}: Claude or ChatGPT
+  "This waits because {agent} needed you to sign in. It goes once you're signed in.": null,
   // the card over the composer while the message waits: the hold the host names. hi: later
   "An undo is changing this matter's papers. Your message is queued and sends once it's done.":
     null,

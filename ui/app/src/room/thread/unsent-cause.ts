@@ -1,5 +1,6 @@
 // Why a message never started, as the host says it (#1314: TurnEnded.cause, carried on the user-message entry as
-// `unsent`; status not_sent for sent_now and not_sent, removed for the rest). Read here, and only here: absent on
+// `unsent`; status not_sent for sent_now and not_sent, removed for the rest), and the copy the host queued of one held
+// for an update or a sign-in (`copy_of`, on the copy's own entry). Read here, and only here: absent on
 // older logs and until #1314 lands, and an unknown value reads as absent, when the wording falls back to this window's
 // own Stop record (unsent-restore.ts).
 import type { UserMessageEntry } from "../../transport/protocol.ts";
@@ -9,7 +10,10 @@ export type Cause = "stopped" | "removed" | "sent_now" | "sign_in" | "update" | 
 
 /** The entry as #1314 gives it. A stand-in until that binding is on main, when UserMessageEntry carries `unsent`
  * (and UserMessageStatus "not_sent") itself. */
-type CausedEntry = UserMessageEntry & { unsent?: string };
+type CausedEntry = UserMessageEntry & {
+  unsent?: string;
+  copy_of?: { message: string; cause: string };
+};
 
 const CAUSES: readonly string[] = [
   "stopped",
@@ -36,3 +40,10 @@ export function endedUnsent(m: UserMessageEntry): boolean {
  * waits in the queue (sign-in, update). */
 export const givesBack = (cause: Cause | null): boolean =>
   cause !== "removed" && cause !== "sign_in" && cause !== "update";
+
+/** What a queued copy stands in for: the original held for an update or a sign-in (#1314's copy_of.cause); null for
+ * any other message, or a cause this version doesn't know. */
+export function copyCauseOf(m: UserMessageEntry): "update" | "sign_in" | null {
+  const cause: unknown = (m as CausedEntry).copy_of?.cause;
+  return cause === "update" || cause === "sign_in" ? cause : null;
+}
