@@ -27,6 +27,7 @@
 //! ends, within [`CANCEL_WAIT`] of its end, or in an agent-started turn's late window is that
 //! turn's tail and is dropped, as `Origin::Late` is.
 
+mod cap;
 mod late;
 pub(super) mod refused;
 mod restart;
@@ -62,6 +63,8 @@ pub(super) const OPEN_CAP: Duration = Duration::from_secs(600);
 pub(crate) struct Held {
     /// Updates (as `Idle`), permission requests and elicitations, in the order they came.
     updates: Vec<AcpEvent>,
+    /// What `updates` weighs (`cap.rs`), counted from its first event on.
+    bytes: usize,
     /// When the thread's last cancelled turn ended, on the monotonic clock.
     cancelled_at: Option<Duration>,
     /// The late window of a cancelled agent-started turn, while it is open.
@@ -95,6 +98,16 @@ pub(super) fn hold_for_test(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         state.own_held.updates.push(event);
     }
 }
+
+/// The updates and requests of `thread` that wait for a turn, in order (tests).
+#[cfg(test)]
+pub(super) fn held_events(actor: &mut Actor, thread: ThreadId) -> Vec<AcpEvent> {
+    state(actor, thread).map_or_else(Vec::new, |state| state.own_held.updates.clone())
+}
+
+/// [`cap::CAP_BYTES`], for tests.
+#[cfg(test)]
+pub(super) const HELD_CAP_BYTES: usize = cap::CAP_BYTES;
 
 /// How many updates and requests of `thread` wait for a turn.
 #[cfg(test)]
@@ -239,8 +252,11 @@ fn hold_event(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> bool {
     let held = &mut state.own_held;
     if held.updates.is_empty() {
         tracing::info!(target: LIFECYCLE, %thread, "agent output outside a turn waits for a turn");
+        held.bytes = 0;
     }
+    held.bytes += cap::weight(&event);
     held.updates.push(event);
+    cap::trim(held, thread);
     open_if_idle(actor, thread);
     true
 }
