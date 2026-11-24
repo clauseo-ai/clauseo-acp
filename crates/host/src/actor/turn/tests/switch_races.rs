@@ -376,6 +376,8 @@ fn a_refused_prompt_leaves_the_handover_owed() {
     else {
         panic!("not the prompt going out");
     };
+    // The refusal comes in place of the prompt going out: its task never marked it out.
+    switch::not_out(&mut rig.actor, thread);
     let error = Error::refused(ErrorCode::CommandInvalid, "the folder has a .codex");
     let reply = AgentReply::PromptRefused { turn, error };
     rig.actor.on_input(Input::Turn(TurnInput::Agent {
@@ -388,5 +390,95 @@ fn a_refused_prompt_leaves_the_handover_owed() {
     assert_eq!(settled(&log), [HandoffStatus::Failed], "{log:?}");
     let (_, owed) = switch::seen(&rig.actor, thread);
     assert_eq!(owed.as_ref().map(AgentId::as_str), Some("fake-agent"));
+    rig.finish();
+}
+
+/// A turn that ends before its `PromptOut` arrives, though its prompt went out (the note is
+/// held until the prompt's answer ended the turn), settles the handover `Delivered` and owes
+/// nothing: the next turn carries no second handover.
+#[test]
+fn a_prompt_out_after_the_turn_ended_still_delivers_the_handover() {
+    let mut rig = two_agents("switch-late-out", Some(PROMPTS_END));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the prompt going out",
+        prompt_out,
+    );
+    rig.run_holding("the turn's end", prompt_out, |actor| {
+        actor.threads[&thread].turn.current.is_none()
+    });
+    rig.release_held();
+    until_idle(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(settled(&log), [HandoffStatus::Delivered], "{log:?}");
+    assert_eq!(switch::seen(&rig.actor, thread).1, None, "nothing owed");
+
+    one_turn(&mut rig, 12, thread);
+    let log = rig.log(thread);
+    let handoffs = count(&log, |e| matches!(e, DomainEvent::ContextHandoff(_)));
+    assert_eq!(handoffs, 1, "no second handover: {log:?}");
+    rig.finish();
+}
+
+/// A mode change held on a switch whose turn is cancelled while its commit is in flight waits
+/// for the commit: nothing launches meanwhile, and when the store refuses the commit the row is
+/// back on the old agent and the change runs there; the new agent never starts.
+#[test]
+fn a_change_held_on_a_refused_commit_runs_on_the_old_agent() {
+    let mut rig = two_agents("switch-refused-held", Some(MODE_THEN_PROMPT));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    rig.fail(1, |e| matches!(e, DomainEvent::AgentSwitched(_)));
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the switch's commit",
+        switch_commit,
+    );
+    let mut mode = set_mode(&mut rig, 12, thread);
+    held_on_the_switch(&mut rig, thread, switch_commit);
+    let (switch, _) = switch::seen(&rig.actor, thread);
+    assert_eq!(
+        switch,
+        Some(("Committing".to_owned(), 1)),
+        "held on the switch"
+    );
+    let (reply, _cancelled) = oneshot::channel();
+    let command = CommandEnvelope {
+        command_id: command_id(13),
+        command: HostCommand::Cancel { thread },
+    };
+    rig.actor.on_request(Request::Dispatch { command, reply });
+    rig.run_holding("the cancel", switch_commit, |actor| {
+        actor.threads[&thread].turn.current.is_none()
+    });
+    let state = &rig.actor.threads[&thread].turn;
+    assert!(
+        state.agent.is_none() && state.preparing.is_none(),
+        "nothing launches before the commit returns"
+    );
+    rig.release_held();
+    until_idle(&mut rig, thread);
+    // The old agent's scenario expects a prompt, so it answers the change by exiting.
+    rig.run_until("the mode change's answer", |_| {
+        !matches!(mode.try_recv(), Ok(None))
+    });
+    rig.settle_commits();
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
+    let log = rig.log(thread);
+    assert_eq!(
+        attached(&log),
+        ["sess-1", "sess-1"],
+        "the change relaunched the old agent, the new one never started: {log:?}"
+    );
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        0
+    );
     rig.finish();
 }

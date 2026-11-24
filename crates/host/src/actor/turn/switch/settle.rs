@@ -2,6 +2,9 @@
 //! `HandoffSettled`, the end of a turn whose switch did not finish, and start-up's settle of a
 //! handover a crash left pending.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use clauseo_protocol::{
     ContentBlock, DetachReason, HandoffEntryStatus, HandoffId, HandoffSettled, HandoffStatus,
     StreamId, ThreadId, TurnId, ViewEntry,
@@ -48,17 +51,23 @@ pub(in super::super) fn started_by_switch(actor: &Actor, thread: ThreadId) -> bo
         .is_some_and(|switch| switch.stage == Stage::Switched)
 }
 
+/// Set once the prompt carrying a handover goes out.
+pub(in super::super) type WentOut = Rc<Cell<bool>>;
+
 /// The prompt `current` sends: the handover first when its switch has one, else as typed; and
-/// whether it carries a handover.
-pub(in super::super) fn prompt(current: &mut Current) -> (Vec<ContentBlock>, bool) {
-    let text = current
+/// when it carries a handover, the flag its task sets once it goes out.
+pub(in super::super) fn prompt(current: &mut Current) -> (Vec<ContentBlock>, Option<WentOut>) {
+    let carried = current
         .switch
         .as_deref_mut()
         .and_then(|switch| switch.handoff.as_mut())
-        .and_then(|handoff| handoff.text.take());
-    match text {
-        Some(text) => (handover::wrap(&text, current.prompt.clone()), true),
-        None => (current.prompt.clone(), false),
+        .and_then(|handoff| Some((handoff.text.take()?, Rc::clone(&handoff.went_out))));
+    match carried {
+        Some((text, went_out)) => (
+            handover::wrap(&text, current.prompt.clone()),
+            Some(went_out),
+        ),
+        None => (current.prompt.clone(), None),
     }
 }
 
@@ -76,11 +85,13 @@ pub(in super::super) struct GoingOut {
     thread: ThreadId,
     agent: u64,
     turn: TurnId,
+    went_out: WentOut,
 }
 
 impl GoingOut {
     /// The prompt passed the Codex `.codex` recheck and goes out now.
     pub(in super::super) fn sent(self) {
+        self.went_out.set(true);
         let reply = AgentReply::PromptOut { turn: self.turn };
         let input = TurnInput::Agent {
             thread: self.thread,
@@ -91,25 +102,28 @@ impl GoingOut {
     }
 }
 
-/// The note for the prompt of `turn` to `thread`'s agent `agent`, when it `carries` a handover.
+/// The note for the prompt of `turn` to `thread`'s agent `agent`, when it carries a handover.
 pub(in super::super) fn going_out(
     actor: &Actor,
     (thread, agent, turn): (ThreadId, u64, TurnId),
-    carries: bool,
+    carries: Option<WentOut>,
 ) -> Option<GoingOut> {
-    carries.then(|| GoingOut {
+    carries.map(|went_out| GoingOut {
         post: actor.post.clone(),
         thread,
         agent,
         turn,
+        went_out,
     })
 }
 
 /// `thread`'s turn ends, before its current is let go: a handover whose prompt never went out
-/// settles `Failed` (the thread owes it when the switch was made), and a switch that did not
+/// settles `Failed` (the thread owes it when the switch was made), one whose prompt went out
+/// though its `PromptOut` has not arrived settles `Delivered`, and a switch that did not
 /// happen logs its old agent's detach as a plain stop's, `Closed`, or has the stopping agent
-/// log that. A commit still in flight settles when it returns (`commit.rs`). The config and mode
-/// changes held on the switch come back, for [`release`] once the turn is let go.
+/// log that. A commit still in flight settles when it returns (`commit.rs`), and keeps the
+/// config and mode changes held on the switch, to run them once it is durable or refused. Else
+/// those come back, for [`release`] once the turn is let go.
 pub(in super::super) fn ends(actor: &mut Actor, thread: ThreadId) -> Vec<Waiting> {
     let Some(switch) = current(actor, thread).and_then(|current| current.switch.as_deref_mut())
     else {
@@ -117,12 +131,30 @@ pub(in super::super) fn ends(actor: &mut Actor, thread: ThreadId) -> Vec<Waiting
     };
     let held = std::mem::take(&mut switch.held);
     let (stage, detach) = (switch.stage, switch.detach.take());
+    let went_out = switch
+        .handoff
+        .as_ref()
+        .is_some_and(|handoff| handoff.went_out.get());
     match stage {
-        Stage::Committing => return held,
+        Stage::Committing => {
+            // Until the commit returns the row may name an agent the store does not have.
+            return match state(actor, thread).and_then(|state| state.switch.in_flight.as_mut()) {
+                Some(in_flight) => {
+                    in_flight.held.extend(held);
+                    Vec::new()
+                }
+                None => held,
+            };
+        }
         Stage::Stopping => agents::unswitch_stop(actor, thread),
         Stage::Asked | Stage::Reading | Stage::Switched => {}
     }
-    settle(actor, thread, HandoffStatus::Failed);
+    let status = if went_out {
+        HandoffStatus::Delivered
+    } else {
+        HandoffStatus::Failed
+    };
+    settle(actor, thread, status);
     if detach.is_some() {
         agents::log_detach(actor, thread, DetachReason::Closed);
     }

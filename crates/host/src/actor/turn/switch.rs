@@ -12,7 +12,8 @@
 //!   are refused before the `UserMessage` is logged. The message's `UserMessage.agent` keeps the
 //!   name, so a restart restores a queued switch (`queue/restore.rs`).
 //! - [`begins`] at step 2, before the launch, when the thread is not on that agent by then:
-//!   background work found then sends the turn back to the held queue unchanged, and a sign-in
+//!   an agent the settings no longer have, or background work found then, sends the turn back
+//!   to the held queue unchanged, and a sign-in
 //!   refusal fails it. Else the live agent stops with the shutdown ladder, the thread's whole log
 //!   is read and the handover built from it (`handover.rs`). Before the commit no agent of the
 //!   thread may run or launch ([`quiet`]); one that does is stopped first. One commit then logs
@@ -22,14 +23,17 @@
 //!   prefs for its kind. Once it is durable the new agent launches as any first launch does.
 //! - While the switch runs (past the start, before its commit is durable) `SetConfigOption` and
 //!   `SetMode` wait on it ([`ensure`]), with those the old agent had waiting, and run on the new
-//!   agent after the commit; a switch that does not happen runs them on the thread's agent.
+//!   agent after the commit; a switch that does not happen runs them on the thread's agent. A
+//!   turn that ends while the commit is in flight leaves them on the commit, which runs them
+//!   once it returns: on the new agent when durable, on the old one when refused.
 //! - No earlier finished turn: the switch goes ahead with no handover, no `ContextHandoff`.
 //!   Earlier items none of which fits: the handover is its header alone, which says how many are
 //!   left out. Not even the header fits: `ContextHandoff`, and the turn fails with
 //!   `prompt.handoff_too_long`; no switch is logged, the thread keeps its agent.
 //! - Step 5 (`prompt.rs`) sends the handover before the lawyer's words ([`prompt`]) and logs
 //!   `HandoffSettled { Delivered }` once the prompt goes out, past the Codex `.codex` recheck
-//!   ([`delivered`]); a turn that ends before that logs it `Failed` ([`ends`]). The lawyer's
+//!   ([`delivered`]); a turn that ends before that logs it `Failed` ([`ends`]), unless the
+//!   prompt's task had passed the recheck already (`went_out`): then `Delivered`. The lawyer's
 //!   `UserMessage` stays as typed. A switch that was committed and whose turn failed before its
 //!   prompt went out (a cancel during the commit included) owes the handover to the next turn.
 //! - The session a switch starts gets no "context not restored" notice ([`started_by_switch`]).
@@ -96,6 +100,9 @@ struct Handoff {
     text: Option<String>,
     /// Its `HandoffSettled` is logged.
     settled: bool,
+    /// Set by the prompt's task once the prompt carrying it passed the Codex `.codex` recheck
+    /// and goes out: a turn that ends before `PromptOut` arrives settles it `Delivered`.
+    went_out: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 /// What a thread keeps of its switches beyond a turn. In memory only: after a restart a new
@@ -234,6 +241,13 @@ pub(super) fn begins(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool 
             _ => false,
         };
     };
+    // The settings may have changed since the message was taken (a queued switch restored
+    // after a restart included): an agent they no longer have waits held, as `target` refuses.
+    if actor.effective.agent(to.as_str()).is_none() {
+        tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch waits: its agent is not in the settings; the message goes back to the held queue");
+        super::queue::put_back(actor, thread, turn);
+        return true;
+    }
     if background(actor, thread) {
         tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch waits: the agent may still work; the message goes back to the held queue");
         super::queue::put_back(actor, thread, turn);
@@ -364,6 +378,18 @@ pub(super) fn on_log(
     if let Err(error) = commit::commit(actor, thread, turn, &log) {
         tracing::warn!(%thread, error = %Cause(&error), "a switch was not logged");
         steps::end_launch_failed(actor, thread, turn, error.code(), Some(error.detail()));
+    }
+}
+
+/// Unmarks `thread`'s handover as gone out, for a test that puts a recheck's refusal in place of
+/// the prompt's going out.
+#[cfg(test)]
+pub(super) fn not_out(actor: &mut Actor, thread: ThreadId) {
+    if let Some(handoff) = current(actor, thread)
+        .and_then(|current| current.switch.as_deref_mut())
+        .and_then(|switch| switch.handoff.as_ref())
+    {
+        handoff.went_out.set(false);
     }
 }
 
