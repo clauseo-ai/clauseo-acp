@@ -85,6 +85,8 @@ const ID_FIELD = {
   agent_text: "message",
   agent_content: "event",
   tool_call: "tool_call",
+  helper: "helper",
+  helper_text: "event",
   permission: "request",
   elicitation: "elicitation",
   step: "turn",
