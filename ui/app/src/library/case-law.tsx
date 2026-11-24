@@ -13,7 +13,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { CaseLawFacts, Recheck } from "./addons-source.ts";
-import { caseLawShown, creditLine, priceLines } from "./case-law-model.ts";
+import { caseLawShown, creditLines, priceLines } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
 
@@ -23,6 +23,9 @@ export type CaseLawActs = {
   openConnectors: (() => void) | null;
   /** Its reach checked again; null where it can't be. */
   recheck: Recheck | null;
+  /** Add credits: the host's checked pay link through the app's link path when out of credit with one, else
+   * `openConnectors`; null without either. */
+  addCredits: (() => void) | null;
 };
 
 type Names = ReadonlyMap<MatterId, string>;
@@ -75,9 +78,15 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   if (shown === "trouble")
     return <Tag text={troubleTag(lang, acts.facts.off === "firm" ? "blocked" : a.status) ?? ""} />;
   const credits = acts.facts.credits;
+  const out = acts.facts.out !== null;
   return (
     <span className="lib-feature-meta">
-      {credits !== null && <span className="lib-credits">{creditLine(lang, credits)}</span>}
+      {(credits !== null || out) &&
+        creditLines(lang, credits, out).map((line, i) => (
+          <span key={line} className={i === 0 ? "lib-credits" : undefined}>
+            {line}
+          </span>
+        ))}
       <span>{scopeTag(lang, a, names)}</span>
     </span>
   );
@@ -200,17 +209,24 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
   }
   if (shown !== "added") return null;
   const credits = acts.facts.credits;
+  const out = acts.facts.out !== null;
+  const add = acts.addCredits;
   return (
     <section className="lib-detail-block">
-      {credits !== null && (
-        <p className="text-ui text-primary">
-          <span className="lib-credits">{creditLine(lang, credits)}</span>
+      {(credits !== null || out) && (
+        <p className="text-ui text-primary" data-testid="case-law-credits">
+          <span className="lib-credits">{creditLines(lang, credits, out).join(" · ")}</span>
         </p>
       )}
       <p className="text-small text-muted">{cost}</p>
-      {open !== null && (
+      {add !== null && (
         <div className="lib-detail-acts">
-          <Button kind="tone" size="small" onClick={open}>
+          <Button
+            kind={out ? "primary" : "tone"}
+            size="small"
+            data-testid="case-law-add-credits"
+            onClick={add}
+          >
             {cr(lang, "Add credits")}
           </Button>
         </div>

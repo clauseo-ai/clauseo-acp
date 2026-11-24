@@ -207,12 +207,15 @@ test("the note shows under the field while out of credit, never blocks typing or
   expect(h!.all("out-of-credit")).toHaveLength(0);
   await play({ connectors_changed: stateOf(OUT) });
   const note = h!.one("out-of-credit")!;
-  expect(note.textContent).toContain("Out of case-law credits.");
-  expect(note.textContent).toContain("Searches of Indian Kanoon stop until you add more.");
+  expect(note.textContent).toContain("Clauseo Case Law");
+  expect(note.textContent).toContain(
+    "Not enough credits for a search. Add credits to keep searching.",
+  );
+  expect(note.textContent).not.toContain("Indian Kanoon");
   expect(h!.one("out-of-credit-hide")?.getAttribute("aria-label")).toBe(
     "Hide in this conversation",
   );
-  // the pay link of the OutOfCredit status is nowhere
+  // the pay link of the OutOfCredit status is no text on the page: Add credits opens it
   expect(h!.host.innerHTML).not.toContain("pay/old");
   await h!.type("Draft the reply.");
   const field = h!.host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]')!;
@@ -220,9 +223,10 @@ test("the note shows under the field while out of credit, never blocks typing or
   expect(field.value).toBe("Draft the reply.");
   expect((h!.one("send") as HTMLButtonElement).disabled).toBe(false);
   await h!.click(h!.one("out-of-credit-add"));
-  expect(h!.transport.only("open_settings")).toEqual([
-    { call: "open_settings", section: "connectors" },
+  expect(h!.transport.only("open_external")).toEqual([
+    { call: "open_external", url: "https://data.clauseo.chat/pay/old", alwaysAsk: true },
   ]);
+  expect(h!.transport.only("open_settings")).toEqual([]);
   await play({ connectors_changed: stateOf(SIGNED_IN) });
   expect(h!.all("out-of-credit")).toHaveLength(0);
   // connectors off: no note

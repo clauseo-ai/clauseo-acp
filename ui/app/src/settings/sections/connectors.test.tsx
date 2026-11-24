@@ -153,7 +153,7 @@ test("out of credit: the line, Add credits first, then Sign out and Remove; its 
   const r = await open({
     status: { out_of_credit: { pay_url: "https://data.clauseo.chat/pay/x" } },
   });
-  expect(r.text()).toContain("No credits left. Case-law searches stop until you add more.");
+  expect(r.text()).toContain("Not enough credits for a search. Add credits to keep searching.");
   expect(r.note("Connectors")).toBe("Out of credit");
   expect(r.buttons()).toEqual(["Add credits", "Sign out", "Remove", "Turn off"]);
 });

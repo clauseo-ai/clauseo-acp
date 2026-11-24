@@ -4,6 +4,7 @@
 // checks Case Law's reach again) and today's add flow, Settings at Connectors.
 import { useSyncExternalStore } from "react";
 import { quietly } from "../room/open.ts";
+import { caseLawCredit, type CaseLawCredit } from "../store/case-law-credit.ts";
 import { CASE_LAW, connectorsStoreOf } from "../store/connectors.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConnectorsState } from "../transport/protocol.ts";
@@ -30,6 +31,9 @@ export type CaseLawFacts = {
   pack: { paise: number; credits: number } | null;
   /** The credits left, from the last account read; null before one, or while not added. */
   credits: number | null;
+  /** Out of credit by the one rule (store/case-law-credit.ts), with the host's checked pay link when it made one;
+   * null while a search goes through. */
+  out: { payUrl: string | null } | null;
   /** Added once, but not signed in now: the sign-in ended or its key was revoked ("ended"), a
    * sign-in is under way ("signing_in"), or the last one failed ("error"); null otherwise. */
   signIn: "ended" | "signing_in" | "error" | null;
@@ -56,20 +60,27 @@ const NO_FACTS: CaseLawFacts = {
   off: null,
   pack: null,
   credits: null,
+  out: null,
   signIn: null,
 };
 
-/** Case Law's facts from the connectors' state. */
-export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFacts {
+/** Case Law's facts from the connectors' state, and its credit by the one rule (the store's, which keeps the figure
+ * last read for an out-of-credit state). */
+export function caseLawFacts(
+  state: ConnectorsState,
+  heard: boolean,
+  credit: CaseLawCredit | null = caseLawCredit(state, null),
+): CaseLawFacts {
   if (!heard) return NO_FACTS;
   const c = state.connectors.find((v) => v.id === CASE_LAW);
   const smallest = [...(c?.packs ?? [])].sort((a, b) => a.paise - b.paise)[0];
   const s = c?.status;
+  const out = credit?.kind === "out" ? credit : null;
   const credits =
-    typeof s !== "object"
-      ? null
-      : "out_of_credit" in s
-        ? 0
+    out !== null
+      ? out.credits
+      : typeof s !== "object"
+        ? null
         : "signed_in" in s
           ? (s.signed_in.balance?.credits ?? null)
           : null;
@@ -87,6 +98,7 @@ export function caseLawFacts(state: ConnectorsState, heard: boolean): CaseLawFac
     off: state.available ? null : state.locked ? "firm" : "lawyer",
     pack: smallest === undefined ? null : { paise: smallest.paise, credits: smallest.credits },
     credits,
+    out: out === null ? null : { payUrl: out.payUrl },
   };
 }
 
@@ -96,7 +108,7 @@ export function sourceOver(transport: HostTransport, list: ListReader): AddonsSo
   let state: AddonsState = { ...list.state(), caseLaw: NO_FACTS };
   let key = "";
   const compose = () => {
-    const facts = caseLawFacts(connectors.state(), connectors.heard());
+    const facts = caseLawFacts(connectors.state(), connectors.heard(), connectors.credit());
     const next = list.state();
     const nextKey = JSON.stringify(facts);
     if (next.items === state.items && next.complete === state.complete && nextKey === key) return;
@@ -160,7 +172,14 @@ export function provideAddons(transport: HostTransport, source: AddonsSource): v
  * shots'. */
 export function fixedAddons(
   items: readonly AddonView[],
-  caseLaw: CaseLawFacts = { heard: true, off: null, pack: null, credits: null, signIn: null },
+  caseLaw: CaseLawFacts = {
+    heard: true,
+    off: null,
+    pack: null,
+    credits: null,
+    out: null,
+    signIn: null,
+  },
 ): AddonsSource {
   const state: AddonsState = { items, complete: true, caseLaw };
   return {
