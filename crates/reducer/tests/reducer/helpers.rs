@@ -14,6 +14,7 @@ use crate::events::{short, tool_started, tool_status};
 use crate::fixtures::{Log, start_turn, thread_created};
 use crate::helpers::{fold, round_trip};
 
+#[cfg(test)]
 fn turn_log(n: u64) -> (Log, TurnId) {
     let mut log = Log::thread(n).unwrap();
     log.push(thread_created().unwrap()).unwrap();
@@ -21,6 +22,7 @@ fn turn_log(n: u64) -> (Log, TurnId) {
     (log, turn)
 }
 
+#[cfg(test)]
 fn started(turn: TurnId, helper: HelperId, call: Option<ToolCallId>) -> DomainEvent {
     Box::new(HelperStarted {
         turn,
@@ -36,6 +38,7 @@ fn started(turn: TurnId, helper: HelperId, call: Option<ToolCallId>) -> DomainEv
     .into()
 }
 
+#[cfg(test)]
 fn words(turn: TurnId, helper: HelperId, text: &str) -> DomainEvent {
     HelperText {
         turn,
@@ -45,6 +48,7 @@ fn words(turn: TurnId, helper: HelperId, text: &str) -> DomainEvent {
     .into()
 }
 
+#[cfg(test)]
 fn ended(helper: HelperId, outcome: HelperOutcome) -> DomainEvent {
     HelperEnded {
         helper,
@@ -55,6 +59,7 @@ fn ended(helper: HelperId, outcome: HelperOutcome) -> DomainEvent {
 }
 
 /// A step of `helper`.
+#[cfg(test)]
 fn step(turn: TurnId, call: ToolCallId, helper: HelperId) -> DomainEvent {
     let DomainEvent::ToolCallStarted(mut started) = tool_started(turn, call, 2).unwrap() else {
         unreachable!("tool_started builds a ToolCallStarted");
@@ -64,10 +69,12 @@ fn step(turn: TurnId, call: ToolCallId, helper: HelperId) -> DomainEvent {
 }
 
 /// How many helpers the state counts open.
+#[cfg(test)]
 fn open(state: &StreamState) -> u32 {
     state.as_thread().unwrap().open_helpers()
 }
 
+#[cfg(test)]
 fn helper_entry(state: &StreamState, helper: HelperId) -> Option<HelperEntry> {
     state.entries().values().find_map(|entry| match entry {
         ViewEntry::Helper(found) if found.helper == helper => Some(found.as_ref().clone()),
@@ -76,6 +83,7 @@ fn helper_entry(state: &StreamState, helper: HelperId) -> Option<HelperEntry> {
 }
 
 /// The helper's own entries in order: `start`, `step`, `words <text>`.
+#[cfg(test)]
 fn shape(state: &StreamState, helper: HelperId) -> Vec<String> {
     state
         .entries()
@@ -141,7 +149,7 @@ fn a_running_helper_has_no_outcome_and_its_end_upserts_it_once() {
     assert_eq!(open(&round_trip(&state)), 1, "a snapshot counts it again");
     let end = log.push(ended(helper, HelperOutcome::Failed)).unwrap();
     let applied = apply(&mut state, &end).unwrap();
-    assert!(applied.anomalies.is_empty());
+    assert_eq!(applied.anomalies, Vec::<Anomaly>::new());
     assert_eq!(open(&state), 0);
     let [ViewChange::Upsert(entry)] = applied.changes.as_slice() else {
         panic!("{:?}", applied.changes);
@@ -161,7 +169,7 @@ fn a_second_end_changes_nothing() {
     let mut state = fold(log.events());
     let again = log.push(ended(helper, HelperOutcome::Stopped)).unwrap();
     let applied = apply(&mut state, &again).unwrap();
-    assert!(applied.changes.is_empty());
+    assert_eq!(applied.changes, Vec::<ViewChange>::new());
     assert_eq!(
         applied.anomalies,
         [Anomaly::AlreadySettled {
@@ -185,7 +193,7 @@ fn an_end_of_an_unknown_helper_and_a_second_start_change_nothing() {
     let mut state = fold(log.events());
     let unknown = log.push(ended(stranger, HelperOutcome::Done)).unwrap();
     let applied = apply(&mut state, &unknown).unwrap();
-    assert!(applied.changes.is_empty());
+    assert_eq!(applied.changes, Vec::<ViewChange>::new());
     assert_eq!(
         applied.anomalies,
         [Anomaly::UnknownReference {
@@ -195,7 +203,7 @@ fn an_end_of_an_unknown_helper_and_a_second_start_change_nothing() {
     );
     let twice = log.push(started(turn, helper, None)).unwrap();
     let applied = apply(&mut state, &twice).unwrap();
-    assert!(applied.changes.is_empty());
+    assert_eq!(applied.changes, Vec::<ViewChange>::new());
     assert_eq!(
         applied.anomalies,
         [Anomaly::Duplicate {

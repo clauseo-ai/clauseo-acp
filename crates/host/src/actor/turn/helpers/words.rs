@@ -96,7 +96,7 @@ pub(super) fn cut(text: String, limit: usize) -> Vec<String> {
 mod tests {
     use clauseo_protocol::escaped_len;
 
-    use super::{FULL_BYTES, Held, cut};
+    use super::{FULL_BYTES, Held, Run, cut};
     use clauseo_protocol::{HelperId, TurnId};
 
     use crate::pipeline::tests::support::id;
@@ -138,7 +138,7 @@ mod tests {
             .map(|run| (run.helper, run.text.as_str()))
             .collect();
         assert_eq!(texts, [(helper(1), "One more."), (helper(2), "Two")]);
-        assert!(held.is_empty());
+        assert_eq!(held.take(), Vec::<Run>::new());
     }
 
     #[test]
