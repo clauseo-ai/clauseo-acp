@@ -201,6 +201,7 @@ fn a_claude_launch_sets_the_launch_variables_in_its_own_environment() {
         ("CLAUDE_CODE_WEB_FETCH_AGENT", "0"),
         ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "6"),
         ("CLAUDE_CODE_FORK_SUBAGENT", "0"),
+        ("CLAUDE_CODE_DISABLE_ADVISOR_TOOL", "1"),
     ] {
         let named: Vec<_> = env
             .iter()

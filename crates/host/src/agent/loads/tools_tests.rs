@@ -10,8 +10,8 @@ use super::profile::{ClaudeBrowser, ClaudeKeys, Folders, Login};
 use super::profile_tests::{OFF, ON};
 use super::tools::{NOT_OFFERED, claude_tools};
 use super::{
-    CLAUDE_CODE_MODE_VAR, CLAUDE_CRON_OFF_VAR, CLAUDE_GIT_STATUS_OFF_VAR, GIT_STATUS_SETTING,
-    McpControl, claude_launch_vars, session_meta,
+    CLAUDE_ADVISOR_OFF_VAR, CLAUDE_CODE_MODE_VAR, CLAUDE_CRON_OFF_VAR, CLAUDE_GIT_STATUS_OFF_VAR,
+    GIT_STATUS_SETTING, McpControl, claude_launch_vars, session_meta,
 };
 
 /// What macOS and Linux offer, web or not; Windows offers the same without `Bash`. `Glob` and
@@ -342,7 +342,45 @@ fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off()
             Some(&OsString::from(value))
         );
     }
-    assert_eq!(launch.len(), 8);
+    assert_eq!(launch.len(), 9);
+}
+
+/// Every Claude launch keeps Claude Code's experimental `advisor` tool off: its variable is `1`
+/// in the adapter's environment, in the env it spawns Claude Code with and in the flag
+/// settings' `env`, over a hook's own value, and a hook's `advisorModel` cannot bring the tool
+/// back, since Claude Code checks the variable first.
+#[test]
+fn every_claude_launch_keeps_the_advisor_tool_off() {
+    assert_eq!(CLAUDE_ADVISOR_OFF_VAR, "CLAUDE_CODE_DISABLE_ADVISOR_TOOL");
+    for hook in [
+        json!({}),
+        json!({"claudeCode": {"options": {
+            "env": {"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "0"},
+            "settings": {
+                "env": {"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": ""},
+                "advisorModel": "opus",
+            },
+        }}}),
+    ] {
+        for control in [McpControl::Clauseo, McpControl::Managed] {
+            let meta = Value::Object(session_meta(
+                hook.as_object().cloned(),
+                control,
+                None,
+                Some(&keys(ON)),
+            ));
+            let options = &meta["claudeCode"]["options"];
+            assert_eq!(options["env"][CLAUDE_ADVISOR_OFF_VAR], "1", "{hook}");
+            assert_eq!(
+                options["settings"]["env"][CLAUDE_ADVISOR_OFF_VAR], "1",
+                "{hook}"
+            );
+        }
+    }
+    assert_eq!(
+        claude_launch_vars().get(&OsString::from("CLAUDE_CODE_DISABLE_ADVISOR_TOOL")),
+        Some(&OsString::from("1"))
+    );
 }
 
 /// The variables that keep helpers off the lead's model: Claude Code's own agent types, its

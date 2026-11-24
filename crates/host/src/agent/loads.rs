@@ -198,6 +198,13 @@ pub(crate) const CLAUDE_FORK_OFF_VAR: &str = "CLAUDE_CODE_FORK_SUBAGENT";
 /// its own switch, a server gate) and then starts with the ordinary tools, saying nothing.
 pub(crate) const CLAUDE_CODE_MODE_VAR: &str = "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE";
 
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]): it keeps
+/// Claude Code's experimental `advisor` tool, which forwards the whole conversation to another
+/// model on the lawyer's usage, out of every session and every helper. Claude Code 2.1.330
+/// checks it before the server's rollout flag and before any `advisorModel` setting, `--advisor`
+/// flag or saved `/advisor` pick.
+pub(crate) const CLAUDE_ADVISOR_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
+
 // A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
 // and in the limits reader's and sign-in's `CLAUDE_FORCED_VARS`, with a test in
 // `tools_tests.rs`. A variable that depends on the login goes in
@@ -206,7 +213,7 @@ pub(crate) const CLAUDE_CODE_MODE_VAR: &str = "CLAUDE_CODE_EXPERIMENTAL_CODE_MOD
 /// The variables every Claude launch sets, each in the adapter's own environment
 /// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
 /// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
-pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 8] = [
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 9] = [
     (CLAUDE_CRON_OFF_VAR, "1"),
     (CLAUDE_GIT_STATUS_OFF_VAR, "1"),
     (CLAUDE_MESSAGING_OFF_VAR, "0"),
@@ -215,6 +222,7 @@ pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 8] = [
     (CLAUDE_WEB_FETCH_AGENT_VAR, "0"),
     (CLAUDE_HELPERS_AT_ONCE_VAR, CLAUDE_HELPERS_AT_ONCE),
     (CLAUDE_FORK_OFF_VAR, "0"),
+    (CLAUDE_ADVISOR_OFF_VAR, "1"),
 ];
 
 /// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
