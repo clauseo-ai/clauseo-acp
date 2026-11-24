@@ -398,6 +398,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Tracked changes: a file over Clauseo's 512,000,000-byte cap or one of stetdoc's limits (size, entries, compression ratio, XML size or depth); the pane says the file is too large in place of the list | `ErrorCode::WordTooLarge` | no |
 | Settings › Skills, Add a skill: the folder picked holds no `SKILL.md`; the pane says so and adds nothing | `ErrorCode::SkillNoSkillMd` | no |
 | Settings › Skills, Add a skill: the skill could not be read, is too large or breaks a pack rule; the pane says it can't be added and adds nothing | `ErrorCode::SkillInvalid` | no |
+| Skills and Connectors: the skill or tool changed is no longer there (removed meanwhile); the list reads again and nothing changed | `ErrorCode::AddonUnknown` | no |
+| Skills and Connectors: a built-in skill or tool cannot be removed or re-scoped (nor, for now, a built-in skill switched per matter); nothing changed | `ErrorCode::AddonBuiltIn` | no |
 | Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
 | Offline mid-answer (D-050): only while the window says offline (`HostCommand::SetNetwork`) and the host's probe of the agent's service can't get through either; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
 | The agent's service had a problem on its side and the agent gave up on the turn (#1030; codex-acp's `internal_error`, `provider_error`, `overloaded`): the answer so far stays, the stop line names the agent ("ChatGPT had a problem on its side. Try again.") and offers Try again, never Restart or a time mark; the queue is held | `ErrorCode::AgentServiceError` | yes |

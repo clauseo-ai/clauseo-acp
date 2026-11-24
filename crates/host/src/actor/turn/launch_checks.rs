@@ -321,7 +321,7 @@ pub(super) fn prepare(
     let (clock, check_clock) = (Arc::clone(&actor.clock), Arc::clone(&actor.clock));
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
-    let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
+    let (mcp, settings) = (McpReads::of(actor, matter), Reads::of(actor, claude));
     actor.spawn_post(async move {
         let skills = skill_wait::after_keys(keys_wait, skills).await;
         // Before anything is made for the launch: a folder that is gone, or does not answer,

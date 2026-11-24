@@ -102,6 +102,7 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "skills.curated" => settings.skills.curated.clear(),
         "skills.allow_scripts" => settings.skills.allow_scripts = false,
         "skills.enabled" => settings.skills.enabled.clear(),
+        "skills.scope" => settings.skills.scope.clear(),
         "sandbox.required" => settings.sandbox.required = SandboxSettings::default().required,
         // Not its default (on): a value the lawyer mistyped turns auto outside the sandbox off,
         // the safe side (decision record 0051), as a refused policy value does.

@@ -1,11 +1,12 @@
 //! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
 //! [`PrivacyPatch`] or an [`UpdateChoice`], of `matters.default_location`, or of one
-//! `agents.<id>`, `plans.<id>` or `skills.enabled` entry. Only
+//! `agents.<id>`, `plans.<id>`, `skills.enabled` or `skills.scope` entry. Only
 //! [`crate::Effective::apply_ui_patch`], [`crate::Effective::apply_tools_patch`],
 //! [`crate::Effective::apply_privacy_patch`],
 //! [`crate::Effective::apply_update_mode`], [`crate::Effective::set_default_location`],
-//! [`crate::Effective::set_agent_launch`], [`crate::Effective::set_plan`] and
-//! [`crate::Effective::set_skill_pack`] call those writes, after they have checked policy locks.
+//! [`crate::Effective::set_agent_launch`], [`crate::Effective::set_plan`],
+//! [`crate::Effective::set_skill_pack`] and [`crate::Effective::set_skill_scope`] call those
+//! writes, after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -229,6 +230,28 @@ pub(crate) fn write_skill_pack(
             None => {
                 entries.remove(id);
             }
+        }
+    }
+    save_document(locations, files, &document)
+}
+
+/// Saves one entry of `skills.scope` in the user's `settings.json`: `"matter"` for `matter`,
+/// else the entry goes; every other key stays, in one write. It checks nothing:
+/// [`crate::Effective::set_skill_scope`] does, before it calls this.
+pub(crate) fn write_skill_scope(
+    locations: &Locations,
+    files: &dyn Files,
+    id: &str,
+    matter: bool,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(skills) = section_mut(&mut document, "skills")
+        && let Value::Object(entries) = section_mut(skills, "scope")
+    {
+        if matter {
+            entries.insert(id.to_owned(), Value::String("matter".to_owned()));
+        } else {
+            entries.remove(id);
         }
     }
     save_document(locations, files, &document)

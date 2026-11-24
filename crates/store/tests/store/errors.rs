@@ -135,6 +135,7 @@ fn error_codes_map() {
         forgotten: None,
         skill_packs: None,
         agent_prefs: None,
+        addon_switches: None,
     };
     let encode = block_on(store.commit(Commit {
         matter: Some(unknown),

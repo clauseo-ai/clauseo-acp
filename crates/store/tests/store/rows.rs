@@ -192,6 +192,7 @@ fn matter_row(n: u64, created: i64) -> MatterRow {
         forgotten: None,
         skill_packs: None,
         agent_prefs: None,
+        addon_switches: None,
     }
 }
 

@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::{BrowserPart, BrowserRoute};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, ThreadId, ToolAvailability};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, MatterId, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
 use super::super::Actor;
+use super::super::addon_rules::{self, Placed};
 use super::launch_checks::egress;
 use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
@@ -26,19 +27,26 @@ use crate::log_file::LIFECYCLE;
 
 pub(super) mod claude;
 
-/// `tools.web_search` and `tools.browser`, with whether each is locked.
-fn switches(actor: &Actor) -> (Switch, Switch) {
+/// `tools.web_search` and `tools.browser`, with whether each is locked; the browser off too
+/// in a matter that switches it off (`addon_rules.rs`), which is the lawyer's, never locked.
+fn switches(actor: &Actor, matter: MatterId) -> (Switch, Switch) {
     let tools = &actor.effective.settings().tools;
+    let here = Placed::of(actor, matter).builtin_on(addon_rules::BROWSER);
     (
         Switch {
             on: tools.web_search,
             locked: actor.effective.is_locked("tools.web_search"),
         },
         Switch {
-            on: tools.browser,
-            locked: actor.effective.is_locked("tools.browser"),
+            on: tools.browser && here,
+            locked: actor.effective.is_locked("tools.browser") && here,
         },
     )
+}
+
+/// Whether `run`'s matter leaves Clauseo's case law on (its switch).
+fn case_law_here(actor: &Actor, run: &RunFolders) -> bool {
+    Placed::of(actor, run.key.matter).builtin_on(addon_rules::CASE_LAW)
 }
 
 /// A Codex agent's `CODEX_CONFIG` keys from the profile, filled into `prepared`. The hook gets
@@ -60,10 +68,15 @@ pub(super) fn launch_keys(
         // the agent answers `initialize`; a file that appears in that window drops the entry
         // (`ManagedByFirm`, the relay ended) while this paragraph stays: wrong words, but no
         // case law reaches the agent.
-        let part = connectors_part(prepared.run.case_law.relay().is_some());
+        let part = connectors_part(
+            prepared.run.case_law.relay().is_some() && case_law_here(actor, &prepared.run),
+        );
         // The part `session_loads` would fill, from the same inputs: the browser entry's state
         // as it stands now (a slot taken in between leaves wrong words, but no browser).
-        let switch = (loads::mcp_control(&actor.managed_mcp), switches(actor).1);
+        let switch = (
+            loads::mcp_control(&actor.managed_mcp),
+            switches(actor, prepared.run.key.matter).1,
+        );
         let matter = super::session::folder(actor, thread)?;
         let downloads = matter.join(browser::DOWNLOADS_FOLDER);
         let fallback = browser::fallback_downloads(&prepared.run.notes);
@@ -76,7 +89,7 @@ pub(super) fn launch_keys(
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
             .with_browser(browser_part(browser, route(kind, shell.is_none())));
-        let (web_search, _) = switches(actor);
+        let (web_search, _) = switches(actor, prepared.run.key.matter);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor
             .profile
@@ -185,7 +198,7 @@ pub(super) fn session_loads(
             Error::refused(ErrorCode::AgentLaunchFailed, "the session has no folders")
         })?;
     let control = loads::mcp_control(&actor.managed_mcp);
-    let (web_search, browser_switch) = switches(actor);
+    let (web_search, browser_switch) = switches(actor, run.key.matter);
     // A Claude session whose sandbox fell back off gets no browser (`profile_loads/claude.rs`).
     let (sandbox, none_here) = claude::session_sandbox(
         actor,
@@ -382,7 +395,11 @@ fn case_law_servers(
         control,
         windows_env: &windows_env,
     };
-    let (rest, entry, state) = case_law::hook_servers(hook, &inputs);
+    let (rest, mut entry, mut state) = case_law::hook_servers(hook, &inputs);
+    // A matter that switches case law off gets no entry and no state for it.
+    if !case_law_here(actor, run) {
+        (entry, state) = (None, None);
+    }
     if entry.is_none()
         && let Some(relay) = run.case_law.relay()
     {
@@ -444,7 +461,7 @@ fn shell_browser(
     {
         return None;
     }
-    let (_, switch) = switches(actor);
+    let (_, switch) = switches(actor, run.key.matter);
     let found = run.browser_shell && run.chrome.is_some();
     Some(browser::shell_state(switch, run.browser_blocked, found))
 }

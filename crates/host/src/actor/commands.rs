@@ -107,6 +107,10 @@ pub(crate) enum AfterCommand {
     MatterRow {
         before: Box<clauseo_store::MatterRow>,
     },
+    /// Matter rows changed when the commit was sent (`addon_change.rs`); put back if it fails.
+    MatterRows {
+        before: Vec<clauseo_store::MatterRow>,
+    },
     /// `ForgetMatter` of this matter, already moved to `Actor::forgotten`.
     Forget(MatterId),
     /// A forgotten matter coming back with this row: on the list once durable.
@@ -307,6 +311,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         // so the API key never reaches the receipts table, not even as a hash.
         HostCommand::Connector(command) => super::connectors::run(actor, ctx, command),
         HostCommand::Mcp(command) => super::mcp::run(actor, ctx, command),
+        HostCommand::SetAddonScope(change) => super::addon_change::set_scope(actor, ctx, &change),
+        HostCommand::SetAddonOn(change) => super::addon_change::set_on(actor, ctx, &change),
+        HostCommand::RemoveAddon(change) => super::addon_change::remove(actor, ctx, &change),
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
@@ -372,6 +379,9 @@ pub(super) fn command_committed(
         (AfterCommand::MatterRow { before }, Err(_)) => {
             super::matter_details::row_failed(actor, *before);
         }
+        (AfterCommand::MatterRows { before }, Err(_)) => {
+            super::addon_change::rows_failed(actor, before);
+        }
         (AfterCommand::Forget(matter), outcome) => {
             super::matter_details::forget_committed(actor, matter, outcome.is_ok());
         }
@@ -382,7 +392,8 @@ pub(super) fn command_committed(
             AfterCommand::Nothing
             | AfterCommand::Thread(_)
             | AfterCommand::Row { .. }
-            | AfterCommand::MatterRow { .. },
+            | AfterCommand::MatterRow { .. }
+            | AfterCommand::MatterRows { .. },
             _,
         ) => {}
         (AfterCommand::Turn(tag), outcome) => turn::committed(actor, tag, outcome),

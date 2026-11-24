@@ -177,6 +177,21 @@ golden! { HostCommand::name_of {
     Mcp => mcp: HostCommand::Mcp(clauseo_protocol::McpCommand::RemoveServer {
         name: "github".to_owned(),
     });
+    SetAddonScope => set_addon_scope: HostCommand::SetAddonScope(clauseo_protocol::SetAddonScope {
+        kind: clauseo_protocol::AddonKind::Skill,
+        id: "pdf".to_owned(),
+        scope: clauseo_protocol::AddonScope::Matter(matter_id(1)),
+    });
+    SetAddonOn => set_addon_on: HostCommand::SetAddonOn(clauseo_protocol::SetAddonOn {
+        kind: clauseo_protocol::AddonKind::Tool,
+        id: "linear".to_owned(),
+        matter: matter_id(1),
+        on: false,
+    });
+    RemoveAddon => remove_addon: HostCommand::RemoveAddon(clauseo_protocol::RemoveAddon {
+        kind: clauseo_protocol::AddonKind::Skill,
+        id: "pdf".to_owned(),
+    });
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

@@ -31,6 +31,7 @@ fn row(n: u64, agent_prefs: Option<AgentPrefs>, skill_packs: Option<PackList>) -
         forgotten: None,
         skill_packs,
         agent_prefs,
+        addon_switches: None,
     }
 }
 
@@ -87,6 +88,7 @@ fn an_unreadable_saved_value_reads_as_the_default_and_the_rest_stays() {
             written[0].clone(),
             MatterRow {
                 agent_prefs: None,
+                addon_switches: None,
                 ..written[1].clone()
             },
             MatterRow {

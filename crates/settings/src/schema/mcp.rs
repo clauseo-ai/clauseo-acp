@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::ItemScope;
+
 /// One MCP server: a local program (`command`) or a remote URL (`url`), and whether it is on.
 /// `host` passes the enabled local ones to the agent in `session/new`. An entry with
 /// `command` is local (a `url` or `headers` beside it is ignored, with a warning); one with
@@ -17,6 +19,10 @@ pub struct McpServerLaunch {
     /// Whether the agent gets it. Off unless set.
     #[serde(default)]
     pub enabled: bool,
+    /// Where it is on when `enabled`: `matter` only in the matters switched on for it (the
+    /// store's `matters.addon_switches`); left out, every matter but one switched off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ItemScope>,
 }
 
 /// How an MCP server is reached. On disk the fields sit in the server's entry, with no tag:
@@ -113,7 +119,13 @@ impl McpServerLaunch {
         Self {
             transport: McpTransport::Local { command, args, env },
             enabled,
+            scope: None,
         }
+    }
+
+    /// Whether its scope is `matter`: on only in the matters switched on for it.
+    pub fn matter_scoped(&self) -> bool {
+        self.scope == Some(ItemScope::Matter)
     }
 
     /// A local server's program, or `None` for a remote one.

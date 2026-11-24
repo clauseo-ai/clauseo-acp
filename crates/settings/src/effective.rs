@@ -27,6 +27,9 @@ mod privacy_tests;
 mod sandbox_tests;
 #[cfg(test)]
 mod set_tests;
+mod skills_scope;
+#[cfg(test)]
+mod skills_scope_tests;
 #[cfg(test)]
 mod skills_tests;
 #[cfg(test)]

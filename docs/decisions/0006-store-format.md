@@ -170,6 +170,24 @@ CREATE TABLE pending_actions (matter TEXT PRIMARY KEY NOT NULL /* MatterId: one 
   thread TEXT /* ThreadId it was asked from; NULL none */, at INTEGER NOT NULL /* ms since the epoch */) WITHOUT ROWID;
 ```
 
+### Schema version 8
+
+`crates/store/src/migrations/0008_matter_addon_switches.sql`, verbatim (the same test checks this
+copy too). A matter's own switches for skills and tools (`SetAddonOn`, `SetAddonScope`,
+`RemoveAddon`; decision record 0040): JSON text such as `{"skill":{"pdf":true},"tool":
+{"linear":false}}`, the shape of protocol's `AddonSwitches`. NULL, as on every matter before it
+and whenever no switch is left, lets each item follow its scope. A row, not an event, as the other
+matter details. A command that clears an item's switches in several matters writes their rows in
+one commit (`Commit::more_matters`).
+
+```sql
+-- Schema version 8: a matter's own switches for skills and tools (decision record 0040, Scope and
+-- per-matter switches). docs/decisions/0040-skill-packs.md gives the reason and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN addon_switches TEXT /* JSON {"skill":{id:bool},"tool":{name:bool}}; NULL = no switch, each item follows its scope */;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.

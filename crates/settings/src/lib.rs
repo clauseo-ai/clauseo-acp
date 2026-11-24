@@ -172,10 +172,11 @@ pub use policy::{
 };
 pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, KeychainRef, Language, Lite,
-    MattersSettings, McpServerLaunch, McpSettings, McpTransport, McpValue, Motion, NetworkSettings,
-    Plan, PlanProvider, PrivacySettings, SandboxSettings, Saved, Settings, SkillsExtra,
-    SkillsSettings, Theme, ToolsSettings, UiSettings, UpdateMode, UpdateSettings, json_schema,
+    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, ItemScope, KeychainRef,
+    Language, Lite, MattersSettings, McpServerLaunch, McpSettings, McpTransport, McpValue, Motion,
+    NetworkSettings, Plan, PlanProvider, PrivacySettings, SandboxSettings, Saved, Settings,
+    SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings, UpdateMode, UpdateSettings,
+    json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

@@ -36,7 +36,8 @@ use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
 /// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its Skills
-/// pane `SetSkillPack` (0040), for its
+/// pane `SetSkillPack` (0040), for skills and tools `SetAddonScope`, `SetAddonOn` and
+/// `RemoveAddon` (also from `main`), for its
 /// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
 /// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
 /// the connector commands but the hint's (R24), for its protection section `RetryProtection`
@@ -65,7 +66,11 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
             | HostCommand::RevokeAllowedSite { .. }
             // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
-            | HostCommand::Mcp(_) => Ok(()),
+            | HostCommand::Mcp(_)
+            // Skills and tools: scope, a matter's switch, removal (D2a), as from main.
+            | HostCommand::SetAddonScope(_)
+            | HostCommand::SetAddonOn(_)
+            | HostCommand::RemoveAddon(_) => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             // "Add a skill": the host reads the path it names, so only a path this run's
             // `pick_skill` returned, as `CreateMatter` takes only a folder ref `pick_folder`
@@ -75,7 +80,8 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, add_skill, remove_skill, refresh_limits, set_update_mode, \
                  check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
-                 the MCP server commands and the connector commands",
+                 set_addon_scope, set_addon_on, remove_addon, the MCP server commands and the \
+                 connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -157,7 +163,14 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         }
         // D-050: the window's `online`/`offline` events, a flag; it only arms or takes back
         // the host's offline watch on running turns.
-        | HostCommand::SetNetwork { .. } => Ok(()),
+        | HostCommand::SetNetwork { .. }
+        // The Skills and Connectors place (D2a): where an item is on, a matter's switch, and
+        // removing an added one. A kind, an id and a matter only; nothing runs a new program
+        // (a server's program was allowed when it was added, in Settings), and the host
+        // refuses a built-in, an unknown id and what the firm locks.
+        | HostCommand::SetAddonScope(_)
+        | HostCommand::SetAddonOn(_)
+        | HostCommand::RemoveAddon(_) => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

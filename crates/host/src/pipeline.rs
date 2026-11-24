@@ -83,6 +83,11 @@ impl Draft {
         self.commit.matter = Some(row);
     }
 
+    /// Sets the other matters' rows to upsert after [`Self::matter_row`]'s.
+    pub(crate) fn more_matter_rows(&mut self, rows: Vec<MatterRow>) {
+        self.commit.more_matters = rows;
+    }
+
     /// Sets the compressed snapshot to store.
     pub(crate) fn snapshot(&mut self, snapshot: SnapshotIn) {
         self.commit.snapshot = Some(snapshot);

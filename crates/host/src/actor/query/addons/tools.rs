@@ -12,11 +12,12 @@ use clauseo_protocol::{
     McpServerKind, McpServerView,
 };
 
-use super::row;
+use super::{Places, row};
 use crate::actor::Actor;
 
-/// The built-in tools, then the added ones.
-pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
+/// The built-in tools, then the added ones, placed for `matter`.
+pub(super) fn rows(actor: &Actor, matter: Option<clauseo_protocol::MatterId>) -> Vec<Addon> {
+    let places = Places::of(actor, matter);
     let effective = &actor.effective;
     let tools = &effective.settings().tools;
     // Case law is left out until its credential has been read once (`recheck::status`).
@@ -39,6 +40,10 @@ pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
         locked: effective.is_locked("tools.browser"),
         ..row(AddonKind::Tool, "browser", "Browser", AddonSource::BuiltIn)
     }]);
+    rows = rows
+        .into_iter()
+        .map(|row| places.placed_as(row, true))
+        .collect();
     let view = crate::actor::mcp::view::view(actor);
     if view.control == McpControl::FirmManaged {
         let servers = effective.mcp_servers().iter();
@@ -53,7 +58,13 @@ pub(super) fn rows(actor: &Actor) -> Vec<Addon> {
         return rows;
     }
     let lawyer = view.control == McpControl::Lawyer;
-    rows.extend(view.servers.iter().map(|server| added(server, lawyer)));
+    let servers = effective.mcp_servers();
+    rows.extend(view.servers.iter().map(|server| {
+        let all = servers
+            .get(&server.name)
+            .is_none_or(|launch| !launch.matter_scoped());
+        places.placed_as(added(server, lawyer), all)
+    }));
     rows
 }
 
@@ -98,6 +109,7 @@ fn added(server: &McpServerView, lawyer: bool) -> Addon {
         },
         can_remove: lawyer,
         locked: !lawyer,
+        server: Some(server.clone()),
         ..row(
             AddonKind::Tool,
             &server.name,

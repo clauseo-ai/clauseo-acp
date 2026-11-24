@@ -127,8 +127,8 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
             kind,
         },
     };
-    let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
-    let packs = pack_prep(actor, &row.agent, matter);
+    let list = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
+    let packs = pack_prep(actor, &row.agent, (row.matter, list));
     Ok(LaunchPaths {
         stored,
         data: locations.data_dir().to_owned(),

@@ -145,6 +145,10 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   record 0051):* the `sandbox` and `network` keys are security keys too, each locked at its safe
   value, which is not always its default: `sandbox.allow_unprotected_auto` locks at false,
   `sandbox.required` at its default false (0051 gives why), the `network` keys unset or empty.
+  *Amended 2026-11-24 (decision record 0040, Scope and per-matter switches):* an `mcp.servers`
+  entry may carry `scope` (`"matter"` or `"all"`); it types with the entry, so a policy list locks
+  each server's scope with it, and `skills.scope` is a policy key of its own (an object, replaced
+  whole). Neither is a security key: a scope only narrows where an item is on.
 - **`ARCHITECTURE.md`.** The `settings` row becomes `exists`, and its "May depend on" cell lists
   the normal dependencies the crate uses: `serde, serde_json, serde_json_lenient, schemars;
   windows (Windows only); objc2-core-foundation (macOS only)`.

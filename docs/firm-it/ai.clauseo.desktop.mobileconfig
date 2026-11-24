@@ -97,6 +97,11 @@
         <key>nda-kit</key>
         <string>sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4</string>
       </dict>
+      <key>skills.scope</key>
+      <dict>
+        <key>nda-kit</key>
+        <string>matter</string>
+      </dict>
       <key>update.mode</key>
       <string>none</string>
       <key>browser.allow_when_remote_debugging_disabled</key>

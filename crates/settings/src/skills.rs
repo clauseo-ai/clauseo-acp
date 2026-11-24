@@ -9,6 +9,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::schema::ItemScope;
 use crate::warning::WarningKind;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -19,6 +20,9 @@ pub(crate) const BAD_ID: &str = "a pack id is 2 to 30 lowercase letters, digits 
 
 /// Why a recorded hash is refused.
 pub(crate) const BAD_HASH: &str = "a pack's hash is sha256: followed by 64 lowercase hex digits";
+
+/// Why a pack's scope is refused.
+const BAD_SCOPE: &str = "a pack's scope is \"matter\" or \"all\"";
 
 /// What a pack's recorded hash starts with.
 const HASH_PREFIX: &str = "sha256:";
@@ -157,4 +161,42 @@ pub(crate) fn enabled(
         });
     }
     Ok(packs)
+}
+
+/// Types `skills.scope`: an object from pack id to `"matter"` (or `"all"`, as if left out). A
+/// value that is not an object refuses the key. Inside it, an entry whose id is no pack id, or
+/// whose value is neither, is left out with a warning in `dropped` that gives its place (or its
+/// id, when id-shaped), and the other entries load: a pack left out is on in every matter, as
+/// before scopes.
+pub(crate) fn scope(
+    key: &str,
+    value: Value,
+    dropped: &mut Vec<WarningKind>,
+) -> Result<BTreeMap<String, ItemScope>, WarningKind> {
+    let Value::Object(entries) = value else {
+        return Err(WarningKind::InvalidValue {
+            key: key.to_owned(),
+            message: "it must be an object from pack id to \"matter\" or \"all\"".to_owned(),
+        });
+    };
+    let mut scopes = BTreeMap::new();
+    for (at, (id, value)) in entries.into_iter().enumerate() {
+        let message = match value.as_str() {
+            _ if !is_pack_id(&id) => BAD_ID,
+            Some("matter") => {
+                scopes.insert(id, ItemScope::Matter);
+                continue;
+            }
+            Some("all") => {
+                scopes.insert(id, ItemScope::All);
+                continue;
+            }
+            _ => BAD_SCOPE,
+        };
+        dropped.push(WarningKind::InvalidValue {
+            key: shown(key, &id, at + 1),
+            message: message.to_owned(),
+        });
+    }
+    Ok(scopes)
 }

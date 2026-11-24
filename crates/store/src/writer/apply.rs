@@ -9,7 +9,7 @@ use rusqlite::{Connection, params};
 
 use super::StreamState;
 use crate::codec::{self, MAX_STREAM_ID};
-use crate::{Commit, Committed, Error, PendingAction, Receipt, SnapshotIn, read};
+use crate::{Commit, Committed, Error, MatterRow, PendingAction, Receipt, SnapshotIn, read};
 
 /// The streams one commit touches, over the writer's map and its group's staged changes.
 pub(super) struct Changes<'a> {
@@ -180,46 +180,8 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             ])?;
         }
     }
-    if let Some(matter) = &commit.matter {
-        let skill_packs = matter
-            .skill_packs
-            .as_ref()
-            .map(codec::skill_packs_text)
-            .transpose()?;
-        let agent_prefs = matter
-            .agent_prefs
-            .as_ref()
-            .map(codec::agent_prefs_text)
-            .transpose()?;
-        conn.prepare_cached(
-            "INSERT INTO matters (id, name, kind, folder_path, folder_locator, shadow_repo_path, \
-             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs, \
-             agent_prefs) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
-             ON CONFLICT (id) DO UPDATE \
-             SET name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
-             folder_locator = excluded.folder_locator, \
-             shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms, \
-             client = excluded.client, next_date = excluded.next_date, \
-             pinned = excluded.pinned, last_opened_ms = excluded.last_opened_ms, \
-             forgotten_ms = excluded.forgotten_ms, skill_packs = excluded.skill_packs, \
-             agent_prefs = excluded.agent_prefs",
-        )?
-        .execute(params![
-            matter.id.to_string(),
-            matter.name,
-            codec::matter_kind_text(matter.kind)?,
-            matter.folder_path,
-            matter.folder_locator,
-            matter.shadow_repo_path,
-            matter.created.as_millis(),
-            matter.client.as_ref().map(ClientName::as_str),
-            matter.next_date.map(|date| date.to_string()),
-            matter.pinned,
-            matter.last_opened.map(Timestamp::as_millis),
-            matter.forgotten.map(Timestamp::as_millis),
-            skill_packs,
-            agent_prefs,
-        ])?;
+    for matter in commit.matter.iter().chain(&commit.more_matters) {
+        upsert_matter(conn, matter)?;
     }
     if let Some(thread) = &commit.thread {
         conn.prepare_cached(
@@ -396,5 +358,57 @@ pub(super) fn put_pending_action(conn: &Connection, action: &PendingAction) -> R
 pub(super) fn clear_pending_action(conn: &Connection, matter: MatterId) -> Result<(), Error> {
     conn.prepare_cached("DELETE FROM pending_actions WHERE matter = ?1")?
         .execute([matter.to_string()])?;
+    Ok(())
+}
+
+/// Inserts or replaces `matter`'s row.
+fn upsert_matter(conn: &Connection, matter: &MatterRow) -> Result<(), Error> {
+    let skill_packs = matter
+        .skill_packs
+        .as_ref()
+        .map(codec::skill_packs_text)
+        .transpose()?;
+    let agent_prefs = matter
+        .agent_prefs
+        .as_ref()
+        .map(codec::agent_prefs_text)
+        .transpose()?;
+    let addon_switches = matter
+        .addon_switches
+        .as_ref()
+        .filter(|switches| !switches.is_empty())
+        .map(codec::addon_switches_text)
+        .transpose()?;
+    conn.prepare_cached(
+        "INSERT INTO matters (id, name, kind, folder_path, folder_locator, shadow_repo_path, \
+         created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs, \
+         agent_prefs, addon_switches) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) \
+         ON CONFLICT (id) DO UPDATE \
+         SET name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
+         folder_locator = excluded.folder_locator, \
+         shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms, \
+         client = excluded.client, next_date = excluded.next_date, \
+         pinned = excluded.pinned, last_opened_ms = excluded.last_opened_ms, \
+         forgotten_ms = excluded.forgotten_ms, skill_packs = excluded.skill_packs, \
+         agent_prefs = excluded.agent_prefs, addon_switches = excluded.addon_switches",
+    )?
+    .execute(params![
+        matter.id.to_string(),
+        matter.name,
+        codec::matter_kind_text(matter.kind)?,
+        matter.folder_path,
+        matter.folder_locator,
+        matter.shadow_repo_path,
+        matter.created.as_millis(),
+        matter.client.as_ref().map(ClientName::as_str),
+        matter.next_date.map(|date| date.to_string()),
+        matter.pinned,
+        matter.last_opened.map(Timestamp::as_millis),
+        matter.forgotten.map(Timestamp::as_millis),
+        skill_packs,
+        agent_prefs,
+        addon_switches,
+    ])?;
     Ok(())
 }

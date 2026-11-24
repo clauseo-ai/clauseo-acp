@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use clauseo_connectors::MemoryStore;
-use clauseo_protocol::{AddonFrom, AddonFromKind, AddonKind, AddonSource, AddonStatus};
+use clauseo_protocol::{Addon, AddonFrom, AddonFromKind, AddonKind, AddonSource, AddonStatus};
 use serde_json::json;
 
 use super::{addons, addons_changed, drain, item};
@@ -105,7 +105,8 @@ fn under_a_managed_mcp_file_the_lawyers_servers_are_blocked() {
 }
 
 /// A remote server's address is listed as its scheme and host only: a token in its path (as
-/// Zapier's addresses carry one) or its query never reaches the list.
+/// Zapier's addresses carry one) or its query never reaches the list;
+/// `server` keeps the whole URL, as Settings › Tools shows it, since Edit saves it back.
 #[test]
 fn an_address_is_listed_as_its_host_only() {
     let dir = Dir::new("addons_mcp_query", &[]);
@@ -123,7 +124,11 @@ fn an_address_is_listed_as_its_host_only() {
         notes.from.as_ref().map(|from| from.text.as_str()),
         Some("https://mcp.example.com")
     );
-    let text = format!("{notes:?}");
+    let shown = Addon {
+        server: None,
+        ..notes.clone()
+    };
+    let text = format!("{shown:?}");
     assert!(
         !text.contains("abc123") && !text.contains("def456"),
         "{text}"
@@ -132,5 +137,13 @@ fn an_address_is_listed_as_its_host_only() {
     assert_eq!(
         local.from.as_ref().map(|from| from.text.as_str()),
         Some("http://127.0.0.1:8123")
+    );
+    let url = notes
+        .server
+        .as_ref()
+        .and_then(|server| server.url.as_deref());
+    assert_eq!(
+        url,
+        Some("https://mcp.example.com/mcp/s/abc123/mcp?token=def456")
     );
 }

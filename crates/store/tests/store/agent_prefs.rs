@@ -27,6 +27,7 @@ fn matter_row(n: u64, agent_prefs: Option<AgentPrefs>) -> MatterRow {
         forgotten: None,
         skill_packs: None,
         agent_prefs,
+        addon_switches: None,
     }
 }
 
@@ -131,6 +132,7 @@ fn schema_5_database_migrates_and_reads_agent_prefs_as_null() {
     // The migrated row takes prefs like a new one.
     let picked = MatterRow {
         agent_prefs: Some(prefs(AgentKind::Codex, &[("reasoning_effort", "high")])),
+        addon_switches: None,
         ..old
     };
     block_on(store.commit(Commit {
@@ -144,7 +146,7 @@ fn schema_5_database_migrates_and_reads_agent_prefs_as_null() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 7);
+    assert_eq!(SCHEMA, 8);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), [picked]);

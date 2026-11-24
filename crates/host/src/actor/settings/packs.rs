@@ -157,7 +157,7 @@ fn start_on(actor: &Actor, ctx: &CommandCtx, id: &PackId, generation: u64) -> Re
 
 /// Reads the pack `id` twice under `root` and gives its hash and whether it holds a script;
 /// `hook` runs between the reads. Off the actor.
-fn read_hash(
+pub(in crate::actor) fn read_hash(
     root: &std::path::Path,
     id: &str,
     allow_scripts: bool,
@@ -316,6 +316,8 @@ pub(in crate::actor) fn write(
         let changed = HostEvent::SettingsChanged(super::view(actor));
         super::super::app::publish(actor, &changed);
         super::super::query::addons::changed(actor);
+        // An idle session's skills are part of what its relaunch compares.
+        actor.mcp.tools_rev += 1;
     }
     super::receipt(actor, ctx)
 }

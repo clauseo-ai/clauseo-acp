@@ -144,6 +144,7 @@ pub(crate) fn plan(
     let server = McpServerLaunch {
         transport,
         enabled: edit.enabled,
+        scope: None,
     };
     if let Some((old_name, old)) = previous {
         let kept = accounts(&edit.name, &server);

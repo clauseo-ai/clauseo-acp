@@ -48,6 +48,7 @@ use clauseo_settings::{Effective, McpTransport, McpValue, McpValueKind, keychain
 use zeroize::Zeroizing;
 
 use super::McpControl;
+use crate::actor::addon_rules::Placed;
 
 mod key;
 mod redact;
@@ -72,6 +73,9 @@ pub(crate) struct McpSecrets {
     commands: BTreeMap<String, PathBuf>,
     /// What the run's servers are made from ([`ToolsKey`]), taken with the reads.
     pub(crate) key: ToolsKey,
+    /// The enabled servers the run's matter leaves out (its switch, or the server's scope):
+    /// [`servers`] skips them.
+    pub(crate) off: BTreeSet<String>,
 }
 
 impl fmt::Debug for McpSecrets {
@@ -82,6 +86,7 @@ impl fmt::Debug for McpSecrets {
             .field("refused", &self.refused.len())
             .field("commands", &self.commands.len())
             .field("key", &self.key)
+            .field("off", &self.off.len())
             .finish()
     }
 }
@@ -127,6 +132,7 @@ impl McpSecrets {
             unreadable: BTreeSet::new(),
             refused: BTreeSet::new(),
             key: ToolsKey::default(),
+            off: BTreeSet::new(),
             commands: commands
                 .iter()
                 .map(|(typed, path)| ((*typed).to_owned(), PathBuf::from(path)))
@@ -153,12 +159,25 @@ fn allowed(lawyer: Lawyer) -> bool {
 /// and every command of each enabled local server; nothing in the Safe workspace. On the actor; no
 /// keychain or file system call. The firm's `managed-mcp.json` is checked at the session call
 /// ([`servers`]), not here.
+#[cfg(test)]
 pub(crate) fn wanted(effective: &Effective, safe_workspace: bool) -> Wanted {
+    wanted_except(effective, safe_workspace, &BTreeSet::new())
+}
+
+/// [`wanted`], leaving out the servers named in `off` (those the matter leaves out).
+pub(crate) fn wanted_except(
+    effective: &Effective,
+    safe_workspace: bool,
+    off: &BTreeSet<String>,
+) -> Wanted {
     let mut wanted = Wanted::default();
     if safe_workspace {
         return wanted;
     }
-    for (name, server) in effective.enabled_mcp_servers() {
+    for (name, server) in effective
+        .enabled_mcp_servers()
+        .filter(|(name, _)| !off.contains(*name))
+    {
         let (values, kind) = match &server.transport {
             McpTransport::Local { command, env, .. } => {
                 wanted.commands.push(command.clone());
@@ -183,22 +202,22 @@ pub(crate) struct Reads {
     resolve: Resolve,
     wanted: Wanted,
     key: ToolsKey,
+    off: BTreeSet<String>,
 }
 
 impl Reads {
-    /// The keychain, the resolver and what the enabled servers need ([`wanted`]); nothing in
-    /// the Safe workspace.
-    pub(crate) fn of(actor: &crate::actor::Actor) -> Self {
+    /// The keychain, the resolver and what the servers on in `matter` need ([`wanted`]);
+    /// nothing in the Safe workspace.
+    pub(crate) fn of(actor: &crate::actor::Actor, matter: clauseo_protocol::MatterId) -> Self {
+        let placed = Placed::of(actor, matter);
+        let safe = actor.protection.safe_workspace();
+        let off = placed.servers_off();
         Self {
             store: actor.wiring.mcp_secrets.clone(),
             resolve: Arc::clone(&actor.wiring.mcp_resolve),
-            wanted: wanted(&actor.effective, actor.protection.safe_workspace()),
-            key: ToolsKey::of(
-                &actor.effective,
-                actor.protection.safe_workspace(),
-                &actor.mcp.secret_revs,
-                actor.mcp.tools_rev,
-            ),
+            wanted: wanted_except(&actor.effective, safe, &off),
+            key: ToolsKey::of(&placed, safe, &actor.mcp.secret_revs, actor.mcp.tools_rev),
+            off,
         }
     }
 
@@ -206,6 +225,7 @@ impl Reads {
     pub(crate) fn read(self) -> McpSecrets {
         let mut secrets = read(self.store.as_deref(), &self.resolve, self.wanted);
         secrets.key = self.key;
+        secrets.off = self.off;
         secrets
     }
 }
@@ -293,7 +313,10 @@ pub(crate) fn servers(
     if !allowed(lawyer) {
         return (sent, left_out);
     }
-    for (name, server) in effective.enabled_mcp_servers() {
+    for (name, server) in effective
+        .enabled_mcp_servers()
+        .filter(|(name, _)| !secrets.off.contains(*name))
+    {
         let (typed, args, env) = match &server.transport {
             McpTransport::Local { command, args, env } => (command, args, env),
             McpTransport::Remote { url, headers } => {

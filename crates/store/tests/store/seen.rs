@@ -25,6 +25,7 @@ fn matter_row(n: u64) -> MatterRow {
         forgotten: None,
         skill_packs: None,
         agent_prefs: None,
+        addon_switches: None,
     }
 }
 
@@ -81,7 +82,7 @@ fn a_schema_2_database_opens_with_its_threads_seen_up_to_their_last_seq() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 7);
+    assert_eq!(SCHEMA, 8);
 }
 
 #[test]

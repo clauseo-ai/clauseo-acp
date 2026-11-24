@@ -81,6 +81,10 @@ mod revisions;
 mod picks;
 
 #[cfg(test)]
+#[path = "commands/addons.rs"]
+mod addons;
+
+#[cfg(test)]
 #[path = "commands/prompt_text.rs"]
 mod prompt_text;
 

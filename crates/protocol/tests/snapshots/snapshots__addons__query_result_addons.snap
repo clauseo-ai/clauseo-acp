@@ -16,7 +16,8 @@ expression: "&answer"
         "has_scripts": false,
         "status": "ready",
         "can_remove": false,
-        "locked": false
+        "locked": false,
+        "switched": []
       },
       {
         "kind": "skill",
@@ -35,7 +36,10 @@ expression: "&answer"
         "has_scripts": true,
         "status": "changed",
         "can_remove": true,
-        "locked": false
+        "locked": false,
+        "switched": [
+          "01900000-0000-7000-8000-000000000001"
+        ]
       },
       {
         "kind": "tool",
@@ -47,7 +51,8 @@ expression: "&answer"
         "on": false,
         "status": "needs_setup",
         "can_remove": false,
-        "locked": false
+        "locked": false,
+        "switched": []
       },
       {
         "kind": "tool",
@@ -63,7 +68,24 @@ expression: "&answer"
         "on": true,
         "status": "needs_secret",
         "can_remove": false,
-        "locked": true
+        "locked": true,
+        "switched": [
+          "01900000-0000-7000-8000-000000000002"
+        ],
+        "server": {
+          "name": "linear",
+          "kind": "remote",
+          "args": [],
+          "url": "https://mcp.linear.app/mcp",
+          "env": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "saved": false
+            }
+          ],
+          "enabled": true
+        }
       }
     ]
   }

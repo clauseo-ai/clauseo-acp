@@ -5,7 +5,7 @@
 use super::*;
 use clauseo_protocol::{
     Addon, AddonFrom, AddonFromKind, AddonKind, AddonList, AddonScope, AddonSource, AddonStatus,
-    HostQuery, QueryResult,
+    HostQuery, McpSecretName, McpServerKind, McpServerView, QueryResult,
 };
 
 /// The contract's three rows, and a built-in skill and a matter-scoped one.
@@ -23,6 +23,8 @@ fn addon_list() -> AddonList {
         status,
         can_remove: false,
         locked: false,
+        switched: Vec::new(),
+        server: None,
     };
     AddonList {
         items: vec![
@@ -45,6 +47,7 @@ fn addon_list() -> AddonList {
                     text: "anthropics/skills/pdf".to_owned(),
                 }),
                 scope: AddonScope::Matter(matter_id(1)),
+                switched: vec![matter_id(1)],
                 has_scripts: Some(true),
                 can_remove: true,
                 ..row(
@@ -71,6 +74,8 @@ fn addon_list() -> AddonList {
                     text: "https://mcp.linear.app/mcp".to_owned(),
                 }),
                 locked: true,
+                switched: vec![matter_id(2)],
+                server: Some(linear()),
                 ..row(
                     AddonKind::Tool,
                     "linear",
@@ -80,6 +85,47 @@ fn addon_list() -> AddonList {
             },
         ],
     }
+}
+
+/// The linear server as Settings › Tools shows it: a header's name and flag, no value.
+fn linear() -> McpServerView {
+    McpServerView {
+        name: "linear".to_owned(),
+        kind: McpServerKind::Remote,
+        command: None,
+        args: Vec::new(),
+        url: Some("https://mcp.linear.app/mcp".to_owned()),
+        env: Vec::new(),
+        headers: vec![McpSecretName {
+            name: "Authorization".to_owned(),
+            saved: false,
+        }],
+        enabled: true,
+    }
+}
+
+/// `switched` is always sent, `[]` when empty; `server` only on an added tool's row.
+#[test]
+fn switched_is_always_sent_and_server_only_on_added_tools() {
+    let list = addon_list();
+    let rows: Vec<serde_json::Value> = list
+        .items
+        .iter()
+        .map(|row| serde_json::to_value(row).unwrap())
+        .collect();
+    assert_eq!(rows[0]["switched"], serde_json::json!([]));
+    assert_eq!(
+        rows[1]["switched"],
+        serde_json::json!([matter_id(1).to_string()])
+    );
+    assert!(rows[0].get("server").is_none() && rows[2].get("server").is_none());
+    assert_eq!(rows[3]["server"]["headers"][0]["name"], "Authorization");
+    assert!(rows[3]["server"]["headers"][0].get("value").is_none());
+    // A row from before `switched` reads with none.
+    let mut old = rows[0].clone();
+    old.as_object_mut().unwrap().remove("switched");
+    let read: Addon = serde_json::from_value(old).unwrap();
+    assert_eq!(read.switched, Vec::<clauseo_protocol::MatterId>::new());
 }
 
 #[test]

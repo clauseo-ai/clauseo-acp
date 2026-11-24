@@ -25,6 +25,7 @@ fn matter_row(n: u64, skill_packs: Option<PackList>) -> MatterRow {
         forgotten: None,
         skill_packs,
         agent_prefs: None,
+        addon_switches: None,
     }
 }
 
@@ -199,7 +200,7 @@ fn schema_4_database_migrates_and_reads_skill_packs_as_null() {
     block_on(store.close()).unwrap();
     let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
     assert_eq!(user_version(&conn), i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 7);
+    assert_eq!(SCHEMA, 8);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), [narrowed]);

@@ -7,7 +7,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::MatterId;
+use crate::{MatterId, McpServerView};
+
+mod change;
+
+pub(crate) use change::check_id;
+pub use change::{AddonSwitches, MAX_ADDON_ID_BYTES, RemoveAddon, SetAddonOn, SetAddonScope};
 
 /// `ListAddons`' answer: skills first, then tools; within each, built-ins first, then added
 /// ones, each group sorted by id.
@@ -40,7 +45,8 @@ pub struct Addon {
     pub from: Option<AddonFrom>,
     /// Where it is on: every matter, or only the matters it is switched on in.
     pub scope: AddonScope,
-    /// Whether it is on (for the matter asked about, once scopes land).
+    /// Whether it is on: in the matter asked about, or without one, in a matter with no switch
+    /// for it (scope `all` and on).
     pub on: bool,
     /// Skills only: whether its folder holds a file an agent could run (anything but Markdown,
     /// text and images, or a file marked executable). Left out for a tool.
@@ -52,6 +58,14 @@ pub struct Addon {
     pub can_remove: bool,
     /// Whether the firm decides its switches: a change answers `settings.locked`.
     pub locked: bool,
+    /// The matters whose switch differs from the scope's default: under `all` those it is off
+    /// in, under `matter` those it is on in. Always sent; `[]` when none.
+    #[serde(default)]
+    pub switched: Vec<MatterId>,
+    /// An added tool's server as Settings › Tools shows it: names and `saved` flags, never a
+    /// value. Left out for a skill and a built-in tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<McpServerView>,
 }
 
 /// A skill, or a tool (an MCP server).

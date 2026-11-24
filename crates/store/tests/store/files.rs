@@ -42,6 +42,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0005_matter_skill_packs.sql"),
         include_str!("../../src/migrations/0006_matter_agent_prefs.sql"),
         include_str!("../../src/migrations/0007_pending_actions.sql"),
+        include_str!("../../src/migrations/0008_matter_addon_switches.sql"),
     ];
     let mut rest = record;
     for migration in migrations {

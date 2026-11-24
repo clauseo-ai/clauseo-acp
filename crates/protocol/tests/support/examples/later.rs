@@ -117,6 +117,8 @@ pub(super) fn failures() -> Vec<DomainEvent> {
         failed(ErrorCode::WordNotDocx, "not a Word document"),
         failed(ErrorCode::SkillNoSkillMd, "the path holds no SKILL.md"),
         failed(ErrorCode::SkillInvalid, "the skill cannot be added (skill)"),
+        failed(ErrorCode::AddonUnknown, "no skill pdf"),
+        failed(ErrorCode::AddonBuiltIn, "legal-drafting is built in"),
         failed(ErrorCode::WordTooLarge, "stetdoc refused: limit_exceeded"),
         failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
         failed(

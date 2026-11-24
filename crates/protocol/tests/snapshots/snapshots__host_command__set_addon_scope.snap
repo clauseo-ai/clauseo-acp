@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::SetAddonScope(clauseo_protocol::SetAddonScope\n{\n    kind: clauseo_protocol::AddonKind::Skill, id: \"pdf\".to_owned(), scope:\n    clauseo_protocol::AddonScope::Matter(matter_id(1)),\n})"
+---
+{
+  "set_addon_scope": {
+    "kind": "skill",
+    "id": "pdf",
+    "scope": {
+      "matter": "01900000-0000-7000-8000-000000000001"
+    }
+  }
+}

@@ -245,9 +245,7 @@ impl HostCommand {
             | Self::RetryProtection {} | Self::RemoveSandboxSetup {}
             // A flag the host keeps the last of; and desktop's own, with no fields.
             | Self::SetNetwork { online: _ } | Self::KeychainReadAgain {} => Ok(()),
-            Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
-                validate_allowed_sites(self)
-            }
+            Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => sites(self),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
@@ -255,6 +253,7 @@ impl HostCommand {
             Self::Mcp(command) => command.check(),
             // The ids' count and repeats; the `.docx` name and the ids' existence are state.
             Self::DecideRevisions(decide) => decide.check(),
+            Self::SetAddonScope(_) | Self::SetAddonOn(_) | Self::RemoveAddon(_) => ids(self),
         }
     }
 }
@@ -292,7 +291,7 @@ fn check_undo(files: &[FileDecision]) -> Result<(), Error> {
 /// The unsafe-site override's two commands (0053): `AllowBlockedSite` has nothing to check here
 /// (its id by its type; whether the host keeps the notice is state); `RevokeAllowedSite` goes to
 /// [`check_revoke`].
-fn validate_allowed_sites(command: &HostCommand) -> Result<(), Error> {
+fn sites(command: &HostCommand) -> Result<(), Error> {
     if let HostCommand::RevokeAllowedSite {
         host,
         scope,
@@ -594,4 +593,17 @@ fn check_paths<'a>(
         });
     }
     Ok(())
+}
+
+/// An add-on command's id length; whether it names an item is the host's `addon.unknown`.
+fn ids(command: &HostCommand) -> Result<(), Error> {
+    if let HostCommand::SetAddonScope(change) = command {
+        crate::addons::check_id("SetAddonScope", &change.id)
+    } else if let HostCommand::SetAddonOn(change) = command {
+        crate::addons::check_id("SetAddonOn", &change.id)
+    } else if let HostCommand::RemoveAddon(change) = command {
+        crate::addons::check_id("RemoveAddon", &change.id)
+    } else {
+        Ok(())
+    }
 }

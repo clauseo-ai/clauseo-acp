@@ -18,8 +18,8 @@ use crate::{
     AgentChoiceId, AgentId, AgentKind, AgentPrefs, AllowScope, BlockedSiteId, CheckpointId,
     ClientName, CommandId, ConfigPicks, Date, DecideRevisions, Delivery, ElicitationId,
     ElicitationResponse, FieldChange, FileDecision, FolderRefId, InstallWhen, MatterId, PackId,
-    PackList, PermissionRequestId, PrivacyPatch, PromptBlock, ThreadId, Timestamp, Title,
-    ToolsPatch, TurnId, UiPatch, UpdateMode,
+    PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RemoveAddon, SetAddonOn,
+    SetAddonScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch, UpdateMode,
 };
 #[cfg(doc)]
 use crate::{FileChoice, MatterPath, RawPayload};
@@ -566,4 +566,16 @@ pub enum HostCommand {
     /// list's integrity hash, saving this run's allows once it reads. Answers `Done` at once,
     /// with no receipt; the events follow the reads. JSON: `{"keychain_read_again": {}}`.
     KeychainReadAgain {},
+    /// Where a skill or tool is on (`addons/change.rs`). Answers `Done`, and every app
+    /// subscriber gets `HostEvent::AddonsChanged`. Refused with `addon.unknown` for no such
+    /// item, `addon.built_in` for a built-in, `settings.locked` while the firm decides it, and
+    /// as `SetSkillPack` refuses turning a skill on. The main and settings windows send it.
+    SetAddonScope(SetAddonScope),
+    /// One matter's switch for a skill or tool (`addons/change.rs`); a built-in tool may be
+    /// switched, a built-in skill is `addon.built_in`. Answers and refuses as `SetAddonScope`.
+    SetAddonOn(SetAddonOn),
+    /// Remove an added skill (as `RemoveSkill` does) or tool (as `remove_server` does, its
+    /// keychain items too), then every matter's switch for it. Answers and refuses as
+    /// `SetAddonScope`; a built-in is `addon.built_in`.
+    RemoveAddon(RemoveAddon),
 }

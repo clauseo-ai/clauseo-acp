@@ -99,6 +99,7 @@ fn commit_is_atomic() {
             forgotten: None,
             skill_packs: None,
             agent_prefs: None,
+            addon_switches: None,
         }),
         snapshot: Some(SnapshotIn::compress(thread(2), seq(1), 1, b"state")),
         ..Commit::default()
