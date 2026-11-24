@@ -346,6 +346,34 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
 }
 
 #[test]
+fn an_install_cancel_whose_end_fails_twice_makes_no_copy_and_does_not_wait() {
+    let mut rig = Rig::start("unsent-install-end-twice", "");
+    let thread = rig.thread();
+    let waiting = rig.current_turn(thread, TurnPhase::Queued);
+    rig.fail(2, |event| matches!(event, DomainEvent::TurnEnded(_)));
+    cancel_all(&mut rig.actor);
+    until_ended(&mut rig, thread);
+    rig.settle_commits();
+
+    let closing = rig.actor.threads[&thread].turn.closing.as_ref();
+    assert!(closing.is_some_and(|closing| closing.close.turn == waiting && closing.retried));
+    // The open turn is left to the next start, which ends it; no copy is made for it, and the
+    // install does not wait for one.
+    assert!(!crate::actor::turn::any_active(&rig.actor));
+    let log = rig.log(thread);
+    assert!(
+        !log.iter()
+            .any(|event| matches!(event, DomainEvent::TurnEnded(t) if t.turn == waiting))
+    );
+    let copies = log
+        .iter()
+        .filter(|event| matches!(event, DomainEvent::UserMessage(m) if m.copy_of.is_some()));
+    assert_eq!(copies.count(), 0);
+    assert_eq!(queue::queued_turns(&rig.actor, thread), []);
+    rig.finish();
+}
+
+#[test]
 fn a_started_turn_ends_with_no_cause() {
     let mut rig = Rig::start("unsent-started", "");
     let thread = rig.thread();

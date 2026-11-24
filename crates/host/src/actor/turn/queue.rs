@@ -57,7 +57,7 @@ pub(crate) use install::{any_active, any_running, cancel_all, release};
 pub(super) use queued::command_tag;
 use queued::{Joins, log_queued};
 pub(super) use restore::{restore, restores};
-pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};
+pub(super) use sign_in::{Requeue, drop_copy, keep as keep_for_sign_in, resume as resume_sign_in};
 pub(super) use steer::{Steered, on_steer_timer, on_steered};
 
 /// A thread's queued turns, in the order they start, and what moves them.
