@@ -1,15 +1,15 @@
-// Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1244; 24 Nov round, issues 6
+// Skills and connectors, library L1 (UC-1050 to UC-1089, UC-1215 to UC-1245; 24 Nov round, issues 6
 // to 8): the real room over library-host.ts, the place opened from the rail's row and pressed to
 // the state that shows each string. UC_LIBRARY_CASE_LAW registers Clauseo Case Law's shared words
-// (UC-1090 to UC-1096 and UC-1300, carried here in UC-kanoon-card.json) on the library's card, so this branch
-// stands alone; the home card's branch (#1297), stacked on it, drops the spread and registers them
-// through its own export.
+// (UC-1090 to UC-1096 and UC-1300, carried here in UC-kanoon-card.json) on the library's card, so
+// this branch stands alone. The home card's branch (#1297), stacked on it, registers them through
+// its own file and drops UC_LIBRARY_CASE_LAW from this default export.
 import { cr, type ConnectorsRoomKey } from "@clauseo/components/lib/words-connectors-room.ts";
 import { lb, type LibraryKey } from "@clauseo/components/lib/words-library.ts";
-import type { Entry } from "./entry.ts";
-import { libraryHost, type LibraryState } from "./library-host.ts";
-import { RoomClicking, RoomOver } from "./states.tsx";
-import type { WordsRef } from "./words.ts";
+import type { Entry } from "../entry.ts";
+import { libraryHost, type LibraryState } from "../library-host.ts";
+import { RoomClicking, RoomOver } from "../states.tsx";
+import type { WordsRef } from "../words.ts";
 
 const libWords = (key: LibraryKey): WordsRef => ({
   file: "lib/words-library.ts",
@@ -47,7 +47,7 @@ const e = (id: string, key: LibraryKey, render: Entry["render"]): Entry => ({
 const SKILLS = at({});
 const CONNECTORS = at({}, CONN);
 
-export const UC_LIBRARY: Entry[] = [
+const UC_LIBRARY: Entry[] = [
   e("UC-1050", "Skills and connectors", rail),
   e("UC-1051", "{skills} skills, {connectors} connectors", rail),
   e("UC-1052", "New", rail),
@@ -214,7 +214,7 @@ const shared = (id: string, key: ConnectorsRoomKey): Entry => ({
 
 /** Clauseo Case Law's agreed words on the library's card: the home card's ids (see the top of this
  * file). */
-export const UC_LIBRARY_CASE_LAW: Entry[] = [
+const UC_LIBRARY_CASE_LAW: Entry[] = [
   shared(
     "UC-1090",
     "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.",
@@ -229,3 +229,6 @@ export const UC_LIBRARY_CASE_LAW: Entry[] = [
   shared("UC-1095", "Prepaid, including GST. No subscription."),
   shared("UC-1094", "Powered by Indian Kanoon"),
 ];
+
+const ENTRIES: Entry[] = [...UC_LIBRARY, ...UC_LIBRARY_CASE_LAW];
+export default ENTRIES;
