@@ -9,6 +9,8 @@ import {
   helperOf,
   mcpOf,
   readOf,
+  noticeOf,
+  searchOf,
   sharmaSteps,
   skillOf,
   stepCall,
@@ -167,6 +169,40 @@ const UC_STEP_LINES: Entry[] = [
     heldOf("failed", undefined, "edit", "Edit"),
     heldOf("failed", RULED, "execute", "Bash"),
   ]),
+  // a code mode script that failed and was tried another way: one quiet line inside the group (stage B's B4)
+  {
+    id: "UC-1246",
+    words: stepWords("A script didn't run; Claude tried another way."),
+    screen: "room/thread",
+    render: () => (
+      <RoomClicking
+        host={() => threadHost({ entries: [QUESTION, ...codeModeAnswer(), ANSWER, step(91)] })}
+        clicks={['[data-testid="step-group"] button']}
+      />
+    ),
+  },
 ];
+
+/** B4's notice for a code mode script that failed: kind "script_failed", level info, the host's English fallback. */
+const SCRIPT_FAILED = {
+  kind: "script_failed",
+  level: "info",
+  text: "A script didn't run; Claude tried another way.",
+} as const;
+
+/** One answer in code mode: two papers read, a script that failed, a paper and a search, another failure, then
+ * Indian Kanoon. */
+function codeModeAnswer(): ViewEntry[] {
+  const at = (c: ToolCallEntry, order: number): ViewEntry => ({ tool_call: { ...c, order } });
+  return [
+    at(readOf(C, "Plaint.docx"), 40),
+    at(readOf(C, "Written statement.pdf"), 41),
+    noticeOf(42, SCRIPT_FAILED),
+    at(readOf(C, "Loan agreement, 12 March 2019.pdf"), 43),
+    at(searchOf(C, "notice period"), 44),
+    noticeOf(45, SCRIPT_FAILED),
+    at(mcpOf(C, "indian-kanoon", "search_judgments", KANOON), 46),
+  ];
+}
 
 export default UC_STEP_LINES;

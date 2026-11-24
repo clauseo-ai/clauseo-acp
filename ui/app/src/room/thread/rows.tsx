@@ -38,6 +38,8 @@ import { isolated, shownOf } from "./content.ts";
 import { downloadNameOf, noticeLine } from "./notice-words.ts";
 import { isCaseLawOutOfCredit } from "./case-law-notice.ts";
 import { CaseLawNoticeRow } from "./case-law-notice-row.tsx";
+import { scriptFailedOf } from "./script-failed.ts";
+import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { ThreadActionsContext } from "./session.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
@@ -265,7 +267,7 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
   const agent = useAgentPlan();
-  const { platform } = useDisplay();
+  const { platform, lang } = useDisplay();
   const reveal = use(ThreadActionsContext)?.revealDownload;
   if (entry.kind === undefined || entry.kind === null) return null;
   if (isCaseLawOutOfCredit(entry.kind))
@@ -279,7 +281,9 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       className={`${ROW} ${QUIET}`}
       dir="auto"
     >
-      {noticeLine(entry.kind, w, agent) ?? entry.text}
+      {scriptFailedOf(entry)
+        ? steps(lang, "A script didn't run; Claude tried another way.")
+        : (noticeLine(entry.kind, w, agent) ?? entry.text)}
       {download !== null && reveal !== undefined && (
         <>
           {" "}

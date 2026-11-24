@@ -6,6 +6,7 @@
 // Sharma matter's papers. For the tests, the copy review and the shots.
 import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../transport/protocol.ts";
 import { toolCall, uuid } from "./stream-script.ts";
+import type { NoticeEntry, NoticeKind } from "../transport/protocol.ts";
 
 export type Agent = "Claude" | "ChatGPT";
 export const AGENTS: readonly Agent[] = ["Claude", "ChatGPT"];
@@ -229,4 +230,25 @@ export function testerCard(): ToolCallEntry[] {
     heldOf(),
     heldOf(),
   ];
+}
+
+/** Claude Code's raw sentence when a code mode script fails, as an agent notice carried it before stage B's B4. */
+export const SCRIPT_RAW =
+  "Code that Claude ran failed with this error: Nothing ran: import and require aren't available here";
+
+/** A notice in an answer, after the step of order `at`: by default an agent's warning with Claude's raw sentence and
+ * no kind (today's shape); `kind` for a host notice (B4's "script_failed", level info, its English fallback text). */
+export function noticeOf(
+  at: number,
+  over: { level?: NoticeEntry["level"]; kind?: string; text?: string } = {},
+): ViewEntry {
+  const notice: NoticeEntry = {
+    order: at,
+    event: uuid(900 + at, 9),
+    level: over.level ?? "warning",
+    text: over.text ?? SCRIPT_RAW,
+    ts: 0,
+    ...(over.kind === undefined ? {} : { kind: over.kind as NoticeKind }),
+  };
+  return { notice };
 }

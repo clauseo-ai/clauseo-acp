@@ -13,7 +13,8 @@ import { turnRunning } from "./live.ts";
 import { lineOf } from "./steps.ts";
 import { asksPick } from "./step-names.ts";
 import { RowOf } from "./row-of.tsx";
-import { CallRow } from "./step-group-parts.tsx";
+import { CallRow, ScriptFailedRow } from "./step-group-parts.tsx";
+import { scriptFailedOf } from "./script-failed.ts";
 
 /** A group's entries from an older page or the view, the same array while each of them is the same object. */
 function entriesPick(ids: readonly EntryId[], paged: ReadonlyMap<EntryId, ViewEntry>) {
@@ -79,11 +80,16 @@ export const LiveStepGroup = memo(
       ),
       [step, asked, before, stream, paged, latest],
     );
+    const firstScript = entries.findIndex((e) => scriptFailedOf(e?.notice));
     return (
       <StepGroup id={ids[0]!} {...words} live={live} head={meta ? head : undefined}>
         {ids.map((id, i) => {
           const call = entries[i]?.tool_call;
           if (call !== undefined) return <CallRow key={id} id={id} call={call} lang={lang} />;
+          // a script's failure: one line for the group however often a script failed (script-failed.ts)
+          const notice = entries[i]?.notice;
+          if (notice !== undefined)
+            return i === firstScript ? <ScriptFailedRow key={id} lang={lang} /> : null;
           return (
             <StepThought key={id}>
               <RowOf id={id} stream={stream} paged={paged} sentNow={false} />

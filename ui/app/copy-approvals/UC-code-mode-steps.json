@@ -1,0 +1,11 @@
+{
+  "UC-1246": {
+    "en": "A script didn't run; Claude tried another way.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "One quiet line inside the step group for stage B's B4 notice of kind \"script_failed\" (a code mode script that failed; Claude tried another way), one per group however many failed, never counted in \"N failed\". Today an agent notice with Claude's raw sentence (\"Code that Claude ran failed with this error: …\"), shown as nothing but splitting the group in two. Shown in the app's words, never the host's text."
+  }
+}

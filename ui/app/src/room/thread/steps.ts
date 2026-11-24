@@ -42,6 +42,7 @@ import { helperOf, helperTaskOf } from "./helper-words.ts";
 import { leadRows } from "./helper-view.ts";
 import { groupKindOf, type GroupKind } from "./group-kind.ts";
 import { summaryOf } from "./step-summary.ts";
+import { scriptFailedOf } from "./script-failed.ts";
 import {
   heldBack,
   heldMark,
@@ -61,6 +62,7 @@ export type Segment =
 export type Part = "tool" | "thought" | "alone" | "hidden";
 
 const TOOL = "tool_call:";
+const NOTICE = "notice:";
 const TEXT = "agent_text:";
 const PERMISSION = "permission:";
 
@@ -152,7 +154,14 @@ export function segmentsPick(
     // a helper's steps and words leave the lead's rows, its card in its launching step's place
     // (helper-view.ts)
     const grouped = segmentsOf(leadRows(ids, entry), (id) =>
-      id.startsWith(TOOL) ? toolPart(entry(id)) : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
+      id.startsWith(TOOL)
+        ? toolPart(entry(id))
+        : id.startsWith(TEXT)
+          ? partOfEntry(entry(id))
+          : // a script's failure joins the run around it, as a thought does: inside its group, never parting it
+            id.startsWith(NOTICE) && scriptFailedOf(entry(id)?.notice)
+            ? "thought"
+            : "alone",
     );
     last = promptsAtTheirCalls(grouped, (row) => {
       const asked = row.startsWith(PERMISSION) ? entry(row)?.permission : undefined;
