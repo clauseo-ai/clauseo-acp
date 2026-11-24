@@ -84,8 +84,12 @@ pub(crate) struct ThreadQueue {
     /// held or empties (`held.rs`), and when the lawyer removes that turn, which leaves the
     /// queue held the usual way (#408), waiting for "Send next".
     sign_in: Option<TurnId>,
-    /// A turn that ended for the sign-in, put back once its close is durable.
+    /// A turn that ended for the sign-in (or an install), put back once its close is durable.
+    /// Kept until its copy's commit is sent, so an install waits for it (`install::any_active`).
     requeue: Option<Requeue>,
+    /// The copy of a turn put back (`sign_in.rs`) whose commit has not returned: an install
+    /// waits for it too, so the update's shutdown does not begin with the copy not yet logged.
+    copying: Option<TurnId>,
     /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
     /// once it is durable, back in their place if it fails, and never started meanwhile.
     removing: Vec<(usize, Queued)>,
@@ -410,7 +414,11 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
             move_on(actor, thread);
         }
-        (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
+        (After::Requeued(turn), true) => {
+            sign_in::copied(actor, thread, turn);
+            move_on(actor, thread);
+        }
+        (After::Edited { .. }, true) => move_on(actor, thread),
         (After::Waits(_), true) => {
             counting::question_sent(actor, thread, Delivery::Steer);
             move_on(actor, thread);
@@ -446,6 +454,7 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             | After::Held { turn, .. },
             false,
         ) => {
+            sign_in::copied(actor, thread, turn);
             drop_turn(actor, thread, turn);
         }
         (After::Edited { turn, old }, false) => put_content(actor, thread, turn, old),

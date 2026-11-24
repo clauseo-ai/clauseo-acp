@@ -20,8 +20,9 @@
 //! [`resume`].
 //!
 //! An update installed now that cancels a turn which had not started (`install.rs`) puts its
-//! turn back the same way, held, but without the sign-in mark: nothing waits for a sign-in, so
-//! the lawyer's `ResumeQueue` (or `SendQueuedNow`) moves it, as after any Stop.
+//! turn back the same way, held, but without the sign-in mark of its own (an earlier mark stays):
+//! nothing waits for a sign-in, so the lawyer's `ResumeQueue` (or `SendQueuedNow`) moves it, as
+//! after any Stop.
 
 use std::collections::BTreeMap;
 
@@ -65,19 +66,32 @@ pub(in crate::actor::turn) fn keep(actor: &mut Actor, thread: ThreadId, requeue:
 }
 
 /// The close of `turn` is durable: a turn kept for it goes back to the queue's head, held.
+/// The copy is a commit of its own after the close; until it returns, `queue.requeue` (while
+/// the stream loads) and then `queue.copying` keep an install waiting (`install::any_active`),
+/// so an update's shutdown never begins between the two and the copy is not lost.
 pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let Some(requeue) = queue(actor, thread)
-        .and_then(|queue| queue.requeue.take_if(|requeue| requeue.turn == turn))
-    else {
+    let kept = queue(actor, thread)
+        .and_then(|queue| queue.requeue.as_ref())
+        .is_some_and(|requeue| requeue.turn == turn);
+    if !kept {
         return;
-    };
+    }
     if host_stopping(actor) {
+        if let Some(queue) = queue(actor, thread) {
+            queue.requeue = None;
+        }
         return;
     }
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+            let Some(requeue) = queue(actor, thread)
+                .and_then(|queue| queue.requeue.take_if(|requeue| requeue.turn == turn))
+            else {
+                actor.release(stream);
+                return;
+            };
             if let Err(error) = loaded.and_then(|()| log(actor, thread, requeue)) {
                 tracing::warn!(%thread, %error, "a turn held for the sign-in was not put back");
             }
@@ -125,14 +139,32 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     );
     queue.held = true;
     queue.held_for_limit = false;
-    queue.sign_in = waits_for_sign_in.then_some(turn);
+    // An install's copy keeps an earlier sign-in mark: that turn still waits for the sign-in.
+    queue.sign_in = waits_for_sign_in.then_some(turn).or(queue.sign_in);
+    queue.copying = Some(turn);
     super::super::prompt_picks::restored(actor, thread, turn, &requeue.config);
     tracing::info!(%thread, waits_for_sign_in, "a cancelled turn goes back to the queue, held");
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {
+        copied(actor, thread, turn);
         drop_turn(actor, thread, turn);
     }
     sent
+}
+
+/// The commit of the copy of `turn` returned (or was not sent): an install no longer waits for
+/// it. A requeued steer's `After::Requeued` names no copy and changes nothing.
+pub(super) fn copied(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if let Some(queue) = queue(actor, thread)
+        && queue.copying == Some(turn)
+    {
+        queue.copying = None;
+    }
+}
+
+/// Whether `queue` still has a copy to log or one whose commit has not returned.
+pub(super) fn copy_pending(queue: &super::ThreadQueue) -> bool {
+    queue.requeue.is_some() || queue.copying.is_some()
 }
 
 /// Whether a hold for the sign-in applies to `thread`: `stop_agents` holds its agent, or its

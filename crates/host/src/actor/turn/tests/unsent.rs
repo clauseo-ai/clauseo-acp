@@ -306,7 +306,19 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
         .prompt = text.clone();
     let original = current_message(&rig, thread);
     cancel_all(&mut rig.actor);
+    // The install waits (`any_active`) at every step until the copy's own commit has returned:
+    // through the end's commit, the copy still to be logged, and the copy's commit in flight.
+    rig.run_until("the copy queued", |actor| {
+        assert!(
+            crate::actor::turn::any_active(actor),
+            "the install went ahead"
+        );
+        !queue::queued_turns(actor, thread).is_empty()
+    });
+    assert!(rig.actor.work.commits > 0, "the copy's commit is in flight");
+    assert!(crate::actor::turn::any_active(&rig.actor));
     rig.settle_commits();
+    assert!(!crate::actor::turn::any_active(&rig.actor));
 
     let event = ended(&mut rig, thread, waiting);
     assert_eq!(event.stop, StopReason::Cancelled);
