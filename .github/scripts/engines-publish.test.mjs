@@ -450,7 +450,9 @@ test("the self-check holds for the live pair and refuses each broken rule", () =
     [(l) => (l.apps = []), /apps is empty/],
     [(l) => (l.apps = [""]), /apps is empty/],
     [(l) => (l.sizes[0].download = 0), /positive/],
-    [(l) => (l.sizes[0].os = "freebsd"), /names/],
+    [(l) => (l.sizes[0].os = "freebsd"), /11 of the 12 known rows/],
+    [(l) => l.sizes.pop(), /11 of the 12 known rows/],
+    [(l) => (l.sizes[0].unpacked = -1), /not a whole number/],
     [(l) => (l.sizes[0].extra = 1), /other fields/],
     [(l) => l.sizes.push({ ...l.sizes[0] }), /repeats/],
     [(l) => (l.package_json.scripts = { postinstall: "x" }), /a field an engines pin file does not/],
@@ -463,15 +465,16 @@ test("the self-check holds for the live pair and refuses each broken rule", () =
     [(l) => (l.package_lock.packages[""].dependencies = {}), /root dependencies/],
     [(l) => (l.package_lock.packages["../evil"] = l.package_lock.packages[lockKey]), /is not node_modules/],
     [(l) => (l.package_lock.packages["node_modules/a\\b"] = l.package_lock.packages[lockKey]), /is not node_modules/],
-    [(l) => (l.package_lock.packages[lockKey].link = true), /link/],
-    [(l) => (l.package_lock.packages[lockKey].inBundle = true), /bundled/],
+    [(l) => (l.package_lock.packages[lockKey].link = true), /has link, not one of the entry fields/],
+    [(l) => (l.package_lock.packages[lockKey].inBundle = true), /has inBundle/],
     [(l) => delete l.package_lock.packages[lockKey].integrity, /exactly one sha512/],
     [(l) => (l.package_lock.packages[lockKey].integrity += " sha512-" + "A".repeat(86) + "=="), /exactly one sha512/],
     [(l) => (l.package_lock.packages[lockKey].integrity = "sha1-" + "A".repeat(26) + "="), /exactly one sha512/],
     [(l) => (l.package_lock.packages[lockKey].resolved = "https://evil.example/zod.tgz"), /resolved is not https:\/\/registry\.npmjs\.org\/zod\/-\/zod-/],
     [(l) => (l.package_lock.packages[lockKey].resolved = "git+https://github.com/colinhacks/zod.git"), /resolved/],
-    [(l) => (l.package_lock.packages[lockKey].name = "../x"), /not an npm name/],
-    [(l) => (l.package_lock.packages["node_modules/@openai/codex"].version = "0.1.0"), /resolved|does not install/],
+    [(l) => (l.package_lock.packages[lockKey].name = "../x"), /a name only on/],
+    [(l) => (l.package_lock.packages["node_modules/@openai/codex"].version = "0.1.0"), /not the pin/],
+    [(l) => delete l.package_lock.packages["node_modules/@openai/codex"], /does not install @openai\/codex/],
   ];
   for (const [change, pattern] of cases) {
     const list = good();
@@ -483,8 +486,95 @@ test("the self-check holds for the live pair and refuses each broken rule", () =
   const entry = list.package_lock.packages["node_modules/@openai/codex"];
   entry.resolved = entry.resolved.replace(entry.version, "0.1.0");
   entry.version = "0.1.0";
-  assert.throws(() => e.selfCheck(list), /does not install @openai\/codex/);
+  assert.throws(() => e.selfCheck(list), /is 0\.1\.0, not the pin/);
   assert.equal(e.installedName("node_modules/@a/b/node_modules/c"), "c");
   assert.equal(e.installedName("node_modules/.bin"), null);
   assert.equal(e.installedName("node_modules/@a"), null);
+});
+
+// Each of #1327's lock rules (crates/engines/tests/engines/lock.rs), on its fixtures' changes.
+test("the self-check mirrors clauseo-engines' lock rules: allowlist, specs, names, pins at any depth, keys", () => {
+  const CODEX = "@openai/codex";
+  const pin = LIVE_JSON.overrides[CODEX];
+  const first = (l) => l.package_lock.packages[Object.keys(l.package_lock.packages)[1]];
+  const copyAt = (l, key, change = () => {}) => {
+    const entry = structuredClone(first(l));
+    change(entry);
+    l.package_lock.packages[key] = entry;
+  };
+  const alias = (l, platform, change = () => {}, path = platform) => {
+    const entry = structuredClone(LIVE_LOCK.packages[`node_modules/${CODEX}-${platform}`]);
+    change(entry);
+    l.package_lock.packages[`node_modules/${CODEX}-${path}`] = entry;
+  };
+  const spec = (s, field = "dependencies") => (l) => (first(l)[field] = { ...(first(l)[field] ?? {}), "evil-x": s });
+  const passes = [
+    ["alias-ok", (l) => alias(l, "darwin-arm64")],
+    ["spec-alias-ok", spec("npm:left-pad@^1.3.0")],
+    ["spec-beta1", spec("beta1")],
+    ["ranges npm writes", spec(">= 2.1.2 < 3.0.0 || ^4 || 1.x || * || 1.2.3 - 2.0.0 || ^5.0.0-0")],
+    ["every allowed field", (l) => Object.assign(first(l), { peerDependenciesMeta: {}, libc: ["glibc"], devOptional: true, funding: {}, deprecated: "x" })],
+  ];
+  for (const [name, change] of passes) {
+    const list = good();
+    change(list);
+    assert.doesNotThrow(() => e.selfCheck(list), name);
+  }
+  const refused = [
+    ["unknown-entry-field", (l) => (first(l).future = true), /has future, not one of the entry fields/],
+    ["install-script", (l) => (first(l).hasInstallScript = true), /has hasInstallScript/],
+    ...[
+      ["git", "git+https://evil.example/x.git"],
+      ["github", "github:evil/x", "optionalDependencies"],
+      ["user-repo", "evil/x"],
+      ["url", "https://evil.example/x.tgz"],
+      ["file", "file:../x", "peerDependencies"],
+      ["link", "link:../x"],
+      ["workspace", "workspace:*"],
+      ["tag", "git"],
+      ["alias-git", "npm:left-pad@git+https://evil.example/x.git"],
+      ["alias-name", "npm:Left-Pad@1.3.0"],
+      ["dot", ".1"],
+      ["tgz", "1.tgz"],
+      ["tar", "1.TAR"],
+      ["tar.gz", "1.Tar.Gz"],
+      ["not a string", 1],
+    ].map(([stem, s, field]) => [`spec-${stem}`, spec(s, field), /has a spec that is not a registry range/]),
+    ["bad-name", (l) => (first(l).name = "../evil"), /a name only on/],
+    ["alias-at-engine", (l) => (first(l).name = CODEX), /a name only on/],
+    ["unnamed-platform", (l) => alias(l, "darwin-arm64", (x) => delete x.name), /a name only on/],
+    ["alias-wrong-path", (l) => alias(l, "darwin-arm64", () => {}, "freebsd-x64"), /a name only on/],
+    ["alias-wrong-version", (l) => alias(l, "darwin-arm64", (x) => {
+      x.version = `${pin}-linux-x64`;
+      x.resolved = `https://registry.npmjs.org/@openai/codex/-/codex-${x.version}.tgz`;
+    }), /not the pin \S+-darwin-arm64/],
+    ["nested-codex", (l) => {
+      const x = structuredClone(l.package_lock.packages[`node_modules/${CODEX}`]);
+      x.version = `${pin}-0`;
+      x.resolved = `https://registry.npmjs.org/@openai/codex/-/codex-${x.version}.tgz`;
+      l.package_lock.packages[`node_modules/@agentclientprotocol/codex-acp/node_modules/${CODEX}`] = x;
+    }, /node_modules\/@openai\/codex is \S+, not the pin/],
+    ["override-dropped", (l) => delete l.package_json.overrides, /is @openai\/codex with no pin/],
+    ["upper-key", (l) => copyAt(l, "node_modules/@agentclientprotocol/Claude-agent-acp"), /is not node_modules/],
+    ["dot-key", (l) => copyAt(l, "node_modules/@openai/codex."), /is not node_modules/],
+    ["short-integrity", (l) => (first(l).integrity = `${first(l).integrity.slice(0, -4)}==`), /exactly one sha512/],
+    ["dep-build", (l) => (l.package_json.dependencies["@agentclientprotocol/claude-agent-acp"] += "+evil"), /not one exact version/],
+    ["override-build", (l) => (l.package_json.overrides[CODEX] += "+evil"), /not one exact version/],
+    ["zero-size", (l) => (l.sizes[0].download = 0), /positive/],
+    ["dup-size", (l) => l.sizes.push({ ...l.sizes[0] }), /repeats/],
+  ];
+  for (const [name, change, pattern] of refused) {
+    const list = good();
+    change(list);
+    assert.throws(() => e.selfCheck(list), pattern, name);
+  }
+  // A row for a platform this version doesn't know is skipped, even with a zero size.
+  const extra = good();
+  extra.sizes.push({ agent: "claude-acp", os: "linux", arch: "riscv64", download: 0, unpacked: 2 });
+  assert.doesNotThrow(() => e.selfCheck(extra));
+  // npm.rs's is_registry_spec on its edges: a scoped alias, an alias with no name, a wildcard, a bare word.
+  assert.equal(e.isRegistrySpec("npm:@scope/x@1"), true);
+  assert.equal(e.isRegistrySpec("npm:@1"), false);
+  assert.equal(e.isRegistrySpec("x"), true);
+  assert.equal(e.isRegistrySpec("beta"), false);
 });

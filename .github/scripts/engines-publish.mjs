@@ -295,12 +295,34 @@ export function commentIsExact(comment) {
 // ---- the self-check, a mirror of crates/engines's rules ----
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const NAME_PART = /^[A-Za-z0-9~-][A-Za-z0-9._~-]*$/;
+// npm.rs's is_package_name: lower case, not starting with . or _, not ending with a dot.
+const NAME_PART = /^[a-z0-9~-][a-z0-9._~-]*$/;
+const isPart = (p) => NAME_PART.test(p) && !p.endsWith(".");
 const isName = (n) => {
   if (typeof n !== "string" || n.length === 0 || n.length > 214) return false;
   const m = /^@([^/]+)\/([^/]+)$/.exec(n);
-  return m ? NAME_PART.test(m[1]) && NAME_PART.test(m[2]) : !n.includes("/") && NAME_PART.test(n);
+  return m ? isPart(m[1]) && isPart(m[2]) : !n.includes("/") && isPart(n);
 };
+/** npm.rs's is_range: semver's characters, at least one digit unless a wildcard, starting with a
+ * letter, digit or one of ^~<>=*, and not ending in .tgz, .tar or .tar.gz in any case. */
+const isRange = (r) =>
+  /^[A-Za-z0-9^~<>=*][A-Za-z0-9 .+^~<>=|*-]*$/.test(r) &&
+  !/\.(tgz|tar|tar\.gz)$/i.test(r) &&
+  (["*", "x", "X"].includes(r.trim()) || /\d/.test(r));
+/** npm.rs's is_registry_spec: a range, or npm:<name>@<range>. */
+export function isRegistrySpec(spec) {
+  if (typeof spec !== "string") return false;
+  if (!spec.startsWith("npm:")) return isRange(spec);
+  const alias = spec.slice(4);
+  const at = alias.indexOf("@", 1);
+  return at > 0 && isName(alias.slice(0, at)) && isRange(alias.slice(at + 1));
+}
+// lock.rs's ENTRY_FIELDS, SPEC_FIELDS and CODEX_PLATFORMS.
+const ENTRY_FIELDS = ["version", "resolved", "integrity", "name", "license", "dependencies", "optionalDependencies", "peerDependencies",
+  "peerDependenciesMeta", "bin", "engines", "os", "cpu", "libc", "optional", "peer", "dev", "devOptional", "funding", "deprecated"];
+const SPEC_FIELDS = ["dependencies", "optionalDependencies", "peerDependencies"];
+const CODEX_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"];
+const SIZE_ROWS = AGENTS.length * Object.keys(OS).length * Object.keys(ARCH).length;
 
 /** The last name of a lock key `node_modules/<name>(/node_modules/<name>)*`, else null. */
 export function installedName(path) {
@@ -310,7 +332,8 @@ export function installedName(path) {
   return names.every(isName) ? names.at(-1) : null;
 }
 
-/** Every rule a list must hold (crates/engines's lib.rs, rules 4 to 6); throws the first broken. */
+/** Every rule a list must hold (crates/engines's list.rs, rules.rs and lock.rs, but the per-app
+ * ones: app listed, seq above the app's floor, not older than its bundle); throws the first broken. */
 export function selfCheck(list) {
   const fail = (what) => {
     throw new Error(`self-check: ${what}`);
@@ -325,15 +348,19 @@ export function selfCheck(list) {
   }
   if (!Array.isArray(list.apps) || list.apps.length === 0 || list.apps.some((a) => typeof a !== "string" || a === "")) fail("apps is empty");
   if (!Array.isArray(list.sizes)) fail("sizes is not a list");
+  // Rows for an agent, OS or arch the crate doesn't know are skipped; the 12 known ones are required.
   const seen = new Set();
   for (const row of list.sizes) {
     if (!isObject(row) || Object.keys(row).sort().join() !== "agent,arch,download,os,unpacked") fail("a sizes row has other fields");
-    if (!AGENTS.includes(row.agent) || !Object.values(OS).includes(row.os) || !Object.values(ARCH).includes(row.arch)) fail(`a sizes row names ${row.agent} ${row.os} ${row.arch}`);
-    if (![row.download, row.unpacked].every((n) => Number.isSafeInteger(n) && n > 0)) fail("a size is not a positive whole number");
+    if (![row.agent, row.os, row.arch].every((n) => typeof n === "string")) fail("a sizes row's names are not strings");
+    if (![row.download, row.unpacked].every((n) => Number.isSafeInteger(n) && n >= 0)) fail("a size is not a whole number");
+    if (!AGENTS.includes(row.agent) || !Object.values(OS).includes(row.os) || !Object.values(ARCH).includes(row.arch)) continue;
+    if (row.download === 0 || row.unpacked === 0) fail("a size is not a positive whole number");
     const key = `${row.agent}/${row.os}/${row.arch}`;
     if (seen.has(key)) fail(`sizes repeats ${key}`);
     seen.add(key);
   }
+  if (seen.size !== SIZE_ROWS) fail(`sizes has ${seen.size} of the ${SIZE_ROWS} known rows`);
   const pj = list.package_json;
   if (!isObject(pj) || Object.keys(pj).some((k) => !PACKAGE_JSON_FIELDS.includes(k))) fail("package_json has a field an engines pin file does not");
   const deps = pj.dependencies;
@@ -343,28 +370,49 @@ export function selfCheck(list) {
   const overrides = pj.overrides ?? {};
   if (!isObject(overrides) || Object.entries(overrides).some(([k, v]) => !OVERRIDES.includes(k) || typeof v !== "string")) fail("package_json.overrides names more than @openai/codex");
   const pins = { ...deps, ...overrides };
-  for (const [name, v] of Object.entries(pins)) if (typeof v !== "string" || !SEMVER.test(v)) fail(`${name} is not one exact version: ${JSON.stringify(v)}`);
+  for (const [name, v] of Object.entries(pins)) if (typeof v !== "string" || !SEMVER.test(v) || v.includes("+")) fail(`${name} is not one exact version: ${JSON.stringify(v)}`);
   const lock = list.package_lock;
   if (!isObject(lock) || lock.lockfileVersion !== 3 || !isObject(lock.packages)) fail("package_lock is not a v3 lock");
   if (!isObject(lock.packages[""]) || JSON.stringify(canonical(lock.packages[""].dependencies ?? null)) !== JSON.stringify(canonical(deps))) {
     fail("the lock's root dependencies are not package_json's");
   }
+  const folded = new Set();
   for (const [path, entry] of Object.entries(lock.packages)) {
     if (path === "") continue;
     const last = installedName(path);
     if (last === null) fail(`lock key ${JSON.stringify(path)} is not node_modules/<name>`);
-    if (!isObject(entry) || "link" in entry || "inBundle" in entry || typeof entry.version !== "string") fail(`${path} is a link, bundled or has no version`);
-    if (typeof entry.integrity !== "string" || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity)) fail(`${path}'s integrity is not exactly one sha512`);
-    if ("name" in entry && !isName(entry.name)) fail(`${path}'s name is not an npm name`);
-    const pkg = entry.name ?? last;
-    if (!/^[A-Za-z0-9.+-]+$/.test(entry.version)) fail(`${path}'s version is not a version`);
-    const want = `${REGISTRY}${pkg}/-/${pkg.split("/").at(-1)}-${entry.version}.tgz`;
-    if (entry.resolved !== want) fail(`${path}'s resolved is not ${want}`);
+    if (folded.has(path.toLowerCase())) fail(`lock key ${JSON.stringify(path)} repeats another ignoring case`);
+    folded.add(path.toLowerCase());
+    lockEntry(path, entry, last, pins, fail);
   }
-  for (const [name, v] of Object.entries(pins)) {
-    if (lock.packages[`node_modules/${name}`]?.version !== v) fail(`the lock does not install ${name} ${v}`);
-  }
+  for (const name of Object.keys(pins)) if (!Object.hasOwn(lock.packages, `node_modules/${name}`)) fail(`the lock does not install ${name}`);
   return list;
+}
+
+/** lock.rs's package: one entry other than the root, installed at a path whose last name is `last`. */
+function lockEntry(path, entry, last, pins, fail) {
+  if (!isObject(entry)) fail(`${path} is not an object`);
+  const other = Object.keys(entry).find((k) => !ENTRY_FIELDS.includes(k));
+  if (other !== undefined) fail(`${path} has ${other}, not one of the entry fields the apps allow`);
+  if (typeof entry.version !== "string") fail(`${path} has no version`);
+  const rest = last.startsWith(`${OVERRIDES[0]}-`) ? last.slice(OVERRIDES[0].length + 1) : null;
+  const platform = CODEX_PLATFORMS.includes(rest) ? rest : null;
+  let pkg = last;
+  if (platform !== null && entry.name === OVERRIDES[0]) pkg = OVERRIDES[0];
+  else if (platform !== null || "name" in entry) fail(`${path}: a name only on, and required on, node_modules/@openai/codex-<platform>, as @openai/codex`);
+  if (!isName(pkg)) fail(`${path}'s name is not an npm name`);
+  if (Object.hasOwn(pins, pkg)) {
+    const want = platform === null ? pins[pkg] : `${pins[pkg]}-${platform}`;
+    if (entry.version !== want) fail(`${path} is ${entry.version}, not the pin ${want}`);
+  } else if ([...OVERRIDES, ...DEPENDENCIES].includes(pkg)) fail(`${path} is ${pkg} with no pin`);
+  for (const field of SPEC_FIELDS) {
+    if (!(field in entry)) continue;
+    if (!isObject(entry[field]) || !Object.values(entry[field]).every(isRegistrySpec)) fail(`${path}'s ${field} has a spec that is not a registry range`);
+  }
+  if (typeof entry.integrity !== "string" || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity)) fail(`${path}'s integrity is not exactly one sha512`);
+  if (!/^[A-Za-z0-9.+-]+$/.test(entry.version)) fail(`${path}'s version is not a version`);
+  const want = `${REGISTRY}${pkg}/-/${pkg.split("/").at(-1)}-${entry.version}.tgz`;
+  if (entry.resolved !== want) fail(`${path}'s resolved is not ${want}`);
 }
 
 // ---- the plan ----
