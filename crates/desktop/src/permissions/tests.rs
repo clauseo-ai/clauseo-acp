@@ -15,17 +15,19 @@ use super::store::{Answer, Store, build_id, exe_identity};
 use super::*;
 
 /// What the fake OS answers, and what it was asked.
-struct Fake {
-    platform: Platform,
+pub(super) struct Fake {
+    pub(super) platform: Platform,
     matters: Option<PathBuf>,
     documents: Option<PathBuf>,
     keychain: KeychainCheck,
     cfa: Option<Cfa>,
     protected: Vec<PathBuf>,
-    /// What listing Documents answers.
-    listed: bool,
+    /// What listing a folder answers.
+    pub(super) listed: bool,
     /// The accounts whose read is refused.
     refused: Vec<&'static str>,
+    /// The mount table.
+    pub(super) mounts: Vec<Mount>,
     /// Every folder listed and keychain account read, in order.
     asked: Mutex<Vec<String>>,
     /// How many times Controlled folder access was read.
@@ -35,7 +37,7 @@ struct Fake {
 }
 
 impl Fake {
-    fn new(platform: Platform) -> Self {
+    pub(super) fn new(platform: Platform) -> Self {
         Self {
             platform,
             matters: Some(PathBuf::from("/Users/ada/Documents/Clauseo")),
@@ -45,13 +47,14 @@ impl Fake {
             protected: Vec::new(),
             listed: true,
             refused: Vec::new(),
+            mounts: Vec::new(),
             asked: Mutex::new(Vec::new()),
             cfa_reads: AtomicUsize::new(0),
             hold: Mutex::new(None),
         }
     }
 
-    fn windows(on: bool) -> Self {
+    pub(super) fn windows(on: bool) -> Self {
         Self {
             matters: Some(PathBuf::from("C:/Users/ada/Documents/Clauseo")),
             protected: vec![PathBuf::from("C:/Users/ada/Documents")],
@@ -63,7 +66,7 @@ impl Fake {
         }
     }
 
-    fn asked(&self) -> Vec<String> {
+    pub(super) fn asked(&self) -> Vec<String> {
         self.asked.lock().unwrap().clone()
     }
 }
@@ -104,6 +107,9 @@ impl Probe for Fake {
         self.asked.lock().unwrap().push(item.account.clone());
         !self.refused.contains(&item.account.as_str())
     }
+    fn mounts(&self) -> Vec<Mount> {
+        self.mounts.clone()
+    }
 }
 
 fn item(service: &str, account: &str) -> KeychainItem {
@@ -114,7 +120,7 @@ fn item(service: &str, account: &str) -> KeychainItem {
 }
 
 /// A store in a scratch folder, for `build`.
-fn store(dir: &tempfile::TempDir, build: &str) -> Store {
+pub(super) fn store(dir: &tempfile::TempDir, build: &str) -> Store {
     Store::new(Arc::new(SystemFiles), dir.path(), build.to_owned())
 }
 
@@ -125,7 +131,7 @@ fn rows(probe: &dyn Probe, store: &Store) -> Vec<PermissionRow> {
 /// No row.
 const NONE: [PermissionRow; 0] = [];
 
-fn ids(rows: &[PermissionRow]) -> Vec<PermissionId> {
+pub(super) fn ids(rows: &[PermissionRow]) -> Vec<PermissionId> {
     rows.iter().map(|row| row.id).collect()
 }
 
