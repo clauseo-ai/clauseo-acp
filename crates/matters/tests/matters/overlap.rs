@@ -47,6 +47,8 @@ fn after_a(
 /// The sets of an [`Overlap`] past `others` and `left`, empty unless a test sets them.
 #[derive(Default)]
 struct Kept {
+    busy: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
+    logged: BTreeMap<MatterPath, Option<ContentId>>,
     failed: BTreeMap<MatterPath, BTreeSet<ThreadId>>,
     own: BTreeSet<MatterPath>,
 }
@@ -77,6 +79,8 @@ fn after_a_kept(
         since: cid(since),
         others,
         left,
+        busy: &kept.busy,
+        logged: &kept.logged,
         failed: &kept.failed,
         own: &kept.own,
     };
@@ -107,6 +111,8 @@ fn from_the_last_checkpoint_with_no_others_is_as_without() {
             since: cid(2),
             others: &empty,
             left: &left,
+            busy: &kept.busy,
+            logged: &kept.logged,
             failed: &kept.failed,
             own: &kept.own,
         };
@@ -189,6 +195,13 @@ fn a_paper_nobody_named_is_flagged() {
     let others = by_b(&["b.docx"]);
     let checkpoint = after_a(&mut matter, 4, &[], 1, &others);
     assert_eq!(checkpoint.beside, [path("b.docx")]);
+    // The change left out names the answer it was left out for.
+    assert_eq!(
+        checkpoint.left_out,
+        [added("b.docx", b"B's")
+            .with_lawyer_edits()
+            .with_also_changed_by(vec![other()])]
+    );
     let changes = created(checkpoint, 4);
     assert_eq!(
         changes,
@@ -288,7 +301,7 @@ fn a_paper_of_an_answer_with_no_card_is_kept_flagged() {
     fx.write("b.docx", "B's");
     let kept = Kept {
         failed: by_b(&["b.docx"]),
-        own: BTreeSet::new(),
+        ..Kept::default()
     };
     let none = BTreeMap::new();
     let checkpoint = after_a_kept(&mut matter, (4, 1), &[], &none, &BTreeMap::new(), &kept);
@@ -312,8 +325,8 @@ fn a_paper_this_answer_named_without_completing_is_kept() {
     matter.before_turn(&meta_b(3)).unwrap();
     fx.write("x.docx", "two");
     let kept = Kept {
-        failed: BTreeMap::new(),
         own: BTreeSet::from([path("x.docx")]),
+        ..Kept::default()
     };
     let others = by_b(&["x.docx"]);
     let checkpoint = after_a_kept(&mut matter, (4, 1), &[], &others, &BTreeMap::new(), &kept);
@@ -323,5 +336,70 @@ fn a_paper_this_answer_named_without_completing_is_kept() {
         [modified("x.docx", b"one", b"two")
             .with_lawyer_edits()
             .with_also_changed_by(vec![other()])]
+    );
+}
+
+/// B, still running, has a call that names b.docx and x.docx and has not completed. A did not
+/// write b.docx: left out, naming B in `left_out`. A wrote x.docx: kept, with no
+/// `also_changed_by`, since B has not changed it yet.
+#[test]
+fn a_paper_only_an_unfinished_call_names_is_left_out_without_the_label() {
+    let fx = Fixture::new("overlap-busy");
+    fx.write("x.docx", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    matter.before_turn(&meta_b(3)).unwrap();
+    fx.write("x.docx", "two");
+    fx.write("b.docx", "B's");
+    let kept = Kept {
+        busy: by_b(&["b.docx", "x.docx"]),
+        ..Kept::default()
+    };
+    let none = BTreeMap::new();
+    let checkpoint = after_a_kept(
+        &mut matter,
+        (4, 1),
+        &["x.docx"],
+        &none,
+        &BTreeMap::new(),
+        &kept,
+    );
+    assert_eq!(checkpoint.beside, [path("b.docx")]);
+    assert_eq!(
+        checkpoint.left_out,
+        [added("b.docx", b"B's")
+            .with_lawyer_edits()
+            .with_also_changed_by(vec![other()])]
+    );
+    assert_eq!(created(checkpoint, 4), [modified("x.docx", b"one", b"two")]);
+}
+
+/// A checkpoint after A's start logged y.docx and z.docx as outside edits. y.docx still holds
+/// what was logged: left out even though A's own call named it. z.docx changed since: kept.
+#[test]
+fn a_paper_logged_as_an_outside_edit_since_is_not_on_the_card_again() {
+    let fx = Fixture::new("overlap-logged");
+    fx.write("y.docx", "one");
+    fx.write("z.docx", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("y.docx", "two");
+    fx.write("z.docx", "two");
+    created(matter.before_turn(&meta_b(3)).unwrap(), 3);
+    fx.write("z.docx", "three");
+    let kept = Kept {
+        logged: BTreeMap::from([
+            (path("y.docx"), Some(blob(b"two"))),
+            (path("z.docx"), Some(blob(b"two"))),
+        ]),
+        own: BTreeSet::from([path("y.docx")]),
+        ..Kept::default()
+    };
+    let none = BTreeMap::new();
+    let checkpoint = after_a_kept(&mut matter, (4, 1), &[], &none, &BTreeMap::new(), &kept);
+    assert_eq!(checkpoint.beside, [path("y.docx")]);
+    assert_eq!(
+        created(checkpoint, 4),
+        [modified("z.docx", b"one", b"three").with_lawyer_edits()]
     );
 }
