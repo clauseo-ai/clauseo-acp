@@ -249,6 +249,10 @@
   .room-conv[aria-current] .room-conv-title {
     @apply text-primary font-chip;
   }
+  /* a conversation not started yet: its placeholder title stays muted while it is open */
+  .room-conv[data-draft][aria-current] .room-conv-title {
+    @apply text-muted;
+  }
   /* one line: the title, the plan where it differs from the matter's first, and the status's icon at the line's end, where
      every row's icon lines up with the next, on the title's first line when it wraps */
   .room-conv-line {

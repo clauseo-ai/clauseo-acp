@@ -34,8 +34,8 @@ export const ids = {
   /**
    * A conversation's row button under the open matter's rail row, with `data-state` (the
    * ConversationState), `data-conversation` (its key) and `aria-current="true"` on the open one.
-   * Its text is the title ("New conversation" for a draft or a thread with no title yet), then,
-   * on a row not open, its status words for assistive technology ("Answering.").
+   * Its text is the title ("Not started yet" for a draft, "New conversation" for a thread with no
+   * title yet), then, on a row not open, its status words for assistive technology ("Answering.").
    */
   conversation: "conversation",
   /** New conversation, under the open matter's conversations: opens a draft, sending nothing. */

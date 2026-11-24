@@ -1,5 +1,5 @@
 // Two conversations in one matter (U6). The first is asked and answered; New conversation opens a
-// draft that says "New conversation" with an empty transcript; its first send creates the thread,
+// draft that says "Not started yet" with an empty transcript; its first send creates the thread,
 // and the room names it from that message: a message over 48 code points takes its first 6 words.
 // Pressing either row then shows that conversation's own transcript.
 //
@@ -58,7 +58,7 @@ test("two conversations in a matter, the second titled from its first message", 
   await expect(second).toHaveAttribute("aria-current", "true");
   // Cut at a word: the title holds nothing of the next word on, and ends with "…".
   await expect(w.conversationTitle(second)).toHaveText(SECOND_TITLE);
-  await expect(w.conversationRow("New conversation")).toHaveCount(0);
+  await expect(w.conversationRow("Not started yet")).toHaveCount(0);
   await expect(w.conversations).toHaveCount(2);
 
   await openRow(w, FIRST, FIRST, SECOND);
