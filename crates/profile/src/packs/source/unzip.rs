@@ -3,7 +3,8 @@
 //! - every entry's name is UTF-8, `/`-separated (a `\` is refused), relative (no leading `/`,
 //!   no drive letter or `:` anywhere), with no empty, `.` or `..` part, and each part a name every
 //!   OS can hold (no control character, none of `<>:"|?*`, no trailing `.` or space, no Windows
-//!   device name); two names equal but for case are refused;
+//!   device name, `COM¹` and `CON .txt` included, no 8.3 short name such as `PROGRA~1`); two
+//!   names equal but for case are refused;
 //! - no symlink (nor any entry whose Unix mode is neither a file nor a folder: zip has no hard
 //!   links), no encrypted entry;
 //! - at most [`ENTRIES_MAX`] entries and [`UNPACKED_MAX`] bytes unpacked, counted as the bytes
@@ -127,7 +128,7 @@ fn is_plain_name(name: &str) -> bool {
 }
 
 /// Whether one part of a name is a file or folder name every OS can hold.
-fn is_plain_part(part: &str) -> bool {
+pub(super) fn is_plain_part(part: &str) -> bool {
     !part.is_empty()
         && part != "."
         && part != ".."
@@ -136,19 +137,37 @@ fn is_plain_part(part: &str) -> bool {
             .chars()
             .any(|c| c.is_control() || matches!(c, '<' | '>' | '"' | '|' | '?' | '*'))
         && !is_device(part)
+        && !is_short_alias(part)
 }
 
-/// Whether `part` names a Windows device (`con`, `nul`, `com1`, `lpt9`, ...), any case, with or
-/// without an extension.
+/// Whether `part` looks like a Windows 8.3 short name (`PROGRA~1`, `x~12.txt`): a `~` then
+/// digits, then the end or a `.`. Such a name can stand for another file on the same disk.
+fn is_short_alias(part: &str) -> bool {
+    part.match_indices('~').any(|(at, _)| {
+        let rest = part.get(at + 1..).unwrap_or_default();
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        digits > 0 && matches!(rest.as_bytes().get(digits), None | Some(b'.'))
+    })
+}
+
+/// Whether `part` names a Windows device (`con`, `nul`, `com1`, `lpt9`, `com¹`, ...), any
+/// case, with or without an extension, spaces before the extension ignored (`CON .txt`), as
+/// Windows reads it.
 fn is_device(part: &str) -> bool {
     let stem = part
         .split('.')
         .next()
         .unwrap_or_default()
+        .trim_end_matches(' ')
         .to_ascii_lowercase();
     let numbered = |prefix: &str| {
-        stem.strip_prefix(prefix)
-            .is_some_and(|rest| rest.len() == 1 && rest.bytes().all(|b| b.is_ascii_digit()))
+        stem.strip_prefix(prefix).is_some_and(|rest| {
+            let mut chars = rest.chars();
+            let digit = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_digit() || matches!(c, '¹' | '²' | '³'));
+            digit && chars.next().is_none()
+        })
     };
     matches!(stem.as_str(), "con" | "prn" | "aux" | "nul") || numbered("com") || numbered("lpt")
 }

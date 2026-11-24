@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use clauseo_profile::packs::added::{self, AddError};
 use clauseo_profile::packs::source::{
-    self, ADDING_DIR, FromKind, Installed, Origin, Remote, SourceError, close_preview, discover,
+    self, ADDING_DIR, FromKind, Installed, Origin, Remote, SourceError, close_preview,
     open_preview, parse_link,
 };
 use clauseo_profile::packs::{self, Refusal};
@@ -137,11 +137,7 @@ fn add(
     admission: &Admission,
 ) -> Result<(Origin, Added), Error> {
     let staged = open_preview(adding, token, now).map_err(source_error)?;
-    let held = |name: &String| {
-        discover(&staged.top, Some(name))
-            .is_ok_and(|found| found.iter().any(|skill| skill.name == *name))
-    };
-    if let Some(missing) = pick.iter().position(|name| !held(name)) {
+    if let Some(missing) = pick.iter().position(|name| staged.shown(name).is_none()) {
         return Err(Error::refused(
             ErrorCode::CommandInvalid,
             format!(

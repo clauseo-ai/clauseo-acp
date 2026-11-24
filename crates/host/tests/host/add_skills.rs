@@ -289,3 +289,40 @@ fn an_icon_over_its_cap_is_left_out() {
     assert_eq!(docx.has_scripts, Some(false));
     assert!(!dir.data().join("skill-icons/docx.png").exists());
 }
+
+/// While a firm's policy turns `skills.allow_scripts` off, a picked skill with a script is
+/// `skill.invalid` and is not added; one without is added.
+#[test]
+fn a_firm_lock_on_scripts_refuses_a_skill_with_one() {
+    let dir = Dir::new("add_skills_scripts_locked", &[]);
+    dir.set_policy(r#"{"skills": {"allow_scripts": false}}"#);
+    let server = SkillServer::start();
+    server.body("/o/r/zip/HEAD", repo_archive());
+    let host = start(&dir, &server);
+    let shown = preview(&host, github()).unwrap();
+    host.refused(
+        add(&shown.token, &["pdf"], AddonScope::All),
+        ErrorCode::SkillInvalid,
+    );
+    assert!(addons(&host).iter().all(|row| row.id != "pdf"));
+    let again = preview(&host, github()).unwrap();
+    host.ok(add(&again.token, &["docx"], AddonScope::All));
+    let docx = item(&addons(&host), AddonKind::Skill, "docx").clone();
+    assert!(docx.on, "{docx:?}");
+}
+
+/// While a firm's policy sets `skills.enabled`, adding is `settings.locked`, nothing added.
+#[test]
+fn a_firm_lock_on_skills_enabled_refuses_adding() {
+    let dir = Dir::new("add_skills_enabled_locked", &[]);
+    dir.set_policy(r#"{"skills": {"extra": "any", "enabled": {}}}"#);
+    let server = SkillServer::start();
+    server.body("/o/r/zip/HEAD", repo_archive());
+    let host = start(&dir, &server);
+    let shown = preview(&host, github()).unwrap();
+    host.refused(
+        add(&shown.token, &["docx"], AddonScope::All),
+        ErrorCode::SettingsLocked,
+    );
+    assert!(addons(&host).iter().all(|row| row.id != "docx"));
+}

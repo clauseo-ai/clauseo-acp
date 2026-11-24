@@ -112,12 +112,28 @@ impl Remote {
     pub fn origin(&self) -> Origin {
         match self {
             Self::GitHub(github) => github.origin(),
-            Self::Zip { url } => Origin {
-                kind: FromKind::Url,
-                text: url.clone(),
-                source_url: Some(url.clone()),
-            },
+            Self::Zip { url } => {
+                let shown = without_query(url);
+                Origin {
+                    kind: FromKind::Url,
+                    text: shown.clone(),
+                    source_url: Some(shown),
+                }
+            }
         }
+    }
+}
+
+/// `link` without its query and fragment: a signed URL's token stays out of what is shown and
+/// recorded (the download still uses the whole link).
+fn without_query(link: &str) -> String {
+    match Url::parse(link) {
+        Ok(mut url) => {
+            url.set_query(None);
+            url.set_fragment(None);
+            url.as_str().to_owned()
+        }
+        Err(_bad) => link.split(['?', '#']).next().unwrap_or_default().to_owned(),
     }
 }
 

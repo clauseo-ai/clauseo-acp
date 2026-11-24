@@ -22,8 +22,8 @@ pub use discover::{Found, discover, narrow};
 pub use local::preview_local;
 pub use remote::{GitHub, Remote, parse_link, parse_skills_sh};
 pub use stage::{
-    ADDING_DIR, Installed, Preview, STAGE_TTL_MS, Staged, Tree, close_preview, install_picked,
-    open_preview, stage_tree, sweep,
+    ADDING_DIR, Installed, Preview, STAGE_TTL_MS, Shown, Staged, Tree, close_preview,
+    install_picked, open_preview, stage_tree, sweep,
 };
 pub use unzip::{Unpacked, unzip};
 

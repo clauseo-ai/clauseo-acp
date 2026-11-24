@@ -58,11 +58,12 @@ const VISITS_MAX: usize = 5000;
 pub struct Found {
     /// Its folder, relative to the tree's top, `/`-separated; empty for the top itself.
     pub folder: String,
-    /// The frontmatter's `name`.
+    /// The frontmatter's `name` as listed (`added::display_name`): what the preview shows and
+    /// `add_skills` picks by.
     pub name: String,
     /// The pack id it would be added as (`added::slug`), when the name gives one.
     pub slug: Option<String>,
-    /// The frontmatter's `description`, on one line.
+    /// The frontmatter's `description`, on one line (`added::one_line`).
     pub description: String,
     /// Whether it holds a file an agent could run: anything but Markdown, text, data and
     /// images, or a file with an exec bit or executable magic (`scripts::is_script`).
@@ -91,7 +92,11 @@ pub fn discover(top: &Path, asked: Option<&str>) -> Result<Vec<Found>, SourceErr
     walk.found.clear();
     walk.walk(top, 1, 1);
     let mut containers: Vec<PathBuf> = CONTAINERS.iter().map(|dir| top.join(dir)).collect();
-    containers.extend(config_paths(top).into_iter().map(|dir| top.join(dir)));
+    containers.extend(
+        config_paths(top)
+            .into_iter()
+            .filter_map(|dir| inside(top, &dir)),
+    );
     for dir in containers {
         walk.walk(&dir, CONTAINER_DEPTH, 1);
     }
@@ -223,6 +228,8 @@ fn is_real(path: &Path, dir: bool) -> bool {
 /// What a `SKILL.md`'s frontmatter says.
 struct Head {
     name: String,
+    /// The pack id the raw name slugs to, as `added::read_source` slugs it.
+    slug: Option<String>,
     description: String,
     internal: bool,
 }
@@ -242,10 +249,14 @@ fn head_of(path: &Path) -> Option<Head> {
         .replace("\r\n", "\n");
     let (description, body) = frontmatter::lenient_description(&text).ok()?;
     let head = text.get(..text.len() - body.len())?;
-    let name = front_name(head)?.trim().to_owned();
-    (!name.is_empty()).then(|| Head {
+    let raw = front_name(head)?.trim();
+    let name = added::display_name(raw);
+    let slug = added::slug(raw);
+    let name = if name.is_empty() { slug.clone()? } else { name };
+    Some(Head {
         name,
-        description: description.split_whitespace().collect::<Vec<_>>().join(" "),
+        slug,
+        description: added::one_line(&description),
         internal: is_internal(head),
     })
 }
@@ -273,7 +284,7 @@ fn is_internal(head: &str) -> bool {
 fn measure(dir: &Path, folder: String, head: Head) -> Found {
     let mut found = Found {
         folder,
-        slug: added::slug(&head.name),
+        slug: head.slug,
         name: head.name,
         description: head.description,
         has_scripts: false,
@@ -355,8 +366,27 @@ fn has_exec_bit(_meta: &std::fs::Metadata) -> bool {
     false
 }
 
+/// `top` joined with the `/`-separated `rel`, when that stays under `top`: every part a plain
+/// name (`unzip::is_plain_part`, no `:`), so neither a drive letter (`C:/Users`, `c:x`), a root
+/// nor a `..` can take the walk out of the stage.
+pub(super) fn inside(top: &Path, rel: &str) -> Option<PathBuf> {
+    let mut out = top.to_path_buf();
+    for part in rel.split('/') {
+        if !super::unzip::is_plain_part(part) || part.contains(':') {
+            return None;
+        }
+        out.push(part);
+    }
+    let rest = out.strip_prefix(top).ok()?;
+    let plain = rest
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)));
+    (plain && out.starts_with(top) && out != top).then_some(out)
+}
+
 /// The folders `skills.sh.json` at `top` lists in `paths`: each starts with `./`, holds no
-/// `\`, `..`, empty or `.` part, and is not the top. An unreadable file lists none.
+/// `\`, `..`, empty or `.` part, nor a `:` (a drive letter), and is not the top. An unreadable
+/// file lists none; [`inside`] checks each again as it is joined.
 fn config_paths(top: &Path) -> Vec<String> {
     let path = top.join(CONFIG_FILE);
     if !is_real(&path, false) {
@@ -380,7 +410,7 @@ fn config_paths(top: &Path) -> Vec<String> {
             continue;
         };
         let parts: Vec<&str> = rest.split('/').filter(|part| !part.is_empty()).collect();
-        let plain = !entry.contains('\\')
+        let plain = !entry.contains(['\\', ':'])
             && !parts.is_empty()
             && parts.iter().all(|part| *part != "." && *part != "..");
         let joined = parts.join("/");

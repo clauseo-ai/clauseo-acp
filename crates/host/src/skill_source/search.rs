@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use clauseo_profile::packs::source::SourceError;
+use clauseo_profile::packs::added::display_name;
+use clauseo_profile::packs::source::{SourceError, parse_skills_sh};
 use serde_json::Value;
 use url::Url;
 
@@ -65,7 +66,10 @@ fn ask(net: &Net, query: &str) -> Result<Vec<CatalogueSkill>, SourceError> {
     Ok(items.iter().filter_map(item).take(SEARCH_MAX).collect())
 }
 
-/// One answer item, or `None` when a field is missing or not a short text.
+/// One answer item, or `None` when a field is missing or not a short text, or when `id` and
+/// `source` are not a skills.sh name (`<owner>/<repo>/<skill>`, `<owner>/<repo>`). The name is
+/// listed as a preview lists a skill's (`added::display_name`: no control, bidi or zero-width
+/// character, at most 200 characters and bytes).
 fn item(value: &Value) -> Option<CatalogueSkill> {
     let text = |key: &str| {
         let text = value.get(key)?.as_str()?;
@@ -74,10 +78,18 @@ fn item(value: &Value) -> Option<CatalogueSkill> {
             && !text.chars().any(char::is_control);
         plain.then(|| text.to_owned())
     };
+    let name_of = |key: &str, parts: usize| {
+        text(key).filter(|name| {
+            name.split('/').count() == parts && !name.contains('@') && parse_skills_sh(name).is_ok()
+        })
+    };
+    let id = name_of("id", 3)?;
+    let source = name_of("source", 2)?;
+    let name = display_name(value.get("name")?.as_str()?);
     Some(CatalogueSkill {
-        id: text("id")?,
-        source: text("source")?,
-        name: text("name")?,
+        id,
+        source,
+        name: (!name.is_empty()).then_some(name)?,
         installs: value.get("installs").and_then(Value::as_u64).unwrap_or(0),
     })
 }

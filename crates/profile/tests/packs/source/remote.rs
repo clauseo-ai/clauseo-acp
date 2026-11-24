@@ -163,3 +163,20 @@ fn archive_links_and_origins() {
     };
     assert_eq!(zip.origin().kind, FromKind::Url);
 }
+
+/// A `.zip` link's query and fragment (a signed URL's token) stay out of what is shown and
+/// recorded; the download keeps the whole link.
+#[test]
+fn a_zip_links_query_is_not_shown_or_recorded() {
+    let link = "https://files.example.org/kit.zip?X-Amz-Signature=secret&t=1#part";
+    let Ok(zip) = parse_link(link) else {
+        panic!("parses");
+    };
+    let origin = zip.origin();
+    assert_eq!(origin.text, "https://files.example.org/kit.zip");
+    assert_eq!(
+        origin.source_url.as_deref(),
+        Some("https://files.example.org/kit.zip")
+    );
+    assert!(zip.download_url().contains("X-Amz-Signature=secret"));
+}

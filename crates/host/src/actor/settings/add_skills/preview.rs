@@ -25,6 +25,7 @@ use super::super::super::Actor;
 use super::super::super::input::Reply;
 use super::{packs_root, source_error};
 use crate::agent::codex::prepare::{Job, off_actor};
+use crate::clock::Clock;
 use crate::error::Error;
 use crate::skill_source::download::{DOWNLOAD_TIMEOUT, Net, preview_remote};
 use crate::skill_source::search::search as catalogue;
@@ -45,6 +46,7 @@ const PAGE: &str = "https://skills.sh/";
 pub(super) struct Route {
     test_server: Option<String>,
     upstream_proxy: Option<String>,
+    clock: Arc<dyn Clock>,
 }
 
 impl Route {
@@ -52,14 +54,16 @@ impl Route {
         Self {
             test_server: actor.wiring.skill_server.clone(),
             upstream_proxy: actor.effective.settings().network.upstream_proxy.clone(),
+            clock: Arc::clone(&actor.clock),
         }
     }
 
     pub(super) fn net(&self) -> Result<Net, SourceError> {
-        match &self.test_server {
-            Some(origin) => Ok(Net::plain(origin)),
-            None => Net::new(self.upstream_proxy.as_deref(), &Upstream::System),
-        }
+        let net = match &self.test_server {
+            Some(origin) => Net::plain(origin),
+            None => Net::new(self.upstream_proxy.as_deref(), &Upstream::System)?,
+        };
+        Ok(net.with_clock(Arc::clone(&self.clock)))
     }
 }
 
