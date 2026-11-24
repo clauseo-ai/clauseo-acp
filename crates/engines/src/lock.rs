@@ -26,6 +26,31 @@ const CODEX_PLATFORMS: [&str; 6] = [
     "win32-x64",
 ];
 
+/// The fields a lock entry may have: what npm writes for a registry package. Anything else
+/// (`link`, `inBundle`, `hasInstallScript`, or a field a newer npm adds) refuses the list.
+const ENTRY_FIELDS: [&str; 20] = [
+    "version",
+    "resolved",
+    "integrity",
+    "name",
+    "license",
+    "dependencies",
+    "optionalDependencies",
+    "peerDependencies",
+    "peerDependenciesMeta",
+    "bin",
+    "engines",
+    "os",
+    "cpu",
+    "libc",
+    "optional",
+    "peer",
+    "dev",
+    "devOptional",
+    "funding",
+    "deprecated",
+];
+
 /// The fields of an entry that hold dependency specs npm resolves while building the tree.
 const SPEC_FIELDS: [&str; 3] = ["dependencies", "optionalDependencies", "peerDependencies"];
 
@@ -78,9 +103,9 @@ pub(crate) fn check(
 }
 
 /// One entry other than the root, installed at a path whose last name is `last`:
-/// - no `link`, `inBundle` or `hasInstallScript`;
-/// - a `name` only on a codex platform alias (`@openai/codex` at
-///   `node_modules/@openai/codex-<platform>`);
+/// - only the fields in [`ENTRY_FIELDS`] (so no `link`, `inBundle` or `hasInstallScript`);
+/// - a `name` exactly where the last name is `@openai/codex-<platform>`, and there it is
+///   `@openai/codex` (the alias), so codex's pin applies;
 /// - a string `version`; a package named in `pins` at exactly its pin (`<pin>-<platform>` for a
 ///   codex alias), wherever it is installed;
 /// - every spec in `dependencies`, `optionalDependencies` and `peerDependencies` a registry
@@ -90,9 +115,9 @@ pub(crate) fn check(
 ///   there is one else `last`, and `<base>` `<pkg>` without its scope.
 fn package(entry: &Value, last: &str, pins: &[(&str, &str)]) -> Result<(), Error> {
     let entry = entry.as_object().ok_or(Error::LockEntry)?;
-    if ["link", "inBundle", "hasInstallScript"]
-        .iter()
-        .any(|field| entry.contains_key(*field))
+    if entry
+        .keys()
+        .any(|field| !ENTRY_FIELDS.contains(&field.as_str()))
     {
         return Err(Error::LockEntry);
     }
@@ -100,18 +125,16 @@ fn package(entry: &Value, last: &str, pins: &[(&str, &str)]) -> Result<(), Error
         .get("version")
         .and_then(Value::as_str)
         .ok_or(Error::LockEntry)?;
-    let (pkg, platform) = match entry.get("name") {
-        None => (last, None),
-        Some(name) => {
-            let platform = last
-                .strip_prefix(CODEX)
-                .and_then(|rest| rest.strip_prefix('-'))
-                .filter(|platform| CODEX_PLATFORMS.contains(platform));
-            match (name.as_str(), platform) {
-                (Some(CODEX), Some(platform)) => (CODEX, Some(platform)),
-                _ => return Err(Error::LockEntry),
-            }
-        }
+    // A codex platform path must be the alias of codex (so its pin applies), and only such a
+    // path may carry a `name`.
+    let platform = last
+        .strip_prefix(CODEX)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .filter(|platform| CODEX_PLATFORMS.contains(platform));
+    let (pkg, platform) = match (entry.get("name").map(Value::as_str), platform) {
+        (None, None) => (last, None),
+        (Some(Some(CODEX)), Some(platform)) => (CODEX, Some(platform)),
+        _ => return Err(Error::LockEntry),
     };
     if !is_package_name(pkg) {
         return Err(Error::LockEntry);

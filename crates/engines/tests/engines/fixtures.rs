@@ -92,6 +92,19 @@ variant! {
     SPEC_LINK = "spec-link";
     SPEC_WORKSPACE = "spec-workspace";
     SPEC_TAG = "spec-tag";
+    SPEC_ALIAS_GIT = "spec-alias-git";
+    SPEC_ALIAS_NAME = "spec-alias-name";
+    SPEC_ALIAS_OK = "spec-alias-ok";
+    SPEC_DOT = "spec-dot";
+    SPEC_TGZ = "spec-tgz";
+    SPEC_TAR = "spec-tar";
+    SPEC_BETA1 = "spec-beta1";
+    UNNAMED_PLATFORM = "unnamed-platform";
+    ALIAS_OK = "alias-ok";
+    ALIAS_WRONG_VERSION = "alias-wrong-version";
+    ALIAS_WRONG_PATH = "alias-wrong-path";
+    UNKNOWN_ENTRY_FIELD = "unknown-entry-field";
+    EXTRA_SIZE = "extra-size";
 }
 
 /// `GOOD`'s bytes signed by key B.

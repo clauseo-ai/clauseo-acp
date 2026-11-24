@@ -18,10 +18,11 @@
 //! 4. The JSON has exactly the top-level fields of `clauseo-engines/1` (an unknown one is an
 //!    error) with the right types; `generated` has the shape `YYYY-MM-DDTHH:MM:SSZ` (never
 //!    compared with a clock); 1 ≤ `seq` ≤ [`MAX_SEQ`]; `apps` is non-empty; each `sizes` row
-//!    names a known agent, OS and architecture with non-zero sizes, with exactly one row for
-//!    each of the 12 (agent, os, arch). A key repeated in a JSON object keeps its last value,
-//!    as npm's `JSON.parse` does, and the caller stores the verified bytes, so both read the
-//!    same list.
+//!    of a known agent, OS and architecture has non-zero sizes, with exactly one row for each of
+//!    the 12 (agent, os, arch); a row naming an agent, OS or architecture this version doesn't
+//!    know is skipped, so a later list can add platforms. A key repeated in a JSON object keeps
+//!    its last value, as npm's `JSON.parse` does, and the caller stores the verified bytes, so
+//!    both read the same list.
 //! 5. Official names only: `package_json` has only the fields an engines pin file has (no
 //!    `scripts`), its `dependencies` keys are exactly [`DEPENDENCIES`], its `overrides` keys
 //!    are within [`OVERRIDES`] and include each one the bundle pins, and every dependency and
@@ -29,8 +30,9 @@
 //!    git URL, `$` reference or `+build`).
 //! 6. The lock: `lockfileVersion` 3; its root's `dependencies` equal `package_json`'s; every
 //!    other `packages` key is `node_modules/<name>(/node_modules/<name>)*` with lower-case npm
-//!    names, no two equal ignoring case; no entry is a `link`, `inBundle` or
-//!    `hasInstallScript`, or has a `name` (an alias) except codex's platform builds; every spec
+//!    names, no two equal ignoring case; each entry has only the fields npm writes for a registry
+//!    package (an allowlist: no `link`, `inBundle`, `hasInstallScript` or newer field), and a
+//!    `name` (an alias) exactly on codex's platform builds; every spec
 //!    an entry depends on is a semver range or `npm:<name>@<range>`; each has exactly one sha512
 //!    `integrity` and a `resolved` that is exactly its own tarball on [`NPM_REGISTRY`]; every
 //!    entry of an engine or of codex, at any depth, is at exactly its pin.
@@ -42,6 +44,11 @@
 //! 9. Never older than the bundled pins: each of [`DEPENDENCIES`] and, when the bundle pins it,
 //!    each of [`OVERRIDES`] is ≥ the one in [`Context::bundled_package_json`], which must itself
 //!    be plain semver.
+//!
+//! The lock-entry allowlist is deliberately closed: F3's plan runs this verifier on what it is
+//! about to sign, so a field a newer npm writes shows up as a failed plan, not as lists refused
+//! in the field. The allowlist is widened in an app release before the publisher's npm moves to
+//! a version that writes a new field.
 //!
 //! No expiry: nothing here reads a clock, so an older signed list whose `seq` is still above
 //! the caller's floor can be replayed (by whoever serves the release asset) until a newer list is

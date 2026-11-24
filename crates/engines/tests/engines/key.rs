@@ -148,3 +148,17 @@ fn key_ids_need_canonical_base64_as_the_runtime_does() {
     let spaced = file.replacen("\nRW", "\nR W", 1);
     assert_eq!(key_id(&STANDARD.encode(spaced)), None);
 }
+
+#[test]
+fn a_config_pubkey_with_a_json_escape_is_refused_cleanly() {
+    let release = conf_pubkey();
+    // The same key, its first character written as a `\u00XX` escape as JSON allows: the
+    // const scan refuses an escape rather than misread it.
+    let first = release.chars().next().unwrap();
+    let written = format!("\\u{:04x}{}", u32::from(first), &release[1..]);
+    let escaped = TAURI_CONF.replacen(release.as_str(), &written, 1);
+    assert_ne!(escaped, TAURI_CONF);
+    let reread: serde_json::Value = serde_json::from_str(&escaped).unwrap();
+    assert_eq!(reread["plugins"]["updater"]["pubkey"], release.as_str());
+    assert!(release_guard(Some("release"), Some(&release), &escaped).is_err());
+}

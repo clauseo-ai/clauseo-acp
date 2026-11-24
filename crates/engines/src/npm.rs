@@ -78,10 +78,22 @@ pub(crate) fn is_registry_spec(spec: &str) -> bool {
 }
 
 /// A semver range as npm writes one (`^1.2.3`, `>= 2.1.2 < 3.0.0`, `^3.25 || ^4`, `1.x`, `*`,
-/// `1.2.3 - 2.0.0`, `^4 || ^5.0.0-0`): only digits, letters (for `x` and prereleases), spaces
-/// and `.-+^~<>=|*`, with at least one digit unless it is `*`, `x` or `X`. So no `:`, `/`, `\`
-/// or `#`, and no bare word (a dist-tag, or `git`).
+/// `1.2.3 - 2.0.0`, `^4 || ^5.0.0-0`), or a dist-tag with a digit (`beta1`): only digits,
+/// letters (for `x` and prereleases), spaces and `.-+^~<>=|*`, with at least one digit unless
+/// it is `*`, `x` or `X`; starting with a digit, a letter or one of `^~<>=*`; not ending in
+/// `.tgz`, `.tar` or `.tar.gz` in any case (npm reads those as a tarball path). So no `:`,
+/// `/`, `\` or `#`, no leading `.`, and no bare word (a dist-tag with no digit, or `git`).
 fn is_range(range: &str) -> bool {
+    let first = range.bytes().next().is_some_and(|b| {
+        b.is_ascii_alphanumeric() || matches!(b, b'^' | b'~' | b'<' | b'>' | b'=' | b'*')
+    });
+    let lower = range.to_ascii_lowercase();
+    let tarball = [".tgz", ".tar", ".tar.gz"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix));
+    if !first || tarball {
+        return false;
+    }
     let allowed = range.bytes().all(|b| {
         b.is_ascii_alphanumeric()
             || matches!(

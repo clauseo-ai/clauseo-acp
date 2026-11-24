@@ -93,6 +93,12 @@ const pin = (list, name, version) => {
   list.package_lock.packages[""].dependencies[name] = version;
   lockAt(list, name, version);
 };
+// Adds the full lock's codex alias for `platform`, changed by `change`, at `path`'s platform.
+const platformAlias = (list, platform, change, path = platform) => {
+  const entry = structuredClone(packageLock.packages[`node_modules/@openai/codex-${platform}`]);
+  change(entry);
+  list.package_lock.packages[`node_modules/@openai/codex-${path}`] = entry;
+};
 // Adds a copy of the first package's entry under `key`, changed by `change`.
 const extraEntry = (list, key, change = () => {}) => {
   const entry = structuredClone(list.package_lock.packages[firstPackage(list)]);
@@ -195,6 +201,24 @@ const variants = {
   },
   "upper-key": (l) => extraEntry(l, "node_modules/@agentclientprotocol/Claude-agent-acp"),
   "dot-key": (l) => extraEntry(l, "node_modules/@openai/codex."),
+  "unnamed-platform": (l) => extraEntry(l, "node_modules/@openai/codex-darwin-arm64", (e) => {
+    e.version = "0.1.0";
+    e.resolved =
+      "https://registry.npmjs.org/@openai/codex-darwin-arm64/-/codex-darwin-arm64-0.1.0.tgz";
+    delete e.dependencies;
+  }),
+  "alias-ok": (l) => { platformAlias(l, "darwin-arm64", (e) => e); },
+  "alias-wrong-version": (l) => {
+    platformAlias(l, "darwin-arm64", (e) => {
+      e.version = `${pinOf(OPENAI)}-linux-x64`;
+      e.resolved = `https://registry.npmjs.org/@openai/codex/-/codex-${e.version}.tgz`;
+    });
+  },
+  "alias-wrong-path": (l) => { platformAlias(l, "darwin-arm64", (e) => e, "freebsd-x64"); },
+  "unknown-entry-field": (l) => { l.package_lock.packages[firstPackage(l)].future = true; },
+  "extra-size": (l) => {
+    l.sizes.push({ agent: "claude-acp", os: "linux", arch: "riscv64", download: 1, unpacked: 2 });
+  },
   ...Object.fromEntries(
     [
       ["git", "dependencies", "git+https://evil.example/x.git"],
@@ -205,6 +229,13 @@ const variants = {
       ["link", "dependencies", "link:../x"],
       ["workspace", "dependencies", "workspace:*"],
       ["tag", "dependencies", "git"],
+      ["alias-git", "dependencies", "npm:left-pad@git+https://evil.example/x.git"],
+      ["alias-name", "dependencies", "npm:Left-Pad@1.3.0"],
+      ["dot", "dependencies", ".1"],
+      ["tgz", "dependencies", "1.tgz"],
+      ["tar", "dependencies", "1.TAR"],
+      ["alias-ok", "dependencies", "npm:left-pad@^1.3.0"],
+      ["beta1", "dependencies", "beta1"],
     ].map(([stem, field, spec]) => [
       `spec-${stem}`,
       (l) => {

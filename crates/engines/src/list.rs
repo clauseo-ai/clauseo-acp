@@ -81,7 +81,35 @@ struct Raw {
     apps: Vec<String>,
     package_json: Value,
     package_lock: Value,
-    sizes: Vec<Size>,
+    sizes: Vec<RawSize>,
+}
+
+/// A `sizes` row as written: the names as strings, so a row for an agent, OS or architecture a
+/// later list adds is skipped rather than refused; the numbers and fields stay strict.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSize {
+    agent: String,
+    os: String,
+    arch: String,
+    download: u64,
+    unpacked: u64,
+}
+
+impl RawSize {
+    /// The row, or `None` when this version doesn't know its agent, OS or architecture.
+    fn known(&self) -> Option<Size> {
+        fn named<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
+            serde_json::from_value(Value::String(name.to_owned())).ok()
+        }
+        Some(Size {
+            agent: named(&self.agent)?,
+            os: named(&self.os)?,
+            arch: named(&self.arch)?,
+            download: self.download,
+            unpacked: self.unpacked,
+        })
+    }
 }
 
 /// A list that verified and passed every rule (see the crate docs).
@@ -123,7 +151,7 @@ impl EngineList {
     }
 
     /// The app's free-space input: each engine's download and unpacked bytes on each platform,
-    /// one row for every (agent, os, arch).
+    /// one row for every (agent, os, arch) this version knows (rows for others are skipped).
     pub fn sizes(&self) -> &[Size] {
         &self.sizes
     }
@@ -159,8 +187,10 @@ pub(crate) fn parse(json: &[u8]) -> Result<EngineList, Error> {
     if raw.apps.is_empty() || raw.apps.iter().any(String::is_empty) {
         return Err(Error::NoApps);
     }
+    // Rows this version doesn't know are skipped; the known ones must be complete.
+    let sizes: Vec<Size> = raw.sizes.iter().filter_map(RawSize::known).collect();
     let mut seen = BTreeSet::new();
-    for size in &raw.sizes {
+    for size in &sizes {
         if size.download == 0 || size.unpacked == 0 {
             return Err(Error::Size);
         }
@@ -179,7 +209,7 @@ pub(crate) fn parse(json: &[u8]) -> Result<EngineList, Error> {
         apps: raw.apps,
         package_json: raw.package_json,
         package_lock: raw.package_lock,
-        sizes: raw.sizes,
+        sizes,
     })
 }
 

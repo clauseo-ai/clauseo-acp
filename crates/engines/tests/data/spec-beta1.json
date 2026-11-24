@@ -1,0 +1,183 @@
+{
+  "format": "clauseo-engines/1",
+  "seq": 2,
+  "generated": "2026-11-24T06:00:00Z",
+  "apps": [
+    "0.1.0",
+    "0.0.0-dev.1a2b3c4"
+  ],
+  "package_json": {
+    "name": "clauseo-limits-live",
+    "version": "0.0.0",
+    "private": true,
+    "description": "The one home of the adapters' npm pins. G16's live tests (crates/limits/tests/live.rs) and its nightly job read an `npm ci` of this file.",
+    "license": "GPL-3.0-or-later",
+    "dependencies": {
+      "@agentclientprotocol/claude-agent-acp": "0.110.1",
+      "@agentclientprotocol/codex-acp": "2.10.0"
+    },
+    "overrides": {
+      "@openai/codex": "0.171.0"
+    }
+  },
+  "package_lock": {
+    "name": "clauseo-limits-live",
+    "version": "0.0.0",
+    "lockfileVersion": 3,
+    "requires": true,
+    "packages": {
+      "": {
+        "name": "clauseo-limits-live",
+        "version": "0.0.0",
+        "license": "GPL-3.0-or-later",
+        "dependencies": {
+          "@agentclientprotocol/claude-agent-acp": "0.110.1",
+          "@agentclientprotocol/codex-acp": "2.10.0"
+        }
+      },
+      "node_modules/@agentclientprotocol/claude-agent-acp": {
+        "version": "0.110.1",
+        "resolved": "https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/claude-agent-acp-0.110.1.tgz",
+        "integrity": "sha512-zIPjFWEU4yit7NHSMFk3W8Coh05GP+S5YLMXZB+t4YF+oQMfxRS+WXWSKnUgWPMsS0BUQnEHTurAgHsgWBiHPQ==",
+        "license": "Apache-2.0",
+        "dependencies": {
+          "@agentclientprotocol/sdk": "2.9.1",
+          "@anthropic-ai/claude-agent-sdk": "0.3.330",
+          "diff": "9.0.0",
+          "zod": "4.6.7",
+          "evil-x": "beta1"
+        },
+        "bin": {
+          "claude-agent-acp": "dist/index.js"
+        },
+        "engines": {
+          "node": ">=22"
+        }
+      },
+      "node_modules/@agentclientprotocol/codex-acp": {
+        "version": "2.10.0",
+        "resolved": "https://registry.npmjs.org/@agentclientprotocol/codex-acp/-/codex-acp-2.10.0.tgz",
+        "integrity": "sha512-KgFNxhLwPAp0LsNQyotp8LD8Vr6A453e995SAuDr4iIVgmHkeesibRPTfUesQ9OSmN+7U9xV14JUBuHdudnqRw==",
+        "license": "Apache-2.0",
+        "dependencies": {
+          "@agentclientprotocol/sdk": "~2.9.1",
+          "@openai/codex": "^0.171.0",
+          "cross-spawn": "^7.0.6",
+          "diff": "^9.0.0",
+          "open": "^11.0.1",
+          "vscode-jsonrpc": "^9.0.1",
+          "zod": "^4.0.0"
+        },
+        "bin": {
+          "codex-acp": "dist/index.js"
+        }
+      },
+      "node_modules/@openai/codex": {
+        "version": "0.171.0",
+        "resolved": "https://registry.npmjs.org/@openai/codex/-/codex-0.171.0.tgz",
+        "integrity": "sha512-1IOFzL2Xg86tLdw6kDo3GoKbkQENgQi7TI6rlEvN132R7ngSw7SNOIQoTcnKzSZZ8kf9N9GynCweSoaFbqk2Eg==",
+        "license": "Apache-2.0",
+        "bin": {
+          "codex": "bin/codex.js"
+        },
+        "engines": {
+          "node": ">=16"
+        },
+        "optionalDependencies": {
+          "@openai/codex-darwin-arm64": "npm:@openai/codex@0.171.0-darwin-arm64",
+          "@openai/codex-darwin-x64": "npm:@openai/codex@0.171.0-darwin-x64",
+          "@openai/codex-linux-arm64": "npm:@openai/codex@0.171.0-linux-arm64",
+          "@openai/codex-linux-x64": "npm:@openai/codex@0.171.0-linux-x64",
+          "@openai/codex-win32-arm64": "npm:@openai/codex@0.171.0-win32-arm64",
+          "@openai/codex-win32-x64": "npm:@openai/codex@0.171.0-win32-x64"
+        }
+      }
+    }
+  },
+  "sizes": [
+    {
+      "agent": "claude-acp",
+      "os": "darwin",
+      "arch": "arm64",
+      "download": 174188051,
+      "unpacked": 414940657
+    },
+    {
+      "agent": "claude-acp",
+      "os": "darwin",
+      "arch": "x64",
+      "download": 180988017,
+      "unpacked": 429792425
+    },
+    {
+      "agent": "claude-acp",
+      "os": "win32",
+      "arch": "x64",
+      "download": 188145377,
+      "unpacked": 438839497
+    },
+    {
+      "agent": "claude-acp",
+      "os": "win32",
+      "arch": "arm64",
+      "download": 182154109,
+      "unpacked": 420845265
+    },
+    {
+      "agent": "claude-acp",
+      "os": "linux",
+      "arch": "x64",
+      "download": 185287631,
+      "unpacked": 432205894
+    },
+    {
+      "agent": "claude-acp",
+      "os": "linux",
+      "arch": "arm64",
+      "download": 186091878,
+      "unpacked": 431055862
+    },
+    {
+      "agent": "codex-acp",
+      "os": "darwin",
+      "arch": "arm64",
+      "download": 160280841,
+      "unpacked": 409557313
+    },
+    {
+      "agent": "codex-acp",
+      "os": "darwin",
+      "arch": "x64",
+      "download": 170448246,
+      "unpacked": 436651129
+    },
+    {
+      "agent": "codex-acp",
+      "os": "win32",
+      "arch": "x64",
+      "download": 195913199,
+      "unpacked": 555087218
+    },
+    {
+      "agent": "codex-acp",
+      "os": "win32",
+      "arch": "arm64",
+      "download": 183134284,
+      "unpacked": 480047474
+    },
+    {
+      "agent": "codex-acp",
+      "os": "linux",
+      "arch": "x64",
+      "download": 174573329,
+      "unpacked": 458613197
+    },
+    {
+      "agent": "codex-acp",
+      "os": "linux",
+      "arch": "arm64",
+      "download": 179082229,
+      "unpacked": 456704887
+    }
+  ]
+}
