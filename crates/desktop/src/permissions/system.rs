@@ -71,13 +71,16 @@ pub(super) fn run(
     Ok(ran)
 }
 
-/// Clauseo's keychain services, as the `keyring` crate writes them: the agents' keys
-/// (`clauseo_agents`' `keys.rs`), the connectors' (`clauseo_connectors`' `known.rs`) and the
-/// MCP servers' (`clauseo_settings`' `mcp.rs`).
-pub(crate) const KEYCHAIN_SERVICES: [&str; 3] = [
-    "ai.clauseo.desktop",
-    "ai.clauseo.desktop.connectors",
-    "ai.clauseo.desktop.mcp",
+/// Every keychain service Clauseo writes, by the constants their writers use, so the keychain
+/// row's check and its Allow cover each one: the agents' keys (read at start), the connectors'
+/// credentials (the case-law one at host start), the MCP servers' secrets (at each launch) and
+/// the blocked-site allow-list's integrity hash (at each host start; left out, a refused read
+/// there would stay refused for good and a revoke would void the hash).
+pub(crate) const KEYCHAIN_SERVICES: [&str; 4] = [
+    clauseo_agents::keys::KEYCHAIN_SERVICE,
+    clauseo_connectors::KEYCHAIN_SERVICE,
+    clauseo_settings::MCP_KEYCHAIN_SERVICE,
+    crate::blocklist::KEYCHAIN_SERVICE,
 ];
 
 #[cfg(target_os = "macos")]
