@@ -537,7 +537,8 @@ export function Gate({
 const stateOf = (view: GateView): string => (view.kind === "failed" ? view.code : view.kind);
 
 /** The signed-in line: the account and plan when the host has them, how when it is a key or the firm's, and through
- * which of the lawyer's own tools when Clauseo reuses that login. It stands inside the room's line. */
+ * which of the lawyer's own tools when Clauseo reuses that login. It stands in Settings' Plans block (the room shows
+ * none once signed in, R24). */
 export function SignedLine({
   plan,
   method,
@@ -572,7 +573,7 @@ export function SignedLine({
             : email !== undefined
               ? w("Signed in as {email}", { email })
               : w("Signed in to {name}", { name: NAME[plan] });
-  // on the room's line under the field, beside its other lines: the tick in primary, never green
+  // the tick in primary, never green
   return (
     <>
       <IconTick size={14} className="flex-none fl-done-tick" />

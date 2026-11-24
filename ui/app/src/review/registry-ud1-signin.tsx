@@ -41,6 +41,7 @@ const signed = (
     SIGNED_OUT,
     signIn(CLAUDE, { signed_in: { method: "plan", source: "own", at: AT, ...over } }),
   ],
+  plans: true,
 });
 
 /** The browser sign-in and how it ends, in the order the brief lists the screens. Each entry's place in this list is

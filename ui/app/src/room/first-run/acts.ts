@@ -29,7 +29,6 @@ export const IDS = {
     loginOther: "login-other",
     signInTo: "signin-plan",
   },
-  done: "signin-done",
   counts: "counts-switch",
 } as const;
 
