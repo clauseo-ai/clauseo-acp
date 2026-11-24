@@ -43,7 +43,8 @@ test.describe("a sign-in pressed before Claude is installed", () => {
     await expect(row.getByText("Claude is ready", { exact: true })).toBeVisible();
     // the kept press ran at Ready: the matter opened now is signed in, with no gate
     await page.getByRole("button", { name: "Open the folder for a matter" }).click();
-    await expect(page.getByTestId("signin-done")).toContainText("e2e@example.invalid");
+    // signed in and fine: no signed-in line under the field (R24)
+    await expect(page.getByText("e2e@example.invalid")).toHaveCount(0);
     await expect(w.signIn).toHaveCount(0);
     await expect(w.composer).toBeVisible();
     await expect(w.composer).toBeEnabled();

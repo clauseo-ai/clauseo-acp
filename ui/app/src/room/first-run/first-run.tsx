@@ -1,11 +1,11 @@
 // UD1's first run in the room, in the first load, which room.tsx renders where the host has the setup wire: the setup store
 // (store/setup.ts) and its subscription, the first screen while there is no matter yet, and the hold on the composer
 // (hold.ts): the install's working line, the sign-in gate in the field's row until the conversation's plan is signed
-// in, and the room's line under the field (the fine print until then, the signed-in line after). Each gate press is one
+// in, and the room's line under the field (the fine print until then; none once signed in). Each gate press is one
 // setup command; nothing else here talks to the host but the matter's creation, the counts and the first act.
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
-import { Gate, SignedLine, type GateAct } from "@clauseo/components/clauseo/first-launch/gate.tsx";
+import { Gate, type GateAct } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import { installLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
@@ -343,21 +343,8 @@ function holdOf(
       ),
     };
   }
-  if (typeof signedIn === "object" && signedIn.signed_in !== undefined && signedHere)
-    return {
-      working,
-      also,
-      line: (
-        <SignedLine
-          plan={plan}
-          method={signedIn.signed_in.method}
-          reused={signedIn.signed_in.source === "reused"}
-          email={signedIn.signed_in.email}
-          label={signedIn.signed_in.plan}
-          testId={IDS.done}
-        />
-      ),
-    };
+  // signed in and fine: no line under the field. A plan that isn't signed in, or whose sign-in has a problem, keeps
+  // its gate or message above, as before
   return working === null ? null : { working, also };
 }
 

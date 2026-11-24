@@ -1,5 +1,6 @@
 // UD1's scenes and the fake host each plays in, apart from registry-ud1.tsx to keep it under the size limit: the room
 // over a FakeTransport that carries the setup wire, the first screen (no matter yet) or matter A open.
+import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { FolderSupportKind, SettingsView, SetupEvent } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import { FIXED_OFFLINE, FIXED_ONLINE, OnlineSource } from "../transport/online.ts";
@@ -7,10 +8,14 @@ import { MATTER } from "./hosts.ts";
 import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
 import { providePermissions, type PermissionsHost } from "../room/first-run/permissions-host.ts";
+import { SettingsOver } from "./states-settings.tsx";
 
 export type Scene = {
   /** No matter: the first screen. */
   first?: boolean;
+  /** Shown on Settings' Plans, not the room: the signed-in line left the room's line under the field (R24), and its
+   * words still stand on Plans' block, so their entries render there. */
+  plans?: boolean;
   events: SetupEvent[];
   platform?: "mac" | "windows" | "linux";
   keys?: boolean;
@@ -98,9 +103,15 @@ const room = (s: Scene) =>
     <RoomClicking host={host(s)} clicks={s.clicks} />
   );
 
-/** The entry's render: the scene's room, on the scene's network. */
-export const render = (s: Scene) => () => (
-  <OnlineSource.Provider value={s.online === true ? FIXED_ONLINE : FIXED_OFFLINE}>
-    {room(s)}
-  </OnlineSource.Provider>
-);
+/** The window a Plans scene renders in: the settings window's, tall enough for one plan's block. */
+export const PLANS_WINDOW = { width: 960, height: 1000 } as const;
+
+/** The entry's render: the scene's room (or Settings' Plans, for a `plans` scene), on the scene's network. */
+export const render = (s: Scene) => (lang: Lang) =>
+  s.plans === true ? (
+    <SettingsOver section="plans" lang={lang} setup={{ first: s.events }} />
+  ) : (
+    <OnlineSource.Provider value={s.online === true ? FIXED_ONLINE : FIXED_OFFLINE}>
+      {room(s)}
+    </OnlineSource.Provider>
+  );

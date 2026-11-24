@@ -19,6 +19,7 @@ import {
   sent,
   settle,
   signIn,
+  text,
   typeInto,
 } from "./rig.tsx";
 
@@ -76,8 +77,8 @@ test("with no word from the host (a desktop before R20's setup wire), the compos
 test("a returning lawyer signed in at the first word sees no gate and sends", async () => {
   const t = await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, SIGNED_IN)] });
   expect(byId("signin")).toBeNull();
-  // signed in before this window: no signed-in line to announce it
-  expect(byId("signin-done")).toBeNull();
+  // signed in and fine: no line under the field (R24)
+  expect(text()).not.toMatch(/Signed in (as|through|to) /);
   await typeInto(field(), QUESTION);
   await press(byId("send"));
   expect(sent(t, "create_thread")).toHaveLength(1);

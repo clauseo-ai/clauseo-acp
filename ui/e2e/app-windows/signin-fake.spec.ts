@@ -33,7 +33,8 @@ test.describe("a scripted sign-in that succeeds", () => {
     await expect(signIn).toBeEnabled();
     await signIn.click();
     await expect(state).toHaveAttribute("data-state", "waiting");
-    await expect(app.page.getByTestId("signin-done")).toContainText("e2e@example.invalid");
+    // signed in and fine: no signed-in line under the field (R24)
+    await expect(app.page.getByText("e2e@example.invalid")).toHaveCount(0);
     await expect(gate).toHaveCount(0);
   });
 });

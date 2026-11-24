@@ -5,6 +5,7 @@
 // device-code card and its refusal; no key field when keys_available is false; ChatGPT and back.
 // @vitest-environment happy-dom
 import { beforeAll, expect, test } from "vitest";
+import { LAST_PLAN_KEY } from "../plan-default.ts";
 import { setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { FoundLogin, InstallProgress, SignIn } from "../../transport/protocol.ts";
@@ -338,21 +339,23 @@ test("signin-device is never the first offer: the plan and the waiting screen of
   expect(text()).not.toContain("Use a code instead");
 });
 
-test("signin-done: Signed in as the email and plan, and the composer takes questions again", async () => {
+test("signed in: no line under the field, and the composer takes questions again", async () => {
   const t = await at({ signed_out: {} });
   await play(t, signIn(CLAUDE, SIGNED_IN));
   expect(byId("signin")).toBeNull();
-  expect(byId("signin-done")?.textContent).toBe("Signed in as test@example.com · Claude Max");
+  expect(text()).not.toContain("Signed in as test@example.com");
   expect(field()?.hidden).toBe(false);
   expect(counts(t).filter((c) => c.onboarding_step?.step === "signed_in")).toHaveLength(1);
 });
 
-test("signin-done: with a key, Using an API key; with no email or plan, the line without them", async () => {
+test("signed in with a key, or with no email or plan: still no line under the field", async () => {
   const t = await at({ signed_out: {} });
   await play(t, signIn(CLAUDE, { signed_in: { method: "api_key", source: "own", at: AT } }));
-  expect(byId("signin-done")?.textContent).toBe("Using an API key, billed to its own account");
+  expect(byId("signin")).toBeNull();
+  expect(text()).not.toContain("Using an API key, billed to its own account");
   await play(t, signIn(CLAUDE, { signed_in: { method: "plan", source: "own", at: AT } }));
-  expect(byId("signin-done")?.textContent).toBe("Signed in to Claude");
+  expect(byId("signin")).toBeNull();
+  expect(text()).not.toContain("Signed in to Claude");
 });
 
 test("signin-cancel: Sign-in was cancelled, with Sign in", async () => {
@@ -439,7 +442,7 @@ test("login-found: the account line and its two buttons, each sending its comman
   expect(setups(t)).toEqual([{ use_found_login: { agent: CLAUDE } }]);
   await press(byId("login-other"));
   expect(setups(t).at(-1)).toEqual({ use_different_account: { agent: CLAUDE } });
-  // after Use it, the through line
+  // after Use it: signed in and fine, so no line under the field
   await play(
     t,
     signIn(CLAUDE, {
@@ -452,9 +455,8 @@ test("login-found: the account line and its two buttons, each sending its comman
       },
     }),
   );
-  expect(byId("signin-done")?.textContent).toBe(
-    "Signed in through Claude Code as test@example.com · Claude Max",
-  );
+  expect(byId("signin")).toBeNull();
+  expect(text()).not.toContain("Signed in through Claude Code");
 });
 
 test("login-found (ChatGPT, no email): the line without the email, from Codex", async () => {
@@ -484,9 +486,7 @@ test("a Reused sign-in at a later start shows no sign-in step, and the through l
   });
   expect(byId("signin")).toBeNull();
   expect(field()?.hidden).toBe(false);
-  expect(byId("signin-done")?.textContent).toBe(
-    "Signed in through Claude Code as test@example.com · Claude Max",
-  );
+  expect(text()).not.toContain("Signed in through Claude Code");
   expect(setups(t)).toEqual([]);
 });
 
@@ -594,4 +594,50 @@ test("papers line: the gate's foot names one plan only once it is in play (picke
     "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
   );
   expect(text()).not.toContain("Claude or ChatGPT sees");
+});
+
+// The room's line under the field is gone once the plan is signed in and fine (for Claude and for ChatGPT), and stays
+// while it isn't: the gate, or the sign-in's problem, as before.
+test("the line under the field: Claude signed in shows none; signed out shows the gate; a problem shows its message", async () => {
+  await at(SIGNED_IN);
+  expect(byId("signin")).toBeNull();
+  expect(text()).not.toMatch(/Signed in (as|through|to) /);
+  expect(field()?.hidden).toBe(false);
+  await at({ signed_out: {} });
+  expect(byId("signin")).not.toBeNull();
+  expect(button("Sign in with Claude")).not.toBeNull();
+  expect(text()).toContain("Sign in with Claude or ChatGPT to ask about this matter");
+  await at({ failed: { code: "signin.failed", at: AT } });
+  expect(text()).toContain("Sign-in didn't finish.");
+  expect(text()).not.toMatch(/Signed in (as|through|to) /);
+});
+
+/** The room with Claude's sign-in given and ChatGPT's in this state (Claude signed out by default). ChatGPT signed in
+ * alone is in default-plan.test.tsx, where the default plan is the one signed in. */
+const chatgpt = (state: SignIn, claude: SignIn = { signed_out: {} }) => {
+  // the plan last asked with is kept in localStorage: an earlier test's Claude must not pick the plan here
+  localStorage.removeItem(LAST_PLAN_KEY);
+  return mountFirstRun({
+    first: [
+      install(CLAUDE, READY),
+      install(CODEX, READY),
+      signIn(CLAUDE, claude),
+      signIn(CODEX, state),
+    ],
+  });
+};
+
+test("the line under the field: ChatGPT signed out shows the gate, with its Sign in", async () => {
+  await chatgpt({ signed_out: {} });
+  expect(byId("signin")).not.toBeNull();
+  expect(text()).toContain("Sign in with Claude or ChatGPT to ask about this matter");
+  expect(button("Sign in with ChatGPT")).not.toBeNull();
+});
+
+test("the line under the field: ChatGPT's sign-in problem shows its message, with Try again", async () => {
+  const t = await chatgpt({ failed: { code: "signin.port_busy", at: AT } });
+  await press("Sign in with ChatGPT");
+  expect(text()).toContain("Another program on this computer is using ChatGPT's sign-in.");
+  await press("Try again");
+  expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
 });

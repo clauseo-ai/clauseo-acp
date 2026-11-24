@@ -56,6 +56,23 @@ test("only ChatGPT signed in: a new matter's new conversation starts on ChatGPT,
   expect(localStorage.getItem(LAST_PLAN_KEY)).toBe(CODEX);
 });
 
+// A login reused from this computer: the line under the field would say "Signed in through Codex"; it is gone (R24)
+test("only ChatGPT signed in from a login found here: no line under the field and no gate", async () => {
+  const reused: SignIn = {
+    signed_in: {
+      email: "test@example.com",
+      plan: "ChatGPT Plus",
+      method: "plan",
+      source: "reused",
+      at: AT,
+    },
+  };
+  await mountFirstRun({ first: [...ready, signIn(CLAUDE, CANCELLED), signIn(CODEX, reused)] });
+  expect(byId("signin")).toBeNull();
+  expect(text()).not.toMatch(/Signed in (as|through|to) /);
+  expect(byId("composer")).not.toBeNull();
+});
+
 test("only ChatGPT signed in: the Scratch matter's new conversation starts on ChatGPT too", async () => {
   const t = await mountFirstRun({
     matters: [A, SCRATCH],

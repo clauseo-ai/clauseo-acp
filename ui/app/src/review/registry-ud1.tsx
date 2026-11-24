@@ -7,7 +7,7 @@ import "@clauseo/components/lib/words-hi.ts";
 import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
 import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { render, type Scene } from "./registry-ud1-scene.tsx";
+import { PLANS_WINDOW, render, type Scene } from "./registry-ud1-scene.tsx";
 import { SIGNING_IN } from "./registry-ud1-signin.tsx";
 import * as T from "./registry-ud1-tools.ts";
 import { errorWords, threadWords, type WordsRef } from "./words.ts";
@@ -71,6 +71,7 @@ const signed = (
     SIGNED_OUT,
     signIn(CLAUDE, { signed_in: { method: "plan", source: "own", at: AT, ...over } }),
   ],
+  plans: true,
 });
 const found = (
   f: NonNullable<Extract<SignIn, { signed_out: unknown }>["signed_out"]>["found"],
@@ -586,8 +587,9 @@ export const UD1: readonly Entry[] = [
           {
             id: `UD1-${String(i + 1).padStart(2, "0")}`,
             words: firstLaunchWords(scene[0]),
-            screen: `first-launch/${scene[2]}`,
+            screen: scene[1].plans === true ? "settings/plans" : `first-launch/${scene[2]}`,
             render: render(scene[1]),
+            ...(scene[1].plans === true ? PLANS_WINDOW : {}),
           },
         ],
   ),
