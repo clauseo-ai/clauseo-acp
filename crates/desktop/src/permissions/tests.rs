@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Files as _, SystemFiles};
@@ -30,6 +30,8 @@ struct Fake {
     asked: Mutex<Vec<String>>,
     /// How many times Controlled folder access was read.
     cfa_reads: AtomicUsize,
+    /// Holds the read open until the test sends on its sender (a second caller can arrive then).
+    hold: Mutex<Option<Receiver<()>>>,
 }
 
 impl Fake {
@@ -45,6 +47,7 @@ impl Fake {
             refused: Vec::new(),
             asked: Mutex::new(Vec::new()),
             cfa_reads: AtomicUsize::new(0),
+            hold: Mutex::new(None),
         }
     }
 
@@ -80,8 +83,11 @@ impl Probe for Fake {
     }
     fn controlled_folder_access(&self) -> Option<Cfa> {
         self.cfa_reads.fetch_add(1, Ordering::SeqCst);
-        // Long enough for a second caller to arrive while this read is under way.
-        std::thread::sleep(Duration::from_millis(20));
+        let hold = self.hold.lock().unwrap().take();
+        if let Some(release) = hold {
+            // Under way until the test lets it finish, after the second caller is started.
+            let _released = release.recv();
+        }
         self.cfa.clone()
     }
     fn protected_defaults(&self) -> Vec<PathBuf> {
@@ -406,11 +412,18 @@ fn the_running_executable_has_an_identity() {
 fn controlled_folder_access_is_read_once_per_process_and_shared_while_under_way() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir, "1");
-    let probe = ReadOnce::new(Fake::windows(true));
+    let held = Fake::windows(true);
+    let (release, hold) = channel();
+    *held.hold.lock().unwrap() = Some(hold);
+    let probe = ReadOnce::new(held);
     // Two at once (a reload while the first screen's read is under way): one read, both rows.
     let both = std::thread::scope(|scope| {
         let first = scope.spawn(|| rows(&probe, &store));
+        while probe.probe.cfa_reads.load(Ordering::SeqCst) == 0 {
+            std::thread::yield_now();
+        }
         let second = scope.spawn(|| rows(&probe, &store));
+        release.send(()).unwrap();
         [first.join().unwrap(), second.join().unwrap()]
     });
     assert!(

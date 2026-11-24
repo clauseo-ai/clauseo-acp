@@ -464,14 +464,14 @@ pub(crate) fn cfa_from_layers(layers: &[CfaLayer], protected: Vec<PathBuf>) -> O
             CfaLayer::Unreadable => unreadable = true,
             CfaLayer::Unset => {}
             CfaLayer::Set(enable) => {
-                return (*enable <= 4).then(|| Cfa {
+                return (*enable <= 4).then_some(Cfa {
                     on: *enable == 1,
                     protected,
                 });
             }
         }
     }
-    (!unreadable).then(|| Cfa {
+    (!unreadable).then_some(Cfa {
         on: false,
         protected,
     })
