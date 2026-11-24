@@ -1,6 +1,7 @@
 // Every string the copy review shows, one entry each. A brief that adds or changes a string adds its entry here: the
 // brief's next free id, the words file and English key (words.ts's helpers), the screen, the state that shows it (the
 // real screen over a scripted host), and the window's size where entry.ts's default doesn't suit. Approvals: copy-approvals/.
+// A new copy-review entries file goes in review/auto/ and default-exports Entry[]; never edit registry.tsx for it.
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
@@ -78,6 +79,7 @@ import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/s
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
+import { AUTO_ENTRIES } from "./registry-auto.ts";
 import { BACKSLASH_ENTRIES } from "./registry-backslash.tsx";
 import { PROGRAM_ENTRIES } from "./registry-program.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
@@ -587,4 +589,6 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_AGENTS,
   ...RELEASE_NOTES,
   ...UC_PANELS,
+  // review/auto/'s files (registry-auto.ts), in path order: a new entries file goes there, never here
+  ...AUTO_ENTRIES,
 ];
