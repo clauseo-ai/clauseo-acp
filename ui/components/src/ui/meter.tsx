@@ -6,10 +6,15 @@ import { cn } from "../lib/cn.ts";
  * state, never red, which means the other side: the meter and the words say it. */
 export type PlanState = "plenty" | "close" | "reached";
 
+/** The fill's colour once the plan runs short: amber from 75% used, red from 95% (the room's plan-model.ts decides),
+ * on the court's yellow line and red. None: the fill as its state draws it. */
+export type PlanLevel = "amber" | "red";
+
 /** The plan meter: the plan's name in primary with a 44 by 4 px meter, a rounded fill on the inset tone, and what's left
  * beneath it in the muted tone. With plenty left the fill is muted, as Settings' Plan and usage and the plan's card
  * draw it; from close to the limit the fill and the line turn to primary, the line at the chip's weight, so it's
- * noticed by its words and weight without any amber; reached, the meter stands empty as well. The meter tells
+ * noticed by its words and weight; from 75% used the fill turns amber and from 95% red (level), the 24 Nov ruling
+ * after one question took a plan from 27% to 73%; reached, the meter stands empty as well. The meter tells
  * assistive technology the same in words. dragRegion makes the meter's four elements part of a title bar: a press on
  * them drags the window, as the toolbar's empty space does. */
 export function PlanMeter({
@@ -18,6 +23,7 @@ export function PlanMeter({
   valueText,
   status,
   state = "plenty",
+  level,
   track = true,
   inButton = false,
   dragRegion = false,
@@ -33,6 +39,8 @@ export function PlanMeter({
   /** "Plenty left until the 9:40 pm reset"; "" or null for no line, as while the first read runs. */
   status: ReactNode;
   state?: PlanState;
+  /** Optional: amber or red, the fill's colour as the plan runs short; left out, as its state draws it. */
+  level?: PlanLevel | undefined;
   /** Optional: false where there's no share to draw, an account billed by use or a plan whose figures
    * didn't come, so an empty track never reads as nothing left. */
   track?: boolean;
@@ -53,6 +61,7 @@ export function PlanMeter({
     <div
       className={cn("grid text-small text-muted", className)}
       data-state={state}
+      data-level={level}
       data-tauri-drag-region={drag}
     >
       <BaseMeter.Root
@@ -73,7 +82,15 @@ export function PlanMeter({
             <BaseMeter.Indicator
               className={cn(
                 "absolute inset-y-0 left-0 rounded-meter",
-                muted ? "bg-flat-num" : state === "plenty" ? "bg-muted" : "bg-primary",
+                muted
+                  ? "bg-flat-num"
+                  : level === "red"
+                    ? "bg-red"
+                    : level === "amber"
+                      ? "bg-yellow-line"
+                      : state === "plenty"
+                        ? "bg-muted"
+                        : "bg-primary",
               )}
               data-muted={muted ? "" : undefined}
             />

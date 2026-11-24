@@ -126,6 +126,13 @@
   .plan-window[data-state="close"] .plan-fill {
     background: var(--primary);
   }
+  /* running short: amber from 75% used, red from 95% (the meter's level) */
+  .plan-window[data-level="amber"] .plan-fill {
+    background: var(--yellow-line);
+  }
+  .plan-window[data-level="red"] .plan-fill {
+    background: var(--red);
+  }
   /* out of date, the numeral goes muted (not Settings' flat-num, which falls under 4.5:1 on a tile) */
   .plan-window[data-stale] .plan-numeral {
     color: var(--muted);

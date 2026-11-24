@@ -1,5 +1,6 @@
 // The plan's words by the share used (HANDOFF item 13's thresholds), the share left rounded down, each freshness's
-// look, and when the composer warns: a session window at 95% used, or the agent's own warning under 75%.
+// look, when the composer warns (the 5-hour window from 75% used, the weekly from 90%, or the agent's own warning
+// under 75%), and the meter's amber from 75% and red from 95%.
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -14,6 +15,7 @@ import type {
 import {
   bandOf,
   forgetShownResets,
+  levelOf,
   lookOf,
   meterLine,
   nameOnlyLine,
@@ -199,43 +201,75 @@ describe("each freshness", () => {
   });
 });
 
-describe("the warning", () => {
-  test("a session window: none at 94.9%, from 95%", () => {
-    expect(warningKey(entry(94.9))).toBe("");
-    expect(warningKey(entry(95))).not.toBe("");
-    expect(warningWords("en", warningKey(entry(95)), NOW)).toEqual({
-      lead: "Close to your 5-hour limit.",
-      until: { text: "Long tasks may pause until 6:10 pm.", at: RESET },
+describe("the warning before sending", () => {
+  const weeklyRow = (used: number, over: Partial<LimitWindowView> = {}) =>
+    row(used, { id: "seven_day", kind: "weekly", label: "Weekly limit", ...over });
+  const words = (e: AgentLimitsView, name = "Claude") =>
+    warningWords("en", warningKey(e), name, NOW);
+  const PAUSE = "It resets at 6:10 pm. If it runs out mid-answer, the answer pauses until then.";
+
+  test("the 5-hour window: none at 74%, from 75%, naming the share used and the reset", () => {
+    expect(warningKey(entry(74))).toBe("");
+    expect(warningKey(entry(74.9))).toBe("");
+    expect(words(entry(75))).toEqual({
+      lead: "You've used 75% of your 5-hour Claude limit.",
+      until: { text: PAUSE, at: RESET },
+    });
+    expect(words(entry(78), "ChatGPT")?.lead).toBe("You've used 78% of your 5-hour ChatGPT limit.");
+  });
+
+  test("the weekly window: none at 89%, from 90%, its reset on another day", () => {
+    const later = RESET + 2 * 24 * 3_600_000;
+    const at = (used: number) =>
+      entry(20, { windows: [row(20), weeklyRow(used, { resets_at: later })] });
+    expect(warningKey(at(89))).toBe("");
+    expect(warningKey(at(89.9))).toBe("");
+    const said = words(at(92));
+    expect(said?.lead).toBe("You've used 92% of your weekly Claude limit.");
+    expect(said?.until?.text).toMatch(
+      /^It resets on \S+ at 6:10 pm\. If it runs out mid-answer, the answer pauses until then\.$/,
+    );
+    expect(said?.until?.at).toBe(later);
+  });
+
+  test("both high: the one with less left; a tie names the 5-hour", () => {
+    const both = (five: number, week: number) =>
+      entry(five, { windows: [weeklyRow(week), row(five)] });
+    expect(words(both(80, 93))?.lead).toBe("You've used 93% of your weekly Claude limit.");
+    expect(words(both(97, 91))?.lead).toBe("You've used 97% of your 5-hour Claude limit.");
+    expect(words(both(92, 92))?.lead).toBe("You've used 92% of your 5-hour Claude limit.");
+  });
+
+  test("the share used is the card's: 100 less the share left", () => {
+    expect(words(entry(78.4))?.lead).toBe("You've used 79% of your 5-hour Claude limit.");
+  });
+
+  test("the agent's warning: tone near under 75%, the toolbar's words with the reset", () => {
+    const warned = entry(40, { meter: meter(40, { tone: "near" }) });
+    expect(words(warned)).toEqual({
+      lead: "Close to the limit.",
+      until: { text: PAUSE, at: RESET },
     });
   });
 
-  test("a weekly window at 95% is not the session's", () => {
-    const weekly = entry(10, { windows: [row(10), row(96, { id: "seven_day", kind: "weekly" })] });
-    expect(warningKey(weekly)).toBe("");
-  });
-
-  test("the agent's warning: tone near under 75%, from the meter's window and reset", () => {
-    const warned = entry(40, { meter: meter(40, { tone: "near" }) });
-    expect(warningWords("en", warningKey(warned), NOW)?.until?.text).toBe(
-      "Long tasks may pause until 6:10 pm.",
-    );
-    // near from 75% is the share's own: no warning below the session's 95%
-    expect(warningKey(entry(80))).toBe("");
-  });
-
-  test("without a reset only the first sentence; in Hindi the design's words", () => {
+  test("without a reset only the first sentence; Hindi shows its English until it comes", () => {
     const { resets_at: _, ...bare } = row(97);
-    const e = entry(97, { windows: [bare] });
-    expect(warningWords("en", warningKey(e), NOW)).toEqual({
-      lead: "Close to your 5-hour limit.",
+    expect(words(entry(97, { windows: [bare] }))).toEqual({
+      lead: "You've used 97% of your 5-hour Claude limit.",
       until: null,
     });
-    expect(warningWords("hi", warningKey(entry(97)), NOW)?.until?.text).toBe(
-      limThread("hi", "Long tasks may pause until {time}.", { time: clock("hi", "6:10 pm") }),
+    expect(warningWords("hi", warningKey(entry(97)), "Claude", NOW)?.until?.text).toBe(
+      limThread(
+        "hi",
+        "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
+        {
+          time: clock("hi", "6:10 pm"),
+        },
+      ),
     );
   });
 
-  test("never close to a limit already reached: the meter at 100%, or the session window at it", () => {
+  test("never close to a limit already reached: the meter at 100%, or the window at it", () => {
     expect(planLine("en", "claude", entry(100), NOW)?.status).toBe(
       lim("en", "Limit reached until {time}", { time: "6:10 pm" }),
     );
@@ -244,7 +278,7 @@ describe("the warning", () => {
     // the meter on the weekly window at its limit, the session close: the toolbar says Limit reached, no warning
     const weekly = entry(100, {
       meter: meter(100, { window_label: "Weekly limit" }),
-      windows: [row(97), row(100, { id: "seven_day", kind: "weekly" })],
+      windows: [row(97), weeklyRow(100)],
     });
     expect(warningKey(weekly)).toBe("");
     // the session window at 100% under a meter that isn't: still no "close to"
@@ -253,6 +287,24 @@ describe("the warning", () => {
 
   test("never for an account billed by use", () => {
     expect(warningKey(entry(99, { billing: "pay_as_you_go" }))).toBe("");
+  });
+});
+
+describe("the meter's colour as the plan runs short", () => {
+  test.each([
+    [74, undefined],
+    [75, "amber"],
+    [94, "amber"],
+    [94.9, "amber"],
+    [95, "red"],
+    [100, "red"],
+  ] as const)("%s%% used: %s", (used, level) => {
+    expect(levelOf(meter(used))).toBe(level);
+    expect(planLine("en", "claude", entry(used), NOW)?.level).toBe(level);
+  });
+
+  test("the agent's own warning under 75% is amber, as the close band", () => {
+    expect(levelOf(meter(40, { tone: "near" }))).toBe("amber");
   });
 });
 

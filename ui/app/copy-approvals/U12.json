@@ -154,28 +154,31 @@
     "by": "design"
   },
   "U12-24": {
-    "en": "Close to your 5-hour limit.",
-    "hi": "आपकी 5 घंटे की सीमा करीब है।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+    "en": "You've used {n}% of your 5-hour {name} limit.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Composer note above the field, before sending, from 75% of the 5-hour window; {name} is Claude or ChatGPT, {n} the share used as the plan card counts it. Was \"Close to your 5-hour limit.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
   },
   "U12-25": {
-    "en": "Long tasks may pause until {time}.",
-    "hi": "लंबे काम {time} बजे तक रुक सकते हैं।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+    "en": "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Composer note's second sentence, the reset today, in a <time>. Was \"Long tasks may pause until {time}.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
   },
   "U12-26": {
-    "en": "Long tasks may pause until {day} {time}.",
-    "hi": "लंबे काम {day} {time} बजे तक रुक सकते हैं।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+    "en": "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Composer note's second sentence, the reset on another day, in a <time>. Was \"Long tasks may pause until {day} {time}.\" (approved 2026-11-03, shown only from 95% of the 5-hour window); 24 Nov ruling: warn before sending from 75% of the 5-hour window and 90% of the weekly one. Hindi to come."
   },
   "U12-27": {
     "en": "{name} plan limit reached at {time}",

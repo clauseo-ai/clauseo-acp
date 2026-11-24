@@ -64,7 +64,7 @@ const row = (used: number | undefined, over: Partial<LimitWindowView> = {}): Lim
   freshness: "fresh",
   ...over,
 });
-const weekly = (used: number) =>
+export const weekly = (used: number) =>
   row(used, { id: "seven_day", kind: "weekly", label: "Weekly limit", resets_at: LATER_RESET });
 
 /** The plan's meter at `used`, its reset given unless `resets` is null. */
@@ -76,7 +76,7 @@ const meter = (used: number, resets: number | null = RESET): LimitMeter => ({
 });
 
 /** Claude Max's figures at `used` of the 5-hour window, the weekly one at 20%. */
-const figures = (used: number, over: Partial<AgentLimitsView> = {}): AgentLimitsView => ({
+export const figures = (used: number, over: Partial<AgentLimitsView> = {}): AgentLimitsView => ({
   plan: "Claude Max",
   billing: "plan",
   meter: meter(used),
@@ -199,7 +199,7 @@ const codexCard = (id: string, words: WordsRef, codex: AgentLimitsView, height =
   ),
 });
 
-const warning = (id: string, words: WordsRef, claude: AgentLimitsView): Entry => ({
+export const warning = (id: string, words: WordsRef, claude: AgentLimitsView): Entry => ({
   id,
   words,
   screen: "limits/warning",
@@ -304,13 +304,22 @@ export const U12: Entry[] = [
     "limits/plan-payg",
     PAYG,
   ),
-  // the composer's warning: the 5-hour window at 96%, its reset today or another day
-  warning("U12-24", limitThreadWords("Close to your 5-hour limit."), figures(96)),
-  warning("U12-25", limitThreadWords("Long tasks may pause until {time}."), figures(96)),
+  // the composer's warning before sending: the 5-hour window at 78%, its reset today or another day (24 Nov words;
+  // the weekly one is UC-1170, registry-uc-plan-low.tsx)
+  warning("U12-24", limitThreadWords("You've used {n}% of your 5-hour {name} limit."), figures(78)),
+  warning(
+    "U12-25",
+    limitThreadWords(
+      "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
+    ),
+    figures(78),
+  ),
   warning(
     "U12-26",
-    limitThreadWords("Long tasks may pause until {day} {time}."),
-    figures(96, { windows: [row(96, { resets_at: LATER_RESET }), weekly(20)] }),
+    limitThreadWords(
+      "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
+    ),
+    figures(78, { windows: [row(78, { resets_at: LATER_RESET }), weekly(20)] }),
   ),
   // the stop: the 5-hour window (hit), the weekly one, a reset not given (unknown); with the stop's time and without
   stop(

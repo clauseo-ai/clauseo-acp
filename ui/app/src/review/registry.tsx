@@ -40,6 +40,7 @@ import { UC_ALL } from "./registry-uc-word.tsx";
 import { UC_TOOLNAMES } from "./registry-uc-toolnames.tsx";
 import { UC_TOOL_ROWS } from "./registry-uc-tool-rows.tsx";
 import { UC_HELPER } from "./registry-uc-helper.tsx";
+import { UC_PLAN_LOW } from "./registry-uc-plan-low.tsx";
 import { UC_CODEX_AUTO } from "./registry-uc-codex-auto.tsx";
 import { PLAIN_REFUSAL } from "./registry-plain-refusal.tsx";
 import { UC_CONVERSATION_SMALL_FIXES } from "./registry-uc-conversation-small-fixes.tsx";
@@ -425,6 +426,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_TOOLNAMES,
   ...UC_TOOL_ROWS,
   ...UC_HELPER,
+  ...UC_PLAN_LOW,
   ...UC_CODEX_AUTO,
   ...PLAIN_REFUSAL,
   ...UC_CONVERSATION_SMALL_FIXES,

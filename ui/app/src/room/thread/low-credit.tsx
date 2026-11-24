@@ -45,11 +45,18 @@ function Slot({
   );
 }
 
-/** The line; `onAdd` opens Settings at Connectors (none where the host has no settings window). */
-export function LowCredit({ onAdd }: { onAdd: (() => void) | null }) {
+/** The line; `onAdd` opens Settings at Connectors (none where the host has no settings window). `testId` names where
+ * it stands: "low-credit" under a turn, "low-credit-before" by the composer; its Add credits takes it with "-add". */
+export function LowCredit({
+  onAdd,
+  testId = "low-credit",
+}: {
+  onAdd: (() => void) | null;
+  testId?: string;
+}) {
   const { lang } = useDisplay();
   return (
-    <div className="contents" data-testid="low-credit">
+    <div className="contents" data-testid={testId}>
       <FieldNotice
         lead={cw(lang, "Running low. Add credits to keep searching.")}
         action={
@@ -59,7 +66,7 @@ export function LowCredit({ onAdd }: { onAdd: (() => void) | null }) {
               kind="link"
               size="small"
               className="min-h-0 px-0 py-0 text-primary align-baseline underline underline-offset-2"
-              data-testid="low-credit-add"
+              data-testid={`${testId}-add`}
               onClick={onAdd}
             >
               {cr(lang, "Add credits")}

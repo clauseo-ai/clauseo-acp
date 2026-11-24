@@ -1,28 +1,42 @@
-// The composer's warning in words (U12), from the key limits/plan-model.ts's warningKey makes: the window, then the
-// reset. In the thread's chunk with the note that says it (limit-warning-note.tsx), so the first load carries neither.
+// The composer's warning in words (U12), from the key limits/plan-model.ts's warningKey makes: the share used of the
+// window, then its reset and what happens if it runs out mid-answer. In the thread's chunk with the note that says it
+// (limit-warning-note.tsx), so the first load carries neither.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
+import type { Warning } from "../limits/plan-model.ts";
 import type { Timestamp } from "../../transport/protocol.ts";
 import { whenOf } from "./clock.ts";
 
-/** The warning's two sentences from its key: the window, then the reset (null without one); null for no warning. */
+/** The warning's two sentences from its key, `name` the plan's (Claude, ChatGPT): the share used, then the reset
+ * with what a pause means (null without a reset); null for no warning. */
 export function warningWords(
   lang: Lang,
   key: string,
+  name: string,
   now: number,
 ): { lead: string; until: { text: string; at: Timestamp } | null } | null {
   if (key === "") return null;
-  const [label, resets] = JSON.parse(key) as [string, Timestamp | null];
+  const { window, used, resets } = JSON.parse(key) as Warning;
   const lead =
-    label === "5-hour limit"
-      ? limThread(lang, "Close to your 5-hour limit.")
-      : lim(lang, "Close to the limit.");
+    window === "five_hour"
+      ? limThread(lang, "You've used {n}% of your 5-hour {name} limit.", { n: used, name })
+      : window === "weekly"
+        ? limThread(lang, "You've used {n}% of your weekly {name} limit.", { n: used, name })
+        : lim(lang, "Close to the limit.");
   if (resets === null) return { lead, until: null };
   const { day, time } = whenOf(lang, resets, now);
   const text =
     day === null
-      ? limThread(lang, "Long tasks may pause until {time}.", { time })
-      : limThread(lang, "Long tasks may pause until {day} {time}.", { day, time });
+      ? limThread(
+          lang,
+          "It resets at {time}. If it runs out mid-answer, the answer pauses until then.",
+          { time },
+        )
+      : limThread(
+          lang,
+          "It resets on {day} at {time}. If it runs out mid-answer, the answer pauses until then.",
+          { day, time },
+        );
   return { lead, until: { text, at: resets } };
 }

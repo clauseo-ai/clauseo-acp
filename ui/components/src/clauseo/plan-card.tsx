@@ -22,6 +22,8 @@ export type PlanWindow = {
   valueText: string;
   /** Optional: close to the limit, by the toolbar's band. The words and the fill take primary, never amber, never red. */
   close?: boolean;
+  /** Optional: the fill amber from 75% used and red from 95% (the meter's PlanLevel); the words stay as close has them. */
+  level?: "amber" | "red" | undefined;
 };
 
 export type PlanCardProps = {
@@ -61,6 +63,7 @@ function WindowRow({ w, stale }: { w: PlanWindow; stale: boolean }) {
     <div
       className="plan-window"
       data-state={w.close === true ? "close" : "plenty"}
+      data-level={w.level}
       data-stale={stale ? "" : undefined}
     >
       <BaseMeter.Root

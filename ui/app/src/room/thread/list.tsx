@@ -39,6 +39,8 @@ import { pickQueued, useTimeOf } from "./time-of.ts";
 export { WarningNote } from "./limit-warning-note.tsx";
 /** U15's out-of-credit note, carried here as U12's warning is (room/connectors/out-of-credit.tsx loads it). */
 export { OutOfCreditNote } from "./out-of-credit-note.tsx";
+/** U15's running-low line, by the composer before sending as well (room/connectors/low-before-send.tsx loads it). */
+export { LowCredit } from "./low-credit.tsx";
 /** UD2's notes in the composer's notice line: the expired sign-in card and the first read's line (work.tsx loads it). */
 export { AfterSignInNote } from "./after-signin-note.tsx";
 /** What a wall tile's open said, carried here with the change note's lines (paper-wall.tsx loads it). */

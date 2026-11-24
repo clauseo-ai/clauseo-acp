@@ -68,6 +68,13 @@
   .set-window-tile[data-state="close"] .set-meter-fill {
     background: var(--primary);
   }
+  /* running short: amber from 75% used, red from 95% (plan-model.ts's levelOf) */
+  .set-window-tile[data-level="amber"] .set-meter-fill {
+    background: var(--yellow-line);
+  }
+  .set-window-tile[data-level="red"] .set-meter-fill {
+    background: var(--red);
+  }
   .set-window-tile[data-stale] .set-numeral {
     color: var(--flat-num);
   }

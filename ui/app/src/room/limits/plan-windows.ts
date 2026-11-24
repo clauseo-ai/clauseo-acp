@@ -8,7 +8,7 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import type { LimitWindowView } from "../../transport/protocol.ts";
 import { whenOf } from "../thread/clock.ts";
-import { bandOf, shareLeft } from "./plan-model.ts";
+import { bandOf, levelOf, shareLeft } from "./plan-model.ts";
 
 /** The window labels the card's words translate; another shows as the host gives it, in English. */
 const LABELS = new Set<string>([
@@ -57,6 +57,12 @@ export function resetOf(lang: Lang, w: LimitWindowView, now: number): string {
  * toolbar's close band on (75% used, or the agent's own warning). */
 export type WindowFigures = PlanWindow & { close: boolean; passed: boolean };
 
+/** A window's fill as the plan runs short, as the toolbar's meter (plan-model.ts's levelOf); none without a share. */
+const levelFor = (w: LimitWindowView, figures: boolean) =>
+  figures && w.used_percent !== undefined
+    ? levelOf({ tone: w.tone, used_percent: w.used_percent, window_label: w.label })
+    : undefined;
+
 export function windowOf(lang: Lang, w: LimitWindowView, now: number): WindowFigures {
   const figures = w.freshness !== "reset_passed" && w.freshness !== "loading";
   const left = figures && w.used_percent !== undefined ? shareLeft(w.used_percent) : null;
@@ -71,6 +77,7 @@ export function windowOf(lang: Lang, w: LimitWindowView, now: number): WindowFig
     reset: resetOf(lang, w, now),
     valueText: left === null ? "" : lim(lang, "{n} percent of the plan left", { n: left }),
     close: band === "close" || band === "reached",
+    level: levelFor(w, figures),
     passed: w.freshness === "reset_passed",
   };
 }

@@ -3,6 +3,7 @@
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import type { Entry } from "./entry.ts";
 import { LowMidTurn } from "./room-low-credit.tsx";
+import { PLAN_LOW_SCENES } from "./scenes-plan-low.tsx";
 
 const LOW = "Running low. Add credits to keep searching.";
 
@@ -19,4 +20,5 @@ export const SCENES: readonly Entry[] = [
     screen: "room/low-credit",
     render: () => <LowMidTurn />,
   },
+  ...PLAN_LOW_SCENES,
 ];

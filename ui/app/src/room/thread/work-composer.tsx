@@ -64,6 +64,7 @@ import { useOtherWait } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
+import { LowBeforeSend } from "../connectors/low-before-send.tsx";
 import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
@@ -412,13 +413,17 @@ export function WorkComposer({
           : busy
             ? { state: answering, testId: "working" }
             : stopped);
+  // U15's out-of-credit note, or its running-low line before sending: the two never show together
   const credit =
     transport === null ? null : (
-      <OutOfCredit
-        transport={transport}
-        conversation={thread ?? draftKey}
-        onFocusField={focusField}
-      />
+      <>
+        <OutOfCredit
+          transport={transport}
+          conversation={thread ?? draftKey}
+          onFocusField={focusField}
+        />
+        <LowBeforeSend transport={transport} thread={thread} />
+      </>
     );
   return (
     <Composer

@@ -4,7 +4,7 @@
 // left is 100 minus used, rounded down. Times are clock times against `now`, the render's own today: never a span.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
-import type { PlanState } from "@clauseo/components/ui/meter.tsx";
+import type { PlanLevel, PlanState } from "@clauseo/components/ui/meter.tsx";
 import type { AgentKind, AgentLimitsView, LimitMeter, SignIn } from "../../transport/protocol.ts";
 import { stamp } from "../thread/clock.ts";
 // the at-limit words, said once for the toolbar and the paused composer, both on the first screen
@@ -24,6 +24,14 @@ export function bandOf(meter: LimitMeter): Band {
   if (meter.tone === "at_limit" || meter.used_percent >= 100) return "reached";
   if (meter.tone === "near" || meter.used_percent >= 75) return "close";
   return meter.used_percent >= 50 ? "half" : "plenty";
+}
+
+/** The meter's fill as the plan runs short (24 Nov ruling): red from 95% used or at the limit, amber from the close
+ * band on (75% used, or the agent's own warning); none below. */
+export function levelOf(meter: LimitMeter): PlanLevel | undefined {
+  const band = bandOf(meter);
+  if (band === "reached" || meter.used_percent >= 95) return "red";
+  return band === "close" ? "amber" : undefined;
 }
 
 const STATE: Record<Band, PlanState> = {
@@ -103,6 +111,7 @@ export type PlanLine = {
   valueText: string;
   status: string;
   state: PlanState;
+  level?: PlanLevel | undefined;
   look?: "stale" | "none" | "bare" | "loading";
   tone?: string;
   freshness: string;
@@ -147,6 +156,7 @@ export function planLine(
     valueText: lim(lang, "{n} percent of the plan left", { n: left }),
     status: meterLine(lang, resets, now),
     state: STATE[bandOf(meter)],
+    level: levelOf(meter),
     ...(look === "stale" ? { look: "stale" as const } : {}),
     tone: meter.tone,
     freshness: entry.freshness,
@@ -175,27 +185,42 @@ export function nameOnlyLine(kind: AgentKind, freshness: string): PlanLine {
   };
 }
 
-/** The composer's warning, as one string so a part renders again only when it changes: the window's label and its
- * reset, "" for none. A session window at 95% used or more, or the agent's own warning (tone `near` under 75% used,
- * which the share alone never gives). Never for an account billed by use, and never "close to" a limit already reached:
- * the toolbar's meter at its limit, or the session window at 100%, where the toolbar says Limit reached. */
+/** The windows the composer warns of before a question is sent, and from what share used: the 5-hour (session) window
+ * from 75%, the weekly from 90% (24 Nov ruling: one question took a Pro plan's 5 hours from 27% to 73%). */
+export const WARN_FROM = { session: 75, weekly: 90 } as const;
+
+/** What the composer's warning names: the 5-hour window, the weekly one, or another (the agent's own warning, or a
+ * session window by another name), with the share used as the card counts it (100 less the share left). */
+export type WarningWindow = "five_hour" | "weekly" | "other";
+export type Warning = { window: WarningWindow; used: number; resets: number | null };
+
+/** The composer's warning, as one string so a part renders again only when it changes: JSON of a Warning, "" for none.
+ * The 5-hour window from 75% used and the weekly from 90%, below 100; both high, the one with less left (a tie names
+ * the 5-hour). Else the agent's own warning (tone `near` under 75% used, which the share alone never gives). Never for
+ * an account billed by use, and never "close to" a limit already reached: the toolbar's meter at its limit, where the
+ * toolbar says Limit reached. */
 export function warningKey(entry: AgentLimitsView | undefined): string {
   if (entry === undefined || lookOf(entry) === "payg") return "";
   const meter = entry.meter;
   if (meter !== undefined && bandOf(meter) === "reached") return "";
-  const session = entry.windows.find(
-    (w) =>
-      w.kind === "session" &&
-      w.used_percent !== undefined &&
-      w.used_percent >= 95 &&
-      w.used_percent < 100 &&
-      w.tone !== "at_limit",
-  );
-  const hit =
-    session !== undefined
-      ? { label: session.label, resets: session.resets_at }
-      : meter !== undefined && meter.tone === "near" && meter.used_percent < 75
-        ? { label: meter.window_label, resets: meter.resets_at }
-        : null;
-  return hit === null ? "" : JSON.stringify([hit.label, hit.resets ?? null]);
+  let hit: Warning | null = null;
+  for (const w of entry.windows) {
+    if (w.kind !== "session" && w.kind !== "weekly") continue;
+    const used = w.used_percent;
+    if (used === undefined || used < WARN_FROM[w.kind] || used >= 100 || w.tone === "at_limit")
+      continue;
+    const share = 100 - shareLeft(used);
+    // both high: the one with less left; a tie names the 5-hour
+    if (hit !== null && (share < hit.used || (share === hit.used && w.kind === "weekly"))) continue;
+    const window: WarningWindow =
+      w.kind === "weekly" ? "weekly" : w.label === "5-hour limit" ? "five_hour" : "other";
+    hit = { window, used: share, resets: w.resets_at ?? null };
+  }
+  if (hit === null && meter !== undefined && meter.tone === "near" && meter.used_percent < 75)
+    hit = {
+      window: "other",
+      used: 100 - shareLeft(meter.used_percent),
+      resets: meter.resets_at ?? null,
+    };
+  return hit === null ? "" : JSON.stringify(hit);
 }

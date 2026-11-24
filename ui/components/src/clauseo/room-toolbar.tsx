@@ -4,7 +4,7 @@ import { Popover } from "@base-ui/react/popover";
 import { floating } from "../ui/recipes.ts";
 import { Button } from "../ui/button.tsx";
 import { SearchField } from "../ui/field.tsx";
-import { PlanMeter, type PlanState } from "../ui/meter.tsx";
+import { PlanMeter, type PlanLevel, type PlanState } from "../ui/meter.tsx";
 import { Toolbar, ToolbarPair, ToolbarPairButton } from "../ui/toolbar.tsx";
 import { IconHistory, IconSidebarLeft, IconSidebarRight, IconUndo } from "../icons/icons.tsx";
 import { Tooltip } from "../ui/tooltip.tsx";
@@ -41,6 +41,8 @@ export type RoomToolbarProps = {
     valueText: string;
     status: string;
     state?: PlanState;
+    /** Optional: the meter's fill amber or red as the plan runs short (PlanMeter's level). */
+    level?: PlanLevel | undefined;
     /** Optional: how the plan's figures stand. stale: the last read is old or failed, so the figures go
      * muted; none: no figures to show, the meter an empty track; bare: an account billed by use, with no meter;
      * loading: the first read still running, the plan's name alone, with no meter and no line. */
@@ -370,6 +372,7 @@ export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan
       valueText={plan.valueText}
       status={plan.status}
       state={plan.state ?? planState(plan.left)}
+      level={plan.level}
       track={!figureless}
       muted={plan.look === "stale"}
       inButton={plan.card !== undefined}

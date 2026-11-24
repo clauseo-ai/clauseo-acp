@@ -2,7 +2,8 @@
 // The running-low line (U15) over FakeTransport: Settings' words under the answer of the turn that was running when
 // the case-law connector's credit turned low, with the out-of-credit note's "Add credits"; none when it was low as the
 // turn started, again after credit came back and turned low in a later turn, never beside the out-of-credit note, and
-// nothing while connectors are off.
+// nothing while connectors are off. And by the composer before sending (24 Nov): while low, unless the line shows
+// under a turn of this thread, never with the out-of-credit note.
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import {
@@ -195,4 +196,40 @@ test("connectors off: nothing", async () => {
   expect(h!.all("low-credit")).toHaveLength(1);
   await status(LOW, false);
   expect(h!.all("low-credit")).toHaveLength(0);
+});
+
+const before = () => h!.all("low-credit-before");
+
+test("low before sending: the line by the composer, with Add credits; gone once credit is back", async () => {
+  await mount();
+  await status(OK);
+  await end(6, T2);
+  expect(before()).toHaveLength(0);
+  await status(LOW);
+  expect(before()).toHaveLength(1);
+  expect(h!.one("low-credit-before")?.textContent).toContain(LINE);
+  // by the composer, never under an answer
+  expect(h!.one("low-credit-before")?.closest("section.step-answer")).toBeNull();
+  expect(h!.all("low-credit")).toHaveLength(0);
+  await h!.click(h!.one("low-credit-before-add"));
+  expect(h!.transport.only("open_settings")).toEqual([
+    { call: "open_settings", section: "connectors" },
+  ]);
+  await status(OK);
+  expect(before()).toHaveLength(0);
+});
+
+test("low before sending: not while the line shows under this thread's turn, nor beside out of credit", async () => {
+  await mount();
+  await status(OK);
+  // turned low mid-turn: the line under the turn, not again by the composer
+  await status(LOW);
+  expect(h!.all("low-credit")).toHaveLength(1);
+  expect(before()).toHaveLength(0);
+  await status(OUT);
+  expect(before()).toHaveLength(0);
+  expect(h!.all("out-of-credit")).toHaveLength(1);
+  // connectors off: nothing
+  await status(LOW, false);
+  expect(before()).toHaveLength(0);
 });
