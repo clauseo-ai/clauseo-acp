@@ -33,6 +33,15 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The queue's line under its head while the copy of a message that ended because Clauseo was updating waits (#1314: cause update; the old message is hidden). The installing line (queue_held_reason update) takes its place while the update installs. New."
+    "note": "The queue's line under its head while a queued message is the host's copy of one held for an update (#1314: copy_of.cause update on the copy; the original is hidden). The installing line (queue_held_reason update) takes its place while the update installs. New."
+  },
+  "UC-1247": {
+    "en": "This waits because {agent} needed you to sign in. It goes once you're signed in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The queue's line while a queued message is the host's copy of one held for the agent's sign-in (#1314: copy_of.cause sign_in); {agent} is Claude or ChatGPT. Same shape as UC-1299. New."
   }
 }

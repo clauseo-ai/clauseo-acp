@@ -111,14 +111,34 @@ test("removed, sign_in and update: nothing comes back and no line shows", async 
   }
 });
 
-test("update: the queued copy's strip says it waits because Clauseo was updating", async () => {
-  const copy = userMessage(4, 3, LATER);
-  await endsWith("removed", "update", [
-    { user_message: { ...copy.user_message!, status: "queued", turn: uuid(3, 4) } },
-  ]);
-  expect(h!.one("queue-why")?.textContent).toBe(
-    "This waits because Clauseo was updating. It goes once Clauseo is ready.",
+/** The host's queued copy of the later message, marked on its own entry (#1314's copy_of, a stand-in). */
+const copy = (cause?: string): ViewEntry => {
+  const e = userMessage(4, 3, LATER);
+  const m = {
+    ...e.user_message!,
+    status: "queued" as const,
+    turn: uuid(3, 4),
+    ...(cause === undefined ? {} : { copy_of: { message: uuid(2, 5), cause } }),
+  };
+  return { user_message: m as NonNullable<ViewEntry["user_message"]> };
+};
+const why = () => h!.one("queue-why")?.textContent?.replace(/\u00a0/g, " ");
+
+test("a copy marked for an update: the strip says it waits because Clauseo was updating", async () => {
+  await endsWith("removed", "update", [copy("update")]);
+  expect(why()).toBe("This waits because Clauseo was updating. It goes once Clauseo is ready.");
+});
+
+test("a copy marked for a sign-in: the strip names the agent", async () => {
+  await endsWith("removed", "sign_in", [copy("sign_in")]);
+  expect(why()).toBe(
+    "This waits because Claude needed you to sign in. It goes once you're signed in.",
   );
+});
+
+test("no copy_of, no line: not even right after a message that ended for an update", async () => {
+  await endsWith("removed", "update", [copy()]);
+  expect(h!.one("queue-why")).toBeNull();
 });
 
 test("an unknown cause reads as none: today's neutral line", async () => {
