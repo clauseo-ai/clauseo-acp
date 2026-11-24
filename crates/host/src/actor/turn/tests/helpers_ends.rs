@@ -1,14 +1,15 @@
 //! Helpers across a run's end and a reopen (`turn/helpers.rs`): the same view after a reopen;
 //! a helper a crash left open in an open turn, or past its turn, ends `Stopped` at the next
 //! start, once; a helper whose engine dies mid-turn, a send-now, a failed write's retry and a
-//! detach end it `Stopped`.
+//! detach end it `Stopped`; a failed write of its handback is written again as it was; its step
+//! and words held with no turn live land in the prompted turn that starts.
 
 use futures::channel::oneshot;
 
 use clauseo_acp::Origin;
 use clauseo_protocol::{
-    DeliveryRequest, DetachReason, DomainEvent, HelperOutcome, HostCommand, HostQuery, PageLimit,
-    Principal, PromptBlock, QueryResult, StreamId, ThreadId, ViewEntry,
+    CommandOutcome, DeliveryRequest, DetachReason, DomainEvent, HelperOutcome, HostCommand,
+    HostQuery, PageLimit, Principal, PromptBlock, QueryResult, StreamId, ThreadId, ViewEntry,
 };
 
 use super::agents::send_prompt;
@@ -18,9 +19,10 @@ use super::helpers::{
     lead_step_logged, live_turn, one_turn, patch, stamped, story, words,
 };
 use super::rig::Rig;
-use crate::actor::input::Request;
-use crate::actor::turn::agents;
+use crate::actor::Actor;
+use crate::actor::input::{Input, Request};
 use crate::actor::turn::helpers as turn_helpers;
+use crate::actor::turn::{agents, own_turn};
 
 /// The helper's view after a reopen is the view before it: the same `Helper` and `HelperText`
 /// entries, and its steps still name it.
@@ -124,9 +126,9 @@ fn a_helper_whose_engine_dies_mid_turn_is_stopped() {
     rig.finish();
 }
 
-/// A helper the log leaves open after its turn ended (a send-now kept it), when the run that
-/// started it crashes: the next run ends it `Stopped` once the conversation loads, and a run
-/// after that adds nothing.
+/// A helper the log holds open after its turn ended (the test starts it by hand once the turn is
+/// over), when the run that started it crashes: the next run ends it `Stopped` once the
+/// conversation loads, and a run after that adds nothing.
 #[test]
 fn a_helper_left_open_past_its_turn_is_stopped_once_at_the_next_load() {
     let mut rig = Rig::start("helpers-open-past-turn", &one_turn("end_turn"));
@@ -268,6 +270,150 @@ fn a_detach_stops_an_open_helper() {
         log.last(),
         Some(DomainEvent::AgentSessionDetached(_))
     ));
+    rig.finish();
+}
+
+/// A helper's step and words that come with no turn live while a prompt's turn is starting wait
+/// for it, and both are logged as that turn's, in the order they came, before its end.
+#[test]
+fn a_helper_s_held_step_and_words_land_in_the_prompted_turn() {
+    let second =
+        r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}"#;
+    let answer = r#"{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}"#;
+    let steps = format!("{}{second}\n{answer}\n", one_turn("end_turn"));
+    let mut rig = Rig::start("helpers-held-words", &steps);
+    let thread = rig.thread();
+    let first = send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    turn_helpers::start(&mut rig.actor, thread, first, open_start()).unwrap();
+    rig.settle_commits();
+    let prompt = HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "Now the notice.".to_owned(),
+        }],
+        delivery: DeliveryRequest::Queue,
+        config: None,
+    };
+    // The prompt's turn waits for its before checkpoint, so no turn is live.
+    let accepted = rig
+        .dispatch_holding(11, prompt, |_, input| matches!(input, Input::Matter { .. }))
+        .unwrap();
+    let CommandOutcome::PromptAccepted { turn, .. } = accepted else {
+        panic!("{accepted:?}");
+    };
+    let read = call("toolu_R1", "Read", None);
+    stamped(&mut rig, thread, Origin::Idle, "toolu_A", read);
+    stamped(&mut rig, thread, Origin::Idle, "toolu_A", words("Read it."));
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 2);
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        story(&log)[1..],
+        [
+            "turn_ended EndTurn",
+            "start paper-reader call= model=- label=- task=true",
+            "step toolu_R1 paper-reader",
+            "words paper-reader: Read it.",
+            "end paper-reader Failed -",
+            "turn_ended EndTurn",
+        ]
+    );
+    let turns: Vec<bool> = log
+        .iter()
+        .filter_map(|event| {
+            if let DomainEvent::ToolCallStarted(step) = event {
+                step.helper.map(|_| step.turn == turn)
+            } else if let DomainEvent::HelperText(text) = event {
+                Some(text.turn == turn)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(turns, [true, true], "both are the prompted turn's");
+    rig.finish();
+}
+
+/// A turn's close whose write cannot be sent at all (no blocked stream: the send itself fails)
+/// with no commit in flight: the retry, sent at once, still ends the open helper, `Stopped` as
+/// for any failed turn.
+#[test]
+fn a_close_whose_write_cannot_be_sent_ends_its_helper_on_the_retry() {
+    let mut rig = Rig::start("helpers-close-unsent", &one_turn("end_turn"));
+    let thread = rig.thread();
+    let turn = live_turn(&mut rig, thread);
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    rig.release_held();
+    // The after-turn checkpoint's answer, which sends the close, waits until every commit
+    // before the close has landed.
+    let after = |_: &Actor, input: &Input| matches!(input, Input::Matter { .. });
+    rig.run_holding("the commits before the close", after, |actor| {
+        actor.work.commits == 0
+    });
+    if rig.held.is_empty() {
+        rig.hold_next("the after-turn checkpoint", after);
+    }
+    rig.actor.failed_sends = 1;
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=Digest lease and notice task=true",
+            "end paper-reader Stopped -",
+            "turn_ended Failed",
+        ]
+    );
+    rig.finish();
+}
+
+/// A handback whose write fails: the turn is cancelled, and once the stream drains the retry
+/// writes the end that write lost, `Done` with the helper's report, not `Stopped`.
+#[test]
+fn a_handback_whose_write_fails_ends_its_helper_done_with_its_report_on_the_retry() {
+    let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
+    let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n");
+    let mut rig = Rig::start("helpers-handback-fails", &steps);
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        call("toolu_A", "Agent", Some(LAUNCH_INPUT)),
+    );
+    in_background(&mut rig, thread, turn, "toolu_A");
+    let handback = call(
+        "toolu_H",
+        "SubagentHandback",
+        Some(r#"{"message":"Digest."}"#),
+    );
+    stamped(&mut rig, thread, Origin::Turn(turn), "toolu_A", handback);
+    rig.fail(1, |event| matches!(event, DomainEvent::HelperEnded(_)));
+    lead(
+        &mut rig,
+        thread,
+        turn,
+        patch("toolu_H", None, COMPLETED, Some(DELIVERED)),
+    );
+    until_ended(&mut rig, thread);
+    let story = story(&rig.log(thread));
+    let ends: Vec<&String> = story
+        .iter()
+        .filter(|line| line.starts_with("end "))
+        .collect();
+    assert_eq!(ends, ["end paper-reader Done Digest."], "{story:?}");
     rig.finish();
 }
 
