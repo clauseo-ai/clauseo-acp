@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -365,6 +365,27 @@ test("LAYOUTS: sac.rs parses and rewrites to itself; the tar reader finds rg.exe
   await assert.rejects(w.hashLayouts(lock, [{ dir: "node_modules/x/none" }], async () => tar), /has no package\/none\/codex-path\/rg\.exe/);
 });
 
+test("npm's --before carries the cool-down to the whole tree, and is left out at 0", () => {
+  assert.equal(w.npmArgs(24, NOW).at(-1), "--before=2026-11-23T12:00:00.000Z");
+  assert.equal(w.npmArgs(48, NOW).at(-1), "--before=2026-11-22T12:00:00.000Z");
+  assert.ok(!w.npmArgs(0, NOW).some((a) => a.startsWith("--before")));
+});
+
+test("the tar reader refuses a size that is not octal; downloads stay on the registry and need a 2xx", async () => {
+  const tar = gunzipSync(tgz({ "package/a": "abc" }));
+  assert.equal(w.tarFile(tar, "package/a").toString(), "abc");
+  const bad = Buffer.from(tar);
+  bad.write("00000009zz\0", 124, "latin1");
+  assert.throws(() => w.tarFile(bad, "package/a"), /size is not octal/);
+  const big = Buffer.from(tar);
+  big.write("777777777777", 124, "latin1");
+  assert.throws(() => w.tarFile(big, "package/a"), /runs past the archive/);
+  const ok = w.registryDownload(async () => new Response("tgz"));
+  assert.equal((await ok(`${w.REGISTRY}a/-/a-1.0.0.tgz`)).toString(), "tgz");
+  await assert.rejects(ok("https://evil.example/a.tgz"), /not under https:\/\/registry\.npmjs\.org\//);
+  await assert.rejects(w.registryDownload(async () => new Response("no", { status: 404 }))(`${w.REGISTRY}a.tgz`), /HTTP 404/);
+});
+
 /** A scratch repository root with the five files the script reads, and a registry stand-in. */
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "engine-watch-"));
@@ -402,8 +423,9 @@ function fixture() {
     if (docs[key]) return Response.json(docs[key]);
     return Response.json({ dist: { unpackedSize: 100 } });
   };
-  const runNpm = (dir) => writeFileSync(join(dir, "package-lock.json"), lock("0.110.1", "0.3.330", "2.10.0", "0.171.0"));
-  return { root, fetchImpl, runNpm, tars, readRel: (rel) => readFileSync(join(root, rel), "utf8"), done: () => rmSync(root, { recursive: true, force: true }) };
+  const npmCalls = [];
+  const runNpm = (dir, args) => (npmCalls.push(args), writeFileSync(join(dir, "package-lock.json"), lock("0.110.1", "0.3.330", "2.10.0", "0.171.0")));
+  return { root, fetchImpl, runNpm, npmCalls, tars, readRel: (rel) => readFileSync(join(root, rel), "utf8"), done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 test("bump end to end on a stand-in registry and npm, then --check-sizes on its result", async () => {
@@ -432,6 +454,7 @@ test("bump end to end on a stand-in registry and npm, then --check-sizes on its 
     assert.match(text, /codex_patch\.rs/);
     assert.match(text, /engines\.seq`\): 1 → 2/);
     assert.match(text, /2\.1\.330/);
+    assert.deepEqual(f.npmCalls, [["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--before=2026-11-23T12:00:00.000Z"]]);
     assert.equal(logs.at(-1), `bump ${out.branch}`);
     assert.equal(await w.checkSizes(f.root, { fetchImpl: f.fetchImpl, log: () => {} }), 0);
     writeFileSync(join(f.root, w.EMBEDDED), f.readRel(w.EMBEDDED).replace("unpacked", "").replace(/, 200\)/, ", 201)"));

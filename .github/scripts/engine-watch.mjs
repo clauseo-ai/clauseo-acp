@@ -21,7 +21,8 @@
 // codex) holds codex-acp and codex at their pins; a proposed pair outside the range throws.
 //
 // The bump: package.json rewritten, the lock regenerated with
-// `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` in its folder, SIZES and
+// `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` in its folder (with
+// `--before=<now minus the cool-down>` unless it is 0, so the whole tree is that old), SIZES and
 // SIZES_STAMP re-measured (engine-watch-lib.mjs), sac.rs's LAYOUTS re-hashed when the codex
 // changes (engine-watch-sac.mjs), engines.seq set to max(its value, the published seq) + 1, and a
 // markdown summary written to <file>: versions, ages, whether each of the four top-level packages
@@ -44,7 +45,7 @@ import {
   cleanVersion, compareVersions, docUrl, fetchJson, maxSatisfying, measureSizes, nextSeq,
   parseSeq, parseSizes, parseVersion, satisfies, shortHash, writeSizes,
 } from "./engine-watch-lib.mjs";
-import { SAC, hashLayouts, parseLayouts, writeLayouts } from "./engine-watch-sac.mjs";
+import { SAC, hashLayouts, parseLayouts, registryDownload, writeLayouts } from "./engine-watch-sac.mjs";
 
 export * from "./engine-watch-lib.mjs";
 export * from "./engine-watch-sac.mjs";
@@ -238,8 +239,18 @@ function setOutput(pairs) {
   appendFileSync(file, Object.entries(pairs).map(([k, v]) => `${k}=${v}\n`).join(""));
 }
 
-function defaultNpm(dir) {
-  const npm = spawnSync("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], {
+/**
+ * The lock's npm arguments. With a cool-down, `--before` (the same clock and hours `judge` uses)
+ * keeps every package in the tree, not just the three pins, at least that old.
+ */
+export function npmArgs(minAge, now) {
+  const args = ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"];
+  if (minAge > 0) args.push(`--before=${new Date(now - minAge * HOUR).toISOString()}`);
+  return args;
+}
+
+function defaultNpm(dir, args) {
+  const npm = spawnSync("npm", args, {
     cwd: dir,
     stdio: "inherit",
     shell: process.platform === "win32",
@@ -289,7 +300,7 @@ export async function bump(root, { summaryPath, minAge = 24, fetchImpl = fetch, 
   const seq = { old: parseSeq(seqText), new: await nextSeq(seqText, fetchImpl) };
   writeFileSync(manifestPath, bumpManifest(manifest, target));
   writeFileSync(seqPath, `${seq.new}\n`);
-  runNpm(dir);
+  runNpm(dir, npmArgs(minAge, now));
   const lockText = readFileSync(lockPath, "utf8");
 
   const embedded = readFileSync(file(EMBEDDED), "utf8");
@@ -302,8 +313,7 @@ export async function bump(root, { summaryPath, minAge = 24, fetchImpl = fetch, 
   const oldLayouts = parseLayouts(sac);
   const layouts = { rehashed: false, changed: false };
   if (oldLayouts.codex !== target.codex) {
-    const download = async (url) => Buffer.from(await (await fetchImpl(url)).arrayBuffer());
-    const hashed = await hashLayouts(lockText, oldLayouts.rows, download);
+    const hashed = await hashLayouts(lockText, oldLayouts.rows, registryDownload(fetchImpl));
     layouts.rehashed = true;
     layouts.changed = hashed.some((row, i) => row.sha256 !== oldLayouts.rows[i].sha256);
     writeFileSync(file(SAC), writeLayouts(sac, hashed, target.codex));

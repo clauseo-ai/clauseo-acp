@@ -9,6 +9,8 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
+import { REGISTRY } from "./engine-watch-lib.mjs";
+
 export const SAC = "crates/agents/src/sac.rs";
 const LAYOUTS_RE = /const LAYOUTS: \[\(&str, &str\); (\d+)\] = \[\n([\s\S]*?)\n\];\n/;
 const ROW_RE = /\(\s*"([^"]+)",\s*"([0-9a-f]{64})",?\s*\)/g;
@@ -62,8 +64,15 @@ export function tarFile(bytes, path) {
   for (let at = 0; at + 512 <= bytes.length; ) {
     const header = bytes.subarray(at, at + 512);
     if (header.every((b) => b === 0)) return null;
-    const sizeField = field(header, 124, 12).trim();
-    const size = header[124] & 0x80 ? Number(header.readBigUInt64BE(504)) : Number.parseInt(sizeField || "0", 8);
+    let size;
+    if (header[124] & 0x80) {
+      size = Number(header.readBigUInt64BE(128));
+    } else {
+      const sizeField = header.subarray(124, 136).toString("latin1").replace(/^[\0 ]+|[\0 ]+$/g, "");
+      if (!/^[0-7]+$/.test(sizeField)) throw new Error(`tar: a header's size is not octal: ${JSON.stringify(sizeField)}`);
+      size = Number.parseInt(sizeField, 8);
+    }
+    if (!Number.isSafeInteger(size) || at + 512 + size > bytes.length) throw new Error("tar: a header's size runs past the archive");
     const type = String.fromCharCode(header[156] || 48);
     const body = bytes.subarray(at + 512, at + 512 + size);
     at += 512 + Math.ceil(size / 512) * 512;
@@ -83,6 +92,16 @@ export function tarFile(bytes, path) {
     if ((type === "0" || type === "7") && name === path) return body;
   }
   return null;
+}
+
+/** A tarball download that refuses a URL outside the registry and any answer but 2xx. */
+export function registryDownload(fetchImpl) {
+  return async (url) => {
+    if (typeof url !== "string" || !url.startsWith(REGISTRY)) throw new Error(`${url}: not under ${REGISTRY}`);
+    const res = await fetchImpl(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  };
 }
 
 /** `bytes`' sha512 checked against an npm `integrity` (`sha512-<base64>`); throws on a mismatch. */
@@ -109,7 +128,9 @@ export async function hashLayouts(lockText, rows, download) {
       const tgz = await download(entry.resolved);
       checkIntegrity(tgz, entry.integrity, path);
       const inner = `package/${dir.slice(path.length + 1)}/codex-path/rg.exe`;
-      const rg = tarFile(gunzipSync(tgz), inner);
+      // A cap on the unpacked tar: about twice codex's largest Windows package today (0.172.0's
+      // win32-x64 unpacks to 523 MiB, so 512 MiB would already refuse it).
+      const rg = tarFile(gunzipSync(tgz, { maxOutputLength: 1 << 30 }), inner);
       if (!rg) throw new Error(`${entry.resolved} has no ${inner}`);
       return { dir, sha256: createHash("sha256").update(rg).digest("hex") };
     }),
