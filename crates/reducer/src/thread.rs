@@ -1,12 +1,13 @@
 //! The fold of a thread's events other than text: the header, tool calls, notices and markers
 //! here; turns, steps and the status in `thread/turn.rs`; permissions and elicitations in
 //! `thread/asks.rs`; the web records in `thread/web.rs`; the agent's wait to retry in
-//! `thread/retry.rs`.
+//! `thread/retry.rs`; a helper's start, words and end in `thread/helpers.rs`.
 //!
 //! Each field is compared as it is set, and an `Upsert` is emitted only when something changed;
 //! no old entry is cloned to compare afterwards.
 
 mod asks;
+mod helpers;
 mod queue;
 mod retry;
 mod triage;
@@ -99,6 +100,9 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
         DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, ts, event, out),
         DomainEvent::ToolCallUpdated(event) => tool_call_updated(state, ts, event, out),
+        DomainEvent::HelperStarted(event) => helpers::started(state, seq, ts, event, out),
+        DomainEvent::HelperText(event) => helpers::text(state, seq, event_id, event, out),
+        DomainEvent::HelperEnded(event) => helpers::ended(state, ts, event, out),
         DomainEvent::PermissionRequested(event) => {
             asks::permission_requested(state, seq, event, out);
         }
@@ -400,6 +404,7 @@ fn tool_call_started(
         finished_at: queue::final_time(event.status, ts),
         background: None,
         web: None,
+        helper: event.helper,
     };
     insert_new(state, seq, ViewEntry::ToolCall(Box::new(entry)), out);
 }

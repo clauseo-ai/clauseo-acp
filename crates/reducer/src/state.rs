@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use clauseo_protocol::{
-    CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
+    CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry, HelperId,
     MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq, SkippedFile,
     StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus, ViewEntry, utf16_len,
 };
@@ -255,6 +255,7 @@ pub(crate) struct Index {
     pub(crate) texts: HashMap<MessageId, TextMeta>,
     pub(crate) users: HashMap<MessageId, Seq>,
     pub(crate) tool_calls: HashMap<ToolCallId, Seq>,
+    pub(crate) helpers: HashMap<HelperId, Seq>,
     pub(crate) permissions: HashMap<PermissionRequestId, Seq>,
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
@@ -300,6 +301,9 @@ impl Index {
                 ViewEntry::ToolCall(call) => {
                     index.tool_calls.insert(call.tool_call, order);
                 }
+                ViewEntry::Helper(helper) => {
+                    index.helpers.insert(helper.helper, order);
+                }
                 ViewEntry::Permission(permission) => {
                     index.permissions.insert(permission.request, order);
                     if permission.state == PermissionState::Pending {
@@ -320,6 +324,7 @@ impl Index {
                 }
                 ViewEntry::Header(_)
                 | ViewEntry::AgentContent(_)
+                | ViewEntry::HelperText(_)
                 | ViewEntry::Notice(_)
                 | ViewEntry::Marker(_)
                 | ViewEntry::MatterHeader(_)
