@@ -64,8 +64,16 @@ fn same_model(a: (&str, &str), b: (&str, &str)) -> bool {
         else {
             return false;
         };
-        let version: Vec<u32> = (rest.split('-'))
-            .map_while(|part| part.parse().ok())
+        // Every part after the family a number, a date left out: a `[1m]`, `1m` or `fast`
+        // part names another model.
+        let Some(version) = (rest.split('-'))
+            .map(|part| part.parse::<u32>().ok())
+            .collect::<Option<Vec<u32>>>()
+        else {
+            return false;
+        };
+        let version: Vec<u32> = version
+            .into_iter()
             .filter(|number| *number < 1000)
             .collect();
         let named: Vec<u32> = (name.rsplit(' ').next().unwrap_or_default().split('.'))
@@ -99,5 +107,25 @@ mod tests {
         assert!(!same_model(("opus", "Opus 5.5"), ("claude-sonnet-5-5", "")));
         assert!(!same_model(("fable", ""), ("claude-fable-5-1", "")));
         assert!(!same_model(("gpt", "GPT 6"), ("gpt-6", "")));
+        assert!(!same_model(
+            ("sonnet", "Sonnet 4.5"),
+            ("claude-sonnet-4-5-20250929[1m]", "")
+        ));
+        assert!(!same_model(
+            ("sonnet", "Sonnet 4.5"),
+            ("claude-sonnet-4-5-1m", "")
+        ));
+        assert!(!same_model(
+            ("sonnet", "Sonnet 4.5"),
+            ("claude-sonnet-4-5-fast", "")
+        ));
+        assert!(!same_model(
+            ("claude-sonnet-4-5[1m]", ""),
+            ("sonnet", "Sonnet 4.5")
+        ));
+        assert!(same_model(
+            ("sonnet", "Sonnet 4.5"),
+            ("claude-sonnet-4-5-20250929", "")
+        ));
     }
 }
