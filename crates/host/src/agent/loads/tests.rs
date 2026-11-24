@@ -28,6 +28,7 @@ fn with_no_hook_the_meta_is_the_switches() {
             "strictMcpConfig": true,
             "settingSources": CLAUDE_SETTING_SOURCES,
             "allowDangerouslySkipPermissions": false,
+            "forwardSubagentText": true,
             "env": {
                 "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
                 "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
@@ -67,6 +68,7 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                     "strictMcpConfig": true,
                     "settingSources": ["user"],
                     "allowDangerouslySkipPermissions": false,
+                    "forwardSubagentText": true,
                     "model": "opus",
                     "settings": {"syncClaudeAiPlugins": false},
                     "env": {

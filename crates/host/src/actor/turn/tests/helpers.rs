@@ -8,18 +8,20 @@
 
 use std::collections::HashMap;
 
+use futures::channel::oneshot;
+
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, ToolCall};
 use clauseo_protocol::{
     AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HelperOutcome, HostCommand,
-    StreamId, TextOrBlob, ThreadId, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus,
-    ToolKind, TurnId, ViewEntry,
+    HostQuery, PageLimit, Principal, QueryResult, StreamId, TextOrBlob, ThreadId, ToolCallContent,
+    ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, TurnId, ViewEntry,
 };
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::rig::Rig;
 use crate::actor::Actor;
-use crate::actor::input::Input;
+use crate::actor::input::{Input, Request};
 use crate::actor::turn::{AgentReply, TurnInput, helpers};
 use crate::agent::AgentInput;
 
@@ -336,7 +338,8 @@ fn the_recorded_background_helper_ends_on_its_handback() {
              label=Digest lease and notice task=true",
             "step toolu_01WesqZa8jMTM4WMn2ELQNTp paper-reader",
             "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
-            "end paper-reader Done DIGEST: lease.txt and notice.txt (lease-matter)",
+            // The digest is past half the inline limit, so it is logged as a blob.
+            "end paper-reader Done <blob>",
             "turn_ended EndTurn",
         ]
     );
@@ -629,18 +632,39 @@ fn a_helper_a_crash_left_open_is_stopped_at_the_next_start() {
     rig.finish();
 }
 
-/// The thread's view entries that belong to a helper: its card, its words, its steps.
+/// The thread's view entries that belong to a helper (its card, its words, its steps), as a
+/// `PageEntries` query answers them: the view a reopened conversation shows.
 fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
-    let loaded = rig.actor.loaded(StreamId::Thread(thread)).unwrap();
-    let state = loaded.state.as_thread().unwrap();
-    state
-        .entries()
-        .values()
+    let (reply, mut answer) = oneshot::channel();
+    let query = HostQuery::PageEntries {
+        stream: StreamId::Thread(thread),
+        before_order: None,
+        limit: PageLimit::new(200).unwrap(),
+    };
+    let principal = Principal::LocalDesktop;
+    rig.actor.on_request(Request::Query {
+        principal,
+        query,
+        reply,
+    });
+    let mut got = None;
+    rig.run_until("the page", |_| {
+        if got.is_none()
+            && let Ok(Some(result)) = answer.try_recv()
+        {
+            got = Some(result);
+        }
+        got.is_some()
+    });
+    let Some(Ok(QueryResult::Entries(entries))) = got else {
+        panic!("{got:?}");
+    };
+    entries
+        .into_iter()
         .filter(|entry| match entry {
             ViewEntry::Helper(_) | ViewEntry::HelperText(_) => true,
             ViewEntry::ToolCall(call) => call.helper.is_some(),
             _ => false,
         })
-        .cloned()
         .collect()
 }
