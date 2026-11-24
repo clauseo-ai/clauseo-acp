@@ -10,11 +10,13 @@ const CODEX_FALLBACK: &str = "falling back from websockets to https transport";
 const CLAUDE_PREFIX: &str = "API Error: ";
 
 /// Claude Code's whole connection lines after [`CLAUDE_PREFIX`] (claude-agent-sdk 0.3.293's
-/// formatter; "Connection error." from older ones).
-const CLAUDE_LINES: [&str; 4] = [
+/// formatter, all four still in 0.3.330's; "Connection error." from older ones). 0.3.330 adds
+/// "Request timed out", with no full stop, for a connection that went idle (`ConnectionIdle`).
+const CLAUDE_LINES: [&str; 5] = [
     "Unable to connect to API. Check your internet connection",
     "Request timed out. Check your internet connection and proxy settings",
     "Request timed out.",
+    "Request timed out",
     "Connection error.",
 ];
 
